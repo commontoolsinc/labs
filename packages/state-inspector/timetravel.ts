@@ -27,7 +27,11 @@ import {
   parseEntityRef,
   summarize,
 } from "./decode.ts";
-import { reconstructDocument, selectAtPath } from "./reconstruct.ts";
+import {
+  owningLink,
+  reconstructDocument,
+  selectAtPath,
+} from "./reconstruct.ts";
 
 /** Annotation depth used for values included in diff output. */
 const COMPARE_DEPTH = 32;
@@ -458,12 +462,17 @@ export function entityTimeline(
   const scope = opts.scope ?? "space";
   const branch = opts.branch ?? "";
   const limit = opts.limit ?? 500;
-  const rows = space.db
+  // The branch that OWNS the visible row, not the branch asked about: the
+  // replay below mirrors `reconstructWithinBranch`, which never composes across
+  // a fork, so the rows to replay are that branch's. Reading local rows only
+  // would return an empty timeline for an entity the branch inherited.
+  const owner = owningLink(space, { branch, scope, id: opts.id });
+  const rows = owner === undefined ? [] : space.db
     .prepare(
       `SELECT r.seq, r.op_index, r.op, r.data, r.commit_seq,
               c.session_id, c.created_at
        FROM revision r JOIN "commit" c ON c.seq = r.commit_seq
-       WHERE r.branch = ? AND r.id = ? AND r.scope_key = ?
+       WHERE r.branch = ? AND r.id = ? AND r.scope_key = ? AND r.seq <= ?
        ORDER BY r.seq ASC, r.op_index ASC LIMIT ?`,
     )
     .all<{
@@ -474,9 +483,9 @@ export function entityTimeline(
       commit_seq: number;
       session_id: string;
       created_at: string;
-    }>(branch, opts.id, scope, limit);
+    }>(owner.branch, opts.id, scope, owner.atSeq, limit);
 
-  // Replay this branch's rows INCREMENTALLY — apply one op per step against a
+  // Replay the owning branch's rows INCREMENTALLY — apply one op per step against a
   // running document — instead of re-reconstructing from scratch at every seq
   // (which is O(writes²) and won't return on a hot entity). The op semantics
   // mirror reconstructWithinBranch: set=decode, patch=applyPatch(doc ?? {}),

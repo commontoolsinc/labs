@@ -1,0 +1,767 @@
+/**
+ * Following a piece's source origin.
+ *
+ * One entry point, {@link SourceReconciler.reconcile}, runs when a user opens a
+ * piece: it reads the origin the piece records, resolves it, and adopts the
+ * source it names when that source has moved. Nothing reconciles a piece nobody
+ * opened, and no kind of piece — a space root included — has a path of its own.
+ *
+ * Whether a candidate has to prove itself first turns on one question: did
+ * anything gate the release that produced it? A `system:` origin names source
+ * this deployment serves, released through golden replays that load
+ * representative state written by the previous version and check the new one
+ * still reads it (`docs/specs/pattern-update-testing.md`). That check is
+ * better than any the runtime could make, and repeating a weaker version of it
+ * would only refuse releases the replays already cleared. Every other origin is
+ * somebody else's, and nobody promised anything, so a candidate from one has to
+ * prove itself — today by not moving the piece's contract at all, which
+ * {@link SourceReconciler.reconcile}'s refusal check explains.
+ *
+ * `docs/specs/piece-source-lifecycle.md` is the design of record.
+ * `piece-origin-kind.ts` enumerates the origins this dispatches on.
+ *
+ * TODO(hixie): record what a reconciliation did as durable state on the piece,
+ * so the source panel can tell a piece that is following its origin from one
+ * that could not reach it and one that refused what it offered. Every outcome
+ * here is a warn-level log, so all three render identically today, and a piece
+ * permanently stuck on old source reads as current. See "Saying when a piece
+ * has stopped following its origin" in the lifecycle spec.
+ */
+
+import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
+import { deepEqual } from "@commonfabric/utils/deep-equal";
+import { getLogger } from "@commonfabric/utils/logger";
+
+import type { Pattern } from "./builder/types.ts";
+import type { Cell } from "./cell.ts";
+import {
+  classifyPieceOriginString,
+  type PieceOriginKind,
+} from "./piece-origin-kind.ts";
+import {
+  applyPieceSourceTransition,
+  getPatternIdentityRef,
+  getPatternSource,
+  getPieceSourceSnapshot,
+  type PieceSourceSnapshot,
+  type PieceSourceTransition,
+  preparePieceSourceTransitionBaseline,
+} from "./runner.ts";
+import type { Runtime } from "./runtime.ts";
+import { fabricAuthorityMatchesSpaceHost } from "./space-host.ts";
+import type { MemorySpace } from "./storage/interface.ts";
+
+const logger = getLogger("runner.source-reconcile", {
+  enabled: true,
+  level: "warn",
+});
+
+/**
+ * What one reconciliation did, or why it did nothing. Every recorded origin
+ * lands on exactly one of these.
+ *
+ * - `detached`: nothing supplies code for this piece — it records no origin,
+ *   or it runs no pattern for an origin to replace.
+ * - `unusable`: it records a string no resolver can follow.
+ * - `unsupported`: it records a well-formed origin of a kind this runtime does
+ *   not follow yet.
+ * - `current`: the origin resolved to the source already running.
+ * - `migrated`: the origin was rewritten into its canonical spelling; the
+ *   pattern is unchanged.
+ * - `updated`: the piece adopted new source.
+ * - `incompatible`: the origin offered source that cannot replace what the
+ *   piece runs, and its owner has not said to take it anyway.
+ * - `unavailable`: the origin's current source could not be adopted this
+ *   time — it could not be reached, or the piece changed underneath the
+ *   attempt and the write it was going to make no longer describes it.
+ */
+export type ReconcileOutcome =
+  | "detached"
+  | "unusable"
+  | "unsupported"
+  | "current"
+  | "migrated"
+  | "updated"
+  | "incompatible"
+  | "unavailable";
+
+async function abortable<T>(
+  operation: () => Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  signal.throwIfAborted();
+  const aborted = Promise.withResolvers<never>();
+  const onAbort = () => aborted.reject(signal.reason);
+  signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    return await Promise.race([operation(), aborted.promise]);
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+  }
+}
+
+type PendingReconcile = {
+  abort: AbortController;
+  reschedule: boolean;
+  promise: Promise<ReconcileOutcome>;
+};
+
+type FabricFollower = {
+  sourceKey: string;
+  cancel: () => void;
+};
+
+/** The state one reconciliation reads once and guards every write against. */
+type PieceState = {
+  space: MemorySpace;
+  running: { identity: string; symbol: string };
+  storedSource: string;
+  snapshot: PieceSourceSnapshot;
+};
+
+export class SourceReconciler {
+  readonly #runtime: Runtime;
+  readonly #pending = new Map<string, PendingReconcile>();
+  readonly #fabricFollowers = new Map<string, FabricFollower>();
+  readonly #stoppedFabricFollowers = new Set<string>();
+  #disposed = false;
+
+  constructor(runtime: Runtime) {
+    this.#runtime = runtime;
+  }
+
+  /**
+   * Resolve the piece's origin and adopt its current source when it has moved.
+   *
+   * Awaited: a piece being opened reconciles before it starts, so it never runs
+   * source that its own origin has already replaced. Failures never throw — a
+   * piece whose origin cannot be reached keeps running what it has.
+   */
+  reconcile(resultCell: Cell<unknown>): Promise<ReconcileOutcome> {
+    if (this.#disposed) return Promise.resolve("detached");
+    this.#stoppedFabricFollowers.delete(this.#followerKey(resultCell));
+    return this.#singleFlight(resultCell);
+  }
+
+  /** Resolve when the reconciliations currently in flight have settled. */
+  async idle(): Promise<void> {
+    await Promise.allSettled(
+      [...this.#pending.values()].map(({ promise }) => promise),
+    );
+  }
+
+  /** Abort network work and keep it away from storage teardown. */
+  async dispose(): Promise<void> {
+    this.#disposed = true;
+    for (const { abort } of this.#pending.values()) abort.abort();
+    for (const { cancel } of this.#fabricFollowers.values()) cancel();
+    this.#fabricFollowers.clear();
+    await this.idle();
+  }
+
+  /** Stop following a source when its piece stops. */
+  unwatch(resultCell: Cell<unknown>): void {
+    const key = this.#followerKey(resultCell);
+    const pending = this.#pending.get(key);
+    if (pending !== undefined) {
+      this.#stoppedFabricFollowers.add(key);
+      pending.abort.abort("fabric follower stopped");
+    } else {
+      this.#stoppedFabricFollowers.delete(key);
+    }
+    this.#unwatchFabricSource(resultCell);
+  }
+
+  #singleFlight(resultCell: Cell<unknown>): Promise<ReconcileOutcome> {
+    const key = this.#followerKey(resultCell);
+    const existing = this.#pending.get(key);
+    if (existing !== undefined) {
+      if (existing.abort.signal.aborted) existing.reschedule = true;
+      return existing.promise;
+    }
+
+    const abort = new AbortController();
+    const pending = {} as PendingReconcile;
+    pending.abort = abort;
+    pending.reschedule = false;
+    pending.promise = this.#reconcile(resultCell, abort.signal)
+      .catch((error) => {
+        logger.warn("reconcile-failed", () => [
+          "source reconciliation failed",
+          resultCell.space,
+          error,
+        ]);
+        return "unavailable" as ReconcileOutcome;
+      })
+      .finally(() => {
+        if (this.#pending.get(key) === pending) this.#pending.delete(key);
+        if (this.#stoppedFabricFollowers.delete(key)) return;
+        if (pending.reschedule && !this.#disposed) {
+          void this.#singleFlight(resultCell);
+        }
+      });
+    this.#pending.set(key, pending);
+    return pending.promise;
+  }
+
+  /** Re-enter after the current pass, for a followed source that moved. */
+  #reconcileFromSourceEvent(resultCell: Cell<unknown>): void {
+    const key = this.#followerKey(resultCell);
+    if (this.#disposed || this.#stoppedFabricFollowers.has(key)) return;
+    const pending = this.#pending.get(key);
+    if (pending !== undefined) {
+      pending.reschedule = true;
+      return;
+    }
+    void this.#singleFlight(resultCell);
+  }
+
+  #followerKey(follower: Cell<unknown>): string {
+    const link = follower.getAsNormalizedFullLink();
+    return `${link.space}\0${link.scope ?? "space"}\0${link.id}`;
+  }
+
+  async #reconcile(
+    resultCell: Cell<unknown>,
+    signal: AbortSignal,
+  ): Promise<ReconcileOutcome> {
+    const running = getPatternIdentityRef(resultCell);
+    const storedSource = getPatternSource(resultCell);
+    if (running === undefined || storedSource === undefined) {
+      this.#unwatchFabricSource(resultCell);
+      return "detached";
+    }
+    const state: PieceState = {
+      space: resultCell.space,
+      running,
+      storedSource,
+      snapshot: getPieceSourceSnapshot(resultCell)!,
+    };
+
+    const host = this.#runtime.hostForSpace(state.space).href;
+    let origin = classifyPieceOriginString(storedSource, host);
+
+    if (origin.kind === "legacy-path") {
+      // A rooted path predates the `system:` scheme. Rewrite it to the ref
+      // naming the same file, which is host-relative and therefore survives the
+      // space moving hosts, then follow that ref. A path that addresses nothing
+      // under the patterns route names no file this deployment serves: it would
+      // resolve against the host and fetch whatever the site answers for an
+      // unrouted path, so nothing follows it.
+      if (origin.ref === undefined) {
+        this.#unwatchFabricSource(resultCell);
+        return "unusable";
+      }
+      const migrated = await this.#migrateOrigin(resultCell, state, origin.ref);
+      if (migrated !== "migrated") return migrated;
+      state.storedSource = origin.ref;
+      state.snapshot = getPieceSourceSnapshot(resultCell)!;
+      origin = classifyPieceOriginString(origin.ref, host);
+      const followed = await this.#follow(
+        resultCell,
+        state,
+        origin,
+        signal,
+      );
+      return followed === "current" ? "migrated" : followed;
+    }
+
+    return await this.#follow(resultCell, state, origin, signal);
+  }
+
+  #follow(
+    resultCell: Cell<unknown>,
+    state: PieceState,
+    origin: PieceOriginKind,
+    signal: AbortSignal,
+  ): Promise<ReconcileOutcome> {
+    switch (origin.kind) {
+      case "unusable":
+        logger.warn("unusable-origin", () => [
+          "a piece records an origin nothing can follow",
+          state.space,
+          origin.reason,
+        ]);
+        this.#unwatchFabricSource(resultCell);
+        return Promise.resolve("unusable");
+      case "fabric-pattern":
+      case "fabric-entity":
+        return this.#followFabric(resultCell, state, origin, signal);
+      case "system":
+        this.#unwatchFabricSource(resultCell);
+        return this.#followSystem(
+          resultCell,
+          state,
+          origin,
+          signal,
+        );
+      case "web":
+        // An external program endpoint is a source outside this deployment
+        // entirely. Resolving one is specified and not built.
+        this.#unwatchFabricSource(resultCell);
+        return Promise.resolve("unsupported");
+      case "legacy-path":
+        // Rewritten before dispatch.
+        return Promise.resolve("unusable");
+    }
+  }
+
+  /**
+   * A pattern this deployment's toolshed serves. Its `?identity` route reports
+   * the identity the current source compiles to, so one conditional request
+   * settles whether anything moved before any source is downloaded.
+   */
+  async #followSystem(
+    resultCell: Cell<unknown>,
+    state: PieceState,
+    origin: Extract<PieceOriginKind, { kind: "system" }>,
+    signal: AbortSignal,
+  ): Promise<ReconcileOutcome> {
+    const target = new URL(
+      origin.route,
+      this.#runtime.hostForSpace(state.space),
+    );
+    const fetch = this.#revalidatingFetch(signal);
+    const identityUrl = new URL(target);
+    identityUrl.searchParams.set("identity", "");
+    const response = await fetch(identityUrl);
+    if (!response.ok) return "unavailable";
+    const advertised = (await abortable(() => response.text(), signal)).trim();
+    if (advertised.length === 0) return "unavailable";
+    // The identity route settles whether the source moved. It says nothing
+    // about whether this space still holds the compiled artifact for it, and a
+    // piece whose artifact is gone cannot start however current its identity
+    // is — so an unchanged identity whose artifact will not load falls through
+    // to compile the source again, which puts the artifact back.
+    if (
+      advertised === state.running.identity &&
+      await this.#runningPatternLoads(state)
+    ) return "current";
+
+    const resolved = await this.#runtime.harness.resolve(
+      new HttpProgramResolver(target.href, fetch),
+    );
+    return await this.#adopt(
+      resultCell,
+      state,
+      { ...resolved, mainExport: state.running.symbol },
+      origin,
+      signal,
+      advertised,
+    );
+  }
+
+  /** Whether this space can still load the pattern the piece is pinned to. */
+  async #runningPatternLoads(state: PieceState): Promise<boolean> {
+    try {
+      return await this.#runtime.patternManager.loadPatternByIdentity(
+        state.running.identity,
+        state.running.symbol,
+        state.space,
+      ) !== undefined;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Source inside the fabric.
+   *
+   * An unpinned URL names another piece, or another mutable entity carrying a
+   * pattern identity: the follower adopts whatever pattern that entity
+   * currently runs, and subscribes so a later change reaches it while it is
+   * running. A pinned or content-addressed URL names exact source instead. It
+   * is resolved and adopted the same way, but it can never name anything else,
+   * so there is nothing to subscribe to and, once adopted, nothing left for it
+   * to report.
+   *
+   * TODO(hixie): store the export symbol a pinned origin selected. A pin fixes
+   * the pattern identity, not the export, and the origin string carries only
+   * the identity — so the symbol the piece already runs is reused, and a pinned
+   * origin can never move a piece to a different export of the same source.
+   */
+  async #followFabric(
+    resultCell: Cell<unknown>,
+    state: PieceState,
+    origin: Extract<
+      PieceOriginKind,
+      { kind: "fabric-entity" | "fabric-pattern" }
+    >,
+    signal: AbortSignal,
+  ): Promise<ReconcileOutcome> {
+    const runtime = this.#runtime;
+    const destinationSpace = state.space;
+    const ref = origin.ref;
+    if (ref.subpath !== undefined || ref.ref.kind !== "uri") {
+      this.#unwatchFabricSource(resultCell);
+      return "unusable";
+    }
+    const named = ref.space ?? destinationSpace;
+    if (!named.startsWith("did:")) {
+      this.#unwatchFabricSource(resultCell);
+      return "unusable";
+    }
+    const sourceSpace = named as MemorySpace;
+    if (
+      ref.host !== undefined &&
+      !fabricAuthorityMatchesSpaceHost(
+        ref.host,
+        runtime.hostForSpace(sourceSpace),
+      )
+    ) {
+      this.#unwatchFabricSource(resultCell);
+      return "unavailable";
+    }
+
+    let target: { identity: string; symbol: string } | undefined;
+    if (origin.kind === "fabric-pattern") {
+      this.#unwatchFabricSource(resultCell);
+      target = { identity: origin.identity, symbol: state.running.symbol };
+    } else {
+      const sourceCell = runtime.getCellFromEntityId(
+        sourceSpace,
+        `${ref.ref.scheme}:fid1:${ref.ref.hash}`,
+      );
+      target = await abortable(async () => {
+        await sourceCell.sync();
+        if (
+          this.#disposed || signal.aborted ||
+          this.#stoppedFabricFollowers.has(this.#followerKey(resultCell))
+        ) return undefined;
+        const current = getPatternIdentityRef(sourceCell);
+        if (current !== undefined) {
+          this.#watchFabricSource(
+            resultCell,
+            sourceCell,
+            state.storedSource,
+            current,
+          );
+        }
+        return current;
+      }, signal);
+    }
+    if (target === undefined) return "unavailable";
+    if (
+      target.identity === state.running.identity &&
+      target.symbol === state.running.symbol
+    ) return "current";
+
+    // Awaited directly rather than through the abort signal. The lookup
+    // synchronizes a source closure against storage, and abandoning the await
+    // would let disposal close storage while that read is still running. The
+    // wait is what keeps teardown behind it.
+    const program = await runtime.patternManager
+      .getPatternSourceProgramByIdentity(
+        target.identity,
+        sourceSpace,
+        destinationSpace,
+      );
+    if (program === undefined) return "unavailable";
+    return await this.#adopt(
+      resultCell,
+      state,
+      { ...program, mainExport: target.symbol },
+      origin,
+      signal,
+      target.identity,
+    );
+  }
+
+  /**
+   * Compile a resolved candidate, check it may replace what is running, and
+   * commit the transition and the swap together.
+   *
+   * `advertisedIdentity`, where the origin supplied one, must equal what the
+   * candidate compiles to. A source that does not produce the identity its own
+   * origin advertises is not the source that origin names.
+   */
+  async #adopt(
+    resultCell: Cell<unknown>,
+    state: PieceState,
+    program: Parameters<Runtime["patternManager"]["compilePattern"]>[0],
+    origin: PieceOriginKind,
+    signal: AbortSignal,
+    advertisedIdentity?: string,
+  ): Promise<ReconcileOutcome> {
+    const runtime = this.#runtime;
+    if (signal.aborted) return "unavailable";
+    const candidate = await runtime.patternManager.compilePattern(program, {
+      space: state.space,
+    });
+    const candidateRef = runtime.patternManager.getArtifactEntryRef(candidate);
+    if (candidateRef === undefined) {
+      logger.warn("candidate-without-identity", () => [
+        "resolved source produced no pattern identity",
+        state.space,
+        state.storedSource,
+      ]);
+      return "unavailable";
+    }
+    if (
+      advertisedIdentity !== undefined &&
+      candidateRef.identity !== advertisedIdentity
+    ) {
+      logger.warn("advertised-identity-mismatch", () => [
+        "resolved source did not compile to the identity its origin advertises",
+        state.space,
+        advertisedIdentity,
+        candidateRef,
+      ]);
+      return "unavailable";
+    }
+    if (
+      candidateRef.identity === state.running.identity &&
+      candidateRef.symbol === state.running.symbol
+    ) return "current";
+
+    const refusal = origin.kind === "system"
+      ? undefined
+      : await this.#refusal(state, candidate);
+    if (refusal !== undefined) {
+      logger.warn("incompatible-source-update", () => [
+        "the origin's current source cannot replace what this piece runs",
+        state.space,
+        state.running,
+        candidateRef,
+        refusal,
+      ]);
+      return "incompatible";
+    }
+
+    const baseline = await preparePieceSourceTransitionBaseline(
+      runtime,
+      resultCell,
+      state.snapshot,
+      { allowUnavailable: true },
+    );
+    const transition: PieceSourceTransition = {
+      revisionId: crypto.randomUUID(),
+      baseline,
+      timestamp: Date.now(),
+      operation: "origin-update",
+      origin: state.storedSource,
+      expected: state.snapshot,
+    };
+    // Setting up the candidate restages the piece's stored argument against
+    // its schema, so that document has to be local before the transaction
+    // opens, and still what it was when the transaction commits. A concurrent
+    // argument change means the setup would stage a value nobody asked for.
+    const argumentUnchanged = await runtime.syncStoredSetupArgument(resultCell);
+    const committed = await this.#commit(resultCell, state, signal, (tx) => {
+      if (!argumentUnchanged(resultCell.withTx(tx))) return false;
+      applyPieceSourceTransition(
+        runtime,
+        resultCell,
+        tx,
+        candidateRef,
+        transition,
+      );
+      // Staging the candidate belongs to this transaction whether or not the
+      // piece is running, so a refusal costs nothing either way: setup that
+      // cannot take the piece's data fails the transaction and the piece keeps
+      // what it has. A running piece is then re-instantiated by the pattern
+      // watcher, which sees its own completion marker and does not stage it a
+      // second time.
+      void runtime.setup(tx, candidate, undefined, resultCell.withTx(tx), {
+        prepareForResume: true,
+      });
+      return true;
+    });
+    return committed ? "updated" : "unavailable";
+  }
+
+  /**
+   * Why a candidate may not replace what is running, or undefined when it may.
+   *
+   * An unattended update to an origin this deployment does not gate the
+   * releases of requires the piece's contract not to move at all. That is
+   * conservative to the point of refusing changes a piece could take, and
+   * the lifecycle spec asks instead for the relation a replacement made by
+   * hand has to satisfy — which is the ungated-origin rule, specified and not
+   * built.
+   *
+   * A piece whose current pattern cannot be loaded has nothing left to protect:
+   * it cannot run at all, so its origin's source is a rescue rather than a
+   * risk, and it is adopted without a comparison there is no way to make.
+   */
+  async #refusal(
+    state: PieceState,
+    candidate: Pattern,
+  ): Promise<string | undefined> {
+    let previous: Pattern | undefined;
+    try {
+      previous = await this.#runtime.patternManager.loadPatternByIdentity(
+        state.running.identity,
+        state.running.symbol,
+        state.space,
+      );
+    } catch {
+      return undefined;
+    }
+    if (previous === undefined) return undefined;
+    if (!deepEqual(previous.argumentSchema, candidate.argumentSchema)) {
+      return "the candidate's argument schema differs from the accepted one";
+    }
+    if (!deepEqual(previous.resultSchema, candidate.resultSchema)) {
+      return "the candidate's result schema differs from the accepted one";
+    }
+    return undefined;
+  }
+
+  /** Rewrite a piece's origin into its canonical spelling, changing nothing else. */
+  async #migrateOrigin(
+    resultCell: Cell<unknown>,
+    state: PieceState,
+    ref: string,
+  ): Promise<ReconcileOutcome> {
+    const runtime = this.#runtime;
+    const baseline = await preparePieceSourceTransitionBaseline(
+      runtime,
+      resultCell,
+      state.snapshot,
+      { allowUnavailable: true },
+    );
+    const transition: PieceSourceTransition = {
+      revisionId: crypto.randomUUID(),
+      baseline,
+      timestamp: Date.now(),
+      operation: "origin-update",
+      origin: ref,
+      expected: state.snapshot,
+    };
+    const committed = await this.#commit(
+      resultCell,
+      state,
+      undefined,
+      (tx) => {
+        applyPieceSourceTransition(
+          runtime,
+          resultCell,
+          tx,
+          state.running,
+          transition,
+        );
+        return true;
+      },
+    );
+    return committed ? "migrated" : "unavailable";
+  }
+
+  /**
+   * Apply a write under the state this reconciliation read. Every attempt
+   * re-checks that state, so a concurrent edit, detach, or repoint is never
+   * overwritten by a decision taken before it.
+   */
+  async #commit(
+    resultCell: Cell<unknown>,
+    state: PieceState,
+    signal: AbortSignal | undefined,
+    write: (tx: Parameters<typeof applyPieceSourceTransition>[2]) => boolean,
+  ): Promise<boolean> {
+    const runtime = this.#runtime;
+    const result = await runtime.editWithRetry((tx) => {
+      // editWithRetry re-runs this callback after a retryable rejection, and a
+      // stop can abort between attempts, so every attempt re-enters the gate.
+      // Throwing ends the retry loop; aborting the transaction would be
+      // classified as retryable and consume the remaining attempts.
+      signal?.throwIfAborted();
+      const candidate = resultCell.withTx(tx);
+      const currentRef = getPatternIdentityRef(candidate);
+      // The piece must still run what the candidate was compared against, and
+      // still record the origin that was resolved. Nothing else decides this
+      // transition, so nothing else is guarded: the setup marker in
+      // particular is written by setup, which this transition triggers.
+      if (
+        currentRef?.identity !== state.running.identity ||
+        currentRef.symbol !== state.running.symbol ||
+        getPatternSource(candidate) !== state.storedSource
+      ) return false;
+      // The reconciler runs from a raw promise, with no scheduler run to stamp
+      // it — bookkeeping per serving-loop.md §3d, RULED 2026-08-05.
+      runtime.stampServerRun(tx, {
+        actionId: `source-reconcile/${resultCell.sourceURI}`,
+        kind: "bookkeeping",
+      });
+      return write(tx);
+    });
+    if (signal?.aborted) return false;
+    if (result.error) {
+      logger.warn("reconcile-commit-failed", () => [
+        "source reconciliation could not commit",
+        state.space,
+        result.error,
+      ]);
+      return false;
+    }
+    return result.ok === true;
+  }
+
+  /**
+   * Every request revalidates its checksum ETag. Unchanged bytes may be reused
+   * after a 304, but never without asking the source host whether they are
+   * still current.
+   */
+  #revalidatingFetch(signal: AbortSignal): typeof globalThis.fetch {
+    return (input, init) =>
+      abortable(
+        () =>
+          this.#runtime.fetch(input, {
+            ...init,
+            cache: "no-cache",
+            signal,
+          }),
+        signal,
+      );
+  }
+
+  #watchFabricSource(
+    follower: Cell<unknown>,
+    source: Cell<unknown>,
+    origin: string,
+    targetRef: { identity: string; symbol: string },
+  ): void {
+    const followerKey = this.#followerKey(follower);
+    const sourceLink = source.getAsNormalizedFullLink();
+    const sourceKey = `${origin}\0${sourceLink.space}\0${
+      sourceLink.scope ?? "space"
+    }\0${sourceLink.id}`;
+    const existing = this.#fabricFollowers.get(followerKey);
+    if (existing?.sourceKey === sourceKey) return;
+    existing?.cancel();
+    let sourcePrimed = false;
+    const cancelSource = source.sinkMeta("patternIdentity", (value) => {
+      if (!sourcePrimed) {
+        sourcePrimed = true;
+        const candidate = value as Record<string, unknown>;
+        if (
+          typeof value === "object" && value !== null &&
+          !Array.isArray(value) &&
+          candidate.identity === targetRef.identity &&
+          candidate.symbol === targetRef.symbol
+        ) return;
+      }
+      this.#reconcileFromSourceEvent(follower);
+    });
+    let followerPrimed = false;
+    const cancelFollower = follower.sinkMeta("patternSource", (value) => {
+      if (!followerPrimed) {
+        followerPrimed = true;
+        if (value === origin) return;
+      }
+      this.#reconcileFromSourceEvent(follower);
+    });
+    this.#fabricFollowers.set(followerKey, {
+      sourceKey,
+      cancel: () => {
+        cancelSource();
+        cancelFollower();
+      },
+    });
+  }
+
+  #unwatchFabricSource(follower: Cell<unknown>): void {
+    const key = this.#followerKey(follower);
+    this.#fabricFollowers.get(key)?.cancel();
+    this.#fabricFollowers.delete(key);
+  }
+}

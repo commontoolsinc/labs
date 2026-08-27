@@ -32,11 +32,49 @@ tables with the v2 basis index — and partly a build. The spec §5
 deletion list is enforced by deleting on main and *not rebuilding*,
 with the survival test as the gate on anything that feels needed.
 
-## Coordination state (2026-08-26) — read this first
+## Coordination state (2026-08-27) — read this first
 
 The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
+
+**Delta 2026-08-27: BOTH remaining entries were campaigned for a lift and
+NEITHER lifted. default-app's reload STEP is 7/10 locally. lunch-poll-vote
+passed its local re-baseline 8/8 — and then the lift PR's own CI ran the
+un-skipped file in the true lane and it went RED (ON shard 7, run
+33085668531, at the HOST's join, a stage no red for this file had ever
+been recorded at). The census stays TWO entries; the flip's list-EMPTY bar
+is unmoved.** Both campaigns ran
+at main `4b70949ac` on one ON-built binary, fresh store + own 97xx port +
+ON posture probe per run, PID-only teardown, `gtimeout 600` never raised,
+quiet and loaded interleaved — and at **two posture changes from every
+archived campaign, both strictly harder**: the space-root ensure is ON
+(the production default the CI ON lanes returned to at #6248, so the
+archived `SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false` no longer matches the
+lane), and the toolshed self-sources its pattern `API_URL` on the run port
+— the corrected source authority the 2026-08-26 default-app RCA
+prescribed, which removes the split-source artifact that produced that
+campaign's only red. Lunch: 8/8 green in 17–18 s, and the member's own
+store discriminator negative in all eight (every space carries
+`patternIdentity` and a 141–198-op materialization commit; the red
+signature is a 4-commit guest space with none). Default-app: 7/10, three
+reds all carrying the entry's current charge verbatim
+(`eventInvocationCount: 7`, `notebookActionCount: 0`, no bound notebook
+action state) — two of them (a03, a07) with r06/r09's keyless
+`pattern-load-error` discriminator, which is the first fresh OBSERVATION
+of that never-root-caused member since it went to
+absence-of-observation on 2026-08-24, and one (a04) with a live but
+incomplete piece matching no stated member.
+**The method finding, which outranks both ledgers: a local campaign is not
+the lane.** Both posture corrections above were made precisely to close
+that gap, and the gap survived them. This row already carried one member
+with the same profile (the fifth-face load-park member: local control
+0/12, CI 2/2 red across two shards); lunch-poll-vote now makes two. A lift
+bar of "N local runs" is therefore weaker evidence than it reads, and the
+natural repair — require a green DIRECT CI unskip probe as part of the bar
+— is a bar change and so the owner's call. Flagged, not taken. Full
+ledgers, the CI probe, classifications, and posture rationale:
+verification-coverage.md OW45's STEP-ENTRY and LUNCH-POLL blocks.
 
 **Delta 2026-08-26: the default-app reload STEP's post-#6292 gate is
 9/10 — NO LIFT. The older read-side residues are likely closed; the
@@ -56,9 +94,10 @@ root-caused. The STEP entry and guard therefore stay, reworded to the
 new observed charge; the 10/10 lift bar is unchanged. Full ledger and
 store/log discriminators:
 [`ow45-default-app-reload-post-6292-remeasure-2026-08-26.md`](../history/plans/server-execution-v2/optimize/ow45-default-app-reload-post-6292-remeasure-2026-08-26.md).
-The current patterns skip census is THREE entries: this default-app
-STEP, the lunch-poll-vote FILE entry, and the topic-board pivot-baseline
-STEP. The flip still requires the list to be empty.
+That census — THREE patterns entries: this default-app STEP, the
+lunch-poll-vote FILE entry, and the topic-board pivot-baseline STEP — is
+now TWO: #6316 lifted the topic-board STEP on 2026-08-26 without updating
+this sentence. The flip still requires the list to be empty.
 
 **Delta 2026-08-24 (this PR): the b04 client-start DEATH closed by
 CATCH-UP-AND-START (RULED 2026-08-24); the 10/10 gate found the arm-B
@@ -1079,10 +1118,10 @@ Stages, one PR each except C, which is a three-PR train (below):
       dirtiness and delivery both key by `scope_key`, and a
       subscriber receives only its applicable set (protocol.md §3);
       pattern-source watcher +
-      hot-swap in the SpaceServer — the `systemPatternAutoUpdate`
-      posture flips server-side (serving-loop.md §3e;
+      hot-swap in the SpaceServer (serving-loop.md §3e;
       `pattern-update-testing.md` scenarios are the acceptance
-      surface); the watermark doc + `derivedThrough` +
+      surface — following a piece's origin is not a serving concern, so
+      only the swap half lands here); the watermark doc + `derivedThrough` +
       `waitForSettled(space, seq)` (protocol.md §4, testing.md §3);
       the §7 counters; engine-side derived-envelope admission check —
       a derived commit's producing session must be the holder's own

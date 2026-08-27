@@ -13,9 +13,9 @@ import type {
 
 import type { Cfc, CurrentPrincipal, WriteAuthorizedBy } from "./cfc.ts";
 
-// ============================================================================
+//
 // Common internal definitions
-// ============================================================================
+//
 
 /**
  * Recursively removes `readonly` from all properties of `T`.
@@ -27,20 +27,20 @@ type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
   : T extends object ? ({ -readonly [P in keyof T]: Mutable<T[P]> })
   : T;
 
-// ============================================================================
+//
 // Fabric Value Types
-// ============================================================================
 //
 // Declared by `@commonfabric/data-model`, and re-exported here. The pattern
 // compiler resolves no bare specifier, so `generate-commonfabric-types.ts`
 // inlines this module's text when it builds the type file the sandbox is
 // served.
+//
 
 export * from "@commonfabric/data-model/api";
 
-// ============================================================================
+//
 // Fabric Execution Value Types
-// ============================================================================
+//
 
 /**
  * A value that can appear in an in-memory fabric execution graph.
@@ -65,9 +65,9 @@ export interface FabricExecArray extends ReadonlyArray<FabricExecValue> {}
 export interface FabricExecPlainObject
   extends Readonly<Record<string, FabricExecValue>> {}
 
-// ============================================================================
+//
 // Runtime Constants
-// ============================================================================
+//
 
 // Runtime constants - defined by @commonfabric/runner/src/builder/types.ts
 // These are ambient declarations since the actual values are provided by the runtime environment
@@ -106,9 +106,9 @@ export type UIVariantFunction = (
 export declare const SELF: unique symbol;
 export type SELF = typeof SELF;
 
-// ============================================================================
+//
 // Cell Brand System
-// ============================================================================
+//
 
 /**
  * Brand symbol for identifying different cell types at compile-time.
@@ -201,9 +201,9 @@ export type AnyBrandedCell<T, Kind extends string = string> = {
 
 export type BrandedCell<T, Kind extends CellKind> = AnyBrandedCell<T, Kind>;
 
-// ============================================================================
+//
 // Cell Capability Interfaces
-// ============================================================================
+//
 
 // To constrain methods that only exists on objects
 export type IsThisObject =
@@ -964,9 +964,9 @@ export interface IOpaquable<T> {
   setSchema(schema: JSONSchema): void;
 }
 
-// ============================================================================
+//
 // Cell Constructor Interfaces
-// ============================================================================
+//
 
 /**
  * Generic constructor interface for cell types with static methods.
@@ -1084,9 +1084,9 @@ export interface ScopedCellTypeConstructor<
   for<T>(cause: unknown): ScopedConstructorResult<Scope, Apply<Wrap, T>>;
 }
 
-// ============================================================================
+//
 // Cell Type Definitions
-// ============================================================================
+//
 
 /**
  * Base type for all cell variants that has methods. Internal API augments this
@@ -1272,9 +1272,9 @@ export interface WriteonlyCell<T>
 
 export declare const WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
 
-// ============================================================================
+//
 // Reactive - annotation for reactively-tracked values
-// ============================================================================
+//
 
 /**
  * Reactive<T> marks a value as reactively tracked by the pattern runtime.
@@ -1284,9 +1284,9 @@ export declare const WriteonlyCell: CellTypeConstructor<AsWriteonlyCell>;
  */
 export type Reactive<T> = T;
 
-// ============================================================================
+//
 // CellLike and FactoryInput - Utility types for accepting cells
-// ============================================================================
+//
 
 /**
  * CellLike is a cell (AnyCell) whose nested values are valid factory inputs.
@@ -1857,7 +1857,10 @@ export type BuiltInLLMMessage = {
   content: BuiltInLLMContent;
 };
 
+//
 // Image types from UI components
+//
+
 export interface ImageData {
   id: string;
   name: string;
@@ -1915,7 +1918,10 @@ export interface BuiltInLLMGroundingSource {
   snippet?: string;
 }
 
+//
 // Built-in types
+//
+
 export interface BuiltInLLMParams {
   messages?: BuiltInLLMMessage[];
   model?: string;
@@ -2717,7 +2723,9 @@ export type CompileAndRunFunction = <T = any, S = any>(
  */
 export type DataFileFunction = (path: string) => string;
 
-// --- SQLite builtins (docs/specs/sqlite-builtin) ---
+//
+// SQLite builtins (docs/specs/sqlite-builtin)
+//
 
 declare const __sqliteDb: unique symbol;
 
@@ -3265,7 +3273,10 @@ export type ToSchemaFunction = <T>(options?: Partial<JSONSchema>) => JSONSchema;
 /** Internal compiler-emitted helper for top-level data materialization. */
 export type CfDataFunction = <T>(value: T) => T;
 
+//
 // Pattern environment types
+//
+
 export interface PatternEnvironment {
   readonly apiUrl: URL;
 }

@@ -89,10 +89,10 @@ const DEFAULT_SUCCESS_ONLY = !RUN_IDS.length &&
 // Restrict to pushes to main (post-land), excluding pre-land pull_request runs.
 const MAIN_ONLY = args.includes("--main-only");
 
-// ---------------------------------------------------------------------------
+//
 // Data fetching: without --input, calls the GitHub REST API directly,
 // authenticated with GH_TOKEN or GITHUB_TOKEN. One of those must be set.
-// ---------------------------------------------------------------------------
+//
 
 const TOKEN = INPUT
   ? undefined
@@ -254,7 +254,7 @@ function latestJobsByName(jobs: Job[]): Job[] {
   return [...latest.values()];
 }
 
-// ---------------------------------------------------------------------------
+//
 // Step phases
 //
 // Every step is placed into a phase from the marker emoji its name begins with.
@@ -268,7 +268,7 @@ function latestJobsByName(jobs: Job[]): Job[] {
 // and "Complete job". The phase classifier also recognizes the "runner" pair
 // present in retained records. Those are classified by name in that module,
 // because their wording is not ours to set.
-// ---------------------------------------------------------------------------
+//
 
 // Chart order, left to right (matches the order steps run in). "other" trails so
 // an unmarked step stands out at the end of the bar.
@@ -289,9 +289,9 @@ async function fetchJobs(path: string): Promise<Job[]> {
   return jobs;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Statistics
-// ---------------------------------------------------------------------------
+//
 
 interface Stat {
   min: number;
@@ -335,9 +335,9 @@ function shardKeyOf(name: string): string {
   return suite ? suite[1] : "";
 }
 
-// ---------------------------------------------------------------------------
+//
 // Formatting
-// ---------------------------------------------------------------------------
+//
 
 function clock(sec: number): string {
   sec = Math.round(sec);
@@ -350,9 +350,9 @@ function esc(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-// ---------------------------------------------------------------------------
+//
 // Main
-// ---------------------------------------------------------------------------
+//
 
 let runs: Run[];
 let jobsPerRun: GanttInput["runs"];
@@ -614,9 +614,9 @@ const prFinish = Math.max(
   ...(prJobs.length ? prJobs : aggregates).map((j) => j.end.med),
 );
 
-// ---------------------------------------------------------------------------
+//
 // SVG layout
-// ---------------------------------------------------------------------------
+//
 
 const maxEnd = Math.max(...aggregates.map((j) => j.end.max));
 const PAD = 22;
@@ -1090,9 +1090,9 @@ const svg = [
   `</svg>`,
 ].join("\n");
 
-// ---------------------------------------------------------------------------
+//
 // Write output: the raw SVG when --out ends in .svg, otherwise a rasterized PNG.
-// ---------------------------------------------------------------------------
+//
 
 if (OUT.toLowerCase().endsWith(".svg")) {
   await Deno.writeTextFile(OUT, svg);

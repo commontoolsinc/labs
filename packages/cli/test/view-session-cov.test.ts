@@ -20,7 +20,9 @@ import { overlayBox, renderFrame, type ViewState } from "../lib/view/render.ts";
 import type { Document } from "../lib/view/model.ts";
 import { frameTop, maxTop } from "../lib/view/actions.ts";
 
-// --- key helpers -----------------------------------------------------------
+//
+// key helpers
+//
 
 function press(s: Session, ...names: string[]): void {
   for (const name of names) {
@@ -65,7 +67,9 @@ function makeSession(width = 90, height = 24): Session {
   );
 }
 
-// --- save dialog: more than six edited files -------------------------------
+//
+// save dialog: more than six edited files
+//
 
 Deno.test("session: the save prompt lists six files plus an '… and N more' line", () => {
   const path = "/work/main.ts";
@@ -123,7 +127,9 @@ Deno.test("session: a single edited file shows no notice list", () => {
   assert(promptText(s.view()).includes("solo.ts"), promptText(s.view()));
 });
 
-// --- selectNode out-of-range guard (288) ------------------------------------
+//
+// selectNode out-of-range guard (288)
+//
 
 Deno.test("session: navigating past the last node is a no-op (selectNode guard)", () => {
   const s = makeSession();
@@ -142,7 +148,9 @@ Deno.test("session: navigating past the last node is a no-op (selectNode guard)"
   assert(last, "a node stayed selected");
 });
 
-// --- definition lookup (319-348) --------------------------------------------
+//
+// definition lookup (319-348)
+//
 
 Deno.test("session: definition lookup reports a miss", () => {
   const s = makeSession();
@@ -204,7 +212,9 @@ Deno.test("session: definition lookup without a matching structure node falls ba
   assert(ov.footer.includes("scroll"), ov.footer);
 });
 
-// --- card selection movement & external file (377-484, 644-701) ------------
+//
+// card selection movement & external file (377-484, 644-701)
+//
 
 function externalSession(destLine = 1, fileLines = 3): {
   s: Session;
@@ -574,7 +584,9 @@ Deno.test("session: Tab toggles a peek card to source and z reveals the subject 
   assertEquals(s.view().overlay!.scroll, 0);
 });
 
-// --- normal-mode keys: search stepping & paging (546-845) -------------------
+//
+// normal-mode keys: search stepping & paging (546-845)
+//
 
 Deno.test("session: n with no matches reports 'No matches'", () => {
   const s = makeSession();
@@ -802,7 +814,9 @@ Deno.test("session: navigateTree with no structure reports no structure", () => 
   assertEquals(s.view().message, "No structure detected");
 });
 
-// --- plain-file editing key paths (888-1090) --------------------------------
+//
+// plain-file editing key paths (888-1090)
+//
 
 function fileSession(text: string, width = 80, height = 12): {
   s: Session;
@@ -1058,7 +1072,9 @@ Deno.test("session: ctrl-c while editing quits a clean buffer", () => {
   assert(s.quit, "ctrl-c quit the clean buffer");
 });
 
-// --- F3 / save / quit prompts (1391-1474) -----------------------------------
+//
+// F3 / save / quit prompts (1391-1474)
+//
 
 Deno.test("session: F3 saves an editable file and ctrl-x ctrl-s also saves", () => {
   const { s, saved } = fileSession("save me\n");
@@ -1211,7 +1227,9 @@ Deno.test("session: C-x C-c quits", () => {
   assert(s.quit, "C-x C-c quit a clean buffer");
 });
 
-// --- revert prompt (1480-1544) ----------------------------------------------
+//
+// revert prompt (1480-1544)
+//
 
 Deno.test("session: ctrl-r on a clean buffer reports nothing to revert", () => {
   const { s } = fileSession("nothing\n");
@@ -1295,7 +1313,9 @@ Deno.test("session: revert that returns nothing-there is reported", () => {
   assertEquals(s.view().message, "Nothing to revert there.");
 });
 
-// --- expand context errors (1556-1574) --------------------------------------
+//
+// expand context errors (1556-1574)
+//
 
 Deno.test("session: ctrl-l when expanding context is unavailable reports it", () => {
   const { s } = fileSession("plain file\n");
@@ -1354,7 +1374,9 @@ Deno.test("session: ctrl-l when expandContext yields nothing reports no more con
   }
 });
 
-// --- diff edit machinery exercised through a real diff source ---------------
+//
+// diff edit machinery exercised through a real diff source
+//
 
 const EXPAND_FILE = "alpha\nbeta\ngamma\ndelta\nepsilon\nzeta\neta\ntheta\n";
 const EXPAND_DIFF = `diff --git a/m.ts b/m.ts
@@ -2460,7 +2482,9 @@ Deno.test("diffcov: after a revert the cursor snaps to an editable line", () => 
   }
 });
 
-// --- file picker (1656-1849) ------------------------------------------------
+//
+// file picker (1656-1849)
+//
 
 const TREE: Record<string, DirEntry[]> = {
   "/work": [
@@ -2676,14 +2700,14 @@ Deno.test("filepickercov: escape cancels the picker", () => {
   assertEquals(s.view().message, "Cancelled");
 });
 
-// ===========================================================================
 // Additional targeted coverage for the remaining branch bodies. Each test
 // drives a specific guard or conditional that the suite above approaches but
 // does not yet execute (the untaken side of an `if (cond) STMT;` one-liner, an
 // off-screen scroll, or a non-editable diff line under a policy gate).
-// ===========================================================================
 
-// --- card reference up-scroll lands a higher target above the scroll (392) --
+//
+// card reference up-scroll lands a higher target above the scroll (392)
+//
 
 /** A node in the SAMPLE blob whose card carries several reference targets, used
  * to step the card selection and force the overlay to scroll. */
@@ -2752,11 +2776,14 @@ Deno.test("session: a card with many references scrolls down then up across the 
   }
 });
 
-// --- jumpToTarget via a use reference with no def offset (428, 446, 464-477) -
+//
+// jumpToTarget via a use reference with no def offset (428, 446, 464-477) -
+//
 // The lift node's card lists both a definition reference (carrying a node
 // offset) and a plain "use" reference (no offset). Revealing the use one takes
 // the offset-less path: findTargetIndex returns -1, jumpToTarget falls back to
 // nodeAtLine, and the off-screen destination column pans the view.
+//
 
 Deno.test("session: revealing a use reference (no def offset) jumps via nodeAtLine and pans", () => {
   const doc = parseDocument(SAMPLE);
@@ -2797,10 +2824,13 @@ Deno.test("session: opening a use reference (no def offset) resolves a node via 
   assert(ov, "a node resolved and its card opened");
 });
 
-// --- findTargetIndex falls back to a start-offset-only match (436-439) -------
+//
+// findTargetIndex falls back to a start-offset-only match (436-439)
+//
 // The pattern's card lists a dependency reference that carries a definition
 // offset but no end offset (no semantic service to pin the exact range), so
 // following it skips the exact (start+end) lookup and matches on start alone.
+//
 
 Deno.test("session: following a dependency with no end offset matches a node by start offset", () => {
   const doc = parseDocument(SAMPLE);
@@ -2820,7 +2850,9 @@ Deno.test("session: following a dependency with no end offset matches a node by 
   assert(s.view().message.startsWith("→"), s.view().message);
 });
 
-// --- overlay enter/z with no reference (484, 665-668) ------------------------
+//
+// overlay enter/z with no reference (484, 665-668)
+//
 
 Deno.test("session: Enter on a card with no reference selected closes the overlay", () => {
   const s = makeSession(100, 24);
@@ -2839,7 +2871,9 @@ Deno.test("session: z on the help overlay (no subject node) does nothing", () =>
   assert(s.view().overlay!.title.toLowerCase().includes("keys"));
 });
 
-// --- edit-mode search with no editable match (546-547, 560) ------------------
+//
+// edit-mode search with no editable match (546-547, 560)
+//
 
 Deno.test("diffcov: an edit-mode search whose only matches are non-editable keeps the cursor", () => {
   const { ws, done } = diffWorkspace();
@@ -2876,7 +2910,9 @@ Deno.test("diffcov: committing an edit-mode search with no matches is a no-op on
   }
 });
 
-// --- escape an empty-query search clears the (empty) match set (599) ---------
+//
+// escape an empty-query search clears the (empty) match set (599)
+//
 
 Deno.test("session: escaping a search with no query typed clears the match set", () => {
   const s = makeSession();
@@ -2887,10 +2923,13 @@ Deno.test("session: escaping a search with no query typed clears the match set",
   assertEquals(s.view().matches, null, "no matches set with an empty query");
 });
 
-// --- diff edit guards on a non-editable (removed) line ----------------------
+//
+// diff edit guards on a non-editable (removed) line
+//
 // Land the cursor on the removed line (index 8 in the DIFF fixture) and run
 // each delete-/kill-style edit. The policy's editStart returns null there, so
 // every gate reports NOT_EDITABLE and refuses the edit.
+//
 
 Deno.test("diffcov: delete-forward on a removed line is refused (guardForwardEdit)", () => {
   const { ws, done } = diffWorkspace();
@@ -3011,7 +3050,9 @@ Deno.test("diffcov: a same-line region past the marker is killed (guardRegionEdi
   }
 });
 
-// --- the mark rides onto the added line when a context edit splits (1109-1111)
+//
+// the mark rides onto the added line when a context edit splits (1109-1111)
+//
 
 Deno.test("diffcov: a mark on a context line rides onto the added line when split", () => {
   const { ws, done } = diffWorkspace();
@@ -3030,7 +3071,9 @@ Deno.test("diffcov: a mark on a context line rides onto the added line when spli
   }
 });
 
-// --- ensureCursorVisible scrolls the cursor into view (1371-1372, 1375-1376) -
+//
+// ensureCursorVisible scrolls the cursor into view (1371-1372, 1375-1376) -
+//
 
 Deno.test("session: moving the edit cursor off-screen scrolls it back into view", () => {
   // A tall, wide file so cursor moves cross the viewport edges in both axes.
@@ -3054,7 +3097,9 @@ Deno.test("session: moving the edit cursor off-screen scrolls it back into view"
   assertEquals(s.view().left, 0, "panned back to column 0");
 });
 
-// --- ensurePickerVisible never lets the scroll go negative (1705) ------------
+//
+// ensurePickerVisible never lets the scroll go negative (1705)
+//
 
 Deno.test("filepickercov: scrolling the picker selection up keeps the scroll non-negative", () => {
   const s = pickerSession();
@@ -3067,7 +3112,9 @@ Deno.test("filepickercov: scrolling the picker selection up keeps the scroll non
   assertEquals(s.view().overlay!.selectedLine, 0, "back at the first entry");
 });
 
-// --- adjustHunkCounts: removing the last context line above a hunk (1152) ----
+//
+// adjustHunkCounts: removing the last context line above a hunk (1152)
+//
 
 Deno.test("diffcov: removing an added line shrinks the hunk header counts", () => {
   const { ws, done } = diffWorkspace();
@@ -3096,7 +3143,9 @@ Deno.test("diffcov: removing an added line shrinks the hunk header counts", () =
   }
 });
 
-// --- only visible hunk edges, and what stops them ---------------------------
+//
+// only visible hunk edges, and what stops them
+//
 
 /** A diff whose only hunk sits hard against the top of its file, with a second
  * hunk close enough below that expanding down soon meets it. */
@@ -3726,7 +3775,9 @@ index 0000000..1111111 100644
   }
 });
 
-// --- reveal-frame remapping and room-less hunks -----------------------------
+//
+// reveal-frame remapping and room-less hunks
+//
 
 Deno.test("diffcov: a reveal frame carries a selected node to its shifted place", () => {
   const { s, done } = tallSession(13);

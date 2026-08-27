@@ -215,8 +215,9 @@ export function serializeEvent(event: Event): SerializedEvent {
   // `codec-realm` carries the whole domain here; what has to stay is the
   // separate job the conversion does of turning an unencodable detail into
   // something rather than failing the event. The same holds of a target's
-  // `value` and `checked` above. The outbound half of this seam is marked on
-  // `SetPropOp` in `../vdom-ops.ts`.
+  // `value` and `checked` above. The outbound half of this seam is closed:
+  // `SetPropOp.value` in `../vdom-ops.ts` is a `FabricValue` the envelope's
+  // encoding carries whole.
   if ("detail" in event && (event as CustomEvent).detail !== undefined) {
     serialized.detail = toSerializableValue((event as CustomEvent).detail);
   }

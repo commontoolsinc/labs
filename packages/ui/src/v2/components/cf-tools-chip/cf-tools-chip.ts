@@ -104,7 +104,7 @@ const ToolsArraySchema = {
 } as const satisfies JSONSchema;
 
 export class CFToolsChip extends BaseElement {
-  /* ---------- Cell controller for tools binding ---------- */
+  /** Cell controller for tools binding */
   private _cellController = createCellController<ToolsInput>(this, {
     timing: { strategy: "immediate" },
     onChange: () => {

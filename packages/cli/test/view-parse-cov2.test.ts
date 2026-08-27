@@ -41,7 +41,9 @@ function labelsOf(doc: Document): string[] {
   return doc.flatStructure.map((n) => n.label);
 }
 
-// --- isTypePosition: qualified names in type position (neighbor of 913) ---
+//
+// isTypePosition: qualified names in type position (neighbor of 913)
+//
 
 Deno.test("qualified name in a type annotation resolves as a type name", () => {
   // `a.b.c.D` in type position climbs the qualified-name chain in
@@ -55,7 +57,9 @@ Deno.test("qualified name in a type annotation resolves as a type name", () => {
   );
 });
 
-// --- isTypePosition: typeof type (neighbor of 916) ---
+//
+// isTypePosition: typeof type (neighbor of 916)
+//
 
 Deno.test("typeof in a type annotation resolves the operand as a type name", () => {
   // `typeof foo` as a type produces a TypeQueryNode parent for `foo`. Because a
@@ -71,7 +75,9 @@ Deno.test("typeof in a type annotation resolves the operand as a type name", () 
   );
 });
 
-// --- isTypePosition: heritage clause (neighbor of 917, 919, 920) ---
+//
+// isTypePosition: heritage clause (neighbor of 917, 919, 920)
+//
 
 Deno.test("class heritage type resolves as a type name", () => {
   // `extends Base<number>` produces an ExpressionWithTypeArguments whose
@@ -94,7 +100,9 @@ Deno.test("interface heritage type resolves as a type name", () => {
   );
 });
 
-// --- classifyIdentifier neighbors of 836: the full reachable classification ---
+//
+// classifyIdentifier neighbors of 836: the full reachable classification
+//
 
 Deno.test("identifier classifications across declaration and use sites", () => {
   const src = [
@@ -121,7 +129,9 @@ Deno.test("identifier classifications across declaration and use sites", () => {
   assert(sideClasses.has("propertyName") || sideClasses.has("binding"));
 });
 
-// --- mergeByStart neighbor of 1215: non-empty comment batches merge in ---
+//
+// mergeByStart neighbor of 1215: non-empty comment batches merge in
+//
 
 Deno.test("comments are threaded into the structure tree", () => {
   const src = [
@@ -146,7 +156,9 @@ Deno.test("comments are threaded into the structure tree", () => {
   );
 });
 
-// --- registerDefinition neighbor of 1260: named declarations register ---
+//
+// registerDefinition neighbor of 1260: named declarations register
+//
 
 Deno.test("named declarations are registered as definitions", () => {
   const src = [
@@ -168,7 +180,9 @@ Deno.test("named declarations are registered as definitions", () => {
   assertEquals(alpha[0].name, "alpha");
 });
 
-// --- controlLabel neighbors of 1674: all eight control-statement labels ---
+//
+// controlLabel neighbors of 1674: all eight control-statement labels
+//
 
 Deno.test("every control statement gets its dedicated label", () => {
   const src = [
@@ -194,7 +208,9 @@ Deno.test("every control statement gets its dedicated label", () => {
   assert(has(/^try$/), "missing try label");
 });
 
-// --- safe() neighbors of 1725-1727: extractors never throw on parseable input ---
+//
+// safe() neighbors of 1725-1727: extractors never throw on parseable input
+//
 
 Deno.test("metadata extraction survives malformed but parseable input", () => {
   // These all parse (via TypeScript error recovery) into nodes with valid
@@ -225,7 +241,9 @@ Deno.test("import metadata is extracted without error", () => {
   assertEquals(imp!.meta!.kind, "import");
 });
 
-// --- describeInitializer neighbors of 2051-2053 ---
+//
+// describeInitializer neighbors of 2051-2053
+//
 
 Deno.test("a raw arrow initializer becomes a closure node, not a variable", () => {
   // bindingDesc routes the arrow to a closure before variableMeta /
@@ -271,7 +289,9 @@ Deno.test("describeInitializer reports non-closure initializers", () => {
   );
 });
 
-// --- incremental highlighter still re-highlights an edited closure line ---
+//
+// incremental highlighter still re-highlights an edited closure line
+//
 
 Deno.test("incremental highlighter updates a line that adds a closure", () => {
   const h = createHighlighter("const a = 1;\nconst b = 2;\n");

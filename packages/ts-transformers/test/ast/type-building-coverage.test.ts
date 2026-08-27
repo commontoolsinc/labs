@@ -112,7 +112,9 @@ function findPropertyAccess(
   return found;
 }
 
-// -- shouldPreserveBindingDeclaredTypeNode ---------------------------------
+//
+// shouldPreserveBindingDeclaredTypeNode
+//
 
 Deno.test("shouldPreserveBindingDeclaredTypeNode: unwraps parentheses to find a preserved Default alias", () => {
   const factory = ts.factory;
@@ -165,7 +167,9 @@ Deno.test("shouldPreserveBindingDeclaredTypeNode: a union containing a scope wra
   assertEquals(shouldPreserveBindingDeclaredTypeNode(node), true);
 });
 
-// -- reportUnknownReactiveType / describeCapture ---------------------------
+//
+// reportUnknownReactiveType / describeCapture
+//
 
 Deno.test("reportUnknownReactiveType: an unknown-typed capture with no printable text falls back to the label", () => {
   // The capture expression prints to empty text, so describeCapture returns the
@@ -222,7 +226,9 @@ Deno.test("reportUnknownReactiveType: a non-unknown capture is not reported", ()
   });
 });
 
-// -- buildCaptureTypeElements: intermediate nodes --------------------------
+//
+// buildCaptureTypeElements: intermediate nodes
+//
 
 Deno.test("buildCaptureTypeElements: an optional intermediate property is emitted with a question token", () => {
   // `config.nested.value` where `nested?: Nested` on `Config`. The intermediate

@@ -6,7 +6,7 @@
  * boundary.
  */
 
-import { afterEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { PiecesController } from "@commonfabric/piece/ops";
 import type {
@@ -17,6 +17,8 @@ import type {
 import { decode } from "@commonfabric/utils/encoding";
 
 import { runRetarget } from "../lib/bulk.ts";
+import { resetUnreportedRunGuardsForTest } from "../lib/unreported-run.ts";
+import { guardHarness } from "./unreported-run-helpers.ts";
 import {
   formatApplyRow,
   piece,
@@ -90,6 +92,9 @@ const REPORT: ApplyReport = {
 describe("piece-retarget", () => {
   // The fixtures pass `quiet`, and the action applies it globally.
   afterEach(() => setQuietMode(false));
+  // The process-end hook is installed once per process, by the first run to
+  // arm a guard; a case that injects its own effects starts from none.
+  beforeEach(() => resetUnreportedRunGuardsForTest());
 
   describe("formatApplyRow()", () => {
     it("puts the verdict, the piece, its phase, and its cost on one line", () => {
@@ -358,9 +363,14 @@ describe("piece-retarget", () => {
       const out = await captureStdout(() =>
         retargetFromCommand({ ...OPTIONS, json: true }, {
           runRetarget: (_config, request) => {
-            // A single document cannot stream, so no row reporter is handed
-            // to the library at all.
-            expect(Object.keys(request).sort()).toEqual(["planPath"]);
+            // A single document cannot stream, so the reporter this mode
+            // hands the library observes and never prints. The key set, not
+            // each value: an `apply: undefined` riding along is a key the
+            // library still has to reason about, and every matcher that asks
+            // about one property reads a present-but-undefined key as an
+            // absent one.
+            expect(Object.keys(request).sort()).toEqual(["onRow", "planPath"]);
+            for (const row of REPORT.rows) request.onRow?.(row);
             return Promise.resolve(REPORT);
           },
           printHint: () => {},
@@ -368,6 +378,10 @@ describe("piece-retarget", () => {
       );
       expect(out.startsWith("fvj1:")).toBe(true);
       expect(out).toContain('"elapsedMs":412');
+      // What "cannot stream" means, asserted directly rather than inferred
+      // from the absence of a callback: two rows went through the reporter
+      // above and stdout still carries exactly one line, the document.
+      expect(out.trimEnd().split("\n")).toHaveLength(1);
     });
 
     it("writes the report to --out and leaves stdout empty", async () => {
@@ -376,7 +390,10 @@ describe("piece-retarget", () => {
       const out = await captureStdout(() =>
         retargetFromCommand({ ...OPTIONS, out: "report.json" }, {
           runRetarget: (_config, request) => {
-            expect(Object.keys(request).sort()).toEqual(["planPath"]);
+            expect(Object.keys(request).sort()).toEqual(["onRow", "planPath"]);
+            // The reporter observes; the empty stdout asserted below is what
+            // says it printed nothing.
+            for (const row of REPORT.rows) request.onRow?.(row);
             return Promise.resolve(REPORT);
           },
           writeTextFile: (path, text) => {
@@ -569,6 +586,177 @@ describe("piece-retarget", () => {
         actionHandler?: unknown;
       };
       expect(registered?.actionHandler).toBe(retargetFromCommand);
+    });
+
+    it("reports what settled and exits nonzero when the process outlives the run", async () => {
+      // The defect's own shape: a run whose promise stops settling. Deno
+      // drains such a process and exits 0, so without the guard the apply
+      // ends having written part of a migration, printed no summary, and
+      // told its caller everything went well.
+      const process = guardHarness();
+      const rows: string[] = [];
+      // Deliberately not awaited — the point is that this promise never
+      // settles, exactly as the run that stopped mid-migration did not.
+      const abandoned = retargetFromCommand({ ...OPTIONS, apply: true }, {
+        runRetarget: (_config, request) => {
+          request.onRow?.({
+            piece: "fid1:aaa",
+            phase: "topics",
+            verdict: "applied",
+            elapsedMs: 12,
+          });
+          return new Promise<ApplyReport>(() => {});
+        },
+        render: (value) => {
+          rows.push(String(value));
+        },
+        printHint: () => {},
+        guard: process.deps,
+      });
+      // The row streamed before the run stalled; the process then ends.
+      await Promise.resolve();
+      expect(rows).toEqual(["applied fid1:aaa topics 12ms"]);
+      expect(process.endProcess()).toBe(1);
+      expect(process.errors.join("\n")).toContain(
+        "Retarget ended before it reported",
+      );
+      expect(process.errors.join("\n")).toContain(
+        "1 row settled — applied: 1.",
+      );
+      // The abandoned promise is the run that never came back; naming it
+      // keeps the lint's floating-promise rule honest about that.
+      expect(abandoned).toBeInstanceOf(Promise);
+    });
+
+    it("counts the rows a document-mode run settled, which wrote no document", async () => {
+      // The mode with the most to lose: `--json` and `--out` build what they
+      // emit from the returned report, so a run that never returns writes
+      // nothing at all and this line is the operator's whole account of it.
+      // A count of zero here after real writes would be worse than silence —
+      // wrong, and actionable.
+      for (
+        const mode of [{ json: true }, { out: "report.json" }] as const
+      ) {
+        resetUnreportedRunGuardsForTest();
+        const process = guardHarness();
+        let written = false;
+        const out = await captureStdout(() => {
+          retargetFromCommand({ ...OPTIONS, ...mode, apply: true }, {
+            runRetarget: (_config, request) => {
+              request.onRow?.({
+                piece: "fid1:aaa",
+                phase: "topics",
+                verdict: "applied",
+                elapsedMs: 12,
+              });
+              request.onRow?.({
+                piece: "fid1:bbb",
+                phase: "topics",
+                verdict: "applied",
+                elapsedMs: 9,
+              });
+              return new Promise<ApplyReport>(() => {});
+            },
+            writeTextFile: () => {
+              written = true;
+              return Promise.resolve();
+            },
+            printHint: () => {},
+            guard: process.deps,
+          });
+          return Promise.resolve();
+        });
+        expect(process.endProcess()).toBe(1);
+        expect(process.errors.join("\n")).toContain(
+          "2 rows settled — applied: 2.",
+        );
+        // Observing is not streaming, and the document was never written.
+        expect(out).toBe("");
+        expect(written).toBe(false);
+      }
+    });
+
+    it("says nothing at process end once the run has reported", async () => {
+      const process = guardHarness();
+      await captureStdout(() =>
+        retargetFromCommand(OPTIONS, {
+          runRetarget: () => Promise.resolve(REPORT),
+          printHint: () => {},
+          guard: process.deps,
+        })
+      );
+      expect(process.endProcess()).toBe(0);
+      expect(process.errors).toEqual([]);
+    });
+
+    it("says the report failed, not that the run never returned, when output throws", async () => {
+      // The engine came back with every row; what broke was the writing of
+      // it. Claiming the run was "still in flight" would be false, and it
+      // would be printed beside the real error — two statements, one wrong.
+      const process = guardHarness();
+      await expect(
+        retargetFromCommand({ ...OPTIONS, out: "report.json", apply: true }, {
+          runRetarget: (_config, request) => {
+            for (const row of REPORT.rows) request.onRow?.(row);
+            return Promise.resolve(REPORT);
+          },
+          writeTextFile: () => Promise.reject(new Error("the disk is full")),
+          printHint: () => {},
+          guard: process.deps,
+        }),
+      ).rejects.toThrow("the disk is full");
+      // Nonzero anyway, since the throw is what the CLI exits on; the guard
+      // adds the tally that the failed report never got to print.
+      expect(process.endProcess()).toBe(1);
+      const said = process.errors.join("\n");
+      expect(said).toContain(
+        "Retarget ran to a report, but the process exited before that " +
+          "report finished.",
+      );
+      expect(said).not.toContain("still in flight");
+      expect(said).toContain("2 rows settled — applied: 1 · landed: 1.");
+    });
+
+    it("still guards a report that hangs rather than throws", async () => {
+      // The window a `finally` released at the engine's return would have
+      // reopened: the report never finishes, nothing throws, and the process
+      // drains — the original defect, moved one step later. The guard is
+      // still armed, so the run is still accounted for.
+      const process = guardHarness();
+      const abandoned = retargetFromCommand(
+        { ...OPTIONS, out: "report.json", apply: true },
+        {
+          runRetarget: (_config, request) => {
+            for (const row of REPORT.rows) request.onRow?.(row);
+            return Promise.resolve(REPORT);
+          },
+          writeTextFile: () => new Promise<void>(() => {}),
+          printHint: () => {},
+          guard: process.deps,
+        },
+      );
+      await Promise.resolve();
+      expect(process.endProcess()).toBe(1);
+      const said = process.errors.join("\n");
+      expect(said).toContain("Retarget ran to a report");
+      expect(said).toContain("2 rows settled — applied: 1 · landed: 1.");
+      expect(abandoned).toBeInstanceOf(Promise);
+    });
+
+    it("says nothing at process end when the run threw", async () => {
+      // The refusal is its own report, and the CLI prints it on the way to
+      // a nonzero exit; a second line about an unreported run would be one
+      // the caller has to rule out.
+      const process = guardHarness();
+      await expect(
+        retargetFromCommand(OPTIONS, {
+          runRetarget: () => Promise.reject(new Error("the plan is stale")),
+          printHint: () => {},
+          guard: process.deps,
+        }),
+      ).rejects.toThrow("the plan is stale");
+      expect(process.endProcess()).toBe(0);
+      expect(process.errors).toEqual([]);
     });
   });
 

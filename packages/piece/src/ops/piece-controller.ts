@@ -1,5 +1,6 @@
 import type { CellKind, LinkScope } from "@commonfabric/api";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
+import { getLogger } from "@commonfabric/utils/logger";
 import {
   applyPieceSourceTransition,
   Cell,
@@ -70,6 +71,11 @@ import {
 } from "./piece-origin.ts";
 import type { PiecesController } from "./pieces-controller.ts";
 import { compileProgram } from "./utils.ts";
+
+const pieceUpdateLogger = getLogger("piece.update", {
+  enabled: true,
+  level: "warn",
+});
 
 interface PieceCellIo {
   get(path?: CellPath): Promise<unknown>;
@@ -3530,7 +3536,10 @@ export class PieceController<T = unknown> {
       if (options.copyData) {
         await restoreCloneInternals(clone.getCell(), internals);
       }
-      await destination.startPiece(clone.getCell());
+      // Opening rather than merely starting: a clone follows the piece it
+      // was taken from, and following begins with the subscription the open
+      // installs.
+      await destination.openPiece(clone.getCell());
     } catch (error) {
       const cleanupErrors: unknown[] = [];
       try {
@@ -4116,8 +4125,41 @@ export class PieceController<T = unknown> {
     let transition: PieceSourceTransition | undefined;
     try {
       await this.#runMutation(mutationVersion, async () => {
-        const { pattern: previousPattern, ref: previousRef } = await this
-          .#loadCurrentPattern();
+        // A piece whose current pattern cannot load is exactly the piece a
+        // source replacement rescues: a stored identity resolvable only from
+        // a retired bundle (a wish-minted sidecar with no in-space program)
+        // strands the piece otherwise. The loaded pattern feeds only the two
+        // checks the escape hatch already waives — the backward-compatibility
+        // assertion and retained-link validation — so under
+        // `dangerouslyAllowIncompatibleSchema` a failed load degrades to the
+        // stored identity ref alone. Without the flag the load failure stays
+        // fatal, unchanged.
+        //
+        // The degradation reaches two populations. A piece with no retained
+        // source takes the transition's displaced-identity arm below. A piece
+        // whose source IS retained but whose artifact will not load — a
+        // compile or evaluation failure under this runtime — keeps its
+        // retained baseline: the stored ref serves only as the concurrency
+        // guard and the candidate's predecessor entry, both of which name an
+        // identity without loading it.
+        let previousPattern: Pattern | undefined;
+        let previousRef: { identity: string; symbol: string };
+        try {
+          ({ pattern: previousPattern, ref: previousRef } = await this
+            .#loadCurrentPattern());
+        } catch (error) {
+          if (!options?.dangerouslyAllowIncompatibleSchema) throw error;
+          await this.#cell.sync();
+          const storedRef = getPatternIdentityRef(this.#cell);
+          if (!storedRef) throw error;
+          pieceUpdateLogger.warn("set-pattern-current-unloadable", () => [
+            "the current pattern failed to load; replacing source from the",
+            `stored identity ref ${storedRef.identity}#${storedRef.symbol}`,
+            `under dangerouslyAllowIncompatibleSchema (${this.#cell.space})`,
+            error,
+          ]);
+          previousRef = storedRef;
+        }
         const expected = getPieceSourceSnapshot(this.#cell);
         if (expected === undefined) {
           throw new Error("piece missing source state");
@@ -4166,7 +4208,9 @@ export class PieceController<T = unknown> {
         // Callers who want every reason at once run `checkPattern()`, which is
         // exactly what `--check` is for.
         if (!options?.dangerouslyAllowIncompatibleSchema) {
-          assertPatternSchemasBackwardCompatible(previousPattern, pattern);
+          // Reached only when the load above succeeded: a failed load
+          // without the flag rethrows there.
+          assertPatternSchemasBackwardCompatible(previousPattern!, pattern);
         }
         // The `null` is the origin: this transition detaches. A caller
         // supplying the source has chosen what the piece runs, and a piece
@@ -4190,7 +4234,9 @@ export class PieceController<T = unknown> {
                 argumentCell,
                 this.#pieces,
                 {
-                  priorArgumentSchema: previousPattern.argumentSchema,
+                  // Same narrowing as the assertion above: this validator arm
+                  // exists only without the flag, where the load succeeded.
+                  priorArgumentSchema: previousPattern!.argumentSchema,
                   // `applySetupState` rewrites the argument from `getRaw()`, so
                   // every retained link's envelope is written back unchanged and
                   // nothing here is rebuilt as an alias. The validator verifies

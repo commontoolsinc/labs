@@ -321,7 +321,7 @@ export function summarizeDebugValue(value: unknown): DebugValueSummary {
 }
 
 export function summarizeTriggerTraceEntries(
-  trace: TriggerTraceEntry[],
+  trace: readonly TriggerTraceEntry[],
   options: { limit?: number; rootOnly?: boolean } = {},
 ): TriggerTraceExplanation {
   const { limit = 10, rootOnly = false } = options;
@@ -544,7 +544,7 @@ export function createDebugUtils(
   }
 
   async function getWriteStackTrace(): Promise<
-    WriteStackTraceEntry[] | undefined
+    readonly WriteStackTraceEntry[] | undefined
   > {
     const rt = getRt();
     if (!rt) {

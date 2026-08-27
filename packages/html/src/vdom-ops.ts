@@ -63,14 +63,9 @@ export type SetPropOp = {
 
   /**
    * The value to set, which is whatever a pattern put on a render node and so
-   * is a `FabricValue` entire. `transformPropValue()` in
-   * `worker/reconciler.ts` produces one: it hands a `FabricPrimitive` over
-   * whole rather than narrowing.
-   *
-   * TODO(danfuzz): the crossing does not yet carry what this declares.
-   * Structured clone strips a `FabricPrimitive` to `{}` between the producer
-   * and the applicator, silently. `codec-realm` is the mechanism, this batch
-   * crossing by `postMessage` rather than as JSON text.
+   * is a `FabricValue` entire. The batch crosses inside the envelope's
+   * encoding, which carries a `FabricPrimitive` with its class where a bare
+   * structured clone stripped one to `{}`.
    */
   value: FabricValue;
 };
@@ -173,7 +168,7 @@ export type VDomBatch = {
   batchId: number;
 
   /** The operations to apply, in order */
-  ops: VDomOp[];
+  ops: readonly VDomOp[];
 
   /**
    * The root node ID for this render tree; `null` while the tree has no root

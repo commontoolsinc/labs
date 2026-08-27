@@ -54,7 +54,9 @@ function runGit(root: string, args: string[]): string {
   return new TextDecoder().decode(output.stdout);
 }
 
-// --- fixtures ---------------------------------------------------------------
+//
+// fixtures
+//
 
 const FILE_TEXT = `export function double(n: number): number {
     return n * 2;
@@ -135,7 +137,9 @@ function tempWorkspace(): {
 
 const NO_WS: DiffWorkspace = { resolve: () => null, read: () => null };
 
-// --- detection ----------------------------------------------------------------
+//
+// detection
+//
 
 Deno.test("diff: detection accepts git and plain unified diffs, rejects code", () => {
   assert(looksLikeDiff(DIFF), "git diff detected");
@@ -194,7 +198,9 @@ rename to new.ts
   assert(looksLikeDiff(rename), "a metadata-only git diff is detected");
 });
 
-// --- parsing -------------------------------------------------------------------
+//
+// parsing
+//
 
 Deno.test("diff: parses files, hunks and per-line old/new numbering", () => {
   const model = parseDiff(DIFF)!;
@@ -269,7 +275,9 @@ new file mode 100644
   assertEquals(model.files[1].hunks.length, 0);
 });
 
-// --- document -------------------------------------------------------------------
+//
+// document
+//
 
 Deno.test("diff doc: verbatim text, tints, markers and syntax color", () => {
   const { ws, done } = tempWorkspace();
@@ -736,7 +744,9 @@ function a() {
   }
 });
 
-// --- semantics ------------------------------------------------------------------
+//
+// semantics
+//
 
 Deno.test("diff semantics: types and definitions answer against the workspace", () => {
   const { root, ws, done } = tempWorkspace();
@@ -803,7 +813,9 @@ Deno.test("diff semantics: a definition outside the diff opens as a file", () =>
   }
 });
 
-// --- rendering ------------------------------------------------------------------
+//
+// rendering
+//
 
 Deno.test("diff render: added lines carry the add tint under the syntax color", () => {
   const { ws, done } = tempWorkspace();
@@ -842,7 +854,9 @@ Deno.test("diff render: added lines carry the add tint under the syntax color", 
   }
 });
 
-// --- review fixes -----------------------------------------------------------
+//
+// review fixes
+//
 
 Deno.test("diff doc: a hunk interior to nested code hoists the inner nodes", () => {
   // Both `outer` and `middle` clamp to the same visible range; the fold must
@@ -1537,7 +1551,9 @@ ${removed}
   assert(!text.includes("remaining uses"), `nothing live is deferred: ${text}`);
 });
 
-// --- object-literal properties are navigable in a diff hunk ------------------
+//
+// object-literal properties are navigable in a diff hunk
+//
 
 Deno.test("diff structure: an object literal's properties are each navigable", () => {
   const root = Deno.makeTempDirSync();

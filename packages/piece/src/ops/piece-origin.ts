@@ -19,6 +19,7 @@ import {
   type MemorySpace,
   NAME,
   parseFabricRef,
+  type ReconcileOutcome,
   resolveSystemPatternSource,
   type Runtime,
   type RuntimeProgram,
@@ -101,6 +102,20 @@ export interface PieceSourceRevisionState {
     | "follow"
     | "repoint";
   selectedRevisionId?: string;
+}
+
+/**
+ * Resolve the piece's origin and adopt its current source when it has moved.
+ *
+ * This runs when a user opens a piece. A candidate from an origin this
+ * deployment does not gate the releases of has to prove itself first;
+ * `SourceReconciler` carries which origins those are, and why.
+ */
+export function reconcilePieceSource(
+  runtime: Runtime,
+  piece: Cell<unknown>,
+): Promise<ReconcileOutcome> {
+  return runtime.sourceReconciler.reconcile(piece);
 }
 
 export class PieceOriginError extends Error {

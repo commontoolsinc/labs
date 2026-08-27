@@ -678,7 +678,9 @@ export function verifySourceDocs(
   };
 }
 
-// --- Source-set store (4.3.2): write/read `pattern:<identity>` cells ---------
+//
+// Source-set store (4.3.2): write/read `pattern:<identity>` cells
+//
 
 /**
  * Stored shape of a source-set cell. Mirrors {@link SourceDoc} but each import
@@ -1113,7 +1115,9 @@ export async function loadVerifiedSourceClosure(
   );
 }
 
-// --- Compiled-set store (4.3.3): `compileCache:<rtver>/<identity>` + CFC ------
+//
+// Compiled-set store (4.3.3): `compileCache:<rtver>/<identity>` + CFC
+//
 
 const compiledDocProperties = {
   kind: { type: "string" },

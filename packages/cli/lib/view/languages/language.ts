@@ -374,7 +374,9 @@ export function readOnlyReasonFor(language: Language): string | undefined {
   return language.input.readOnlyReason;
 }
 
-// --- selection ---------------------------------------------------------------
+//
+// selection
+//
 
 /**
  * Every language the pager knows, most specific first, built on first use.

@@ -241,7 +241,6 @@ describe("Phase 4 client-effect channel", () => {
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: false,
           },
         });
         servingManager = manager;

@@ -30,7 +30,13 @@ import { hashStringOf } from "@commonfabric/data-model/value-hash";
 
 import { openSpace, type SpaceDb } from "./db.ts";
 import { annotate, collectLinks } from "./decode.ts";
-import { getValueAt, reconstructDocument } from "./reconstruct.ts";
+import {
+  candidatesMatching,
+  getValueAt,
+  owningLink,
+  reconstructDocument,
+  visibleRevisionRows,
+} from "./reconstruct.ts";
 
 export interface SpaceRef {
   /** Display label — usually the space DID (DB file basename). */
@@ -157,12 +163,18 @@ function entityMeta(
   scope: string,
   branch: string,
 ): SpaceEntityView {
-  const meta = space.db
+  // Resolved through the OWNING branch, like every other surface describing one
+  // entity. `present` gates the value read below, so a branch-local count marks
+  // an inherited entity absent before reconstruction runs — and then the scan
+  // reports it as held by nobody and suppresses the divergence it exists to
+  // find.
+  const owner = owningLink(space, { branch, scope, id });
+  const meta = owner === undefined ? undefined : space.db
     .prepare(
       `SELECT max(seq) headSeq, count(*) revisions FROM revision
-       WHERE branch = ? AND id = ? AND scope_key = ?`,
+       WHERE branch = ? AND id = ? AND scope_key = ? AND seq <= ?`,
     )
-    .get<MetaRow>(branch, id, scope);
+    .get<MetaRow>(owner.branch, id, scope, owner.atSeq);
   const present = !!meta && meta.revisions > 0;
   if (!present) {
     return {
@@ -178,10 +190,10 @@ function entityMeta(
     .prepare(
       `SELECT c.session_id, c.created_at FROM revision r
        JOIN "commit" c ON c.seq = r.commit_seq
-       WHERE r.branch = ? AND r.id = ? AND r.scope_key = ?
+       WHERE r.branch = ? AND r.id = ? AND r.scope_key = ? AND r.seq <= ?
        ORDER BY r.seq DESC, r.op_index DESC LIMIT 1`,
     )
-    .get<LastRow>(branch, id, scope);
+    .get<LastRow>(owner!.branch, id, scope, owner!.atSeq);
   return {
     label: "",
     present: true,
@@ -342,13 +354,16 @@ export function buildCrossSpaceLinkIndex(
 
   for (const { label, space } of spaces) {
     const ownDid = spaceDidFromLabel(label);
-    const candidates = space.db
-      .prepare(
-        `SELECT DISTINCT id FROM revision
-         WHERE branch = ? AND scope_key = ? AND data LIKE '%"space":"did:key:%'`,
-      )
-      .all<{ id: string }>(branch, scope);
-    for (const { id } of candidates) {
+    // Candidates across every branch the read can reach: a child branch
+    // inherits its parent's link holders, and an index built from local rows
+    // only would drop their targets' `cross-space-linked` classification while
+    // the scan beside it still finds those targets.
+    const candidates = candidatesMatching(space, {
+      branch,
+      scope,
+      like: ['%"space":"did:key:%'],
+    });
+    for (const id of candidates) {
       examinedEntities++;
       let doc: unknown;
       try {
@@ -447,12 +462,12 @@ export function convergenceScanExact(
   // id -> how many spaces hold it
   const counts = new Map<string, number>();
   for (const { space } of spaces) {
-    const ids = space.db
-      .prepare(
-        `SELECT DISTINCT id FROM revision WHERE branch = ? AND scope_key = ?`,
-      )
-      .all<{ id: string }>(branch, scope);
-    for (const { id } of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+    // Entities each space can SEE on this branch, ancestry included: a
+    // convergence scan that enumerated only local rows would silently skip
+    // entities both spaces read fine, and report agreement it never checked.
+    for (const { id } of visibleRevisionRows(space, { branch, scope })) {
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
   }
   const shared = [...counts.entries()].filter(([, n]) => n >= 2).map(([id]) =>
     id
@@ -506,12 +521,12 @@ export function convergenceScan(
     : buildCrossSpaceLinkIndex(spaces, { scope, branch });
   const counts = new Map<string, number>();
   for (const { space } of spaces) {
-    const ids = space.db
-      .prepare(
-        `SELECT DISTINCT id FROM revision WHERE branch = ? AND scope_key = ?`,
-      )
-      .all<{ id: string }>(branch, scope);
-    for (const { id } of ids) counts.set(id, (counts.get(id) ?? 0) + 1);
+    // Entities each space can SEE on this branch, ancestry included: a
+    // convergence scan that enumerated only local rows would silently skip
+    // entities both spaces read fine, and report agreement it never checked.
+    for (const { id } of visibleRevisionRows(space, { branch, scope })) {
+      counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
   }
   const shared = [...counts.entries()].filter(([, count]) => count >= 2).map(
     ([id]) => id,

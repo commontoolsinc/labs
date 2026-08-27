@@ -55,6 +55,16 @@ observed. Against a remote board that is megabytes of upload per survey and tens
 of seconds of wall clock, and it grows the space's database as a side effect.
 Survey through `index` and project with `--select`; expand one Topic at a time.
 
+Every read below names its target with `--url`, and that settles a choice the
+CLI otherwise offers two spellings of. `--input` reads a piece's arguments cell
+rather than its result cell; a canonical reference ending `#argument` selects
+that same cell, on the commands that take `--input`. A `--url` carries no
+canonical reference and its fragment is dropped rather than refused, so
+`--input` is the spelling that reaches the arguments cell in every example here.
+The suffix is what to reach for once an address from `--select @` is the target
+instead. `skills/cf/SKILL.md` says where each is accepted, and
+`docs/common/workflows/reading-and-writing.md` walks the difference.
+
 The current pattern exports `index` — a compact discovery result whose rows ARE
 the Topics, declared through scalar summaries, so one read surveys the whole
 board without expanding any Topic:

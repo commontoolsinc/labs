@@ -312,7 +312,10 @@ export class XLoginView extends BaseView {
     }
   };
 
+  //
   // Auth event handlers
+  //
+
   private async handlePasskeyRegister() {
     this.isProcessing = true;
     this.error = null;

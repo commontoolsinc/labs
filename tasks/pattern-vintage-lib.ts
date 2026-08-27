@@ -1015,6 +1015,47 @@ export function reportFailures(failures: readonly ReplayFailure[]): string {
 }
 
 /**
+ * What the gate prints for the derived sub-pattern targets it held back.
+ *
+ * Each line is a target whose captured state the replay did not hold today's
+ * source to, because the state is a hoist: derivation the updated source re-runs
+ * and re-supplies for itself. Naming the rule beside the count is the point — a
+ * run that held something back and said only how many is a run whose reader has
+ * to go and find out on what grounds.
+ *
+ * One target is named once however many vintages raised it, so the count is
+ * targets held back rather than times one was.
+ */
+export function reportCapturesSuperseded(
+  targets: readonly string[],
+): string {
+  const held = [...new Set(targets)].sort();
+  return [
+    `Held ${held.length} derived sub-pattern target(s) back, each with the ` +
+    `rule that held it: a hoist is derivation the updated source re-runs and ` +
+    `re-supplies (root contracts still gate):`,
+    ...held.map((target) => `  ${target}`),
+  ].join("\n");
+}
+
+/**
+ * What the gate prints for the paths an accepted removal forgave.
+ *
+ * Each line is a `pattern` and `path` pair whose vintage held a value today's
+ * source no longer reads. The exemption list is named in the text rather than
+ * left to the reader, because the list is where the entry is retired once the
+ * removal it was granted for is done with.
+ */
+export function reportDropsApplied(pairs: Iterable<string>): string {
+  const forgiven = [...pairs].sort();
+  return [
+    `Held ${forgiven.length} path(s) back from their vintage, by accepted ` +
+    `removal (tasks/pattern-vintage-accepted-drops.ts):`,
+    ...forgiven.map((pair) => `  ${pair}`),
+  ].join("\n");
+}
+
+/**
  * What the gate prints when it PASSES — built here and tested, for the same
  * reason the failure reports are: it is the whole of what a green run tells
  * whoever reads the log, and a claim assembled inline is one nothing checks.

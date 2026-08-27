@@ -163,9 +163,9 @@ function stripInjectedResult(
   return copy;
 }
 
-// --------------------
+//
 // Helper types + utils
-// --------------------
+//
 
 type ToolKind = "handler" | "cell" | "pattern";
 type LLMObservationSerializationResult = CfcObservationResult;
@@ -1209,9 +1209,10 @@ type PinnedCell = {
   name: string; // Human-readable name for display
 };
 
-// ============================================================================
+//
 // Path Utility Functions
-// ============================================================================
+//
+
 // These utilities handle the conversion between LLM-facing path format (/of:...)
 // and internal runtime format (of:...). The LLM sees paths with a leading slash
 // to make it clear that strings are links.

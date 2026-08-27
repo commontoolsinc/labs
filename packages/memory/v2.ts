@@ -317,13 +317,61 @@ export const SERVER_EXECUTION_WATERMARK_DOC_ID =
  * space — not per doc, not per piece, never vectorized. */
 export type WatermarkDocValue = { seq: number };
 
-// ---------------------------------------------------------------------------
+/** The well-known SPACE-scoped discovery index for unresolved event delivery
+ * attention. Entries are safe summaries only; the referenced stream entry is
+ * authoritative and must be resolved before presenting recovery actions. */
+export const SERVER_EXECUTION_ATTENTION_DOC_ID =
+  "of:server-execution-attention";
+
+/** Encode an attention-index map key without admitting JavaScript prototype
+ * names. JSON string literals are injective for strings and always begin with
+ * `"`, so dynamic stream and event identifiers remain ordinary own keys. */
+export function eventAttentionIndexKey(value: string): string {
+  return JSON.stringify(value);
+}
+
+/** Encode one immutable stream-entry identity for the attention index. Event
+ * ids may be admitted again below the stream watermark, so the engine-stamped
+ * sequence is the part that distinguishes two entries in the same stream.
+ * Legacy seq-less entries use the protocol's sequence-zero identity. */
+export function eventAttentionEntryKey(
+  eventId: string,
+  seq: number | undefined,
+): string {
+  return JSON.stringify([eventId, seq ?? 0]);
+}
+
+export type UnresolvedEventAttention = {
+  eventId: string;
+  seq: number;
+  sidecarId: string;
+  phase: DeliveryFailurePhase;
+  failureClass: DeliveryFailureClass;
+  code: DeliveryAttention["code"];
+  firstFailureAt: number;
+};
+
+/** Durable idempotency record for a resolved attention entry. It survives
+ * ordinary stream compaction so a caller replaying after a lost response gets
+ * the recorded Retry/Dismiss winner instead of creating a second outcome. */
+export type ResolvedEventAttention = {
+  eventId: string;
+  seq: number;
+  sidecarId: string;
+  principal: string;
+  resolution: EventAttentionResolution;
+};
+
+export type EventAttentionIndexValue = {
+  entries?: Record<string, Record<string, UnresolvedEventAttention>>;
+  resolutions?: Record<string, Record<string, ResolvedEventAttention>>;
+};
+
 // Events-down (server-execution v2 Phase 3, D-v2-1;
 // docs/specs/server-side-execution/events.md). The event is an AUTHORED
 // APPEND to a stream document — the client's only computational commit
 // under the flag. Protocol vocabulary, defined once here (protocol.md §7:
 // `eventId`/`firedAt` are commit-metadata additions for event appends).
-// ---------------------------------------------------------------------------
 
 /**
  * The stream-entries SIDECAR doc id for one stream (events.md §1's "stream
@@ -379,13 +427,61 @@ export type StreamEventFiredAt = {
   clientSeq?: number;
 };
 
+export type DeliveryFailurePhase =
+  | "dispatch-load"
+  | "commit-preparation"
+  | "commit-finalization";
+
+export type DeliveryFailureClass =
+  | "session-revoked"
+  | "connection"
+  | "authorization"
+  | "protocol"
+  | "timeout"
+  | "unknown";
+
+/** Durable processing state for an event whose runnable handler has not yet
+ * reached a provably safe consequence commit. Failed time is cumulative across
+ * recovery attempts; `recovering` time is settlement and is not charged. */
+export type DeliveryDeferral = {
+  phase: DeliveryFailurePhase;
+  failureClass: DeliveryFailureClass;
+  firstFailureAt: number;
+  lastFailureAt: number;
+  accumulatedFailureMs: number;
+  failureCount: number;
+  activeFailureStartedAt?: number;
+  state: "failed" | "recovering";
+  recoveryEpoch?: string;
+  /** Positive versioned producer evidence that this failure is permanent. */
+  permanentEvidence?: true;
+};
+
+export type DeliveryAttention = {
+  phase: DeliveryFailurePhase;
+  failureClass: DeliveryFailureClass;
+  code:
+    | "delivery-failure-budget-exhausted"
+    | "permanent-delivery-failure";
+  firstFailureAt: number;
+  lastFailureAt: number;
+  accumulatedFailureMs: number;
+  failureCount: number;
+  recovery: "explicit-retry";
+};
+
+export type EventAttentionResolution =
+  | { kind: "retried"; eventId: string }
+  | { kind: "dismissed" };
+
 /**
  * One durable event entry on a stream's sidecar doc (`value.entries[i]`).
  * `payload` is the only client-authored content field (events.md §1);
  * `seq` is ENGINE-STAMPED at apply time with the appending commit's seq —
  * the stream seq the idempotency rule keys on (events.md §4) — and
  * `firedAt` is server-stamped per the class of the admitting commit.
- * `consequenced`/`error`/`status`/`reason` are PROCESSING-side fields
+ * `consequenced`/`error`/`status`/`reason` and the OW54 delivery fields are
+ * PROCESSING-side fields
  * written only by the space's SpaceServer as the event's consequence
  * (events.md §5: an error/drop IS the consequence); admission REFUSES an
  * incoming append that pre-supplies any of them.
@@ -432,8 +528,22 @@ export type StreamEventEntry = {
 
   /** Processing-side: the dropped-event notice (events.md §5 T7) —
    * `{ status: "dropped", reason }` on the entry itself. */
-  status?: "dropped";
+  status?: "dropped" | "needs-attention";
   reason?: string;
+
+  /** Processing-side checkpoint. It is not a consequence and advances no
+   * watermark. Only the SpaceServer may write it. */
+  deliveryDeferral?: DeliveryDeferral;
+
+  /** Authoritative client-safe terminal detail for `needs-attention`. */
+  attention?: DeliveryAttention;
+
+  /** Server-owned resolution of an attention notice. */
+  resolution?: EventAttentionResolution;
+
+  /** Server-derived audit link on the one retry appended for an original
+   * attention notice. Authored clients cannot supply it. */
+  retryOf?: string;
 
   /** Processing-side (OW14, protocol.md §2b's LT4 ruling): failure
    * notices for CROSS-SPACE appends this event's handler emitted whose
@@ -474,7 +584,6 @@ export type EventAppendDecl = {
   eventId: string;
 };
 
-// ---------------------------------------------------------------------------
 // The client-effect channel (server-execution v2 Phase 4;
 // docs/specs/server-side-execution/protocol.md §5). Session-scoped,
 // server-computed, client-enacted effects: the SpaceServer writes INTENT
@@ -482,7 +591,6 @@ export type EventAppendDecl = {
 // doc, the session's client enacts and ACKS by nonce (an ordinary authored
 // write into its own instance), and the next wave retires acked entries.
 // Protocol vocabulary, defined once here (the LD3 direction).
-// ---------------------------------------------------------------------------
 
 /**
  * The well-known client-effects doc, one id per space (protocol.md §5,
@@ -1313,7 +1421,9 @@ export type EntityIdLookupRequest = {
   id: EntityId;
 };
 
-// --- SQLite builtins (docs/specs/sqlite-builtin) ---
+//
+// SQLite builtins (docs/specs/sqlite-builtin)
+//
 
 /** Wire form of SQLite bind parameters. */
 export type SqliteParamsWire =
@@ -1488,6 +1598,22 @@ export type SessionAckRequest = {
   seenSeq: number;
 };
 
+export type EventAttentionResolveRequest = {
+  type: "event.attention.resolve";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  eventId: string;
+  seq: number;
+  sidecarId: string;
+  action: "retry" | "dismiss";
+};
+
+export type EventAttentionResolveResult = {
+  serverSeq: number;
+  resolution: EventAttentionResolution;
+};
+
 export type ResponseMessage<Result> = {
   type: "response";
   requestId: string;
@@ -1525,6 +1651,12 @@ export type V2Error = {
    * client stops reopening the session and surfaces the error instead of looping.
    */
   retriable?: boolean;
+
+  /** Positive evidence that the server made a durable, no-commit verdict. */
+  permanentEvidence?: true;
+
+  /** Engine revision whose ACL state produced an authorization denial. */
+  aclRevision?: number;
 };
 
 export type V2Result<Value> = { ok: Value } | { error: V2Error };
@@ -1541,7 +1673,8 @@ export type ClientMessage =
   | SqliteRegisterDiskSourceRequest
   | WatchSetRequest
   | WatchAddRequest
-  | SessionAckRequest;
+  | SessionAckRequest
+  | EventAttentionResolveRequest;
 export type ServerMessage =
   | HelloOkMessage
   | ResponseMessage<FabricValue>
@@ -1932,6 +2065,62 @@ export const toDocumentSelector = (
 export const isEntityDocument = (
   value: unknown,
 ): value is EntityDocument => isObjectNotArray(value);
+
+/**
+ * Read a stored document payload: decode it, and refuse a root that is not a
+ * tree of paths.
+ *
+ * `decode` is the caller's, because the readers disagree on which payloads they
+ * accept and only on that: the engine reads what it wrote, through
+ * {@link decodeMemoryBoundary}, while an offline reader over a durable file may
+ * also meet untagged plain-JSON rows and route accordingly. Everything else is
+ * one rule shared here, since a reader that tests the payload for truthiness
+ * instead takes an empty string for an absent one and rebuilds a document the
+ * engine would have rejected.
+ *
+ * An absent payload never reaches the decoder. Handing one a placeholder string
+ * makes the rule depend on which decoder was passed — `decodeMemoryBoundary`
+ * refuses any untagged payload, a plain-JSON decoder accepts one — and two
+ * readers that disagree about an absent payload do not share a rule at all. An
+ * absent document is `null`, which the root check below refuses on its own.
+ */
+export const decodeStoredDocumentPayload = (
+  decode: (source: string) => unknown,
+  data: string | null,
+): EntityDocument => {
+  const parsed = data === null ? null : decode(data);
+  if (!isEntityDocument(parsed)) {
+    const shape = parsed === null
+      ? "null"
+      : Array.isArray(parsed)
+      ? "an array"
+      : `a ${typeof parsed}`;
+    throw new TypeError(
+      `memory v2 stored documents must be plain object roots; got ${shape}`,
+    );
+  }
+  return parsed;
+};
+
+/**
+ * Read a stored patch-list payload through the same rule. An absent payload is
+ * refused rather than read as the empty list: nothing writes a patch row
+ * without one, so an absent payload is a malformed row, and applying it as a
+ * no-op would leave the document reading current.
+ */
+export const decodeStoredPatchListPayload = (
+  decode: (source: string) => unknown,
+  data: string | null,
+): PatchOp[] => {
+  if (data === null) {
+    throw new TypeError("memory v2 stored patches must carry a payload");
+  }
+  const parsed = decode(data);
+  if (!Array.isArray(parsed)) {
+    throw new TypeError("memory v2 stored patches must be arrays");
+  }
+  return parsed as PatchOp[];
+};
 
 export const getEntityDocumentMetadata = (
   document: EntityDocument,

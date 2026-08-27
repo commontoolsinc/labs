@@ -97,11 +97,14 @@ function extractGroundingChunks(completion: unknown): GroundingChunk[] {
   return Array.isArray(chunks) ? (chunks as GroundingChunk[]) : [];
 }
 
-// --- SSRF guard ---------------------------------------------------------
+//
+// SSRF guard
+//
 // This route fetches URLs that come from search results (and follows their
 // redirects), so it must never be coaxed into reaching internal hosts. We
 // validate every hop's host (name + resolved IP) against private/reserved
 // ranges before connecting.
+//
 
 function isPrivateIpv4(ip: string): boolean {
   const m = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);

@@ -902,10 +902,12 @@ describe("reading a piece's source state", () => {
 
     const startPiece = destination.startPiece.bind(destination);
     let countWhenStarted: unknown;
-    destination.startPiece = async (piece, options) => {
+    destination.startPiece = async (
+      piece: Parameters<typeof startPiece>[0],
+    ) => {
       if (typeof piece === "string") throw new Error("expected clone cell");
       countWhenStarted = destination.getResult(piece).key("count").get();
-      await startPiece(piece, options);
+      await startPiece(piece);
     };
 
     const clone = await source.cloneTo(destination, { copyData: true });
@@ -1675,7 +1677,7 @@ describe("reading a piece's source state", () => {
     );
     await destination.synced();
     const clone = await source.cloneTo(destination);
-    await runtime.patternUpdater.idle();
+    await runtime.sourceReconciler.idle();
     const updatedSource = FOLLOW_SOURCE.replace("1 + 0", "2 + 0");
 
     await source.setPattern({
@@ -1683,7 +1685,7 @@ describe("reading a piece's source state", () => {
       files: [{ name: "/main.tsx", contents: updatedSource }],
     });
     await runtime.idle();
-    await runtime.patternUpdater.idle();
+    await runtime.sourceReconciler.idle();
     await runtime.idle();
 
     const sourceState = await readPieceSourceState(runtime, source.getCell());
@@ -1706,7 +1708,7 @@ describe("reading a piece's source state", () => {
     );
     await destination.synced();
     const clone = await source.cloneTo(destination);
-    await runtime.patternUpdater.idle();
+    await runtime.sourceReconciler.idle();
 
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
@@ -1739,9 +1741,9 @@ describe("reading a piece's source state", () => {
         }],
       });
       release.resolve();
-      await runtime.patternUpdater.idle();
+      await runtime.sourceReconciler.idle();
       await runtime.idle();
-      await runtime.patternUpdater.idle();
+      await runtime.sourceReconciler.idle();
 
       expect(getPatternIdentityRef(clone.getCell())).toEqual(
         getPatternIdentityRef(source.getCell()),
@@ -1797,7 +1799,7 @@ describe("reading a piece's source state", () => {
     try {
       const clone = await source.cloneTo(destination);
       await sinkCaptured.promise;
-      await runtime.patternUpdater.idle();
+      await runtime.sourceReconciler.idle();
       await source.setPattern({
         main: "/main.tsx",
         files: [{
@@ -1807,7 +1809,7 @@ describe("reading a piece's source state", () => {
       });
       installCapturedSink!();
       await runtime.idle();
-      await runtime.patternUpdater.idle();
+      await runtime.sourceReconciler.idle();
       await runtime.idle();
 
       expect(getPatternIdentityRef(clone.getCell())).toEqual(
@@ -1834,7 +1836,7 @@ describe("reading a piece's source state", () => {
     );
     await destination.synced();
     const clone = await source.cloneTo(destination);
-    await runtime.patternUpdater.idle();
+    await runtime.sourceReconciler.idle();
     const stoppedPattern = getPatternIdentityRef(clone.getCell());
 
     runtime.runner.stop(clone.getCell());
@@ -1846,7 +1848,7 @@ describe("reading a piece's source state", () => {
       }],
     });
     await runtime.idle();
-    await runtime.patternUpdater.idle();
+    await runtime.sourceReconciler.idle();
 
     expect(getPatternIdentityRef(clone.getCell())).toEqual(stoppedPattern);
   });
@@ -1865,7 +1867,7 @@ describe("reading a piece's source state", () => {
     );
     await destination.synced();
     const clone = await source.cloneTo(destination);
-    await runtime.patternUpdater.idle();
+    await runtime.sourceReconciler.idle();
     const stoppedPattern = getPatternIdentityRef(clone.getCell());
 
     const entered = Promise.withResolvers<void>();
@@ -1891,7 +1893,7 @@ describe("reading a piece's source state", () => {
       await entered.promise;
       runtime.runner.stop(clone.getCell());
       release.resolve();
-      await runtime.patternUpdater.idle();
+      await runtime.sourceReconciler.idle();
       await runtime.idle();
 
       expect(getPatternIdentityRef(clone.getCell())).toEqual(stoppedPattern);
@@ -1915,7 +1917,7 @@ describe("reading a piece's source state", () => {
     );
     await destination.synced();
     const clone = await source.cloneTo(destination);
-    await runtime.patternUpdater.idle();
+    await runtime.sourceReconciler.idle();
 
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
@@ -1939,11 +1941,14 @@ describe("reading a piece's source state", () => {
       });
       await entered.promise;
       runtime.runner.stop(clone.getCell());
-      await runtime.runner.start(clone.getCell());
+      // A stopped piece stops following. Opening it again is what resumes —
+      // started here, while the check the stop aborted is still held.
+      const reopened = destination.openPiece(clone.getCell());
       release.resolve();
-      await runtime.patternUpdater.idle();
+      await reopened;
+      await runtime.sourceReconciler.idle();
       await runtime.idle();
-      await runtime.patternUpdater.idle();
+      await runtime.sourceReconciler.idle();
       await runtime.idle();
 
       expect(getPatternIdentityRef(clone.getCell())).toEqual(

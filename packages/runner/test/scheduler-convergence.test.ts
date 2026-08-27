@@ -638,9 +638,7 @@ describe("bounded convergence", () => {
     expect(cellC.get()).toBeLessThanOrEqual(3);
   });
 
-  // ============================================================
   // Action Stats Edge Cases
-  // ============================================================
 
   it("should return undefined for unknown action stats", () => {
     const unknownAction: Action = () => {};
@@ -711,9 +709,7 @@ describe("bounded convergence", () => {
     expect(stats!.averageTime).toBeCloseTo(stats!.totalTime / 3, 5);
   });
 
-  // ============================================================
   // Cycle Convergence Scenarios
-  // ============================================================
 
   it("should handle larger cycles without hanging", async () => {
     const cellA = runtime.getCell<number>(space, "4cycle-A", undefined, tx);

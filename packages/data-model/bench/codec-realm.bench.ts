@@ -234,10 +234,8 @@ for (const [size, value] of BYTES) {
   });
 }
 
-//
 // Omnibus trees. These hold a `FabricBytes`, so the decode direction builds a
 // fresh tree per iteration and excludes it from the measurement.
-//
 
 for (const [leaves, value] of OMNIBUSES) {
   Deno.bench({

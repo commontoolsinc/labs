@@ -202,7 +202,9 @@ function op(binding: FabricExecValue, links: Links = withSchema): void {
   );
 }
 
-// ---- deno bench cases ------------------------------------------------------
+//
+// deno bench cases
+//
 for (const aliases of [10, 30, 100, 300]) {
   const binding = makeUiBinding({ aliases, pathDepth: 2 });
   Deno.bench(
@@ -211,7 +213,9 @@ for (const aliases of [10, 30, 100, 300]) {
   );
 }
 
-// ---- direct-run study harness ---------------------------------------------
+//
+// direct-run study harness
+//
 function time(
   label: string,
   binding: FabricExecValue,

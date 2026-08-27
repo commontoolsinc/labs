@@ -95,7 +95,7 @@ Status legend:
 
 | # | behavior | today (anchor) | v2 doc § | status |
 | --- | --- | --- | --- | --- |
-| 40 | `systemPatternAutoUpdate`: post-instantiation background source check; pre-bootstrap default-root reconcile; schema-compat gate; pointer write | `pattern-updater.ts:70-531` (`80-122`, `442-465`, `476-511`), hook `runner.ts:2306-2318`; flag `docs/development/EXPERIMENTAL_OPTIONS.md` §systemPatternAutoUpdate | serving-loop.md §3e | COVERED (stage F: the serving-runtime factory enables the flag server-side; the check half's source probe against a fully-local store is the flagged stage-F residual) |
+| 40 | Following a piece's source origin: origin resolution, identity lookup, verified closure compile, schema-compat gate, pointer write | `source-reconciler.ts`, called from `packages/piece/src/ops/pieces-controller.ts` when a piece is opened | serving-loop.md §3e | N/A server-side (a serving tenure opens no piece, so it follows no origin; the SWAP half it does own is row 41) |
 | 41 | `patternIdentity` watcher: live hot-swap of running pieces on pointer change (setup, teardown, reinstantiate); unloadable-pointer roll-forward (CT-1923) | `runner.ts:2331-2513` (`2375-2512`, `2340-2379`, `2418-2490`) | serving-loop.md §3e | COVERED (stage F: the swap runs in the SpaceServer — a pointer write is ordinary authored input; the swap's setup write stamps the `bookkeeping` kind; end-to-end test in `executor-serving-loop.test.ts`) |
 | 42 | Piece source lifecycle records (revisions, transitions, provenance) | `runner.ts:623-748`, `6578-6903` | none (authored data; rides along) | COVERED |
 
@@ -364,14 +364,13 @@ counter-visible). Recommended: derive "piece created" from data (the
 result cell), drop the callback server-side; adopt the §4 memo shape
 for the compile request.
 
-**N40/N41 (pattern updates — who triggers under v2).** Today the
-*client* does both halves when `systemPatternAutoUpdate` is on (shell
-ON, server processes OFF — EXPERIMENTAL_OPTIONS.md): the
-fire-and-forget source check after an instantiation commit
-(`runner.ts:2138-2145`) and the live hot-swap via the
-`patternIdentity` meta sink (`runner.ts:2202`), including teardown +
-reinstantiation (`2168-2200`) and the unloadable-pointer roll-forward
-(`2259-2317`). Under v2 pieces run only in the SpaceServer, so the
+**N40/N41 (pattern updates — who triggers under v2).** The two halves
+have different owners. FOLLOWING a source origin belongs to whoever
+OPENS a piece, which is a client; a serving tenure opens none. The live
+hot-swap via the `patternIdentity` meta sink, including teardown +
+reinstantiation and the unloadable-pointer roll-forward, belongs to
+whichever runtime is running the piece. Under v2 pieces run only in the
+SpaceServer, so the
 watcher and the swap MUST run there — a pointer write is an ordinary
 authored input that dirties the piece; the swap is the server
 reacting. The *check* (network fetch + compile + verify + pointer

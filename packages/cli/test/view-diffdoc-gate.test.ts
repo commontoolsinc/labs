@@ -2,7 +2,8 @@ import { assert, assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import { realWorkspace } from "../lib/view/diffdoc.ts";
 
-// --- realWorkspace.resolve: the file-vs-directory check ----------------------
+//
+// realWorkspace.resolve: the file-vs-directory check
 //
 // resolve() walks each base and, for a candidate that bounded() accepts, checks
 // Deno.statSync(abs).isFile. bounded() already canonicalized abs through
@@ -10,6 +11,7 @@ import { realWorkspace } from "../lib/view/diffdoc.ts";
 // removed (read() guards the file contents). These tests pin resolve()'s data
 // paths — a bounded regular file, a directory, an out-of-bounds path — the ones
 // a real `cf view` invocation drives.
+//
 
 Deno.test("realWorkspace.resolve: a bounded regular file resolves to its absolute path", () => {
   const root = Deno.makeTempDirSync();

@@ -16,10 +16,8 @@
  * createMockCellHandle util, exactly like cell-controller.test.ts.
  */
 
-// ---------------------------------------------------------------------------
 // Minimal DOM shim — installed BEFORE importing the component so that Lit's
 // ReactiveElement base class has an HTMLElement to extend.
-// ---------------------------------------------------------------------------
 
 interface ShadowStub {
   querySelector(): null;
@@ -134,8 +132,6 @@ g.HTMLElement = FakeHTMLElement;
 g.customElements = { define: () => {}, get: () => undefined };
 g.requestAnimationFrame = (_cb: () => void) => 0;
 g.cancelAnimationFrame = () => {};
-
-// ---------------------------------------------------------------------------
 
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";

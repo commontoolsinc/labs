@@ -18,6 +18,10 @@ export interface RuntimeTransport extends EventEmitter<RuntimeTransportEvents> {
    * Structured cloning satisfies this, so a `postMessage` transport gets it for
    * nothing. A transport that would instead hand the same object to both ends
    * does not, and cannot be used as-is.
+   *
+   * What the far end receives is also frozen, the message reaching it through
+   * a decode. Unsharedness is this method's requirement; immutability is the
+   * decode's, and `BaseRequest` states both as one contract.
    */
   send(data: IPCClientMessage | IPCClientNotification): void;
 

@@ -12,6 +12,7 @@ import type {
   EntityDocument,
   EntityIdListOptions,
   EntityIdListResult,
+  EventAttentionResolveResult,
   OperationFieldQuery,
   OperationFieldSnapshot,
   PatchOp,
@@ -24,6 +25,7 @@ import type {
   SqliteQueryResult,
   SqliteRegisterDiskSourceResult,
 } from "@commonfabric/memory/v2";
+import type { DeliveryFailureClass } from "@commonfabric/memory/v2";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
 import type { Cancel } from "../cancel.ts";
 import type { EntityId } from "../create-ref.ts";
@@ -86,6 +88,66 @@ export interface IStorageError {
   readonly name: string;
   readonly message: string;
 }
+
+/** Typed producer evidence for a required replica load that failed before an
+ * at-most-once handler could dispatch. The scheduler receives typed failure
+ * evidence; an error name may inform `failureClass`, but diagnostic text never
+ * constitutes policy evidence or durable `permanentEvidence`. */
+export type ReplicaLoadFailure = {
+  failureClass: DeliveryFailureClass;
+  recoveryEpoch: string;
+  permanentEvidence: boolean;
+};
+
+export class ReplicaLoadFailureError extends Error {
+  override readonly name = "ReplicaLoadFailureError";
+
+  constructor(
+    readonly failure: ReplicaLoadFailure,
+    cause: unknown,
+  ) {
+    super(
+      cause instanceof Error ? cause.message : String(cause),
+      { cause },
+    );
+  }
+}
+
+export const toReplicaLoadFailureError = (
+  cause: unknown,
+  recoveryEpoch: string,
+): ReplicaLoadFailureError => {
+  if (cause instanceof ReplicaLoadFailureError) return cause;
+  const named = cause as {
+    name?: unknown;
+    message?: unknown;
+    permanentEvidence?: unknown;
+    aclRevision?: unknown;
+  } | undefined;
+  const name = typeof named?.name === "string" ? named.name : "";
+  const failureClass: DeliveryFailureClass = name === "SessionRevokedError"
+    ? "session-revoked"
+    : name === "ConnectionError"
+    ? "connection"
+    : name === "AuthorizationError"
+    ? "authorization"
+    : name === "ProtocolError"
+    ? "protocol"
+    : name === "TimeoutError"
+    ? "timeout"
+    : "unknown";
+  const aclRevision = named?.aclRevision;
+  const permanentAclEvidence = failureClass === "authorization" &&
+    named?.permanentEvidence === true && typeof aclRevision === "number";
+  return new ReplicaLoadFailureError({
+    failureClass,
+    recoveryEpoch: permanentAclEvidence ? `acl:${aclRevision}` : recoveryEpoch,
+    // A name is not durable evidence. Authorization becomes permanent only
+    // when the memory server supplies the current ACL revision. Versioned
+    // protocol validators construct ReplicaLoadFailureError directly.
+    permanentEvidence: permanentAclEvidence,
+  }, cause);
+};
 
 /**
  * Metadata that can be attached to read operations
@@ -414,6 +476,36 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * a replica whose required load failed.
    */
   loadsSettled?(keys: readonly string[]): Promise<void>;
+
+  /** A new generation of the SAME required load is a causal recovery wake.
+   * `failedEpoch` is stable for the document across manager recreation;
+   * `recoveryEpoch` uniquely names the replacement generation. Carrying both
+   * prevents an unrelated document recovery from authorizing a retry. */
+  loadRecoveryObserver?:
+    | ((recovery: {
+      failedEpoch: string;
+      recoveryEpoch: string;
+    }) => void)
+    | undefined;
+
+  /** Authenticated current-session recovery for one OW54 terminal notice. */
+  resolveEventAttention?(
+    space: MemorySpace,
+    eventId: string,
+    seq: number,
+    sidecarId: string,
+    action: "retry" | "dismiss",
+  ): Promise<EventAttentionResolveResult>;
+
+  /**
+   * THE SESSION REMOUNT's trigger: an admitted commit touched `space`'s ACL
+   * document. A space session this manager holds — revoked or denied by an
+   * EARLIER ACL verdict — is dropped so the next load re-opens it, because
+   * the ACL is the only input that decision has. Never widens authority: a
+   * genuine de-authorization is refused again at `session.open`. Implemented
+   * by the v2 StorageManager; the serving loop's host is its only caller.
+   */
+  noteSpaceAclChanged?(space: MemorySpace): void;
 
   /**
    * Load cell from storage. Will also subscribe to new changes.
@@ -2059,6 +2151,11 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
 export interface IStorageTransactionAborted extends IStorageError {
   readonly name: "StorageTransactionAborted";
 
+  /** Positive evidence that `abort()` discarded the transaction before a
+   * storage attempt. Commit-promise failures use the same error family but do
+   * not carry this marker because their storage outcome may be ambiguous. */
+  readonly abortedBeforeStorage?: true;
+
   /**
    * Reason provided when transaction was aborted.
    */
@@ -2106,6 +2203,15 @@ export interface ICfcCommitRefusalError extends IStorageError {
   readonly reasons: readonly string[];
 }
 
+/** Commit preparation crashed before any storage attempt. This is typed apart
+ * from a deterministic CFC policy verdict so served delivery can apply OW54's
+ * bounded recovery policy without misreporting a handler error. */
+export interface ICommitPreparationError extends IStorageError {
+  readonly name: "CommitPreparationError";
+  readonly failureClass: "unknown";
+  readonly permanentEvidence: false;
+}
+
 /**
  * Error that indicating that no change could be made to a transaction is it is
  * no longer active.
@@ -2124,6 +2230,7 @@ export type StorageTransactionRejected =
   | IConflictError
   | IPreconditionFailedError
   | ICfcCommitRefusalError
+  | ICommitPreparationError
   | IStoreError
   | TransactionError
   | IConnectionError
@@ -2438,6 +2545,13 @@ export interface ISpaceReplica extends ISpace {
     append: EventAppendRequest,
   ): Promise<EventAppendDeliveryOutcome>;
 
+  resolveEventAttention?(
+    eventId: string,
+    seq: number,
+    sidecarId: string,
+    action: "retry" | "dismiss",
+  ): Promise<EventAttentionResolveResult>;
+
   /** Pending (undischarged) event intents — the offline event queue's
    * live content (speculation.md §5), bounded by pending-intent count. */
   pendingEventAppends?(): readonly EventAppendRequest[];
@@ -2597,6 +2711,7 @@ export type PushError =
   | IConflictError
   | IPreconditionFailedError
   | ICfcCommitRefusalError
+  | ICommitPreparationError
   | TransactionError
   | IAuthorizationError;
 

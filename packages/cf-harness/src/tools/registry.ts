@@ -7,8 +7,10 @@ import { describeHandleTool } from "./describe-handle.ts";
 import { editFileTool } from "./edit-file.ts";
 import { readFileTool } from "./read-file.ts";
 import { readSkillResourceTool } from "./read-skill-resource.ts";
+import { recordFeedbackTool } from "./record-feedback.ts";
 import { runPatternTool } from "./run-pattern.ts";
 import { runSkillScriptTool } from "./run-skill-script.ts";
+import { searchPatternsTool } from "./search-patterns.ts";
 import { webFetchTool } from "./web-fetch.ts";
 import { viewImageTool } from "./view-image.ts";
 import { writeFileTool } from "./write-file.ts";
@@ -28,6 +30,8 @@ export const BUILTIN_TOOLS = [
   runPatternTool,
   assignSlugTool,
   describeHandleTool,
+  searchPatternsTool,
+  recordFeedbackTool,
 ] as const;
 
 export const BUILTIN_TOOL_REGISTRY = new Map<

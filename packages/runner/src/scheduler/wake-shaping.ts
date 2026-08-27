@@ -268,9 +268,9 @@ export class WakeShaper {
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // Event-path adapter (channel 3)
-// ---------------------------------------------------------------------------
+//
 
 export interface DeliverOpts {
   eventId?: string;
@@ -461,9 +461,9 @@ export function holdShapedEvent(
   });
 }
 
-// ---------------------------------------------------------------------------
+//
 // Cell-path adapter (plan B, channels 4 and 5)
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Shape a cell-flip wake (plan B). `groupKey` identifies the observing pattern

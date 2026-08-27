@@ -549,9 +549,9 @@ Deno.bench(
   },
 );
 
-// ============================================================================
+//
 // MICRO-BENCHMARKS: Isolated operations to measure overhead
-// ============================================================================
+//
 
 // Benchmark: Just setup/teardown overhead
 Deno.bench(
@@ -710,9 +710,9 @@ Deno.bench(
   },
 );
 
-// ============================================================================
+//
 // MICRO-BENCHMARKS: Utility functions
-// ============================================================================
+//
 
 // Generate test addresses for micro-benchmarks
 function generateAddresses(
@@ -769,9 +769,9 @@ Deno.bench(
   },
 );
 
-// ============================================================================
+//
 // MICRO-BENCHMARKS: Scheduler operations in isolation
-// ============================================================================
+//
 
 // Benchmark: Just subscribe without any cell operations
 Deno.bench(

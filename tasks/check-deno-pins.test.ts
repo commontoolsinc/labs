@@ -202,9 +202,12 @@ Deno.test("findProblems flags a Dockerfile without deno images", () => {
   assertEquals(findProblems(files).length, 1);
 });
 
+//
 // check.sh reads the bounds with shell arithmetic, which aborts on a bound
 // carrying anything beyond MAJOR.MINOR.PATCH. Comparing such a bound loosely
 // would report "aligned" for a range that makes check.sh fail for everyone.
+//
+
 Deno.test("findProblems flags a range bound that is not exact", () => {
   for (const bad of ["2.8.0.1", "2.8", "abc"]) {
     const withMin = findProblems({
@@ -418,16 +421,17 @@ Deno.test("main reports each problem and returns 1 when misaligned", async () =>
   }
 });
 
-// The repository's actual files must be aligned; this is the same check CI
-// runs via `deno task check-deno-pins`.
 Deno.test("the repository's pins are aligned", async () => {
+  // The repository's actual files must be aligned; this is the same check CI
+  // runs via `deno task check-deno-pins`.
   assertEquals(await main(), 0);
 });
 
-// Runs the script the way `deno task check-deno-pins` does, which the calls to
-// main() above do not: they would still pass if the entry point never ran it,
-// or if the task's declared permissions were too narrow to read the files.
 Deno.test("running the script as a command reports the aligned pin", async () => {
+  // Runs the script the way `deno task check-deno-pins` does, which the calls
+  // to main() above do not: they would still pass if the entry point never ran
+  // it, or if the task's declared permissions were too narrow to read the
+  // files.
   const output = await runDenoCommandWithTemporaryLock({
     root: REPO_ROOT,
     args: (lockPath) => [

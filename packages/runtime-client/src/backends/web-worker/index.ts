@@ -8,12 +8,15 @@
 import "core-js/proposals/explicit-resource-management";
 import "core-js/proposals/async-explicit-resource-management";
 
+import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { unrefTimer } from "@commonfabric/utils/sleep";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import { CompilerStackLoadError } from "@commonfabric/runner";
 import {
+  IPCClientMessage,
   IPCRemoteResponse,
   isIPCClientMessage,
   isIPCClientNotification,
@@ -144,14 +147,54 @@ function setWorkerConsoleBridge(enabled: boolean): void {
   else uninstallWorkerConsoleBridge();
 }
 
+/**
+ * How much of an unreadable request to render in the report about it. Enough
+ * to recognize which message it was, short enough that a hostile payload
+ * cannot flood the channel it is being reported on.
+ */
+const MAX_INVALID_REQUEST_RENDER = 512;
+
+/**
+ * Posts one reply and records it in the ledger by what actually went. An
+ * encoding failure substitutes an error reply, and counting that as a
+ * response would say the request succeeded.
+ */
+function postReply(payload: IPCRemoteResponse, type: RequestType): void {
+  const delivered = postToClient(payload);
+  ipcLogger.debug(
+    `${delivered ? "responded" : "responded-error"}/${type}`,
+    () => [],
+  );
+}
+
 self.addEventListener("message", async (event: MessageEvent) => {
-  // TODO(danfuzz): what arrives here is whatever structured cloning preserved,
-  // which is less than the payload type describes; decoding with `codec-realm`
-  // is what would make the two agree. The payload type carries the matching
-  // marker -- `IPCClientRequest` in `../../protocol/types.ts` -- as does the
-  // sending end, `WebWorkerRuntimeTransport.send()` in
-  // `../../client/transports/web-worker/transport-web-worker.ts`.
-  const message = event.data;
+  // Decoded whole, so what arrives is what was sent rather than whatever
+  // structured cloning preserved of it. The encoding end is
+  // `WebWorkerRuntimeTransport.send()`.
+  //
+  // What a decode returns is deep-frozen, so a handler owns what its request
+  // carries and may cede it, but does not edit it -- which is what
+  // `BaseRequest` states as one contract.
+  //
+  // Typed as a request rather than as the `FabricValue` a decode returns: the
+  // guards below are what actually vet it, and every use here is behind one
+  // of them or inside the `catch`, which wants the id of whatever failed.
+  let message: IPCClientMessage;
+
+  try {
+    message = fabricFromRealmValue(event.data) as IPCClientMessage;
+  } catch (error) {
+    // Defense in depth, as at the other end. Nothing undecodable should reach
+    // here, and if something does there is no `msgId` to answer under -- so
+    // this reports rather than replies, and the request it belonged to is left
+    // to time out. Throwing instead would surface as an unhandled rejection
+    // out of this async listener, which is the quiet failure to avoid.
+    postToClient({
+      type: NotificationType.ErrorReport,
+      message: `Undecodable message from the client: ${describeFailure(error)}`,
+    });
+    return;
+  }
 
   // One-way notifications carry no msgId and get no response. Drop them once
   // the worker is gone or disposed; in teardown the main thread may still be
@@ -169,7 +212,15 @@ self.addEventListener("message", async (event: MessageEvent) => {
 
   try {
     if (!isIPCClientMessage(message)) {
-      throw new Error(`Invalid IPC request: ${JSON.stringify(message)}`);
+      // Rendered by `value-debug` rather than `JSON.stringify`, which is
+      // wrong for exactly what the decode above admits: it throws on a
+      // `bigint` anywhere in the tree -- replacing this report with one that
+      // names nothing -- and renders a `FabricPrimitive` as `{}`.
+      throw new Error(
+        `Invalid IPC request: ${
+          toCompactDebugString(message, MAX_INVALID_REQUEST_RENDER)
+        }`,
+      );
     }
     const { msgId, data: request } = message;
     ipcLogger.debug(`received/${request.type}`, () => []);
@@ -196,12 +247,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
         request.data,
       );
       worker = await workerInitialization;
-      // Count the reply only once it is actually posted: if postMessage throws
-      // (e.g. a non-cloneable payload) the catch below records a
-      // `responded-error/*` instead, so the ledger never double-counts one
-      // request as both a success and an error.
-      postToClient({ msgId: message.msgId });
-      ipcLogger.debug(`responded/${request.type}`, () => []);
+      postReply({ msgId: message.msgId }, request.type);
       return;
     }
 
@@ -210,8 +256,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
     // of runtime initialization, so it is answered before the init check.
     if (request.type === RequestType.SetForwardWorkerConsole) {
       setWorkerConsoleBridge(request.enabled);
-      postToClient({ msgId });
-      ipcLogger.debug(`responded/${request.type}`, () => []);
+      postReply({ msgId }, request.type);
       return;
     }
 
@@ -222,8 +267,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
       // After disposal, silently ack any late-arriving requests.
       // Components may still be unsubscribing or finishing in-flight
       // operations during teardown — no point erroring on these.
-      postToClient({ msgId });
-      ipcLogger.debug(`responded/${request.type}`, () => []);
+      postReply({ msgId }, request.type);
       return;
     }
 
@@ -239,8 +283,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
     const payload: IPCRemoteResponse = response !== undefined
       ? { msgId, data: response }
       : { msgId };
-    postToClient(payload);
-    ipcLogger.debug(`responded/${request.type}`, () => []);
+    postReply(payload, request.type);
   } catch (error) {
     console.error("[RuntimeWorker] Error:", error);
     const type = isIPCClientMessage(message) ? message.data.type : "invalid";
@@ -248,13 +291,14 @@ self.addEventListener("message", async (event: MessageEvent) => {
     const code = error instanceof CompilerStackLoadError
       ? RuntimeErrorCode.CompilerStackLoadFailed
       : undefined;
+
     // A reply is addressed by `msgId`, and what reaches here need not have
-    // one: `message` is whatever was posted, which is why the line above asks
-    // `isIPCClientMessage()` rather than trusting it, and `Invalid IPC
-    // request` is thrown precisely for what is no message at all. Reading
-    // `msgId` off that throws from inside this `catch`, which is the one place
-    // a throw has nowhere to go -- out of an async listener it surfaces as an
-    // unhandled rejection, taking the report it was making with it.
+    // one: the decode above admits every `FabricValue`, `undefined` and a
+    // `bigint` among them, and `Invalid IPC request` is thrown precisely for
+    // what is no message at all. Reading `msgId` off that would throw from
+    // inside this `catch`, which is the one place a throw has nowhere to go --
+    // out of an async listener it surfaces as an unhandled rejection, taking
+    // with it the report it was in the middle of making.
     const msgId = isObjectNotArray(message) && typeof message.msgId === "number"
       ? message.msgId
       : undefined;

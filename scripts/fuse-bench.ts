@@ -18,9 +18,9 @@
  *     [--result-path result/content]
  */
 
-// ---------------------------------------------------------------------------
+//
 // Helpers
-// ---------------------------------------------------------------------------
+//
 
 function join(...parts: string[]): string {
   return parts.join("/").replace(/\/+/g, "/");
@@ -62,9 +62,9 @@ async function readFileSafe(path: string): Promise<string | null> {
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // Help & argument parsing
-// ---------------------------------------------------------------------------
+//
 
 function printHelp(): void {
   console.log(`fuse-bench — FUSE multi-op benchmark harness
@@ -175,9 +175,9 @@ function parseArgs(args: string[]): ParsedArgs | null {
   };
 }
 
-// ---------------------------------------------------------------------------
+//
 // Piece discovery
-// ---------------------------------------------------------------------------
+//
 
 async function discoverPieces(piecesDir: string): Promise<string[]> {
   const pieces: string[] = [];
@@ -189,9 +189,9 @@ async function discoverPieces(piecesDir: string): Promise<string[]> {
   return pieces.sort();
 }
 
-// ---------------------------------------------------------------------------
+//
 // Benchmark operations
-// ---------------------------------------------------------------------------
+//
 
 interface LatencyResult {
   latency_ms: {
@@ -415,9 +415,9 @@ async function benchConcurrentRead(
   };
 }
 
-// ---------------------------------------------------------------------------
+//
 // Main
-// ---------------------------------------------------------------------------
+//
 
 const opts = parseArgs(Deno.args);
 if (!opts) {

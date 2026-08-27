@@ -5,17 +5,12 @@
  * for interacting with cells across the worker boundary.
  */
 
-import {
-  fabricFromRealmValue,
-  realmFromFabricValue,
-} from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import {
-  type DID,
-  type Identity,
-  realmValueFromKeyPair,
-} from "@commonfabric/identity";
+import type {
+  FabricPlainObject,
+  FabricValue,
+} from "@commonfabric/data-model/fabric-value";
+import type { DID, Identity } from "@commonfabric/identity";
 import { Program } from "@commonfabric/js-compiler/interface";
 import type {
   ApplyOpResolution,
@@ -52,8 +47,11 @@ import {
   type CellRef,
   ConsoleMessage,
   ErrorNotification,
+  type EventAttentionListResponse,
+  type EventAttentionNotice,
+  type EventAttentionResolveResponse,
+  EventNeedsAttentionNotification,
   InitializationData,
-  JSONValue,
   type LoggerCountsData,
   type LoggerFlagsData,
   type LoggerMetadata,
@@ -72,31 +70,8 @@ import {
   type SpaceAclView,
   TelemetryNotification,
   type UploadBlobResponse,
-  type WireApplyOpResolution,
-  type WireOperationFieldSnapshot,
 } from "./protocol/mod.ts";
 import { cellRefToInstanceId } from "./shared/utils.ts";
-
-const operationFieldFromWire = (
-  field: WireOperationFieldSnapshot,
-): OperationFieldSnapshot => ({
-  ...field,
-  materialized: fabricFromRealmValue(field.materialized),
-  operations: field.operations.map((operation) => ({
-    ...operation,
-    payload: fabricFromRealmValue(operation.payload),
-  })),
-});
-
-const applyOpResolutionFromWire = (
-  resolution: WireApplyOpResolution,
-): ApplyOpResolution => ({
-  ...resolution,
-  operations: resolution.operations.map((operation) => ({
-    ...operation,
-    payload: fabricFromRealmValue(operation.payload),
-  })),
-});
 
 export interface RuntimeClientOptions
   extends Omit<InitializationData, "apiUrl" | "identity" | "spaceIdentity"> {
@@ -111,6 +86,7 @@ export type RuntimeClientEvents = {
   error: [ErrorNotification];
   telemetry: [RuntimeTelemetryMarkerResult];
   pendingwriteschange: [{ pending: boolean }];
+  eventneedsattention: [EventAttentionNotice];
 };
 
 export const $conn = Symbol("$request");
@@ -141,6 +117,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     this.#conn.on("telemetry", this._onTelemetry);
     this.#conn.on("pendingwriteschange", this._onPendingWritesChange);
     this.#conn.on("operationupdate", this._onOperationUpdate);
+    this.#conn.on("eventneedsattention", this._onEventNeedsAttention);
   }
 
   /** Returns an opaque identity for the scoped document instance in `ref`. */
@@ -192,7 +169,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       ...(operationSessionId === undefined ? {} : { operationSessionId }),
       ...(after === undefined ? {} : { after }),
     });
-    return operationFieldFromWire(response.field);
+    return response.field;
   }
 
   async applyOperation<T>(
@@ -211,9 +188,9 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       cell: cell.ref(),
       ...(operationSessionId === undefined ? {} : { operationSessionId }),
       ...operation,
-      payload: realmFromFabricValue(operation.payload),
+      payload: operation.payload,
     });
-    return applyOpResolutionFromWire(response.resolution);
+    return response.resolution;
   }
 
   async subscribeOperationField<T>(
@@ -317,9 +294,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     const initialized = await (new RuntimeConnection(transport)).initialize({
       apiUrl: options.apiUrl.toString(),
       spaceHostMap: options.spaceHostMap,
-      identity: realmValueFromKeyPair(options.identity.keyPair),
-      spaceIdentity: options.spaceIdentity &&
-        realmValueFromKeyPair(options.spaceIdentity.keyPair),
+      identity: options.identity.keyPair,
+      spaceIdentity: options.spaceIdentity?.keyPair,
       spaceDid: options.spaceDid,
       spaceName: options.spaceName,
       experimental: options.experimental,
@@ -391,6 +367,37 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     await this.#conn.request<RequestType.Idle>({ type: RequestType.Idle });
   }
 
+  /** Discover retained terminal delivery notices after navigation or a fresh
+   * worker, resolving each index hint against its authoritative stream entry. */
+  async listEventAttention(space: DID): Promise<EventAttentionNotice[]> {
+    const response = await this.#conn.request<RequestType.ListEventAttention>({
+      type: RequestType.ListEventAttention,
+      space,
+    }) as EventAttentionListResponse;
+    return response.notices;
+  }
+
+  /** Retry or dismiss one notice under this runtime's authenticated session. */
+  async resolveEventAttention(
+    notice: Pick<
+      EventAttentionNotice,
+      "space" | "eventId" | "seq" | "sidecarId"
+    >,
+    action: "retry" | "dismiss",
+  ): Promise<EventAttentionResolveResponse["resolution"]> {
+    const response = await this.#conn.request<
+      RequestType.ResolveEventAttention
+    >({
+      type: RequestType.ResolveEventAttention,
+      space: notice.space,
+      eventId: notice.eventId,
+      seq: notice.seq,
+      sidecarId: notice.sidecarId,
+      action,
+    }) as EventAttentionResolveResponse;
+    return response.resolution;
+  }
+
   /**
    * Await all in-flight compile-cache write-backs in the worker. Narrower than
    * `idle()`: it flushes only the compile cache, so a subsequent load of an
@@ -403,10 +410,17 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     });
   }
 
+  /**
+   * Creates a piece in the given space, from a URL, a program, or the source
+   * of a single-file one.
+   *
+   * `options.argument` is the piece's input, which is a record: a piece is
+   * created with named inputs or with none.
+   */
   async createPage<T = unknown>(
     input: string | URL | Program,
     space: DID,
-    options?: { argument?: JSONValue; run?: boolean },
+    options?: { argument?: FabricPlainObject; run?: boolean },
   ): Promise<PageHandle<T>> {
     const source = input instanceof URL
       ? { url: input.href }
@@ -824,7 +838,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * Return recent settle stats history captured from worker execute() calls.
    * Entries are ordered oldest first.
    */
-  async getSettleStatsHistory(): Promise<SettleStatsHistoryEntry[]> {
+  async getSettleStatsHistory(): Promise<readonly SettleStatsHistoryEntry[]> {
     const res = await this.#conn.request<RequestType.GetSettleStatsHistory>({
       type: RequestType.GetSettleStatsHistory,
     });
@@ -835,7 +849,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * Return recent exact action-run history captured from worker scheduler runs.
    * Entries are ordered oldest first.
    */
-  async getActionRunTrace(): Promise<ActionRunTraceEntry[]> {
+  async getActionRunTrace(): Promise<readonly ActionRunTraceEntry[]> {
     const res = await this.#conn.request<RequestType.GetActionRunTrace>({
       type: RequestType.GetActionRunTrace,
     });
@@ -868,7 +882,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * Return recent structured trigger-trace entries captured from worker storage changes.
    * Entries are ordered oldest first.
    */
-  async getTriggerTrace(): Promise<TriggerTraceEntry[]> {
+  async getTriggerTrace(): Promise<readonly TriggerTraceEntry[]> {
     const res = await this.#conn.request<RequestType.GetTriggerTrace>({
       type: RequestType.GetTriggerTrace,
     });
@@ -892,7 +906,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * Return recent transaction-level write stack trace entries from the worker.
    * Entries are ordered oldest first.
    */
-  async getWriteStackTrace(): Promise<WriteStackTraceEntry[]> {
+  async getWriteStackTrace(): Promise<readonly WriteStackTraceEntry[]> {
     const res = await this.#conn.request<RequestType.GetWriteStackTrace>({
       type: RequestType.GetWriteStackTrace,
     });
@@ -931,7 +945,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       type: RequestType.UploadBlob,
       space: options.space,
       contentType: options.contentType,
-      body: realmFromFabricValue(new FabricBytes(options.body)),
+      body: new FabricBytes(options.body),
       suffix: options.suffix,
     });
   }
@@ -986,7 +1000,14 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   private _onOperationUpdate = (data: OperationUpdateNotification): void => {
     this.#operationSubscriptions.get(data.subscriptionId)?.(
-      operationFieldFromWire(data.field),
+      data.field,
     );
+  };
+
+  private _onEventNeedsAttention = (
+    data: EventNeedsAttentionNotification,
+  ): void => {
+    const { type: _type, ...notice } = data;
+    this.emit("eventneedsattention", notice);
   };
 }

@@ -17,9 +17,9 @@ import type {
   StripDefaultBrand,
 } from "../src/builder/types.ts";
 
-// ============================================================================
+//
 // Helpers
-// ============================================================================
+//
 
 /**
  * Asserts T and U are mutually assignable (structurally equal).
@@ -44,9 +44,9 @@ type Simplify<T> = { [K in keyof T]: T[K] };
 type AssertNotEqual<T, U> = [T] extends [U] ? [U] extends [T] ? never : true
   : true;
 
-// ============================================================================
+//
 // StripDefaultBrand<T> — non-Default types are unchanged
-// ============================================================================
+//
 
 const _stripPlainString: MustBeTrue<
   AssertEqual<StripDefaultBrand<string>, string>
@@ -60,9 +60,9 @@ const _stripPlainObject: MustBeTrue<
   AssertEqual<StripDefaultBrand<{ a: string }>, { a: string }>
 > = true;
 
-// ============================================================================
+//
 // StripDefaultBrand<T> — Default<T,V> strips to plain T
-// ============================================================================
+//
 
 const _stripDefaultString: MustBeTrue<
   AssertEqual<StripDefaultBrand<Default<string, "hello">>, string>
@@ -92,9 +92,9 @@ const _stripDefaultWithUndefined: MustBeTrue<
   >
 > = true;
 
-// ============================================================================
+//
 // RequireDefaults<T> — plain optional fields are unchanged
-// ============================================================================
+//
 
 const _plainOptionalPreserved: MustBeTrue<
   AssertEqual<
@@ -110,9 +110,9 @@ const _plainRequiredPreserved: MustBeTrue<
   >
 > = true;
 
-// ============================================================================
+//
 // RequireDefaults<T> — Default<> fields become required with brand stripped
-// ============================================================================
+//
 
 const _stringDefaultRequired: MustBeTrue<
   AssertEqual<
@@ -142,9 +142,9 @@ const _objectDefaultRequired: MustBeTrue<
   >
 > = true;
 
-// ============================================================================
+//
 // RequireDefaults<T> — mixed: Default fields required, plain fields preserved
-// ============================================================================
+//
 
 type Mixed = {
   title?: Default<string, "Untitled">;
@@ -160,11 +160,12 @@ const _mixed: MustBeTrue<
   >
 > = true;
 
-// ============================================================================
+//
 // RequireDefaults<T> — Default<T|undefined, V>
+//
 // The implementation strips `| undefined` via Exclude when making the key
 // required, so the value type becomes just T (not T|undefined).
-// ============================================================================
+//
 
 const _undefinableDefault: MustBeTrue<
   AssertEqual<
@@ -173,9 +174,9 @@ const _undefinableDefault: MustBeTrue<
   >
 > = true;
 
-// ============================================================================
+//
 // RequireDefaults<T> — Cell-wrapped Default fields
-// ============================================================================
+//
 
 const _cellDefaultRequired: MustBeTrue<
   AssertEqual<
@@ -184,10 +185,11 @@ const _cellDefaultRequired: MustBeTrue<
   >
 > = true;
 
-// ============================================================================
+//
 // RequireDefaults<T> — Default field in a union with a plain type
+//
 // The presence of a Default-branded member in the union makes the field required.
-// ============================================================================
+//
 
 const _unionDefault: MustBeTrue<
   AssertEqual<
@@ -247,9 +249,9 @@ const _deepDefaultUnion: MustBeTrue<
   >
 > = true;
 
-// ============================================================================
+//
 // RequireDefaults<T> — plain union (no Default) stays optional
-// ============================================================================
+//
 
 const _plainUnionPreserved: MustBeTrue<
   AssertEqual<
@@ -258,10 +260,10 @@ const _plainUnionPreserved: MustBeTrue<
   >
 > = true;
 
-// ============================================================================
+//
 // RequireDefaults<T> — is only one level deep (inner Default fields are not
 // processed, preserving the Default brand on nested types)
-// ============================================================================
+//
 
 type Nested = {
   outer?: Default<string, "">;
@@ -276,9 +278,9 @@ const _shallowOnly: MustBeTrue<
   >
 > = true;
 
-// ============================================================================
+//
 // StripDefaultBrand<T> — any, never, unknown pass through unchanged
-// ============================================================================
+//
 
 const _stripAny: MustBeTrue<AssertEqual<StripDefaultBrand<any>, any>> = true;
 const _stripNever: MustBeTrue<AssertEqual<StripDefaultBrand<never>, never>> =
@@ -287,9 +289,9 @@ const _stripUnknown: MustBeTrue<
   AssertEqual<StripDefaultBrand<unknown>, unknown>
 > = true;
 
-// ============================================================================
+//
 // StripDefaultBrand<T> — array and tuple types
-// ============================================================================
+//
 
 // Plain array is unchanged
 const _stripPlainArrayType: MustBeTrue<
@@ -341,9 +343,9 @@ const _emptyArrayUnionDefaultRequired: MustBeTrue<
   >
 > = true;
 
-// ============================================================================
+//
 // StripDefaultBrand<T> — Default<T & U, V> intersection
-// ============================================================================
+//
 
 type IntersectedT = { a: string } & { b: number };
 
@@ -354,9 +356,9 @@ const _stripDefaultIntersection: MustBeTrue<
   >
 > = true;
 
-// ============================================================================
+//
 // RequireDefaults<T> — any, never, unknown
-// ============================================================================
+//
 
 // any absorbs all intersections: RequireDefaults<any> = any
 const _requireDefaultsAny: MustBeTrue<
@@ -373,9 +375,9 @@ const _requireDefaultsUnknownHasNoKeys: MustBeTrue<
   AssertEqual<keyof Simplify<RequireDefaults<unknown>>, never>
 > = true;
 
-// ============================================================================
+//
 // RequireDefaults<T> — empty object
-// ============================================================================
+//
 
 // RequireDefaults on an empty object produces a type with no keys
 // (uses `Record<never, never>` to avoid the `ban-types` lint rule for literal `{}`)
@@ -384,9 +386,9 @@ const _emptyObjectHasNoKeys: MustBeTrue<
   AssertEqual<keyof Simplify<RequireDefaults<_EmptySchema>>, never>
 > = true;
 
-// ============================================================================
+//
 // RequireDefaults<T> — array and tuple types as Default fields
-// ============================================================================
+//
 
 const _arrayDefault: MustBeTrue<
   AssertEqual<
@@ -402,9 +404,9 @@ const _tupleDefault: MustBeTrue<
   >
 > = true;
 
-// ============================================================================
+//
 // RequireDefaults<T> — index signatures
-// ============================================================================
+//
 
 // Plain index signature is preserved unchanged
 const _plainIndexSig: MustBeTrue<
@@ -422,9 +424,9 @@ const _defaultIndexSig: MustBeTrue<
   >
 > = true;
 
-// ============================================================================
+//
 // RequireDefaults<T> — Default<T & U, V> intersection field
-// ============================================================================
+//
 
 const _intersectionDefault: MustBeTrue<
   AssertEqual<
@@ -433,9 +435,9 @@ const _intersectionDefault: MustBeTrue<
   >
 > = true;
 
-// ============================================================================
+//
 // RequireDefaults<T> — Default in generic context
-// ============================================================================
+//
 
 // RequireDefaults works correctly when used inside a generic type alias
 type ApplyRequireDefaults<T extends object> = Simplify<RequireDefaults<T>>;
@@ -447,9 +449,9 @@ const _genericContext: MustBeTrue<
   >
 > = true;
 
-// ============================================================================
+//
 // RequireDefaults<T> — `any` fields are not treated as Default-branded
-// ============================================================================
+//
 
 // IsDefaultField<any> = false (IsAny guard), so `any` fields remain unchanged.
 // RequireDefaults must not make an `any`-typed field required.
@@ -460,9 +462,9 @@ const _anyFieldOptional: MustBeTrue<
   AssertEqual<undefined extends _AnyFieldResult["x"] ? true : false, true>
 > = true;
 
-// ============================================================================
+//
 // Negative tests — things that must NOT happen
-// ============================================================================
+//
 
 // Plain optional field must NOT be made required
 const _plainOptionalNotRequired: MustBeTrue<
@@ -490,9 +492,9 @@ const _stripPlainNotNever: MustBeTrue<
   AssertNotEqual<StripDefaultBrand<string>, never>
 > = true;
 
-// ============================================================================
+//
 // Runtime stub — the type assertions above are the real tests
-// ============================================================================
+//
 
 describe("RequireDefaults type-level tests", () => {
   it("all type assertions compile correctly", () => {

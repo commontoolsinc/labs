@@ -16,8 +16,8 @@
 // - §9-2 per-wave multi-principal: two users' handler runs mint each
 //   run's own user, and both commits recheck clean (a digest mismatch
 //   would refuse the commit and error the entry — OW54's surfacing);
-// - §9-3 replay: a re-drained entry (first attempt aborted) mints from
-//   the DURABLE entry's actor, and a second host activation re-runs
+// - §9-3 replay: a re-drained entry (first commit-preparation attempt failed)
+//   mints from the DURABLE entry's actor, and a second host activation re-runs
 //   nothing and leaves the persisted labels byte-identical;
 // - §9-4 the stamp seam's precedence, pinned on the LIVE stamper:
 //   delegated carriage wins, a handler's acting next, a demanded
@@ -225,7 +225,6 @@ describe("executor-trust-attribution", () => {
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: false,
           },
         });
         servingRuntime = runtime;
@@ -684,7 +683,7 @@ describe("executor-trust-attribution", () => {
   });
 
   describe("§9-3 replay", () => {
-    it("mints from the DURABLE entry's actor on a re-drain (first attempt aborted), and a second activation re-runs nothing and leaves the labels byte-identical (INV-B)", async () => {
+    it("mints from the DURABLE entry's actor on a re-drain after a typed commit-preparation failure, and a second activation re-runs nothing and leaves the labels byte-identical (INV-B)", async () => {
       const { engine, cancelDemand, sidecarId, streamLink, result } =
         await warmServedStream({
           arg: "replay-arg",
@@ -704,10 +703,24 @@ describe("executor-trust-attribution", () => {
             claim: "replayed claim",
           });
           if (dispatches === 1) {
-            // A NON-CFC give-up: the entry stays unconsequenced and the
-            // wave re-drains it (the retry cadence) — the re-dispatch
-            // must resolve its actor from the durable entry again.
-            tx.abort(new Error("ow34 replay probe: first attempt aborted"));
+            // Model the typed pre-storage failure after the handler has built
+            // its write. OW54 persists that failure, then grants one clean
+            // retry; the re-dispatch must resolve its actor from the durable
+            // entry again. The handler no longer aborts directly; the mocked
+            // commit path aborts internally, mirroring the framework sealing
+            // the typed CommitPreparationError before granting one clean retry.
+            const error = {
+              name: "CommitPreparationError" as const,
+              message: "OW34 replay probe: first commit preparation failed",
+              failureClass: "unknown" as const,
+              permanentEvidence: false as const,
+            };
+            (tx as unknown as {
+              commit: () => Promise<{ error: typeof error }>;
+            }).commit = () => {
+              tx.abort(new Error(error.message));
+              return Promise.resolve({ error });
+            };
           }
         },
         streamLink,

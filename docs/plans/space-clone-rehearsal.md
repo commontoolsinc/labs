@@ -403,7 +403,11 @@ Gideon's runbook, made checkable:
 1. **Baseline.** `cf space clone … --verify`; record fingerprint, topic/comment/
    link counts, `max(seq)`. `cf inspect churn` shows a quiet window.
 2. **Serial batches, children first, board last.** Never parallel; the board's
-   result recomputation is what storms.
+   result recomputation is what storms. This order inverts when the update
+   moves the BOARD's own demand: children-first assumes the children must
+   catch up to what the board already requires, so if the new board reads both
+   shapes and the old one cannot read the new children, the board goes first.
+   Decide it by reading the deployed holder's demand, not its source.
 3. **Step and verify each batch.** `--input` for what durably committed,
    `--step` for computed results. An unstepped result read that looks empty is
    not evidence of anything.

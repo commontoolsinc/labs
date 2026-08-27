@@ -1,6 +1,7 @@
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
 
+import type { FabricValue } from "@commonfabric/api";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { metrics, SpanStatusCode, trace } from "@opentelemetry/api";
@@ -19,6 +20,7 @@ import {
   type ClientCommit,
   type ClientMessage,
   type CommitClass,
+  commitPreconditionValueHash,
   dbNeedsColumnProvenance,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
@@ -29,6 +31,11 @@ import {
   type EntityIdLookupResult,
   type EntitySnapshot,
   EventAppendDuplicateError,
+  eventAttentionEntryKey,
+  eventAttentionIndexKey,
+  type EventAttentionIndexValue,
+  type EventAttentionResolveRequest,
+  type EventAttentionResolveResult,
   getMemoryProtocolFlags,
   getOwnWriteEchoConfig,
   getServerExecutionConfig,
@@ -49,6 +56,7 @@ import {
   type ScopeKey,
   scopeKeyApplicableTo,
   type ScopeKeyIdentity,
+  SERVER_EXECUTION_ATTENTION_DOC_ID,
   type ServerMessage,
   type SessionAckRequest,
   type SessionAckResult,
@@ -87,11 +95,15 @@ import * as Engine from "./engine.ts";
 import { respondToHello } from "./handshake.ts";
 import {
   cloneTrackedGraphState,
+  createQueryEvaluationCache,
   extendTrackedGraph,
   fromDirtyKey,
   fromDocKey,
   isGraphQueryCoveredByState,
   type QueryDocKey,
+  type QueryEvaluationCache,
+  type QueryEvaluationCacheDiagnostics,
+  queryEvaluationCacheDiagnostics,
   queryGraph,
   type QueryGraphReuseContext,
   refreshTrackedGraph,
@@ -191,6 +203,11 @@ const timing = getLogger("memory", { enabled: false });
 const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
 const MIN_REFRESH_QUEUE_DRAIN_WAIT_MS = 500;
 const SLOW_QUERY_THRESHOLD_MS = 100;
+const QUERY_EVALUATION_CACHE_MAX_SPACES = 8;
+// ~5 board-scale corpora (a full board evaluation retains ~6k entities).
+// Entity count is the byte proxy: what an entry holds alive is its cloned
+// state's parsed documents, which scale with the entities delivered.
+const QUERY_EVALUATION_CACHE_BUDGET = 32_768;
 const SLOW_QUERY_BUFFER_SIZE = 100;
 const DEFAULT_SESSION_OPEN_CHALLENGE_TTL_SECONDS = 300;
 const SESSION_OPEN_CHALLENGE_BYTES = 32;
@@ -211,6 +228,21 @@ export type SlowQuery = {
   space: string;
   roots?: number;
   watches?: number;
+  /** transact only: milliseconds the commit waited for the space
+   * publication lock before evaluation began. Flush passes hold the same
+   * lock, so a large value is head-of-line blocking behind fan-out rather
+   * than the commit's own cost. */
+  lockWaitMs?: number;
+  /** transact only: the commit's operation count. */
+  operations?: number;
+  /** transact only: the commit's confirmed read count. */
+  readsConfirmed?: number;
+  /** transact only: the commit's pending read count. */
+  readsPending?: number;
+  /** transact only: "ok", the response error's name (a rejected commit
+   * that took this long is at least as interesting as an applied one), or
+   * "threw" when evaluation raised instead of responding. */
+  outcome?: string;
 };
 
 const slowQueries: SlowQuery[] = [];
@@ -242,7 +274,7 @@ const recordSlowQueryDuration = (
   });
 };
 
-/** Returns the last N slow query/watch operations (>100ms). */
+/** Returns the last N slow query, watch, and commit operations (>100ms). */
 export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
 
 /**
@@ -283,9 +315,14 @@ const randomHex = (bytes: number): string => {
 const isNonNegativeInteger = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
-const toError = (name: string, message: string): V2Error => ({
+const toError = (
+  name: string,
+  message: string,
+  details: Pick<V2Error, "permanentEvidence" | "aclRevision"> = {},
+): V2Error => ({
   name,
   message,
+  ...details,
 });
 
 const toPreconditionFailedError = (
@@ -444,7 +481,12 @@ export type AdmittedCommitNotice = {
    * handler processing" classification input. Ids only (the sidecar
    * doc instance + the eventId); the SpaceServer's drain reads the
    * stamped entries from the store, never from this record. */
-  eventAppends?: Array<{ id: string; scopeKey: ScopeKey; eventId: string }>;
+  eventAppends?: Array<{
+    id: string;
+    scopeKey: ScopeKey;
+    eventId: string;
+    retryOf?: string;
+  }>;
 
   /** The EXPLICIT WARM REQUEST (serving-loop.md §1's third activation
    * trigger; RULED 2026-08-21): set only by the serving-side
@@ -1053,6 +1095,26 @@ class Connection {
           );
         }
         return;
+      case "event.attention.resolve":
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
+        {
+          const response = await this.server.resolveEventAttention(parsed);
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
+        return;
     }
   }
 
@@ -1182,6 +1244,11 @@ class Connection {
 export class Server {
   #sessions: SessionRegistry;
   #connections = new Map<string, Connection>();
+
+  /** Whole-evaluation caches, one per space (see QueryEvaluationCache in
+   * query.ts for the sharing, purity, and seq-rotation rules), held for at
+   * most QUERY_EVALUATION_CACHE_MAX_SPACES spaces in LRU order. */
+  #queryEvaluationCaches = new Map<string, QueryEvaluationCache>();
   #engines = new Map<string, Promise<Engine.Engine>>();
   // The resolved-engine index for the SYNC cross-engine lease lookup
   // (server-execution v2 Phase 5; see openEngine / #liveCoHostedLeaseSpaceFor).
@@ -1281,6 +1348,14 @@ export class Server {
        * dirty spaces held for the next explicit call.
        */
       subscriptionRefreshDelayMs?: number | "manual";
+      /** Cross-space retained-entity budget for the query evaluation
+       * caches (default QUERY_EVALUATION_CACHE_BUDGET). An entry's weight
+       * is the entity count of the evaluation it retains — the proxy for
+       * the parsed documents kept alive — and eviction removes the
+       * least-recently-evaluated spaces' oldest entries until the total
+       * fits. A single evaluation heavier than the whole budget is not
+       * retained at all. */
+      queryEvaluationCacheBudget?: number;
       authorizeSessionOpen: (
         message: SessionOpenRequest,
         context: SessionOpenAuthContext,
@@ -1575,6 +1650,7 @@ export class Server {
       return toError(
         "AuthorizationError",
         `Space ${space} has a malformed, ownerless, or retracted ACL`,
+        { permanentEvidence: true, aclRevision: Engine.serverSeq(engine) },
       );
     }
     if (this.#aclMode() === "observe") {
@@ -1589,6 +1665,7 @@ export class Server {
     return toError(
       "AuthorizationError",
       `Principal ${principalLabel} lacks ${requirement} on space ${space}`,
+      { permanentEvidence: true, aclRevision: Engine.serverSeq(engine) },
     );
   }
 
@@ -2915,29 +2992,358 @@ export class Server {
     message: TransactRequest,
     publishVerdict?: PublishTransactVerdict,
   ): Promise<ResponseMessage<Engine.AppliedCommit>> {
+    const requestedAt = performance.now();
     return await this.withSpacePublicationLock(message.space, async () => {
-      const decision = await this.decideTransaction(message);
-      let verdictError: { value: unknown } | undefined;
+      const lockWaitMs = performance.now() - requestedAt;
+      let outcome = "threw";
       try {
-        publishVerdict?.(decision.response);
-      } catch (error) {
-        verdictError = { value: error };
-      }
-      try {
-        await decision.postCommit?.();
-      } catch (postCommitError) {
+        const decision = await this.decideTransaction(message);
+        outcome = decision.response.error?.name ?? "ok";
+        let verdictError: { value: unknown } | undefined;
+        try {
+          publishVerdict?.(decision.response);
+        } catch (error) {
+          verdictError = { value: error };
+        }
+        try {
+          await decision.postCommit?.();
+        } catch (postCommitError) {
+          if (verdictError !== undefined) {
+            throw new AggregateError(
+              [verdictError.value, postCommitError],
+              "Verdict publication and post-commit bookkeeping both failed",
+            );
+          }
+          throw postCommitError;
+        }
         if (verdictError !== undefined) {
-          throw new AggregateError(
-            [verdictError.value, postCommitError],
-            "Verdict publication and post-commit bookkeeping both failed",
+          throw verdictError.value;
+        }
+        return decision.response;
+      } finally {
+        // The elapsed span deliberately starts at the REQUEST, not at lock
+        // acquisition: what a client waits for is both halves, and the
+        // lockWaitMs field is what splits them apart on the dashboard.
+        // The wire parser validates only the commit's envelope, so the
+        // arrays may be absent here; a malformed commit records with its
+        // counts missing rather than masking the transaction's own
+        // response with a throw from this finally.
+        const commit = message.commit as Partial<ClientCommit>;
+        const count = (value: unknown): number | undefined =>
+          Array.isArray(value) ? value.length : undefined;
+        recordSlowQueryDuration("transact", message.space, requestedAt, {
+          lockWaitMs: Math.round(lockWaitMs),
+          operations: count(commit.operations),
+          readsConfirmed: count(commit.reads?.confirmed),
+          readsPending: count(commit.reads?.pending),
+          outcome,
+        });
+      }
+    });
+  }
+
+  /** Resolve one authoritative OW54 notice. The publication lock, exact-value
+   * precondition, original-entry resolution, optional append, and index removal
+   * form one same-space atomic decision. */
+  async resolveEventAttention(
+    message: EventAttentionResolveRequest,
+  ): Promise<ResponseMessage<EventAttentionResolveResult>> {
+    return await this.withSpacePublicationLock(message.space, async () => {
+      try {
+        const session = this.#sessions.get(message.space, message.sessionId);
+        if (session === null) {
+          return respondTypedError<EventAttentionResolveResult>(
+            message.requestId,
+            toError("SessionError", "Unknown session for space"),
           );
         }
-        throw postCommitError;
+        const engine = await this.openEngine(message.space);
+        if (this.#sessions.get(message.space, message.sessionId) !== session) {
+          return respondTypedError<EventAttentionResolveResult>(
+            message.requestId,
+            toError("SessionError", "Unknown or replaced session for space"),
+          );
+        }
+        const deny = this.#authorizeMessageWithEngine(
+          engine,
+          message.space,
+          session.principal,
+          "WRITE",
+        );
+        if (deny !== null) {
+          return respondTypedError<EventAttentionResolveResult>(
+            message.requestId,
+            deny,
+          );
+        }
+        const indexDocument = Engine.read(engine, {
+          id: SERVER_EXECUTION_ATTENTION_DOC_ID as never,
+        });
+        const indexValue = indexDocument?.value as
+          | EventAttentionIndexValue
+          | undefined;
+        const sidecarKey = eventAttentionIndexKey(message.sidecarId);
+        const entryKey = eventAttentionEntryKey(message.eventId, message.seq);
+        const indexEntries = indexValue?.entries;
+        const sidecarSummaries = indexEntries !== undefined &&
+            Object.hasOwn(indexEntries, sidecarKey)
+          ? indexEntries[sidecarKey]
+          : undefined;
+        const summary = sidecarSummaries !== undefined &&
+            Object.hasOwn(sidecarSummaries, entryKey)
+          ? sidecarSummaries[entryKey]
+          : undefined;
+        const resolutionSidecars = indexValue?.resolutions;
+        const sidecarResolutions = resolutionSidecars !== undefined &&
+            Object.hasOwn(resolutionSidecars, sidecarKey)
+          ? resolutionSidecars[sidecarKey]
+          : undefined;
+        const recorded = sidecarResolutions !== undefined &&
+            Object.hasOwn(sidecarResolutions, entryKey)
+          ? sidecarResolutions[entryKey]
+          : undefined;
+        const sidecarDocument = Engine.read(engine, {
+          id: message.sidecarId as never,
+        });
+        const sidecarValue = sidecarDocument?.value as
+          | StreamEventsDocValue
+          | undefined;
+        const entryIndex = sidecarValue?.entries?.findIndex((entry) =>
+          entry?.eventId === message.eventId &&
+          (entry.seq ?? 0) === message.seq
+        ) ?? -1;
+        const original = entryIndex < 0
+          ? undefined
+          : sidecarValue!.entries![entryIndex];
+        const principal = session.principal;
+        if (original === undefined && recorded !== undefined) {
+          if (principal === undefined || recorded.principal !== principal) {
+            return respondTypedError<EventAttentionResolveResult>(
+              message.requestId,
+              toError(
+                "AuthorizationError",
+                "Only the original acting user may resolve this event",
+              ),
+            );
+          }
+          return {
+            type: "response",
+            requestId: message.requestId,
+            ok: {
+              serverSeq: Engine.serverSeq(engine),
+              resolution: recorded.resolution,
+            },
+          };
+        }
+        if (
+          original?.status !== "needs-attention" ||
+          original.attention === undefined ||
+          original.consequenced !== true
+        ) {
+          throw new Engine.ProtocolError(
+            `event ${message.eventId} at seq ${message.seq} has no ` +
+              "authoritative attention cover",
+          );
+        }
+        const originalUser = original.firedAt?.user;
+        if (
+          principal === undefined ||
+          (originalUser === undefined
+            ? message.action === "retry"
+            : originalUser !== principal)
+        ) {
+          return respondTypedError<EventAttentionResolveResult>(
+            message.requestId,
+            toError(
+              "AuthorizationError",
+              originalUser === undefined
+                ? "A userless event may be dismissed but not retried"
+                : "Only the original acting user may resolve this event",
+            ),
+          );
+        }
+        if (original.resolution !== undefined) {
+          return {
+            type: "response",
+            requestId: message.requestId,
+            ok: {
+              serverSeq: Engine.serverSeq(engine),
+              resolution: original.resolution,
+            },
+          };
+        }
+        if (
+          summary === undefined || summary.sidecarId !== message.sidecarId ||
+          summary.eventId !== message.eventId || summary.seq !== message.seq
+        ) {
+          throw new Engine.ProtocolError(
+            `event ${message.eventId} at seq ${message.seq} has no ` +
+              "unresolved attention notice",
+          );
+        }
+        const retryEventId = message.action === "retry"
+          ? crypto.randomUUID()
+          : undefined;
+        const resolution = retryEventId === undefined
+          ? { kind: "dismissed" as const }
+          : { kind: "retried" as const, eventId: retryEventId };
+        const escapePointer = (value: string) =>
+          value.replace(/~/g, "~0").replace(/\//g, "~1");
+        const sidecarPatches: Array<
+          | { op: "replace"; path: string; value: unknown }
+          | { op: "append"; path: string; values: unknown[] }
+        > = [{
+          op: "replace",
+          path: `/value/entries/${entryIndex}/resolution`,
+          value: resolution,
+        }];
+        if (retryEventId !== undefined) {
+          sidecarPatches.push({
+            op: "append",
+            path: "/value/entries",
+            values: [{
+              eventId: retryEventId,
+              stream: original.stream,
+              ...(original.payload === undefined
+                ? {}
+                : { payload: original.payload }),
+              firedAt: {
+                user: principal,
+                session: message.sessionId,
+              },
+              ...(original.rendererTrusted === true
+                ? { rendererTrusted: true as const }
+                : {}),
+              ...(original.runtimeInjectedEventKeys === undefined ? {} : {
+                runtimeInjectedEventKeys: original.runtimeInjectedEventKeys,
+              }),
+              retryOf: message.eventId,
+            }],
+          });
+        }
+        const recordedResolution = {
+          eventId: message.eventId,
+          seq: message.seq,
+          sidecarId: message.sidecarId,
+          principal,
+          resolution,
+        };
+        const indexPatches: Array<
+          | { op: "remove"; path: string }
+          | { op: "add"; path: string; value: FabricValue }
+        > = [{
+          op: "remove",
+          path: Object.keys(sidecarSummaries ?? {}).length === 1
+            ? `/value/entries/${escapePointer(sidecarKey)}`
+            : `/value/entries/${escapePointer(sidecarKey)}/${
+              escapePointer(entryKey)
+            }`,
+        }];
+        if (resolutionSidecars === undefined) {
+          indexPatches.push({
+            op: "add",
+            path: "/value/resolutions",
+            value: { [sidecarKey]: { [entryKey]: recordedResolution } },
+          });
+        } else if (sidecarResolutions === undefined) {
+          indexPatches.push({
+            op: "add",
+            path: `/value/resolutions/${escapePointer(sidecarKey)}`,
+            value: { [entryKey]: recordedResolution },
+          });
+        } else {
+          indexPatches.push({
+            op: "add",
+            path: `/value/resolutions/${escapePointer(sidecarKey)}/${
+              escapePointer(entryKey)
+            }`,
+            value: recordedResolution,
+          });
+        }
+        const commit = Engine.applyCommit(engine, {
+          // Server-owned transaction identity: the requesting user's session
+          // has its own localSeq namespace, so borrowing it here would collide
+          // with ordinary client commits. The copied retry entry separately
+          // records the requesting current session in `firedAt`.
+          sessionId: this.#directSessionId,
+          space: message.space,
+          principal,
+          commitClass: "system",
+          ...(retryEventId === undefined ? {} : {
+            systemEventActor: {
+              principal,
+              sessionId: message.sessionId,
+            },
+          }),
+          commit: {
+            localSeq: ++this.#directLocalSeq,
+            reads: { confirmed: [], pending: [] },
+            preconditions: [{
+              kind: "entity-value-hash",
+              id: summary.sidecarId as never,
+              valueHash: commitPreconditionValueHash(sidecarValue as never),
+            }],
+            operations: [{
+              op: "patch",
+              id: summary.sidecarId as never,
+              patches: sidecarPatches as never,
+            }, {
+              op: "patch",
+              id: SERVER_EXECUTION_ATTENTION_DOC_ID as never,
+              patches: indexPatches,
+            }],
+            ...(retryEventId === undefined ? {} : {
+              eventAppends: [{
+                id: summary.sidecarId as never,
+                scope: "space" as const,
+                eventId: retryEventId,
+              }],
+            }),
+          },
+        });
+        this.markSpaceDirty(message.space, [
+          toDirtyKey(summary.sidecarId, "space"),
+          toDirtyKey(SERVER_EXECUTION_ATTENTION_DOC_ID, "space"),
+        ]);
+        this.#notifyCommitAdmitted({
+          space: message.space,
+          seq: commit.seq,
+          class: "system",
+          sessionId: this.#directSessionId,
+          writes: [
+            { id: summary.sidecarId, scopeKey: "space" },
+            { id: SERVER_EXECUTION_ATTENTION_DOC_ID, scopeKey: "space" },
+          ],
+          ...(retryEventId === undefined ? {} : {
+            eventAppends: [{
+              id: summary.sidecarId,
+              scopeKey: "space" as const,
+              eventId: retryEventId,
+              retryOf: message.eventId,
+            }],
+          }),
+        });
+        return {
+          type: "response",
+          requestId: message.requestId,
+          ok: { serverSeq: commit.seq, resolution },
+        };
+      } catch (error) {
+        const messageText = error instanceof Error
+          ? error.message
+          : String(error);
+        return respondTypedError<EventAttentionResolveResult>(
+          message.requestId,
+          toError(
+            error instanceof Engine.ConflictError
+              ? "ConflictError"
+              : error instanceof Engine.ProtocolError
+              ? "ProtocolError"
+              : "TransactionError",
+            messageText,
+          ),
+        );
       }
-      if (verdictError !== undefined) {
-        throw verdictError.value;
-      }
-      return decision.response;
     });
   }
 
@@ -3866,8 +4272,13 @@ export class Server {
             {
               principal: session.principal,
               sessionId: message.sessionId,
+              evaluationCache: this.#evaluationCacheFor(message.space),
             },
           );
+          // Enforced per evaluation, not per request: a later group's
+          // failure (or a failing operation-field attachment) must not
+          // leave an already-inserted entry over budget.
+          this.#enforceEvaluationCacheBudget();
           graphs.set(branch, tracked.state);
           for (const [docKey, entity] of tracked.state.entities) {
             recordUpdate(docKey, entity);
@@ -3977,6 +4388,76 @@ export class Server {
     }
   }
 
+  #evaluationCacheFor(space: string): QueryEvaluationCache {
+    let cache = this.#queryEvaluationCaches.get(space);
+    if (cache !== undefined) {
+      // Recency bump: insertion order is the LRU order.
+      this.#queryEvaluationCaches.delete(space);
+      this.#queryEvaluationCaches.set(space, cache);
+      return cache;
+    }
+    cache = createQueryEvaluationCache();
+    this.#queryEvaluationCaches.set(space, cache);
+    // An inactive space's cache would otherwise linger until that space's
+    // next commit — which may never come. The space bound is the
+    // cardinality backstop; the memory bound is the weight budget below.
+    if (this.#queryEvaluationCaches.size > QUERY_EVALUATION_CACHE_MAX_SPACES) {
+      const oldest = this.#queryEvaluationCaches.keys().next().value;
+      if (oldest !== undefined) {
+        this.#queryEvaluationCaches.delete(oldest);
+      }
+    }
+    return cache;
+  }
+
+  /** Evict least-recently-evaluated spaces' oldest entries until the
+   * caches' total retained weight fits the budget. Runs after every
+   * evaluation that may have inserted; an entry heavier than the whole
+   * budget is therefore never retained past its own evaluation. */
+  #enforceEvaluationCacheBudget(): void {
+    const budget = this.options.queryEvaluationCacheBudget ??
+      QUERY_EVALUATION_CACHE_BUDGET;
+    let total = 0;
+    for (const cache of this.#queryEvaluationCaches.values()) {
+      total += cache.weight;
+    }
+    if (total <= budget) return;
+    // Entry-less leftovers (drained by an earlier pass, or rotation-
+    // cleared and idle since) drop before eviction: an empty cache holds
+    // no weight, only a stale LRU slot. The rebuild preserves order.
+    this.#queryEvaluationCaches = new Map(
+      [...this.#queryEvaluationCaches].filter(
+        ([, cache]) => cache.entries.size > 0,
+      ),
+    );
+    // Least-recently-evaluated spaces first (map insertion order IS the
+    // LRU order), oldest entry first within each. A space drained by THIS
+    // pass keeps its cache — its counters and LRU position belong to a
+    // live space — and is swept as a leftover by the next enforcement.
+    for (const cache of [...this.#queryEvaluationCaches.values()]) {
+      while (total > budget && cache.entries.size > 0) {
+        const oldestEntry = cache.entries.keys().next().value!;
+        const entry = cache.entries.get(oldestEntry)!;
+        cache.entries.delete(oldestEntry);
+        cache.weight -= entry.weight;
+        total -= entry.weight;
+      }
+      if (total <= budget) return;
+    }
+  }
+
+  /** The space's evaluation-cache counters, for diagnostics and tests.
+   * A peek: an absent (never-evaluated or evicted) space reads as empty
+   * rather than being created or recency-bumped by the question. */
+  evaluationCacheDiagnostics(
+    space: string,
+  ): QueryEvaluationCacheDiagnostics {
+    const cache = this.#queryEvaluationCaches.get(space);
+    return cache === undefined
+      ? { seq: -1, entries: 0, weight: 0, hits: 0, misses: 0, rotations: 0 }
+      : queryEvaluationCacheDiagnostics(cache);
+  }
+
   async evaluateGraphQuery(
     space: string,
     query: GraphQuery,
@@ -3989,17 +4470,35 @@ export class Server {
     } = {},
   ): Promise<GraphQueryResult> {
     const startedAt = performance.now();
-    const result = queryGraph(
-      space,
-      engine ?? await this.openEngine(space),
-      query,
-      reuse,
-      scopeContext,
-    );
-    recordSlowQueryDuration("graph.query", space, startedAt, {
-      roots: query.roots.length,
-    });
-    return result;
+    // Cache eligibility decided BEFORE touching the LRU: a historical or
+    // lease-holder-exempt query neither serves nor records an entry, and
+    // must not create a cache or evict a live space's on its way through.
+    const cacheEligible = query.atSeq === undefined &&
+      scopeContext.keyedSnapshots !== true;
+    try {
+      const result = queryGraph(
+        space,
+        engine ?? await this.openEngine(space),
+        query,
+        reuse,
+        {
+          ...scopeContext,
+          ...(cacheEligible
+            ? { evaluationCache: this.#evaluationCacheFor(space) }
+            : {}),
+        },
+      );
+      recordSlowQueryDuration("graph.query", space, startedAt, {
+        roots: query.roots.length,
+      });
+      return result;
+    } finally {
+      // The insert precedes the snapshot mapping, so enforcement must
+      // cover the throw path too.
+      if (cacheEligible) {
+        this.#enforceEvaluationCacheBudget();
+      }
+    }
   }
 
   async evaluateWatchSet(
@@ -4027,9 +4526,13 @@ export class Server {
         resolvedEngine,
         query,
         reuse,
-        scopeContext,
+        {
+          ...scopeContext,
+          evaluationCache: this.#evaluationCacheFor(space),
+        },
       );
       serverSeq = result.serverSeq;
+      this.#enforceEvaluationCacheBudget();
       graphs.set(branch, result.state);
       for (const [docKey, entity] of result.state.entities) {
         const { scopeKey } = fromDocKey(docKey);
@@ -6255,6 +6758,29 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       watches: parsed.watches as WatchSpec[],
+    };
+  }
+
+  if (
+    parsed.type === "event.attention.resolve" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    typeof parsed.eventId === "string" && parsed.eventId.length > 0 &&
+    typeof parsed.seq === "number" && Number.isSafeInteger(parsed.seq) &&
+    parsed.seq >= 0 &&
+    typeof parsed.sidecarId === "string" && parsed.sidecarId.length > 0 &&
+    (parsed.action === "retry" || parsed.action === "dismiss")
+  ) {
+    return {
+      type: "event.attention.resolve",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      eventId: parsed.eventId,
+      seq: parsed.seq,
+      sidecarId: parsed.sidecarId,
+      action: parsed.action,
     };
   }
 
