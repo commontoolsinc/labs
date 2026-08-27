@@ -5,7 +5,10 @@
  * sent to the worker thread for dispatch to the appropriate handler.
  */
 
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import {
+  fabricFromNativeValue,
+  type FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import {
   type EventProvenance,
   getEventProvenance,
@@ -176,6 +179,8 @@ export function serializeEvent(event: Event): SerializedEvent {
         // A `cf-input`, a `cf-tabs` and a `cf-calendar` each declare theirs as
         // `CellHandle<string> | string`, and a `CellHandle` reaches the pattern
         // as the sigil link its `toJSON()` produces, which the worker resolves.
+        // The outbound half of this seam is closed the same way: `SetPropOp`'s
+        // `value` in `../vdom-ops.ts` is a `FabricValue` the envelope carries.
         (serializedTarget as unknown as Record<string, unknown>)[prop] =
           toSerializableValue(value);
         hasTargetProps = true;
@@ -206,18 +211,6 @@ export function serializeEvent(event: Event): SerializedEvent {
     }
   }
 
-  // TODO(danfuzz): a `detail` is a whole value a component chose to hand the
-  // pattern, and the pattern's handler receives it as a `FabricValue`. The
-  // conversion below narrows it to the JSON-compatible subset on the way in: a
-  // `bigint` throws out of `JSON.stringify()` and lands in the `catch`, which
-  // replaces the entire detail with `String(detail)`, and a `FabricBytes`
-  // stringifies to `{}`. The crossing is `postMessage`, not JSON text, so
-  // `codec-realm` carries the whole domain here; what has to stay is the
-  // separate job the conversion does of turning an unencodable detail into
-  // something rather than failing the event. The same holds of a target's
-  // `value` and `checked` above. The outbound half of this seam is closed:
-  // `SetPropOp.value` in `../vdom-ops.ts` is a `FabricValue` the envelope's
-  // encoding carries whole.
   if ("detail" in event && (event as CustomEvent).detail !== undefined) {
     serialized.detail = toSerializableValue((event as CustomEvent).detail);
   }
@@ -226,22 +219,47 @@ export function serializeEvent(event: Event): SerializedEvent {
 }
 
 /**
- * Converts one value a component exposed to the event into a form the VDOM
- * event notification can carry, substituting a description for anything with
- * no conversion at all. Handing the pattern something is the point: an event
- * whose value cannot cross is still an event the handler should see.
+ * Converts one value a component exposed to the event into the form the VDOM
+ * event notification carries, substituting a description for anything with no
+ * conversion at all. Handing the pattern something is the point: an event whose
+ * value cannot cross is still an event the handler should see.
+ *
+ * Two conversions, in this order. The round trip goes first and answers for
+ * everything it can: it resolves whatever `toJSON()` a value defines -- a
+ * `CellHandle` becoming the sigil link the worker resolves -- and it is what
+ * a value reaching a handler has always been rendered by.
+ *
+ * The fabric conversion answers for what the round trip refuses, which is where
+ * the crossing being `postMessage` rather than JSON text starts to matter: a
+ * `bigint` anywhere inside a value throws out of `JSON.stringify()`, and
+ * without a second answer the whole value becomes a description of itself. It
+ * refuses a circular reference in turn, which is what keeps one from reaching a
+ * crossing that has no representation for it.
+ *
+ * The order is what bounds the conversion to values the far side accepts. The
+ * fabric conversion mints a `FabricError` from an `Error`, and the worker's
+ * event ingress refuses a `FabricInstance` (`stripSigilCfcLabelViews()` in
+ * `@commonfabric/runner/cfc`); an `Error` reaching a detail is ordinary --
+ * `cf-file-input` dispatches one -- and the round trip renders it as `{}` and
+ * gets there first.
+ *
+ * TODO(danfuzz): once that ingress descends an instance rather than refusing
+ * one, the fabric conversion can go first, and a `FabricBytes` in a detail
+ * stops arriving as `{}`.
  */
 function toSerializableValue(value: unknown): FabricValue {
   try {
-    // The round trip resolves whatever `toJSON()` a value defines -- a
-    // `CellHandle` becomes its sigil link -- and drops what JSON has no
-    // representation for. `undefined` comes back from `JSON.stringify()` for a
-    // function or a symbol, and a circular reference or a throwing `toJSON()`
-    // throws out of it.
     const jsonString = JSON.stringify(value);
     if (jsonString !== undefined) return JSON.parse(jsonString);
   } catch {
-    // Described below, as a value with no JSON form at all is.
+    // Answered below, first by the fabric conversion and then as a value with
+    // no rendering at all.
+  }
+
+  try {
+    return fabricFromNativeValue(value);
+  } catch {
+    // Described below, as a value with neither rendering is.
   }
 
   return describeUnconvertible(value);

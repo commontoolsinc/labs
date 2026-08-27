@@ -381,6 +381,61 @@ Deno.test("events - serializeEvent", async (t) => {
     assertEquals((serialized.detail as { count: number }).count, 42);
   });
 
+  await t.step(
+    "carries a `bigint` in a detail rather than losing the detail",
+    () => {
+      // The whole detail used to go: a `bigint` throws out of `JSON.stringify()`,
+      // and the `catch` answered for the value it was handed rather than for the
+      // member that could not be rendered.
+      const event = new MockCustomEvent("custom", {
+        detail: { message: "hello", count: 42n },
+      }) as unknown as Event;
+
+      const serialized = serializeEvent(event);
+
+      assertEquals(serialized.detail, { message: "hello", count: 42n });
+    },
+  );
+
+  await t.step("renders an `Error` in a detail as a bare record", () => {
+    // What bounds the conversion to values the far side accepts. The fabric
+    // conversion mints a `FabricError` from an `Error`, and the worker's event
+    // ingress refuses a `FabricInstance`; an `Error` in a detail is ordinary,
+    // `cf-file-input` dispatching one on `cf-error`. So the round trip answers
+    // for it first, and what crosses is a record the ingress walks.
+    const event = new MockCustomEvent("cf-error", {
+      detail: { error: new Error("boom"), message: "upload failed" },
+    }) as unknown as Event;
+
+    const serialized = serializeEvent(event);
+
+    assertEquals(serialized.detail, { error: {}, message: "upload failed" });
+  });
+
+  await t.step("describes a circular detail rather than passing one on", () => {
+    // A circular value has no representation at the crossing, so it must not
+    // reach one. Both conversions refuse it, for their own reasons.
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const event = new MockCustomEvent("custom", {
+      detail: circular,
+    }) as unknown as Event;
+
+    const serialized = serializeEvent(event);
+
+    assertEquals(serialized.detail, "[object Object]");
+  });
+
+  await t.step("carries a `bigint` exposed as a target's value", () => {
+    const event = new MockEvent("input", {
+      target: { value: 42n },
+    }) as unknown as Event;
+
+    const serialized = serializeEvent(event);
+
+    assertEquals(serialized.target?.value, 42n);
+  });
+
   await t.step("omits undefined properties", () => {
     const event = new MockEvent("click") as unknown as Event;
     const serialized = serializeEvent(event);
