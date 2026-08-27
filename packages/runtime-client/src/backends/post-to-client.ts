@@ -66,8 +66,9 @@ export function postToClient(message: IPCRemotePost): boolean {
  * rendering of what could not be sent -- degraded rather than silent, which
  * matters most for the console, whose whole job is to say what happened.
  *
- * What this returns is built from strings and numbers alone, which the
- * encoding cannot refuse, so the caller encodes it without a guard.
+ * What this returns is built from strings and numbers alone, which neither
+ * the encoding nor `postMessage` can refuse, so the caller sends it without a
+ * guard of its own.
  */
 function undeliverableMessageFrom(
   message: IPCRemotePost,

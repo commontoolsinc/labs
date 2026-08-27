@@ -986,13 +986,13 @@ describe("cell-handle", () => {
       expect(CellHandle.serialize(marker)).toBe(marker);
     });
 
-    it("refuses a `FabricInstance` for its own reason, as `deserialize()` does", () => {
-      // The two arms are refused for different reasons -- a primitive because
-      // the wire has no representation for it, an instance because this walk
-      // cannot descend one to find a handle inside -- and only the second
-      // reason outlives a wire that carries the class. The instance arm says
-      // so through the shared helper, which is what every other refusal site
-      // in the tree uses, `deserialize()` below included.
+    it("refuses a `FabricInstance` with the whole of the shared message", () => {
+      // A primitive crosses whole, as the tests above pin. What is left is the
+      // instance, refused because this walk cannot descend one to find a
+      // handle inside -- a reason about the walk rather than about the wire,
+      // so it survives a connection that carries the class. Pinned to the
+      // whole message, situation string included, which is what says the
+      // refusal goes through the shared helper every other site uses.
       expect(() =>
         CellHandle.serialize(FabricError.fromNativeError(new Error("boom")))
       ).toThrow(
