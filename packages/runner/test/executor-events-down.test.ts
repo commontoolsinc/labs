@@ -1327,8 +1327,12 @@ describe("Phase 3 events-down (serving side)", () => {
     );
     expect(carryingBatches.length).toBeGreaterThanOrEqual(1);
     const committedOps = carryingBatches[carryingBatches.length - 1].operations;
-    expect(committedOps.some((op) => op.id === sidecarId)).toBe(true);
-    expect(committedOps.some((op) => op.id === argumentDocId)).toBe(true);
+    expect(
+      committedOps.some((op) => op.op !== "sqlite" && op.id === sidecarId),
+    ).toBe(true);
+    expect(
+      committedOps.some((op) => op.op !== "sqlite" && op.id === argumentDocId),
+    ).toBe(true);
     cancelDemand();
   });
 
