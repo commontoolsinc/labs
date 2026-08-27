@@ -605,6 +605,41 @@ describe("runtime-processor", () => {
     });
   });
 
+  describe("piece creation", () => {
+    it("names the rejected argument rather than its type", async () => {
+      // A piece's input is a record, and the guard turns away everything else.
+      // `typeof` is not what says which: it renders an array and `null` alike,
+      // as `object`, and those are two of the three kinds that get here. The
+      // message exists to explain the refusal, so it names the value.
+      const space = "did:key:z6Mk-runtime-processor-create" as const;
+      const processor = { getSpaceCtx: () => ({}) };
+      const refusalFor = async (argument: unknown) => {
+        try {
+          // deno-lint-ignore no-explicit-any
+          await (RuntimeProcessor.prototype as any).handlePieceCreate.call(
+            processor,
+            {
+              type: RequestType.PageCreate,
+              space,
+              source: { program: { main: "/main.tsx", files: [] } },
+              argument,
+            },
+          );
+        } catch (error) {
+          return (error as Error).message;
+        }
+        throw new Error("handlePieceCreate returned instead of refusing");
+      };
+
+      expect(await refusalFor([1, 2]))
+        .toBe("A piece's argument must be a record, not: [1,2]");
+      expect(await refusalFor(null))
+        .toBe("A piece's argument must be a record, not: null");
+      expect(await refusalFor("a bare string"))
+        .toBe('A piece\'s argument must be a record, not: "a bare string"');
+    });
+  });
+
   describe("space ACL state", () => {
     it("reports owner controls from the active principal's ACL entry", async () => {
       const space = "did:key:z6Mk-runtime-processor-acl" as const;
