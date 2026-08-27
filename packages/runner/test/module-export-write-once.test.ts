@@ -10,12 +10,14 @@ const noRequire = (s: string): Record<string, unknown> => {
   throw new Error(`unexpected require(${s})`);
 };
 
+//
 // The ESM loader hands the module body a write-once exports object so a write
 // smuggled into the evaluation of an otherwise-accepted expression (e.g. a
 // comma side effect inside a `__cf_data(...)` argument) cannot overwrite an
 // already-assigned export with attacker-controlled state before the loader
 // snapshots it into the (SES-immutable) namespace. These tests pin that
 // behavior, plus the legitimate compiler shapes that must still work.
+//
 
 describe("createWriteOnceExports", () => {
   it("locks a property after a real assignment (blocks the overwrite smuggle)", () => {

@@ -957,8 +957,10 @@ Deno.test("toolAllowsObservedConfidentiality permits tools within maxConfidentia
   assertEquals(allowed, true);
 });
 
+//
 // Tests for simplifySchemaForContext
 // Note: We cast schemas to `any` to avoid strict type checking on `type` field literals
+//
 
 Deno.test("simplifySchemaForContext preserves asCell stream marker", () => {
   const schema: any = {
@@ -1232,7 +1234,9 @@ Deno.test("simplifySchemaForContext handles primitive and composed schemas", () 
   assertEquals(result.allOf?.[0]?.properties?.id?.type, "string");
 });
 
+//
 // Tests for resolveRefsForLLM
+//
 
 Deno.test("resolveRefsForLLM converts boolean true schema to empty object", () => {
   const result = resolveRefsForLLM(true as any);
@@ -1397,7 +1401,9 @@ Deno.test("resolveRefsForLLM handles mutually recursive types", () => {
   );
 });
 
+//
 // Tests for prepareSchemaForLLM
+//
 
 Deno.test("prepareSchemaForLLM returns primitive schemas unchanged", () => {
   assertEquals(prepareSchemaForLLM("plain" as any), "plain" as any);

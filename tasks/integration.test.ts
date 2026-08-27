@@ -370,12 +370,15 @@ function generatedPortOffsets(): number[] {
   return [...offsets].sort((a, b) => a - b);
 }
 
+//
 // A port offset shifts every dev server together, and the servers bind whatever
 // port arithmetic lands on. Browsers and Deno's `fetch` both refuse to open a
 // connection to a port on the WHATWG bad-port list, so an offset that lands a
 // server on one produces a server that starts, passes a curl health check, and
 // that nothing in a test can reach: every browser navigation gets an error page
 // and every server-to-server proxy hop fails.
+//
+
 Deno.test("no generated port offset lands a server on a blocked port", () => {
   const blocked = new Set(ports.blockedPorts);
   const offenders: string[] = [];

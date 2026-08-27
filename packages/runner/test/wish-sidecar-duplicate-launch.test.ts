@@ -250,6 +250,7 @@ describe("wish profile-create sidecar duplicate launch", () => {
   });
 });
 
+//
 // The discrimination itself, exhaustively — this is the shared decision both
 // the commit-error arm AND the thrown-error arm of runSidecarInOwnTx consume
 // (a thrown conflict carries the same object shape as a commit-refused one).
@@ -258,6 +259,8 @@ describe("wish profile-create sidecar duplicate launch", () => {
 // its own reads), so the semantics are pinned here and each arm reduces to a
 // mechanical consume of this function; the flow-level pin above covers the
 // commit arm end to end.
+//
+
 describe("sidecarRunFailureDisposition", () => {
   const conflict = { name: "ConflictError" };
   const inconsistent = { name: "StorageTransactionInconsistent" };

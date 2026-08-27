@@ -1,7 +1,9 @@
 import { assert, assertEquals } from "@std/assert";
 import { schemaToTypeString } from "../src/schema-format.ts";
 
+//
 // Tests for schemaToTypeString - TypeScript-like schema representation
+//
 
 Deno.test("schemaToTypeString converts basic types", () => {
   assertEquals(schemaToTypeString({ type: "string" } as any), "string");
@@ -570,9 +572,11 @@ Deno.test("schemaToTypeString formats fixture-style PatternToolResult without le
   );
 });
 
+//
 // A conjunction states its fields across its members. These pin that the
 // rendering merges them the way the CLI's reader does, so a help page's type
 // block and its flag list cannot disagree about the same schema.
+//
 
 Deno.test("schemaToTypeString renders a conjunction's fields alongside its own", () => {
   assertEquals(

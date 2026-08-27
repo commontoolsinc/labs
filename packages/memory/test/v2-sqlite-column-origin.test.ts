@@ -74,10 +74,13 @@ Deno.test("pinned libsqlite3 release matches the resolved @db/sqlite", () => {
   );
 });
 
+//
 // Provenance has to be read from the same libsqlite3 image that runs the query,
 // so the only acceptable file is the one `@db/sqlite` picks. These cover the
 // picking rule and the refusal to substitute a different file for one that
 // cannot be opened.
+//
+
 Deno.test("library source follows @db/sqlite's own precedence", () => {
   const env = (vars: Record<string, string>) => (k: string) => vars[k];
   // @db/sqlite reads DENO_SQLITE_LOCAL first, so it wins even with a path set.

@@ -20,10 +20,12 @@ await ensureCompilerStack();
 
 const signer = await Identity.fromPassphrase("build-from-compiled");
 
+//
 // The warm load path builds records directly from cached compiled bodies — no
 // TS source, no resolve, no recompile. The export NAMES are recovered from the
 // compiled JS (export * unioned transitively). These tests prove that the
 // resolve-free build produces records equivalent to the source-derived ones.
+//
 
 describe("extractCompiledExports", () => {
   it("recovers exports.X assignments and Object.defineProperty re-exports", () => {

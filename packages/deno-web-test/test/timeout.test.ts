@@ -42,12 +42,15 @@ Deno.test("a stuck test fails by name and the run continues", async function () 
   );
 });
 
+//
 // The detector is only worth having while it fires before astral does. Astral
 // gives each `page.evaluate` five retried 10-second deadlines and throws a
 // `RetryError` once they run out, measured at 53 to 57 seconds; past that the
 // run dies without naming the test. Raising the default above that would put
 // the diagnostic back out of reach, so the relationship is pinned here rather
 // than left in a comment.
+//
+
 Deno.test("the default fires before astral's retries run out", function () {
   assert(
     DEFAULT_TEST_TIMEOUT_MS < 50_000,

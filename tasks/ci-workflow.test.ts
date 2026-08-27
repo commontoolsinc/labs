@@ -160,6 +160,7 @@ function workflowTriggers(contents: string): string {
   return contents.slice(0, concurrencyStart);
 }
 
+//
 // Every other check in this file reads the workflow files as TEXT (regex over
 // job and step blocks), so none of them can notice that a file has stopped
 // being valid YAML — and a workflow that does not parse produces ZERO jobs on
@@ -167,6 +168,8 @@ function workflowTriggers(contents: string): string {
 // unquoted `default: ` inside two step names turned deno.yml into a nested
 // mapping the runner refused, and CI silently ran nothing for a whole stack of
 // pushes. This is the one check that would have caught it.
+//
+
 Deno.test("every workflow and composite action is valid YAML", async () => {
   const broken: string[] = [];
   for await (const path of githubYamlPaths()) {
@@ -615,6 +618,7 @@ Deno.test("Deploy steps call the bastion wrapper the way it accepts", async () =
   }
 });
 
+//
 // Both shells CI builds take their co-presence endpoint from a repository
 // variable, and an unset variable is a supported state that builds a working
 // shell. Every check the wiring performs therefore sits inside an
@@ -623,6 +627,8 @@ Deno.test("Deploy steps call the bastion wrapper the way it accepts", async () =
 // wiring and the same runs stay green. The properties a configured value
 // depends on are checked here instead, against the workflow text, where
 // repository configuration does not get to decide whether the check runs.
+//
+
 Deno.test("a configured presence URL reaches every shell bundle CI builds", async () => {
   const deno = await workflow("deno.yml");
 

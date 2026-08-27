@@ -250,8 +250,11 @@ describe("asCell scope cap", () => {
   });
 });
 
+//
 // Shapes the first round of this change missed, each found by adversarial
 // review rather than by the tests above.
+//
+
 describe("asCell scope cap, harder shapes", () => {
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;

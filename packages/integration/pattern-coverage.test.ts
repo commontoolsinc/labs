@@ -13,12 +13,15 @@ const span = (fileName: string): PatternCoverageSpan => ({
   endColumn: 2,
 });
 
+//
 // A worker reports two shapes of file name, depending on how the pattern reached
 // it, and the gate only credits a line if its `SF:` path matches the file the
 // source walk found. So resolve each shape the way the LCOV writer will and
 // check it lands on a file that actually exists — a mapping that is merely
 // plausible produces a path nothing matches, and the coverage silently
 // evaporates rather than failing anything.
+//
+
 Deno.test("worker span file names resolve onto real pattern files", async () => {
   const cases = [
     {
