@@ -5,7 +5,8 @@
  *
  * Each document is paired with the demo that runs the session it describes —
  * the tour and the walkthrough with `verb-session-demo.sh`, the bulk tour with
- * `bulk-ops-demo.sh` — and a document may QUOTE its demo's commands but never
+ * `bulk-ops-demo.sh`, the read/write tour with `read-write-demo.sh` — and a
+ * document may QUOTE its demo's commands but never
  * compose them: every `cf` line in one of its command blocks must be a command
  * that demo actually runs, or sit under a `# not in the demo` comment saying
  * why it cannot be. Nothing
@@ -45,18 +46,27 @@ export const BULK_DEMO_PATH = "packages/cli/integration/bulk-ops-demo.sh";
 /** The tour written from that demo, and held to it below. */
 export const BULK_TOUR_PATH = "docs/common/workflows/bulk-operations.md";
 
+/** The demo that reads and writes a piece's cells, act by act. */
+export const READ_WRITE_DEMO_PATH =
+  "packages/cli/integration/read-write-demo.sh";
+
+/** The tour written from that demo, and held to it below. */
+export const READ_WRITE_TOUR_PATH =
+  "docs/common/workflows/reading-and-writing.md";
+
 /**
  * Each document, paired with the demo that runs the session it describes.
  *
  * A document is held to its own demo and no other: the verb tour and its
- * walkthrough describe one session, and the bulk tour describes a different
- * one. Pairing them here is what lets a second story be added without either
- * demo having to grow commands the other document quotes.
+ * walkthrough describe one session, and the bulk and read/write tours each
+ * describe a different one. Pairing them here is what lets another story be
+ * added without any demo having to grow commands another document quotes.
  */
 export const DOC_DEMOS: ReadonlyArray<{ doc: string; demo: string }> = [
   { doc: TOUR_PATH, demo: DEMO_PATH },
   { doc: WALKTHROUGH_PATH, demo: DEMO_PATH },
   { doc: BULK_TOUR_PATH, demo: BULK_DEMO_PATH },
+  { doc: READ_WRITE_TOUR_PATH, demo: READ_WRITE_DEMO_PATH },
 ];
 
 /** Every document held to a demo. Each quotes commands and names acts, and a
@@ -173,9 +183,13 @@ function extractCf(line: string): string | null {
 }
 
 /** Every command a demo runs, as normalized token lists: `run`, `run_loud`,
- * `refused` and `broken` lines execute theirs, and a `pending` line's first
- * argument is the command it promises. `run_loud` differs from `run` only in
- * how much of the output it shows, so both are commands the demo ran. */
+ * `run_stdin`, `refused` and `broken` lines execute theirs, and a `pending`
+ * line's first argument is the command it promises. `run_loud` differs from
+ * `run` only in how much of the output it shows, and `run_stdin` only in the
+ * value it pipes in ahead of the same argv, so all three are commands the
+ * demo ran. Slicing from the `cf` token is what lets a helper carry its own
+ * leading arguments — `run_stdin`'s payload, `refused`'s claim — without a
+ * rule per helper. */
 export function demoCommands(shText: string): string[][] {
   const commands: string[][] = [];
   for (const line of joinContinuations(shText)) {
@@ -184,8 +198,8 @@ export function demoCommands(shText: string): string[][] {
     if (tokens.length === 0) continue;
     const head = tokens[0]!;
     if (
-      head === "run" || head === "run_loud" || head === "refused" ||
-      head === "broken"
+      head === "run" || head === "run_loud" || head === "run_stdin" ||
+      head === "refused" || head === "broken"
     ) {
       const at = tokens.indexOf("cf");
       if (at !== -1) commands.push(dropSpaceFlag(tokens.slice(at)));

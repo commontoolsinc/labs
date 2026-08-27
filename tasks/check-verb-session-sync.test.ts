@@ -27,6 +27,8 @@ import {
   findViolations,
   joinContinuations,
   main,
+  READ_WRITE_DEMO_PATH,
+  READ_WRITE_TOUR_PATH,
   tokenize,
   TOUR_PATH,
   WALKTHROUGH_PATH,
@@ -77,6 +79,20 @@ describe("check-verb-session-sync", () => {
     it("extracts a command out of an assignment's substitution", () => {
       expect(demoCommands(`X=$(cf piece get --piece a title | jq -r .)`))
         .toEqual([["cf", "piece", "get", "--piece", "a", "title"]]);
+    });
+
+    it("reads past a helper's own leading arguments", () => {
+      // `run_stdin` carries the piped value ahead of the argv, so a rule that
+      // read the second token would take the payload for the command and
+      // report every write in a tour as invented.
+      expect(demoCommands(`run_stdin '25' cf set --piece a target`))
+        .toEqual([["cf", "set", "--piece", "a", "target"]]);
+    });
+
+    it("ignores a helper it does not know", () => {
+      // The head list is the whole of what makes a line a command the demo
+      // ran; a new helper that executes one has to be added to it.
+      expect(demoCommands(`frobnicate cf set --piece a target`)).toEqual([]);
     });
   });
 
@@ -265,6 +281,24 @@ describe("check-verb-session-sync", () => {
       expect(lines.join("\n")).toContain("1 document(s)");
       expect(demoFor(BULK_TOUR_PATH)).toBe(BULK_DEMO_PATH);
       expect(demoFor(TOUR_PATH)).toBe(DEMO_PATH);
+    });
+
+    it("holds the read/write tour to the demo that runs it", async () => {
+      // Every command in the tour is one read-write-demo.sh runs, and none of
+      // them is one the verb demo runs — so the pairing is what makes the
+      // document check at all, and the wrong demo says so loudly.
+      const lines: string[] = [];
+      expect(
+        await main({ mdPath: READ_WRITE_TOUR_PATH, log: (l) => lines.push(l) }),
+      ).toBe(0);
+      expect(demoFor(READ_WRITE_TOUR_PATH)).toBe(READ_WRITE_DEMO_PATH);
+      expect(
+        await main({
+          mdPath: READ_WRITE_TOUR_PATH,
+          shPath: DEMO_PATH,
+          error: () => {},
+        }),
+      ).toBe(1);
     });
 
     it("refuses a document no demo is paired with", async () => {
