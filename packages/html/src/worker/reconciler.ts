@@ -3154,12 +3154,6 @@ export class WorkerReconciler {
    */
   // deno-lint-ignore no-explicit-any
   private transformPropValue(key: string, value: unknown): any {
-    // TODO(danfuzz): what this returns does not survive the crossing whole.
-    // `convertCellsToLinks()` below preserves a `FabricPrimitive` by identity,
-    // and structured clone strips one to `{}` between here and the applicator,
-    // silently. Encoding with `codec-realm` is what would carry it; see the
-    // marker on `SetPropOp` in `../vdom-ops.ts`.
-    //
     // TODO(danfuzz): the `typeof` gate admits a `FabricSpecialObject`, so a
     // fabric-valued `style` prop is routed into the `Object.entries` walk of
     // `styleObjectToCssString` — yielding an empty CSS string, silently —

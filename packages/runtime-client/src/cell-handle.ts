@@ -33,7 +33,6 @@ import {
   type CfcLabelView,
   JSONValue,
   RequestType,
-  type WireCellValue,
 } from "./protocol/mod.ts";
 import { $conn, type RuntimeClient } from "./runtime-client.ts";
 
@@ -55,8 +54,11 @@ export const $onCellUpdate = Symbol("$onCellUpdate");
  * The container arms are here too, since theirs hold `FabricValue` where these
  * hold handles as well.
  *
- * That the connection cannot presently _carry_ all of it is a fact about
- * `WireCellValue`, not about this: see the note there.
+ * The connection's encoding carries this whole domain. The conversion walk
+ * that feeds it is narrower: `CellHandle.serialize()` refuses a
+ * `FabricInstance`, being a container it cannot descend to find a handle
+ * inside. So a value admitted here can still be refused on the way out, and
+ * the refusal names which.
  */
 export type ClientCellValue =
   | FabricValue
@@ -160,13 +162,21 @@ export class CellHandle<T = unknown> {
     value: T,
     type: RequestType.CellSet | RequestType.CellPush,
   ): Promise<void> {
-    // Serialized _first_, because it can refuse. The local update below is
-    // optimistic about the _write_ -- it assumes a value the connection
-    // accepts will land -- and not about whether the value can be sent at all.
-    // Were the refusal to come after, a value the runtime is never going to
-    // see would already be this handle's cached value and would already have
-    // reached every subscriber, leaving the display showing state that does
-    // not exist.
+    // Serialized first, which is what keeps a `FabricInstance` out of the
+    // cached value: `serialize()` refuses one, and refuses it here, before the
+    // local update below.
+    //
+    // Everything `serialize()` does accept, the local update is optimistic
+    // about: optimistic that the write lands, and equally that the value is
+    // one the encoding can carry. So a value the encode refuses does become
+    // this handle's cached value and does reach every subscriber before the
+    // send fails. Accepted deliberately: what is left in that set is a value
+    // TypeScript calls a `FabricValue` and the value model does not -- a
+    // unique symbol, an object forged onto a fabric prototype -- and telling
+    // those apart before the write means validating the whole value on every
+    // write. The failure still reaches the caller, because
+    // `RuntimeConnection.request()` is not `async` and the encode's throw
+    // leaves before the `.catch()` below can absorb it.
     //
     // `T` is unconstrained, so this says what the write path requires rather
     // than what the class guarantees. Constraining `T` to `ClientCellValue` is
@@ -490,7 +500,10 @@ export class CellHandle<T = unknown> {
    * Recursively hydrate any object, converting any sigil links into
    * CellHandle instances. Legacy `$alias` records are plain data — they are
    * only meaningful as bindings inside Pattern objects, which the client
-   * never interprets.
+   * never interprets. A `FabricPrimitive` comes back as itself.
+   *
+   * @throws If the value holds a `FabricInstance`, which is a container this
+   *   walk cannot descend and so cannot hydrate a link inside.
    */
   static deserialize<T>(
     base: CellHandle<T>,
@@ -518,10 +531,12 @@ export class CellHandle<T = unknown> {
     // see it -- and a value handed back unhydrated would carry that link where
     // a `CellHandle` belongs.
     //
-    // Nothing reaches this today, de facto rather than by construction: the
-    // connection carries a value by structured cloning, which strips a fabric
-    // class before it arrives, and `CellHandle.serialize()` refuses one on the
-    // way out.
+    // Nothing reaches this today, de facto rather than by construction. The
+    // transport no longer helps: the envelope's encoding carries an instance
+    // across with its class, where structured cloning used to strip it. What
+    // keeps it unreachable is the refusal at each of the other ends of the
+    // crossing -- `convertCellsToLinks()` on the way out of the worker, and
+    // `serialize()` below on the way in.
     if (value instanceof FabricInstance) {
       refuseFabricInstance(value, "when hydrating a value off the connection");
     }
@@ -549,49 +564,36 @@ export class CellHandle<T = unknown> {
    * Converts a value the client holds into the one the connection carries,
    * which is the same data with a `CellRef` wherever a `CellHandle` sat.
    *
-   * Refuses a `FabricPrimitive`, which the connection cannot carry, and a
-   * `FabricInstance`, which is a container this walk cannot descend to find a
-   * handle inside.
+   * A `FabricPrimitive` crosses as itself, the envelope's encoding carrying it
+   * with its class, as it carries a `bigint` and a `symbol`.
    *
    * `CellHandle.deserialize()` is the inverse.
+   *
+   * @throws If the value holds a `FabricInstance`, which is a container this
+   *   walk cannot descend and so cannot convert a handle inside.
    */
-  static serialize(value: ClientCellValue): WireCellValue {
+  static serialize(value: ClientCellValue): FabricValue {
     if (isCellHandle(value)) return value.ref();
 
     if (Array.isArray(value)) {
       return value.map((element) => CellHandle.serialize(element));
     }
 
-    // A `FabricPrimitive` is a `ClientCellValue` -- a cell holds one like
-    // any other value -- but `WireCellValue` has no representation for it, so
-    // this refuses rather than converting. It goes _before_ the record test:
-    // such a value is also a record, and that branch would otherwise rebuild
+    // A `FabricPrimitive` crosses whole rather than being walked: it is a
+    // leaf, so stopping at it loses nothing. This goes _before_ the record
+    // test, since such a value is also a record and that branch would rebuild
     // it from enumerable own properties it is not supposed to have, putting
-    // `{}` on the wire in place of a `FabricBytes` and losing the bytes with
-    // nothing to show for it.
-    //
-    // A _de facto_ tripwire, in the sense of "Flag-gated tripwires" in
-    // `docs/development/EXPERIMENTAL_OPTIONS.md`: no flag gates this, and a
-    // `FabricBytes` is an ordinary shipped value, so what makes the refusal
-    // safe is that nothing writes one from the client today. The first thing
-    // that does will throw here, in the change that adds it.
-    //
-    // TODO(danfuzz): carry the whole `FabricValue` domain across this
-    // connection, at which point this becomes a conversion rather than a
-    // refusal. `codec-realm` is the mechanism, and the gap it closes is the
-    // one marked on `WireCellValue` in `protocol/types.ts`.
-    if (value instanceof FabricPrimitive) {
-      throw new Error(
-        `Cannot yet handle \`${value.constructor.name}\` (a ` +
-          "`FabricSpecialObject`) on this connection.",
-      );
-    }
+    // `{}` on the wire in place of a `FabricBytes`.
+    if (value instanceof FabricPrimitive) return value;
 
-    // An instance is refused for a second reason, which outlives the first: it
-    // is a container whose contents this walk cannot reach, so a `CellHandle`
-    // inside one would cross unconverted even on a connection that carried the
-    // class. Refused through the shared helper, as `deserialize()` above
-    // already does, so the two walks say the same thing about the same value.
+    // An instance is a container whose contents this walk cannot reach, so a
+    // `CellHandle` inside one would cross unconverted -- as a handle, which
+    // the wire has no representation for. Refused here rather than downstream:
+    // the worker's `mapCellRefsToSigilLinks()` refuses one as well, and a
+    // refusal there arrives as an error reply, after this handle has already
+    // cached the value and told its subscribers. Refused through the shared
+    // helper, as `deserialize()` above already does, so the two walks say the
+    // same thing about the same value.
     if (value instanceof FabricInstance) {
       refuseFabricInstance(value, "when sending a value over this connection");
     }
@@ -604,28 +606,16 @@ export class CellHandle<T = unknown> {
       );
     }
 
-    if (
-      typeof value === "string" || typeof value === "number" ||
-      typeof value === "boolean" || value === undefined || value === null
-    ) {
-      return value;
-    }
-
-    // Reachable two ways. A `bigint` and a `symbol` are `FabricValue` arms, so
-    // a cell holds either and `ClientCellValue` admits either, while
-    // `WireCellValue` has neither -- the same gap the refusal above covers,
-    // for the two arms that are not objects. And `CellHandle<T>` does not
-    // constrain `T`, so `set()` and `send()` cast on the way in and a caller
-    // can arrive here with anything at all.
+    // Every remaining arm is a primitive the encoding carries as itself.
+    // `CellHandle<T>` does not constrain `T`, so a caller can arrive here with
+    // something `ClientCellValue` does not admit at all; that is the encode's
+    // to answer, per the input contract, and not worth a check on the way to
+    // it that every correct value would also pay.
     //
-    // `typeof` names the kind, since the value's own text rarely explains the
-    // refusal: a `1n` prints as `1`, which reads like a number that was
-    // rejected for no reason. `String()` rather than interpolation, a symbol
-    // throwing on implicit conversion and replacing this refusal with a
-    // `TypeError` naming nothing.
-    throw new Error(
-      `Cannot send a \`${typeof value}\` on this connection: ${String(value)}`,
-    );
+    // Cast because `Array.isArray()` does not narrow a `readonly` array out of
+    // the union, though it does catch one at run time -- so the arm TypeScript
+    // still sees here cannot actually reach it.
+    return value as FabricValue;
   }
 }
 

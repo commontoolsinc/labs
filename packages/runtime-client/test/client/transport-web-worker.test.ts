@@ -1,4 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
+import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
+import { type ErrorNotification, NotificationType } from "@/protocol/mod.ts";
 import { expect } from "@std/expect";
 import { TransportNotificationType } from "@/protocol/mod.ts";
 import { WebWorkerRuntimeTransport } from "@/client/transports/web-worker/transport-web-worker.ts";
@@ -59,6 +61,18 @@ function connectWithFakeWorker(): {
   }
 }
 
+/**
+ * A `MessageEvent` carrying `data` as the worker would actually post it. The
+ * clone is what a real `postMessage()` inserts between the encode and the
+ * decode, and it matters here: the decode cedes and freezes what it is given,
+ * so without one a test would be watching a tree it still holds a reference to.
+ */
+function posted(data: unknown): MessageEvent {
+  return new MessageEvent("message", {
+    data: structuredClone(realmFromFabricValue(data as never)),
+  });
+}
+
 function handlerOf(
   transport: WebWorkerRuntimeTransport,
 ): (event: MessageEvent) => void {
@@ -80,14 +94,12 @@ describe("WebWorkerRuntimeTransport", () => {
 
       // Anything else leaves it pending, the notification being the one message
       // that says the worker's entry has run.
-      handle(new MessageEvent("message", { data: { msgId: 1 } }));
+      handle(posted({ msgId: 1 }));
       await Promise.resolve();
       expect(settled).toBe(false);
 
       handle(
-        new MessageEvent("message", {
-          data: { type: TransportNotificationType.WorkerReady },
-        }),
+        posted({ type: TransportNotificationType.WorkerReady }),
       );
       await ready;
       expect(settled).toBe(true);
@@ -97,10 +109,12 @@ describe("WebWorkerRuntimeTransport", () => {
   });
 
   describe("connect()", () => {
+    // A failed `connect()` never hands the caller a transport, so there is
+    // nothing left to call `dispose()` on -- and `dispose()` holds the only
+    // `terminate()`. The worker would run for as long as the page did. Both
+    // ways readiness can fail are covered below.
+
     it("terminates the worker when a pre-ready worker error rejects it", async () => {
-      // A failed `connect()` never hands the caller a transport, so there is
-      // nothing left to call `dispose()` on -- and `dispose()` holds the only
-      // `terminate()`. The worker would run for as long as the page did.
       const { connection, worker } = connectWithFakeWorker();
 
       worker.dispatchEvent(
@@ -112,6 +126,116 @@ describe("WebWorkerRuntimeTransport", () => {
 
       await expect(connection).rejects.toThrow("worker failed to load");
       expect(worker.terminated).toBe(true);
+    });
+
+    it("terminates the worker when a pre-ready decode failure rejects it", async () => {
+      const { connection, worker } = connectWithFakeWorker();
+
+      worker.dispatchEvent(
+        new MessageEvent("message", { data: { not: "an encoding" } }),
+      );
+
+      await expect(connection).rejects.toThrow("Undecodable message");
+      expect(worker.terminated).toBe(true);
+    });
+  });
+
+  describe("what a decode delivers", () => {
+    it("emits a message the consumer cannot edit", () => {
+      // `BaseRequest` states this as one contract for both directions: a
+      // receiver owns what it is given and may cede it, but does not edit it,
+      // because every container a decode returns is frozen. Pinned here rather
+      // than only stated -- and at the seam a consumer actually reads from.
+      const transport = makeTransport();
+      const emitted: unknown[] = [];
+      transport.on("message", (m) => emitted.push(m));
+      const handle = handlerOf(transport);
+      handle(posted({ type: TransportNotificationType.WorkerReady }));
+
+      handle(posted({ msgId: 3, data: { nested: { a: [1, 2] } } }));
+
+      expect(emitted).toHaveLength(1);
+      const message = emitted[0] as { data: { nested: { a: number[] } } };
+      expect(Object.isFrozen(message)).toBe(true);
+      expect(Object.isFrozen(message.data.nested)).toBe(true);
+      expect(Object.isFrozen(message.data.nested.a)).toBe(true);
+    });
+  });
+
+  describe("an undecodable message", () => {
+    it("reports it and leaves the listener standing", () => {
+      const transport = makeTransport();
+      const emitted: unknown[] = [];
+      transport.on("message", (m) => emitted.push(m));
+      const handle = handlerOf(transport);
+
+      // Ready first: before that there is no dispatch to keep standing, and a
+      // decode failure lands on `ready()` instead (see below).
+      handle(posted({ type: TransportNotificationType.WorkerReady }));
+
+      // Not an encoding at all, which is what a non-conforming sender or a
+      // damaged one would deliver. The worker proves each payload encodable
+      // before sending, so this should never happen -- the point is what
+      // happens if it does.
+      handle(new MessageEvent("message", { data: { not: "an encoding" } }));
+
+      expect(emitted).toHaveLength(1);
+      const reported = emitted[0] as ErrorNotification;
+      expect(reported.type).toBe(NotificationType.ErrorReport);
+      expect(reported.message).toContain("Undecodable message");
+
+      // The transport still works afterwards, which is the whole point of
+      // reporting rather than throwing out of the listener.
+      handle(posted({ msgId: 7, data: { value: true } }));
+      expect(emitted).toHaveLength(2);
+    });
+
+    it("rejects `ready()` when it arrives before the worker is ready", async () => {
+      // `connect()` awaits `ready()`, so a pre-ready failure reported into an
+      // emitter nobody is listening to yet would leave that promise pending
+      // for good -- and a caller waiting on a promise that will not settle has
+      // no way back. `_handleError()` puts a pre-ready worker error on the
+      // promise for the same reason; this is the decode's half of that.
+      const transport = makeTransport();
+      const emitted: unknown[] = [];
+      transport.on("message", (m) => emitted.push(m));
+
+      handlerOf(transport)(
+        new MessageEvent("message", { data: { not: "an encoding" } }),
+      );
+
+      await expect(transport.ready()).rejects.toThrow("Undecodable message");
+      expect(emitted).toHaveLength(0);
+
+      await transport.dispose();
+    });
+
+    it("reports a failure that refuses to be stringified", () => {
+      const transport = makeTransport();
+      const emitted: unknown[] = [];
+      transport.on("message", (m) => emitted.push(m));
+      handlerOf(transport)(
+        posted({ type: TransportNotificationType.WorkerReady }),
+      );
+
+      // A decode failure can throw a value with no `toString` to reach, and
+      // deriving the report's text must not fail in turn.
+      const hostile = new Proxy({}, {
+        get() {
+          throw Object.create(null);
+        },
+        ownKeys() {
+          return ["x"];
+        },
+        getOwnPropertyDescriptor() {
+          return { enumerable: true, configurable: true };
+        },
+      });
+      handlerOf(transport)(new MessageEvent("message", { data: hostile }));
+
+      expect(emitted).toHaveLength(1);
+      expect((emitted[0] as ErrorNotification).message)
+        .toContain("Undecodable message");
     });
   });
 
@@ -135,21 +259,17 @@ describe("WebWorkerRuntimeTransport", () => {
         const handle = handlerOf(transport);
 
         handle(
-          new MessageEvent("message", {
-            data: {
-              type: TransportNotificationType.WorkerConsole,
-              level: "error",
-              text: "kaboom",
-            },
+          posted({
+            type: TransportNotificationType.WorkerConsole,
+            level: "error",
+            text: "kaboom",
           }),
         );
         handle(
-          new MessageEvent("message", {
-            data: {
-              type: TransportNotificationType.WorkerConsole,
-              level: "warn",
-              text: "careful",
-            },
+          posted({
+            type: TransportNotificationType.WorkerConsole,
+            level: "warn",
+            text: "careful",
           }),
         );
 
@@ -169,7 +289,7 @@ describe("WebWorkerRuntimeTransport", () => {
           level: "fatal",
           text: "not console traffic",
         };
-        handle(new MessageEvent("message", { data: offRoster }));
+        handle(posted(offRoster));
         expect(calls).toHaveLength(2);
         expect(emitted).toEqual([offRoster]);
       } finally {
@@ -180,7 +300,7 @@ describe("WebWorkerRuntimeTransport", () => {
 
       // A non-console message still flows through as an emitted IPC message.
       const ipc = { msgId: 7, data: { value: true } };
-      handlerOf(transport)(new MessageEvent("message", { data: ipc }));
+      handlerOf(transport)(posted(ipc));
       expect(emitted).toContainEqual(ipc);
 
       await transport.dispose();
