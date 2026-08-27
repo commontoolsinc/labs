@@ -415,11 +415,14 @@ export type ServingLoopStats = {
      * entry's `consequenced` mark into the handler tx BEFORE the body
      * runs, so letting the skip seal committed a 1-op mark-only
      * consequence — the entry permanently consumed with ZERO effects
-     * and no error (a04's seqs 53/56). Counted per withdrawn dispatch;
-     * the entry stays pending and re-drains (the deferral threshold
-     * hardens a permanently unresolvable argument into the visible §5
-     * DROP notice). A count that grows without `processed` settling
-     * names a handler whose argument never resolves. */
+     * and no error (a04's seqs 53/56). Counted per withdrawn DRAIN
+     * dispatch — an LT1 in-process copy's withdrawal is uncounted (no
+     * failure hook; its entry lands unmarked and the drain's own later
+     * copy counts if still unresolvable). The entry stays pending and
+     * re-drains (the deferral threshold hardens a permanently
+     * unresolvable argument into the visible §5 DROP notice). A count
+     * that grows without `processed` settling names a handler whose
+     * argument never resolves. */
     handlerNotRunDeferrals: number;
     /** The pre-dispatch LOAD-PARK deferrals (verification-coverage.md's
      * OW45 residue member, fixed 2026-08-26): a served event's dispatch
