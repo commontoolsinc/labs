@@ -26,7 +26,14 @@
  */
 
 import { parseArgs } from "@std/cli/parse-args";
-import { dirname, fromFileUrl, join, resolve, toFileUrl } from "@std/path";
+import {
+  dirname,
+  extname,
+  fromFileUrl,
+  join,
+  resolve,
+  toFileUrl,
+} from "@std/path";
 
 const moduleDir = dirname(fromFileUrl(import.meta.url));
 import {
@@ -43,10 +50,13 @@ import {
   resolveHarnessModelProviderPreference,
 } from "../src/auth/provider-settings.ts";
 import type {
+  HarnessFabricCfcEnforcementMode,
+  HarnessFabricCfcFlowLabelsMode,
   HarnessFabricSessionConfig,
   HarnessModelProviderId,
   HarnessPatternIndexConfig,
 } from "../src/config.ts";
+import type { CfcPosture } from "@commonfabric/runner";
 import {
   DEFAULT_HARNESS_CHAT_POLICY,
   type HarnessChatError,
@@ -71,6 +81,12 @@ import {
 import type { CreateHarnessPromptLoopOptions } from "../src/prompt-loop.ts";
 import type { HarnessChatSessionStore } from "../src/session-store.ts";
 import {
+  listKickoffRuns,
+  readKickoffRun,
+  readKickoffRunArtifact,
+  readKickoffToolOutput,
+} from "./run-store.ts";
+import {
   type KickoffSessionListing,
   summarizeKickoffSessions,
 } from "./sessions.ts";
@@ -85,8 +101,42 @@ import {
 /** Loopback only. See the module comment on why there is no authentication. */
 const HOSTNAME = "127.0.0.1";
 
+/**
+ * The paths served from the built page rather than from an API route: the page
+ * itself, and the two directories felt emits into.
+ */
+const ASSET_PATH = /^\/(scripts\/|styles\/|build-manifest\.json$|$)/;
+
+const CONTENT_TYPES: Readonly<Record<string, string>> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".map": "application/json; charset=utf-8",
+};
+
+const contentType = (extension: string): string =>
+  CONTENT_TYPES[extension] ?? "application/octet-stream";
+
 const DEFAULT_PORT = 8100;
 const DEFAULT_FABRIC_API_URL = "http://localhost:8000";
+
+/**
+ * The CFC posture a kickoff session runs its fabric session under. This
+ * surface exists to show CFC working, so the named bundle is on by default
+ * rather than opted into: `max-enforcement` spreads
+ * `MAX_ENFORCEMENT_CFC_OPTIONS` over the runtime `run_pattern` deploys into —
+ * flow labels `persist`, write floor, policy evaluation, declared monotonicity
+ * and label-metadata protection at `enforce`, trigger-read gating on, the
+ * standard prompt-caveat policy, and public-only ceilings on the network-fetch
+ * sinks. `--fabric-cfc-posture none` turns it off for a run that wants the
+ * first-party default instead.
+ *
+ * The bundle leaves the enforcement pin at `enforce-explicit`; raising to
+ * `enforce-strict` stays a deliberate per-session move, so it has its own flag
+ * and no default here.
+ */
+const DEFAULT_FABRIC_CFC_POSTURE: CfcPosture = "max-enforcement";
 
 /** The CLI's own default model, so both entrypoints bill the same route. */
 const DEFAULT_MODEL = "gpt-5.6-terra";
@@ -180,6 +230,9 @@ export const resolveKickoffConfig = (
       "pattern-index-url",
       "session-db",
       "max-model-turns",
+      "fabric-cfc-enforcement-mode",
+      "fabric-cfc-flow-labels",
+      "fabric-cfc-posture",
     ],
   });
   const flag = (name: string): string | undefined =>
@@ -233,6 +286,35 @@ export const resolveKickoffConfig = (
       `--fabric-space must be a space name rather than a DID: assign_slug composes a URL from the name, and offers none for ${space}`,
     );
   }
+  const posture = flag("fabric-cfc-posture") ??
+    nonEmpty(env.CF_HARNESS_FABRIC_CFC_POSTURE);
+  if (
+    posture !== undefined && posture !== "none" && posture !== "max-enforcement"
+  ) {
+    throw new Error(
+      `--fabric-cfc-posture must be max-enforcement or none: ${posture}`,
+    );
+  }
+  const flowLabels = flag("fabric-cfc-flow-labels") ??
+    nonEmpty(env.CF_HARNESS_FABRIC_CFC_FLOW_LABELS);
+  if (
+    flowLabels !== undefined &&
+    !["off", "observe", "persist"].includes(flowLabels)
+  ) {
+    throw new Error(
+      `--fabric-cfc-flow-labels must be off, observe, or persist: ${flowLabels}`,
+    );
+  }
+  const fabricEnforcement = flag("fabric-cfc-enforcement-mode") ??
+    nonEmpty(env.CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE);
+  if (
+    fabricEnforcement !== undefined &&
+    !["enforce-explicit", "enforce-strict"].includes(fabricEnforcement)
+  ) {
+    throw new Error(
+      `--fabric-cfc-enforcement-mode must be enforce-explicit or enforce-strict: ${fabricEnforcement}`,
+    );
+  }
   const fabricSession: HarnessFabricSessionConfig = {
     apiUrl: requiredUrl(
       flag("fabric-api-url") ?? nonEmpty(env.CF_HARNESS_FABRIC_API_URL) ??
@@ -241,6 +323,18 @@ export const resolveKickoffConfig = (
     ),
     identityKeyPath: resolve(cwd, identityKeyPath),
     space,
+    ...(posture === "none"
+      ? {}
+      : { cfcPosture: (posture ?? DEFAULT_FABRIC_CFC_POSTURE) as CfcPosture }),
+    ...(flowLabels !== undefined
+      ? { cfcFlowLabels: flowLabels as HarnessFabricCfcFlowLabelsMode }
+      : {}),
+    ...(fabricEnforcement !== undefined
+      ? {
+        cfcEnforcementMode:
+          fabricEnforcement as HarnessFabricCfcEnforcementMode,
+      }
+      : {}),
   };
 
   // The repo's skills/ tree gives the pattern-author subagent its preloaded
@@ -467,8 +561,8 @@ export class KickoffServer {
 
   async handle(request: Request): Promise<Response> {
     const url = new URL(request.url);
-    if (request.method === "GET" && url.pathname === "/") {
-      return await this.#page();
+    if (request.method === "GET" && ASSET_PATH.test(url.pathname)) {
+      return await this.#asset(url.pathname);
     }
     if (request.method === "POST" && url.pathname === "/api/task") {
       return await this.#startTask(request);
@@ -487,16 +581,80 @@ export class KickoffServer {
     if (request.method === "GET" && url.pathname === "/api/events") {
       return this.#events(url);
     }
+    if (request.method === "GET" && url.pathname === "/api/runs") {
+      return Response.json({
+        runs: await listKickoffRuns(this.#config.artifactRoot),
+      });
+    }
+    if (request.method === "GET" && url.pathname.startsWith("/api/runs/")) {
+      return await this.#run(url);
+    }
     return new Response("not found", { status: 404 });
   }
 
-  async #page(): Promise<Response> {
-    const html = await Deno.readTextFile(
-      new URL("./index.html", import.meta.url),
-    );
-    return new Response(html, {
-      headers: { "content-type": "text/html; charset=utf-8" },
-    });
+  /**
+   * One run's artifacts: the run whole, one named artifact of it, or one tool
+   * output. The path is read rather than pattern-matched because a run id is
+   * a path segment and the store is what decides whether it is a legal one —
+   * a name this cannot resolve is a 404 rather than a read of somewhere else.
+   */
+  async #run(url: URL): Promise<Response> {
+    const [runId, kind, name, ...rest] = url.pathname
+      .slice("/api/runs/".length)
+      .split("/")
+      .map(decodeURIComponent);
+    if (runId === undefined || runId === "" || rest.length > 0) {
+      return new Response("not found", { status: 404 });
+    }
+    const root = this.#config.artifactRoot;
+    if (kind === undefined || kind === "") {
+      const detail = await readKickoffRun(root, runId);
+      return detail === undefined
+        ? new Response("not found", { status: 404 })
+        : Response.json(detail);
+    }
+    if (name === undefined || name === "") {
+      return new Response("not found", { status: 404 });
+    }
+    const text = kind === "artifacts"
+      ? await readKickoffRunArtifact(root, runId, name)
+      : kind === "tool-outputs"
+      ? await readKickoffToolOutput(root, runId, name)
+      : undefined;
+    return text === undefined
+      ? new Response("not found", { status: 404 })
+      : new Response(text, {
+        headers: { "content-type": "application/json; charset=utf-8" },
+      });
+  }
+
+  /**
+   * One file of the built page. The page is a felt build under `dist/`, so a
+   * server started before `deno task kickoff:build` has nothing to serve and
+   * says which command produces it rather than answering an empty 404.
+   */
+  async #asset(pathname: string): Promise<Response> {
+    const relativePath = pathname === "/" ? "index.html" : pathname.slice(1);
+    if (relativePath.split("/").some((segment) => segment === "..")) {
+      return new Response("not found", { status: 404 });
+    }
+    const path = join(moduleDir, "dist", relativePath);
+    try {
+      const body = await Deno.readFile(path);
+      return new Response(body, {
+        headers: { "content-type": contentType(extname(path)) },
+      });
+    } catch {
+      return new Response(
+        pathname === "/"
+          ? "the kickoff page is not built; run `deno task --cwd packages/cf-harness kickoff:build`"
+          : "not found",
+        {
+          status: 404,
+          headers: { "content-type": "text/plain; charset=utf-8" },
+        },
+      );
+    }
   }
 
   /**
@@ -771,6 +929,16 @@ export const startKickoffServer = async (
       console.log(`  fabric:     ${config.fabricSession.apiUrl}`);
       console.log(
         `  index:      ${config.patternIndex?.baseUrl ?? "(not configured)"}`,
+      );
+      console.log(
+        `  cfc:        ${
+          config.fabricSession.cfcPosture ?? "first-party default"
+        }, flow labels ${
+          config.fabricSession.cfcFlowLabels ??
+            (config.fabricSession.cfcPosture === "max-enforcement"
+              ? "persist"
+              : "off")
+        }, ${config.fabricSession.cfcEnforcementMode ?? "enforce-explicit"}`,
       );
       console.log(`  workspace:  ${config.workspacePath}`);
       console.log(`  artifacts:  ${config.artifactRoot}\n`);

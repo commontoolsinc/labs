@@ -3,7 +3,9 @@
   "tasks": {
     "run": "deno run -A src/main.ts",
     "help": "deno run -A src/main.ts --help",
-    "kickoff": "deno run -A kickoff/server.ts",
+    "kickoff:build": "cd kickoff && deno run -A ../../felt/cli.ts build .",
+    "kickoff:watch": "cd kickoff && deno run -A ../../felt/cli.ts dev .",
+    "kickoff": "deno task kickoff:build && deno run -A kickoff/server.ts",
     "test": "ENV=test deno test --allow-read --allow-write --allow-run --allow-ffi --allow-net --allow-env test",
     "test:integration": "CF_HARNESS_INTEGRATION=1 deno test -A integration"
   },
