@@ -739,6 +739,44 @@ describe("piece source reconciliation", () => {
       expect(getPatternIdentityRef(piece)).toEqual(thirdRef);
     });
 
+    it("installs no follower when the piece stops while its source is read", async () => {
+      // Reading a fabric source is where the follower is installed. A stop
+      // landing during that read has to leave the piece following nothing, or
+      // it would keep taking updates after it stopped.
+      const piece = await preparePiece(refuseEveryFetch);
+      const upstream = runtime.getCell(
+        piece.space,
+        `reconcile-upstream-${crypto.randomUUID()}`,
+      );
+      await runtime.setup(
+        undefined,
+        await compileMarkerPattern("v1"),
+        {},
+        upstream,
+      );
+      await stampSource(
+        piece,
+        `cf:/${piece.space}/${upstream.getAsNormalizedFullLink().id}`,
+      );
+      const originalRef = getPatternIdentityRef(piece);
+
+      const pass = reconcile(piece);
+      runtime.sourceReconciler.unwatch(piece);
+      expect(await pass).toBe("unavailable");
+      expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+
+      // Nothing is following, so moving the upstream leaves the piece alone.
+      await runtime.setup(
+        undefined,
+        await compileMarkerPattern("v2"),
+        {},
+        upstream,
+      );
+      await runtime.idle();
+      await runtime.sourceReconciler.idle();
+      expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+    });
+
     it("stops following once the piece stops", async () => {
       const piece = await preparePiece(refuseEveryFetch);
       const upstreamPiece = runtime.getCell(
