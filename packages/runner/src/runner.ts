@@ -9,6 +9,7 @@ import {
 } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { hashOf, hashStringOf } from "@commonfabric/data-model/value-hash";
+import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -255,14 +256,6 @@ type ArgumentLinkRoot = {
   schema?: JSONSchema;
 };
 
-// Whether a declared schema hands the run a reference rather than a value to
-// read through: `asCell` on the schema itself, or a union or reference that
-// resolves to one. A union counts when ANY arm carries the marker, because
-// that is the arm the reader takes — `preferAsCellBranch` in schema-view.ts
-// picks the `asCell` branch and hands back a cell handle, so `Cell<T> |
-// undefined` is a handle rather than something read through. The depth bound
-// terminates a declaration that refers to itself, which resolves to itself
-// however many times it is followed.
 // The child schema a declared read sees at `key`, mirroring `childSchema` in
 // schema-view.ts: `schemaAtPath` decides which children exist from the
 // schema's `type`, so a schema that declares `properties` or `items` and omits
@@ -290,12 +283,20 @@ function narrowChildSchema(schema: JSONSchema, key: string): JSONSchema {
   if (isObjectOrArray(properties) && Object.hasOwn(properties, key)) {
     return (properties as Record<string, JSONSchema>)[key];
   }
-  if (/^(?:0|[1-9][0-9]*)$/.test(key) && schema.items !== undefined) {
+  if (isArrayIndexPropertyName(key) && schema.items !== undefined) {
     return schema.items as JSONSchema;
   }
   return narrowed;
 }
 
+// Whether a declared schema hands the run a reference rather than a value to
+// read through: `asCell` on the schema itself, or a union or reference that
+// resolves to one. A union counts when ANY arm carries the marker, because
+// that is the arm the reader takes — `preferAsCellBranch` in schema-view.ts
+// picks the `asCell` branch and hands back a cell handle, so `Cell<T> |
+// undefined` is a handle rather than something read through. The depth bound
+// terminates a declaration that refers to itself, which resolves to itself
+// however many times it is followed.
 function isReferenceOnlySchema(
   schema: JSONSchema | undefined,
   depth: number = 4,
@@ -5337,10 +5338,10 @@ export class Runner {
    *
    * Where a declaration runs out — a `true` schema, an object schema with no
    * `properties`, a root with no schema — the walk falls back to the
-   * undeclared form: every link in the raw value, two link hops deep from
-   * that point, which covers the measured defaultProfile container chain and
-   * any read the transformer could not see. Deduped, values only; an
-   * unloadable target is skipped rather than failing the resume.
+   * undeclared form: every link in the raw value within the same overall
+   * two-link-hop bound, which covers the measured defaultProfile container
+   * chain and any read the transformer could not see. Deduped, values only;
+   * an unloadable target is skipped rather than failing the resume.
    */
   async #syncArgumentLinkTargets(
     roots: readonly ArgumentLinkRoot[],
@@ -5437,15 +5438,15 @@ export class Runner {
       ) => {
         if (schema === false) return;
         // A `true` or absent schema is where the declaration ran out; scan
-        // from here in the undeclared form with a fresh two-hop budget.
+        // from here in the undeclared form with the remaining overall budget.
         const declared = schema !== undefined && schema !== true;
         const link = parseLink(value, base);
         if (link) {
           // `asCell` marks a reference the run holds rather than reads
           // through: sync the target document, walk no further. The marker
           // usually rides the declared property schema beside any `$ref`;
-          // where the declaration is a union or ends in a reference, it
-          // counts as opaque only when every resolved arm does.
+          // where the declaration is a union or ends in a reference, any
+          // resolved arm carrying the marker makes the value a handle.
           const reference = declared && isReferenceOnlySchema(schema);
           enqueue(
             link,
@@ -5465,9 +5466,8 @@ export class Runner {
           // — a cold target can then enter the commit basis, the exact
           // failure this walk exists to prevent.
           for (const key in value) {
-            // The undeclared scan runs on its own two-hop budget from the
-            // point the declaration ran out (the enqueue clamp enforces the
-            // same bound; stating it here keeps the transition visible).
+            // The undeclared scan keeps the remaining share of the overall
+            // two-hop budget; the clamp states that transition explicitly.
             collect(
               value[key],
               base,

@@ -382,6 +382,20 @@ describe("syncArgumentLinkTargets", () => {
     expect(syncedIds).toContain(id(leaf));
   });
 
+  it("does not treat an out-of-range numeric property as an array item", async () => {
+    const { make, commit } = docBuilder("non-index property");
+    const leaf = make("leaf", { n: 1 });
+    const root = make("root", { "4294967295": leaf });
+    await commit();
+    await run(root, {
+      items: { type: "object" },
+    } as JSONSchema);
+    // 2^32 - 1 is an ordinary property name, not an array index. The reader's
+    // child-schema fallback therefore does not apply `items` to it, and the
+    // pre-sync must leave the same property unselected.
+    expect(syncedIds).not.toContain(id(leaf));
+  });
+
   it("keeps two subtrees apart when one path segment contains a separator", async () => {
     const { make, commit } = docBuilder("path collision");
     const nestedLeaf = make("nested leaf", { n: 1 });
