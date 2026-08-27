@@ -383,6 +383,70 @@ Deno.test(
 );
 
 Deno.test(
+  "Callback support policy: a nullish-returning map callback is render-collecting",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const rows = items.map(() => null);
+      const result = <div>{rows}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findMapCallback(sourceFile);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    // `null` renders nothing and is never a cell, so the collected array is
+    // ordinary data and the result may leave the render path.
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
+  },
+);
+
+Deno.test(
+  "Callback support policy: a literal-returning map callback is render-collecting",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const flags = items.map(() => true);
+      const result = <div>{flags}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findMapCallback(sourceFile);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    // A literal constant carries no lowered value, so nothing can escape.
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
+  },
+);
+
+Deno.test(
+  "Callback support policy: parentheses around a JSX-child map do not change the decision",
+  () => {
+    const { sourceFile, checker, context } = createProgramAndContext(
+      `
+      const items = [1, 2, 3];
+      const result = <div>{(items.map((item) => item + 1))}</div>;
+    `,
+      { withDefaultLibrary: true },
+    );
+
+    const callback = findMapCallback(sourceFile);
+    const semantics = getCallbackBoundarySemantics(callback, checker, context);
+
+    assertEquals(semantics.isPlainArrayValueCallback, true);
+    // Parentheses are spelling: the value-collecting map still reaches the
+    // JSX child, so it keeps the wrapper site the bare spelling gets.
+    assertEquals(semantics.supportsPatternOwnedWrapperCallbackSite, true);
+  },
+);
+
+Deno.test(
   "Callback support policy: a map result stored in a local carries no wrapper site",
   () => {
     const { sourceFile, checker, context } = createProgramAndContext(
