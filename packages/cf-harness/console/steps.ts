@@ -10,6 +10,7 @@
  * in, which is the order that matters for reading a run back.
  */
 
+import { matchLLMFriendlyLink } from "@commonfabric/runner/shared";
 import {
   HANDLE_TOKEN_PATTERN,
   type HarnessHandleEntry,
@@ -668,16 +669,41 @@ const handleProvenance = (
 };
 
 /**
- * The document an LLM-friendly link addresses. The cell a run holds a handle
- * to is the document, so a link naming a path inside one resolves to the same
- * cell rather than to a second one.
+ * The cell an argument written as a link names, and the handle for it where the
+ * run holds one.
+ *
+ * What counts as a link is the runner's own `matchLLMFriendlyLink`, so a
+ * cross-space link and any entity prefix are recognised, not the `/of:` form
+ * alone — a spelling this failed to recognise would read as a plain value and
+ * lose the reference entirely.
+ *
+ * A handle's `ref` is the canonical spelling of what it names, so a link naming
+ * a path inside a held cell starts with that cell's `ref`. The longest such
+ * match wins, which is what keeps a path inside a document resolving to the
+ * document rather than to a second cell. A link matching no handle is still a
+ * reference — the run simply holds no handle for it.
  */
-const linkDocument = (value: unknown): string | undefined => {
+const linkTarget = (
+  value: unknown,
+  handles: readonly ConsoleHandle[],
+): { ref: string; handle?: ConsoleHandle } | undefined => {
   if (typeof value !== "string") {
     return undefined;
   }
-  const match = value.trim().match(/^(\/of:[A-Za-z0-9]+:[A-Za-z0-9_-]+)/);
-  return match?.[1];
+  const text = value.trim();
+  if (!matchLLMFriendlyLink.test(text)) {
+    return undefined;
+  }
+  let best: ConsoleHandle | undefined;
+  for (const handle of handles) {
+    if (
+      handle.ref !== undefined && text.startsWith(handle.ref) &&
+      (best?.ref === undefined || handle.ref.length > best.ref.length)
+    ) {
+      best = handle;
+    }
+  }
+  return best === undefined ? { ref: text } : { ref: best.ref!, handle: best };
 };
 
 /**
@@ -696,24 +722,15 @@ export const consoleStepArguments = (
     return [];
   }
   const byToken = new Map(handles.map((handle) => [handle.token, handle]));
-  const byRef = new Map(
-    handles.flatMap((handle) =>
-      handle.ref === undefined ? [] : [[handle.ref, handle] as const]
-    ),
-  );
   const args = asRecord(step.input);
   const source = step.toolName === "run_pattern" ? asRecord(args.inputs) : args;
   const atoms = stepAtomNames(step);
 
   return Object.entries(source).map(([key, value]): ConsoleArgumentRef => {
     const token = tokensIn(value)[0];
-    const document = linkDocument(value);
-    const handle = token !== undefined
-      ? byToken.get(token)
-      : document !== undefined
-      ? byRef.get(document)
-      : undefined;
-    const ref = handle?.ref ?? document;
+    const link = token === undefined ? linkTarget(value, handles) : undefined;
+    const handle = token !== undefined ? byToken.get(token) : link?.handle;
+    const ref = handle?.ref ?? link?.ref;
     const named = token ?? handle?.token;
     if (named === undefined && ref === undefined) {
       return { key, isReference: false, confidentiality: [], value };

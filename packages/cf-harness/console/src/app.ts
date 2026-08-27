@@ -76,6 +76,7 @@ export class ConsoleApp extends LitElement {
     runs: { attribute: false },
     openRunId: { attribute: false },
     flow: { attribute: false },
+    flowError: { attribute: false },
     focusStep: { attribute: false },
     state: { attribute: false },
     running: { attribute: false },
@@ -92,6 +93,12 @@ export class ConsoleApp extends LitElement {
   declare openRunId: string | undefined;
   /** The open run's conversation map, which the third column draws. */
   declare flow: ConsoleFlow | undefined;
+  /**
+   * Why the map could not be read. Held apart from `flow` because an absent
+   * map and a refused one are different things to a reader: one is still
+   * arriving, the other needs asking for again.
+   */
+  declare flowError: string | undefined;
   /** The step the middle column is reading, marked in the map. */
   declare focusStep: number | undefined;
   declare state: string;
@@ -146,6 +153,7 @@ export class ConsoleApp extends LitElement {
       changed.has("openRunId") && this.openRunId !== changed.get("openRunId")
     ) {
       this.flow = undefined;
+      this.flowError = undefined;
       this.focusStep = undefined;
       void this.#loadFlow();
     }
@@ -165,11 +173,14 @@ export class ConsoleApp extends LitElement {
       const flow = await readRunFlow(runId);
       if (read === this.#flowReads && this.openRunId === runId) {
         this.flow = flow;
+        this.flowError = undefined;
       }
-    } catch {
-      // A map that cannot be read leaves the rest of the run readable.
+    } catch (error) {
+      // A map that cannot be read leaves the rest of the run readable, and
+      // says so rather than reading as one still arriving.
       if (read === this.#flowReads && this.openRunId === runId) {
         this.flow = undefined;
+        this.flowError = error instanceof Error ? error.message : String(error);
       }
     }
   }
@@ -535,6 +546,17 @@ export class ConsoleApp extends LitElement {
             <div class="run-list-head"><span>Map</span></div>
             ${this.openRunId === undefined
               ? html`<p class="empty">Choose a run to see how it went.</p>`
+              : this.flowError !== undefined
+              ? html`
+                <p class="empty bad">${this.flowError}</p>
+                <button
+                  class="secondary"
+                  type="button"
+                  @click=${() => this.#loadFlow()}
+                >
+                  Try again
+                </button>
+              `
               : html`
                 <console-flow-view
                   .flow=${this.flow}

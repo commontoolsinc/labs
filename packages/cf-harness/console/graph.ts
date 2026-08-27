@@ -14,6 +14,7 @@
  */
 
 import type { ConsoleDisclosure, ConsoleHandle, ConsoleStep } from "./steps.ts";
+import { matchLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { HANDLE_TOKEN_PATTERN } from "../src/contracts/handle-table.ts";
 
 /** A pattern that ran, or a cell in the space. */
@@ -106,8 +107,15 @@ const linkDocument = (value: unknown): string | undefined => {
   if (typeof value !== "string") {
     return undefined;
   }
-  const match = value.trim().match(/^(\/of:[A-Za-z0-9]+:[A-Za-z0-9_-]+)/);
-  return match?.[1];
+  const text = value.trim();
+  if (!matchLLMFriendlyLink.test(text)) {
+    return undefined;
+  }
+  // The document is the link up to its first path segment past the entity, so
+  // a cross-space link keeps its space prefix and a path inside a document
+  // resolves to the document.
+  const parts = text.split("/");
+  return parts.slice(0, text.startsWith("/@") ? 3 : 2).join("/");
 };
 
 /** The short name of a CFC atom, which is the last segment of its type URL. */

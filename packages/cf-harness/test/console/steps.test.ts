@@ -549,6 +549,30 @@ describe("console/steps provenance", () => {
       expect(args[0].producedByStep).toBe(0);
     });
 
+    it("reads a cross-space link as a reference", () => {
+      const steps = consoleRunSteps([
+        call("c1", "run_pattern", {
+          sourceText: "y",
+          inputs: { source: "/@did:key:z6MkAbc/of:fid1:xyz" },
+        }),
+        result("c1", "run_pattern", { status: "ok" }),
+      ]);
+      const args = consoleStepArguments(steps[0], []);
+      // No handle resolves it, but a link the run holds nothing for is still a
+      // reference — reading it as a plain value would lose it entirely.
+      expect(args[0].isReference).toBe(true);
+      expect(args[0].ref).toBe("/@did:key:z6MkAbc/of:fid1:xyz");
+    });
+
+    it("resolves a link naming a path inside a held cell to that cell", () => {
+      const steps = composed("/of:fid1:abc/numbers");
+      const handles = consoleRunHandles(steps, table);
+      const args = consoleStepArguments(steps[2], handles);
+      expect(args[0].isReference).toBe(true);
+      expect(args[0].token).toBe("cfh:a:aaaaa");
+      expect(args[0].producedByStep).toBe(0);
+    });
+
     it("reads a literal input as a value rather than a reference", () => {
       const steps = consoleRunSteps([
         call("c1", "run_pattern", { sourceText: "x", inputs: { bill: 100 } }),

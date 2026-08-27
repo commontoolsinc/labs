@@ -65,7 +65,12 @@ export interface ConsoleRunDetail {
   lens: ConsoleRunLens;
   /** The run as a timeline, which is what the step scrubber reads. */
   steps: readonly ConsoleStep[];
-  /** Every handle the run introduced, resolved against its own table. */
+  /**
+   * Every handle the run introduced, resolved against its own table first and
+   * against its neighbours' tables after — a token minted in an earlier turn
+   * resolves to nothing in this run's own salted table, and an argument naming
+   * that cell would otherwise read as coming from nowhere.
+   */
   handles: readonly ConsoleHandle[];
   /** The artifacts this run wrote, by name, for the raw pane to fetch. */
   artifactNames: readonly string[];
