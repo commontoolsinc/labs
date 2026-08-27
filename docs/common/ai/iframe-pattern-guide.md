@@ -236,6 +236,10 @@ const stop = database.sink(() => void refreshRows());
 
 SQLite scopes have the same `space`, `user`, and `session` meanings as Cells.
 An active query should use `sink()` to refresh after committed writes.
+Database resource names, table names, and column names are data rather than
+generated TypeScript bindings. They may use reserved words. When the exact name
+`__proto__` is required in `contract.ts`, write it as a computed property
+(`["__proto__"]`) so JavaScript creates an own property.
 
 ## Generate the wrapper
 
