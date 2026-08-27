@@ -507,6 +507,54 @@ describe("piece source lifecycle", () => {
     });
   });
 
+  it("drops an outcome about a piece that moved while it was being reached", async () => {
+    const origin = "https://source.test/moves-underneath.tsx";
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    await stampOrigin(piece, origin);
+    // Repoint the piece from inside the fetch, so that by the time the
+    // attempt concludes it describes an origin the piece no longer records.
+    // Stamping rather than transitioning is what makes this test say
+    // something: a transition would clear the record on its own, and then an
+    // absent record would prove nothing about the guard.
+    const moved = "https://source.test/moved-to.tsx";
+    const original = globalThis.fetch;
+    globalThis.fetch =
+      (() =>
+        stampOrigin(piece, moved).then(() =>
+          new Response("not found", { status: 404 })
+        )) as typeof globalThis.fetch;
+    try {
+      await expect(piece.changeSource({ kind: "adopt" })).rejects.toThrow();
+    } finally {
+      globalThis.fetch = original;
+    }
+
+    expect(getPatternSource(piece.getCell())).toBe(moved);
+    expect(getPieceReconciliation(piece.getCell())).toBeUndefined();
+  });
+
+  it("applies the exact candidate a confirmed entered origin reviewed", async () => {
+    const origin = "https://source.test/entered-changing.tsx";
+    webSources["/entered-changing.tsx"] = incompatibleSeedProgram("reviewed");
+    const piece = await pieces.create(versionProgram("current"), { input: {} });
+    const action = { kind: "repoint" as const, url: origin };
+
+    const warning = await piece.changeSource(action);
+    expect(warning.status).toBe("incompatible");
+    if (warning.status !== "incompatible") {
+      throw new Error("expected an incompatibility warning");
+    }
+
+    // The origin moves between the review and the confirmation. Consent was
+    // given for what was reviewed, so that is what lands.
+    webSources["/entered-changing.tsx"] = incompatibleSeedProgram("later");
+    expect(
+      await piece.changeSource(action, { confirmedChange: warning.prepared }),
+    ).toEqual({ status: "applied" });
+    expect(await piece.result.get(["version"])).toBe("reviewed");
+    expect(getPatternSource(piece.getCell())).toBe(origin);
+  });
+
   it("records an update the piece refused, and clears it on acceptance", async () => {
     const origin = "https://source.test/refused.tsx";
     webSources["/refused.tsx"] = incompatibleSeedProgram("candidate");

@@ -3768,32 +3768,34 @@ export class PieceController<T = unknown> {
     origin: string,
     reconciliation: Omit<PieceReconciliation, "at" | "origin">,
   ): Promise<void> {
-    try {
-      await this.#pieces.runtime.editWithRetry((tx) => {
-        // An outcome describes the piece the attempt reasoned about. A
-        // concurrent detach, edit, or repoint has moved it somewhere this
-        // conclusion does not describe, so the write is dropped rather than
-        // landing on the piece that replaced it.
-        const candidate = this.#cell.withTx(tx);
-        const current = getPieceSourceSnapshot(candidate);
-        if (
-          current === undefined ||
-          current.pattern.identity !== expected.pattern.identity ||
-          current.pattern.symbol !== expected.pattern.symbol ||
-          current.origin !== expected.origin ||
-          current.revisionId !== expected.revisionId
-        ) return false;
-        setPieceReconciliation(this.#cell, tx, {
-          ...reconciliation,
-          origin,
-          at: Date.now(),
-        });
-        return true;
+    // The result is not read. A commit that does not land leaves the piece
+    // with whatever it recorded before, which is a worse answer than this one
+    // and not a wrong one, and the caller's own result is what says whether
+    // the change happened. `editWithRetry` reports a failed commit in that
+    // result rather than by throwing, and the history this reads was already
+    // read at the top of the change that led here, so there is nothing left
+    // to throw either.
+    await this.#pieces.runtime.editWithRetry((tx) => {
+      // An outcome describes the piece the attempt reasoned about. A
+      // concurrent detach, edit, or repoint has moved it somewhere this
+      // conclusion does not describe, so the write is dropped rather than
+      // landing on the piece that replaced it.
+      const candidate = this.#cell.withTx(tx);
+      const current = getPieceSourceSnapshot(candidate);
+      if (
+        current === undefined ||
+        current.pattern.identity !== expected.pattern.identity ||
+        current.pattern.symbol !== expected.pattern.symbol ||
+        current.origin !== expected.origin ||
+        current.revisionId !== expected.revisionId
+      ) return false;
+      setPieceReconciliation(this.#cell, tx, {
+        ...reconciliation,
+        origin,
+        at: Date.now(),
       });
-    } catch {
-      // Reported by the source state the caller reads back, which simply
-      // keeps whatever it had.
-    }
+      return true;
+    });
   }
 
   /**
