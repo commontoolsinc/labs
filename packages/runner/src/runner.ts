@@ -247,11 +247,46 @@ type ArgumentLinkRoot = {
 };
 
 // Whether a declared schema hands the run a reference rather than a value to
-// read through: `asCell` on the schema itself, or a union or reference whose
-// every resolved arm is itself reference-only. A union with one readable arm
-// is readable — the walk must cover the arm the run may take. The depth bound
+// read through: `asCell` on the schema itself, or a union or reference that
+// resolves to one. A union counts when ANY arm carries the marker, because
+// that is the arm the reader takes — `preferAsCellBranch` in schema-view.ts
+// picks the `asCell` branch and hands back a cell handle, so `Cell<T> |
+// undefined` is a handle rather than something read through. The depth bound
 // terminates a declaration that refers to itself, which resolves to itself
 // however many times it is followed.
+// The child schema a declared read sees at `key`, mirroring `childSchema` in
+// schema-view.ts: `schemaAtPath` decides which children exist from the
+// schema's `type`, so a schema that declares `properties` or `items` and omits
+// `type` narrows to `false` — no child selected — while an eager read reaches
+// those children anyway. Read the subschema directly there, so the pre-sync
+// covers what the reader covers. A subschema of `false` turns the child down
+// rather than describing one, and stays refused.
+function narrowChildSchema(schema: JSONSchema, key: string): JSONSchema {
+  let narrowed: JSONSchema;
+  try {
+    narrowed = ContextualFlowControl.schemaAtPath(
+      schema,
+      [key],
+      undefined,
+      true,
+      false,
+    );
+  } catch {
+    // A declaration that cannot resolve is one that ran out: scan rather
+    // than skip.
+    return true;
+  }
+  if (narrowed !== false || !isObjectOrArray(schema)) return narrowed;
+  const properties = schema.properties;
+  if (isObjectOrArray(properties) && Object.hasOwn(properties, key)) {
+    return (properties as Record<string, JSONSchema>)[key];
+  }
+  if (/^(?:0|[1-9][0-9]*)$/.test(key) && schema.items !== undefined) {
+    return schema.items as JSONSchema;
+  }
+  return narrowed;
+}
+
 function isReferenceOnlySchema(
   schema: JSONSchema | undefined,
   depth: number = 4,
@@ -273,7 +308,7 @@ function isReferenceOnlySchema(
     ? [...anyOf, ...oneOf]
     : anyOf ?? oneOf;
   if (arms !== undefined && arms.length > 0) {
-    return arms.every((arm) => isReferenceOnlySchema(arm, depth - 1));
+    return arms.some((arm) => isReferenceOnlySchema(arm, depth - 1));
   }
   return false;
 }
@@ -4913,7 +4948,8 @@ export class Runner {
    * in lockstep: a link on a schema-named path has its target synced, and
    * the walk continues INTO that target under the same path schema — a
    * declared read through a link reaches the linked document's fields, so
-   * the pre-sync does too, as deep as the declaration goes. A path whose
+   * the pre-sync does too, two link hops deep — the reach the undeclared
+   * walk has always had, kept while declared depth stays unmeasured. A path whose
    * schema carries `asCell` is handed to the run as a reference, so its
    * target document is synced and its contents are not walked. A property a
    * `properties`-bearing schema does not select is invisible to the run and
@@ -4999,8 +5035,15 @@ export class Runner {
           (target as Cell<any> & { synced?: boolean }).synced = true;
         }
         if (hopsLeft <= 0) return;
-        const walkKey = `${docKey}\0${link.path.join("/")}\0${
-          schema !== undefined ? "declared" : "undeclared"
+        // The key names the subtree a walk would descend: the document, the
+        // path within it, and the schema the descent follows. All three are
+        // needed — two links can reach one document at different paths, and
+        // two bindings can read one path under disjoint declarations, and
+        // each of those is a walk this one cannot stand in for. `path` is
+        // encoded injectively, since joining segments lets `["a/b"]` and
+        // `["a", "b"]` collide.
+        const walkKey = `${docKey}\0${JSON.stringify(link.path)}\0${
+          schema === undefined ? "undeclared" : hashStringOf(schema)
         }`;
         if (walkedSubtrees.has(walkKey)) return;
         walkedSubtrees.add(walkKey);
@@ -5060,21 +5103,7 @@ export class Runner {
         // true` makes an unstructured object read fall back to the
         // undeclared scan above, since such a read is unbounded.
         for (const key in value) {
-          let narrowed: JSONSchema;
-          try {
-            narrowed = ContextualFlowControl.schemaAtPath(
-              schema,
-              [key],
-              undefined,
-              true,
-              false,
-            );
-          } catch {
-            // A declaration that cannot resolve (an unresolvable reference,
-            // say) is one that ran out: scan rather than skip.
-            narrowed = true;
-          }
-          collect(value[key], base, narrowed, hopsLeft);
+          collect(value[key], base, narrowChildSchema(schema, key), hopsLeft);
         }
       };
       for (const [index, entry] of frontier.entries()) {

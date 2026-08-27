@@ -7,8 +7,8 @@ import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 
 // The argument link-target pre-sync follows each root's declared schema:
-// targets on schema-named paths are synced (reading through links, as deep as
-// the declaration goes), an `asCell` path syncs its target without walking
+// targets on schema-named paths are synced (reading through links, two link
+// hops deep), an `asCell` path syncs its target without walking
 // it, an unselected property is invisible, and a root whose declaration runs
 // out falls back to the undeclared two-hop scan.
 
@@ -236,35 +236,39 @@ describe("syncArgumentLinkTargets", () => {
     expect(syncedIds).toContain(id(rightLeaf));
   });
 
-  it("treats a union as a reference only when every arm is one", async () => {
+  it("treats a union as a reference when any arm carries the marker", async () => {
     const { make, commit } = docBuilder("union arms");
-    const behindOpaque = make("behind opaque", { n: 1 });
-    const opaque = make("opaque", { child: behindOpaque });
-    const behindReadable = make("behind readable", { n: 2 });
-    const readable = make("readable", { child: behindReadable });
-    const root = make("root", { allRef: opaque, mixed: readable });
+    const behindHandle = make("behind handle", { n: 1 });
+    const handle = make("handle", { child: behindHandle });
+    const behindPlain = make("behind plain", { n: 2 });
+    const plain = make("plain", { child: behindPlain });
+    const root = make("root", { optional: handle, readable: plain });
     await commit();
     await run(root, {
       type: "object",
       properties: {
-        allRef: {
+        // The shape a generated optional handle takes. `preferAsCellBranch`
+        // hands the reader the `asCell` branch, so the run holds a handle
+        // and never reads through it.
+        optional: {
           anyOf: [
             { type: "object", asCell: ["cell"] },
-            { type: "object", asCell: ["stream"] },
+            { type: "undefined" },
           ],
         },
-        mixed: {
+        readable: {
           anyOf: [
-            { type: "object", asCell: ["cell"] },
             { type: "object", properties: { child: { type: "object" } } },
+            { type: "undefined" },
           ],
         },
       },
     } as JSONSchema);
-    expect(syncedIds).toContain(id(opaque));
-    expect(syncedIds).not.toContain(id(behindOpaque));
-    expect(syncedIds).toContain(id(readable));
-    expect(syncedIds).toContain(id(behindReadable));
+    expect(syncedIds).toContain(id(handle));
+    expect(syncedIds).not.toContain(id(behindHandle));
+    // No arm of the second union carries the marker, so it is read through.
+    expect(syncedIds).toContain(id(plain));
+    expect(syncedIds).toContain(id(behindPlain));
   });
 
   it("treats an `asCell` marker behind a `$ref` as a reference, and an unresolvable `$ref` as readable", async () => {
@@ -318,7 +322,7 @@ describe("syncArgumentLinkTargets", () => {
     expect(syncedIds).toContain(id(leaf));
   });
 
-  it("reads a union whose `oneOf` arm is readable beside a reference-only `anyOf`", async () => {
+  it("sees a marker in the `oneOf` arms when a schema carries both keywords", async () => {
     const { make, commit } = docBuilder("both keywords");
     const behind = make("behind", { n: 1 });
     const target = make("target", { child: behind });
@@ -328,18 +332,85 @@ describe("syncArgumentLinkTargets", () => {
       type: "object",
       properties: {
         both: {
-          anyOf: [{ type: "object", asCell: ["cell"] }],
-          oneOf: [{
+          anyOf: [{
             type: "object",
             properties: { child: { type: "object" } },
           }],
+          oneOf: [{ type: "object", asCell: ["cell"] }],
         },
       },
     } as JSONSchema);
-    // The `oneOf` arm is an alternative the run may take, so the link is not
-    // reference-only and the document behind it is pre-synced.
+    // Both keywords describe one set of alternatives, so the `oneOf` marker
+    // counts: the target is synced as a handle and not read through. Letting
+    // `anyOf` shadow `oneOf` would walk it instead.
     expect(syncedIds).toContain(id(target));
-    expect(syncedIds).toContain(id(behind));
+    expect(syncedIds).not.toContain(id(behind));
+  });
+
+  it("walks the same document at one path under two disjoint declarations", async () => {
+    const { make, commit } = docBuilder("disjoint schemas");
+    const leftLeaf = make("left leaf", { n: 1 });
+    const rightLeaf = make("right leaf", { n: 2 });
+    const shared = make("shared", { left: leftLeaf, right: rightLeaf });
+    const root = make("root", { viaLeft: shared, viaRight: shared });
+    await commit();
+    await run(root, {
+      type: "object",
+      properties: {
+        viaLeft: { type: "object", properties: { left: { type: "object" } } },
+        viaRight: { type: "object", properties: { right: { type: "object" } } },
+      },
+    } as JSONSchema);
+    // One document, one path, two bindings that read different fields of it.
+    // Neither walk stands in for the other, so both leaves are pre-synced.
+    expect(syncedIds).toContain(id(leftLeaf));
+    expect(syncedIds).toContain(id(rightLeaf));
+  });
+
+  it("descends a schema that declares `properties` without a `type`", async () => {
+    const { make, commit } = docBuilder("no type");
+    const leaf = make("leaf", { n: 1 });
+    const target = make("target", { child: leaf });
+    const root = make("root", { a: target });
+    await commit();
+    await run(root, {
+      properties: { a: { properties: { child: {} } } },
+    } as JSONSchema);
+    // An eager read reaches these children even though `schemaAtPath` selects
+    // none of them, so the pre-sync follows the declaration it can see.
+    expect(syncedIds).toContain(id(target));
+    expect(syncedIds).toContain(id(leaf));
+  });
+
+  it("keeps two subtrees apart when one path segment contains a separator", async () => {
+    const { make, commit } = docBuilder("path collision");
+    const nestedLeaf = make("nested leaf", { n: 1 });
+    const slashLeaf = make("slash leaf", { n: 2 });
+    const shared = make("shared", {
+      a: { b: nestedLeaf },
+      "a/b": slashLeaf,
+    });
+    await commit();
+    const root = (() => {
+      const b = docBuilder("path collision root");
+      const cell = b.make("root", {
+        nested: shared.key("a").key("b"),
+        slashed: shared.key("a/b"),
+      });
+      return { cell, commit: b.commit };
+    })();
+    await root.commit();
+    await run(root.cell, {
+      type: "object",
+      properties: {
+        nested: { type: "object" },
+        slashed: { type: "object" },
+      },
+    } as JSONSchema);
+    // `["a", "b"]` and `["a/b"]` are different subtrees; a joined key would
+    // collapse them and drop the second.
+    expect(syncedIds).toContain(id(nestedLeaf));
+    expect(syncedIds).toContain(id(slashLeaf));
   });
 
   it("gives an undeclared subtree below a declared root the two-hop budget", async () => {
