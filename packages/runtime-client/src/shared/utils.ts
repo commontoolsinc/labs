@@ -37,10 +37,14 @@ export function cellRefToInstanceId(
   identity: { principal: string; sessionId: string },
 ): string {
   const scopeKey = cell.scope === "user"
-    ? `user:${identity.principal}`
+    ? { scope: "user", principal: identity.principal }
     : cell.scope === "session"
-    ? `session:${identity.principal}:${identity.sessionId}`
-    : "space";
+    ? {
+      scope: "session",
+      principal: identity.principal,
+      sessionId: identity.sessionId,
+    }
+    : { scope: "space" };
   return hashOf({
     purpose: "runtime-client:cell-instance:v1",
     cell: cellRefToIdentityKey(cell),

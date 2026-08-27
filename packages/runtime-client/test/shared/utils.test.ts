@@ -82,6 +82,21 @@ describe("runtime client shared utilities", () => {
       );
     });
 
+    it("separates identities containing delimiter-like text", () => {
+      const sessionRef = { ...ref, scope: "session" as const };
+      expect(
+        cellRefToInstanceId(sessionRef, {
+          principal: "a:b",
+          sessionId: "c",
+        }),
+      ).not.toBe(
+        cellRefToInstanceId(sessionRef, {
+          principal: "a",
+          sessionId: "b:c",
+        }),
+      );
+    });
+
     it("keeps space instances independent of the viewer", () => {
       expect(
         cellRefToInstanceId(ref, {

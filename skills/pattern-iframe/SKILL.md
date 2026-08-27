@@ -37,9 +37,11 @@ Validate the generated pattern with:
 
 ```bash
 deno fmt packages/patterns/<name>
-deno check packages/patterns/<name>/guest.ts
+deno check packages/patterns/<name>/<guest-file>
 deno task cf check packages/patterns/<name>/main.tsx --no-run
 ```
+
+Replace `<guest-file>` with the authored `guest.ts` or `guest.tsx` filename.
 
 Run the pattern or add a focused test when behavior, rather than only its data
 contract, changed. Preserve `contract.ts` and the guest source beside the
