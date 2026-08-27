@@ -370,14 +370,16 @@ const neighbouringHandles = async (
   // every run's state on a timeline that re-reads whenever a tool completes.
   const stamps: string[] = [];
   for (const name of names.sort()) {
-    let mtime = 0;
+    let stamp = "absent";
     try {
       const info = await Deno.stat(join(artifactRoot, name, "run-state.json"));
-      mtime = info.mtime?.getTime() ?? 0;
+      // Size as well as time: two writes inside one millisecond share an
+      // mtime, and a run that mints a handle grows its table.
+      stamp = `${info.mtime?.getTime() ?? 0}:${info.size}`;
     } catch {
       // A run whose state cannot be read contributes no entries either way.
     }
-    stamps.push(`${name}@${mtime}`);
+    stamps.push(`${name}@${stamp}`);
   }
   const key = `${artifactRoot}\n${stamps.join("\n")}`;
   const cached = neighbourIndex.get(key);

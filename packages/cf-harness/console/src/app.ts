@@ -561,7 +561,16 @@ export class ConsoleApp extends LitElement {
                   class="secondary"
                   type="button"
                   ?disabled=${this.flowLoading}
-                  @click=${() => this.#loadFlow()}
+                  @click=${() => {
+                    // Lit writes `disabled` on the next render, so a rapid
+                    // second click lands before the attribute does; the guard
+                    // belongs in the handler. It cannot go inside `#loadFlow`,
+                    // which must stay callable when a different run opens
+                    // while a read is in flight.
+                    if (!this.flowLoading) {
+                      void this.#loadFlow();
+                    }
+                  }}
                 >
                   Try again
                 </button>

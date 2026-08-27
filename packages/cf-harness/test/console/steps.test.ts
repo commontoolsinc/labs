@@ -657,6 +657,66 @@ describe("console/steps provenance", () => {
       expect(cwd?.confidentiality).toEqual([]);
     });
 
+    it("keeps a label whose root names no argument of the call", () => {
+      // A tool taking `path` may be mediated as `args`, so the label root
+      // names nothing the model wrote. Dropping the atom would lose an
+      // observed fact; it governs the call instead.
+      const labelled: HarnessCfcInvocationContext = {
+        type: "cf-harness.cfc-invocation-context",
+        version: 1,
+        sequence: 1,
+        runId: "r",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        toolId: "read_file",
+        toolOutputId: createToolOutputId("r", "read_file", 1),
+        operation: "command",
+        cfcEnforcementMode: "enforce-explicit",
+        cwd: "/workspace",
+        runManifest: { present: false },
+        inputs: {},
+        cfcInputLabels: {
+          version: 1,
+          entries: [
+            {
+              path: ["args"],
+              label: {
+                confidentiality: [
+                  {
+                    type:
+                      "https://commonfabric.org/cfc/atom/PromptSlotInfluence",
+                    version: 1,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      };
+      const steps = consoleRunSteps(
+        [
+          call("c1", "read_file", { path: "notes.md" }),
+          {
+            role: "tool",
+            toolCallId: "c1",
+            toolName: "read_file",
+            content: JSON.stringify({ ok: true }),
+            resultRef: {
+              type: "cf-harness.tool-result-ref",
+              outputId: createToolOutputId("r", "read_file", 1),
+              toolId: "read_file",
+              runId: "r",
+            },
+          },
+        ],
+        [],
+        [],
+        [labelled],
+      );
+      const args = consoleStepArguments(steps[0], []);
+      expect(args[0].key).toBe("path");
+      expect(args[0].confidentiality).toEqual(["PromptSlotInfluence"]);
+    });
+
     it("reads a literal input as a value rather than a reference", () => {
       const steps = consoleRunSteps([
         call("c1", "run_pattern", { sourceText: "x", inputs: { bill: 100 } }),

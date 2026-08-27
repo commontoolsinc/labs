@@ -623,6 +623,7 @@ const handleProvenance = (
       for (const token of handleTokensIn(output.resultRef)) {
         at(token).producedByStep = step.index;
       }
+      const patternKeys = Object.keys(asRecord(args.inputs));
       for (const [key, value] of Object.entries(asRecord(args.inputs))) {
         for (const token of handleTokensIn(value)) {
           const record = at(token);
@@ -631,7 +632,7 @@ const handleProvenance = (
             toolName: "run_pattern",
             as: key,
           });
-          for (const name of argumentAtomNames(step, key)) {
+          for (const name of argumentAtomNames(step, key, patternKeys)) {
             if (!record.confidentiality.includes(name)) {
               record.confidentiality.push(name);
             }
@@ -642,6 +643,7 @@ const handleProvenance = (
     }
     // Every other tool that takes a handle takes it as a named argument, so
     // the argument's own name is how the handle was spent.
+    const toolKeys = Object.keys(args);
     for (const [key, value] of Object.entries(args)) {
       for (const token of handleTokensIn(value)) {
         const record = at(token);
@@ -652,7 +654,7 @@ const handleProvenance = (
         });
         // A handle spent on any tool carries whatever the runtime labelled
         // that argument with, not only one spent on `run_pattern`.
-        for (const name of argumentAtomNames(step, key)) {
+        for (const name of argumentAtomNames(step, key, toolKeys)) {
           if (!record.confidentiality.includes(name)) {
             record.confidentiality.push(name);
           }
@@ -758,6 +760,7 @@ export const consoleStepArguments = (
   const byToken = new Map(handles.map((handle) => [handle.token, handle]));
   const args = asRecord(step.input);
   const source = step.toolName === "run_pattern" ? asRecord(args.inputs) : args;
+  const argumentKeys = Object.keys(source);
   return Object.entries(source).map(([key, value]): ConsoleArgumentRef => {
     const token = handleTokensIn(value)[0];
     const link = token === undefined ? linkTarget(value, handles) : undefined;
@@ -771,7 +774,7 @@ export const consoleStepArguments = (
       return {
         key,
         isReference: false,
-        confidentiality: argumentAtomNames(step, key),
+        confidentiality: argumentAtomNames(step, key, argumentKeys),
         value,
       };
     }
@@ -785,7 +788,7 @@ export const consoleStepArguments = (
         ? { producedByStep: handle.producedByStep }
         : {}),
       ...(handle?.schema !== undefined ? { schema: handle.schema } : {}),
-      confidentiality: argumentAtomNames(step, key),
+      confidentiality: argumentAtomNames(step, key, argumentKeys),
     };
   });
 };
@@ -805,11 +808,26 @@ export const consoleStepArguments = (
  * carries no invocation context at all, so a cell minted by a pattern shows no
  * atoms however the run's flow labels are set.
  */
-const argumentAtomNames = (step: ConsoleStep, key: string): string[] => {
+const argumentAtomNames = (
+  step: ConsoleStep,
+  key: string,
+  argumentKeys: readonly string[] = [],
+): string[] => {
+  const entries = step.invocation?.cfcInputLabels?.entries ?? [];
+  // A label path is rooted at the operation's own argument, which is not
+  // always what the model called it: a tool taking `path` and `content` may be
+  // mediated as `args` and `stdin`. When no root names any argument of this
+  // call, no mapping exists to apply and every entry governs the call rather
+  // than being dropped — losing an observed atom is worse than spreading it.
+  const rootsNameArguments = entries.some((entry) => {
+    const root = String(entry.path[0] ?? "");
+    return root !== "" && argumentKeys.includes(root);
+  });
   const names: string[] = [];
-  for (const entry of step.invocation?.cfcInputLabels?.entries ?? []) {
+  for (const entry of entries) {
     const path = entry.path.map(String);
-    const governs = path.length === 0 || path[0] === key;
+    const governs = !rootsNameArguments || path.length === 0 ||
+      path[0] === key;
     if (!governs) {
       continue;
     }
