@@ -2708,6 +2708,7 @@
       },
       "scripts": {
         "dependencies": [
+          "jsr:@db/sqlite@0.13.0",
           "npm:@viz-js/viz@3.26.0",
           "npm:htmlparser2@12",
           "npm:marked@^18.0.6"

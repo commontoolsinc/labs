@@ -781,8 +781,10 @@ describe("scan-extent", () => {
         (space) => {
           // The filter drops the undecodable row because its kind cannot be
           // determined — which is precisely why the omission has to be
-          // reported. `topics-export.ts` runs this exact scan under
-          // `--require-complete` to guard a rollback payload.
+          // reported. `scripts/topics-export.ts` runs this exact scan and
+          // refuses to write a rollback payload when `isCompleteScan` says
+          // no, so this report is what stands between an operator and a
+          // partial export that reads like a whole one.
           const listing = listEntityModels(space, { kind: "piece" });
           expect(listing.entities.map((e) => e.id)).toEqual(["of:piece-1"]);
           expect(listing.extent.unreadable).toBe(1);

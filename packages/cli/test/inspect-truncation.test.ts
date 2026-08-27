@@ -300,9 +300,10 @@ describe("cf inspect capped listings", () => {
       ).run();
       db.close();
 
-      // The shape `scripts/topics-export.ts` runs to guard a rollback payload.
       // A filtered scan drops what it cannot classify, so the omission has to
-      // reach the exit code — the notice alone never reaches `cfJson`.
+      // reach the exit code: the notice goes to stderr, and a `--json`
+      // consumer reads stdout, where a subset parses exactly like the whole
+      // set.
       const refused = await cf(
         `inspect entities ${path} --kind piece --require-complete --json`,
       );
