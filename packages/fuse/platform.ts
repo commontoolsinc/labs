@@ -174,7 +174,10 @@ export interface FusePlatform {
   /** Byte offset of st_mtim(espec) within struct stat. */
   STAT_ST_MTIM_OFFSET: number;
 
+  //
   // Struct helpers
+  //
+
   writeStat(buf: ArrayBuffer, opts: StatOpts): void;
   writeEntryParam(buf: ArrayBuffer, opts: EntryParamOpts): void;
   readFileInfo(ptr: Deno.PointerValue): FileInfo;
@@ -322,7 +325,10 @@ export const FUSE_SET_ATTR_METADATA_KNOWN_MASK = FUSE_SET_ATTR_MODE |
   FUSE_SET_ATTR_BKUPTIME |
   FUSE_SET_ATTR_FLAGS;
 
+//
 // File mode constants
+//
+
 export const S_IFDIR = 0o40000;
 export const S_IFREG = 0o100000;
 export const S_IFLNK = 0o120000;

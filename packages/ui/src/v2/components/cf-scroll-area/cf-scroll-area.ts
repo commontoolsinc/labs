@@ -358,7 +358,10 @@ export class CFScrollArea extends BaseElement {
     }, 1000);
   }
 
+  //
   // Vertical scrollbar handlers
+  //
+
   private handleVerticalThumbMouseDown = (event: MouseEvent): void => {
     event.preventDefault();
     event.stopPropagation();
@@ -427,7 +430,10 @@ export class CFScrollArea extends BaseElement {
     );
   };
 
+  //
   // Horizontal scrollbar handlers
+  //
+
   private handleHorizontalThumbMouseDown = (event: MouseEvent): void => {
     event.preventDefault();
     event.stopPropagation();
