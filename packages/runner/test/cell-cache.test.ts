@@ -2340,9 +2340,9 @@ describe("cell-cache: compiled-set store (CFC integrity, fail-closed)", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // End-to-end: two runtimes with DISTINCT user identities over shared storage
-// ---------------------------------------------------------------------------
+//
 
 // Two distinct signers for the two "users" in the e2e describe.
 // Declared at module level so top-level await applies.

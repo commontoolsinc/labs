@@ -379,9 +379,9 @@ Deno.bench(
   },
 );
 
-// ---------------------------------------------------------------------------
+//
 // watchIdForEntry — exercises hashStringOf on a fresh, ad-hoc watch key
-// ---------------------------------------------------------------------------
+//
 
 const WATCH_SCHEMA: JSONSchema = internSchema({
   type: "object",

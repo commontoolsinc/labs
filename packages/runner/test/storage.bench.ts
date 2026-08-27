@@ -75,9 +75,9 @@ const readDocument = (
   });
 };
 
-// ============================================================================
+//
 // Write operations
-// ============================================================================
+//
 
 Deno.bench(
   "Storage - tx.write raw (100x)",
@@ -211,9 +211,9 @@ Deno.bench(
   },
 );
 
-// ============================================================================
+//
 // Read operations
-// ============================================================================
+//
 
 Deno.bench(
   "Storage - tx.read after tx.write (100x)",
@@ -347,9 +347,9 @@ Deno.bench(
   },
 );
 
-// ============================================================================
+//
 // Entity creation overhead
-// ============================================================================
+//
 
 Deno.bench(
   "Storage - new entity overhead (100x)",
@@ -446,9 +446,9 @@ Deno.bench(
   },
 );
 
-// ============================================================================
+//
 // Path depth comparison
-// ============================================================================
+//
 
 Deno.bench(
   "Storage - read shallow path (100x)",
@@ -516,9 +516,9 @@ Deno.bench(
   },
 );
 
-// ============================================================================
+//
 // Commit overhead
-// ============================================================================
+//
 
 Deno.bench(
   "Storage - empty commit",
@@ -556,9 +556,9 @@ Deno.bench(
   },
 );
 
-// ============================================================================
+//
 // Overhead sources (microbenchmarks)
-// ============================================================================
+//
 
 Deno.bench(
   "Overhead - object creation (1000x)",
@@ -633,9 +633,9 @@ Deno.bench(
   },
 );
 
-// ============================================================================
+//
 // Entity creation breakdown - isolate what makes first write slow
-// ============================================================================
+//
 
 Deno.bench(
   "Entity creation breakdown - first write only (100x new entities)",
@@ -753,9 +753,9 @@ Deno.bench(
   },
 );
 
-// ============================================================================
+//
 // Microbenchmarks to isolate entity creation overhead sources
-// ============================================================================
+//
 
 Deno.bench(
   "Overhead - Map get/set (1000x)",
@@ -840,9 +840,9 @@ Deno.bench(
   },
 );
 
-// ============================================================================
+//
 // Isolate write vs commit overhead
-// ============================================================================
+//
 
 Deno.bench(
   "Write vs Commit - 100 new entities, measure writes only",
@@ -946,12 +946,12 @@ Deno.bench(
   },
 );
 
-// ============================================================================
+//
 // Realistic commit benchmarks - using "median complexity" data
 //
 // These measure commit performance with realistic Cell data, testing the
 // differential change detection (which now uses deepEqual).
-// ============================================================================
+//
 
 Deno.bench(
   "Realistic commit - equal values, no change (100x)",
@@ -1035,13 +1035,13 @@ Deno.bench(
   },
 );
 
-// ============================================================================
+//
 // Realistic commit benchmarks with large strings (100k chars)
 //
 // This tests the case where deepEqual should clearly win: comparing large
 // strings. JSON.stringify must serialize both 100k strings every comparison,
 // while deepEqual just uses === on strings directly (no construction).
-// ============================================================================
+//
 
 Deno.bench(
   "Large string commit - equal values (50x)",
@@ -1097,13 +1097,13 @@ Deno.bench(
   },
 );
 
-// ============================================================================
+//
 // Read invariant validation benchmarks (exercises attestation.claim())
 //
 // At commit time, each read invariant is validated via attestation.claim()
 // which compares expected vs actual values using JSON.stringify. This tests
 // the impact of that comparison with large string data.
-// ============================================================================
+//
 
 Deno.bench(
   "Read validation - large string, unchanged (50x)",
@@ -1133,12 +1133,12 @@ Deno.bench(
   },
 );
 
-// ============================================================================
+//
 // Value comparison: JSON.stringify vs deepEqual
 //
 // These benchmarks compare the two approaches used for equality checking in
 // the storage layer. Uses shared "median complexity" fixtures defined at top.
-// ============================================================================
+//
 
 Deno.bench(
   "Compare - JSON.stringify, equal values (1000x)",
@@ -1203,12 +1203,12 @@ Deno.bench(
   },
 );
 
-// ============================================================================
+//
 // Value comparison: JSON.stringify vs deepEqual (many small objects)
 //
 // Tests comparison performance on wide, shallow object graphs with many
 // properties spread across many small objects (4,500 properties total).
-// ============================================================================
+//
 
 Deno.bench(
   "Compare - JSON.stringify, many small objects equal (100x)",

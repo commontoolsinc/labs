@@ -441,9 +441,9 @@ export class Scheduler {
   // `servingYieldObserver` seam — the SpaceServer's mid-wave lease renew.
   private readonly cooperativeYield: CooperativeYield | undefined;
 
-  // ============================================================
+  //
   // Public API
-  // ============================================================
+  //
 
   constructor(
     readonly runtime: Runtime,
@@ -1053,14 +1053,12 @@ export class Scheduler {
     return rearmed;
   }
 
-  // ============================================================
   // The (d′) standing `demandedWriters` root kind and the
   // per-(instance, demander) currency check (stage-C design §2.2 / §2.4;
   // serving-loop.md §1). The SpaceServer's demand pass calls these on
   // registry DELTAS; nothing here is reached off the serving posture (the
   // registration hook installs lazily on the first `enterDemandedEntity`,
   // so a plain client runtime's `demandedWriters` set stays empty — T9′).
-  // ============================================================
 
   /** Refcount per demanded ENTITY (scope-NAME keyed, `entityNameKey` —
    * the writer index's vocabulary: two instances of one doc, `user:alice`
@@ -1495,9 +1493,9 @@ export class Scheduler {
     return this.eventPreflightTelemetryEnabled;
   }
 
-  // ============================================================
+  //
   // Debounce infrastructure for throttling slow actions
-  // ============================================================
+  //
 
   /**
    * Sets a debounce delay for an action.
@@ -1544,9 +1542,9 @@ export class Scheduler {
     this.gates.setNoDebounce(action, optOut);
   }
 
-  // ============================================================
+  //
   // Throttle infrastructure - "value may be outdated by T ms"
-  // ============================================================
+  //
 
   /**
    * Sets a throttle period for an action.
@@ -1645,9 +1643,9 @@ export class Scheduler {
     return buildSchedulerGraphSnapshot(this.graphSnapshotState);
   }
 
-  // ============================================================
+  //
   // Push-triggered filtering
-  // ============================================================
+  //
 
   /**
    * Returns the action's static write surface.
@@ -1656,9 +1654,9 @@ export class Scheduler {
     return this.writeIndex.getSchedulingWrites(action);
   }
 
-  // ============================================================
+  //
   // Compute time tracking for cycle-aware scheduling
-  // ============================================================
+  //
 
   /**
    * Returns the execution statistics for an action, if available.
@@ -1754,9 +1752,9 @@ export class Scheduler {
     return [...this.triggerTrace];
   }
 
-  // ============================================================
+  //
   // Non-settling detection API
-  // ============================================================
+  //
 
   /**
    * Returns whether the scheduler has detected a non-settling condition.
@@ -1783,7 +1781,9 @@ export class Scheduler {
     return runSchedulerDiagnosis(this.diagnosisControlState, durationMs);
   }
 
-  // ── Inline idempotency check mode ──────────────────────────────────
+  //
+  // Inline idempotency check mode
+  //
 
   enableIdempotencyCheck(): void {
     this.idempotencyCheckMode = true;
@@ -1862,9 +1862,9 @@ export class Scheduler {
     this.diagnosisEnabled = false;
   }
 
-  // ============================================================
+  //
   // Execution orchestration
-  // ============================================================
+  //
 
   private handleError(error: Error, action: any) {
     handleSchedulerError(
@@ -2067,9 +2067,9 @@ export class Scheduler {
     }
   }
 
-  // ============================================================
+  //
   // Idempotency diagnosis API (Phase 2 + 3)
-  // ============================================================
+  //
 
   /**
    * Starts diagnosis mode: captures read/write values and causal edges.
@@ -2105,9 +2105,9 @@ export class Scheduler {
     });
   }
 
-  // ============================================================
+  //
   // State wiring
-  // ============================================================
+  //
 
   // Keep state-bundle wiring explicit without making the field declarations
   // read like one large object graph.
@@ -2659,9 +2659,9 @@ export class Scheduler {
     };
   }
 
-  // ============================================================
+  //
   // Private forwarding helpers
-  // ============================================================
+  //
 
   /**
    * Gets a stable identifier for an action based on its source location.

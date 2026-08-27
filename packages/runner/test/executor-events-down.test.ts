@@ -2172,7 +2172,6 @@ describe("Phase 3 events-down (serving side)", () => {
     cancelParentDemand();
   });
 
-  // ---------------------------------------------------------------------
   // Stage C build W3 — (α): ONE durable entry, ONE completed run
   // (events.md §4, RULED 2026-08-18; register OW35). The pins below drive
   // RAW handlers on the serving runtime (the production chain from the
@@ -2184,7 +2183,6 @@ describe("Phase 3 events-down (serving side)", () => {
   // async child that is still RUNNING when the deadline closes its wave
   // (the in-flight residue the purge cannot reach), and a DERIVATION
   // emitter whose sidecar append the wave supersedes (the orphan).
-  // ---------------------------------------------------------------------
 
   /** Bare stream + value docs for the (α) pins, created by the CLIENT
    * (client commits land natively; the serving runtime's writes must
@@ -2694,7 +2692,6 @@ describe("Phase 3 events-down (serving side)", () => {
     }
   });
 
-  // ---------------------------------------------------------------------
   // The same-eventId SIBLING shape (independent review of W3, B1 / M1):
   // an event can contribute SEVERAL transactions to one wave — the
   // handler run plus a separate event-handler-stamped tx carrying the
@@ -2706,7 +2703,6 @@ describe("Phase 3 events-down (serving side)", () => {
   // the sibling's survival as the handler's: a seq-less entry is marked
   // consequenced only by the LT1 copy's OWN run (`lt1 === true`), and an
   // orphan-refused copy takes its siblings down with it.
-  // ---------------------------------------------------------------------
 
   /** A sibling contribution of the running handler's event: a separate
    * event-handler-stamped tx carrying `tx.dispatchedEventId`, committed

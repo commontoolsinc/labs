@@ -110,7 +110,7 @@ export function createRuntimeTelemetryOtelBridge(
   const mattrs = (extra?: Attributes): Attributes =>
     extra ? { ...mbase, ...extra } : mbase;
 
-  // --- Instruments (created once; no-ops when no MeterProvider is set) --------
+  // Instruments (created once; no-ops when no MeterProvider is set)
   const runs = meter.createCounter("ct.scheduler.runs", {
     description: "Scheduler action runs",
   });
@@ -187,7 +187,7 @@ export function createRuntimeTelemetryOtelBridge(
     description: "Storage push/pull duration",
   });
 
-  // --- In-flight storage spans, keyed by the marker `id` ---------------------
+  // In-flight storage spans, keyed by the marker `id`
   type OpenOp = { span: Span; startMs: number };
   const openOps = new Map<string, OpenOp>();
 

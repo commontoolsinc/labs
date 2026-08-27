@@ -1573,7 +1573,6 @@ const isMetaSeamPath = (
   path: readonly string[],
 ): boolean => metaOnlyByPath?.get(pathKey(path)) === true;
 
-// ---------------------------------------------------------------------------
 // S16 flow labels (default transition): one conservative confidentiality join
 // per transaction — everything the transaction observed taints everything it
 // wrote (§8.9.2/§8.9.3 collapsed to tx granularity). Reads of runtime-internal
@@ -3211,7 +3210,6 @@ const ifcEntryAppliesToAttemptedWrite = (
   );
 };
 
-// ---------------------------------------------------------------------------
 // Epic D4 — per-write read-prefix provenance
 // (docs/specs/cfc-write-prefix-provenance.md). Each protected write is gated
 // on only the reads that could have fed it: those whose activity-clock
@@ -3322,7 +3320,6 @@ const buildWritePrefixBounds = (
   };
 };
 
-// ---------------------------------------------------------------------------
 // Stage 0 of the value-level-provenance design
 // (docs/specs/cfc-value-level-provenance.md §6, SC-24): per-prepare
 // precision counters measuring how much the shipped D4 prefix narrows the

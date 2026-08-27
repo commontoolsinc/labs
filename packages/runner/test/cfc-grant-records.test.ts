@@ -112,9 +112,7 @@ const aliceShareFact = (audience: CfcAtom = userBob) => ({
 });
 
 describe("CFC grant records (§8.12.7 route 2a)", () => {
-  // -------------------------------------------------------------------------
   // Build-order item 1: the `policyState` guard kind.
-  // -------------------------------------------------------------------------
   describe("policyState guard validation (boot, fail closed)", () => {
     const withGuard = (policyState: unknown): CfcPolicyRecordInput[] => [{
       id: "p",
@@ -334,9 +332,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
-  // -------------------------------------------------------------------------
   // Build-order item 2: grant records + reserved-path storage discipline.
-  // -------------------------------------------------------------------------
   describe("grant document addressing", () => {
     const identity = {
       space: ALICE,
@@ -775,9 +771,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
-  // -------------------------------------------------------------------------
   // Resolution wired into the egress gate (build-order items 1+3).
-  // -------------------------------------------------------------------------
   describe("grant resolution at the sink egress gate", () => {
     it("a live grant releases the owner clause to the audience (enforce)", async () => {
       await withRuntime({}, async (runtime) => {
@@ -961,9 +955,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
-  // -------------------------------------------------------------------------
   // Build-order item 3: read non-taint + digest binding.
-  // -------------------------------------------------------------------------
   describe("read non-taint (internalVerifierRead discipline)", () => {
     it("grant lookups never enter the consumed read set", async () => {
       await withRuntime({}, async (runtime) => {
@@ -989,11 +981,9 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
-  // -------------------------------------------------------------------------
   // Arm-level coverage: every reachable validation / fail-closed branch is
   // pinned directly (the repo standard — defensive arms reachable from the
   // runner side get tests, not just the happy path).
-  // -------------------------------------------------------------------------
   describe("writer validation arms (prepareCfcGrantWrite)", () => {
     const base: CfcGrantWriteInput = {
       kind: "ShareGrant",

@@ -650,7 +650,8 @@ describe("intent listener — scripted notification seam (design (e) pins 1–5,
   });
 });
 
-// ─── W2.1: the cascade-echo retirement (scripted; the MARK path) ────────
+//
+// W2.1: the cascade-echo retirement (scripted; the MARK path)
 //
 // W0 l3's "duplicate join", root-caused by W3 as a CLIENT cascade-echo
 // stranding (speculation.md §4 step 2's jobless-cascade consequence,
@@ -693,6 +694,7 @@ describe("intent listener — scripted notification seam (design (e) pins 1–5,
 //  W2.1-7. F6 telemetry: depth-capped walks and thread evictions are
 //          counted (`cascadeWalkDepthCapCount` /
 //          `cascadeThreadEvictionCount`) — truncation is observable.
+//
 
 const W21_SIDECAR = "of:stream-events:w21-click";
 
@@ -1151,7 +1153,9 @@ describe("intent listener — W2.1 cascade-echo retirement (scripted; the jobles
   });
 });
 
-// ─── e2e: the real replica, the real relay, a real serving side ─────────
+//
+// e2e: the real replica, the real relay, a real serving side
+//
 
 const spaceSigner = await Identity.fromPassphrase("intent listener space");
 const space = spaceSigner.did() as MemorySpace;
