@@ -1295,10 +1295,12 @@ useful part of the remaining work for that flag.
 ## How flags propagate
 
 The environment-backed flags (`EXPERIMENTAL_MODERN_CELL_REP`,
+`EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS`,
 `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS`,
 `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE`,
 `EXPERIMENTAL_COMPUTED_CELL_IDS`,
 `EXPERIMENTAL_LAZY_MATERIALIZATION`,
+`EXPERIMENTAL_READER_SCHEMA_PRECEDENCE`,
 `EXPERIMENTAL_SERVER_EXECUTION`) reach the runtime through the
 deployed processes. The runtime-only flags (`commitPreconditions`, the CFC
 dials) reach it only through the `RuntimeOptions` passed to `new Runtime(...)`.

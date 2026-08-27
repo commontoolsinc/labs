@@ -141,12 +141,16 @@ document may carry flow-control labels this replica cannot see yet, so no
 content is served under an unknowable policy — and no lower-precedence
 stand-in schema can express that, since a shaped reader ignores the link
 schema entirely. Instead the crossing resolves as not found: the traversal
-returns not-found at the pointer (`followPointer`), an asCell boundary
-mints no handle (the hop consumed the crossing, so a handle would hand its
-reads out from under the labels), and a content-reading link resolution
-resolves to undefined data, unmemoized. What is visible of a partial
-schema still marks, conservatively. The tracked reads and the delivery
-kick re-run the reader when the documents arrive, and that pass resolves,
+returns not-found at the pointer (`followPointer`), an array's element
+hop — which the array walk dereferences itself, fast paths included —
+voids the whole array read (a partial array would disclose which
+positions were readable), an asCell boundary mints no handle (the hop
+consumed the crossing, so a handle would hand its reads out from under
+the labels), and a content-reading link resolution resolves to undefined
+data, unmemoized. Marking runs before each fail-closed return, so what is
+visible of a partial schema still marks, conservatively — a crossing can
+be relevant and still unreadable. The tracked reads and the delivery kick
+re-run the reader when the documents arrive, and that pass resolves,
 marks, and serves for real.
 
 Link resolution also narrows a stored schema across an ancestor hop (a

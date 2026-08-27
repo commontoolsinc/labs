@@ -304,14 +304,19 @@ export interface DeployedClientExperimentalParams {
  *
  * Call it in place of {@link experimentalOptionsFromEnv} wherever a runtime
  * talks to a deployed API — `cf`, the pieces controller, the agents host, the
- * admin CLIs. The presets that run against LOCAL emulated storage have no
+ * admin CLIs, and the browser shell (whose build defines stand in for the
+ * environment). The presets that run against LOCAL emulated storage have no
  * server to ask and keep reading the environment alone.
  *
- * Every way of not getting an answer — an old server with no posture on its
- * meta document, an unreachable one, a body that will not parse — resolves to
- * the environment alone. Absence of a declaration is not a declaration, and
- * the caller is about to fail loudly on its real work if the server is
- * genuinely down; failing here first would only obscure that.
+ * An unreachable server or a body that will not parse resolves to the
+ * environment alone — the caller is about to fail loudly on its real work if
+ * the server is genuinely down, and failing here first would only obscure
+ * that. A server that ANSWERS with a pre-flag document — a meta document
+ * without an `experimental` field, or a posture record silent on
+ * `readerSchemaPrecedence` — is different: it necessarily runs the strict
+ * combine, so that flag adopts as the legacy declared `false`
+ * ({@link parseServerExperimentalOptions}). For every other flag, absence of
+ * a declaration is not a declaration.
  *
  * An aborted `signal` is the one case that does NOT resolve: the caller
  * asked to stop, so this throws the abort reason rather than handing back a

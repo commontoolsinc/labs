@@ -399,9 +399,11 @@ delivery channel is asked for it, so its arrival re-runs the reader. A
 closure that cannot be completed fails the crossing CLOSED: the absent
 document may carry flow-control labels this replica cannot see yet, so
 the crossing reads as not found — the traversal returns not-found at the
-pointer, an asCell boundary mints no handle, and a content-reading link
-resolution resolves to undefined data, unmemoized — until the documents
-arrive and the re-run resolves for real. Link resolution loads the same
+pointer, an array's element hop voids the whole array read, an asCell
+boundary mints no handle, and a content-reading link resolution resolves
+to undefined data, unmemoized — until the documents arrive and the re-run
+resolves for real. Marking runs before each fail-closed return, so what
+is visible of a partial schema still marks. Link resolution loads the same
 closure before narrowing a stored schema across an ancestor hop, skipping
 the narrowing (rather than throwing on the dangling ref) when it is
 incomplete; the fail-closed rule then decides the result. A resolution that reads marks even on a write path:

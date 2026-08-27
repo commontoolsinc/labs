@@ -446,6 +446,75 @@ describe("link-ifc-read-relevance closure, narrowing, and raw readers", () => {
     expect(hopReasons().length).toBeGreaterThan(0);
   });
 
+  it("marks what a partial schema shows while still failing the crossing closed", () => {
+    const decomposed = labeledCidSchema();
+    // The root-level ifc is visible without the missing child document, so
+    // the crossing marks — and the crossing still fails closed, since the
+    // absent document could carry labels of its own.
+    const partiallyVisible = {
+      type: "object",
+      ifc: { integrity: ["asserted"] },
+      properties: { name: { $ref: decomposed.rootRef } },
+    } as JSONSchema;
+    const holder = holderOver(partiallyVisible);
+
+    expect(holder.get()?.item?.name).toBeUndefined();
+    expect(tx.getCfcState().relevant).toBe(true);
+    expect(hopReasons().length).toBeGreaterThan(0);
+
+    writeClosureDocs(decomposed);
+    expect(holder.get()).toEqual({ item: { name: "Ada" } });
+  });
+
+  it("withholds a whole asCell array while one element's schema closure is cold", () => {
+    const decomposed = labeledCidSchema();
+    const warmTarget = runtime.getCell(
+      space,
+      `array-warm-${seq}`,
+      undefined,
+      tx,
+    );
+    warmTarget.setRaw({ name: "Warm" });
+    const coldTarget = runtime.getCell(
+      space,
+      `array-cold-${seq}`,
+      undefined,
+      tx,
+    );
+    coldTarget.setRaw({ name: "Cold" });
+    const holder = runtime.getCell(space, `array-holder-${seq}`, undefined, tx);
+    holder.setRaw({
+      items: [
+        linkTo(warmTarget, plainLinkSchema),
+        linkTo(coldTarget, { $ref: decomposed.rootRef }),
+      ],
+    } as never);
+    const reader = holder.asSchema<{ items?: Cell<{ name: string }>[] }>({
+      type: "object",
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { name: { type: "string" } },
+            asCell: ["cell"],
+          },
+        },
+      },
+    });
+
+    // One cold element withholds the WHOLE array: a partial array would
+    // disclose which positions were readable.
+    expect(reader.get()?.items).toBeUndefined();
+
+    writeClosureDocs(decomposed);
+    const items = reader.get()?.items;
+    expect(items).toHaveLength(2);
+    expect(items?.[0]?.get()).toEqual({ name: "Warm" });
+    expect(items?.[1]?.get()).toEqual({ name: "Cold" });
+    expect(tx.getCfcState().relevant).toBe(true);
+  });
+
   it("mints no asCell handle over a crossing whose schema closure is cold", () => {
     const decomposed = labeledCidSchema();
     const holder = holderOver({ $ref: decomposed.rootRef });
