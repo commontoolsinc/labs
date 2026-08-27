@@ -38,6 +38,7 @@ import {
   EditorState,
   Extension,
   Prec,
+  Transaction,
 } from "@codemirror/state";
 import { oneDark } from "@codemirror/theme-one-dark";
 import {
@@ -52,6 +53,7 @@ import {
   lineNumbers,
   placeholder,
   rectangularSelection,
+  type ViewUpdate,
 } from "@codemirror/view";
 import type { DID } from "@commonfabric/identity";
 import { parseFabricUrl } from "@commonfabric/runner/fabric-url";
@@ -84,7 +86,11 @@ import {
   MentionableArraySchema,
   MentionableSchema,
 } from "../../core/mentionable.ts";
-import { runtimeContext, spaceContext } from "../../runtime-context.ts";
+import {
+  presenceUrlContext,
+  runtimeContext,
+  spaceContext,
+} from "../../runtime-context.ts";
 import { type StoredFile, uploadFile } from "../../utils/file-cell-storage.ts";
 import { mentionIdFromCellId } from "../../utils/mention-id.ts";
 import {
@@ -106,6 +112,27 @@ import {
 } from "./features/mention-refs.ts";
 import { createProseMarkdownPlugin } from "./features/prose-markdown.ts";
 import { styles } from "./styles.ts";
+import {
+  CodeMirrorCollaborationController,
+  CodeMirrorReconciliationError,
+  codeMirrorRewriteDedupeEffect,
+  type CodeMirrorSynchronizationSnapshot,
+} from "./codemirror-collaboration.ts";
+import {
+  codeMirrorPresence,
+  codeMirrorPresenceClearEffect,
+  codeMirrorPresenceCursorEffect,
+  codeMirrorPresenceRemoveEffect,
+  codeMirrorPresenceUpsertEffect,
+  mapSelectionToConfirmed,
+  presenceSelectionToJSON,
+} from "./codemirror-presence.ts";
+import {
+  copresenceRoomForField,
+  CopresenceSession,
+  type PresenceFailureCategory,
+  type PresenceServerMessage,
+} from "./copresence-client.ts";
 
 /** A unique noteId, so notes created from a mention do not collide. */
 function generateNoteId(): string {
@@ -120,6 +147,10 @@ function escapeMarkdownImageAltText(text: string): string {
     .replace(/\]/g, "\\]")
     .replace(/\r?\n/g, " ");
 }
+
+// A browser tab advertises one editor room at a time. Blur retains ownership;
+// focus in another instance transfers it.
+let activePresenceEditor: CFCodeEditor | undefined;
 
 /**
  * Supported MIME types for syntax highlighting
@@ -192,10 +223,21 @@ const getLangExtFromMimeType = (mime: MimeType) => {
  * @attr {"light"|"dark"} theme - Editor theme mode; "dark" enables oneDark.
  * @attr {"code"|"prose"} mode - Editor mode; "prose" enables markdown prose editing.
  * @attr {CellHandle<string>} pattern - Optional pattern piece used for backlink context.
+ * @attr {boolean} collaborative - Use Memory's operation protocol for concurrent editing.
+ * @attr {string} presenceRoom - Optional opaque room override for ephemeral
+ *   co-presence. The bound text Cell address supplies the default.
+ * @attr {string} participantName - Plain-text display name which enables
+ *   co-presence when this editor is focused.
+ * @attr {string} presenceUrl - Optional WebSocket co-presence service
+ *   override. Hosts can instead provide `presenceUrlContext`.
  *
  * @fires cf-change - Fired when content changes with detail: { value, oldValue, language }
  * @fires cf-focus - Fired on focus
  * @fires cf-blur - Fired on blur
+ * @fires cf-collaboration-reconcile - Fired when an epoch changes while local
+ *   edits are pending. Detail preserves localValue, canonicalValue, and cursors.
+ * @fires cf-presence-error - Fired when ephemeral presence fails independently
+ *   of document collaboration. Detail contains a safe failure category.
  * @fires backlink-click - Fired when a backlink is clicked with Cmd/Ctrl+Enter with detail: { text, piece }
  * @fires backlink-create - Fired when a novel backlink is activated (Cmd/Ctrl+Click)
  *   or confirmed with Enter during autocomplete with no matches. Detail:
@@ -243,6 +285,10 @@ export class CFCodeEditor extends BaseElement {
     mode: { type: String, reflect: true },
     autofocus: { type: Boolean },
     cursorPosition: { type: String },
+    collaborative: { type: Boolean },
+    presenceRoom: { type: String },
+    participantName: { type: String },
+    presenceUrl: { type: String },
   };
 
   declare value: CellHandle<string> | string;
@@ -281,6 +327,14 @@ export class CFCodeEditor extends BaseElement {
   declare mode: "code" | "prose";
   declare autofocus: boolean;
   declare cursorPosition: "start" | "end";
+  declare collaborative: boolean;
+  declare presenceRoom: string;
+  declare participantName: string;
+  declare presenceUrl: string;
+
+  @consume({ context: presenceUrlContext, subscribe: true })
+  @property({ attribute: false })
+  accessor contextPresenceUrl: string | undefined = undefined;
 
   @consume({ context: runtimeContext, subscribe: true })
   @property({ attribute: false })
@@ -303,6 +357,26 @@ export class CFCodeEditor extends BaseElement {
   private _setupComp = new Compartment();
   private _modeComp = new Compartment();
   private _proseMarkdownComp = new Compartment();
+  private _collaborationComp = new Compartment();
+  private _presenceComp = new Compartment();
+  private _collaboration: CodeMirrorCollaborationController | undefined;
+  private _collaborationSyncUnsub: (() => void) | undefined;
+  private _presence: CopresenceSession | undefined;
+  private _presenceParticipantId: string | undefined;
+  private _presenceHasSelection = false;
+  private _presenceEpoch: number | undefined;
+  private _presenceServiceUrl: string | undefined;
+  private _presenceRoom: string | undefined;
+  private _presenceFailure:
+    | {
+      category: PresenceFailureCategory;
+      configurationKey: string;
+    }
+    | undefined;
+  private _presenceReconnectListenersInstalled = false;
+  private _collaborationTransition: Promise<void> | undefined;
+  private _collaborationGeneration = 0;
+  private _collaborationFailed = false;
   private _cleanupFns: Array<() => void> = [];
   private _mentionableUnsub: (() => void) | null = null;
   private _mentionedUnsub: (() => void) | null = null;
@@ -384,6 +458,10 @@ export class CFCodeEditor extends BaseElement {
     this.mode = "code";
     this.autofocus = false;
     this.cursorPosition = "start";
+    this.collaborative = false;
+    this.presenceRoom = "";
+    this.participantName = "";
+    this.presenceUrl = "";
     this.mentionable = null;
     this.references = null;
     this.fabricHosts = [];
@@ -1157,6 +1235,7 @@ export class CFCodeEditor extends BaseElement {
 
   override connectedCallback() {
     super.connectedCallback();
+    this._setupPresenceReconnectListeners();
     if (this.autofocus && this._editorView) {
       this._queueAutofocus();
     }
@@ -1164,11 +1243,18 @@ export class CFCodeEditor extends BaseElement {
 
   override disconnectedCallback() {
     super.disconnectedCallback();
+    this._cleanupPresenceReconnectListeners();
+    this._releasePresenceOwnership();
     this._cleanup();
   }
 
   private _updateEditorFromCellValue(): void {
     if (!this._editorView) return;
+    // While an operation field is active, its integrated stream is the editor
+    // authority. The ordinary Cell subscription still updates the bound value,
+    // but feeding that materialized echo back into CodeMirror would discard its
+    // unconfirmed local OT state.
+    if (this._collaboration?.active) return;
 
     const newValue = this.getValue();
     // Guard against undefined - can happen when cell isn't bound yet
@@ -1209,6 +1295,40 @@ export class CFCodeEditor extends BaseElement {
     this._updateMentionedFromContent();
   }
 
+  private _handleEditorUpdate(update: ViewUpdate): void {
+    const isCellSync = update.transactions.some(
+      (transaction) => transaction.annotation(CFCodeEditor._cellSyncAnnotation),
+    );
+    const isRemote = update.transactions.some((transaction) =>
+      transaction.annotation(Transaction.remote)
+    );
+    if (update.selectionSet && !isCellSync && !isRemote) {
+      this._publishPresence();
+    }
+    if (!update.docChanged || isCellSync) return;
+
+    const value = update.state.doc.toString();
+    if (!this.readonly && !isRemote) {
+      if (this._collaboration?.active) {
+        this._collaboration.localDocChanged();
+        this._publishPresence();
+        this.emit("cf-change", {
+          value,
+          oldValue: update.startState.doc.toString(),
+          language: this.language,
+        });
+      } else {
+        this.setValue(value);
+      }
+    }
+    this._updateMentionedFromContent(value);
+    this._setupPieceNameSubscriptions();
+    if (!this.readonly && !isRemote) {
+      this._detectAndSyncNameChanges();
+      this._syncMentionRefs();
+    }
+  }
+
   private _cellSyncUnsub: (() => void) | null = null;
 
   private _setupCellSyncHandler(): void {
@@ -1239,6 +1359,432 @@ export class CFCodeEditor extends BaseElement {
     if (this._cellSyncUnsub) {
       this._cellSyncUnsub();
       this._cellSyncUnsub = null;
+    }
+  }
+
+  private _cleanupCollaboration(): void {
+    this._collaborationGeneration++;
+    this._collaborationSyncUnsub?.();
+    this._collaborationSyncUnsub = undefined;
+    this._cleanupPresence();
+    const collaboration = this._collaboration;
+    this._collaboration = undefined;
+    void collaboration?.stop().catch(() => {
+      // The element is disconnecting, so there is no live editor surface on
+      // which to reconcile a failed final send. The controller has already
+      // failed closed and detached its subscription.
+    });
+  }
+
+  private _observeCollaboration(
+    controller: CodeMirrorCollaborationController,
+  ): void {
+    this._collaborationSyncUnsub?.();
+    this._collaborationSyncUnsub = controller.observeSynchronization(
+      (snapshot) => this._handleCollaborationSynchronization(snapshot),
+    );
+  }
+
+  private async _setupCollaboration(): Promise<void> {
+    const view = this._editorView;
+    if (!view) return;
+
+    const generation = ++this._collaborationGeneration;
+    this._collaborationSyncUnsub?.();
+    this._collaborationSyncUnsub = undefined;
+    this._cleanupPresence();
+    const previous = this._collaboration;
+    this._collaborationFailed = false;
+
+    if (previous !== undefined) {
+      // Freeze editing while the previous controller confirms every local
+      // update. Toggling collaboration or rebinding the cell must never turn
+      // an unconfirmed CodeMirror change into an ordinary whole-value write.
+      view.dispatch({
+        effects: this._readonly.reconfigure(EditorState.readOnly.of(true)),
+      });
+      try {
+        await previous.stop();
+      } catch (cause) {
+        if (generation !== this._collaborationGeneration) return;
+        previous.dispose();
+        if (this._collaboration === previous) {
+          this._collaboration = undefined;
+        }
+        const error = cause instanceof Error ? cause : new Error(String(cause));
+        this._collaborationFailed = true;
+        this.emit("cf-error", { error, message: error.message });
+        return;
+      }
+      if (generation !== this._collaborationGeneration) return;
+      if (this._collaboration === previous) {
+        this._collaboration = undefined;
+      }
+    }
+
+    if (!this.collaborative) {
+      view.dispatch({
+        effects: [
+          this._collaborationComp.reconfigure([]),
+          this._readonly.reconfigure(EditorState.readOnly.of(this.readonly)),
+        ],
+      });
+      this._updateEditorFromCellValue();
+      return;
+    }
+
+    if (!isCellHandle(this.value)) {
+      const error = new Error(
+        "Collaborative code editing requires a CellHandle value",
+      );
+      view.dispatch({
+        effects: this._readonly.reconfigure(EditorState.readOnly.of(true)),
+      });
+      this.emit("cf-error", { error, message: error.message });
+      return;
+    }
+    const sourceCell = this.value as CellHandle<string>;
+
+    // Do not accept edits between the initial Memory query and installation of
+    // CodeMirror's versioned collaboration state.
+    view.dispatch({
+      effects: this._readonly.reconfigure(EditorState.readOnly.of(true)),
+    });
+    let cell: CellHandle<string>;
+    try {
+      cell = await sourceCell.resolveAsCell();
+    } catch (cause) {
+      if (generation !== this._collaborationGeneration) return;
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      this._collaborationFailed = true;
+      this.emit("cf-error", { error, message: error.message });
+      return;
+    }
+    if (generation !== this._collaborationGeneration) return;
+    const controller = new CodeMirrorCollaborationController({
+      runtime: cell.runtime(),
+      cell,
+      view,
+      compartment: this._collaborationComp,
+      onError: (error) => {
+        if (
+          generation !== this._collaborationGeneration ||
+          this._collaboration !== controller
+        ) return;
+        this._collaborationFailed = true;
+        this._cleanupPresence();
+        view.dispatch({
+          effects: this._readonly.reconfigure(EditorState.readOnly.of(true)),
+        });
+        if (error instanceof CodeMirrorReconciliationError) {
+          this.emit("cf-collaboration-reconcile", {
+            localValue: error.localValue,
+            canonicalValue: error.canonicalValue,
+            localCursor: error.localCursor,
+            canonicalCursor: error.canonicalCursor,
+          });
+        }
+        this.emit("cf-error", { error, message: error.message });
+      },
+    });
+    this._collaboration = controller;
+
+    try {
+      await controller.start();
+      if (
+        generation !== this._collaborationGeneration ||
+        this._collaboration !== controller
+      ) {
+        controller.dispose();
+        return;
+      }
+      this._observeCollaboration(controller);
+      view.dispatch({
+        effects: this._readonly.reconfigure(
+          EditorState.readOnly.of(
+            this.readonly || this._collaborationFailed,
+          ),
+        ),
+      });
+    } catch (cause) {
+      if (
+        generation !== this._collaborationGeneration ||
+        this._collaboration !== controller
+      ) return;
+      controller.dispose();
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      this._collaborationFailed = true;
+      this._cleanupPresence();
+      view.dispatch({
+        effects: this._readonly.reconfigure(EditorState.readOnly.of(true)),
+      });
+      this.emit("cf-error", { error, message: error.message });
+    }
+  }
+
+  private _handleCollaborationSynchronization(
+    snapshot: CodeMirrorSynchronizationSnapshot | null,
+  ): void {
+    if (snapshot === null) {
+      this._cleanupPresence();
+      return;
+    }
+    if (
+      this._presenceEpoch !== undefined &&
+      this._presenceEpoch !== snapshot.confirmedCursor.epoch
+    ) {
+      this._cleanupPresence();
+    }
+    this._setupPresence(snapshot);
+    if (!this._presence || !this._editorView) return;
+    this._editorView.dispatch({
+      effects: codeMirrorPresenceCursorEffect.of({
+        cursor: snapshot.confirmedCursor,
+        pendingChanges: snapshot.pendingChanges,
+      }),
+    });
+    this._publishPresence();
+  }
+
+  private _setupPresence(
+    synchronization = this._collaboration?.synchronizationSnapshot,
+    retryFailedConnection = false,
+  ): void {
+    if (activePresenceEditor !== this) {
+      this._cleanupPresence();
+      return;
+    }
+    const view = this._editorView;
+    const serviceUrl = this.presenceUrl || this.contextPresenceUrl || "";
+    const room = this.presenceRoom ||
+      (synchronization === null || synchronization === undefined
+        ? ""
+        : copresenceRoomForField(synchronization.field));
+    const configurationKey = JSON.stringify([
+      serviceUrl,
+      room,
+      this.participantName,
+    ]);
+    if (
+      this._presenceFailure !== undefined &&
+      this._presenceFailure.configurationKey !== configurationKey
+    ) {
+      this._presenceFailure = undefined;
+    }
+    if (
+      !view || !this.collaborative || !this._collaboration?.active ||
+      synchronization === null || synchronization === undefined ||
+      !room || !this.participantName || !serviceUrl
+    ) {
+      this._cleanupPresence();
+      return;
+    }
+    if (
+      this._presenceFailure?.configurationKey === configurationKey &&
+      (this._presenceFailure.category === "configuration" ||
+        !retryFailedConnection)
+    ) {
+      return;
+    }
+    if (
+      this._presence !== undefined &&
+      this._presenceEpoch === synchronization.confirmedCursor.epoch &&
+      this._presenceRoom === room &&
+      this._presenceServiceUrl === serviceUrl
+    ) {
+      this._publishPresence();
+      return;
+    }
+
+    this._presenceFailure = undefined;
+    this._cleanupPresence();
+    view.dispatch({
+      effects: this._presenceComp.reconfigure(
+        codeMirrorPresence(synchronization.confirmedCursor),
+      ),
+    });
+    this._presenceEpoch = synchronization.confirmedCursor.epoch;
+    this._presenceRoom = room;
+    this._presenceServiceUrl = serviceUrl;
+    try {
+      this._presence = new CopresenceSession({
+        serviceUrl,
+        room,
+        onMessage: (message) => this._handlePresenceMessage(message),
+        onFailure: (category) => this._failPresence(category),
+      });
+      this._publishPresence();
+    } catch {
+      this._failPresence("configuration");
+    }
+  }
+
+  private _takePresenceOwnership(): void {
+    if (activePresenceEditor !== this) {
+      const previous = activePresenceEditor;
+      activePresenceEditor = this;
+      previous?._cleanupPresence();
+    }
+    this._setupPresence();
+  }
+
+  private _handlePresenceFocus(): void {
+    this._takePresenceOwnership();
+    this._publishPresence();
+  }
+
+  private _releasePresenceOwnership(): void {
+    if (activePresenceEditor !== this) return;
+    activePresenceEditor = undefined;
+    this._cleanupPresence();
+  }
+
+  private _cleanupPresence(): void {
+    const presence = this._presence;
+    this._presence = undefined;
+    presence?.dispose();
+    this._presenceParticipantId = undefined;
+    this._presenceHasSelection = false;
+    this._presenceEpoch = undefined;
+    this._presenceRoom = undefined;
+    this._presenceServiceUrl = undefined;
+    this._editorView?.dispatch({
+      effects: [
+        codeMirrorPresenceClearEffect.of(null),
+        this._presenceComp.reconfigure([]),
+      ],
+    });
+  }
+
+  private _failPresence(category: PresenceFailureCategory): void {
+    const synchronization = this._collaboration?.synchronizationSnapshot;
+    const room = this.presenceRoom ||
+      (synchronization === null || synchronization === undefined
+        ? ""
+        : copresenceRoomForField(synchronization.field));
+    const configurationKey = JSON.stringify([
+      this.presenceUrl || this.contextPresenceUrl || "",
+      room,
+      this.participantName,
+    ]);
+    if (
+      this._presenceFailure?.category === category &&
+      this._presenceFailure.configurationKey === configurationKey
+    ) {
+      return;
+    }
+    this._presenceFailure = { category, configurationKey };
+    this._cleanupPresence();
+    this.emit("cf-presence-error", { category });
+  }
+
+  private _retryPresenceFromSignal(): void {
+    if (!this._presenceFailure) return;
+    this._setupPresence(undefined, true);
+  }
+
+  private readonly _handlePresenceOnline = (): void => {
+    this._retryPresenceFromSignal();
+  };
+
+  private readonly _handlePresenceVisibilityChange = (): void => {
+    if (
+      typeof document !== "undefined" && document.visibilityState === "visible"
+    ) {
+      this._retryPresenceFromSignal();
+    }
+  };
+
+  private _setupPresenceReconnectListeners(): void {
+    if (this._presenceReconnectListenersInstalled) return;
+    this._presenceReconnectListenersInstalled = true;
+    globalThis.addEventListener("online", this._handlePresenceOnline);
+    if (typeof document !== "undefined") {
+      document.addEventListener(
+        "visibilitychange",
+        this._handlePresenceVisibilityChange,
+      );
+    }
+  }
+
+  private _cleanupPresenceReconnectListeners(): void {
+    if (!this._presenceReconnectListenersInstalled) return;
+    this._presenceReconnectListenersInstalled = false;
+    globalThis.removeEventListener("online", this._handlePresenceOnline);
+    if (typeof document !== "undefined") {
+      document.removeEventListener(
+        "visibilitychange",
+        this._handlePresenceVisibilityChange,
+      );
+    }
+  }
+
+  private _handlePresenceMessage(message: PresenceServerMessage): void {
+    const view = this._editorView;
+    const synchronization = this._collaboration?.synchronizationSnapshot;
+    if (!view || !this._presence || !synchronization) return;
+    if (message.type === "room.snapshot") {
+      this._presenceParticipantId = message.snapshot.selfParticipantId;
+      view.dispatch({
+        effects: [
+          codeMirrorPresenceClearEffect.of(null),
+          ...message.snapshot.participants
+            .filter((participant) =>
+              participant.participantId !== this._presenceParticipantId
+            )
+            .map((participant) =>
+              codeMirrorPresenceUpsertEffect.of({
+                participant,
+                pendingChanges: synchronization.pendingChanges,
+              })
+            ),
+        ],
+      });
+      return;
+    }
+    if (message.type === "participant.upsert") {
+      if (message.participant.participantId === this._presenceParticipantId) {
+        return;
+      }
+      view.dispatch({
+        effects: codeMirrorPresenceUpsertEffect.of({
+          participant: message.participant,
+          pendingChanges: synchronization.pendingChanges,
+        }),
+      });
+    } else {
+      if (message.participantId === this._presenceParticipantId) return;
+      view.dispatch({
+        effects: codeMirrorPresenceRemoveEffect.of(message.participantId),
+      });
+    }
+  }
+
+  private _publishPresence(): void {
+    const presence = this._presence;
+    const view = this._editorView;
+    const synchronization = this._collaboration?.synchronizationSnapshot;
+    if (!presence || !view || synchronization === null || !synchronization) {
+      return;
+    }
+    const focused = view.hasFocus;
+    if (focused) this._presenceHasSelection = true;
+    const provisional = synchronization.pendingChanges.length !== 0;
+    try {
+      presence.publish({
+        name: this.participantName,
+        focused,
+        cursor: synchronization.confirmedCursor,
+        selection: this._presenceHasSelection
+          ? presenceSelectionToJSON(mapSelectionToConfirmed(
+            view.state.selection,
+            synchronization.pendingChanges,
+          ))
+          : null,
+        basis: provisional ? "provisional" : "confirmed",
+      });
+    } catch {
+      this._failPresence("configuration");
     }
   }
 
@@ -1339,6 +1885,7 @@ export class CFCodeEditor extends BaseElement {
   private _cleanup(): void {
     this._cancelAutofocus();
     this._cleanupCellSyncHandler();
+    this._cleanupCollaboration();
     this._cleanupPieceNameSubscriptions();
     this._cleanupRefDestinationSubscriptions();
     this._resolvedPieceIds.clear();
@@ -1415,6 +1962,23 @@ export class CFCodeEditor extends BaseElement {
       this._updateEditorFromCellValue();
     }
 
+    if (
+      this.hasUpdated &&
+      (changedProperties.has("value") ||
+        changedProperties.has("collaborative"))
+    ) {
+      void this._setupCollaboration();
+    }
+
+    if (
+      changedProperties.has("presenceRoom") ||
+      changedProperties.has("presenceUrl") ||
+      changedProperties.has("contextPresenceUrl") ||
+      changedProperties.has("participantName")
+    ) {
+      this._setupPresence();
+    }
+
     // Update language
     if (changedProperties.has("language") && this._editorView) {
       const lang = getLangExtFromMimeType(this.language);
@@ -1427,7 +1991,9 @@ export class CFCodeEditor extends BaseElement {
     if (changedProperties.has("readonly") && this._editorView) {
       this._editorView.dispatch({
         effects: this._readonly.reconfigure(
-          EditorState.readOnly.of(this.readonly),
+          EditorState.readOnly.of(
+            this.readonly || this._collaborationFailed,
+          ),
         ),
       });
     }
@@ -1547,6 +2113,8 @@ export class CFCodeEditor extends BaseElement {
 
     // Set up custom cell sync handler for CodeMirror
     this._setupCellSyncHandler();
+
+    void this._setupCollaboration();
 
     // Set up mentionable sync handler and initialize mentioned list
     this._setupMentionableSyncHandler();
@@ -1798,36 +2366,23 @@ export class CFCodeEditor extends BaseElement {
       this._proseMarkdownComp.of(
         this.mode === "prose" ? createProseMarkdownPlugin() : [],
       ),
-      EditorView.updateListener.of((update) => {
-        // Only process user-initiated changes, not Cell-originated updates.
-        // Check if any transaction has the Cell sync annotation - if so, skip.
-        // This prevents the feedback loop: Cell → Editor → setValue → Cell...
-        const isCellSync = update.transactions.some(
-          (tr) => tr.annotation(CFCodeEditor._cellSyncAnnotation),
-        );
-        if (update.docChanged && !this.readonly && !isCellSync) {
-          const value = update.state.doc.toString();
-          this.setValue(value);
-          // Keep $mentioned current as user types
-          this._updateMentionedFromContent();
-          // Sync name changes to linked pieces
-          this._detectAndSyncNameChanges();
-          // Refresh subscriptions for any new backlinks
-          this._setupPieceNameSubscriptions();
-          // Reconcile the reference map with the edited document
-          this._syncMentionRefs();
-        }
-      }),
+      this._collaborationComp.of([]),
+      this._presenceComp.of([]),
+      EditorView.updateListener.of((update) =>
+        this._handleEditorUpdate(update)
+      ),
       // Handle focus/blur events
       EditorView.domEventHandlers({
         focus: () => {
           this._cellController.onFocus();
           this.emit("cf-focus");
+          this._handlePresenceFocus();
           return false;
         },
         blur: () => {
           this._cellController.onBlur();
           this.emit("cf-blur");
+          this._publishPresence();
           return false;
         },
         paste: (event, view) => {
@@ -2067,6 +2622,50 @@ export class CFCodeEditor extends BaseElement {
     }
   }
 
+  /**
+   * Deliberately releases the active Memory operation field. Disconnecting the
+   * element or toggling `collaborative` does not release shared durable state.
+   */
+  async releaseCollaboration(): Promise<void> {
+    const collaboration = this._collaboration;
+    if (!collaboration?.active) return;
+    this._collaborationSyncUnsub?.();
+    this._collaborationSyncUnsub = undefined;
+    this._cleanupPresence();
+    const view = this._editorView;
+    view?.dispatch({
+      effects: this._readonly.reconfigure(EditorState.readOnly.of(true)),
+    });
+    const transition = collaboration.release();
+    this._collaborationTransition = transition;
+    try {
+      await transition;
+    } catch (error) {
+      if (this._collaboration === collaboration) {
+        if (collaboration.active) {
+          this._observeCollaboration(collaboration);
+        }
+        view?.dispatch({
+          effects: this._readonly.reconfigure(
+            EditorState.readOnly.of(
+              this.readonly || this._collaborationFailed,
+            ),
+          ),
+        });
+      }
+      throw error;
+    } finally {
+      if (this._collaborationTransition === transition) {
+        this._collaborationTransition = undefined;
+      }
+    }
+    if (this._collaboration === collaboration) {
+      this._collaboration = undefined;
+      this.collaborative = false;
+      this.requestUpdate();
+    }
+  }
+
   private async _handleImagePaste(
     files: File[],
     view: EditorView,
@@ -2124,10 +2723,8 @@ export class CFCodeEditor extends BaseElement {
    * Link syntax: [[Name (id)]]. We parse ids and resolve them against
    * `$mentionable` to produce live Piece instances.
    */
-  private _updateMentionedFromContent(): void {
+  private _updateMentionedFromContent(content = this.getValue() || ""): void {
     if (!this.mentioned) return;
-
-    const content = this.getValue() || "";
 
     if (this._refMode) {
       this._updateMentionedWithRefs(content);
@@ -2274,7 +2871,7 @@ export class CFCodeEditor extends BaseElement {
 
       // Subscribe with changeGroup so our own edits are filtered out
       const unsub = titleCell.subscribe(() => {
-        this._handleExternalTitleChange(pieceId, pieceCell);
+        void this._handleExternalTitleChange(pieceId, pieceCell);
       });
 
       this._pieceNameSubscriptions.set(pieceId, unsub);
@@ -2293,11 +2890,29 @@ export class CFCodeEditor extends BaseElement {
    * Handle external title change from a piece - update the pill text in the document.
    * This is called when a piece's title field changes externally (not from our own edit).
    */
-  private _handleExternalTitleChange(
+  private async _handleExternalTitleChange(
     pieceId: string,
     pieceCell: CellHandle<Mentionable>,
-  ): void {
+  ): Promise<void> {
     if (!this._editorView) return;
+
+    const transition = this._collaborationTransition;
+    if (transition !== undefined) {
+      await transition.catch(() => undefined);
+      return await this._handleExternalTitleChange(pieceId, pieceCell);
+    }
+    const collaboration = this._collaboration;
+    if (collaboration !== undefined) {
+      if (!collaboration.active) return;
+      // A semantic rewrite has to be the first unconfirmed local update for
+      // CodeMirror to acknowledge another client's copy. Confirm ordinary
+      // local edits first, then recompute the rewrite against the latest doc.
+      if (!await collaboration.prepareExternalChange()) return;
+      if (
+        this._collaboration !== collaboration || !collaboration.active ||
+        !this._editorView
+      ) return;
+    }
 
     // Get the piece's title (without emoji prefix)
     const title = pieceCell.key("title").get() as string;
@@ -2322,10 +2937,17 @@ export class CFCodeEditor extends BaseElement {
     // try to sync this change back to the piece (it runs synchronously during dispatch)
     this._previousBacklinkNames.set(pieceId, currentName);
 
-    // Update document with annotation to prevent updateListener from calling setValue
+    const oldDocValue = this._editorView.state.doc.toString();
+
+    // Update the editor without routing through the generic update listener.
+    // The collaboration path submits this ChangeSet directly below; the
+    // ordinary path writes through CellController as before.
     this._editorView.dispatch({
       changes: { from: bl.nameFrom, to: bl.nameTo, insert: currentName },
       annotations: CFCodeEditor._cellSyncAnnotation.of(true),
+      effects: codeMirrorRewriteDedupeEffect.of(
+        JSON.stringify(["backlink-title", pieceId, bl.name, currentName]),
+      ),
     });
 
     // Record the rewrite as a local edit through the CellController so it merges
@@ -2336,6 +2958,16 @@ export class CFCodeEditor extends BaseElement {
     // focus/blur cycle, and a rewrite that arrives while the editor is
     // unfocused would never be written.
     const newDocValue = this._editorView.state.doc.toString();
+    if (collaboration !== undefined) {
+      await collaboration.localDocChanged();
+      this.emit("cf-change", {
+        value: newDocValue,
+        oldValue: oldDocValue,
+        language: this.language,
+      });
+      this._updateMentionedFromContent();
+      return;
+    }
     this.setValue(newDocValue);
     this._cellController.flush();
   }
@@ -2510,7 +3142,7 @@ export class CFCodeEditor extends BaseElement {
           const name = (value as Mentionable | undefined)?.[NAME];
           if (typeof name !== "string" || name.length === 0) return;
           this._refNames.set(key, name);
-          this._handleExternalRefTitleChange(key, name);
+          void this._handleExternalRefTitleChange(key, name);
         }),
       });
     }
@@ -2528,8 +3160,26 @@ export class CFCodeEditor extends BaseElement {
    * Rewrite a label after its destination was renamed elsewhere — unless the
    * user has claimed that label, which is the whole point of `modifiedTitle`.
    */
-  private _handleExternalRefTitleChange(key: string, name: string): void {
+  private async _handleExternalRefTitleChange(
+    key: string,
+    name: string,
+  ): Promise<void> {
     if (!this._editorView) return;
+
+    const transition = this._collaborationTransition;
+    if (transition !== undefined) {
+      await transition.catch(() => undefined);
+      return await this._handleExternalRefTitleChange(key, name);
+    }
+    const collaboration = this._collaboration;
+    if (collaboration !== undefined) {
+      if (!collaboration.active) return;
+      if (!await collaboration.prepareExternalChange()) return;
+      if (
+        this._collaboration !== collaboration || !collaboration.active ||
+        !this._editorView
+      ) return;
+    }
     if (this._refMap()[key]?.modifiedTitle) return;
 
     const ref = this._documentRefs().find((candidate) => candidate.key === key);
@@ -2540,16 +3190,31 @@ export class CFCodeEditor extends BaseElement {
     const safe = labelForToken(name);
     this._previousRefLabels.set(key, safe);
 
+    const oldDocValue = this._editorView.state.doc.toString();
     this._editorView.dispatch({
       changes: { from: ref.labelFrom, to: ref.labelTo, insert: safe },
       annotations: CFCodeEditor._cellSyncAnnotation.of(true),
+      effects: codeMirrorRewriteDedupeEffect.of(
+        JSON.stringify(["reference-title", key, ref.label, safe]),
+      ),
     });
 
     // Record the rewrite through the CellController so it merges with any
     // pending debounced edit, then flush: this is a remote change rather than
     // user input, and the blur strategy would otherwise hold it until the next
     // focus/blur cycle.
-    this.setValue(this._editorView.state.doc.toString());
+    const newDocValue = this._editorView.state.doc.toString();
+    if (collaboration !== undefined) {
+      await collaboration.localDocChanged();
+      this.emit("cf-change", {
+        value: newDocValue,
+        oldValue: oldDocValue,
+        language: this.language,
+      });
+      this._updateMentionedFromContent();
+      return;
+    }
+    this.setValue(newDocValue);
     this._cellController.flush();
   }
 

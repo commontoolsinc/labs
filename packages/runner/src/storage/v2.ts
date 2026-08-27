@@ -19,6 +19,8 @@ import {
   type URI,
 } from "@commonfabric/memory/interface";
 import {
+  type ApplyOpOperation,
+  type ApplyOpResolution,
   canResolveScopeKey,
   type CellScope,
   type ClientCommit,
@@ -31,7 +33,10 @@ import {
   type EntityIdListResult,
   getCommitPreconditionsConfig,
   getServerExecutionConfig,
+  type OperationFieldQuery,
+  type OperationFieldSnapshot,
   type PatchOp,
+  type ReleaseOpFieldOperation,
   resolveScopeKey,
   type ScopeKey,
   type ScopeKeyIdentity,
@@ -81,6 +86,7 @@ import * as Differential from "./differential.ts";
 import type {
   IMemoryAddress,
   IMergedChanges,
+  IOperationStorageCapability,
   IPreconditionFailedError,
   IRemoteStorageProviderSettings,
   ISpaceReplica,
@@ -2156,6 +2162,14 @@ type ProviderSyncRequest = {
   instance?: ScopeKey;
 };
 
+type ProviderOperationSubscription = {
+  query: Omit<OperationFieldQuery, "principal" | "sessionId">;
+  callback: (snapshot: OperationFieldSnapshot) => void;
+  cancel?: Cancel;
+  install?: Promise<void>;
+  closed: boolean;
+};
+
 /**
  * Minimal marker sink — structurally the Runtime's `RuntimeTelemetry`.
  * Kept structural (type-only import) so the storage layer takes no runtime
@@ -2163,7 +2177,7 @@ type ProviderSyncRequest = {
  */
 type TelemetrySink = { submit(marker: RuntimeTelemetryMarker): void };
 
-class Provider implements IStorageProvider {
+class Provider implements IStorageProvider, IOperationStorageCapability {
   replica: SpaceReplica;
   // Registered reads to replay when a provisional replica is replaced, keyed
   // by document and then by the normalized selector. A normalized selector is
@@ -2176,6 +2190,7 @@ class Provider implements IStorageProvider {
   >();
   #destroyed = false;
   #routeAbort = new AbortController();
+  #operationSubscriptions = new Set<ProviderOperationSubscription>();
 
   constructor(
     readonly options: ProviderOptions,
@@ -2276,6 +2291,102 @@ class Provider implements IStorageProvider {
     );
   }
 
+  operationCodecs(): Promise<readonly string[]> {
+    return this.followReplacement((replica) => replica.operationCodecs());
+  }
+
+  queryOperationField(
+    query: Omit<OperationFieldQuery, "principal" | "sessionId">,
+  ): Promise<OperationFieldSnapshot> {
+    return this.followReplacement((replica) =>
+      replica.queryOperationField(query)
+    );
+  }
+
+  applyOperation(operation: ApplyOpOperation): Promise<ApplyOpResolution> {
+    return this.followReplacement((replica) =>
+      replica.applyOperation(operation)
+    );
+  }
+
+  releaseOperationField(operation: ReleaseOpFieldOperation): Promise<void> {
+    return this.followReplacement((replica) =>
+      replica.releaseOperationField(operation)
+    );
+  }
+
+  async subscribeOperationField(
+    query: Omit<OperationFieldQuery, "principal" | "sessionId">,
+    callback: (snapshot: OperationFieldSnapshot) => void,
+  ): Promise<Cancel> {
+    if (this.#destroyed) throw new Error("memory provider closed");
+    const subscription: ProviderOperationSubscription = {
+      query,
+      callback,
+      closed: false,
+    };
+    this.#operationSubscriptions.add(subscription);
+    try {
+      await this.ensureOperationSubscription(subscription);
+    } catch (error) {
+      subscription.closed = true;
+      this.#operationSubscriptions.delete(subscription);
+      throw error;
+    }
+    if (subscription.closed || this.#destroyed) {
+      throw new Error("memory provider closed");
+    }
+    return () => {
+      if (subscription.closed) return;
+      subscription.closed = true;
+      this.#operationSubscriptions.delete(subscription);
+      subscription.cancel?.();
+      subscription.cancel = undefined;
+    };
+  }
+
+  private ensureOperationSubscription(
+    subscription: ProviderOperationSubscription,
+  ): Promise<void> {
+    if (subscription.install !== undefined) return subscription.install;
+    const install = this.installOperationSubscription(subscription);
+    subscription.install = install;
+    const clear = () => {
+      if (subscription.install === install) subscription.install = undefined;
+    };
+    install.then(clear, clear);
+    return install;
+  }
+
+  private async installOperationSubscription(
+    subscription: ProviderOperationSubscription,
+  ): Promise<void> {
+    while (!subscription.closed && !this.#destroyed) {
+      const replica = this.replica;
+      let cancel: Cancel;
+      try {
+        cancel = await replica.subscribeOperationField(
+          subscription.query,
+          subscription.callback,
+        );
+      } catch (error) {
+        if (replica !== this.replica && !this.#destroyed) continue;
+        throw error;
+      }
+      if (subscription.closed || this.#destroyed) {
+        cancel();
+        return;
+      }
+      if (replica !== this.replica) {
+        cancel();
+        continue;
+      }
+      subscription.cancel?.();
+      subscription.cancel = cancel;
+      return;
+    }
+  }
+
   canReplaceProvisionalReplica(): boolean {
     const { generation, writeIssuedGeneration } = this.options.routeState;
     return writeIssuedGeneration !== generation;
@@ -2291,6 +2402,10 @@ class Provider implements IStorageProvider {
     this.#routeAbort = new AbortController();
     const replacement = this.createReplica();
     this.replica = replacement;
+    for (const subscription of this.#operationSubscriptions) {
+      subscription.cancel?.();
+      subscription.cancel = undefined;
+    }
     previous.redirectOverlappingReadsTo((uri, selector, scope, instance) =>
       this.replaySync(replacement, uri, selector, scope, instance)
     );
@@ -2298,11 +2413,14 @@ class Provider implements IStorageProvider {
     previous.closeNow();
     const requests = [...this.#syncRequests.values()]
       .flatMap((bySelector) => [...bySelector.values()]);
-    await Promise.all(
-      requests.map(({ uri, selector, scope, instance }) =>
+    await Promise.all([
+      ...requests.map(({ uri, selector, scope, instance }) =>
         this.replaySync(replacement, uri, selector, scope, instance)
       ),
-    );
+      ...[...this.#operationSubscriptions].map((subscription) =>
+        this.ensureOperationSubscription(subscription)
+      ),
+    ]);
   }
 
   synced(): Promise<void> {
@@ -2386,6 +2504,11 @@ class Provider implements IStorageProvider {
       return;
     }
     this.#destroyed = true;
+    for (const subscription of this.#operationSubscriptions) {
+      subscription.closed = true;
+      subscription.cancel?.();
+    }
+    this.#operationSubscriptions.clear();
     this.#routeAbort.abort(new Error("memory replica closed"));
     this.options.routeState.generation++;
     await this.replica.close();
@@ -2394,6 +2517,11 @@ class Provider implements IStorageProvider {
   async destroyNow(): Promise<void> {
     if (!this.#destroyed) {
       this.#destroyed = true;
+      for (const subscription of this.#operationSubscriptions) {
+        subscription.closed = true;
+        subscription.cancel?.();
+      }
+      this.#operationSubscriptions.clear();
       this.#routeAbort.abort(new Error("memory replica closed"));
       this.options.routeState.generation++;
     }
@@ -2518,7 +2646,7 @@ const docKey = (id: URI, instance: string): string => `${instance}\0${id}`;
  * caller knows it, the explicit instance key. */
 type LocalDocAddress = { id: URI; scope?: CellScope; scopeKey?: ScopeKey };
 
-class SpaceReplica implements ISpaceReplica {
+class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
   readonly #space: MemorySpace;
   readonly #subscription: IStorageSubscription;
   readonly #scopeKeyIdentity: () => ScopeKeyIdentity;
@@ -2556,9 +2684,7 @@ class SpaceReplica implements ISpaceReplica {
   #aclChangedSinceMount = false;
   readonly #docs = new Map<string, DocumentRecord>();
   readonly #syncTasks = new Map<string, SyncTask>();
-  readonly #commitPromises = new Set<
-    Promise<Result<Unit, StorageTransactionRejected>>
-  >();
+  readonly #commitPromises = new Set<Promise<unknown>>();
   // Issued-but-unsettled commits that carry pending reads, keyed by localSeq.
   // Scanned by cascadeDroppedDependency when a dependency's optimistic writes
   // are dropped. See the InFlightCommit doc for why zero-pending-read commits
@@ -2596,6 +2722,11 @@ class SpaceReplica implements ISpaceReplica {
     string,
     Set<(document: EntityDocument | undefined) => void>
   >();
+  readonly #operationSinks = new Map<
+    string,
+    Set<(snapshot: OperationFieldSnapshot) => void>
+  >();
+  readonly #operationWatchRemovals = new Map<string, Promise<void>>();
   #watchView: MemoryV2Client.WatchView | null = null;
   // The specific view instance that `consumeUpdates` is iterating. This can
   // diverge from `#watchView` (the client may hand back a fresh view instance
@@ -3183,6 +3314,140 @@ class SpaceReplica implements ISpaceReplica {
     );
   }
 
+  async queryOperationField(
+    query: Omit<OperationFieldQuery, "principal" | "sessionId">,
+  ): Promise<OperationFieldSnapshot> {
+    const { session } = await this.activeSessionHandle();
+    return (await session.queryOperationField(query)).field;
+  }
+
+  async operationCodecs(): Promise<readonly string[]> {
+    const { client } = await this.activeSessionHandle();
+    if (client.serverFlags?.applyOp !== true) return [];
+    return client.serverFlags.operationCodecs ?? [];
+  }
+
+  async applyOperation(
+    operation: ApplyOpOperation,
+  ): Promise<ApplyOpResolution> {
+    const { client, session } = await this.activeSessionHandle();
+    if (client.serverFlags?.applyOp !== true) {
+      throw new Error("memory server does not support apply-op");
+    }
+    const localSeq = this.#nextLocalSeq++;
+    const request = session.transact({
+      localSeq,
+      reads: { confirmed: [], pending: [] },
+      operations: [operation],
+    }, () => this.markRouteWriteIssued());
+    this.#commitPromises.add(request);
+    let applied;
+    try {
+      applied = await request;
+    } finally {
+      this.#commitPromises.delete(request);
+    }
+    const resolution = applied.operationResolutions?.[0];
+    if (resolution === undefined) {
+      throw new Error("apply-op commit returned no operation resolution");
+    }
+    return resolution;
+  }
+
+  async releaseOperationField(
+    operation: ReleaseOpFieldOperation,
+  ): Promise<void> {
+    const { client, session } = await this.activeSessionHandle();
+    if (client.serverFlags?.applyOp !== true) {
+      throw new Error("memory server does not support release-op-field");
+    }
+    const localSeq = this.#nextLocalSeq++;
+    const request = session.transact({
+      localSeq,
+      reads: { confirmed: [], pending: [] },
+      operations: [operation],
+    }, () => this.markRouteWriteIssued());
+    this.#commitPromises.add(request);
+    try {
+      await request;
+    } finally {
+      this.#commitPromises.delete(request);
+    }
+  }
+
+  async subscribeOperationField(
+    query: Omit<OperationFieldQuery, "principal" | "sessionId">,
+    callback: (snapshot: OperationFieldSnapshot) => void,
+  ): Promise<Cancel> {
+    const watchId = `operation:${hashStringOf(query)}`;
+    let callbacks = this.#operationSinks.get(watchId);
+    if (callbacks === undefined) {
+      callbacks = new Set();
+      this.#operationSinks.set(watchId, callbacks);
+    }
+    callbacks.add(callback);
+
+    try {
+      await this.#operationWatchRemovals.get(watchId);
+      const { session } = await this.activeSessionHandle();
+      const { view, precedingSyncs, sync } = await session.watchAddSync([{
+        id: watchId,
+        kind: "operation",
+        query,
+      }]);
+      if (this.#closed) {
+        view.close();
+        throw new Error("memory replica closed");
+      }
+      this.#watchView = view;
+      for (const precedingSync of precedingSyncs) {
+        this.applySessionSync(precedingSync, "integrate");
+      }
+      this.applySessionSync(sync, "integrate");
+      this.#consumeWatchView(view);
+    } catch (error) {
+      callbacks.delete(callback);
+      if (callbacks.size === 0) this.#operationSinks.delete(watchId);
+      throw error;
+    }
+
+    return () => {
+      const current = this.#operationSinks.get(watchId);
+      current?.delete(callback);
+      if (current?.size !== 0) return;
+      this.#operationSinks.delete(watchId);
+      const removal = this.#removeOperationWatch(watchId).finally(() => {
+        if (this.#operationWatchRemovals.get(watchId) === removal) {
+          this.#operationWatchRemovals.delete(watchId);
+        }
+      });
+      this.#operationWatchRemovals.set(watchId, removal);
+    };
+  }
+
+  async #removeOperationWatch(watchId: string): Promise<void> {
+    try {
+      const { session } = await this.activeSessionHandle();
+      const { view, precedingSyncs, sync } = await session.watchRemoveSync([
+        watchId,
+      ]);
+      if (this.#closed) {
+        view.close();
+        return;
+      }
+      this.#watchView = view;
+      for (const precedingSync of precedingSyncs) {
+        this.applySessionSync(precedingSync, "integrate");
+      }
+      this.applySessionSync(sync, "integrate");
+      this.#consumeWatchView(view);
+    } catch (error) {
+      if (!this.#closed) {
+        console.warn("failed to remove operation watch", error);
+      }
+    }
+  }
+
   async sqliteQuery(
     db: SqliteDbRef,
     sql: string,
@@ -3505,6 +3770,7 @@ class SpaceReplica implements ISpaceReplica {
     this.cancelQueuedWatchRefresh();
     this.#watchView?.close();
     this.#watchView = null;
+    this.#operationSinks.clear();
     // Also close the view the update consumer is bound to, in case it diverged
     // from #watchView; otherwise its pending next() never settles and the
     // `Promise.allSettled([...#updatePromises])` below hangs forever.
@@ -3543,6 +3809,8 @@ class SpaceReplica implements ISpaceReplica {
     ]);
     await Promise.allSettled([...this.#syncPromises]);
     await Promise.allSettled([...this.#updatePromises]);
+    await Promise.allSettled([...this.#operationWatchRemovals.values()]);
+    this.#operationWatchRemovals.clear();
     this.#syncTasks.clear();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>(
       () => this.#scopeKeyIdentity(),
@@ -3677,6 +3945,8 @@ class SpaceReplica implements ISpaceReplica {
     // verdicts settle off the same teardown rejection.
     void Promise.allSettled([...this.#syncPromises]);
     void Promise.allSettled([...this.#updatePromises]);
+    void Promise.allSettled([...this.#operationWatchRemovals.values()]);
+    this.#operationWatchRemovals.clear();
     void Promise.allSettled([...this.#suppressedVerdicts]);
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     this.#syncTasks.clear();
@@ -4387,22 +4657,27 @@ class SpaceReplica implements ISpaceReplica {
         view.close();
         throw error;
       }
-      if (this.#updatePromises.size === 0) {
-        this.#subscribedWatchView = view;
-        const updates = this.consumeUpdates(view.subscribeSync())
-          .finally(() => {
-            this.#updatePromises.delete(updates);
-            if (this.#subscribedWatchView === view) {
-              this.#subscribedWatchView = null;
-              this.applyParkedAcceptsNow();
-            }
-          });
-        this.#updatePromises.add(updates);
-      }
+      this.#consumeWatchView(view);
       return { ok: {} };
     } catch (error) {
       return { error: toPullError(error) };
     }
+  }
+
+  #consumeWatchView(view: MemoryV2Client.WatchView): void {
+    if (this.#subscribedWatchView === view) return;
+    const previous = this.#subscribedWatchView;
+    this.#subscribedWatchView = view;
+    previous?.close();
+    const updates = this.consumeUpdates(view.subscribeSync())
+      .finally(() => {
+        this.#updatePromises.delete(updates);
+        if (this.#subscribedWatchView === view) {
+          this.#subscribedWatchView = null;
+          this.applyParkedAcceptsNow();
+        }
+      });
+    this.#updatePromises.add(updates);
   }
 
   private enqueueWatchRefresh(
@@ -5792,6 +6067,15 @@ class SpaceReplica implements ISpaceReplica {
     sync: SessionSync,
     type: "pull" | "integrate",
   ): void {
+    for (const delivery of sync.operationFields ?? []) {
+      for (const callback of this.#operationSinks.get(delivery.watchId) ?? []) {
+        try {
+          callback(delivery.field);
+        } catch (error) {
+          console.error("operation field subscriber failed", error);
+        }
+      }
+    }
     if (
       sync.upserts.length === 0 &&
       sync.removes.length === 0

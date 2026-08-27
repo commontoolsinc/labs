@@ -19,6 +19,9 @@ a record: archive it to `docs/history/plans/` following the procedure in
   remaining owner decisions and blocked stages for exchange rules.
 - [CFC TypeScript authoring](cfc_typescript_authoring.md) sequences the
   TypeScript and JSX authoring surface for CFC metadata.
+- [`cf-code-editor` co-presence](cf-code-editor-copresence.md) adds an
+  ephemeral Cloudflare WebSocket plane for live participant names, carets, and
+  selections while Memory remains the sole authority for document contents.
 - [First-class serializable factories](first-class-serializable-factories.md)
   sequences the implementation of durable pattern, module, and handler
   factories.
@@ -49,6 +52,10 @@ a record: archive it to `docs/history/plans/` following the procedure in
   and packing rules, and the two things a subset breaks and this replaces:
   coverage becomes a trend rather than a gate, and a regression that only
   `main` catches is reported back to the change that introduced it.
+- [Memory `apply-op`](memory-apply-op.md) sequences the editor-neutral
+  collaborative-field substrate, the first CodeMirror codec and editor
+  integration, and the checkpoints and review gates required before a future
+  WordGard codec.
 - [Server-primary execution v2](server-execution-v2.md) sequences the
   greenfield rebuild that executes the server-side-execution v2 spec, with
   per-phase task and success-criteria checkboxes. Its

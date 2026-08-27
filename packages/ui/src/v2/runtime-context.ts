@@ -6,3 +6,8 @@ export const runtimeContext = createContext<RuntimeClient | undefined>(
   "runtime",
 );
 export const spaceContext = createContext<DID | undefined>("space");
+
+/** Optional host default for ephemeral editor co-presence WebSockets. */
+export const presenceUrlContext = createContext<string | undefined>(
+  "presence-url",
+);

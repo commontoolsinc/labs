@@ -51,8 +51,13 @@ A row carries the piece's canonical bare address, an optional `phase` label,
 the `expect` record the operation requires, and — once an operation is chosen
 — the `op` that performs it. `expect` holds the pattern identity the piece is
 on, the export symbol that identity runs, whether that source is verifiably
-retained in the space, the current source revision when the piece keeps a log,
-and the stored document's hash when a repair recorded one. An `op` is a
+retained in the space, the origin the piece follows when it follows one, the
+current source revision when the piece keeps a log, and the stored document's
+hash when a repair recorded one. The origin is the string the piece stores and
+nothing derived from it: the canonical URL and the kind are both computed from
+it, against the host this deployment routes the space to, so either would read
+differently elsewhere. It records what the plan was built against rather than
+what a run detaches, which the report carries instead. An `op` is a
 retarget (a local source, the identity it produces, the symbol, and a per-row
 compatibility override), a restore (the reference to return to, and the
 revision when one was read), or a repair (the fixer's name and the content
@@ -182,7 +187,11 @@ A row's `problem` and its `warning` are different facts. A `problem` belongs
 to a row that did not apply. A `warning` belongs to a row that **did** —
 the source was saved and something after it complained — so a warned row is
 still complete, and the warning rides the report rather than a console nobody
-keeps.
+keeps. A row's `origin` is neither: it is a fact about the plan's row rather
+than about this run's outcome, so it rides every verdict, the dry run's
+included — which is the only moment the detach below is still a decision. Its
+`detachedOrigin` is the matching fact about the outcome, and rides only a row
+this run wrote.
 
 `complete` is true when every row reached what the run was for and no session
 boundary failed: under an apply, every row landed or applied; on a dry run,
@@ -195,6 +204,63 @@ Before any read, a run refuses: a plan whose header names pieces the survey
 did not account for; a plan carrying rows of another operation's kind, one run
 applying one kind; a plan with no rows of this kind, since an empty run reads
 as a completed one; and a group size that is not a positive integer.
+
+## The origin a retarget detaches
+
+A retarget's write detaches the piece from the origin it follows. The source
+it runs afterwards is the one the plan names, chosen by a human and reviewed
+as part of the plan; a piece still carrying that origin could be repointed
+afterwards to whatever the origin ships, which is not what the plan's
+reviewer approved.
+
+The detach is recorded rather than gated, and recorded twice over, because a
+survey's reading of an origin and a write's are not the same fact. The survey
+reads the origin into the row's `expect.origin` and the apply carries that
+onto every report row, labelled as the plan's. A row this run wrote carries a
+second value beside it — `detachedOrigin`, the origin the write actually
+detached, taken from the snapshot its transaction committed against.
+
+The two disagree when the plan went stale before the run reached the row.
+Only the `{identity, symbol}` pair is a retarget's precondition, so a piece
+whose origin alone moved since the survey is still written, and is detached
+off the origin it holds then rather than the one the plan recorded — including
+the case where it holds none by that point and the write detaches nothing.
+Reporting the recorded value there would send an operator re-attaching by hand
+to an origin the run never touched, which is worse than recording nothing: a
+wrong record is confidently actionable. Substituting the live value silently
+would be a smaller lie and still a lie, so both ride the row, the report names
+both when they differ, and re-attaching is from the report rather than from
+the plan. Re-attaching afterwards is by hand. Nothing re-attaches on
+its own: the runtime's `follow` resolves an origin as it currently stands and
+adopts whatever source it now ships, which is not the reference the plan or
+its rollback promises to land, and a restore detaches in its own right by
+design — so that reverting to repair a regression is not undone by the next
+load.
+
+It is recorded rather than gated because a detached origin is not the kind of
+loss an unretained source is. An unretained row names a piece that can never
+be returned; a detached origin is recoverable by hand from the record the run
+leaves. Gate the irreversible, report the recoverable. An acceptance that
+fired on nearly every row would be a rubber stamp rather than a decision,
+which is the same risk the per-row compatibility override exists to avoid.
+
+Which mechanism moves a piece follows from who chose the source and whether
+there is a set. Bulk is the operator's lane: a set that has to move together
+in a chosen order, from a plan a human reviewed. It is also the only lane for
+a piece that records no origin.
+
+The other lane is origin-following — one piece moving to whatever source its
+origin ships, the choice belonging to whoever ships that origin rather than
+to the operator. What a piece does with an origin today is narrower: the
+origin is recorded on the piece, and explicit history actions act on it, one
+clearing it and another repointing the piece to what the recorded origin now
+ships. Following an origin as one mechanism, triggered by a user opening the
+piece, is specified and not built.
+[`piece-source-lifecycle.md`](../specs/piece-source-lifecycle.md) is where
+that status is recorded — its logical-state table gives a repository status
+per state — so a reader checks it there rather than inferring it here. A
+retarget detaches the recorded origin whichever lane would have moved the
+piece next, which is why every row records it.
 
 ## The safety model
 
@@ -335,10 +401,11 @@ must exist in the piece's log *and* carry the recorded reference; without one,
 the reference selects the most recent revision carrying it. A revision whose
 source is no longer retained is not a restore target, however it was selected.
 
-Restoring severs the origin the piece follows. So a piece is already where a
-restore would leave it only when it runs the revision's reference **and**
-follows no origin; a piece that runs the reference while still following an
-origin is written, and the run names the origin it cuts. A compatibility
+Restoring detaches the piece from the origin it follows, as a retarget does.
+So a piece is already where a restore would leave it only when it runs the
+revision's reference **and** follows no origin; a piece that runs the reference
+while still following an origin is written, and the run names the origin it
+detaches. A compatibility
 verdict against the piece as it now stands is a refusal naming the piece and
 the reason, and an argument the restored source cannot use at all is the
 runtime's hard refusal, which arrives as an operational failure instead. Both
@@ -471,7 +538,10 @@ Under [`packages/piece/src/ops/`](../../packages/piece/src/ops/):
   the design and build sequence, including the stage that is still gated on
   measurement
 - [`docs/specs/piece-source-lifecycle.md`](../specs/piece-source-lifecycle.md)
-  — the append-only revision log a piece keeps and the restore built on it
+  — the append-only revision log a piece keeps, the restore built on it, and
+  the origin-following lane it specifies: one piece moving at its user's next
+  open, on an origin a retarget detaches. That lane is specified there and
+  not built; the document's logical-state table carries what has landed
 - [`packages/cli/README.md`](../../packages/cli/README.md) — the commands,
   their flags, and the reference forms their selections take
 - [`space-clone-rehearsal.md`](../development/space-clone-rehearsal.md) — the

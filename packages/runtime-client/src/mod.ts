@@ -13,3 +13,10 @@ export { cellRefToKey } from "./shared/utils.ts";
 export * from "./protocol/mod.ts";
 export * from "./vnode-types.ts";
 export * from "@commonfabric/runner/shared";
+export type {
+  ApplyOpResolution,
+  IntegratedOperation,
+  OpCursor,
+  OperationFieldSnapshot,
+} from "@commonfabric/memory/v2";
+export { CODEMIRROR_CHANGESET_CODEC } from "@commonfabric/memory/v2/operation-codec";

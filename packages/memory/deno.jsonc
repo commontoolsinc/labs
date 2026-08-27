@@ -27,6 +27,8 @@
     "./interface": "./interface.ts",
     "./v2": "./v2.ts",
     "./v2/patch": "./v2/patch.ts",
+    "./v2/path": "./v2/path.ts",
+    "./v2/operation-codec": "./v2/operation-codec.ts",
     "./v2/client": "./v2/client.ts",
     "./v2/engine": "./v2/engine.ts",
     "./v2/execution-lease": "./v2/execution-lease.ts",
@@ -49,6 +51,8 @@
   },
   "imports": {
     // Dependency guide: ../../docs/development/DEPENDENCIES.md
+    "@codemirror/collab": "npm:@codemirror/collab@^6.1.1",
+    "@codemirror/state": "npm:@codemirror/state@^6.7.1",
     "@db/sqlite": "jsr:@db/sqlite@0.13.0",
     "@denosaurs/plug": "jsr:@denosaurs/plug@^1.1.0",
     "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.1"

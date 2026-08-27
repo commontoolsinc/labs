@@ -244,6 +244,43 @@ describe("bulk-plan", () => {
       ).toThrow("row 1");
     });
 
+    it("throws for an empty origin on an expectation", () => {
+      const plan = retargetPlan();
+      const emptyOrigin = {
+        ...plan.rows[0],
+        expect: { ...plan.rows[0].expect, origin: "" },
+      };
+      expect(() =>
+        decodePlan(JSON.stringify(header) + "\n" + JSON.stringify(emptyOrigin))
+      ).toThrow("row 1");
+    });
+
+    it("carries the origin a row records, and a row that records none", () => {
+      const plan = retargetPlan();
+      const following: PiecePlan = {
+        header,
+        rows: [
+          {
+            ...plan.rows[0],
+            expect: {
+              ...plan.rows[0].expect,
+              origin: "https://origins.test/topic.tsx",
+            },
+          },
+          plan.rows[1],
+        ],
+      };
+
+      const decoded = decodePlan(encodePlan(following));
+
+      expect(decoded.rows[0].expect.origin).toBe(
+        "https://origins.test/topic.tsx",
+      );
+      // The field is additive: a row that records no origin is a valid row,
+      // so every plan an earlier survey wrote is still a plan.
+      expect(decoded.rows[1].expect.origin).toBeUndefined();
+    });
+
     it("throws for an enumeration count that no selection can produce", () => {
       for (const collection of [-1, 2.5, Number.NaN]) {
         const bad = {
@@ -512,6 +549,26 @@ describe("bulk-plan", () => {
           revisionId: "rev-b",
         },
       ]);
+    });
+
+    it("returns a precondition recording no origin, the retarget having detached the piece", () => {
+      const plan = retargetPlan();
+      const following: PiecePlan = {
+        header,
+        rows: plan.rows.map((row) => ({
+          ...row,
+          expect: { ...row.expect, origin: "https://origins.test/topic.tsx" },
+        })),
+      };
+
+      const rollback = deriveRollbackPlan(following, "later");
+
+      // The forward run detached every piece it wrote, so a detached piece
+      // is what the reversal is proved against. Carrying the forward row's
+      // origin here would claim the reversal detaches something already
+      // gone, and the restore it runs re-attaches nothing.
+      expect(rollback.rows.every((row) => row.expect.origin === undefined))
+        .toBe(true);
     });
 
     it("returns a header stamped with the given time, same space", () => {
