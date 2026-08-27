@@ -9,10 +9,14 @@
  *   deno task --cwd packages/cf-harness kickoff
  *   open http://127.0.0.1:8100
  *
- * There is no authentication here and none is wanted: the server binds
- * 127.0.0.1, so reaching it means already running code on this machine, and a
- * password in front of a loopback socket would protect nothing while implying
- * it protects something. Do not put this behind a public address.
+ * The server binds 127.0.0.1, and loopback is where its trust ends rather than
+ * where it begins: a page anywhere on the web can drive requests at this
+ * socket, and a hostile name that resolves to 127.0.0.1 can make these routes
+ * same-origin. So every request has to name this server's own host, and every
+ * `/api` route has to carry the per-process token the page is handed as a
+ * `SameSite=Strict` cookie when it loads — a token a cross-origin caller
+ * cannot send and a rebound origin cannot obtain. Do not put this behind a
+ * public address.
  *
  * Two pieces of configuration are what make a run able to finish with a link
  * rather than a transcript. The fabric session — API URL, identity keyfile,
@@ -98,8 +102,41 @@ import {
   pingFrame,
 } from "./sse.ts";
 
-/** Loopback only. See the module comment on why there is no authentication. */
+/** Loopback only. See the module comment on what does and does not protect. */
 const HOSTNAME = "127.0.0.1";
+
+/** The cookie the page carries this process's token back in. */
+const TOKEN_COOKIE = "cf_harness_kickoff_token";
+
+/**
+ * The host names a request may address this server by: its own loopback
+ * addresses at its own port, and the bare forms when the port is the one a
+ * browser leaves out. Any other `Host` is a name that resolved here without
+ * being this server, which is what a DNS rebinding attack looks like on the
+ * wire.
+ */
+const allowedHosts = (port: number): readonly string[] => [
+  `127.0.0.1:${port}`,
+  `localhost:${port}`,
+  ...(port === 80 ? ["127.0.0.1", "localhost"] : []),
+];
+
+const allowedOrigins = (port: number): readonly string[] =>
+  allowedHosts(port).map((host) => `http://${host}`);
+
+/** One cookie's value out of a `Cookie` header, or nothing. */
+const cookieValue = (
+  header: string | null,
+  name: string,
+): string | undefined => {
+  for (const pair of header?.split(";") ?? []) {
+    const separator = pair.indexOf("=");
+    if (separator > 0 && pair.slice(0, separator).trim() === name) {
+      return pair.slice(separator + 1).trim();
+    }
+  }
+  return undefined;
+};
 
 /**
  * The paths served from the built page rather than from an API route: the page
@@ -510,6 +547,7 @@ export class KickoffServer {
   readonly #clients = new Set<StreamClient>();
   readonly #config: KickoffConfig;
   readonly #service: HarnessInteractiveChatService;
+  readonly #token = crypto.randomUUID();
   #beats = 0;
 
   /**
@@ -561,8 +599,21 @@ export class KickoffServer {
 
   async handle(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    const refusal = this.#refuse(request, url);
+    if (refusal !== undefined) {
+      return refusal;
+    }
     if (request.method === "GET" && ASSET_PATH.test(url.pathname)) {
-      return await this.#asset(url.pathname);
+      const response = await this.#asset(url.pathname);
+      response.headers.append(
+        "set-cookie",
+        // No `Secure`: this is plain http on loopback, and a `Secure` cookie
+        // would simply never be stored. `SameSite=Strict` is what a
+        // cross-origin request cannot carry, and `HttpOnly` keeps the token
+        // out of reach of anything scripted into the page.
+        `${TOKEN_COOKIE}=${this.#token}; SameSite=Strict; HttpOnly; Path=/`,
+      );
+      return response;
     }
     if (request.method === "POST" && url.pathname === "/api/task") {
       return await this.#startTask(request);
@@ -590,6 +641,47 @@ export class KickoffServer {
       return await this.#run(url);
     }
     return new Response("not found", { status: 404 });
+  }
+
+  /**
+   * What stands between this socket and the rest of the web, or nothing when
+   * the request is one this server's own page made. The `Host` gate comes
+   * first and covers every route, including the page: a request that arrived
+   * under another name was addressed to somewhere else, whatever it asks for.
+   * The token then gates `/api` whole, reads included, because a read here
+   * hands out run artifacts and a write starts an effectful turn under the
+   * local fabric identity.
+   */
+  #refuse(request: Request, url: URL): Response | undefined {
+    const port = this.#config.port;
+    // The `Host` header is what an HTTP/1.1 client addressed; an HTTP/2 client
+    // sends `:authority` instead, which is the authority the request URL was
+    // built from.
+    const host = request.headers.get("host") ?? url.host;
+    if (!allowedHosts(port).includes(host)) {
+      return new Response("forbidden", { status: 403 });
+    }
+    if (!url.pathname.startsWith("/api/")) {
+      return undefined;
+    }
+    const origin = request.headers.get("origin");
+    if (origin !== null && !allowedOrigins(port).includes(origin)) {
+      return new Response("forbidden", { status: 403 });
+    }
+    if (
+      cookieValue(request.headers.get("cookie"), TOKEN_COOKIE) !== this.#token
+    ) {
+      return new Response("forbidden", { status: 403 });
+    }
+    if (
+      request.method === "POST" &&
+      !(request.headers.get("content-type") ?? "").startsWith(
+        "application/json",
+      )
+    ) {
+      return new Response("unsupported media type", { status: 415 });
+    }
+    return undefined;
   }
 
   /**

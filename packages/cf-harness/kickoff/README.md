@@ -5,8 +5,11 @@ left behind when the feed's elided summaries are not enough. One Deno HTTP
 server holding one in-process interactive chat service, and one Lit page reading
 its events over Server-Sent Events.
 
-The server binds `127.0.0.1` and has no authentication. Reaching it means
-already running code on this machine; do not put it behind a public address.
+The server binds `127.0.0.1`, and it treats loopback as an address rather than
+as an authorization: a page anywhere on the web can drive requests at the
+socket, so every request must name this server's own host and every `/api` route
+must carry the per-process token the page is handed as a `SameSite=Strict`
+cookie when it loads. Do not put it behind a public address.
 
 ## Prerequisites
 
