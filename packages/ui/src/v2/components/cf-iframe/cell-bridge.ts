@@ -4,6 +4,7 @@
  */
 
 import {
+  type BridgeCell,
   type BridgeResource,
   createFabricBridge,
   type FabricBridge,
@@ -98,12 +99,6 @@ function sqliteInput(value: FabricValue | undefined): {
 
 type SqliteOperationRunner = <T>(operation: () => Promise<T>) => Promise<T>;
 
-function isSqliteAuthorityValue(value: unknown): boolean {
-  return value !== null && typeof value === "object" &&
-    !Array.isArray(value) && Object.hasOwn(value, "id") &&
-    typeof (value as { id?: unknown }).id === "string";
-}
-
 async function demandSqliteSource<T>(
   source: CellHandle<unknown>,
   authority: CellHandle<unknown>,
@@ -112,25 +107,6 @@ async function demandSqliteSource<T>(
   const cancel = source.subscribe(() => {});
   try {
     await source.pull();
-    const current = await source.resolveAsCell();
-    if (!current.equals(authority)) {
-      throw new TypeError(
-        "SQLite source resolved outside its granted capability.",
-      );
-    }
-
-    const readiness = authority.asSchema<unknown>({
-      type: "object",
-      additionalProperties: true,
-    });
-    if (!isSqliteAuthorityValue(await readiness.pull())) {
-      // Source pull waits for reactive work, but a scoped factory's first
-      // handle write can still be committing. Cross the commit-aware barrier
-      // only for that missing first use; a ready database must not wait for
-      // unrelated worker activity. Demand stays live until the backend
-      // operation completes.
-      await source.runtime().idle();
-    }
     const latest = await source.resolveAsCell();
     if (!latest.equals(authority)) {
       throw new TypeError(
@@ -141,6 +117,31 @@ async function demandSqliteSource<T>(
   } finally {
     cancel();
   }
+}
+
+function bridgeCell(
+  cell: CellHandle<unknown>,
+  writable: boolean,
+): BridgeCell {
+  const ref = cell.ref();
+  return {
+    identity: {
+      id: ref.id,
+      space: ref.space,
+      ...(ref.scope !== undefined && { scope: ref.scope }),
+      path: [...ref.path],
+    },
+    get: () => bridgeValue(cell.get()),
+    pull: async () => bridgeValue(await cell.pull()),
+    ...(writable && {
+      set: async (value: FabricValue) => await cell.setStrict(value),
+      push: async (...values: FabricValue[]) =>
+        await (cell as CellHandle<FabricValue[]>).pushStrict(...values),
+    }),
+    sink: (listener) => cell.subscribe((value) => listener(bridgeValue(value))),
+    key: (key) => bridgeCell(cell.key(key as never), writable),
+    resolve: async () => bridgeCell(await cell.resolveAsCell(), writable),
+  };
 }
 
 function cellResource(
@@ -167,7 +168,7 @@ function cellResource(
     return {
       kind: "sqlite",
       ...metadata,
-      subscribe: (listener) => {
+      sink: (listener) => {
         let initial = true;
         return revisionCell.subscribe(() => {
           if (initial) {
@@ -224,20 +225,7 @@ function cellResource(
   return {
     kind: "cell",
     ...metadata,
-    read: async () => bridgeValue(await cell.sync()),
-    ...(kind !== "readonly" && {
-      write: async (value: FabricValue) => await cell.setStrict(value),
-    }),
-    subscribe: (listener) => {
-      let initial = true;
-      return cell.subscribe((value) => {
-        if (initial) {
-          initial = false;
-          return;
-        }
-        listener(bridgeValue(value));
-      });
-    },
+    cell: bridgeCell(cell, kind !== "readonly"),
   };
 }
 
@@ -247,10 +235,48 @@ function localResource(
 ): BridgeResource {
   return {
     kind: "cell",
-    read: () => bridgeValue(context[name]),
-    write: (value) => {
-      context[name] = value;
+    cell: localCell(context, [name]),
+  };
+}
+
+function localCell(
+  root: Record<string, unknown>,
+  path: Array<string | number>,
+): BridgeCell {
+  const get = (): FabricValue | undefined => {
+    let value: unknown = root;
+    for (const key of path) {
+      if (value === null || typeof value !== "object") return undefined;
+      const property = Object.getOwnPropertyDescriptor(value, String(key));
+      if (!property || !("value" in property)) return undefined;
+      value = property.value;
+    }
+    return bridgeValue(value);
+  };
+  return {
+    get,
+    pull: get,
+    set: (value) => {
+      let parent: Record<string, unknown> = root;
+      for (const key of path.slice(0, -1)) {
+        const property = Object.getOwnPropertyDescriptor(parent, String(key));
+        const child = property && "value" in property
+          ? property.value
+          : undefined;
+        if (child === null || typeof child !== "object") {
+          throw new TypeError("Cannot descend through a non-object value.");
+        }
+        parent = child as Record<string, unknown>;
+      }
+      Object.defineProperty(parent, String(path.at(-1)), {
+        configurable: true,
+        enumerable: true,
+        value,
+        writable: true,
+      });
     },
+    key: (key) => localCell(root, [...path, key]),
+    resolve: () => localCell(root, path),
   };
 }
 
@@ -330,10 +356,10 @@ export async function resolveCellContextBridge(
   context: CellHandle<Record<string, unknown>>,
   resourceKinds: Readonly<Record<string, CellContextResourceKind>> = {},
 ): Promise<FabricBridge> {
-  await context.sync();
+  await context.pull();
   const sourceCurrent = context.get();
   const root = await context.resolveAsCell();
-  await root.sync();
+  await root.pull();
   const resolvedCurrent = root.get();
   const properties = schemaProperties(root.ref().schema);
   const names = new Set([

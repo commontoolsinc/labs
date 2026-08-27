@@ -45,8 +45,9 @@ describe("ipc", () => {
         ...HEADER,
         type: "request",
         id: 2,
-        operation: "write",
+        operation: "set",
         resource: "count",
+        path: ["nested", 0],
         value: 1,
       })).toBe(true);
       expect(isBridgeRequest({
@@ -61,8 +62,18 @@ describe("ipc", () => {
         ...HEADER,
         type: "request",
         id: 4,
-        operation: "subscribe",
-        resource: "count",
+        operation: "push",
+        resource: "items",
+        path: [],
+        values: [1, 2],
+      })).toBe(true);
+      expect(isBridgeRequest({
+        ...HEADER,
+        type: "request",
+        id: 5,
+        operation: "sink",
+        handle: "cell-1",
+        path: ["title"],
         subscription: "s1",
       })).toBe(true);
     });
@@ -80,7 +91,14 @@ describe("ipc", () => {
         ...HEADER,
         type: "request",
         id: 0,
-        operation: "read",
+        operation: "pull",
+      })).toBe(false);
+      expect(isBridgeRequest({
+        ...HEADER,
+        type: "request",
+        id: 0,
+        operation: "push",
+        resource: "items",
       })).toBe(false);
       expect(isBridgeRequest({
         ...HEADER,

@@ -26,14 +26,18 @@ const bridge: FabricBridge = createFabricBridge({
   count: {
     kind: "cell",
     schema: { type: "number", description: "Shared counter" },
-    read: () => count,
-    write: (value) => {
-      count = value as number;
-      for (const listener of listeners) listener(count);
-    },
-    subscribe: (listener) => {
-      listeners.add(listener as (value: number) => void);
-      return () => listeners.delete(listener as (value: number) => void);
+    cell: {
+      get: () => count,
+      pull: () => count,
+      set: (value) => {
+        count = value as number;
+        for (const listener of listeners) listener(count);
+      },
+      sink: (listener) => {
+        listener(count);
+        listeners.add(listener as (value: number) => void);
+        return () => listeners.delete(listener as (value: number) => void);
+      },
     },
   },
 });
@@ -44,13 +48,15 @@ frame.src = "<main id='root'></main>";
 ```
 
 A resource has a `kind`, optional schema and description, and only the
-operations the host supplies. The resource kinds are `cell`, `stream`, `sqlite`,
-and `service`. Named methods let an application expose a narrow service without
-expanding the core protocol.
+operations the host supplies. A cell capability follows the runtime's Cell
+shape: `get()`, `pull()`, optional `set()` and `push()`, `sink()`, `key()`, and
+`resolve()`. The resource kinds are `cell`, `stream`, `sqlite`, and `service`.
+Named methods let an application expose a narrow service without expanding the
+cell protocol.
 
 The higher-level `cf-iframe` component accepts the same `bridge` property. Its
 `context` convenience property turns top-level Fabric cells into cell resources,
-read-only cells into resources without `write`, stream cells into `send`
+read-only cells into resources without `set`, stream cells into `send`
 resources, and SQLite database cells into `query`/`exec` resources. A pattern
 can supply a serializable capability hint when a context cell's schema is
 intentionally opaque at the renderer boundary:
@@ -70,8 +76,9 @@ scope before the guest loads.
 
 ## Guest API
 
-The guest connects once and receives a promise-based client. Calls made before
-the document receives its `MessagePort` remain queued in order.
+The guest connects once and receives a Cell-shaped client. Remote operations
+return promises; calls made before the document receives its `MessagePort`
+remain queued in order.
 
 ```ts
 import { connectFabric } from "@commonfabric/iframe-sandbox/guest";
@@ -81,11 +88,12 @@ const manifest = await fabric.describe();
 console.log(manifest.resources);
 
 const count = fabric.cell<number>("count");
-console.log(await count.read());
-await count.write(1);
+console.log(count.get()); // Immediate cache sample; it may be stale.
+console.log(await count.pull()); // Fully updated after the host Cell.pull().
+await count.set(1);
 
-const stop = count.subscribe((snapshot) => {
-  if (snapshot.status === "ready") console.log(snapshot.value);
+const stop = count.sink((value) => {
+  console.log(value);
 });
 
 // When the application unmounts:
@@ -93,10 +101,51 @@ stop();
 fabric.disconnect();
 ```
 
+`sink()` calls its listener synchronously with the same cache sample `get()`
+would return, then calls it when the host cell changes. `pull()` is the explicit
+freshness boundary; it waits for the runtime Cell pull, including scheduler and
+storage work that pull must settle. The bridge does not substitute a lighter
+readiness probe for that contract.
+
 `describe()` makes the API inspectable by people and agents. It returns every
-resource's kind, supported methods, description, and schema. Missing resources
-and unsupported operations reject with `FabricBridgeError`, whose `code` and
-`resource` fields are stable machine-readable context.
+resource's kind, core operations, named methods, description, and schema.
+Missing resources and unsupported operations reject with `FabricBridgeError`,
+whose `code` and `resource` fields are stable machine-readable context.
+
+### Paths and stable array entries
+
+`key()` derives a fine-grained cell view locally. Pulls, sinks, and writes carry
+that path to the host, so a sink on `profile.key("name")` does not subscribe to
+the whole profile.
+
+An array position is not an item identity. Resolve the position before keeping a
+sink or set handle when the item can move:
+
+```ts
+const tasks = fabric.cell<Array<{ title: string; done: boolean }>>("tasks");
+await tasks.pull();
+
+const task = await tasks.key(0).resolve();
+console.log(task.identity?.id); // Stable entity document ID.
+
+const stop = task.key("title").sink((title) => console.log(title));
+await task.key("done").set(true); // Still the same task after array reorder.
+```
+
+The host mints an opaque capability for the resolved cell. The guest receives
+identity metadata for keys and diagnostics, but cannot turn an arbitrary ID into
+authority. `Cell.for(cause)` remains the runtime's construction API for a new
+deterministic cell; it is not an array selector. Existing array objects are
+anchored into entity documents, which is why resolving a positional item can
+return a stable handle.
+
+Use operation-shaped writes when they express the intent. `push()` carries only
+the appended members and uses the runtime's mergeable append instead of reading
+and replacing the array:
+
+```ts
+await tasks.push({ title: "Review bridge", done: false });
+```
 
 ## React
 
@@ -151,6 +200,10 @@ await database.exec(
   "INSERT INTO notes (title) VALUES (:title)",
   { title: "Bridge the database" },
 );
+
+const stopInvalidations = database.sink(() => {
+  console.log("database changed");
+});
 ```
 
 `exec` uses the runner's transactional SQLite path, including its write checks,
@@ -167,11 +220,13 @@ across two sessions for one identity, a second identity, and a page reload.
 ## Protocol
 
 Each loaded document owns a fresh capability session over a `MessagePort`.
-Requests carry a protocol name, version, numeric request ID, operation, resource
-name, and optional method/input. Responses correlate by ID and carry either a
-result or a structured error. Subscriptions have explicit IDs and are cancelled
-when the guest unsubscribes, reloads, or sends the session-level `disconnect`
-operation.
+Requests carry a protocol name, version, numeric request ID, operation, and
+either a named resource or an opaque resolved-cell handle. Cell requests may
+carry a path; push requests carry appended members separately from replacement
+values. `resolve` returns a session-local handle plus stable identity metadata.
+Responses correlate by ID and carry either a result or a structured error. Sinks
+have explicit IDs and are cancelled when the guest cancels, reloads, or sends
+the session-level `disconnect` operation.
 
 The complete request, response, or event is encoded with `codec-realm`. This
 preserves Fabric values such as `FabricBytes` instead of relying on structured

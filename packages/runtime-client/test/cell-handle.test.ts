@@ -1559,7 +1559,7 @@ describe("cell-handle", () => {
     });
   });
 
-  describe("CellHandle push (read-modify-write)", () => {
+  describe("CellHandle push", () => {
     const ref: CellRef = {
       id: "of:push-cell" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
@@ -1594,6 +1594,22 @@ describe("cell-handle", () => {
       expect(request.values).toEqual([3]);
       expect(request).toMatchObject({ awaitCommit: true });
       expect(cell.get()).toEqual([1, 2, 3]);
+    });
+
+    it("reports a refused strict push to capability callers", async () => {
+      const refused = new Error("push refused");
+      const runtime = {
+        [$conn]: () => ({
+          request: () => Promise.reject(refused),
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<number[]>(runtime, ref, [1]);
+
+      await expect(cell.pushStrict(2)).rejects.toBe(refused);
+      expect(cell.get()).toEqual([1]);
     });
 
     it("throws when the cell is not an array", () => {

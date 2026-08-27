@@ -85,7 +85,7 @@ const GUEST_HTML = `<!doctype html>
     const id = nextRequestId++;
     const message = {
       protocol: "common-fabric-bridge",
-      version: 1,
+      version: 2,
       type: "request",
       id,
       operation,
@@ -98,14 +98,14 @@ const GUEST_HTML = `<!doctype html>
     return result;
   };
 
-  const write = (resource, value) =>
-    request("write", { resource, value });
+  const set = (resource, value) =>
+    request("set", { resource, path: [], value });
   const call = (resource, method, value) =>
     request("call", { resource, method, value });
-  const subscribe = async (resource, listener) => {
+  const sink = async (resource, listener) => {
     const subscription = "guest-" + nextSubscriptionId++;
     subscriptions.set(subscription, listener);
-    await request("subscribe", { resource, subscription });
+    await request("sink", { resource, subscription });
   };
 
   const databaseRows = {
@@ -124,7 +124,7 @@ const GUEST_HTML = `<!doctype html>
       throw new Error(database + ": " + error.message);
     }
     const rows = result.rows.map((entries) => Object.fromEntries(entries));
-    await write(
+    await set(
       databaseRows[database],
       rows.map((row) => row.value).join(","),
     );
@@ -135,7 +135,7 @@ const GUEST_HTML = `<!doctype html>
       await ready;
       if (readyError) throw readyError;
     } else if (command.operation === "write") {
-      await write(command.resource, command.value);
+      await set(command.resource, command.value);
     } else if (command.operation === "sqlite-insert") {
       const database = command.database || "database";
       await call(database, "exec", {
@@ -146,7 +146,7 @@ const GUEST_HTML = `<!doctype html>
       await refreshRows(command.database || "database");
     } else if (command.operation === "clear-database-rows") {
       await Promise.all(
-        Object.values(databaseRows).map((resource) => write(resource, "")),
+        Object.values(databaseRows).map((resource) => set(resource, "")),
       );
     } else {
       throw new Error("Unknown command: " + command.operation);
@@ -170,7 +170,7 @@ const GUEST_HTML = `<!doctype html>
   const accept = (message) => {
     if (
       !message || message.protocol !== "common-fabric-bridge" ||
-      message.version !== 1
+      message.version !== 2
     ) return;
     if (message.type === "event") {
       subscriptions.get(message.subscription)?.(message.value);
@@ -219,7 +219,7 @@ const GUEST_HTML = `<!doctype html>
 
     void (async () => {
       for (const database of Object.keys(databaseRows)) {
-        await subscribe(database, () => void refreshRows(database));
+        await sink(database, () => void refreshRows(database));
       }
       await Promise.all(Object.keys(databaseRows).map(refreshRows));
       document.querySelector("#guest-state").textContent = "ready";

@@ -5,7 +5,13 @@ import { expect } from "@std/expect";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 
-import { createFabricBridge, FabricBridgeHost } from "../src/bridge.ts";
+import {
+  type BridgeCancel,
+  type BridgeCell,
+  type BridgeResource,
+  createFabricBridge,
+  FabricBridgeHost,
+} from "../src/bridge.ts";
 import { connectFabric } from "../src/guest.ts";
 import { GUEST_PORT_HANDOFF } from "../src/ipc.ts";
 
@@ -30,24 +36,48 @@ function nextTask(): Promise<void> {
   });
 }
 
+function cellResource(
+  get: () => FabricValue | undefined,
+  options: {
+    set?: (value: FabricValue) => void | Promise<void>;
+    sink?: (listener: (value: FabricValue | undefined) => void) => BridgeCancel;
+    push?: (...values: FabricValue[]) => void | Promise<void>;
+  } = {},
+): BridgeResource {
+  return {
+    kind: "cell",
+    cell: {
+      get,
+      pull: get,
+      ...(options.set && { set: options.set }),
+      ...(options.sink && { sink: options.sink }),
+      ...(options.push && { push: options.push }),
+    },
+  };
+}
+
 describe("Fabric iframe bridge", () => {
   it("describes resources and performs cell operations", async () => {
     let count = 1;
     const listeners = new Set<(value: number) => void>();
     const bridge = createFabricBridge({
       count: {
-        kind: "cell",
+        ...cellResource(
+          () => count,
+          {
+            set: (value) => {
+              count = value as number;
+              for (const listener of listeners) listener(count);
+            },
+            sink: (listener) => {
+              listeners.add(listener as (value: number) => void);
+              listener(count);
+              return () =>
+                listeners.delete(listener as (value: number) => void);
+            },
+          },
+        ),
         schema: { type: "number", description: "Visible counter" },
-        read: () => count,
-        write: (value) => {
-          count = value as number;
-          for (const listener of listeners) listener(count);
-        },
-        subscribe: (listener) => {
-          listeners.add(listener as (value: number) => void);
-          listener(count);
-          return () => listeners.delete(listener as (value: number) => void);
-        },
       },
     });
     const channel = new MessageChannel();
@@ -58,25 +88,215 @@ describe("Fabric iframe bridge", () => {
     try {
       await expect(client.describe()).resolves.toEqual({
         protocol: "common-fabric-bridge",
-        version: 1,
+        version: 2,
         resources: [{
           name: "count",
           kind: "cell",
-          methods: ["read", "write", "subscribe"],
+          operations: ["get", "pull", "set", "sink"],
+          methods: [],
           schema: { type: "number", description: "Visible counter" },
         }],
       });
 
       const remote = client.cell<number>("count");
-      await expect(remote.read()).resolves.toBe(1);
+      await expect(remote.pull()).resolves.toBe(1);
       const updates: number[] = [];
-      const unsubscribe = remote.subscribe((snapshot) => {
-        if (snapshot.status === "ready") updates.push(snapshot.value);
+      const unsubscribe = remote.sink((value) => {
+        if (value !== undefined) updates.push(value);
       });
-      await remote.write(2);
-      await remote.read();
+      await remote.set(2);
+      await remote.pull();
       expect(updates).toEqual([1, 2]);
       unsubscribe();
+    } finally {
+      client.disconnect();
+      host.disconnect();
+    }
+  });
+
+  it("samples immediately, sinks synchronously, and pulls through a barrier", async () => {
+    let value = 1;
+    const listeners = new Set<(value: FabricValue | undefined) => void>();
+    const pullStarted = Promise.withResolvers<void>();
+    const releasePull = Promise.withResolvers<void>();
+    const bridge = createFabricBridge({
+      count: {
+        kind: "cell",
+        cell: {
+          get: () => value,
+          pull: async () => {
+            pullStarted.resolve();
+            await releasePull.promise;
+            return value;
+          },
+          sink: (listener) => {
+            listener(value);
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+          },
+        },
+      },
+    });
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(bridge, channel.port1);
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    try {
+      const cell = client.cell<number>("count");
+      expect(cell.get()).toBeUndefined();
+      const initial = Promise.withResolvers<void>();
+      const seen: Array<number | undefined> = [];
+      const cancel = cell.sink((current) => {
+        seen.push(current);
+        if (current === 1) initial.resolve();
+      });
+      expect(seen).toEqual([undefined]);
+      await initial.promise;
+      expect(seen).toEqual([undefined, 1]);
+      expect(cell.get()).toBe(1);
+
+      value = 2;
+      const pulling = cell.pull();
+      await pullStarted.promise;
+      expect(cell.get()).toBe(1);
+      releasePull.resolve();
+      await expect(pulling).resolves.toBe(2);
+      expect(cell.get()).toBe(2);
+      cancel();
+    } finally {
+      client.disconnect();
+      host.disconnect();
+    }
+  });
+
+  it("resolves a moving array entry before sinking and writing its path", async () => {
+    type Item = { title: string; done: boolean };
+    const records: Record<string, Item> = {
+      a: { title: "A", done: false },
+      b: { title: "B", done: false },
+    };
+    const order = ["a", "b"];
+    const listeners = new Map<
+      string,
+      Set<(value: FabricValue | undefined) => void>
+    >();
+    const stableCell = (
+      id: string,
+      path: Array<string | number> = [],
+    ): BridgeCell => {
+      const get = (): FabricValue | undefined => {
+        let value: unknown = records[id];
+        for (const key of path) {
+          value = (value as Record<string, unknown>)[String(key)];
+        }
+        return value as FabricValue;
+      };
+      return {
+        identity: {
+          id: `of:item:${id}`,
+          space: "did:key:test",
+          scope: "space",
+          path: [...path],
+        },
+        get,
+        pull: get,
+        set: (value) => {
+          const key = String(path.at(-1));
+          (records[id] as unknown as Record<string, FabricValue>)[key] = value;
+          for (
+            const listener of listeners.get(`${id}:${path.join(".")}`) ?? []
+          ) {
+            listener(value);
+          }
+        },
+        sink: (listener) => {
+          const key = `${id}:${path.join(".")}`;
+          const current = listeners.get(key) ?? new Set();
+          listeners.set(key, current);
+          current.add(listener);
+          listener(get());
+          return () => current.delete(listener);
+        },
+        key: (key) => stableCell(id, [...path, key]),
+        resolve: () => stableCell(id, path),
+      };
+    };
+    const items: BridgeCell = {
+      get: () => order.map((id) => records[id]!),
+      pull: () => order.map((id) => records[id]!),
+      key: (key) => {
+        const id = order[Number(key)];
+        if (!id) throw new RangeError("No item at that position.");
+        return {
+          get: () => records[id],
+          pull: () => records[id],
+          resolve: () => stableCell(id),
+        };
+      },
+    };
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(
+      createFabricBridge({ items: { kind: "cell", cell: items } }),
+      channel.port1,
+    );
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    try {
+      const resolved = await client.cell<Item[]>("items").key(0).resolve();
+      expect(resolved.identity).toEqual({
+        id: "of:item:a",
+        space: "did:key:test",
+        scope: "space",
+        path: [],
+      });
+      const title = resolved.key("title");
+      const seen: Array<string | undefined> = [];
+      const sinkReady = Promise.withResolvers<void>();
+      const cancel = title.sink((value) => {
+        seen.push(value);
+        if (value === "A") sinkReady.resolve();
+      });
+      await sinkReady.promise;
+      expect(seen).toEqual(["A"]);
+
+      order.reverse();
+      await resolved.key("done").set(true);
+      expect(seen).toEqual(["A"]);
+      await title.set("A moved");
+      expect(records[order[1]!]!.title).toBe("A moved");
+      expect(seen).toEqual(["A", "A moved"]);
+      cancel();
+    } finally {
+      client.disconnect();
+      host.disconnect();
+    }
+  });
+
+  it("carries push as append intent instead of replacing the array", async () => {
+    const value = [0];
+    const pushes: FabricValue[][] = [];
+    const bridge = createFabricBridge({
+      items: cellResource(() => value, {
+        push: (...members) => {
+          pushes.push(members);
+          value.push(...members as number[]);
+        },
+      }),
+    });
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(bridge, channel.port1);
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    try {
+      const items = client.cell<number[]>("items");
+      await items.pull();
+      await Promise.all([items.push(1), items.push(2)]);
+      expect(pushes).toEqual([[1], [2]]);
+      expect(value).toEqual([0, 1, 2]);
+      expect(items.get()).toEqual([0, 1, 2]);
     } finally {
       client.disconnect();
       host.disconnect();
@@ -195,7 +415,7 @@ describe("Fabric iframe bridge", () => {
     }
   });
 
-  it("completes earlier writes before later reads", async () => {
+  it("completes earlier sets before later pulls", async () => {
     let value = 0;
     const writeStarted = Promise.withResolvers<void>();
     const releaseWrite = Promise.withResolvers<void>();
@@ -203,13 +423,16 @@ describe("Fabric iframe bridge", () => {
     const host = new FabricBridgeHost(
       createFabricBridge({
         count: {
-          kind: "cell",
-          read: () => value,
-          write: async (next) => {
-            writeStarted.resolve();
-            await releaseWrite.promise;
-            value = next as number;
-          },
+          ...cellResource(
+            () => value,
+            {
+              set: async (next) => {
+                writeStarted.resolve();
+                await releaseWrite.promise;
+                value = next as number;
+              },
+            },
+          ),
         },
       }),
       channel.port1,
@@ -218,9 +441,9 @@ describe("Fabric iframe bridge", () => {
     handOff(channel.port2);
 
     try {
-      const writing = client.cell<number>("count").write(1);
+      const writing = client.cell<number>("count").set(1);
       await writeStarted.promise;
-      const reading = client.cell<number>("count").read();
+      const reading = client.cell<number>("count").pull();
       await nextTask();
       releaseWrite.resolve();
 
@@ -263,7 +486,7 @@ describe("Fabric iframe bridge", () => {
     handOff(channel.port2);
 
     try {
-      await expect(client.cell("missing").read()).rejects.toMatchObject({
+      await expect(client.cell("missing").pull()).rejects.toMatchObject({
         code: "resource-not-found",
         resource: "missing",
       });
@@ -389,16 +612,13 @@ describe("Fabric iframe bridge", () => {
   it("refuses inherited resource operations and method containers", async () => {
     let inheritedWrites = 0;
     const inherited = {
-      write: () => inheritedWrites++,
-      subscribe: () => () => {},
-      methods: { inherited: () => "wrong" },
+      set: () => inheritedWrites++,
+      sink: () => () => {},
     };
-    const resource = Object.create(inherited) as {
-      kind: "cell";
-      read: () => number;
-    };
-    resource.kind = "cell";
-    resource.read = () => 1;
+    const cell = Object.create(inherited) as BridgeCell;
+    cell.get = () => 1;
+    cell.pull = () => 1;
+    const resource: BridgeResource = { kind: "cell", cell };
     const channel = new MessageChannel();
     const host = new FabricBridgeHost(
       createFabricBridge({ count: resource }),
@@ -409,9 +629,13 @@ describe("Fabric iframe bridge", () => {
 
     try {
       await expect(client.describe()).resolves.toMatchObject({
-        resources: [{ name: "count", methods: ["read"] }],
+        resources: [{
+          name: "count",
+          operations: ["get", "pull"],
+          methods: [],
+        }],
       });
-      await expect(client.cell("count").write(2)).rejects.toMatchObject({
+      await expect(client.cell("count").set(2)).rejects.toMatchObject({
         code: "method-not-supported",
       });
       await expect(client.call("count", "inherited")).rejects.toMatchObject({
@@ -448,10 +672,11 @@ describe("Fabric iframe bridge", () => {
     try {
       await expect(client.describe()).resolves.toEqual({
         protocol: "common-fabric-bridge",
-        version: 1,
+        version: 2,
         resources: [{
           name: "constructor",
           kind: "service",
+          operations: [],
           methods: ["ping"],
         }],
       });
@@ -525,8 +750,7 @@ describe("Fabric iframe bridge", () => {
       createFabricBridge({
         service: {
           kind: "service",
-          read: () => "core",
-          methods: { read: () => "named" },
+          methods: { pull: () => "named" },
         },
       }),
       channel.port1,
@@ -538,9 +762,9 @@ describe("Fabric iframe bridge", () => {
       await expect(client.describe()).rejects.toMatchObject({
         code: "operation-failed",
         message:
-          "Bridge resource `service` method `read` collides with a core operation.",
+          "Bridge resource `service` method `pull` collides with a core operation.",
       });
-      await expect(client.call("service", "read")).rejects.toMatchObject({
+      await expect(client.call("service", "pull")).rejects.toMatchObject({
         code: "method-not-supported",
       });
     } finally {
@@ -576,18 +800,19 @@ describe("Fabric iframe bridge", () => {
     }
   });
 
-  it("cancels host subscriptions when the guest disconnects", async () => {
+  it("cancels host sinks when the guest disconnects", async () => {
     const subscribed = Promise.withResolvers<void>();
     const cancelled = Promise.withResolvers<void>();
     const channel = new MessageChannel();
     const host = new FabricBridgeHost(
       createFabricBridge({
         watched: {
-          kind: "cell",
-          subscribe: () => {
-            subscribed.resolve();
-            return () => cancelled.resolve();
-          },
+          ...cellResource(() => undefined, {
+            sink: () => {
+              subscribed.resolve();
+              return () => cancelled.resolve();
+            },
+          }),
         },
       }),
       channel.port1,
@@ -595,7 +820,7 @@ describe("Fabric iframe bridge", () => {
     const client = connectFabric();
     handOff(channel.port2);
 
-    client.subscribeResource("watched", () => {});
+    client.sinkResource("watched", () => {});
     await subscribed.promise;
     client.disconnect();
     await cancelled.promise;
@@ -611,22 +836,24 @@ describe("Fabric iframe bridge", () => {
     const host = new FabricBridgeHost(
       createFabricBridge({
         first: {
-          kind: "cell",
-          subscribe: () => {
-            firstSubscribed.resolve();
-            return () => {
-              throw new Error("cancel failed");
-            };
-          },
+          ...cellResource(() => undefined, {
+            sink: () => {
+              firstSubscribed.resolve();
+              return () => {
+                throw new Error("cancel failed");
+              };
+            },
+          }),
         },
         second: {
-          kind: "cell",
-          subscribe: () => {
-            secondSubscribed.resolve();
-            return () => {
-              secondCancelled = true;
-            };
-          },
+          ...cellResource(() => undefined, {
+            sink: () => {
+              secondSubscribed.resolve();
+              return () => {
+                secondCancelled = true;
+              };
+            },
+          }),
         },
       }),
       channel.port1,
@@ -634,9 +861,9 @@ describe("Fabric iframe bridge", () => {
     const client = connectFabric();
     handOff(channel.port2);
 
-    client.subscribeResource("first", () => {});
+    client.sinkResource("first", () => {});
     await firstSubscribed.promise;
-    client.subscribeResource("second", () => {});
+    client.sinkResource("second", () => {});
     await secondSubscribed.promise;
 
     expect(() => host.disconnect()).not.toThrow();

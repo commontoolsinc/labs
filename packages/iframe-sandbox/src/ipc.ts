@@ -106,7 +106,7 @@ export function isGuestError(e: object): e is GuestError {
 }
 
 export const BRIDGE_PROTOCOL = "common-fabric-bridge";
-export const BRIDGE_VERSION = 1;
+export const BRIDGE_VERSION = 2;
 
 export type BridgeError = {
   code: string;
@@ -117,6 +117,7 @@ export type BridgeError = {
 export type BridgeResourceDescriptor = {
   name: string;
   kind: "cell" | "stream" | "sqlite" | "service";
+  operations: string[];
   methods: string[];
   schema?: FabricValue;
   description?: string;
@@ -131,11 +132,32 @@ export type BridgeManifest = {
 export type BridgeOperation =
   | "describe"
   | "disconnect"
-  | "read"
-  | "write"
+  | "pull"
+  | "set"
+  | "push"
+  | "resolve"
   | "call"
-  | "subscribe"
-  | "unsubscribe";
+  | "sink"
+  | "unsink";
+
+/** A path beneath a granted or previously resolved cell capability. */
+export type BridgeCellPath = Array<string | number>;
+
+/** Stable identity metadata returned with an opaque resolved capability. */
+export type BridgeCellIdentity = {
+  id: string;
+  space?: string;
+  scope?: "space" | "user" | "session";
+  path: BridgeCellPath;
+};
+
+/** Guest-visible descriptor for a host-minted stable cell capability. */
+export type BridgeResolvedCell = {
+  handle: string;
+  hasValue: true;
+  identity?: BridgeCellIdentity;
+  value?: FabricValue;
+};
 
 export type BridgeRequest = {
   protocol: typeof BRIDGE_PROTOCOL;
@@ -144,9 +166,12 @@ export type BridgeRequest = {
   id: number;
   operation: BridgeOperation;
   resource?: string;
+  handle?: string;
+  path?: BridgeCellPath;
   method?: string;
   subscription?: string;
   value?: FabricValue;
+  values?: FabricValue[];
 };
 
 export type BridgeResponse = {
@@ -192,19 +217,37 @@ export function isBridgeRequest(message: unknown): message is BridgeRequest {
     case "describe":
     case "disconnect":
       return true;
-    case "read":
-    case "write":
-      return typeof message.resource === "string";
+    case "pull":
+    case "set":
+    case "resolve":
+      return hasCellTarget(message) && hasCellPath(message);
+    case "push":
+      return hasCellTarget(message) && hasCellPath(message) &&
+        Array.isArray(message.values);
     case "call":
       return typeof message.resource === "string" &&
         typeof message.method === "string";
-    case "subscribe":
-    case "unsubscribe":
-      return typeof message.resource === "string" &&
-        typeof message.subscription === "string";
+    case "sink":
+    case "unsink":
+      return hasCellTarget(message) &&
+        hasCellPath(message) && typeof message.subscription === "string";
     default:
       return false;
   }
+}
+
+function hasCellTarget(message: Record<string, unknown>): boolean {
+  return (typeof message.resource === "string") !==
+    (typeof message.handle === "string");
+}
+
+function hasCellPath(message: Record<string, unknown>): boolean {
+  return message.path === undefined ||
+    Array.isArray(message.path) &&
+      message.path.every((part) =>
+        typeof part === "string" ||
+        typeof part === "number" && Number.isSafeInteger(part)
+      );
 }
 
 export function isBridgeHostMessage(

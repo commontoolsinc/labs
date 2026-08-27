@@ -58,7 +58,7 @@ describe("CFIframe", () => {
       string,
     ];
     expect(source).toBe("<p>ready</p>");
-    expect(bridge.resources.count.read!()).toBe(1);
+    expect(bridge.resources.count.cell!.get()).toBe(1);
   });
 
   it("keeps a cell-backed source closed until its resources resolve", async () => {

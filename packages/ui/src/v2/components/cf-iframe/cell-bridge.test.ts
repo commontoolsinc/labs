@@ -53,7 +53,10 @@ describe("cf-iframe cell bridge", () => {
       [$conn]: () => ({
         request: (request: { type: RequestType }) => {
           requests.push(request);
-          if (request.type === RequestType.CellGet) {
+          if (
+            request.type === RequestType.CellGet ||
+            request.type === RequestType.CellPull
+          ) {
             return Promise.resolve({ value: 2 });
           }
           return Promise.resolve({});
@@ -72,10 +75,10 @@ describe("cf-iframe cell bridge", () => {
     const count = bridge.resources.count;
     expect(count.kind).toBe("cell");
     expect(count.description).toBe("Shared counter");
-    await expect(count.read!()).resolves.toBe(2);
-    await count.write!(3);
+    await expect(count.cell!.pull()).resolves.toBe(2);
+    await count.cell!.set!(3);
     expect(requests).toEqual([{
-      type: RequestType.CellGet,
+      type: RequestType.CellPull,
       cell: {
         ...ref,
         path: ["count"],
@@ -93,6 +96,84 @@ describe("cf-iframe cell bridge", () => {
     }]);
   });
 
+  it("derives path sinks, resolves stable identities, and sends push intent", async () => {
+    const requests: Array<
+      { type: RequestType; cell: CellRef; values?: unknown[] }
+    > = [];
+    const subscriptions: CellRef[] = [];
+    const itemsRef: CellRef = {
+      ...ref,
+      schema: {
+        type: "object",
+        properties: {
+          items: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { title: { type: "string" } },
+            },
+          },
+        },
+      },
+    };
+    const runtime = {
+      [$conn]: () => ({
+        request: (
+          request: { type: RequestType; cell: CellRef; values?: unknown[] },
+        ) => {
+          requests.push(request);
+          if (request.type === RequestType.CellResolveAsCell) {
+            return Promise.resolve({
+              cell: {
+                ...request.cell,
+                id: "of:item-a",
+                path: [],
+              },
+            });
+          }
+          if (request.type === RequestType.CellPull) {
+            return Promise.resolve({ value: "A" });
+          }
+          return Promise.resolve({});
+        },
+        subscribe: (cell: CellHandle<unknown>) => {
+          subscriptions.push(cell.ref());
+          return Promise.resolve();
+        },
+        unsubscribe: () => Promise.resolve(),
+        signal: { aborted: false },
+      }),
+    } as unknown as RuntimeClient;
+    const context = new CellHandle(runtime, itemsRef, {
+      items: [{ title: "A" }],
+    });
+    const items = createCellContextBridge(context).resources.items.cell!;
+
+    const positionalTitle = items.key!(0).key!("title");
+    const cancel = positionalTitle.sink!(() => {});
+    expect(subscriptions.at(-1)?.path).toEqual(["items", "0", "title"]);
+    cancel();
+
+    const stable = await items.key!(0).resolve!();
+    expect(stable.identity).toMatchObject({
+      id: "of:item-a",
+      scope: "space",
+      path: [],
+    });
+    await expect(stable.key!("title").pull()).resolves.toBe("A");
+    await items.push!({ title: "B" });
+
+    expect(
+      requests.find(({ type }) => type === RequestType.CellPull)?.cell,
+    ).toMatchObject({ id: "of:item-a", path: ["title"] });
+    expect(
+      requests.find(({ type }) => type === RequestType.CellPush),
+    ).toMatchObject({
+      cell: { id: "of:context", path: ["items"] },
+      values: [{ title: "B" }],
+    });
+  });
+
   it("adapts plain object properties without a runtime connection", async () => {
     const runtime = {
       [$conn]: () => ({
@@ -104,10 +185,15 @@ describe("cf-iframe cell bridge", () => {
     } as unknown as RuntimeClient;
     const linked = new CellHandle(runtime, ref);
     const marker = new Date(0);
+    const inherited = { hidden: "prototype" };
+    const record = Object.assign(Object.create(inherited), {
+      visible: "own",
+    }) as Record<string, unknown>;
     const context = {
       count: 1,
       nested: { linked },
       marker,
+      record,
     };
 
     const bridge = createCellContextBridge(context);
@@ -116,13 +202,19 @@ describe("cf-iframe cell bridge", () => {
       "count",
       "nested",
       "marker",
+      "record",
     ]);
-    expect(bridge.resources.nested.read!()).toEqual({
+    expect(bridge.resources.nested.cell!.get()).toEqual({
       linked: linked.toJSON(),
     });
-    expect(bridge.resources.marker.read!()).toBe(marker);
-    await bridge.resources.count.write!(2);
+    expect(bridge.resources.marker.cell!.get()).toBe(marker);
+    await bridge.resources.count.cell!.set!(2);
     expect(context.count).toBe(2);
+    const hidden = bridge.resources.record.cell!.key!("hidden");
+    expect(await hidden.pull()).toBeUndefined();
+    await hidden.set!("own");
+    expect(record.hidden).toBe("own");
+    expect(inherited.hidden).toBe("prototype");
   });
 
   it("discovers context properties that materialize after bridge creation", async () => {
@@ -165,7 +257,7 @@ describe("cf-iframe cell bridge", () => {
     ).toBeUndefined();
     const command = bridge.resources.command;
     expect(command.kind).toBe("cell");
-    await command.write!("next");
+    await command.cell!.set!("next");
     const write = requests.at(-1) as {
       type: RequestType;
       cell: CellRef;
@@ -199,6 +291,15 @@ describe("cf-iframe cell bridge", () => {
         request: (request: { type: RequestType; cell: CellRef }) => {
           requests.push(request);
           if (request.type === RequestType.CellGet) {
+            if (request.cell.id === "of:database") {
+              return Promise.resolve({
+                value: {
+                  id: "fid1:database",
+                  tables: { notes: { type: "object" } },
+                  scope: "space",
+                },
+              });
+            }
             return Promise.resolve({
               value: {
                 command: undefined,
@@ -279,7 +380,7 @@ describe("cf-iframe cell bridge", () => {
       requests.filter(({ type }) => type === RequestType.CellPull).map(
         ({ cell }) => cell.path,
       ),
-    ).toEqual([["database"], ["database"], []]);
+    ).toEqual([[], [], ["database"], ["database"]]);
     expect(
       requests.filter(({ type, cell }) =>
         type === RequestType.CellResolveAsCell && cell.path.length > 0
@@ -290,11 +391,6 @@ describe("cf-iframe cell bridge", () => {
       })),
     ).toEqual([
       { path: ["command"], scope: "space", schema: undefined },
-      {
-        path: ["database"],
-        scope: "space",
-        schema: undefined,
-      },
       {
         path: ["database"],
         scope: "space",
@@ -328,16 +424,24 @@ describe("cf-iframe cell bridge", () => {
         return idle.promise;
       },
       [$conn]: () => ({
-        request: (request: { type: RequestType; cell: CellRef }) => {
+        request: async (request: { type: RequestType; cell: CellRef }) => {
           if (request.type === RequestType.CellGet) {
-            return Promise.resolve({ value: { database: undefined } });
-          }
-          if (request.type === RequestType.CellPull) {
             return Promise.resolve({
               value: request.cell.id === "of:user-database" && materialized
                 ? databaseValue
-                : undefined,
+                : { database: undefined },
             });
+          }
+          if (request.type === RequestType.CellPull) {
+            if (request.cell.path[0] === "database" && !materialized) {
+              reachedIdle.resolve();
+              await idle.promise;
+            }
+            return {
+              value: request.cell.id === "of:user-database" && materialized
+                ? databaseValue
+                : undefined,
+            };
           }
           if (request.type === RequestType.CellResolveAsCell) {
             return Promise.resolve({
@@ -400,24 +504,14 @@ describe("cf-iframe cell bridge", () => {
       schema: true,
     });
 
-    const bridge = await resolveCellContextBridge(context, {
+    const resolving = resolveCellContextBridge(context, {
       database: "sqlite",
-    });
-
-    const querying = bridge.resources.database.methods!.query({
-      sql: "SELECT 1",
     });
     await reachedIdle.promise;
     expect(sqliteQueries).toBe(0);
-    retargeted = true;
     materialized = true;
     idle.resolve();
-
-    await expect(querying).rejects.toThrow(
-      "resolved outside its granted capability",
-    );
-    expect(sqliteQueries).toBe(0);
-    retargeted = false;
+    const bridge = await resolving;
     await expect(
       bridge.resources.database.methods!.query({ sql: "SELECT 1" }),
     ).resolves.toEqual({ rows: [] });
@@ -475,7 +569,9 @@ describe("cf-iframe cell bridge", () => {
     expect(bridge.resources.database.kind).toBe("cell");
     expect(bridge.resources.database.methods).toBeUndefined();
     expect(
-      requests.some(({ type }) => type === RequestType.CellPull),
+      requests.some(({ type, cell }) =>
+        type === RequestType.CellPull && cell.path.length > 0
+      ),
     ).toBe(false);
   });
 
@@ -495,14 +591,14 @@ describe("cf-iframe cell bridge", () => {
 
     const count = createCellContextBridge(context).resources.count;
 
-    await expect(count.write!(3)).rejects.toThrow("write refused");
+    await expect(count.cell!.set!(3)).rejects.toThrow("write refused");
   });
 
   it("omits writes from read-only cell capabilities", async () => {
     const runtime = {
       [$conn]: () => ({
         request: (request: { type: RequestType }) =>
-          request.type === RequestType.CellGet
+          request.type === RequestType.CellPull
             ? Promise.resolve({ value: "fixed" })
             : Promise.resolve({}),
         subscribe: () => Promise.resolve(),
@@ -516,11 +612,11 @@ describe("cf-iframe cell bridge", () => {
 
     expect(locked.kind).toBe("cell");
     expect(locked.description).toBe("Read-only value");
-    await expect(locked.read!()).resolves.toBe("fixed");
-    expect(locked.write).toBeUndefined();
+    await expect(locked.cell!.pull()).resolves.toBe("fixed");
+    expect(locked.cell!.set).toBeUndefined();
   });
 
-  it("publishes cell changes after suppressing the initial value", () => {
+  it("sinks the current value synchronously before later changes", () => {
     let subscribed: CellHandle<number> | undefined;
     const runtime = {
       [$conn]: () => ({
@@ -540,10 +636,10 @@ describe("cf-iframe cell bridge", () => {
     const count = createCellContextBridge(context).resources.count;
     const changes: unknown[] = [];
 
-    const unsubscribe = count.subscribe!((value) => changes.push(value));
+    const unsubscribe = count.cell!.sink!((value) => changes.push(value));
     subscribed?.[$onCellUpdate](2);
 
-    expect(changes).toEqual([2]);
+    expect(changes).toEqual([1, 2]);
     unsubscribe();
   });
 
@@ -602,7 +698,7 @@ describe("cf-iframe cell bridge", () => {
     const database = createCellContextBridge(context).resources.database;
     expect(database.kind).toBe("sqlite");
     let invalidations = 0;
-    const unsubscribe = database.subscribe!(() => invalidations++);
+    const unsubscribe = database.sink!(() => invalidations++);
     expect(subscribed?.ref().schema).toEqual({
       type: "object",
       additionalProperties: true,

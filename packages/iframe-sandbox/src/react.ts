@@ -64,13 +64,13 @@ export function createFabricReact(react: ReactHooks, client: FabricClient) {
   ): CellHookResult<T> {
     const cell = react.useMemo(() => client.cell<T>(name), [name]);
     const snapshot = react.useSyncExternalStore(
-      (notify) => cell.subscribe(() => notify()),
+      (notify) => cell.subscribeSnapshot(() => notify()),
       cell.getSnapshot,
       cell.getSnapshot,
     );
     react.useEffect(() => {
       if (cell.getSnapshot().status === "loading") {
-        void cell.read().catch(() => {});
+        void cell.pull().catch(() => {});
       }
     }, [cell]);
 
@@ -78,14 +78,14 @@ export function createFabricReact(react: ReactHooks, client: FabricClient) {
       (next: T | ((current: T) => T)) =>
         typeof next === "function"
           ? cell.update(next as (current: T) => T)
-          : cell.write(next),
+          : cell.set(next),
       [cell],
     );
 
     return {
       ...snapshot,
       set,
-      refresh: () => cell.read(),
+      refresh: () => cell.pull(),
     };
   }
 
@@ -144,7 +144,7 @@ export function createFabricReact(react: ReactHooks, client: FabricClient) {
 
     react.useEffect(() => {
       activeQuery.current = queryKey;
-      const unsubscribe = database.subscribeInvalidation(() => void refresh());
+      const unsubscribe = database.sink(() => void refresh());
       void refresh();
       return () => {
         if (activeQuery.current === queryKey) {

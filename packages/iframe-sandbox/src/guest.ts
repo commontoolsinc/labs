@@ -16,11 +16,14 @@ import {
 import {
   BRIDGE_PROTOCOL,
   BRIDGE_VERSION,
+  type BridgeCellIdentity,
+  type BridgeCellPath,
   type BridgeError,
   type BridgeHostMessage,
   type BridgeManifest,
   type BridgeOperation,
   type BridgeRequest,
+  type BridgeResolvedCell,
   GUEST_PORT_HANDOFF,
   type GuestError,
   isBridgeHostMessage,
@@ -46,6 +49,7 @@ export type ResourceSnapshot<T> =
   | { status: "error"; error: FabricBridgeError };
 
 type SnapshotListener<T> = (snapshot: ResourceSnapshot<T>) => void;
+type CellSink<T> = (value: Readonly<T> | undefined) => void | (() => void);
 type EncodedBridgeRequest = ReturnType<typeof realmFromFabricValue>;
 
 type QueuedBridgeRequest = {
@@ -53,64 +57,109 @@ type QueuedBridgeRequest = {
   encoded: EncodedBridgeRequest;
 };
 
-/** Reactive guest-side handle for one named cell resource. */
+type CellOperationQueue = {
+  tail?: Promise<void>;
+};
+
+export type RemoteCellTarget = {
+  resource: string;
+  handle?: never;
+  path: BridgeCellPath;
+} | {
+  resource?: never;
+  handle: string;
+  path: BridgeCellPath;
+};
+
+function targetFields(target: RemoteCellTarget): Pick<
+  BridgeRequest,
+  "resource" | "handle" | "path"
+> {
+  return "handle" in target
+    ? { handle: target.handle, path: target.path }
+    : { resource: target.resource, path: target.path };
+}
+
+/** Cell-shaped guest handle rooted in an explicitly granted capability. */
 export class RemoteCell<T = FabricValue> {
   readonly #client: FabricClient;
-  readonly #name: string;
-  readonly #listeners = new Set<SnapshotListener<T>>();
-  readonly #activeReads = new Set<Promise<void>>();
+  readonly #target: RemoteCellTarget;
+  readonly #snapshotListeners = new Set<SnapshotListener<T>>();
+  readonly #sinks = new Map<CellSink<T>, (() => void) | void>();
+  readonly #identity: BridgeCellIdentity | undefined;
+  readonly #operationQueue: CellOperationQueue;
   #snapshot: ResourceSnapshot<T> = { status: "loading" };
   #unsubscribeRemote: (() => void) | undefined;
-  #writeTail: Promise<void> | undefined;
-  #readGeneration = 0;
   #eventGeneration = 0;
+  #resolved: Promise<RemoteCell<T>> | undefined;
 
-  constructor(client: FabricClient, name: string) {
+  constructor(
+    client: FabricClient,
+    target: string | RemoteCellTarget,
+    options: { identity?: BridgeCellIdentity; value?: T } = {},
+    operationQueue: CellOperationQueue = {},
+  ) {
     this.#client = client;
-    this.#name = name;
+    this.#target = typeof target === "string"
+      ? { resource: target, path: [] }
+      : target;
+    this.#identity = options.identity;
+    this.#operationQueue = operationQueue;
+    if (Object.hasOwn(options, "value")) {
+      this.#snapshot = { status: "ready", value: options.value as T };
+    }
+  }
+
+  /** Stable identity metadata, present after resolve(). */
+  get identity(): BridgeCellIdentity | undefined {
+    return this.#identity;
+  }
+
+  /** Samples the current guest-side value without waiting for host work. */
+  get(): Readonly<T> | undefined {
+    return this.#snapshot.status === "ready" ? this.#snapshot.value : undefined;
   }
 
   getSnapshot = (): ResourceSnapshot<T> => this.#snapshot;
 
-  subscribe = (listener: SnapshotListener<T>): () => void => {
-    this.#listeners.add(listener);
+  /** Internal status subscription used by framework adapters. */
+  subscribeSnapshot = (listener: SnapshotListener<T>): () => void => {
+    this.#snapshotListeners.add(listener);
     listener(this.#snapshot);
-    if (this.#listeners.size === 1) {
-      this.#unsubscribeRemote = this.#client.subscribeResource(
-        this.#name,
-        (value) => {
-          this.#eventGeneration++;
-          this.#setReady(value as T);
-        },
-        (error) => this.#setError(error),
-      );
-    }
+    this.#ensureRemoteSink();
     return () => {
-      this.#listeners.delete(listener);
-      if (this.#listeners.size === 0) {
-        this.#unsubscribeRemote?.();
-        this.#unsubscribeRemote = undefined;
-      }
+      this.#snapshotListeners.delete(listener);
+      this.#closeRemoteSinkIfUnused();
     };
   };
 
-  async read(): Promise<T> {
-    const writes = this.#writeTail;
-    return writes ? await writes.then(() => this.#read()) : await this.#read();
+  /**
+   * Calls `listener` synchronously with get(), then again whenever the value
+   * changes. The returned function tears down this sink.
+   */
+  sink(listener: CellSink<T>): () => void {
+    this.#sinks.set(listener, listener(this.get()));
+    this.#ensureRemoteSink();
+    return () => {
+      this.#runSinkCleanup(listener);
+      this.#sinks.delete(listener);
+      this.#closeRemoteSinkIfUnused();
+    };
   }
 
-  async #read(): Promise<T> {
-    const completion = Promise.withResolvers<void>();
-    this.#activeReads.add(completion.promise);
+  /** Waits for the host Cell.pull() barrier and returns its current value. */
+  pull(): Promise<T> {
+    return this.#enqueueOperation(() => this.#pull());
+  }
+
+  async #pull(): Promise<T> {
     const before = this.#snapshot;
-    const generation = ++this.#readGeneration;
     const eventGeneration = this.#eventGeneration;
     try {
-      const value = await this.#client.request("read", {
-        resource: this.#name,
+      const value = await this.#client.request("pull", {
+        ...targetFields(this.#target),
       }) as T;
       if (
-        generation === this.#readGeneration &&
         eventGeneration === this.#eventGeneration &&
         this.#snapshot === before
       ) {
@@ -119,20 +168,17 @@ export class RemoteCell<T = FabricValue> {
       return value;
     } catch (error) {
       if (
-        generation === this.#readGeneration &&
         eventGeneration === this.#eventGeneration &&
         this.#snapshot === before
       ) {
         this.#setError(error);
       }
       throw error;
-    } finally {
-      this.#activeReads.delete(completion.promise);
-      completion.resolve();
     }
   }
 
-  write(value: T): Promise<void> {
+  /** Replaces the cell's value. */
+  set(value: T): Promise<void> {
     let snapshot: T;
     try {
       snapshot = cloneIfNecessary(value as FabricValue, {
@@ -141,48 +187,102 @@ export class RemoteCell<T = FabricValue> {
     } catch (error) {
       return Promise.reject(error);
     }
-    return this.#enqueueWrite(async () => {
-      if (this.#activeReads.size > 0) {
-        await Promise.all(this.#activeReads);
-      }
-      await this.#write(snapshot);
-    });
+    return this.#enqueueOperation(() => this.#set(snapshot));
   }
 
   update(updater: (current: T) => T): Promise<void> {
-    return this.#enqueueWrite(async () => {
-      if (this.#activeReads.size > 0) {
-        await Promise.all(this.#activeReads);
-      }
+    return this.#enqueueOperation(async () => {
       const snapshot = this.#snapshot;
       const current = snapshot.status === "ready"
         ? snapshot.value
-        : await this.#read();
-      await this.#write(updater(current));
+        : await this.#pull();
+      await this.#set(updater(current));
     });
   }
 
-  #enqueueWrite(operation: () => Promise<void>): Promise<void> {
-    const writing = this.#writeTail
-      ? this.#writeTail.then(operation)
+  /** Appends members with the runtime's mergeable array operation. */
+  push<U>(this: RemoteCell<U[]>, ...values: U[]): Promise<void> {
+    let snapshots: U[];
+    try {
+      snapshots = cloneIfNecessary(values as FabricValue, {
+        frozen: false,
+      }) as U[];
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    return this.#enqueueOperation(async () => {
+      const eventGeneration = this.#eventGeneration;
+      const before = this.#snapshot;
+      await this.#client.request("push", {
+        ...targetFields(this.#target),
+        values: snapshots as FabricValue[],
+      });
+      if (
+        eventGeneration === this.#eventGeneration &&
+        this.#snapshot === before && before.status === "ready" &&
+        Array.isArray(before.value)
+      ) {
+        this.#setReady([...before.value, ...snapshots] as U[]);
+      }
+    });
+  }
+
+  /** Derives a path-scoped handle without a round trip. */
+  key<K extends Extract<keyof T, string | number>>(key: K): RemoteCell<T[K]>;
+  key(...keys: Array<string | number>): RemoteCell<unknown>;
+  key(...keys: Array<string | number>): RemoteCell<any> {
+    let value: unknown = this.get();
+    let hasValue = this.#snapshot.status === "ready";
+    for (const key of keys) {
+      if (value === null || typeof value !== "object") {
+        hasValue = false;
+        break;
+      }
+      value = (value as Record<string, unknown>)[String(key)];
+    }
+    return this.#client.cellTarget(
+      {
+        ...this.#target,
+        path: [...this.#target.path, ...keys],
+      },
+      hasValue ? { value } : {},
+    );
+  }
+
+  /** Resolves links and returns a stable, host-minted cell capability. */
+  resolve(): Promise<RemoteCell<T>> {
+    this.#resolved ??= this.#enqueueOperation(async () => {
+      const result = await this.#client.request("resolve", {
+        ...targetFields(this.#target),
+      }) as BridgeResolvedCell;
+      return this.#client.resolvedCell<T>(result);
+    });
+    return this.#resolved;
+  }
+
+  #enqueueOperation<U>(operation: () => Promise<U>): Promise<U> {
+    const running = this.#operationQueue.tail
+      ? this.#operationQueue.tail.then(operation)
       : operation();
-    const tail = writing.catch(() => {});
-    this.#writeTail = tail;
+    const tail = running.then(() => {}, () => {});
+    this.#operationQueue.tail = tail;
     void tail.then(() => {
-      if (this.#writeTail === tail) this.#writeTail = undefined;
+      if (this.#operationQueue.tail === tail) {
+        this.#operationQueue.tail = undefined;
+      }
     });
-    return writing;
+    return running;
   }
 
-  async #write(value: T): Promise<void> {
+  async #set(value: T): Promise<void> {
     const before = this.#snapshot;
     const eventGeneration = this.#eventGeneration;
     const snapshot = cloneIfNecessary(value as FabricValue, {
       frozen: false,
     }) as T;
     try {
-      await this.#client.request("write", {
-        resource: this.#name,
+      await this.#client.request("set", {
+        ...targetFields(this.#target),
         value: snapshot as FabricValue,
       });
       if (
@@ -203,6 +303,7 @@ export class RemoteCell<T = FabricValue> {
   }
 
   #setReady(value: T): void {
+    const previous = this.get();
     if (
       this.#snapshot.status === "ready" &&
       valueEqual(
@@ -213,7 +314,15 @@ export class RemoteCell<T = FabricValue> {
       return;
     }
     this.#snapshot = { status: "ready", value };
-    for (const listener of this.#listeners) listener(this.#snapshot);
+    for (const listener of this.#snapshotListeners) listener(this.#snapshot);
+    if (
+      previous !== undefined || value !== undefined
+    ) {
+      for (const listener of this.#sinks.keys()) {
+        this.#runSinkCleanup(listener);
+        this.#sinks.set(listener, listener(value));
+      }
+    }
   }
 
   #setError(error: unknown): void {
@@ -222,10 +331,38 @@ export class RemoteCell<T = FabricValue> {
       : new FabricBridgeError({
         code: "operation-failed",
         message: error instanceof Error ? error.message : String(error),
-        resource: this.#name,
+        resource: "resource" in this.#target
+          ? this.#target.resource
+          : undefined,
       });
     this.#snapshot = { status: "error", error: bridgeError };
-    for (const listener of this.#listeners) listener(this.#snapshot);
+    for (const listener of this.#snapshotListeners) listener(this.#snapshot);
+  }
+
+  #ensureRemoteSink(): void {
+    if (this.#unsubscribeRemote) return;
+    this.#unsubscribeRemote = this.#client.sinkCell(
+      this.#target,
+      (value) => {
+        this.#eventGeneration++;
+        this.#setReady(value as T);
+      },
+      (error) => this.#setError(error),
+    );
+  }
+
+  #closeRemoteSinkIfUnused(): void {
+    if (this.#sinks.size > 0 || this.#snapshotListeners.size > 0) return;
+    this.#unsubscribeRemote?.();
+    this.#unsubscribeRemote = undefined;
+  }
+
+  #runSinkCleanup(listener: CellSink<T>): void {
+    try {
+      this.#sinks.get(listener)?.();
+    } catch {
+      // A broken consumer cleanup must not retain or block the other sinks.
+    }
   }
 }
 
@@ -285,8 +422,9 @@ export class RemoteSqlite {
     );
   }
 
-  subscribeInvalidation(listener: () => void): () => void {
-    return this.#client.subscribeResource(this.#name, () => listener());
+  /** Sinks database invalidations until the returned function is called. */
+  sink(listener: () => void): () => void {
+    return this.#client.sinkResource(this.#name, () => listener());
   }
 }
 
@@ -308,7 +446,8 @@ export class FabricClient {
   #pending = new Map<number, PendingRequest>();
   #queued: QueuedBridgeRequest[] = [];
   #subscriptions = new Map<string, Subscription>();
-  #cells = new Map<string, RemoteCell>();
+  #cells = new Map<string, RemoteCell<unknown>>();
+  #cellOperationQueues = new Map<string, CellOperationQueue>();
   #disconnected = false;
 
   constructor() {
@@ -320,12 +459,47 @@ export class FabricClient {
   }
 
   cell<T = FabricValue>(name: string): RemoteCell<T> {
-    let cell = this.#cells.get(name);
+    return this.cellTarget<T>({ resource: name, path: [] });
+  }
+
+  /** Returns the one shared guest handle for a capability target and path. */
+  cellTarget<T = FabricValue>(
+    target: RemoteCellTarget,
+    options: { identity?: BridgeCellIdentity; value?: T } = {},
+  ): RemoteCell<T> {
+    const key = JSON.stringify([
+      "handle" in target ? "handle" : "resource",
+      "handle" in target ? target.handle : target.resource,
+      target.path,
+    ]);
+    const rootKey = JSON.stringify([
+      "handle" in target ? "handle" : "resource",
+      "handle" in target ? target.handle : target.resource,
+    ]);
+    let cell = this.#cells.get(key) as RemoteCell<T> | undefined;
     if (!cell) {
-      cell = new RemoteCell(this, name);
-      this.#cells.set(name, cell);
+      let queue = this.#cellOperationQueues.get(rootKey);
+      if (!queue) {
+        queue = {};
+        this.#cellOperationQueues.set(rootKey, queue);
+      }
+      cell = new RemoteCell(this, target, options, queue);
+      this.#cells.set(key, cell as RemoteCell<unknown>);
     }
     return cell as unknown as RemoteCell<T>;
+  }
+
+  /** Rehydrates a host-minted stable cell capability. */
+  resolvedCell<T = FabricValue>(descriptor: BridgeResolvedCell): RemoteCell<T> {
+    return this.cellTarget<T>(
+      { handle: descriptor.handle, path: [] },
+      {
+        ...(descriptor.identity !== undefined && {
+          identity: descriptor.identity,
+        }),
+        value: descriptor.value as T,
+      },
+    );
   }
 
   sqlite(name: string): RemoteSqlite {
@@ -384,14 +558,14 @@ export class FabricClient {
     return result.promise;
   }
 
-  subscribeResource(
+  sinkResource(
     resource: string,
     update: (value: FabricValue | undefined) => void,
     error?: (error: unknown) => void,
   ): () => void {
     const subscription = `subscription-${this.#nextSubscriptionId++}`;
     this.#subscriptions.set(subscription, { update, error });
-    void this.request("subscribe", { resource, subscription }).catch(
+    void this.request("sink", { resource, subscription }).catch(
       (cause) => {
         this.#subscriptions.delete(subscription);
         error?.(cause);
@@ -399,9 +573,33 @@ export class FabricClient {
     );
     return () => {
       this.#subscriptions.delete(subscription);
-      void this.request("unsubscribe", { resource, subscription }).catch(
+      void this.request("unsink", { resource, subscription }).catch(
         () => {},
       );
+    };
+  }
+
+  /** Opens a value sink on a cell target. */
+  sinkCell(
+    target: RemoteCellTarget,
+    update: (value: FabricValue | undefined) => void,
+    error?: (error: unknown) => void,
+  ): () => void {
+    const subscription = `subscription-${this.#nextSubscriptionId++}`;
+    this.#subscriptions.set(subscription, { update, error });
+    void this.request("sink", {
+      ...targetFields(target),
+      subscription,
+    }).catch((cause) => {
+      this.#subscriptions.delete(subscription);
+      error?.(cause);
+    });
+    return () => {
+      this.#subscriptions.delete(subscription);
+      void this.request("unsink", {
+        ...targetFields(target),
+        subscription,
+      }).catch(() => {});
     };
   }
 
@@ -427,6 +625,7 @@ export class FabricClient {
     for (const pending of this.#pending.values()) pending.reject(error);
     this.#pending.clear();
     this.#subscriptions.clear();
+    this.#cellOperationQueues.clear();
     this.#queued = [];
   }
 

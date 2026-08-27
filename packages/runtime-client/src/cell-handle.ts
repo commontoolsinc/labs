@@ -388,6 +388,22 @@ export class CellHandle<T = unknown> {
     this: CellHandle<U[]>,
     ...values: T extends (infer U)[] ? U[] : never
   ): void {
+    void this.#pushValues(values).catch((error) => {
+      if (!this.#conn.signal.aborted) {
+        console.error("[CellHandle] Push failed:", error);
+      }
+    });
+  }
+
+  /** Append values and reject when the runtime refuses the mergeable write. */
+  pushStrict<U>(
+    this: CellHandle<U[]>,
+    ...values: T extends (infer U)[] ? U[] : never
+  ): Promise<void> {
+    return this.#pushValues(values);
+  }
+
+  #pushValues<U>(values: U[]): Promise<void> {
     const serializedValues = values.map((value) =>
       CellHandle.serialize(value as ClientCellValue)
     );
@@ -416,9 +432,9 @@ export class CellHandle<T = unknown> {
       queue.value = value;
       queue.hasValue = true;
       if (writeGeneration === this.#writeGeneration) {
-        this.#publishValue(value);
+        this.#publishValue(value as unknown as T);
       }
-      const rollback = (error: unknown) => {
+      const rollback = () => {
         if (
           updateGeneration === this.#updateGeneration &&
           authoritativeGeneration === queue.authoritativeGeneration
@@ -429,11 +445,8 @@ export class CellHandle<T = unknown> {
           queue.hasValue = true;
           queue.value = current;
           if (writeGeneration === this.#writeGeneration) {
-            this.#publishValue(current as U[]);
+            this.#publishValue(current as unknown as T);
           }
-        }
-        if (!this.#conn.signal.aborted) {
-          console.error("[CellHandle] Push failed:", error);
         }
       };
       let request: Promise<unknown>;
@@ -445,16 +458,15 @@ export class CellHandle<T = unknown> {
           awaitCommit: true,
         });
       } catch (error) {
-        rollback(error);
-        return Promise.resolve();
+        rollback();
+        return Promise.reject(error);
       }
-      return request.then(() => {}, rollback);
+      return request.then(() => {}, (error) => {
+        rollback();
+        throw error;
+      });
     };
-    void this.#enqueueOperation(append).catch((error) => {
-      if (!this.#conn.signal.aborted) {
-        console.error("[CellHandle] Push failed:", error);
-      }
-    });
+    return this.#enqueueOperation(append);
   }
 
   /** The cell's current display CFC label, for label-aware subscribers. */

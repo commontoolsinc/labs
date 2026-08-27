@@ -37,15 +37,13 @@ const cell = (key) => {
   if (!cells.has(key)) cells.set(key, fabric.cell(key));
   return cells.get(key);
 };
-const read = async (key) => onUpdate(key, await cell(key).read());
-const write = (key, value) => cell(key).write(value);
-const subscribe = (key) => {
+const pull = async (key) => onUpdate(key, await cell(key).pull());
+const set = (key, value) => cell(key).set(value);
+const sink = (key) => {
   subscriptions.get(key)?.();
-  subscriptions.set(key, cell(key).subscribe((snapshot) => {
-    if (snapshot.status === "ready") onUpdate(key, snapshot.value);
-  }));
+  subscriptions.set(key, cell(key).sink((value) => onUpdate(key, value)));
 };
-const unsubscribe = (key) => {
+const unsink = (key) => {
   subscriptions.get(key)?.();
   subscriptions.delete(key);
 };
@@ -54,7 +52,7 @@ const unsubscribe = (key) => {
 const GUEST_EPILOG = `
 </script>`;
 
-Deno.test("read and writes", async () => {
+Deno.test("pulls and sets", async () => {
   cleanupFixtures();
   try {
     const context = new ContextShim({ a: 1 });
@@ -62,10 +60,10 @@ Deno.test("read and writes", async () => {
     const body = `${GUEST_PROLOG}
 onUpdate = (key, value) => {
   if (key === "a" && value === 1) {
-    write(key, value + 1); 
+    set(key, value + 1);
   }
 };
-read('a');
+pull('a');
 ${GUEST_EPILOG}`;
     const iframe = await render(body, context);
 
@@ -94,19 +92,19 @@ Deno.test("subscribes", async () => {
 const updates = [];
 onUpdate = (key, value) => {
   if (key === "barrier") {
-    write("barrier-seen", value);
+    set("barrier-seen", value);
     return;
   }
   updates.push([key, value]);
-  write("updates", updates);
+  set("updates", updates);
   if (key === "a" && value === 3) {
-    unsubscribe("a");
-    write("unsubscribed", true);
+    unsink("a");
+    set("unsubscribed", true);
   }
 };
-subscribe("a");
-subscribe("barrier");
-write("ready", true);
+sink("a");
+sink("barrier");
+set("ready", true);
 ${GUEST_EPILOG}`;
     const iframe = await render(body, context);
     await waitForContextValue(
@@ -123,7 +121,13 @@ ${GUEST_EPILOG}`;
       context,
       iframe,
       "updates",
-      (value) => deepEquals(value, [["a", 2], ["a", 3]]),
+      (value) =>
+        deepEquals(value, [
+          ["a", undefined],
+          ["a", 1],
+          ["a", 2],
+          ["a", 3],
+        ]),
     );
     await waitForContextValue(
       context,
@@ -145,7 +149,12 @@ ${GUEST_EPILOG}`;
       "barrier-seen",
       (value) => value === 1,
     );
-    assertDeepEquals(context.get(iframe, "updates"), [["a", 2], ["a", 3]]);
+    assertDeepEquals(context.get(iframe, "updates"), [
+      ["a", undefined],
+      ["a", 1],
+      ["a", 2],
+      ["a", 3],
+    ]);
   } finally {
     cleanupFixtures();
   }
@@ -158,16 +167,16 @@ Deno.test("handles multiple iframes", async () => {
     const context2 = new ContextShim({ b: 100 }, ["a"]);
 
     const body1 = `${GUEST_PROLOG}
-write("b", 1);
+set("b", 1);
 ${GUEST_EPILOG}`;
 
     const body2 = `${GUEST_PROLOG}
 onUpdate = (key, value) => {
   if (key === "b" && value === 100) {
-    write("a", 200); 
+    set("a", 200);
   }
 };
-read("b");
+pull("b");
 ${GUEST_EPILOG}`;
     const iframe1 = await render(body1, context1);
     const iframe2 = await render(body2, context2);
@@ -191,10 +200,10 @@ Deno.test("handles loading new documents", async () => {
     const context = new ContextShim({ a: 1 }, ["b", "c"]);
 
     const body1 = `${GUEST_PROLOG}
-write("b", 1);
+set("b", 1);
 ${GUEST_EPILOG}`;
     const body2 = `${GUEST_PROLOG}
-write("c", 1);
+set("c", 1);
 ${GUEST_EPILOG}`;
     const iframe = await render(body1, context);
     await waitForContextValue(context, iframe, "b", (value) => value === 1);
@@ -218,20 +227,20 @@ Deno.test("cancels subscriptions between documents", async () => {
     ]);
 
     const body1 = `${GUEST_PROLOG}
-subscribe("a");
-write("ready1", true);
+sink("a");
+set("ready1", true);
 ${GUEST_EPILOG}`;
     const body2 = `${GUEST_PROLOG}
 onUpdate = (key, value) => {
   if (key === "b") {
-    write("got-b-update", true);
+    set("got-b-update", true);
   }
   if (key === "a") {
-    write("got-a-update", true); 
+    set("got-a-update", true);
   }
 };
-subscribe("b");
-write("ready2", true);
+sink("b");
+set("ready2", true);
 ${GUEST_EPILOG}`;
     const iframe = await render(body1, context);
     await waitForContextValue(
@@ -286,7 +295,7 @@ parent.postMessage({ type: "error", data: {
   description: "raised without a port",
   source: "", lineno: 0, colno: 0, stacktrace: "",
 } }, "*");
-write("after", 1);
+set("after", 1);
 ${GUEST_EPILOG}`;
     const iframe = await render(body, context);
 
@@ -312,7 +321,7 @@ Deno.test("a reattached element loads its document into the frame it gets", asyn
   try {
     const context = new ContextShim({}, ["ran"]);
     const body = `${GUEST_PROLOG}
-write("ran", 1);
+set("ran", 1);
 ${GUEST_EPILOG}`;
     const iframe = await render(body, context);
     await waitForContextValue(context, iframe, "ran", (value) => value === 1);
@@ -341,10 +350,10 @@ Deno.test("same-task reparenting keeps the bridge host alive", async () => {
     const context = new ContextShim({}, ["ready", "seen", "value"]);
     const body = `${GUEST_PROLOG}
 onUpdate = (key, value) => {
-  if (key === "value") write("seen", value);
+  if (key === "value") set("seen", value);
 };
-subscribe("value");
-write("ready", true);
+sink("value");
+set("ready", true);
 ${GUEST_EPILOG}`;
     const iframe = await render(body, context);
     await waitForContextValue(
@@ -369,7 +378,7 @@ Deno.test("a second ready from the frame already in hand is refused", async () =
   try {
     const context = new ContextShim({}, ["ran"]);
     const body = `${GUEST_PROLOG}
-write("ran", 1);
+set("ran", 1);
 ${GUEST_EPILOG}`;
     const iframe = await render(body, context);
     await waitForContextValue(context, iframe, "ran", (value) => value === 1);
@@ -403,7 +412,7 @@ Deno.test("an element that gets a frame and has no source says nothing is loaded
   try {
     const context = new ContextShim({}, ["ran"]);
     const body = `${GUEST_PROLOG}
-write("ran", 1);
+set("ran", 1);
 ${GUEST_EPILOG}`;
     const iframe = await render(body, context);
     await waitForContextValue(context, iframe, "ran", (value) => value === 1);
@@ -430,8 +439,8 @@ Deno.test("a subscription is cancelled against the bridge that issued it", async
   try {
     const first = new ContextShim({ watched: 1 }, ["ready"]);
     const body = `${GUEST_PROLOG}
-subscribe("watched");
-write("ready", true);
+sink("watched");
+set("ready", true);
 ${GUEST_EPILOG}`;
     const iframe = await render(body, first);
     await waitForContextValue(
@@ -450,7 +459,7 @@ ${GUEST_EPILOG}`;
     iframe.bridge = second.bridge;
     // @ts-ignore This is a lit property.
     iframe.src = `${GUEST_PROLOG}
-write("second-ran", true);
+set("second-ran", true);
 ${GUEST_EPILOG}`;
 
     await waitForContextValue(
@@ -481,12 +490,12 @@ Deno.test("carries a value structured cloning would flatten", async () => {
     const body = `${GUEST_PROLOG}
 onUpdate = (key, value) => {
   if (key !== "payload") return;
-  write("bytes-seen", typeof value?.slice === "function"
+  set("bytes-seen", typeof value?.slice === "function"
     ? [...value.slice()]
     : "not a FabricBytes");
-  write("echo", value);
+  set("echo", value);
 };
-read("payload");
+pull("payload");
 ${GUEST_EPILOG}`;
     const iframe = await render(body, context);
 

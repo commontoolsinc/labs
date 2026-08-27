@@ -28,8 +28,8 @@ function withUpdater<
   T,
   Remote extends {
     getSnapshot(): ResourceSnapshot<T>;
-    read(): Promise<T>;
-    write(value: T): Promise<void>;
+    pull(): Promise<T>;
+    set(value: T): Promise<void>;
   },
 >(
   remote: Remote,
@@ -41,8 +41,8 @@ function withUpdater<
         const snapshot = remote.getSnapshot();
         const current = snapshot.status === "ready"
           ? snapshot.value
-          : await remote.read();
-        await remote.write(updater(current));
+          : await remote.pull();
+        await remote.set(updater(current));
       };
       const writing = tail ? tail.then(operation) : operation();
       tail = writing.catch(() => {});
@@ -62,13 +62,13 @@ describe("React bridge adapter", () => {
     let snapshot: ResourceSnapshot<Counter> = { status: "loading" };
     const remote = withUpdater({
       getSnapshot: () => snapshot,
-      subscribe: () => () => {},
-      read: () => {
-        reads.push("read");
+      subscribeSnapshot: () => () => {},
+      pull: () => {
+        reads.push("pull");
         snapshot = { status: "ready", value: { count: 2 } };
         return Promise.resolve({ count: 2 });
       },
-      write: (value: Counter) => {
+      set: (value: Counter) => {
         writes.push(value);
         return Promise.resolve();
       },
@@ -95,7 +95,7 @@ describe("React bridge adapter", () => {
     for (const effect of effects) effect();
     await counter.set((value) => ({ count: value.count + 1 }));
 
-    expect(reads).toEqual(["read"]);
+    expect(reads).toEqual(["pull"]);
     expect(writes).toEqual([{ count: 3 }]);
   });
 
@@ -110,9 +110,9 @@ describe("React bridge adapter", () => {
     };
     const remote = withUpdater({
       getSnapshot: () => snapshot,
-      subscribe: () => () => {},
-      read: () => Promise.resolve((snapshot as { value: Counter }).value),
-      write: async (value: Counter) => {
+      subscribeSnapshot: () => () => {},
+      pull: () => Promise.resolve((snapshot as { value: Counter }).value),
+      set: async (value: Counter) => {
         writes.push(value);
         if (writes.length === 1) {
           firstStarted.resolve();
@@ -159,9 +159,9 @@ describe("React bridge adapter", () => {
     };
     const remote = withUpdater({
       getSnapshot: () => snapshot,
-      subscribe: () => () => {},
-      read: () => Promise.resolve((snapshot as { value: Counter }).value),
-      write: async (value: Counter) => {
+      subscribeSnapshot: () => () => {},
+      pull: () => Promise.resolve((snapshot as { value: Counter }).value),
+      set: async (value: Counter) => {
         writes.push(value);
         if (writes.length === 1) {
           firstStarted.resolve();
@@ -210,9 +210,9 @@ describe("React bridge adapter", () => {
     };
     const remote = withUpdater({
       getSnapshot: () => snapshot,
-      subscribe: () => () => {},
-      read: () => Promise.resolve((snapshot as { value: Counter }).value),
-      write: async (value: Counter) => {
+      subscribeSnapshot: () => () => {},
+      pull: () => Promise.resolve((snapshot as { value: Counter }).value),
+      set: async (value: Counter) => {
         writes.push(value);
         if (writes.length === 1) {
           firstStarted.resolve();
@@ -262,9 +262,9 @@ describe("React bridge adapter", () => {
     };
     const remote = withUpdater({
       getSnapshot: () => snapshot,
-      subscribe: () => () => {},
-      read: () => Promise.resolve((snapshot as { value: Counter }).value),
-      write: async (value: Counter) => {
+      subscribeSnapshot: () => () => {},
+      pull: () => Promise.resolve((snapshot as { value: Counter }).value),
+      set: async (value: Counter) => {
         writes.push(value);
         if (writes.length === 1) {
           firstStarted.resolve();
@@ -329,7 +329,7 @@ describe("React bridge adapter", () => {
         calls.push("query");
         return Promise.resolve({ rows: [] });
       },
-      subscribeInvalidation: () => {
+      sink: () => {
         calls.push("subscribe");
         return () => {
           unsubscribed = true;
@@ -367,11 +367,11 @@ describe("React bridge adapter", () => {
     const databases = {
       alice: {
         query: () => Promise.resolve({ rows: [{ owner: "alice" }] }),
-        subscribeInvalidation: () => () => {},
+        sink: () => () => {},
       },
       bob: {
         query: () => Promise.resolve({ rows: [{ owner: "bob" }] }),
-        subscribeInvalidation: () => () => {},
+        sink: () => () => {},
       },
     };
     const client = {
@@ -463,7 +463,7 @@ describe("React bridge adapter", () => {
             ? aliceInitial.promise
             : aliceRetained.promise;
         },
-        subscribeInvalidation: (listener: () => void) => {
+        sink: (listener: () => void) => {
           retainedAliceRefresh = listener;
           return () => {};
         },
@@ -473,7 +473,7 @@ describe("React bridge adapter", () => {
           queries.push("bob");
           return bobResult.promise;
         },
-        subscribeInvalidation: () => () => {},
+        sink: () => () => {},
       },
     };
     const client = {

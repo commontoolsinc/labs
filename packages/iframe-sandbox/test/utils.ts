@@ -1,7 +1,11 @@
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { defer } from "@commonfabric/utils/defer";
 
-import type { BridgeResource, FabricBridge } from "../src/bridge.ts";
+import type {
+  BridgeCell,
+  BridgeResource,
+  FabricBridge,
+} from "../src/bridge.ts";
 import { CommonIframeSandboxElement } from "../src/common-iframe-sandbox.ts";
 
 type Callback = (key: string, value: FabricValue) => void;
@@ -45,17 +49,64 @@ export class ContextShim {
   private resource(key: string): BridgeResource {
     return {
       kind: "cell",
-      read: () => this.get({} as CommonIframeSandboxElement, key),
-      write: (value) => this.set({} as CommonIframeSandboxElement, key, value),
-      subscribe: (listener) => {
+      cell: this.cell(key),
+    };
+  }
+
+  private cell(key: string, path: Array<string | number> = []): BridgeCell {
+    const get = (): FabricValue | undefined => {
+      let value: unknown = this.get({} as CommonIframeSandboxElement, key);
+      for (const part of path) {
+        if (value === null || typeof value !== "object") return undefined;
+        value = (value as Record<string, unknown>)[String(part)];
+      }
+      return value as FabricValue | undefined;
+    };
+    return {
+      get,
+      pull: get,
+      set: (value) => {
+        if (path.length === 0) {
+          this.set({} as CommonIframeSandboxElement, key, value);
+          return;
+        }
+        const root = this.get({} as CommonIframeSandboxElement, key);
+        if (root === null || typeof root !== "object") {
+          throw new TypeError("Cannot descend through a non-object value.");
+        }
+        let parent = root as Record<string, FabricValue>;
+        for (const part of path.slice(0, -1)) {
+          const child = parent[String(part)];
+          if (child === null || typeof child !== "object") {
+            throw new TypeError("Cannot descend through a non-object value.");
+          }
+          parent = child as Record<string, FabricValue>;
+        }
+        parent[String(path.at(-1))] = value;
+        this.set({} as CommonIframeSandboxElement, key, root);
+      },
+      push: (...values) => {
+        const current = get();
+        if (!Array.isArray(current)) {
+          throw new TypeError("push() requires an array value.");
+        }
+        this.set(
+          {} as CommonIframeSandboxElement,
+          key,
+          [...current, ...values],
+        );
+      },
+      sink: (listener) => {
+        listener(get());
         const receipt = this.subscribe(
           {} as CommonIframeSandboxElement,
           key,
-          (_key, value) => listener(value),
+          () => listener(get()),
         );
         return () =>
           this.unsubscribe({} as CommonIframeSandboxElement, receipt);
       },
+      key: (part) => this.cell(key, [...path, part]),
     };
   }
   set(_element: CommonIframeSandboxElement, key: string, value: FabricValue) {
