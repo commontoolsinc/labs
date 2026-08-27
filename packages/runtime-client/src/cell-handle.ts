@@ -590,7 +590,7 @@ export class CellHandle<T = unknown> {
     return value;
   }
 
-  /** Demand lazy producers before fetching the current value. */
+  /** Demand lazy producers and their durable commits before fetching a value. */
   async pull(): Promise<Readonly<T> | undefined> {
     const writeGeneration = this.#writeGeneration;
     const updateGeneration = this.#updateGeneration;

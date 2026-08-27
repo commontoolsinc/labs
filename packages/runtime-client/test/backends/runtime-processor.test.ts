@@ -2033,14 +2033,15 @@ describe("runtime-processor", () => {
   });
 
   describe("RuntimeProcessor cell pull IPC", () => {
-    it("pulls scheduler producers before returning a cell value", async () => {
+    it("waits for producer commit durability before returning a cell value", async () => {
       const ref: CellRef = {
         id: "of:lazy-cell" as CellRef["id"],
         space: "did:key:test" as CellRef["space"],
         scope: "session",
         path: [],
       };
-      let ready = false;
+      const calls: string[] = [];
+      let durable = false;
       const processor = Object.assign(
         Object.create(
           RuntimeProcessor.prototype,
@@ -2049,11 +2050,18 @@ describe("runtime-processor", () => {
           runtime: {
             getCellFromLink: () => ({
               pull: () => {
-                ready = true;
-                return Promise.resolve({ ready: true });
+                calls.push("pull");
+                return Promise.resolve();
               },
-              get: () => ready ? { ready: true } : undefined,
+              get: () => durable ? { ready: true } : undefined,
             }),
+            scheduler: {
+              idleWithPendingCommits: () => {
+                calls.push("commits");
+                durable = true;
+                return Promise.resolve();
+              },
+            },
           },
         },
       ) as RuntimeProcessor;
@@ -2064,6 +2072,7 @@ describe("runtime-processor", () => {
           cell: ref,
         }),
       ).resolves.toEqual({ value: { ready: true } });
+      expect(calls).toEqual(["pull", "commits"]);
     });
   });
 
