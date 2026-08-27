@@ -63,9 +63,17 @@ export interface AcceptedContractBreak {
 
 export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
   {
-    // Topics no longer derives a prose reference graph. `crossrefs` published
-    // that graph, and there is no shape of the board that both keeps the
-    // published field and removes the feature behind it.
+    // ONE entry per pattern, and that is a requirement rather than tidiness:
+    // the gate keys accepted pairs into a Map, so a second entry naming a
+    // baseline this one also names REPLACES its path set rather than adding to
+    // it. Two breaks on one pattern therefore share an entry, and share its
+    // single `record`; the other is named in the reason.
+    //
+    // Carried here: the reference graph rebuilt on cell identity, and the
+    // board's demand narrowed to the eight members it reads — which narrows
+    // the published projection with it, opens the link and author `kind`
+    // domains a closed enum in provided data could never widen, and stops
+    // `addLink` requiring the two fields its handler already defaulted.
     pattern: "topics/main.tsx",
     baselines: [
       "20260729T022742Z-31DT95VXuyOj8JeU",
@@ -80,27 +88,10 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20260817T051200Z-NIE10ssgY89CXloq",
       "20260817T212730Z-3FUPLp4oeb7gwpch",
       "20260817T231646Z-3OsO1miQLNSxm34N",
+      "20260818T002831Z-Lk1mtrXcWtEV2FAK",
+      "20260818T020120Z-AfZn709Q7YVH7WlZ",
+      "20260819T172917Z-ocrU646RD4YKITBc",
     ],
-    // `argument.topics[]` is every change to `TopicPiece` seen from the board's
-    // list: each stored topic's defaults moved, which the proof cannot show is
-    // stable under insertion. The `crossrefs[]` fields are the old graph row's,
-    // which the pivot row replaces wholesale.
-    //
-    // The last defaults to move are `title`, `body` and `createdByName`, which
-    // gained one so the board's card list can be declared over the topic itself
-    // rather than over a card-shaped copy of it. A card's argument schema is
-    // what a piece holding older topics is updated against, so every field a
-    // card renders has to carry a default for that update to be accepted —
-    // `deno task pattern-vintage` refuses it otherwise, naming the field.
-    //
-    // `mention` moves for the opposite reason: its payload stopped being
-    // `unknown` and now names `title`. Naming it does not by itself refuse
-    // anything — an `asCell` payload is wrapped whole, without validating what
-    // is behind it — but it is what lets the verb tell a reference from a
-    // non-reference in one read of one field, and `mention` now rejects rather
-    // than storing an entry that resolves to no piece. A narrowed payload is a
-    // real tightening of what the verb accepts, which is the decision being
-    // recorded here rather than worked around.
     paths: [
       "argument.topics[]",
       "result.mentionable[].mention",
@@ -108,19 +99,30 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "result.crossrefs[].fid",
       "result.crossrefs[].commentCount",
       "result.index[].fid",
+      "argument.topics[].createdBy",
+      "result.index[].createdBy",
+      "result.mentionable[].addComment",
+      // The unsigned caller retires: `agentName` is required on every verb, and the display-name mirrors that path filled go with it.
+      "result.myName",
     ],
     reason:
-      "Topics' reference graph was removed and then rebuilt on cell identity. " +
-      "The board still publishes `crossrefs`, but as a `{ topic, mentionedBy }` " +
-      "pivot rather than the old summary-bearing graph row, so the old row's " +
-      "fields go. `index` is the full-board survey surface, and its rows ARE " +
-      "the topics: a row's own address is the topic's, so the copied `fid` " +
-      "field goes with the copy.",
-    record: "docs/history/topics-crossref-identity-break.md",
+      "Two accepted breaks on one pattern: the reference-graph rebuild on cell " +
+      "identity (docs/history/topics-crossref-identity-break.md), and the " +
+      "demand narrowing recorded below.",
+    record: "docs/history/topics-demand-narrowing-break.md",
   },
   {
-    // The same removal seen from a topic: its own `crossrefs` row, and the
-    // `boardCrossrefs` input the board wired in to feed it.
+    // ONE entry per pattern, and that is a requirement rather than tidiness:
+    // the gate keys accepted pairs into a Map, so a second entry naming a
+    // baseline this one also names REPLACES its path set rather than adding to
+    // it. Two breaks on one pattern therefore share an entry, and share its
+    // single `record`; the other is named in the reason.
+    //
+    // Carried here: the reference graph rebuilt on cell identity, and the
+    // board's demand narrowed to the eight members it reads — which narrows
+    // the published projection with it, opens the link and author `kind`
+    // domains a closed enum in provided data could never widen, and stops
+    // `addLink` requiring the two fields its handler already defaulted.
     pattern: "topics/topic.tsx",
     baselines: [
       "20260729T022742Z-6pmDbdEVBz84jJRa",
@@ -134,6 +136,9 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "20260814T233350Z-ignmxWvAy2vygaDl",
       "20260817T212731Z-S2Y3ePoq7Zj_7fLa",
       "20260817T231646Z-bBfPByCuBScHp-Ou",
+      "20260818T002831Z-ULPZkKYbQEmzLpDl",
+      "20260818T020121Z-Y5Q-u4fiTKGUrP5Y",
+      "20260819T172917Z-K_8fL8hZtM4xYV7V",
     ],
     paths: [
       "argument.boardCrossrefs",
@@ -141,18 +146,17 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "argument.mentionable[]",
       "result.mention",
       "result.crossrefs",
+      "argument.bodyUpdatedBy.kind",
+      "result.addLink.kind",
+      // The unsigned caller retires: a comment always carries a structured author now, so the mirror beside it goes.
+      "argument.comments[]",
+      "result.createdByName",
     ],
     reason:
-      "Topics' reference graph was removed and then rebuilt on cell identity. " +
-      "A topic no longer derives an edge row and no longer publishes " +
-      "`crossrefs`; it publishes `referencedBy`, read out of the board's pivot, " +
-      "whose row shape the `boardCrossrefs` input changed to match. " +
-      "`mentionable[]` moves because `TopicPiece` gained the reference fields, " +
-      "and `mention` because its payload now names `title` rather than being " +
-      "`unknown` — the one field that lets the verb read a payload and tell a " +
-      "reference from a bare string, which it now rejects rather than storing " +
-      "inert.",
-    record: "docs/history/topics-crossref-identity-break.md",
+      "Two accepted breaks on one pattern: the reference-graph rebuild on cell " +
+      "identity (docs/history/topics-crossref-identity-break.md), and the " +
+      "demand narrowing recorded below.",
+    record: "docs/history/topics-demand-narrowing-break.md",
   },
   {
     // The parking coordinator's admin roster declared a `requiredIntegrity`
