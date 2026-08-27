@@ -1433,15 +1433,21 @@ export class PiecesController<T = unknown> {
     await timePiecePhase("syncPattern.piece.sync", () => piece.sync());
 
     // When we subscribe to a doc, our subscription includes the doc's pattern
-    // pointer (`patternIdentity`), so read that.
-    let ref = getPatternIdentityRef(piece);
+    // pointer (`patternIdentity`), so read that. A KEYLESS piece carries no
+    // durable pointer (the never-durable contract; L3(a), RULED 2026-08-27)
+    // — in the session that set it up, the runner's session-side pointer
+    // answers instead, and `loadPatternByIdentity` serves the minted
+    // identity from the in-memory index.
+    let ref = getPatternIdentityRef(piece) ??
+      this.runtime.runner.sessionPatternPointerFor(piece);
     if (!ref) {
       // Under remote sync, metadata can transiently lag the result value even
       // though setup just wrote both. Wait for storage to settle and retry once
       // before treating the pattern metadata as missing.
       await timePiecePhase("syncPattern.retry.synced", () => this.synced());
       await timePiecePhase("syncPattern.retry.piece.sync", () => piece.sync());
-      ref = getPatternIdentityRef(piece);
+      ref = getPatternIdentityRef(piece) ??
+        this.runtime.runner.sessionPatternPointerFor(piece);
     }
     if (!ref) throw new Error("piece missing pattern identity");
 

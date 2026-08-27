@@ -1536,6 +1536,20 @@ export class Runner {
     `${MemorySpace}/${ScopeKey}/${URI}`,
     { identity: string; symbol: string }
   >(RESULT_SHORTCUT_LIMIT);
+
+  /**
+   * The SESSION-side pattern pointer for a keyless piece this runner set up,
+   * or undefined. The piece layer's read-through: a keyless piece carries no
+   * durable `patternIdentity` (the never-durable contract), so consumers
+   * that used to read the durable meta (`PiecesController.syncPattern`)
+   * consult this before concluding the piece has no pattern. Session-scoped
+   * by construction — a fresh runtime correctly finds nothing.
+   */
+  sessionPatternPointerFor(
+    resultCell: Cell<unknown>,
+  ): { identity: string; symbol: string } | undefined {
+    return this.sessionPatternPointers.get(this.getDocKey(resultCell));
+  }
   // SESSION-side pattern-swap channel for RUNNING pieces, the third stamp
   // stand-in: a re-derived child (a lift returning a pattern) used to reach
   // its running piece's swap machinery THROUGH the durable stamp — setup
