@@ -262,7 +262,9 @@ Deno.test("getNameForIno returns the registered child name", () => {
   assertEquals(tree.getNameForIno(ino), undefined);
 });
 
-// --- transplantSubtree ---------------------------------------------------
+//
+// transplantSubtree
+//
 
 type BuildSpec =
   | { file: string; jsonType?: JsonType }
@@ -564,7 +566,9 @@ Deno.test("transplant removes a vanished child's CFC directory entry", () => {
   assertEquals(entries?.map((entry) => entry.name), ["keep"]);
 });
 
-// --- mtime tracking ------------------------------------------------------
+//
+// mtime tracking
+//
 
 Deno.test("a node records the clock time it was created at", () => {
   let clock = 1_000;
@@ -692,7 +696,9 @@ Deno.test("clear on a missing inode is a no-op", () => {
   assertEquals(tree.inodes.size, before);
 });
 
-// --- generated files (.status) -------------------------------------------
+//
+// generated files (.status)
+//
 
 Deno.test("addGeneratedFile publishes an initial render", () => {
   const tree = new FsTree();

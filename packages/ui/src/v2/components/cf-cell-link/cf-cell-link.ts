@@ -101,7 +101,10 @@ export class CFCellLink extends BaseElement {
   private _subscribedCellKey: string | undefined = undefined;
   private _resolveCellGeneration = 0;
 
+  //
   // Drag state
+  //
+
   private _isDragging = false;
   private _isTracking = false;
   private _dragStartX = 0;

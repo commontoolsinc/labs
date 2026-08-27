@@ -17,7 +17,9 @@
  * filtering (protocol §3).
  */
 
-// ---------- identities and keys ----------
+//
+// identities and keys
+//
 
 export type UserId = string;
 export type SessionId = string;
@@ -85,7 +87,9 @@ export const isCanonicalKey = (value: string): boolean => {
 /** The scope kinds a handler write can declare (scopes.md §2). */
 export type ScopeKind = "space" | "user" | "session";
 
-// ---------- the program under test ----------
+//
+// the program under test
+//
 
 /** Handler behavior attached to a stream — the model's "pattern". */
 export interface HandlerSpec {
@@ -105,7 +109,9 @@ export interface DerivationSpec {
   out: DocId;
 }
 
-// ---------- world state ----------
+//
+// world state
+//
 
 export interface StreamEntry {
   seq: number;
@@ -321,7 +327,9 @@ export interface World {
   skippedIdempotent: number;
 }
 
-// ---------- construction ----------
+//
+// construction
+//
 
 export interface SpaceSpec {
   streams: Record<DocId, HandlerSpec>;
@@ -400,7 +408,9 @@ export function makeWorld(opts: {
 
 const clone = <T>(x: T): T => structuredClone(x);
 
-// ---------- admission ----------
+//
+// admission
+//
 
 /** protocol §2 row 2: stamp firedAt from the authenticated envelope. */
 function admitClientAppend(
@@ -478,7 +488,9 @@ export function admitDerived(
     commit.envelope.startsWith("service:");
 }
 
-// ---------- the wave (serving-loop §3, §3d; events §2, §4) ----------
+//
+// the wave (serving-loop §3, §3d; events §2, §4)
+//
 
 /** Stage one event's handler run into a contribution — no world
  * mutation beyond id minting; everything applies at COMMIT. */
@@ -886,7 +898,9 @@ function runWave(w: World, space: SpaceId): void {
   commitWave(w, space);
 }
 
-// ---------- push filtering (protocol §3) ----------
+//
+// push filtering (protocol §3)
+//
 
 export function applicableSet(c: ClientSession): string[] {
   return [SPACE_KEY, userKey(c.user), sessionKey(c.user, c.session)];
@@ -901,7 +915,9 @@ export function pushRowsFor(
   return commit.writes.filter((r) => ok.has(r.scopeKey));
 }
 
-// ---------- transitions ----------
+//
+// transitions
+//
 
 export type Step =
   | { kind: "fire"; session: SessionId; space: SpaceId; stream: DocId }
@@ -1114,7 +1130,9 @@ export function apply(w0: World, step: Step): World {
   return w;
 }
 
-// ---------- schedule exploration ----------
+//
+// schedule exploration
+//
 
 function stableStringify(x: unknown): string {
   return JSON.stringify(x, function (this: unknown, _k, v) {
@@ -1167,7 +1185,8 @@ export function explore(
   return { finals, all, statesSeen: visited.size };
 }
 
-// ---------- narrowing / fan-out sub-model (Phase 2 pre-gate, OW3) ----------
+//
+// narrowing / fan-out sub-model (Phase 2 pre-gate, OW3)
 //
 // The three bound rules ONE extension covers (verification-coverage
 // OW3): instance sets are CLEAN PRODUCTS over principals, never ragged
@@ -1180,6 +1199,7 @@ export function explore(
 // downstream of one shared space-scoped input, exhaustively driven by
 // the property suite's own DFS. Uses the SAME key constructors as the
 // main model (bridge-checked against the wire vocabulary).
+//
 
 export interface FanoutState {
   /** The principals that exist (each may demand its own instance). */

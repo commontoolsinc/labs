@@ -3,9 +3,9 @@
 // Deno Memory Profiler — V8 Inspector CDP client
 // Zero dependencies. Single file. JSON output to stdout, status to stderr.
 
-// ---------------------------------------------------------------------------
+//
 // Arg parsing
-// ---------------------------------------------------------------------------
+//
 
 interface GlobalOpts {
   host: string;
@@ -34,9 +34,9 @@ function parseGlobalOpts(args: string[]): { opts: GlobalOpts; rest: string[] } {
   return { opts: { host, port }, rest };
 }
 
-// ---------------------------------------------------------------------------
+//
 // CDP Client
-// ---------------------------------------------------------------------------
+//
 
 type CDPEventHandler = (params: Record<string, unknown>) => void;
 
@@ -130,9 +130,9 @@ class CDPClient {
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // Commands
-// ---------------------------------------------------------------------------
+//
 
 async function cmdUsage(client: CDPClient, args: string[]) {
   const doGC = args.includes("--gc");
@@ -281,9 +281,9 @@ async function cmdSample(client: CDPClient, args: string[]) {
   );
 }
 
-// ---------------------------------------------------------------------------
+//
 // Snapshot helpers
-// ---------------------------------------------------------------------------
+//
 
 interface HeapSnapshotData {
   snapshot: {
@@ -446,9 +446,9 @@ async function cmdSnapshot(client: CDPClient, _args: string[]) {
   );
 }
 
-// ---------------------------------------------------------------------------
+//
 // Diff
-// ---------------------------------------------------------------------------
+//
 
 async function cmdDiff(client: CDPClient, args: string[], port: number) {
   const subcommand = args[0];
@@ -590,9 +590,9 @@ async function cmdDiff(client: CDPClient, args: string[], port: number) {
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // Main
-// ---------------------------------------------------------------------------
+//
 
 async function main() {
   const rawArgs = Deno.args;

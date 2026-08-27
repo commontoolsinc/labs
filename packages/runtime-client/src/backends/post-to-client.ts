@@ -33,27 +33,28 @@ const MAX_UNDELIVERABLE_RENDER = 512;
  * does not.
  */
 export function postToClient(message: IPCRemotePost): boolean {
-  let encoded;
-  let delivered = true;
-
   try {
-    encoded = realmFromFabricValue(message);
+    // `self` is read at call time rather than captured at module load, so
+    // that a test driving this without a real worker can substitute its own.
+    self.postMessage(realmFromFabricValue(message));
+    return true;
   } catch (error) {
-    // Defense in depth, and the mirror of the two decodes: a value can pass
-    // every `FabricValue` check and still have no encoding -- an object forged
-    // onto a `FabricPrimitive`'s prototype is one -- and this is the only
-    // place a worker speaks. A throw here reaches whatever called it, which
-    // for a console notification is a synchronous `EventTarget` listener,
-    // where it becomes an uncaught error and takes the process down.
-    encoded = realmFromFabricValue(undeliverableMessageFrom(message, error));
-    delivered = false;
+    // Defense in depth, and the mirror of the two decodes. Both steps above
+    // can refuse: a value can pass every `FabricValue` check and still have
+    // no encoding -- an object forged onto a `FabricPrimitive`'s prototype is
+    // one -- and the post can fail for reasons no encoding anticipates. One
+    // guard covers both because the answer is the same either way.
+    //
+    // This is the only place a worker speaks, and the notification paths
+    // reach it from a `queueMicrotask` callback, outside any caller's `try`,
+    // where a throw is an uncaught error rather than something that becomes
+    // an error reply. Losing one message loudly beats taking the worker's
+    // dispatch with it.
+    self.postMessage(
+      realmFromFabricValue(undeliverableMessageFrom(message, error)),
+    );
+    return false;
   }
-
-  // Read off `self` at call time rather than captured at module load, so that
-  // a test driving this without a real worker can substitute its own.
-  self.postMessage(encoded);
-
-  return delivered;
 }
 
 /**

@@ -1750,9 +1750,9 @@ export async function writeCoverageResolved(
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // Main
-// ---------------------------------------------------------------------------
+//
 
 export async function main() {
   const runId = Deno.env.get("GITHUB_RUN_ID");

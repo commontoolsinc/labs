@@ -122,7 +122,9 @@ export function extFor(lang: string, ctx: Context, body = ""): string {
   return "tsx";
 }
 
-// --- vocabulary ------------------------------------------------------------
+//
+// vocabulary
+//
 
 interface Vocabulary {
   frameworkValues: string[];
@@ -154,7 +156,9 @@ function arrayReceivers(body: string): Set<string> {
   return out;
 }
 
-// --- block extraction ------------------------------------------------------
+//
+// block extraction
+//
 
 export interface Block {
   file: string; // absolute path
@@ -192,7 +196,9 @@ export function extractBlocks(file: string, text: string): Block[] {
   return out;
 }
 
-// --- context detection -----------------------------------------------------
+//
+// context detection
+//
 
 export function detectContext(body: string): { ctx: Context; body: string } {
   const lines = body.split("\n");
@@ -209,7 +215,9 @@ export function detectContext(body: string): { ctx: Context; body: string } {
   return { ctx: "standalone", body };
 }
 
-// --- source transform ------------------------------------------------------
+//
+// source transform
+//
 
 const DEFINED =
   /^\s*(?:export\s+)?(?:declare\s+)?(?:const|let|var|function|class|interface|type|enum)\s+([A-Za-z_$][\w$]*)/gm;
@@ -415,7 +423,9 @@ export function render(ctx: Context, rawBody: string, docDir: string): string {
   }
 }
 
-// --- runner ----------------------------------------------------------------
+//
+// runner
+//
 
 const ANSI = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, "g");
 const PARSE_ABORT =

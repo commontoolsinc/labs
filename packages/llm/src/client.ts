@@ -80,9 +80,9 @@ export const setLLMUrl = (toolshedUrl: string) => {
   llmApiUrl = new URL("/api/ai/llm", toolshedUrl).toString();
 };
 
-// ============================================================================
+//
 // Mock Mode for Testing
-// ============================================================================
+//
 
 type MockResponseMatcher = (request: LLMRequest) => boolean;
 type MockObjectResponseMatcher = (request: LLMGenerateObjectRequest) => boolean;
@@ -272,9 +272,9 @@ export function addMockObjectResponse(
   mockCatalog.addObjectResponse(matcher, response);
 }
 
-// ============================================================================
+//
 // Conversation Fixtures for Testing
-// ============================================================================
+//
 
 /**
  * Optional assertions to validate the request when a fixture entry is matched.

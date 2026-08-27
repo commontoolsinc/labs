@@ -238,7 +238,7 @@ export function classifyDocument(doc: EntityDocument): Classification {
   const lineage: Lineage = {};
   if (owned) lineage.owner = linkId(doc.result);
 
-  // --- Pieces -------------------------------------------------------------
+  // Pieces
   // Modern: the durable piece → pattern pointer is `patternIdentity`.
   if (isObjectNotArray(doc.patternIdentity)) {
     const pi = doc.patternIdentity as { identity?: unknown; symbol?: unknown };
@@ -296,7 +296,7 @@ export function classifyDocument(doc: EntityDocument): Classification {
     };
   }
 
-  // --- Cell sub-kinds by value shape -------------------------------------
+  // Cell sub-kinds by value shape
   if (isModuleValue(value)) {
     return {
       kind: "module",
@@ -332,7 +332,7 @@ export function classifyDocument(doc: EntityDocument): Classification {
     };
   }
 
-  // --- Plain cells -------------------------------------------------------
+  // Plain cells
   if (owned) {
     const label = value === undefined ? "(lineage)" : summarize(value);
     return {

@@ -2373,7 +2373,7 @@ export const serverSeq = (engine: Engine): number => {
   return (engine.statements.selectServerSeq.get() as { seq: number }).seq;
 };
 
-// ---------------------------------------------------------------------------
+//
 // Event-append admission (server-execution v2 Phase 3, D-v2-1;
 // events.md §1, §4; protocol.md §2's event-append rows). ONE stamping
 // site with three identity sources — the authenticated envelope for plain
@@ -2381,7 +2381,7 @@ export const serverSeq = (engine: Engine): number => {
 // (LT1) the already-written inherited actor for derived wave carriage,
 // where producer and admitter are one trust environment and only the
 // entry's stream `seq` needs stamping.
-// ---------------------------------------------------------------------------
+//
 
 /** Where one declared appended entry sits inside the commit's operations,
  * plus the `firedAt` admission resolved for it. The stamp step clones the

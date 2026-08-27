@@ -1738,7 +1738,7 @@ Deno.test("acl default: absent acl option behaves like off", async () => {
   }
 });
 
-// ---------------------------------------------------------------------------
+//
 // OW31 (WRITE ruled 2026-08-18, READ ruled 2026-08-19): the delegated READ
 // binding. A session opened `actingAs: "space-owner"` by a DELEGATING-class
 // principal has its READ-class decisions resolved as the space's ACL OWNER
@@ -1746,6 +1746,7 @@ Deno.test("acl default: absent acl option behaves like off", async () => {
 // WRITE/OWNER requirements keep resolving against the ENVELOPE, so the
 // binding grants no write path; a delegating principal is NOT a service
 // principal and cannot initialize a genesis.
+//
 
 Deno.test("OW31 acl enforce: a delegating principal acting as space-owner READS an owner-only space; its writes and ACL-doc writes stay refused", async () => {
   const server = createAclServer("memory://acl-ow31-binding", {

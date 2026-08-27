@@ -281,7 +281,10 @@ function copyBtn(text, label){ return el("button",{class:"copy",title:"copy "+te
   onclick:e=>{e.stopPropagation(); navigator.clipboard?.writeText(text); flash("copied "+(label||"id"));}}, label||"copy"); }
 function kindChip(kind){ return el("span",{class:"kind "+kind,style:"background:"+(KC[kind]||"#999"),text:kind}); }
 
-// ---- live shell link --------------------------------------------------
+//
+// live shell link
+//
+
 let LIVE = localStorage.getItem("si-live") || B.liveBase || "";
 function liveUrl(id){ if(!LIVE) return null;
   // The shell navigates by the bare id form (fid1:…); the stored "of:" prefix
@@ -291,7 +294,10 @@ function liveAnchor(id){ const u = liveUrl(id); return u
   ? el("a",{href:u,target:"_blank",rel:"noopener",text:"open in app ↗",title:u})
   : el("span",{class:"muted",text:"(set app URL ↗ to enable live links)"}); }
 
-// ---- selection + history ----------------------------------------------
+//
+// selection + history
+//
+
 let cur = null; const hist = [];
 function select(id, push=true){
   if(!byId.has(id)) return;
@@ -304,7 +310,10 @@ function select(id, push=true){
 }
 function back(){ const id = hist.pop(); if(id){ cur=null; select(id,false); } }
 
-// ---- value renderer (links become clickable chips) --------------------
+//
+// value renderer (links become clickable chips)
+//
+
 function valueDom(v, depth=0){
   if(v===null) return el("span",{class:"muted",text:"null"});
   if(typeof v!=="object") return el("span",{text: typeof v==="string" ? JSON.stringify(v) : String(v)});
@@ -349,7 +358,10 @@ function linkChip(ref){
   return c;
 }
 
-// ---- detail pane ------------------------------------------------------
+//
+// detail pane
+//
+
 function section(title, openByDefault, bodyNodes){
   const d = el("details",{class:"sec"}); if(openByDefault) d.setAttribute("open","");
   d.append(el("summary",{text:title}));
@@ -494,7 +506,10 @@ function renderDetail(id){
 function fmtSession(s){ try{ s=decodeURIComponent(s);}catch{} const m=s.match(/^session:(did:key:)?([^:]+):([0-9a-f-]+)/i);
   if(m) return (m[2].length>12?m[2].slice(0,6)+"…"+m[2].slice(-4):m[2])+"/"+m[3].slice(0,6); return s.slice(0,18); }
 
-// ---- tree view --------------------------------------------------------
+//
+// tree view
+//
+
 function treeRow(d, childInfo){
   const ov = overlayById.get(d.id);
   const cf = conflictById.get(d.id);
@@ -552,7 +567,10 @@ function renderTree(){
   host.append(ul);
 }
 
-// ---- graph view -------------------------------------------------------
+//
+// graph view
+//
+
 function neighborhood(rootId, depth){
   const adj=new Map();
   for(const e of B.graph.edges){ (adj.get(e.from)??adj.set(e.from,[]).get(e.from)).push(e.to);
@@ -595,7 +613,10 @@ function renderGraph(){
   if(sel.value) layoutGraph(sel.value);
 }
 
-// ---- timeline ---------------------------------------------------------
+//
+// timeline
+//
+
 function renderTimeline(){
   const t=B.timeline; const host=$("#tl"); host.innerHTML="";
   if(!t.length){host.append(el("p",{class:"muted",text:"(no commits)"}));return;}
@@ -615,7 +636,10 @@ function renderTimeline(){
     el("th",{text:"touched"}),el("th",{text:"total"}),el("th",{text:"who"}),el("th",{text:"when"})])),tb]));
 }
 
-// ---- wiring -----------------------------------------------------------
+//
+// wiring
+//
+
 for(const b of $$("nav button")) b.onclick=()=>{
   $$("nav button").forEach(x=>x.classList.toggle("active",x===b));
   $$(".tabwrap").forEach(s=>s.classList.toggle("active",s.id===b.dataset.tab));

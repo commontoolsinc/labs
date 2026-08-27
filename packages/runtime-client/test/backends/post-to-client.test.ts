@@ -122,8 +122,11 @@ describe("post-to-client", () => {
       const { restore } = capturing();
 
       try {
-        expect(() => postToClient({ type: "x", args: [forged()] } as never))
-          .not.toThrow();
+        let delivered: boolean | undefined;
+        expect(() => {
+          delivered = postToClient({ type: "x", args: [forged()] } as never);
+        }).not.toThrow();
+        expect(delivered).toBe(false);
       } finally {
         restore();
       }

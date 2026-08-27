@@ -6,9 +6,9 @@
  *   - post-coverage-comment.ts (posts the gate's coverage comment)
  */
 
-// ---------------------------------------------------------------------------
+//
 // Config (from environment)
-// ---------------------------------------------------------------------------
+//
 
 export const REPO = Deno.env.get("GITHUB_REPOSITORY") ?? "commontoolsinc/labs";
 
@@ -101,9 +101,9 @@ export const COVERAGE_LOCAL_CHECK_COMMAND = [
   '  --profile-dir="$(pwd)/coverage/raw/local" --root="$(pwd)"',
 ].join("\n");
 
-// ---------------------------------------------------------------------------
+//
 // Types
-// ---------------------------------------------------------------------------
+//
 
 export interface WorkflowRun {
   id: number;
@@ -251,9 +251,9 @@ export interface BaselineOverrides {
   coverageBaselineReset: boolean;
 }
 
-// ---------------------------------------------------------------------------
+//
 // GitHub API helpers
-// ---------------------------------------------------------------------------
+//
 
 function apiHeaders(): Record<string, string> {
   return {
@@ -389,9 +389,9 @@ export async function githubPatch<T>(
   return resp.json();
 }
 
-// ---------------------------------------------------------------------------
+//
 // Fetch artifacts
-// ---------------------------------------------------------------------------
+//
 
 export async function fetchArtifactsForRun(
   runId: number,
@@ -682,9 +682,9 @@ export async function downloadAndParseCoverageBaseline(
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // Compile cache state
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Parse the JSON contents of cache-state artifact files into records.
@@ -756,9 +756,9 @@ export function aggregateCacheStates(
   return states;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Formatting
-// ---------------------------------------------------------------------------
+//
 
 export function isCoverageDebtMetric(name: string): boolean {
   return name.startsWith(COVERAGE_METRIC_PREFIX);
@@ -1427,9 +1427,9 @@ export function buildCoverageResolvedComment(
   return out.join("\n");
 }
 
-// ---------------------------------------------------------------------------
+//
 // Event helpers
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Reads and parses the GHA event. Returns `undefined` if it can't be done.
@@ -1451,9 +1451,9 @@ export async function readAndParseEvent(
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // PR helpers
-// ---------------------------------------------------------------------------
+//
 
 /** Fetch the full body of a PR by number. */
 export async function fetchPRBody(prNumber: number): Promise<string> {
@@ -1524,9 +1524,9 @@ export async function fetchCurrentPRBody(
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // Coverage override parsing
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Each `ACCEPT_COVERAGE_DEBT:` marker that starts a line, and the rest of that

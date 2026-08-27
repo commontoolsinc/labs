@@ -154,6 +154,19 @@ function setWorkerConsoleBridge(enabled: boolean): void {
  */
 const MAX_INVALID_REQUEST_RENDER = 512;
 
+/**
+ * Posts one reply and records it in the ledger by what actually went. An
+ * encoding failure substitutes an error reply, and counting that as a
+ * response would say the request succeeded.
+ */
+function postReply(payload: IPCRemoteResponse, type: RequestType): void {
+  const delivered = postToClient(payload);
+  ipcLogger.debug(
+    `${delivered ? "responded" : "responded-error"}/${type}`,
+    () => [],
+  );
+}
+
 self.addEventListener("message", async (event: MessageEvent) => {
   // Decoded whole, so what arrives is what was sent rather than whatever
   // structured cloning preserved of it. The encoding end is
@@ -200,7 +213,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
   try {
     if (!isIPCClientMessage(message)) {
       // Rendered by `value-debug` rather than `JSON.stringify`, which is
-      // wrong for exactly what the decode above now admits: it throws on a
+      // wrong for exactly what the decode above admits: it throws on a
       // `bigint` anywhere in the tree -- replacing this report with one that
       // names nothing -- and renders a `FabricPrimitive` as `{}`.
       throw new Error(
@@ -234,11 +247,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
         request.data,
       );
       worker = await workerInitialization;
-      // Count the reply only once it is actually posted: if the post throws,
-      // the catch below records a `responded-error/*` instead, so the ledger
-      // never double-counts one request as both a success and an error.
-      postToClient({ msgId: message.msgId });
-      ipcLogger.debug(`responded/${request.type}`, () => []);
+      postReply({ msgId: message.msgId }, request.type);
       return;
     }
 
@@ -247,8 +256,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
     // of runtime initialization, so it is answered before the init check.
     if (request.type === RequestType.SetForwardWorkerConsole) {
       setWorkerConsoleBridge(request.enabled);
-      postToClient({ msgId });
-      ipcLogger.debug(`responded/${request.type}`, () => []);
+      postReply({ msgId }, request.type);
       return;
     }
 
@@ -259,8 +267,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
       // After disposal, silently ack any late-arriving requests.
       // Components may still be unsubscribing or finishing in-flight
       // operations during teardown — no point erroring on these.
-      postToClient({ msgId });
-      ipcLogger.debug(`responded/${request.type}`, () => []);
+      postReply({ msgId }, request.type);
       return;
     }
 
@@ -276,14 +283,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
     const payload: IPCRemoteResponse = response !== undefined
       ? { msgId, data: response }
       : { msgId };
-    // Counted by what went, not by what was asked for: an encoding failure
-    // substitutes an error reply, and recording that as a response would say
-    // the request succeeded.
-    const delivered = postToClient(payload);
-    ipcLogger.debug(
-      `${delivered ? "responded" : "responded-error"}/${request.type}`,
-      () => [],
-    );
+    postReply(payload, request.type);
   } catch (error) {
     console.error("[RuntimeWorker] Error:", error);
     const type = isIPCClientMessage(message) ? message.data.type : "invalid";
