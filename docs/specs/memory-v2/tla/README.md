@@ -164,6 +164,45 @@ or missed contributor directly.
 - **No branches, scopes, preconditions, or schema sync.** Orthogonal to the
   pending-stack machinery under study.
 
+## Model: session delivery across a reconnect
+
+`SessionDelivery.tla` is a second, deliberately small model of the delivery
+side that `PendingStacks.tla` leaves out of scope: one session's watch union,
+the server's per-session delivery memory (`session.entities`), the client's
+replica, and the diff base a reconnect's frame is computed against
+(`04-protocol.md` §4.1.2, §4.3.5, §4.6). Pushes can be LOST by the client (the
+OW61 absorb-defect class, bounded by `MaxLoss`), the replica can be WIPED under
+a live session (`SpaceReplica.reset()` on route replacement, `AllowReset`), and
+the session can EXPIRE while disconnected (a re-establishing reconnect instead
+of a resume). `Mode` selects the diff base: `memory` is the server's own memory
+on resume and nothing on re-establishment (the design before client-declared
+holdings); `holdings` is the client's declaration on both paths.
+
+Checked with TLC 2.19; every config finishes in seconds:
+
+| Config | Mode | MaxLoss | AllowReset | Result |
+| --- | --- | --- | --- | --- |
+| `SessionDelivery_Memory.cfg` | `memory` | 1 | yes | **ReconnectConverges violated** at depth 4 — a push the server records as delivered and the client loses, a disconnect, a resume: the diff against the server's memory elides the lost document, and the replica stays behind. This is the schema-doc quarantine residual (verification-coverage.md OW61) as a machine-found trace; kept as the regression witness. |
+| `SessionDelivery_MemoryFull.cfg` | `memory` | 0 | no | **NoRedundantDelivery violated** — with a perfect client the old design converges (`ReconnectConverges` holds at 202 distinct states when checked alone), but a re-established session is delivered in full: the whole union again, held or not. |
+| `SessionDelivery_Holdings.cfg` | `holdings` | 1 | yes | **All invariants hold** (684 distinct states, exhaustive at `MaxWrites = 3`): every reconnect — resumed or re-established, after any loss or wipe — brings the replica to the union's current state and re-delivers nothing it holds. |
+
+`ReconnectConverges` is INV-14 of `09-invariants.md`; `NoRedundantDelivery`
+is its efficiency companion, stated as an invariant so the full re-download
+the old design performed on a lapsed session is a checked witness rather than
+an anecdote.
+
+**Scope of the certification.** The client is honest — its declaration IS its
+replica — so a client claiming documents it does not hold is outside the
+model, in the same trust class as a client fabricating reads. Catch-up frames
+are absorbed: the pre-watch loss they were once subject to is fixed and pinned
+separately (#6292, `precedingSyncs`), and the residual loss class the model
+exercises is the steady-state push. Commit replay (INV-11) remains outside
+both models. The wire's parse of `holdings` and the replica's construction of
+its declaration are checked by unit tests
+(`packages/memory/test/v2-session-holdings.test.ts`,
+`v2-client-holdings.test.ts`,
+`packages/runner/test/memory-v2-reconnect-holdings.test.ts`), not by TLC.
+
 ## Changing the model
 
 Per the change discipline in `09-invariants.md`: if a change introduces a new

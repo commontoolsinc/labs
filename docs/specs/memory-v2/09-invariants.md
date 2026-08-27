@@ -43,6 +43,10 @@ Checkers referenced below:
   dependency-recording and staleness-basis variant, and — in its
   delayed-verdict-delivery mode (the `PendingStacks_Channel*.cfg` configs) —
   INV-6 over the decided-but-not-yet-processed window.
+- the **delivery model**: `docs/specs/memory-v2/tla/SessionDelivery.tla`,
+  which model-checks INV-14 over one session's watch delivery across lost
+  pushes, a wiped replica, and both reconnect paths (resumed and
+  re-established), for each diff-base design (`SessionDelivery_*.cfg`).
 
 ## The invariants
 
@@ -485,6 +489,47 @@ or write a new space", "the space identity initializes a private space",
 "service DIDs have implicit OWNER and do not claim spaces", "acl observe:
 fresh-space genesis remains a hard invariant", "direct writes cannot create or
 mutate ACL state", "a retracted ACL fails closed instead of becoming public".
+
+### INV-14 — Reconnect convergence
+
+> A reconnect brings a session's replica to the current state of its watch
+> union: after the reconnect's frame, every document the union covers is
+> held at its current seq (a tombstone as a tombstone, an uncovered document
+> removed), whatever the replica lost, was wiped of, or missed while away —
+> and the frame delivers nothing the replica already holds at that seq.
+
+The diff base is the client's DECLARED holdings (`04-protocol.md` §4.1.2,
+§4.3.5), on a resumed session and a re-established one alike. The server's
+own memory of what it delivered is a claim about the client the client cannot
+contradict — a push it recorded and the client failed to absorb, or a replica
+wiped under a surviving session, left the memory asserting a document the
+replica did not hold, and the resumed catch-up elided it for the session's
+life. A declaration from the replica is the exact vocabulary the diff compares
+and cannot be wrong about the replica by construction.
+
+Layer: server (`holdingsToCacheEntries` and the resumed-open reconcile in
+`packages/memory/v2/server.ts`; `buildDiffSync` against the declaration in
+`watchSet`); client (`SpaceSession.holdingsProvider`, `reopen`/`restore` in
+`packages/memory/v2/client.ts`; `SpaceReplica.holdings()` in
+`packages/runner/src/storage/v2.ts`).
+
+Soundness direction: the server MAY deliver a document the replica already
+holds (a redundant frame is tolerated — the replica's monotonic seq guard makes
+an equal or older re-delivery a no-op) and MUST NOT elide a document the
+replica does not hold at its current seq. The client MAY under-declare (a
+document it holds but omits is re-delivered) and MUST NOT over-declare: a
+claim to hold a document at a seq it does not is the one input that makes the
+server elide a real gap, which is why the declaration is derived from the
+replica's confirmed state and never from anything pending or never-seen.
+
+Checked by: the delivery model (`SessionDelivery_Holdings.cfg` certifies it
+with loss and a wipe in play; `SessionDelivery_Memory.cfg` is the violation
+witness for the server-memory base — the schema-doc quarantine residual;
+`SessionDelivery_MemoryFull.cfg` witnesses the full re-download of a lapsed
+session under the old base); the wire-boundary tests
+(`packages/memory/test/v2-session-holdings.test.ts`,
+`v2-client-holdings.test.ts`) and the runner's end-to-end pin
+(`packages/runner/test/memory-v2-reconnect-holdings.test.ts`).
 
 ## Change discipline
 
