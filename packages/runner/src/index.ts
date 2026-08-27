@@ -25,6 +25,7 @@ export type {
   RuntimeOptions,
   SpaceCellContents,
 } from "./runtime.ts";
+export type { EventIntentOutcome } from "./speculation/overlay-destination.ts";
 export {
   ADOPT_SERVER_FLAGS_ENV,
   type BrowserWorkerPresetParams,
@@ -157,7 +158,6 @@ export * from "./pattern-manager.ts";
 export {
   createSpaceRootIfAbsent,
   DEFAULT_APP_PATTERN_SOURCE,
-  DEFAULT_ROOT_RUN_OPTIONS,
   ensureSpaceRootPattern,
   type EnsureSpaceRootResult,
   HOME_PATTERN_SOURCE,
@@ -172,12 +172,15 @@ export {
   resolveSystemPatternSource,
   SYSTEM_PATTERN_SOURCE_SCHEME,
   systemPatternSource,
-  systemPatternSourceForModuleName,
 } from "./pattern-source-scheme.ts";
 export {
-  type PatternUpdateOutcome,
-  PatternUpdater,
-} from "./pattern-updater.ts";
+  classifyPieceOriginString,
+  type PieceOriginKind as PieceOriginClassification,
+} from "./piece-origin-kind.ts";
+export {
+  type ReconcileOutcome,
+  SourceReconciler,
+} from "./source-reconciler.ts";
 export {
   applyPieceSourceTransition,
   asPatternIdentityRef,

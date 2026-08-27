@@ -149,7 +149,7 @@ describe("scheduler.dispose() and idle()", () => {
     // The end-to-end shape, and the reason the two cases above are worth
     // pinning: a test that quiesced the scheduler by hand could not then run
     // the real teardown, so it closed storage directly and skipped
-    // `patternUpdater.dispose()`, `settlePointerCommits()` and `popFrame()`.
+    // `sourceReconciler.dispose()`, `settlePointerCommits()` and `popFrame()`.
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = newRuntime(storageManager);
     subscribeIdleBlockingEffect(runtime);

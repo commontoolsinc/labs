@@ -17,7 +17,12 @@ import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { getLogger } from "@commonfabric/utils/logger";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
-import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
+import {
+  decodeMemoryBoundary,
+  eventAttentionEntryKey,
+  eventAttentionIndexKey,
+  SERVER_EXECUTION_ATTENTION_DOC_ID,
+} from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { siteTableCause, siteTableSchema } from "@commonfabric/home-schemas";
@@ -32,6 +37,7 @@ import {
 } from "@commonfabric/runner";
 import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { StorageManager as WorkerStorageManager } from "@commonfabric/runner/storage/cache";
 
 import { parseLink } from "@commonfabric/runner";
 import * as V2Storage from "@commonfabric/runner/storage/v2";
@@ -40,6 +46,7 @@ import {
   type CfcLabelView,
   ClientNotificationType,
   type GetPatternSourcesRequest,
+  NotificationType,
   RequestType,
 } from "@/protocol/mod.ts";
 import {
@@ -48,6 +55,7 @@ import {
   renderConfidentialityResolverFor,
   renderMembershipProviderFor,
   RuntimeProcessor,
+  subscribeEventAttentionNotifications,
   toConsoleDebugValue,
 } from "@/backends/runtime-processor.ts";
 import {
@@ -3479,6 +3487,337 @@ describe("runtime-processor", () => {
           type: RequestType.GetPatternCoverage,
         }),
       ).toEqual({ data: report });
+    });
+  });
+
+  describe("RuntimeProcessor event attention IPC", () => {
+    const space = "did:key:z6Mk-runtime-processor-attention" as never;
+    const sidecarId = "of:stream-events:runtime-processor-attention";
+    const attention = {
+      phase: "dispatch-load" as const,
+      failureClass: "session-revoked" as const,
+      code: "permanent-delivery-failure" as const,
+      firstFailureAt: 10,
+      lastFailureAt: 10,
+      accumulatedFailureMs: 0,
+      failureCount: 1,
+      recovery: "explicit-retry" as const,
+    };
+
+    it("forwards only complete terminal-attention outcomes", () => {
+      let subscriber: ((outcome: never) => void) | undefined;
+      const cancel = () => {};
+      const posted: unknown[] = [];
+      const returned = subscribeEventAttentionNotifications({
+        subscribeEventIntentOutcomes(callback: (outcome: never) => void) {
+          subscriber = callback as (outcome: never) => void;
+          return cancel;
+        },
+      } as never, (notification) => posted.push(notification));
+
+      expect(returned).toBe(cancel);
+      subscriber!({
+        kind: "dropped",
+        space,
+        eventId: "evt-dropped",
+        reason: "dropped",
+      } as never);
+      subscriber!({
+        kind: "needs-attention",
+        space,
+        eventId: "evt-incomplete",
+        reason: "incomplete",
+      } as never);
+      subscriber!({
+        kind: "needs-attention",
+        space,
+        eventId: "evt-complete",
+        seq: 40,
+        sidecarId,
+        retryable: false,
+        reason: "complete",
+        attention,
+      } as never);
+
+      expect(posted).toEqual([{
+        type: NotificationType.EventNeedsAttention,
+        space,
+        eventId: "evt-complete",
+        seq: 40,
+        sidecarId,
+        retryable: false,
+        reason: "complete",
+        attention,
+      }]);
+    });
+
+    it("installs and cancels the runtime notification subscription", async () => {
+      const server = new MemoryV2Server.Server({
+        authorizeSessionOpen: () => cfcSigner.did(),
+        sessionOpenAuth: { audience: testSessionOpenAudience },
+      });
+      const storageManager = new SharedV2StorageManager({
+        as: cfcSigner,
+        memoryHost: new URL("memory://"),
+      }, server);
+      const originalOpen = WorkerStorageManager.open;
+      const originalHealthCheck = Runtime.prototype.healthCheck;
+      const originalWatchSiteTable = RuntimeProcessor.prototype.watchSiteTable;
+      const originalSubscribe = Runtime.prototype.subscribeEventIntentOutcomes;
+      let subscribed = false;
+      let cancelled = 0;
+      WorkerStorageManager.open = () => storageManager;
+      Runtime.prototype.healthCheck = () => Promise.resolve(true);
+      RuntimeProcessor.prototype.watchSiteTable = () => {};
+      Runtime.prototype.subscribeEventIntentOutcomes = () => {
+        subscribed = true;
+        return () => cancelled++;
+      };
+      try {
+        const processor = await RuntimeProcessor.initialize({
+          apiUrl: "http://worker.test/",
+          identity: cfcSigner.keyPair,
+          spaceDid: space,
+        });
+        expect(subscribed).toBe(true);
+        await processor.dispose();
+        expect(cancelled).toBe(1);
+      } finally {
+        WorkerStorageManager.open = originalOpen;
+        Runtime.prototype.healthCheck = originalHealthCheck;
+        RuntimeProcessor.prototype.watchSiteTable = originalWatchSiteTable;
+        Runtime.prototype.subscribeEventIntentOutcomes = originalSubscribe;
+        await storageManager.close();
+        await server.close();
+      }
+    });
+
+    it("lists only authoritative unresolved notices and dispatches resolution", async () => {
+      const summaries = {
+        [eventAttentionEntryKey("evt-valid", 41)]: {
+          eventId: "evt-valid",
+          seq: 41,
+          sidecarId,
+          phase: attention.phase,
+          failureClass: attention.failureClass,
+          code: attention.code,
+          firstFailureAt: attention.firstFailureAt,
+        },
+        [eventAttentionEntryKey("evt-resolved", 42)]: {
+          eventId: "evt-resolved",
+          seq: 42,
+          sidecarId,
+          phase: attention.phase,
+          failureClass: attention.failureClass,
+          code: attention.code,
+          firstFailureAt: attention.firstFailureAt,
+        },
+        [eventAttentionEntryKey("evt-legacy", 0)]: {
+          eventId: "evt-legacy",
+          seq: 0,
+          sidecarId,
+          phase: attention.phase,
+          failureClass: attention.failureClass,
+          code: attention.code,
+          firstFailureAt: attention.firstFailureAt,
+        },
+        [eventAttentionEntryKey("evt-userless", 43)]: {
+          eventId: "evt-userless",
+          seq: 43,
+          sidecarId,
+          phase: attention.phase,
+          failureClass: attention.failureClass,
+          code: attention.code,
+          firstFailureAt: attention.firstFailureAt,
+        },
+      };
+      const provider = {
+        sync: () => Promise.resolve({}),
+        replica: {
+          getDocument(id: string) {
+            if (id === SERVER_EXECUTION_ATTENTION_DOC_ID) {
+              return {
+                value: {
+                  entries: {
+                    [eventAttentionIndexKey(sidecarId)]: summaries,
+                  },
+                },
+              };
+            }
+            return {
+              value: {
+                entries: [{
+                  eventId: "evt-valid",
+                  seq: 41,
+                  status: "needs-attention",
+                  reason: "safe reason",
+                  attention,
+                  firedAt: { user: cfcSigner.did() },
+                }, {
+                  eventId: "evt-resolved",
+                  seq: 42,
+                  status: "needs-attention",
+                  attention,
+                  resolution: { kind: "dismissed" },
+                  firedAt: { user: cfcSigner.did() },
+                }, {
+                  eventId: "evt-legacy",
+                  status: "needs-attention",
+                  reason: "legacy reason",
+                  attention,
+                  firedAt: { user: cfcSigner.did() },
+                }, {
+                  eventId: "evt-userless",
+                  seq: 43,
+                  status: "needs-attention",
+                  reason: "system event reason",
+                  attention,
+                  firedAt: { session: "server" },
+                }],
+              },
+            };
+          },
+        },
+      };
+      const resolveCalls: unknown[] = [];
+      const processor = {
+        runtime: {
+          storageManager: {
+            open: () => provider,
+            resolveEventAttention(
+              requestSpace: unknown,
+              eventId: unknown,
+              seq: unknown,
+              requestSidecarId: unknown,
+              action: unknown,
+            ) {
+              resolveCalls.push([
+                requestSpace,
+                eventId,
+                seq,
+                requestSidecarId,
+                action,
+              ]);
+              return Promise.resolve({ resolution: { kind: "dismissed" } });
+            },
+          },
+        },
+        identity: cfcSigner,
+        handleListEventAttention:
+          RuntimeProcessor.prototype.handleListEventAttention,
+        handleResolveEventAttention:
+          RuntimeProcessor.prototype.handleResolveEventAttention,
+      } as unknown as RuntimeProcessor;
+
+      expect(
+        await RuntimeProcessor.prototype.handleRequest.call(processor, {
+          type: RequestType.ListEventAttention,
+          space,
+        }),
+      ).toEqual({
+        notices: [{
+          space,
+          eventId: "evt-valid",
+          seq: 41,
+          sidecarId,
+          retryable: true,
+          reason: "safe reason",
+          attention,
+        }, {
+          space,
+          eventId: "evt-legacy",
+          seq: 0,
+          sidecarId,
+          retryable: true,
+          reason: "legacy reason",
+          attention,
+        }, {
+          space,
+          eventId: "evt-userless",
+          seq: 43,
+          sidecarId,
+          retryable: false,
+          reason: "system event reason",
+          attention,
+        }],
+      });
+      expect(
+        await RuntimeProcessor.prototype.handleRequest.call(processor, {
+          type: RequestType.ResolveEventAttention,
+          space,
+          eventId: "evt-valid",
+          seq: 41,
+          sidecarId,
+          action: "dismiss",
+        }),
+      ).toEqual({ resolution: { kind: "dismissed" } });
+      expect(resolveCalls).toEqual([[
+        space,
+        "evt-valid",
+        41,
+        sidecarId,
+        "dismiss",
+      ]]);
+    });
+
+    it("surfaces attention index and sidecar synchronization failures", async () => {
+      const indexError = new Error("index failed");
+      const sidecarError = new Error("sidecar failed");
+      const summary = {
+        eventId: "evt-failed",
+        seq: 43,
+        sidecarId,
+        phase: attention.phase,
+        failureClass: attention.failureClass,
+        code: attention.code,
+        firstFailureAt: attention.firstFailureAt,
+      };
+      const invoke = (provider: unknown) =>
+        RuntimeProcessor.prototype.handleListEventAttention.call({
+          runtime: { storageManager: { open: () => provider } },
+          identity: cfcSigner,
+        } as never, { type: RequestType.ListEventAttention, space });
+
+      await expect(invoke({
+        sync: () => Promise.resolve({ error: indexError }),
+      })).rejects.toBe(indexError);
+      await expect(invoke({
+        sync: () => Promise.resolve({}),
+      })).rejects.toThrow("does not expose an attention replica");
+      let syncCount = 0;
+      await expect(invoke({
+        sync: () =>
+          Promise.resolve(
+            ++syncCount === 1 ? {} : { error: sidecarError },
+          ),
+        replica: {
+          getDocument: () => ({
+            value: {
+              entries: {
+                [eventAttentionIndexKey(sidecarId)]: {
+                  [eventAttentionEntryKey(summary.eventId, summary.seq)]:
+                    summary,
+                },
+              },
+            },
+          }),
+        },
+      })).rejects.toBe(sidecarError);
+    });
+
+    it("rejects resolution when the storage capability is absent", async () => {
+      await expect(
+        RuntimeProcessor.prototype.handleResolveEventAttention.call({
+          runtime: { storageManager: {} },
+        } as never, {
+          type: RequestType.ResolveEventAttention,
+          space,
+          eventId: "evt-unsupported",
+          seq: 44,
+          sidecarId,
+          action: "retry",
+        }),
+      ).rejects.toThrow("does not support event attention");
     });
   });
 

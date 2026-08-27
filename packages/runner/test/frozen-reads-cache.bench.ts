@@ -67,7 +67,9 @@ const setupPrimedSiblingTransaction = (subtreeCount: number) => {
   return { storage, tx };
 };
 
-// --- 1. Hot sibling-rich pattern at K=16 (the baseline shape). -----------
+//
+// 1. Hot sibling-rich pattern at K=16 (the baseline shape).
+//
 
 Deno.bench({
   name: `frozenReads: ${ITERATIONS}x {write sub0; read other 15 siblings}`,
@@ -96,7 +98,9 @@ Deno.bench({
   },
 });
 
-// --- 2. 1-sibling control at K=16. ---------------------------------------
+//
+// 2. 1-sibling control at K=16.
+//
 
 Deno.bench({
   name: `frozenReads: ${ITERATIONS}x {write sub0; read same sibling once}`,
@@ -117,7 +121,8 @@ Deno.bench({
   },
 });
 
-// --- 3. Cache-size scaling: K=16, 64, 256. -------------------------------
+//
+// 3. Cache-size scaling: K=16, 64, 256.
 // Loop shape is fixed at {write sub0/count; read sub1}. The cache holds K
 // cached sibling reads.
 //
@@ -132,6 +137,7 @@ Deno.bench({
 // remains shaped to flag any future change that re-introduces K-scaling.
 // To isolate just the invalidator's O(K)-vs-O(D) behavior, see
 // `packages/utils/test/path-key-map.bench.ts`.
+//
 
 for (const K of [16, 64, 256]) {
   Deno.bench({
@@ -162,11 +168,13 @@ for (const K of [16, 64, 256]) {
   });
 }
 
-// --- 4. Deep nested-path write. ------------------------------------------
+//
+// 4. Deep nested-path write.
 // Writes at depth-7 path `value/a/b/c/d/e/items/0`, with three cached
 // sibling reads at varying depths along the chain. Stresses the per-write
 // walk's depth dependence; a trie walker pays O(D), an O(N) scanner pays
 // the same as the K=16 case.
+//
 
 const seedDeep = () => ({
   value: {

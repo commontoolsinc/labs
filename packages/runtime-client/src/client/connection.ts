@@ -10,12 +10,14 @@ import {
   Commands,
   ConsoleMessage,
   ErrorNotification,
+  EventNeedsAttentionNotification,
   InitializationData,
   IPCClientNotification,
   IPCRemoteMessage,
   isCellUpdateNotification,
   isConsoleNotification,
   isErrorNotification,
+  isEventNeedsAttentionNotification,
   isIPCRemoteNotification,
   isIPCRemoteResponse,
   isNavigateRequestNotification,
@@ -118,6 +120,7 @@ export type RuntimeConnectionEvents = {
   vdombatch: [VDomBatchNotification];
   pendingwriteschange: [PendingWritesNotification];
   operationupdate: [OperationUpdateNotification];
+  eventneedsattention: [EventNeedsAttentionNotification];
 };
 
 export interface InitializedRuntimeConnection extends RuntimeConnection {}
@@ -547,6 +550,8 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
         this.emit("pendingwriteschange", message);
       } else if (isOperationUpdateNotification(message)) {
         this.emit("operationupdate", message);
+      } else if (isEventNeedsAttentionNotification(message)) {
+        this.emit("eventneedsattention", message);
       } else {
         console.warn(`Unknown notification: ${JSON.stringify(message)}`);
       }

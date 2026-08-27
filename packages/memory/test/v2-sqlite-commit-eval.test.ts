@@ -164,6 +164,7 @@ Deno.test("INSERT…SELECT with a violating committed row rolls back the WHOLE c
       ])
     );
     assert(error instanceof RowLabelCommitError, String(error));
+    assertEquals(error.operationIndex, 1);
     assert(
       error.message.includes("strict-if-present"),
       `unexpected reason: ${error.message}`,

@@ -167,12 +167,14 @@ import type {
   ReactivityLog,
   SchedulerObservationIdentity,
   ServedEventDispatch,
+  ServedEventFailureOutcome,
   SettleStats,
   SettleStatsHistoryEntry,
   SpaceScopeAndURI,
   TelemetryAnnotations,
   TriggerTraceEntry,
 } from "./types.ts";
+import { ReplicaLoadFailureError } from "../storage/interface.ts";
 ensureNotRenderThread();
 
 const logger = getLogger("scheduler", {
@@ -441,9 +443,9 @@ export class Scheduler {
   // `servingYieldObserver` seam — the SpaceServer's mid-wave lease renew.
   private readonly cooperativeYield: CooperativeYield | undefined;
 
-  // ============================================================
+  //
   // Public API
-  // ============================================================
+  //
 
   constructor(
     readonly runtime: Runtime,
@@ -1053,14 +1055,12 @@ export class Scheduler {
     return rearmed;
   }
 
-  // ============================================================
   // The (d′) standing `demandedWriters` root kind and the
   // per-(instance, demander) currency check (stage-C design §2.2 / §2.4;
   // serving-loop.md §1). The SpaceServer's demand pass calls these on
   // registry DELTAS; nothing here is reached off the serving posture (the
   // registration hook installs lazily on the first `enterDemandedEntity`,
   // so a plain client runtime's `demandedWriters` set stays empty — T9′).
-  // ============================================================
 
   /** Refcount per demanded ENTITY (scope-NAME keyed, `entityNameKey` —
    * the writer index's vocabulary: two instances of one doc, `user:alice`
@@ -1495,9 +1495,9 @@ export class Scheduler {
     return this.eventPreflightTelemetryEnabled;
   }
 
-  // ============================================================
+  //
   // Debounce infrastructure for throttling slow actions
-  // ============================================================
+  //
 
   /**
    * Sets a debounce delay for an action.
@@ -1544,9 +1544,9 @@ export class Scheduler {
     this.gates.setNoDebounce(action, optOut);
   }
 
-  // ============================================================
+  //
   // Throttle infrastructure - "value may be outdated by T ms"
-  // ============================================================
+  //
 
   /**
    * Sets a throttle period for an action.
@@ -1645,9 +1645,9 @@ export class Scheduler {
     return buildSchedulerGraphSnapshot(this.graphSnapshotState);
   }
 
-  // ============================================================
+  //
   // Push-triggered filtering
-  // ============================================================
+  //
 
   /**
    * Returns the action's static write surface.
@@ -1656,9 +1656,9 @@ export class Scheduler {
     return this.writeIndex.getSchedulingWrites(action);
   }
 
-  // ============================================================
+  //
   // Compute time tracking for cycle-aware scheduling
-  // ============================================================
+  //
 
   /**
    * Returns the execution statistics for an action, if available.
@@ -1754,9 +1754,9 @@ export class Scheduler {
     return [...this.triggerTrace];
   }
 
-  // ============================================================
+  //
   // Non-settling detection API
-  // ============================================================
+  //
 
   /**
    * Returns whether the scheduler has detected a non-settling condition.
@@ -1783,7 +1783,9 @@ export class Scheduler {
     return runSchedulerDiagnosis(this.diagnosisControlState, durationMs);
   }
 
-  // ── Inline idempotency check mode ──────────────────────────────────
+  //
+  // Inline idempotency check mode
+  //
 
   enableIdempotencyCheck(): void {
     this.idempotencyCheckMode = true;
@@ -1862,9 +1864,9 @@ export class Scheduler {
     this.diagnosisEnabled = false;
   }
 
-  // ============================================================
+  //
   // Execution orchestration
-  // ============================================================
+  //
 
   private handleError(error: Error, action: any) {
     handleSchedulerError(
@@ -2067,9 +2069,9 @@ export class Scheduler {
     }
   }
 
-  // ============================================================
+  //
   // Idempotency diagnosis API (Phase 2 + 3)
-  // ============================================================
+  //
 
   /**
    * Starts diagnosis mode: captures read/write values and causal edges.
@@ -2105,9 +2107,9 @@ export class Scheduler {
     });
   }
 
-  // ============================================================
+  //
   // State wiring
-  // ============================================================
+  //
 
   // Keep state-bundle wiring explicit without making the field declarations
   // read like one large object graph.
@@ -2659,9 +2661,9 @@ export class Scheduler {
     };
   }
 
-  // ============================================================
+  //
   // Private forwarding helpers
-  // ============================================================
+  //
 
   /**
    * Gets a stable identifier for an action based on its source location.
@@ -2892,6 +2894,11 @@ export class Scheduler {
     this.headEventLoadPark = null;
     this.headEventLoadParkHistory = null;
     const detail = error instanceof Error ? error.message : String(error);
+    const failure = error instanceof ReplicaLoadFailureError ? error.failure : {
+      failureClass: "unknown" as const,
+      recoveryEpoch: "untyped",
+      permanentEvidence: false,
+    };
     if (event.served === undefined) {
       this.dropEvent(
         event,
@@ -2900,15 +2907,24 @@ export class Scheduler {
       this.queueExecution();
       return;
     }
-    // WARN per deferral, naming the failing doc keys and the error: a
-    // deferral that never clears is a user action that never lands, and
-    // `events.loadParkDeferrals` counts what the log spells out.
+    // The head's debug record names the failing doc keys and error;
+    // `events.loadParkDeferrals` counts every head and barrier deferral, while
+    // the durable checkpoint and terminal attention surface persistent failure.
     this.dropEvent(
       event,
       `Event deferred: required replica load failed before dispatch ` +
         `(${keys}: ${detail}); the entry stays pending and a later drain ` +
         `re-delivers it`,
-      { servedKind: "deferred", cause: "load-park" },
+      {
+        servedKind: "deferred",
+        quiet: true,
+        servedOutcome: {
+          kind: "deferred",
+          cause: "load-park",
+          role: "failed-head",
+          failure,
+        },
+      },
     );
     for (const later of [...this.eventQueue]) {
       if (later.eventLink.space !== event.eventLink.space) continue;
@@ -2918,7 +2934,15 @@ export class Scheduler {
         `Event deferred: held behind ${event.id}, whose required replica ` +
           `load failed before dispatch (${keys}); later-arrived events wait ` +
           `behind it`,
-        { servedKind: "deferred", cause: "load-park" },
+        {
+          servedKind: "deferred",
+          quiet: true,
+          servedOutcome: {
+            kind: "deferred",
+            cause: "arrival-barrier",
+            blockedBy: event.id,
+          },
+        },
       );
     }
     this.queueExecution();
@@ -2933,7 +2957,7 @@ export class Scheduler {
        * durable entry UNCONSEQUENCED for a later drain (events.md §5);
        * only meaningful for a served event. */
       servedKind?: "dropped" | "deferred";
-      cause?: "load-park";
+      servedOutcome?: ServedEventFailureOutcome;
     } = {},
   ): void {
     if (this.headEventLoadPark?.eventId === event.id) {

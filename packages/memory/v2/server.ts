@@ -1,7 +1,7 @@
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
 
-import type { FabricPlainObject } from "@commonfabric/api";
+import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { metrics, SpanStatusCode, trace } from "@opentelemetry/api";
@@ -20,6 +20,7 @@ import {
   type ClientCommit,
   type ClientMessage,
   type CommitClass,
+  commitPreconditionValueHash,
   dbNeedsColumnProvenance,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
@@ -30,6 +31,11 @@ import {
   type EntityIdLookupResult,
   type EntitySnapshot,
   EventAppendDuplicateError,
+  eventAttentionEntryKey,
+  eventAttentionIndexKey,
+  type EventAttentionIndexValue,
+  type EventAttentionResolveRequest,
+  type EventAttentionResolveResult,
   getMemoryProtocolFlags,
   getOwnWriteEchoConfig,
   getServerExecutionConfig,
@@ -50,6 +56,7 @@ import {
   type ScopeKey,
   scopeKeyApplicableTo,
   type ScopeKeyIdentity,
+  SERVER_EXECUTION_ATTENTION_DOC_ID,
   type ServerMessage,
   type SessionAckRequest,
   type SessionAckResult,
@@ -296,9 +303,14 @@ const randomHex = (bytes: number): string => {
 const isNonNegativeInteger = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
-const toError = (name: string, message: string): V2Error => ({
+const toError = (
+  name: string,
+  message: string,
+  details: Pick<V2Error, "permanentEvidence" | "aclRevision"> = {},
+): V2Error => ({
   name,
   message,
+  ...details,
 });
 
 const toPreconditionFailedError = (
@@ -457,7 +469,12 @@ export type AdmittedCommitNotice = {
    * handler processing" classification input. Ids only (the sidecar
    * doc instance + the eventId); the SpaceServer's drain reads the
    * stamped entries from the store, never from this record. */
-  eventAppends?: Array<{ id: string; scopeKey: ScopeKey; eventId: string }>;
+  eventAppends?: Array<{
+    id: string;
+    scopeKey: ScopeKey;
+    eventId: string;
+    retryOf?: string;
+  }>;
 
   /** The EXPLICIT WARM REQUEST (serving-loop.md §1's third activation
    * trigger; RULED 2026-08-21): set only by the serving-side
@@ -1066,6 +1083,26 @@ class Connection {
           );
         }
         return;
+      case "event.attention.resolve":
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
+        {
+          const response = await this.server.resolveEventAttention(parsed);
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
+        return;
     }
   }
 
@@ -1588,6 +1625,7 @@ export class Server {
       return toError(
         "AuthorizationError",
         `Space ${space} has a malformed, ownerless, or retracted ACL`,
+        { permanentEvidence: true, aclRevision: Engine.serverSeq(engine) },
       );
     }
     if (this.#aclMode() === "observe") {
@@ -1602,6 +1640,7 @@ export class Server {
     return toError(
       "AuthorizationError",
       `Principal ${principalLabel} lacks ${requirement} on space ${space}`,
+      { permanentEvidence: true, aclRevision: Engine.serverSeq(engine) },
     );
   }
 
@@ -2968,6 +3007,311 @@ export class Server {
           readsPending: count(commit.reads?.pending),
           outcome,
         });
+      }
+    });
+  }
+
+  /** Resolve one authoritative OW54 notice. The publication lock, exact-value
+   * precondition, original-entry resolution, optional append, and index removal
+   * form one same-space atomic decision. */
+  async resolveEventAttention(
+    message: EventAttentionResolveRequest,
+  ): Promise<ResponseMessage<EventAttentionResolveResult>> {
+    return await this.withSpacePublicationLock(message.space, async () => {
+      try {
+        const session = this.#sessions.get(message.space, message.sessionId);
+        if (session === null) {
+          return respondTypedError<EventAttentionResolveResult>(
+            message.requestId,
+            toError("SessionError", "Unknown session for space"),
+          );
+        }
+        const engine = await this.openEngine(message.space);
+        if (this.#sessions.get(message.space, message.sessionId) !== session) {
+          return respondTypedError<EventAttentionResolveResult>(
+            message.requestId,
+            toError("SessionError", "Unknown or replaced session for space"),
+          );
+        }
+        const deny = this.#authorizeMessageWithEngine(
+          engine,
+          message.space,
+          session.principal,
+          "WRITE",
+        );
+        if (deny !== null) {
+          return respondTypedError<EventAttentionResolveResult>(
+            message.requestId,
+            deny,
+          );
+        }
+        const indexDocument = Engine.read(engine, {
+          id: SERVER_EXECUTION_ATTENTION_DOC_ID as never,
+        });
+        const indexValue = indexDocument?.value as
+          | EventAttentionIndexValue
+          | undefined;
+        const sidecarKey = eventAttentionIndexKey(message.sidecarId);
+        const entryKey = eventAttentionEntryKey(message.eventId, message.seq);
+        const indexEntries = indexValue?.entries;
+        const sidecarSummaries = indexEntries !== undefined &&
+            Object.hasOwn(indexEntries, sidecarKey)
+          ? indexEntries[sidecarKey]
+          : undefined;
+        const summary = sidecarSummaries !== undefined &&
+            Object.hasOwn(sidecarSummaries, entryKey)
+          ? sidecarSummaries[entryKey]
+          : undefined;
+        const resolutionSidecars = indexValue?.resolutions;
+        const sidecarResolutions = resolutionSidecars !== undefined &&
+            Object.hasOwn(resolutionSidecars, sidecarKey)
+          ? resolutionSidecars[sidecarKey]
+          : undefined;
+        const recorded = sidecarResolutions !== undefined &&
+            Object.hasOwn(sidecarResolutions, entryKey)
+          ? sidecarResolutions[entryKey]
+          : undefined;
+        const sidecarDocument = Engine.read(engine, {
+          id: message.sidecarId as never,
+        });
+        const sidecarValue = sidecarDocument?.value as
+          | StreamEventsDocValue
+          | undefined;
+        const entryIndex = sidecarValue?.entries?.findIndex((entry) =>
+          entry?.eventId === message.eventId &&
+          (entry.seq ?? 0) === message.seq
+        ) ?? -1;
+        const original = entryIndex < 0
+          ? undefined
+          : sidecarValue!.entries![entryIndex];
+        const principal = session.principal;
+        if (original === undefined && recorded !== undefined) {
+          if (principal === undefined || recorded.principal !== principal) {
+            return respondTypedError<EventAttentionResolveResult>(
+              message.requestId,
+              toError(
+                "AuthorizationError",
+                "Only the original acting user may resolve this event",
+              ),
+            );
+          }
+          return {
+            type: "response",
+            requestId: message.requestId,
+            ok: {
+              serverSeq: Engine.serverSeq(engine),
+              resolution: recorded.resolution,
+            },
+          };
+        }
+        if (
+          original?.status !== "needs-attention" ||
+          original.attention === undefined ||
+          original.consequenced !== true
+        ) {
+          throw new Engine.ProtocolError(
+            `event ${message.eventId} at seq ${message.seq} has no ` +
+              "authoritative attention cover",
+          );
+        }
+        const originalUser = original.firedAt?.user;
+        if (
+          principal === undefined ||
+          (originalUser === undefined
+            ? message.action === "retry"
+            : originalUser !== principal)
+        ) {
+          return respondTypedError<EventAttentionResolveResult>(
+            message.requestId,
+            toError(
+              "AuthorizationError",
+              originalUser === undefined
+                ? "A userless event may be dismissed but not retried"
+                : "Only the original acting user may resolve this event",
+            ),
+          );
+        }
+        if (original.resolution !== undefined) {
+          return {
+            type: "response",
+            requestId: message.requestId,
+            ok: {
+              serverSeq: Engine.serverSeq(engine),
+              resolution: original.resolution,
+            },
+          };
+        }
+        if (
+          summary === undefined || summary.sidecarId !== message.sidecarId ||
+          summary.eventId !== message.eventId || summary.seq !== message.seq
+        ) {
+          throw new Engine.ProtocolError(
+            `event ${message.eventId} at seq ${message.seq} has no ` +
+              "unresolved attention notice",
+          );
+        }
+        const retryEventId = message.action === "retry"
+          ? crypto.randomUUID()
+          : undefined;
+        const resolution = retryEventId === undefined
+          ? { kind: "dismissed" as const }
+          : { kind: "retried" as const, eventId: retryEventId };
+        const escapePointer = (value: string) =>
+          value.replace(/~/g, "~0").replace(/\//g, "~1");
+        const sidecarPatches: Array<
+          | { op: "replace"; path: string; value: unknown }
+          | { op: "append"; path: string; values: unknown[] }
+        > = [{
+          op: "replace",
+          path: `/value/entries/${entryIndex}/resolution`,
+          value: resolution,
+        }];
+        if (retryEventId !== undefined) {
+          sidecarPatches.push({
+            op: "append",
+            path: "/value/entries",
+            values: [{
+              eventId: retryEventId,
+              stream: original.stream,
+              ...(original.payload === undefined
+                ? {}
+                : { payload: original.payload }),
+              firedAt: {
+                user: principal,
+                session: message.sessionId,
+              },
+              ...(original.rendererTrusted === true
+                ? { rendererTrusted: true as const }
+                : {}),
+              ...(original.runtimeInjectedEventKeys === undefined ? {} : {
+                runtimeInjectedEventKeys: original.runtimeInjectedEventKeys,
+              }),
+              retryOf: message.eventId,
+            }],
+          });
+        }
+        const recordedResolution = {
+          eventId: message.eventId,
+          seq: message.seq,
+          sidecarId: message.sidecarId,
+          principal,
+          resolution,
+        };
+        const indexPatches: Array<
+          | { op: "remove"; path: string }
+          | { op: "add"; path: string; value: FabricValue }
+        > = [{
+          op: "remove",
+          path: Object.keys(sidecarSummaries ?? {}).length === 1
+            ? `/value/entries/${escapePointer(sidecarKey)}`
+            : `/value/entries/${escapePointer(sidecarKey)}/${
+              escapePointer(entryKey)
+            }`,
+        }];
+        if (resolutionSidecars === undefined) {
+          indexPatches.push({
+            op: "add",
+            path: "/value/resolutions",
+            value: { [sidecarKey]: { [entryKey]: recordedResolution } },
+          });
+        } else if (sidecarResolutions === undefined) {
+          indexPatches.push({
+            op: "add",
+            path: `/value/resolutions/${escapePointer(sidecarKey)}`,
+            value: { [entryKey]: recordedResolution },
+          });
+        } else {
+          indexPatches.push({
+            op: "add",
+            path: `/value/resolutions/${escapePointer(sidecarKey)}/${
+              escapePointer(entryKey)
+            }`,
+            value: recordedResolution,
+          });
+        }
+        const commit = Engine.applyCommit(engine, {
+          // Server-owned transaction identity: the requesting user's session
+          // has its own localSeq namespace, so borrowing it here would collide
+          // with ordinary client commits. The copied retry entry separately
+          // records the requesting current session in `firedAt`.
+          sessionId: this.#directSessionId,
+          space: message.space,
+          principal,
+          commitClass: "system",
+          ...(retryEventId === undefined ? {} : {
+            systemEventActor: {
+              principal,
+              sessionId: message.sessionId,
+            },
+          }),
+          commit: {
+            localSeq: ++this.#directLocalSeq,
+            reads: { confirmed: [], pending: [] },
+            preconditions: [{
+              kind: "entity-value-hash",
+              id: summary.sidecarId as never,
+              valueHash: commitPreconditionValueHash(sidecarValue as never),
+            }],
+            operations: [{
+              op: "patch",
+              id: summary.sidecarId as never,
+              patches: sidecarPatches as never,
+            }, {
+              op: "patch",
+              id: SERVER_EXECUTION_ATTENTION_DOC_ID as never,
+              patches: indexPatches,
+            }],
+            ...(retryEventId === undefined ? {} : {
+              eventAppends: [{
+                id: summary.sidecarId as never,
+                scope: "space" as const,
+                eventId: retryEventId,
+              }],
+            }),
+          },
+        });
+        this.markSpaceDirty(message.space, [
+          toDirtyKey(summary.sidecarId, "space"),
+          toDirtyKey(SERVER_EXECUTION_ATTENTION_DOC_ID, "space"),
+        ]);
+        this.#notifyCommitAdmitted({
+          space: message.space,
+          seq: commit.seq,
+          class: "system",
+          sessionId: this.#directSessionId,
+          writes: [
+            { id: summary.sidecarId, scopeKey: "space" },
+            { id: SERVER_EXECUTION_ATTENTION_DOC_ID, scopeKey: "space" },
+          ],
+          ...(retryEventId === undefined ? {} : {
+            eventAppends: [{
+              id: summary.sidecarId,
+              scopeKey: "space" as const,
+              eventId: retryEventId,
+              retryOf: message.eventId,
+            }],
+          }),
+        });
+        return {
+          type: "response",
+          requestId: message.requestId,
+          ok: { serverSeq: commit.seq, resolution },
+        };
+      } catch (error) {
+        const messageText = error instanceof Error
+          ? error.message
+          : String(error);
+        return respondTypedError<EventAttentionResolveResult>(
+          message.requestId,
+          toError(
+            error instanceof Engine.ConflictError
+              ? "ConflictError"
+              : error instanceof Engine.ProtocolError
+              ? "ProtocolError"
+              : "TransactionError",
+            messageText,
+          ),
+        );
       }
     });
   }
@@ -6272,6 +6616,29 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       watches: parsed.watches as WatchSpec[],
+    };
+  }
+
+  if (
+    parsed.type === "event.attention.resolve" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    typeof parsed.eventId === "string" && parsed.eventId.length > 0 &&
+    typeof parsed.seq === "number" && Number.isSafeInteger(parsed.seq) &&
+    parsed.seq >= 0 &&
+    typeof parsed.sidecarId === "string" && parsed.sidecarId.length > 0 &&
+    (parsed.action === "retry" || parsed.action === "dismiss")
+  ) {
+    return {
+      type: "event.attention.resolve",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      eventId: parsed.eventId,
+      seq: parsed.seq,
+      sidecarId: parsed.sidecarId,
+      action: parsed.action,
     };
   }
 

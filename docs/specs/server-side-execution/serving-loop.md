@@ -950,6 +950,21 @@ classes:
   consequences move TOGETHER into the rebased commit, never
   separately.
 
+An event-delivery processing checkpoint is an internal
+`bookkeeping`-stamped write. A terminal error, drop, or
+`needs-attention` notice is an `event-handler`-stamped
+non-re-derivable contribution carrying that event's consequence and
+watermark advance. Sealing a terminal contribution is not durable
+success: the serving loop keeps the event's arrival barrier closed
+until the closing wave confirms that the complete contribution
+committed. A rejected, resolved-error, rebased-out, or refused-wave
+notice leaves the entry pending, records its checkpoint or notice-write
+failure, and cannot release later events. This contract adds no
+same-wave dependent-withdrawal mechanism. A failed processing-state write
+re-derives on a later input, activation, or typed recovery wake. A quiet space
+does not add a timer solely to retry that write: it remains loudly pending
+through the failure counter and warning until one of those valid wakes arrives.
+
 Dropping would be unsound for authored values, which is one more reason
 the classes never share a commit. Whole-wave CAS failure is FORBIDDEN
 (livelock under sustained authored traffic), as are blind derived
@@ -1065,25 +1080,23 @@ same crossing (builtins.md §5 carries the register row; RULED
 
 ## 3e. Pattern updates
 
-The SpaceServer owns the pattern-source watcher and the hot-swap. Off
-the flag both halves run CLIENT-side when `systemPatternAutoUpdate` is
-on — on in shell, off in server processes (EXPERIMENTAL_OPTIONS.md):
-the post-instantiation source check and the live swap via the
-`patternIdentity` meta sink, teardown + reinstantiation included. Under
-the flag that posture FLIPS, and stage F LANDED the flip
-(runtime-mapping.md rows 40/41): the serving-runtime factory enables
-`systemPatternAutoUpdate` server-side, and the swap runs in the
-SpaceServer — a pattern-pointer write is an ordinary authored input
-that dirties the piece, the swap is the server reacting to it, and the
-swap's setup write stamps the `bookkeeping` kind and enters the wave
+The SpaceServer owns the pattern-source watcher and the hot-swap. The
+two halves have different owners. FOLLOWING a piece's source origin
+belongs to whoever OPENS the piece, which a serving tenure never does
+(piece-source-lifecycle.md); a tenure owes its space the EXISTENCE of a
+root and nothing more. The SWAP is the server's: a pattern-pointer
+write is an ordinary authored input that dirties the piece, the swap is
+the server reacting to it, and the swap's setup write stamps the
+`bookkeeping` kind and enters the wave
 (§3d). Because a sealed setup can still be WITHDRAWN at the wave
 commit, the swap replaces the running graph only after DURABLE
 acceptance — on withdrawal the old graph stays (old-graph-plus-new-
 pointer is a coherent not-yet-swapped state; the reverse is the
 broken-setup class). The pointer write itself stays authored-class
-under the updater's principal. The CHECK half's network source probe
-against a fully-local store is the flagged stage-F residual (verified
-in the integration environment, not the unit fixture).
+under the writing principal. Nothing server-side probes a pattern
+route any more, so the network source probe against a fully-local
+store that this section used to record as a residual is gone with the
+half that made it.
 
 ## 4. Effectful nodes: memoization contract
 
@@ -1291,7 +1304,11 @@ pushGrowthWakes, watchWakes, warmWakes}, settle: {series, dropped},
 settleAdvances: {count, lastDelta, series, dropped}, events:
 {appended, processed, coalescedPerWaveMax, skippedIdempotent,
 drainInFlightSkips, lt1LeftoversPurged, lt1LateSealsRefused,
-orphanDeliveriesRefused, loadParkDeferrals, dropped}, memo:
+orphanDeliveriesRefused, loadParkDeferrals, loadParkFailures,
+deliveryDeferralsActive, deliveryFailuresActive,
+maxAccumulatedDeliveryFailureMs, needsAttention: {total, byPhase},
+needsAttentionSealFailures, deliveryCheckpointWriteFailures,
+explicitRetries, dropped}, memo:
 {hits, misses, inflight}, outbox: {queued, completed, failed,
 budgetDeferrals}, lease:
 {held, lost}, push: {prioritizedSessions, followerSessions,
@@ -1427,31 +1444,35 @@ per-event run counts are (and a store-side per-event consequence-commit
 count is not one either: it reads 1 for a same-wave double and 2 for a
 late-seal split with a surviving intent sibling — W3 review B1).
 
-The `events` block's DISPOSITION counters (verification-coverage.md's
-OW45 residue member, 2026-08-26): `loadParkDeferrals` — served events
-deferred because the dispatch preflight's head-event LOAD PARK failed,
-counted per deferral (the head's and each later-arrived same-space
-entry the arrival-order barrier holds behind it), each with a WARN
-naming the failing doc keys and the error. events.md §5's T3 predicate
-is "no
-runnable handler", never "the run raced", so a transient read failure
-over a durably-existing doc defers rather than dropping: the entry
-stays pending and UNCONSEQUENCED and a later drain re-delivers it.
-The deferral is deliberately NOT on the queued class's bounded
-creation-race budget — that budget hardens into events.md §5's drop,
-which for
-this cause would be the at-least-once discharge the arm exists to
-prevent — so a load that never heals defers indefinitely and its
-backstop rescan keeps the space out of the idle park; a give-up arm
-for that case is OW54's separately tracked territory. `dropped` —
-terminal drop notices SEALED onto a durable entry, the previously
-unmeasurable half: an event discharged this way left `appended ==
-processed` reading clean while a user's action was permanently gone,
-so only the WARN and the entry's own `status` field carried it. Both
-are read together, never alone: `loadParkDeferrals` growing while
-`processed` does not names a load that never heals, and a rising
-`dropped` on a space whose pieces all start names a disposition bug
-rather than routine unrunnable-event cleanup.
+The `events` block's DISPOSITION counters:
+
+- `loadParkDeferrals` counts every load-park decision, including the
+  failed head and each same-space arrival-barrier follower;
+  `loadParkFailures` counts only heads whose required load actually
+  failed.
+- `deliveryDeferralsActive`, `deliveryFailuresActive`, and
+  `maxAccumulatedDeliveryFailureMs` expose the current durable
+  checkpoint population without treating settlement as failure.
+- `needsAttention` counts terminal attention notices only after their
+  carrying wave commits, split under `byPhase` into `dispatch-load`,
+  `commit-preparation`, and `commit-finalization`.
+  `needsAttentionSealFailures` counts failed attempts to persist that
+  cover, and `deliveryCheckpointWriteFailures` counts failed
+  processing-checkpoint writes.
+- `explicitRetries` counts accepted new-ID retry appends carrying
+  `retryOf`.
+- `dropped` remains exclusive to events.md §5's T3 disposition and
+  retains its legacy decision-time counting point. Unlike
+  `needsAttention`, a refused T3 notice can therefore be decided and
+  counted again.
+
+Repeated failure attempts remain measurable in counters. Logs report
+the first deferral, class changes, positive recovery, committed
+attention, failed checkpoint/attention writes, and explicit retry
+transitions rather than every retry. `loadParkDeferrals` growing while
+`processed` does not names a load that is not healing; a rising
+`dropped` on a space whose pieces all start names a T3 disposition bug
+rather than routine delivery failure.
 
 ## 8. Tripwires (grep-able FORBIDDEN list)
 

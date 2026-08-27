@@ -40,6 +40,7 @@ import {
   applyCommit,
   applyWaveCommit,
   readState,
+  RowLabelCommitError,
   selectDocHead,
   selectWritePathsSince,
   serverSeq,
@@ -54,6 +55,46 @@ import type {
   WaveCommitSink,
   WaveSpaceCommit,
 } from "./wave.ts";
+
+export function waveCommitFailureResult(
+  error: unknown,
+): { error: WaveCommitRejection } {
+  if (error instanceof WaveCommitConflictError) {
+    return {
+      error: {
+        name: "WaveCommitRejected",
+        message: error.message,
+        conflictedDocs: error.conflictedDocs,
+      },
+    };
+  }
+  if (error instanceof WavePreconditionError) {
+    return {
+      error: {
+        name: "WaveCommitRejected",
+        message: error.message,
+        failedPreconditions: error.failedPreconditions,
+      },
+    };
+  }
+  if (
+    error instanceof RowLabelCommitError && error.operationIndex !== undefined
+  ) {
+    return {
+      error: {
+        name: "RowLabelCommitError",
+        message: error.message,
+        failedOperation: error.operationIndex,
+      },
+    };
+  }
+  return {
+    error: {
+      name: "WaveCommitRejected",
+      message: error instanceof Error ? error.message : String(error),
+    },
+  };
+}
 
 export class EngineWaveCommitSink implements WaveCommitSink {
   readonly #engineFor: (space: MemorySpace) => Engine;
@@ -346,30 +387,7 @@ export class EngineWaveCommitSink implements WaveCommitSink {
       }
       return Promise.resolve({ ok: { seq: applied.seq } });
     } catch (error) {
-      if (error instanceof WaveCommitConflictError) {
-        return Promise.resolve({
-          error: {
-            name: "WaveCommitRejected",
-            message: error.message,
-            conflictedDocs: error.conflictedDocs,
-          },
-        });
-      }
-      if (error instanceof WavePreconditionError) {
-        return Promise.resolve({
-          error: {
-            name: "WaveCommitRejected",
-            message: error.message,
-            failedPreconditions: error.failedPreconditions,
-          },
-        });
-      }
-      return Promise.resolve({
-        error: {
-          name: "WaveCommitRejected",
-          message: error instanceof Error ? error.message : String(error),
-        },
-      });
+      return Promise.resolve(waveCommitFailureResult(error));
     }
   }
 }

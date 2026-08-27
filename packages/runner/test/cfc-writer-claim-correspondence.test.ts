@@ -466,16 +466,24 @@ describe("reportDroppedCfcRejectedWrite", () => {
     try {
       reportDroppedCfcRejectedWrite(
         {
+          name: "CfcCommitRefusalError",
           message: "CFC enforcement rejected commit: relevant transaction " +
             "was not prepared: writeAuthorizedBy failed at /",
         },
         "handler-1",
       );
       reportDroppedCfcRejectedWrite(
-        { message: "some unrelated storage conflict" },
+        {
+          message: "CFC enforcement rejected commit: relevant transaction " +
+            "was not prepared: lookalike only",
+        },
         "handler-2",
       );
-      reportDroppedCfcRejectedWrite(undefined, "handler-3");
+      reportDroppedCfcRejectedWrite(
+        { name: "ConflictError", message: "some unrelated storage conflict" },
+        "handler-3",
+      );
+      reportDroppedCfcRejectedWrite(undefined, "handler-4");
     } finally {
       console.error = original;
     }

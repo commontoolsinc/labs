@@ -2023,7 +2023,8 @@ Deno.test("memory v2 stacked commits: divergent basis overrides survive pending-
   }
 });
 
-// ---- CT-1927 parked-accept promotion ----
+//
+// CT-1927 parked-accept promotion
 //
 // Verdicts return inline (the fan-out stays batched server-side), and the
 // client PARKS each accept's state application until a frame's
@@ -2032,6 +2033,7 @@ Deno.test("memory v2 stacked commits: divergent basis overrides survive pending-
 // novelty the accept was applied on top of. These tests use the base
 // ScriptedModelTransport (which advertises verdictCatchUpMarkers) and push
 // markers explicitly.
+//
 
 const markerHarness = () =>
   createHarness({ transport: (model) => new MarkerContractTransport(model) });
@@ -2231,7 +2233,8 @@ Deno.test("memory v2 stacked commits: whenApplied resolves at the parked accept'
   }
 });
 
-// ---- The settle input barrier (server-execution v2 Phase 2 revisit (a)) ----
+//
+// The settle input barrier (server-execution v2 Phase 2 revisit (a))
 //
 // A foreign frame integrating UNDER a parked own write is SHADOWED: the
 // materialized view (and therefore the change notification) reflects the
@@ -2240,6 +2243,7 @@ Deno.test("memory v2 stacked commits: whenApplied resolves at the parked accept'
 // serving loop's W advance can exclude them, and — flag ON — the
 // promotion fires the shadow-flip notification the moment the foreign
 // value becomes visible.
+//
 
 const shadowFloorOf = (harness: Harness): number | undefined =>
   (harness.provider.replica as unknown as {

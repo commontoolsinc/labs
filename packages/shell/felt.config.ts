@@ -64,9 +64,6 @@ const config: Config = {
       "$EXPERIMENTAL_COMPUTED_CELL_IDS": Deno.env.get(
         "EXPERIMENTAL_COMPUTED_CELL_IDS",
       ),
-      "$EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE": Deno.env.get(
-        "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
-      ),
       "$EXPERIMENTAL_SERVER_EXECUTION": Deno.env.get(
         "EXPERIMENTAL_SERVER_EXECUTION",
       ),

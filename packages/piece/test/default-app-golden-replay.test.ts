@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   getPatternIdentityRef,
+  getPatternSetupIdentityRef,
   isLink,
   resolveEntryIdentity,
   resolveSystemPatternSource,
@@ -17,6 +18,7 @@ import {
   DEFAULT_APP_PATTERN_SOURCE,
   PiecesController,
 } from "../src/ops/pieces-controller.ts";
+import { reconcilePieceSource } from "../src/ops/piece-origin.ts";
 
 // The route that ref expands to — what the toolshed serves, and what the
 // worker names the module by when it compiles the pattern over HTTP.
@@ -130,7 +132,6 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
-      experimental: { systemPatternAutoUpdate: true },
     });
     const session = await createSession({
       identity: signer,
@@ -183,7 +184,13 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     // N+1: the toolshed now serves a newer default-app (its `summary` logic
     // changed). Roll forward in place.
     stub.setSource(ROOT_V2);
-    expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
+    expect(
+      await reconcilePieceSource(
+        runtime,
+        (await controller
+          .getDefaultPattern(false))!,
+      ),
+    ).toBe("updated");
     // Let the pattern watcher observe the meta change and re-instantiate, then
     // pull the root so the new instance actually executes (pull-based graph).
     await runtime.idle();
@@ -279,7 +286,6 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     const freshRuntime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager: readerStorage,
-      experimental: { systemPatternAutoUpdate: true },
     });
     const freshController = new PiecesController(session, freshRuntime);
     let cancelPieceRegistrySink: (() => void) | undefined;
@@ -297,9 +303,8 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
       ).toBeUndefined();
       const coldRoot = await freshController.getDefaultPattern(false);
       expect(coldRoot).toBeDefined();
-      expect(
-        await freshController.checkAndUpdateDefaultPattern(coldRoot),
-      ).toBe("updated");
+      expect(await reconcilePieceSource(freshRuntime, coldRoot!))
+        .toBe("updated");
       expect(
         readerReplica.get?.(profileLink.id, profileLink.scope),
       ).toBeDefined();
@@ -337,6 +342,94 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
       await freshController.dispose();
       await readerStorage.close();
     }
+  });
+
+  /**
+   * A root pinned to V2 whose stored setup was staged by V1, started as it is.
+   * Returns the V2 entry ref the root now points at.
+   */
+  async function stageMetadataOnlyRollForward() {
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+    await piece.setInput({ profile: { name: "warm" } });
+    await runtime.idle();
+    await controller.stopPiece(root);
+
+    stub.setSource(ROOT_V2);
+    const currentPattern = await runtime.patternManager.compilePattern(
+      {
+        main: DEFAULT_APP_PATTERN_PATH,
+        files: [{ name: DEFAULT_APP_PATTERN_PATH, contents: ROOT_V2 }],
+      },
+      { space: controller.getSpace() },
+    );
+    const currentRef = runtime.patternManager.getArtifactEntryRef(
+      currentPattern,
+    )!;
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", currentRef);
+    });
+    expect(error).toBeUndefined();
+    const metadataOnlyRoot = (await controller.getDefaultPattern(false))!;
+    await controller.startPiece(metadataOnlyRoot);
+    return currentRef;
+  }
+
+  /**
+   * Run `body` with pattern loads for `identity` answered by `answer` instead
+   * of by the pattern manager.
+   */
+  async function withLoadFor(
+    identity: string,
+    answer: () => Promise<undefined>,
+    body: () => Promise<void>,
+  ) {
+    const manager = runtime.patternManager;
+    const load = manager.loadPatternByIdentity.bind(manager);
+    manager.loadPatternByIdentity = (...args: Parameters<typeof load>) =>
+      args[0] === identity ? answer() : load(...args);
+    try {
+      await body();
+    } finally {
+      manager.loadPatternByIdentity = load;
+    }
+  }
+
+  it("leaves the root alone when its pinned pattern will not load", async () => {
+    // The re-stage repairs a document whose stored setup an older version
+    // staged. With no pattern to stage from there is nothing to repair with,
+    // so the root is left exactly as it is rather than half-written.
+    const currentRef = await stageMetadataOnlyRollForward();
+
+    await withLoadFor(
+      currentRef.identity,
+      () => Promise.resolve(undefined),
+      async () => {
+        await controller.ensureDefaultPattern();
+      },
+    );
+    await runtime.idle();
+
+    const after = (await controller.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)).toEqual(currentRef);
+    expect(getPatternSetupIdentityRef(after)).not.toEqual(currentRef);
+  });
+
+  it("leaves the root alone when loading its pinned pattern throws", async () => {
+    const currentRef = await stageMetadataOnlyRollForward();
+
+    await withLoadFor(
+      currentRef.identity,
+      () => Promise.reject(new Error("the pattern index is unreadable")),
+      async () => {
+        await controller.ensureDefaultPattern();
+      },
+    );
+    await runtime.idle();
+
+    const after = (await controller.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(after)).toEqual(currentRef);
+    expect(getPatternSetupIdentityRef(after)).not.toEqual(currentRef);
   });
 
   it("repairs a metadata-only roll-forward to the current pattern", async () => {
@@ -379,16 +472,21 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     await controller.startPiece(metadataOnlyRoot);
     expect(metadataOnlyRoot.key("profileName").getRaw()).toBeUndefined();
 
-    const outcome = await controller.checkAndUpdateDefaultPattern(
-      metadataOnlyRoot,
-    );
+    // Opening the root re-stages a document its pinned pattern did not set
+    // up, which is what repairs the projection. The repair writes through a
+    // transaction of its own, so read the root it hands back rather than the
+    // one captured before it: the older cell still describes the metadata the
+    // re-stage replaced.
+    const repaired = await controller.ensureDefaultPattern();
     await runtime.idle();
+    expect(getPatternSetupIdentityRef(repaired.getCell())).toEqual(currentRef);
 
-    const repairedRoot = metadataOnlyRoot.asSchema(
+    const repairedRoot = repaired.getCell().asSchema(
       {
         type: "object",
         properties: {
           pieceRegistry: { type: "array", items: { type: "string" } },
+          profileName: { type: "string" },
         },
       } as const,
     );
@@ -401,8 +499,11 @@ describe("default-app golden replay (state survives an in-place roll-forward)", 
     await repairedRoot.pull();
     await runtime.idle();
 
+    // `profileName` is V2's alone, and the projection carrying it is what the
+    // re-stage writes. `pieceRegistry` was seeded under V1 and survives a root
+    // that was never repaired, so it says nothing on its own.
+    expect(repairedRoot.key("profileName").get()).toBe("warm");
     expect(pieceRegistry).toEqual(SEEDED_PIECES);
-    expect(outcome).toBe("updated");
     cancelPieceRegistrySink();
   });
 });

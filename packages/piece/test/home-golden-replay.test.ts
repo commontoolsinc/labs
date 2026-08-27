@@ -12,6 +12,7 @@ import {
   HOME_PATTERN_SOURCE,
   PiecesController,
 } from "../src/ops/pieces-controller.ts";
+import { reconcilePieceSource } from "../src/ops/piece-origin.ts";
 
 // The route that ref expands to — what the toolshed serves, and what the
 // worker names the module by when it compiles the pattern over HTTP.
@@ -24,9 +25,8 @@ const HOME_PATTERN_PATH = resolveSystemPatternSource(
 //
 // The home root (home.tsx) carries the user's REAL durable data — favorites,
 // journal, spaces — where losing data on an update would be unrecoverable.
-// This test is the state-survival evidence that lets home ride the same
-// `systemPatternAutoUpdate` flag as every other tracked system root (the
-// home-specific second gate was retired on its strength): seed representative
+// This test is the state-survival evidence that lets home follow its origin
+// like every other piece: seed representative
 // home data, roll the home root N→N+1 in place, and prove every list survives
 // intact and the new code runs over it.
 //
@@ -147,7 +147,6 @@ describe("home golden replay (durable home state survives an in-place roll-forwa
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
       // One flag covers every tracked system root, home included.
-      experimental: { systemPatternAutoUpdate: true },
     });
     // A HOME session: space === the user's identity DID, which is what flips
     // `isHomeSpace` on inside the controller (ensureDefaultPattern + the update
@@ -203,7 +202,13 @@ describe("home golden replay (durable home state survives an in-place roll-forwa
     // N+1: the toolshed now serves a newer home (its `summary` logic changed).
     // Roll forward in place.
     stub.setSource(ROOT_V2);
-    expect(await controller.checkAndUpdateDefaultPattern()).toBe("updated");
+    expect(
+      await reconcilePieceSource(
+        runtime,
+        (await controller
+          .getDefaultPattern(false))!,
+      ),
+    ).toBe("updated");
     // Let the watcher observe the meta change and re-instantiate, then pull so
     // the new instance actually executes.
     await runtime.idle();

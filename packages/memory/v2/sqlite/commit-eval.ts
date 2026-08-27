@@ -69,6 +69,14 @@ const READ_BACK_CHUNK = 400;
  *  transaction error. */
 export class RowLabelCommitError extends Error {
   override name = "RowLabelCommitError";
+
+  /**
+   * The commit operation that produced the refusal, attached by the engine's
+   * operation loop. The evaluator itself sees only one sqlite operation; the
+   * engine adds this index before the error crosses the commit boundary so a
+   * wave can attribute the proven-no-commit failure to its owning run.
+   */
+  operationIndex?: number;
 }
 
 const fail = (message: string): never => {

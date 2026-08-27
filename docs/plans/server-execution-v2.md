@@ -1118,10 +1118,10 @@ Stages, one PR each except C, which is a three-PR train (below):
       dirtiness and delivery both key by `scope_key`, and a
       subscriber receives only its applicable set (protocol.md §3);
       pattern-source watcher +
-      hot-swap in the SpaceServer — the `systemPatternAutoUpdate`
-      posture flips server-side (serving-loop.md §3e;
+      hot-swap in the SpaceServer (serving-loop.md §3e;
       `pattern-update-testing.md` scenarios are the acceptance
-      surface); the watermark doc + `derivedThrough` +
+      surface — following a piece's origin is not a serving concern, so
+      only the swap half lands here); the watermark doc + `derivedThrough` +
       `waitForSettled(space, seq)` (protocol.md §4, testing.md §3);
       the §7 counters; engine-side derived-envelope admission check —
       a derived commit's producing session must be the holder's own
