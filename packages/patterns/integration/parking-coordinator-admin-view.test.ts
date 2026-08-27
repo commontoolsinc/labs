@@ -9,7 +9,10 @@ import {
   PiecesController,
 } from "./pieces-controller.ts";
 import {
+  clickCfButton,
   clickCfButtonAndWaitForText,
+  clickTrustedAction,
+  fillCfInput,
   waitForDisabled,
   waitForRuntimeIdle,
   waitForText,
@@ -17,6 +20,8 @@ import {
 } from "./cfc-browser-helpers.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
+
+const TRUSTED_PROFILE_CREATE_ACTION = "CreateProfile";
 
 describe("parking coordinator admin view integration test", () => {
   const shell = new ShellIntegration();
@@ -88,7 +93,7 @@ describe("parking coordinator admin view integration test", () => {
     await cc?.dispose();
   });
 
-  it("renders manager and admin controls with the expected enabled states", async () => {
+  it("offers no admin control until an identity has resolved", async () => {
     const page = shell.page();
     await shell.goto({
       frontendUrl: FRONTEND_URL,
@@ -108,9 +113,40 @@ describe("parking coordinator admin view integration test", () => {
       "Make admin",
     );
     await waitForDisabled(page, "#parking-enable-admin-manager", false);
+    // A role binds to an identity, and a fresh identity has no profile, so
+    // Alice's row cannot be granted one and the card offers the wish's own
+    // create surface instead.
     await waitForDisabled(page, '[data-parking-admin-toggle="Alice"]', true);
     await waitForDisabled(page, "#parking-admin-mode-toggle", true);
     await waitForTextAbsent(page, "#parking-admin-people-section", "People");
+  });
+
+  it("grants admin once a profile is created and the row claimed", async () => {
+    // Navigates itself rather than inheriting the step above's page: a step
+    // the ON arm skips has to be runnable on its own, which is how anyone
+    // debugging the skip will run it.
+    const page = shell.page();
+    await shell.goto({
+      frontendUrl: FRONTEND_URL,
+      view: {
+        spaceName: SPACE_NAME,
+        pieceId,
+      },
+      identity,
+    });
+    await waitForRuntimeIdle(page);
+
+    // Creating a profile is the only path in — there is no typed-name
+    // fallback. Creation is a cross-space commit the runner drives through
+    // pending/retry cycles; runtime idle is its completion signal.
+    await fillCfInput(page, "#wish-profile-name-input", "Alice");
+    await clickTrustedAction(page, TRUSTED_PROFILE_CREATE_ACTION);
+    await waitForRuntimeIdle(page);
+
+    // Claiming the row binds it to that identity, which is what makes it a
+    // row a role can name.
+    await clickCfButton(page, '[data-parking-admin-claim="Alice"]');
+    await waitForRuntimeIdle(page);
 
     await clickCfButtonAndWaitForText(
       page,

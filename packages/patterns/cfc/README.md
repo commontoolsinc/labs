@@ -144,12 +144,22 @@ unreviewed action in the same pattern, or another pattern holding the same cell
 — is refused by the runtime rather than by convention.
 
 **A role names someone who is there.** Once a roster gates itself, a role
-granted to a subject no actor can be — a name nobody answers to, a profile
-nobody holds — fills the roster without giving anyone the authority to change
-it, and the bootstrap that opened the first grant never reopens. Grant only to a
-subject drawn from the pattern's own list of them, and where a subject can be
-renamed or removed, refuse the change rather than leave a role pointing at
-someone who is no longer there.
+granted to a subject no actor can be fills the roster without giving anyone the
+authority to change it, and the bootstrap that opened the first grant never
+reopens. Grant only to a subject drawn from the pattern's own list of them.
+
+Which subject you pick decides how much of that you have to enforce by hand.
+Name a person by name and you own three rules: a rename has to move the role, a
+removal has to drop it, and a later person of that name must not inherit it.
+Name the profile **cell** instead, comparing subjects with
+`activeAdminRoleForSubject` and `subjectHasAdminRole`, and the first and third
+stop existing — a rename moves nothing, and a newcomer arrives holding no
+profile at all. Two traps come with cells, both of them load-bearing. An unset
+optional cell input reads back as a present-but-empty handle, so it is truthy
+and a presence test on it always passes: gate on a name string, which is
+honestly `""` when nothing resolved. And pin the terminal cell with
+`resolveAsCell()` before storing one, or what gets stored is "whoever the reader
+resolves".
 
 Two of these describe this runtime rather than the CFC specification, and an
 author who goes looking for them in the specification will not find them. The

@@ -265,4 +265,26 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
       "input has a safe compatibility default.",
     record: "docs/history/agent-connector-owner-identity-break.md",
   },
+  {
+    // A parking-admin role named a person by name. Review asked for the CFC
+    // primitives instead — compare profiles by their cells, not by what those
+    // cells are called — so a role names the viewer's `#profile` cell, and the
+    // stored shape of a role changed with it.
+    pattern: "factory-outputs/parking-coordinator/main.tsx",
+    baselines: ["20260820T191154Z-Fah23u1z5LYk4qKk"],
+    // The same change seen from the two roles a contract has: the subject is a
+    // cell where it was an inline object, and the name inside it goes with it.
+    paths: [
+      "argument.adminRegistry.admins[].subject",
+      "result.adminRegistry.admins[].subject.personName",
+    ],
+    reason:
+      "A role's subject moved from a person's name to their profile cell, so " +
+      "authority is compared by identity rather than by a string. A stored " +
+      "role of the old shape names nobody the pattern can resolve, and the " +
+      "piece holding it keeps running its own source; a space starting over " +
+      "on the new contract recovers through the same open-roster bootstrap " +
+      "that lets a fresh space have an admin at all.",
+    record: "docs/history/parking-admin-profile-subject-break.md",
+  },
 ];
