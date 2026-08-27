@@ -148,17 +148,32 @@ not change either outcome.
 Recovering the prior state therefore means restoring the prior *content*, not
 the prior source.
 
-The prior source itself is not the obstacle, and an early guess that it "comes
-from the repository" is wrong: `cf inspect piece <snapshot> <entity> --code
---json` returns the full `pattern.code` from the store — the board's
-pre-migration `main.tsx` came back at 14,085 characters under identity
-`MKlcErXYo-…`. What does not come back is the module **graph**. That source
-imports from and re-exports `./topic.tsx`, three topic generations are live on
-this board, and only one of them — which 15 of the 125 children run, against
-87 on another — exports the symbols the board compiles against. Pairing the
-modules back into the graph that produced a given identity is guesswork:
-recompiling a plausible pair yielded a different identity than the original.
-Nothing records which graph produced an identity.
+The prior source is not the obstacle, and neither is its graph. Two guesses
+made here were false, and both were checked against the store rather than
+reasoned about a second time.
+
+The source comes back from the store, not from the repository: `cf inspect
+piece <snapshot> <entity> --code --json` returns the board's pre-migration
+`main.tsx` in full, 14,085 characters under identity `MKlcErXYo-…`.
+
+The graph comes back too, which matters more, because the board imports and
+re-exports `./topic.tsx` and three topic generations are live on this board —
+only one of which exports the symbols it compiles against, run by 15 of the
+125 children against 87 on another. Guessing that pairing fails. It does not
+have to be guessed: a revision in `pieceSourceHistory` carries a link to its
+source entity, that entity's `imports` array holds one edge per dependency,
+and each edge is `{specifier, link}` — the specifier as written beside a link
+to the exact source entity that satisfied it. Followed from this snapshot,
+`./topic.tsx` resolves to identity `uqb-PnkKp…`, 37,316 characters, exporting
+`asArray` — the minority generation, named rather than inferred. The whole
+prior graph is walkable from the snapshot alone.
+
+What is **not** explained is that replaying the correctly paired files through
+a current checkout produced identity `edorpCS9Bxs…` rather than `MKlcErXYo-…`.
+Toolchain drift, the root passed to the compiler, a dependency version, or
+something else about how identity is computed that two files do not determine
+would all account for it, and none was tested. It is a question for whoever
+owns identity computation, not a defect claimed here.
 
 **Not established here:** whether this deadlock generalizes beyond one board
 whose children link into its argument, or whether a content export and restore
