@@ -1831,6 +1831,40 @@ describe("setup/start", () => {
     }
   });
 
+  it("runSyncedWithCommit refuses a result cell bound to an open transaction", async () => {
+    // Writes staged in a transaction the caller still owns have no storage
+    // verdict yet — the caller decides their fate — so there is nothing to
+    // issue a receipt for. Refusing up front is what makes "resolved means
+    // storage accepted it" true of every receipt this method returns.
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    };
+    const resultCell = runtime.getCell(
+      space,
+      "runSyncedWithCommit bound transaction",
+    );
+    const tx = runtime.edit();
+
+    try {
+      await expect(runtime.runSyncedWithCommit(
+        resultCell.withTx(tx),
+        trustExecutable(runtime, pattern),
+        {},
+        {
+          expectedPatternIdentity: {
+            identity: "of:fid1:expected",
+            symbol: "default",
+          },
+        },
+      )).rejects.toThrow("requires an unbound result cell");
+    } finally {
+      await tx.commit();
+    }
+  });
+
   it("runSyncedWithCommit rejects a commit storage refused", async () => {
     // The receipt's whole claim is that storage accepted the transaction, so
     // a rejected commit has to reach the caller as that rejection. Reported

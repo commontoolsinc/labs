@@ -5034,11 +5034,12 @@ export class Runner {
   /**
    * Runs a pattern and returns its reconciled result-cell view.
    *
-   * This surface never issues a receipt, so a failure after the setup
-   * transaction commits reaches the caller as the failure itself. Callers that
-   * classify such a failure by message — `isCfcMigrationRejection` among them
-   * — depend on that, which is why the unwrap below stands guard at the
-   * boundary even though `#runSynced` mints no receipt for this path.
+   * A failure after the setup transaction commits reaches the caller as the
+   * failure itself, never wrapped: a receipt is what a wrapper would carry,
+   * and this surface asks for none. Callers that classify such a failure by
+   * message — `isCfcMigrationRejection` among them — depend on that, so the
+   * gate that keeps receipts to the callers who request one is load-bearing
+   * for more than the receipt.
    */
   async runSynced(
     resultCell: Cell<any>,
@@ -5046,20 +5047,13 @@ export class Runner {
     inputs?: any,
     options?: RunSyncedOptions,
   ): Promise<Cell<any>> {
-    try {
-      return (await this.#runSynced(
-        resultCell,
-        pattern,
-        inputs,
-        options,
-        false,
-      )).cell;
-    } catch (error) {
-      if (error instanceof PatternSetupPostCommitError) {
-        throw error.cause;
-      }
-      throw error;
-    }
+    return (await this.#runSynced(
+      resultCell,
+      pattern,
+      inputs,
+      options,
+      false,
+    )).cell;
   }
 
   /**
@@ -5112,14 +5106,14 @@ export class Runner {
       options,
       true,
     );
-    if (result.commit === undefined) {
-      // `#runSynced` issues a receipt on every path it can reach with
-      // `requireCommit`, so this is unreachable rather than merely unlikely.
-      // It is a throw and not an assertion because the alternative is handing
-      // back a receipt whose pattern is undefined.
-      throw new Error("the pattern setup did not produce a commit receipt");
-    }
-    return { cell: result.cell, commit: result.commit };
+    // Under `requireCommit` the helper has two exits: it throws, or it issues
+    // a receipt. The check above is what rules out the third — the staging
+    // path, which commits nothing — and it holds for the whole call rather
+    // than only at entry: a cell's `tx` is readonly and `withTx()` yields a
+    // different cell, so this one cannot acquire a transaction along the way,
+    // and `ready` is a transaction's initial state, which `pending` and `done`
+    // follow but never precede.
+    return { cell: result.cell, commit: result.commit! };
   }
 
   /**
@@ -5158,14 +5152,6 @@ export class Runner {
     // scheduler if the transaction isn't committed before the first functions
     // run. Though most likely the worst case is just extra invocations.
     const givenTx = resultCell.tx?.status().status === "ready" && resultCell.tx;
-    if (givenTx && requireCommit) {
-      // `runSyncedWithCommit` rejects a bound cell before it starts, but the
-      // awaits above yield, and a transaction attached during them would
-      // otherwise reach the staging path below and produce no receipt at all.
-      throw new Error(
-        "a committed pattern setup receipt requires an unbound result cell",
-      );
-    }
     let setupRes: ReturnType<typeof this.setupInternal> | undefined;
     let commit: PatternSetupCommitReceipt | undefined;
     const assertExpectedPatternIdentity = (
@@ -5253,6 +5239,12 @@ export class Runner {
         setupRes = undefined;
       } else {
         setupRes = outcome.ok;
+        // Only a caller that asked for a receipt gets one, and that decides
+        // more than the return value: the receipt is what the post-commit
+        // wrapper below carries, so withholding it here is what keeps
+        // `runSynced`'s failures unwrapped for the callers that read their
+        // messages. Minting unconditionally would wrap those failures in a
+        // type whose message names none of them.
         if (requireCommit) {
           const patternRef = setupRes.patternRef;
           if (patternRef === undefined) {
