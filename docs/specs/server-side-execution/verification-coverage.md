@@ -5284,13 +5284,13 @@ supply; OW29/OW32/OW34 closed):
   starvation, so the entry now names that product charge, not a test
   flake). That 2026-08-26 census — THREE patterns entries: default-app's
   reload STEP, lunch-poll-vote's FILE entry, and the topic-board
-  pivot-baseline STEP — has since fallen twice. #6316 (2026-08-26) lifted
-  the topic-board STEP with its content-addressed arrival-witness fix, and
-  the lunch-poll-vote FILE entry LIFTED 2026-08-27 on its own
-  owner-directed re-baseline (8/8; the LUNCH-POLL block below). **The
-  current census (2026-08-27) is ONE patterns entry — default-app's reload
-  STEP — and NO file-level entry in any suite.** It gates the FLIP —
-  whose bar is the list EMPTY — not the land. Rows, one per
+  pivot-baseline STEP — is now TWO: #6316 (2026-08-26) lifted the
+  topic-board STEP with its content-addressed arrival-witness fix, without
+  updating this sentence. **The current census (2026-08-27) is TWO patterns
+  entries: default-app's reload STEP and lunch-poll-vote's FILE entry.**
+  BOTH were campaigned for a lift on 2026-08-27 and NEITHER lifted (the
+  STEP-ENTRY and LUNCH-POLL blocks below). They gate the FLIP — whose bar
+  is the list EMPTY — not the land. Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
   lifts:
   - **OW45 — the profile piece's PROGRAM-materialization write path
@@ -6321,9 +6321,10 @@ supply; OW29/OW32/OW34 closed):
     This was neither a server refusal nor loss of a required client wire
     send; it was the server name-resolution retry gate preventing
     issuance.
-    **THE LUNCH-POLL FILE ENTRY IS LIFTED (2026-08-27) — 8/8 on the
-    owner-directed re-baseline, at a posture strictly harder than any
-    archived campaign's.** The bar this satisfies is the one the
+    **THE 2026-08-27 LIFT ATTEMPT: the local re-baseline PASSED 8/8 and
+    the DIRECT CI UNSKIP PROBE ON THE SAME BRANCH went RED — NO LIFT.**
+    Recorded in that order because the order is the finding. The bar the
+    local campaign satisfies is the one the
     2026-08-26 ruling set in place of the old 10/10: an approximately
     eight-run re-baseline, a red-first mechanism regression, and eight
     post-fix runs. The regression and the first eight runs landed with
@@ -6368,9 +6369,38 @@ supply; OW29/OW32/OW34 closed):
     `/Users/berni/labs-worktrees/b1-lifts-evidence/runs/lunch/` (per-run
     ledger, test and toolshed logs, meta+stats JSON, own `memory/` store,
     plus `store-census.txt`), report at
-    `/Users/berni/labs-worktrees/b1-lifts-report.md`. With this lift NO
-    suite carries a file-level ON skip any more; the flip's list-EMPTY bar
-    is down to default-app's reload STEP alone.
+    `/Users/berni/labs-worktrees/b1-lifts-report.md`.
+    **AND THEN CI SAID NO.** The lift PR (#6410) un-skipped the file, so its
+    own CI ran it in the true lane for the first time since #5744's re-skip:
+    **ON shard 7 of run 33085668531 (job 98564797510, head `0cebb3621`) went
+    RED.** Not at any stage this row records — the failure is
+    `lunch-poll-vote.test.ts:271`, the **HOST's**
+    `clickCfButton("#lp-join-button")`, timing out at the test's own
+    300000 ms bound after 5m10s with `"#lp-join-button": []` and the poll
+    body rendered. Every red this row has recorded for this file is the
+    GUEST's join at line 306, and the 2026-08-24 gate's own finding was
+    that "the host always joins". The 2026-08-24 n=3 ensure-ON side probe is
+    the nearest recorded neighbour — it timed out even earlier, filling the
+    HOST's `#wish-profile-name-input` — and #6312 fixed the member that
+    probe saw. Whether this is that family's residue, a new host-side
+    member, or the fifth-face load-park member reaching this surface is
+    UNDETERMINED from the CI artifact: the CI window between the file's
+    start and its failure is SILENT (zero `pattern-load-error`,
+    `pattern-swap-setup-error`, `sidecar-run-raced`,
+    `deferred-start-catchup`, `session-remount`, `piece-start-commit-failed`
+    — the neighbouring occurrences in that job's log fall outside the
+    window), and **CI does not publish the toolshed log**, so no server-side
+    member can be excluded from it. n=1 in CI, against 0/8 locally.
+    **DISPOSITION: NO LIFT.** The entry stays, its reason extended with this
+    probe (and the skip-list test pinned to it) so the 8/8 cannot be read as
+    a clean bar by the next seat. What the split says on its own terms: a
+    local campaign — however careful its posture, and this one deliberately
+    matched the lane on both the ensure and the source authority — is not
+    the lane. This row already carries one member with exactly that profile
+    (the fifth-face load-park member: local control 0/12, CI 2/2 red on two
+    shards), and the honest reading is that the lift bar for this file
+    should require a green DIRECT CI unskip probe, not a local count alone.
+    That is a bar change, so it is the owner's call, flagged not taken.
     **THE ENSURE-ON PROFILE-SURFACE MEMBER ROOT-CAUSED AND FIXED
     2026-08-25 (PR #6312) — the n=3 side probe's "create surface never renders"
     shape and the #6248 board's profile-shard family, reproduced

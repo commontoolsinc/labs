@@ -128,10 +128,6 @@ const SUITE_PACKAGE_DIR: Record<ServerExecutionSuite, string> = {
  * stage-C W3 (2026-08-19) after OW35's close for the W2 cascade-echo
  * residual; its sibling `cfc-group-chat-demo-two-browsers` was
  * un-skipped by fan-out stage B (2026-08-17, 3/3 green).
- * That 2026-08-19 lift did NOT hold: #5744's profile-first join re-skipped
- * the file the same week on a different member. It is lifted AGAIN, and on
- * that member's own evidence, as of 2026-08-27 — see the lift comment in
- * the `patterns` list below.
  */
 
 /**
@@ -225,35 +221,103 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "10/10 quiet-and-loaded ON under the current source-authority " +
         "posture.",
     },
-    // The lunch-poll-vote FILE entry is LIFTED (2026-08-27). Its bar was
-    // NOT the old 10/10: the 2026-08-26 owner ruling superseded that with
-    // an approximately eight-run re-baseline, a red-first mechanism
-    // regression, and eight post-fix runs (verification-coverage.md OW45).
-    // The regression and the first eight runs landed with #6378 — the
-    // served event reached `ProfileHome.inSpace()` before the anonymous
-    // target name was cached and `retries: false` dropped its
-    // `RetryImmediately` signal, so the guest's ~98-101-op
-    // program-materialization transaction was never issued; the scheduler
-    // now preserves the served carriage across that name-resolution
-    // requeue. This lift adds the re-baseline AT THE CURRENT LANE POSTURE:
-    // 8/8 GREEN in 17-18 s at main 4b70949ac, ON-built binary (sha256
-    // 5018e589dc54b19a…), fresh store + own 97xx port + posture probe per
-    // run, 4 quiet / 4 loaded interleaved — and, unlike every archived
-    // campaign, with the space-root ensure ON (the production default; the
-    // ON lanes stopped opting out at #6248) and the toolshed's own
-    // pattern-source `API_URL` set to the run port (the split-source
-    // launcher defect the OW45 RCA root-caused). The member's own store
-    // discriminator is negative in 8/8: the red signature is a guest
-    // profile space of exactly 4 commits with NO `patternIdentity`, and
-    // every space of every run here carries `patternIdentity` plus a
-    // 141-198-operation materialization commit. Counters across the eight:
-    // zero pattern-load-error, zero pattern-swap-setup-error, zero
-    // catch-up activations or failures, zero terminal deferred-start
-    // deaths, zero load-park deferrals, zero schema-doc-quarantine. The
-    // entry's history — the 2026-08-19 swatch-stall lift, #5744's
-    // client-start re-skip, the 2026-08-24 gate that closed b04 and
-    // narrowed the charge to the write-side member — is preserved in git
-    // history and in OW45's LUNCH-POLL FILE ENTRY'S OWN GATE block.
+    {
+      // Re-listed by the lunch-poll identity PR (#5744). This file was
+      // LIFTED 2026-08-19 for the swatch-stall class (stage-C W3.1 —
+      // history in the header comment above); the profile-first join
+      // that PR introduces newly exposes the arm-B family's REMAINING
+      // member (the entry above): the test now creates the viewer's
+      // profile piece mid-test, and the flag-ON client's deferred start
+      // of that fresh piece dies terminally on the first-hydration
+      // stale-confirmed-read ConflictError, killing the client's piece
+      // context for the session — so the wish `#profile` never
+      // resolves and the join card never renders `#lp-join-button`.
+      // Both the 2026-08-22 red (run 32539777265, shards 7 and 9 —
+      // shard 9's cfc-staged-publish red is the same class's per-run
+      // lottery) and the 2026-08-24 red (run 32769542550) carry the
+      // deferred-start tx-commit-error signature; the OFF lane runs
+      // this file green. Every later step depends on that join, hence
+      // a FILE entry rather than a step guard. Same class, same fork
+      // memo as the entry above. MERGE NOTE (the catch-up-and-start
+      // PR): both recorded reds PREDATE the recovery landing — the
+      // "dies terminally" mechanism is exactly the b04 death that
+      // recovery closes (verification-coverage.md OW45's
+      // CATCH-UP-AND-START block), so this entry's lift condition is
+      // now concretely testable; it lifts on its own gate evidence at
+      // the merged head, never by inference from the default-app gate.
+      // THAT GATE RAN 2026-08-24 — 10 runs at merged head f14e44830
+      // (ON binary sha256 ce65782063f4f14a1…, fresh store + posture
+      // probe per run, ensure-off, 5 quiet / 5 loaded interleaved):
+      // 7/10, NO LIFT, and the b04 class above is CLOSED on this
+      // file's own evidence (catchup activations in 10/10 runs,
+      // deferred-start-catchup-failed 0, terminal "Error committing
+      // deferred …" 0, pattern-load-error 0 — the "dies terminally"
+      // mechanism did not reproduce once). The three reds are ONE
+      // shape and a THIRD residue member, on the WRITE side: the
+      // GUEST browser's mid-session profile piece never lands its
+      // ~98-101-op program-materialization commit, so its space holds
+      // exactly 4 commits (byte-identical across all three reds), no
+      // patternIdentity anywhere, and appears in ZERO toolshed log
+      // lines — greens reach 14-21 commits with patternIdentity named
+      // 57-216 times. That campaign deliberately left refused vs
+      // dropped vs never issued undetermined. PR #6378 later pinned the
+      // mechanism: the authoritative server attempt was dropped on its
+      // `RetryImmediately` name-resolution signal before it could issue
+      // the transaction. Flagged there, not here: S-B's barrier
+      // cannot cover a write that is never in flight, and the S-C
+      // skip ruling's premise (waitForRuntimeIdle before any reload)
+      // does not reach a surface with no reload. Recorded so nobody
+      // re-derives them: piece-start-commit-failed is NOT the
+      // discriminator (13 occurrences, green runs included) and
+      // OW46's structure-load-stuck is blind here (fires in both
+      // arms, names only the host's space). Full evidence in
+      // verification-coverage.md OW45's LUNCH-POLL FILE ENTRY'S OWN
+      // GATE block.
+      file: "integration/lunch-poll-vote.test.ts",
+      phase: "phase-7",
+      reason: "OW45 arm B, charge NARROWED 2026-08-24 by this entry's " +
+        "OWN 10-run gate at merged head f14e44830 — 7/10 green, no " +
+        "lift (verification-coverage.md OW45's LUNCH-POLL FILE " +
+        "ENTRY'S OWN GATE block). The b04 client-start class this " +
+        "entry was minted for (fork memo: " +
+        "optimize/ow45-armb-client-start-fork.md) is CLOSED at that " +
+        "head: catch-up activations in 10/10 runs, zero terminal " +
+        "deferred-start deaths, zero recovery failures, zero " +
+        "pattern-load-error. The entry's THIRD, WRITE-SIDE residue " +
+        "member is RESOLVED by PR #6378: the authoritative server " +
+        "attempt reached ProfileHome.inSpace() before the anonymous " +
+        "target name was cached, then retries: false dropped its " +
+        "RetryImmediately signal. The ~98-101-op " +
+        "program-materialization transaction was therefore never " +
+        "issued; this was neither a refusal nor loss of a required " +
+        "client wire send. The 2026-08-26 owner ruling makes the " +
+        "server transaction authoritative under ON. Current-main " +
+        "evidence moved from 2/8 target-member reds to 0/8 after the " +
+        "scheduler retained the served carriage across the " +
+        "name-resolution requeue. The prior 10/10 lift bar is " +
+        "superseded by that owner-directed approximately eight-run " +
+        "pin. THAT RE-BASELINE RAN 2026-08-27 AND PASSED LOCALLY, AND " +
+        "THE DIRECT CI UNSKIP PROBE ON THE SAME BRANCH FAILED: 8/8 " +
+        "green at main 4b70949ac on the ON binary at the current lane " +
+        "posture (ensure ON, toolshed self-sourced), with the " +
+        "member's own store discriminator negative in every run — but " +
+        "the un-skipped file went RED in ON shard 7 of run " +
+        "33085668531 (job 98564797510, head 0cebb3621), at " +
+        "lunch-poll-vote.test.ts:271 on the HOST's " +
+        "clickCfButton(#lp-join-button), 300000ms, 5m10s. That is an " +
+        "EARLIER stage than every red this entry records: the " +
+        "2026-08-24 gate's three reds were the GUEST's join at line " +
+        "306, and its finding was that the host always joins. The CI " +
+        "window is silent — zero pattern-load-error, " +
+        "pattern-swap-setup-error, sidecar-run-raced, " +
+        "deferred-start-catchup, session-remount and " +
+        "piece-start-commit-failed between the file's start and its " +
+        "failure — and CI does not publish the toolshed log, so the " +
+        "server-side members cannot be excluded from that artifact. " +
+        "Local 0/8 against CI 1/1 is itself the observation. This " +
+        "FILE entry remains explicit until the phase-7 coordinator " +
+        "lifts it.",
+    },
     // The sqlite identity pair's two FILE entries were LIFTED (OW53
     // CLOSED, 2026-08-22): the sqlite builtins consumed the RUNTIME's
     // ambient identity — the SERVICE, on a serving runtime — where the

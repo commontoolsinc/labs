@@ -38,9 +38,13 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
-**Delta 2026-08-27: the lunch-poll-vote FILE entry LIFTS (8/8); the
-default-app reload STEP does NOT (7/10). The patterns skip census is
-now ONE entry and NO file-level entry in any suite.** Both campaigns ran
+**Delta 2026-08-27: BOTH remaining entries were campaigned for a lift and
+NEITHER lifted. default-app's reload STEP is 7/10 locally. lunch-poll-vote
+passed its local re-baseline 8/8 — and then the lift PR's own CI ran the
+un-skipped file in the true lane and it went RED (ON shard 7, run
+33085668531, at the HOST's join, a stage no red for this file had ever
+been recorded at). The census stays TWO entries; the flip's list-EMPTY bar
+is unmoved.** Both campaigns ran
 at main `4b70949ac` on one ON-built binary, fresh store + own 97xx port +
 ON posture probe per run, PID-only teardown, `gtimeout 600` never raised,
 quiet and loaded interleaved — and at **two posture changes from every
@@ -60,10 +64,17 @@ action state) — two of them (a03, a07) with r06/r09's keyless
 `pattern-load-error` discriminator, which is the first fresh OBSERVATION
 of that never-root-caused member since it went to
 absence-of-observation on 2026-08-24, and one (a04) with a live but
-incomplete piece matching no stated member. The remaining entry is the
-last thing between the arc and the flip's list-EMPTY bar. Full ledgers,
-classifications, and posture rationale: verification-coverage.md OW45's
-STEP-ENTRY and LUNCH-POLL blocks.
+incomplete piece matching no stated member.
+**The method finding, which outranks both ledgers: a local campaign is not
+the lane.** Both posture corrections above were made precisely to close
+that gap, and the gap survived them. This row already carried one member
+with the same profile (the fifth-face load-park member: local control
+0/12, CI 2/2 red across two shards); lunch-poll-vote now makes two. A lift
+bar of "N local runs" is therefore weaker evidence than it reads, and the
+natural repair — require a green DIRECT CI unskip probe as part of the bar
+— is a bar change and so the owner's call. Flagged, not taken. Full
+ledgers, the CI probe, classifications, and posture rationale:
+verification-coverage.md OW45's STEP-ENTRY and LUNCH-POLL blocks.
 
 **Delta 2026-08-26: the default-app reload STEP's post-#6292 gate is
 9/10 — NO LIFT. The older read-side residues are likely closed; the
@@ -84,10 +95,9 @@ new observed charge; the 10/10 lift bar is unchanged. Full ledger and
 store/log discriminators:
 [`ow45-default-app-reload-post-6292-remeasure-2026-08-26.md`](../history/plans/server-execution-v2/optimize/ow45-default-app-reload-post-6292-remeasure-2026-08-26.md).
 That census — THREE patterns entries: this default-app STEP, the
-lunch-poll-vote FILE entry, and the topic-board pivot-baseline STEP —
-has since fallen twice (#6316's topic-board lift, and the lunch lift in
-the 2026-08-27 delta above). The flip still requires the list to be
-empty.
+lunch-poll-vote FILE entry, and the topic-board pivot-baseline STEP — is
+now TWO: #6316 lifted the topic-board STEP on 2026-08-26 without updating
+this sentence. The flip still requires the list to be empty.
 
 **Delta 2026-08-24 (this PR): the b04 client-start DEATH closed by
 CATCH-UP-AND-START (RULED 2026-08-24); the 10/10 gate found the arm-B
