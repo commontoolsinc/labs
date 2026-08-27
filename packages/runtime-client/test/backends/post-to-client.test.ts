@@ -39,12 +39,18 @@ describe("post-to-client", () => {
       const { posted, restore } = capturing();
 
       try {
-        postToClient(
-          {
-            msgId: 7,
-            data: { value: Symbol.for("cf.test.unpostable") },
-          } as never,
-        );
+        // The return is the contract: `web-worker/index.ts` counts a reply
+        // as `responded` or `responded-error` by it, so an implementation that
+        // substituted while still answering `true` would misreport every
+        // refused reply and pass on the posted message alone.
+        expect(
+          postToClient(
+            {
+              msgId: 7,
+              data: { value: Symbol.for("cf.test.unpostable") },
+            } as never,
+          ),
+        ).toBe(false);
 
         expect(posted).toHaveLength(1);
         expect(posted[0].msgId).toBe(7);
@@ -58,13 +64,20 @@ describe("post-to-client", () => {
       const { posted, restore } = capturing();
 
       try {
-        postToClient(
-          {
-            type: NotificationType.CellUpdate,
-            cell: { id: "of:x", space: "did:key:t", scope: "space", path: [] },
-            value: Symbol.for("cf.test.unpostable"),
-          } as never,
-        );
+        expect(
+          postToClient(
+            {
+              type: NotificationType.CellUpdate,
+              cell: {
+                id: "of:x",
+                space: "did:key:t",
+                scope: "space",
+                path: [],
+              },
+              value: Symbol.for("cf.test.unpostable"),
+            } as never,
+          ),
+        ).toBe(false);
 
         expect(posted).toHaveLength(1);
         expect(posted[0].type).toBe(NotificationType.ErrorReport);
@@ -82,14 +95,16 @@ describe("post-to-client", () => {
       const { restore } = capturing();
 
       try {
-        expect(() =>
-          postToClient(
+        let delivered: boolean | undefined;
+        expect(() => {
+          delivered = postToClient(
             {
               type: NotificationType.ErrorReport,
               message: Symbol.for("x"),
             } as never,
-          )
-        ).not.toThrow();
+          );
+        }).not.toThrow();
+        expect(delivered).toBe(false);
       } finally {
         restore();
       }
@@ -101,7 +116,8 @@ describe("post-to-client", () => {
       const { posted, restore } = capturing();
 
       try {
-        postToClient({ msgId: 8, data: { value: 1 } } as never);
+        expect(postToClient({ msgId: 8, data: { value: 1 } } as never))
+          .toBe(true);
 
         expect(posted).toEqual([{ msgId: 8, data: { value: 1 } }]);
       } finally {
