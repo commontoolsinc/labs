@@ -7304,7 +7304,8 @@ supply; OW29/OW32/OW34 closed):
 
     Terminal cover is one entry-local `{status: "needs-attention",
     consequenced: true}` notice plus the per-space unresolved-attention
-    discovery index. The entry stays authoritative and uncompactable
+    discovery index, keyed by stream sidecar and event ID and protected
+    from authored writes. The entry stays authoritative and uncompactable
     until resolution. The arrival barrier opens only after the notice's
     wave confirms the whole terminal contribution committed; failed
     checkpoint or notice writes fail closed and are counted. Retry and

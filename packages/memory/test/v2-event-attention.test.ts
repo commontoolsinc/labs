@@ -4,6 +4,7 @@ import * as Engine from "../v2/engine.ts";
 import { Server } from "../v2/server.ts";
 import {
   encodeMemoryBoundary,
+  type EventAttentionIndexValue,
   getMemoryProtocolFlags,
   type HelloOkMessage,
   MEMORY_PROTOCOL,
@@ -13,6 +14,7 @@ import {
   setServerExecutionConfig,
   streamEntriesDocId,
   type StreamEventsDocValue,
+  type StreamLinkRef,
 } from "../v2.ts";
 
 const AUDIENCE = "did:key:z6Mk-event-attention-audience";
@@ -21,6 +23,8 @@ const ALICE = "did:key:z6Mk-event-attention-alice";
 const BOB = "did:key:z6Mk-event-attention-bob";
 const STREAM = { id: "of:event-attention-result", path: ["submit"] };
 const SIDECAR = streamEntriesDocId(STREAM);
+const SECOND_STREAM = { id: "of:event-attention-result", path: ["approve"] };
+const SECOND_SIDECAR = streamEntriesDocId(SECOND_STREAM);
 
 type Connection = ReturnType<Server["connect"]>;
 
@@ -81,8 +85,10 @@ describe("event attention resolution", () => {
     sessionId: string,
     principal: string,
     eventId: string,
+    stream: StreamLinkRef = STREAM,
   ): Promise<void> => {
     const engine = await server.engineForSpace(SPACE);
+    const sidecarId = streamEntriesDocId(stream);
     Engine.applyCommit(engine, {
       space: SPACE,
       sessionId,
@@ -93,23 +99,23 @@ describe("event attention resolution", () => {
         reads: { confirmed: [], pending: [] },
         operations: [{
           op: "patch",
-          id: SIDECAR,
+          id: sidecarId,
           patches: [{
             op: "append",
             path: "/value/entries",
             values: [{
               eventId,
-              stream: STREAM,
+              stream,
               payload: { answer: "captured", nested: [1, 2] },
               runtimeInjectedEventKeys: ["detail"],
               rendererTrusted: true,
             }],
           }],
         }],
-        eventAppends: [{ id: SIDECAR, eventId }],
+        eventAppends: [{ id: sidecarId, eventId }],
       },
     });
-    const value = Engine.read(engine, { id: SIDECAR })!
+    const value = Engine.read(engine, { id: sidecarId })!
       .value as StreamEventsDocValue;
     const entry = value.entries!.find((candidate) =>
       candidate.eventId === eventId
@@ -124,6 +130,9 @@ describe("event attention resolution", () => {
       failureCount: 1,
       recovery: "explicit-retry" as const,
     };
+    const currentIndex = Engine.read(engine, {
+      id: SERVER_EXECUTION_ATTENTION_DOC_ID,
+    })?.value as EventAttentionIndexValue | undefined;
     Engine.applyCommit(engine, {
       space: SPACE,
       sessionId,
@@ -134,7 +143,7 @@ describe("event attention resolution", () => {
         reads: { confirmed: [], pending: [] },
         operations: [{
           op: "patch",
-          id: SIDECAR,
+          id: sidecarId,
           patches: [
             {
               op: "add",
@@ -165,13 +174,17 @@ describe("event attention resolution", () => {
           value: {
             value: {
               entries: {
-                [eventId]: {
-                  eventId,
-                  sidecarId: SIDECAR,
-                  phase: attention.phase,
-                  failureClass: attention.failureClass,
-                  code: attention.code,
-                  firstFailureAt: attention.firstFailureAt,
+                ...(currentIndex?.entries ?? {}),
+                [sidecarId]: {
+                  ...(currentIndex?.entries?.[sidecarId] ?? {}),
+                  [eventId]: {
+                    eventId,
+                    sidecarId,
+                    phase: attention.phase,
+                    failureClass: attention.failureClass,
+                    code: attention.code,
+                    firstFailureAt: attention.firstFailureAt,
+                  },
                 },
               },
             },
@@ -335,6 +348,55 @@ describe("event attention resolution", () => {
     expect(retryEntries.length).toBe(
       original.resolution?.kind === "retried" ? 1 : 0,
     );
+    expect(
+      Engine.read(engine, { id: SERVER_EXECUTION_ATTENTION_DOC_ID })?.value,
+    ).toEqual({ entries: {} });
+  });
+
+  it("keeps equal event IDs from different streams independently resolvable", async () => {
+    const sessionId = await openSession(ALICE);
+    await seedAttention(sessionId, ALICE, "evt-shared");
+    await seedAttention(sessionId, ALICE, "evt-shared", SECOND_STREAM);
+
+    const engine = await server.engineForSpace(SPACE);
+    const before = Engine.read(engine, {
+      id: SERVER_EXECUTION_ATTENTION_DOC_ID,
+    })?.value as EventAttentionIndexValue;
+    expect(before.entries?.[SIDECAR]?.["evt-shared"]?.sidecarId).toBe(
+      SIDECAR,
+    );
+    expect(before.entries?.[SECOND_SIDECAR]?.["evt-shared"]?.sidecarId).toBe(
+      SECOND_SIDECAR,
+    );
+
+    const first = await server.resolveEventAttention({
+      type: "event.attention.resolve",
+      requestId: "same-id-first",
+      space: SPACE,
+      sessionId,
+      eventId: "evt-shared",
+      sidecarId: SIDECAR,
+      action: "dismiss",
+    });
+    expect(first.error).toBeUndefined();
+    const afterFirst = Engine.read(engine, {
+      id: SERVER_EXECUTION_ATTENTION_DOC_ID,
+    })?.value as EventAttentionIndexValue;
+    expect(afterFirst.entries?.[SIDECAR]).toBeUndefined();
+    expect(
+      afterFirst.entries?.[SECOND_SIDECAR]?.["evt-shared"]?.sidecarId,
+    ).toBe(SECOND_SIDECAR);
+
+    const second = await server.resolveEventAttention({
+      type: "event.attention.resolve",
+      requestId: "same-id-second",
+      space: SPACE,
+      sessionId,
+      eventId: "evt-shared",
+      sidecarId: SECOND_SIDECAR,
+      action: "dismiss",
+    });
+    expect(second.error).toBeUndefined();
     expect(
       Engine.read(engine, { id: SERVER_EXECUTION_ATTENTION_DOC_ID })?.value,
     ).toEqual({ entries: {} });

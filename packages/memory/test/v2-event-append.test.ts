@@ -61,6 +61,7 @@ import {
   type ClientCommit,
   EventAppendDuplicateError,
   resetServerExecutionConfig,
+  SERVER_EXECUTION_ATTENTION_DOC_ID,
   setServerExecutionConfig,
   STREAM_ENTRIES_DOC_PREFIX,
   streamEntriesDocId,
@@ -649,6 +650,46 @@ Deno.test("event-append admission: declarations and the sidecar write guard", as
         );
       },
     );
+
+    await t.step("authored writes cannot mutate the attention index", () => {
+      for (
+        const operation of [{
+          op: "set" as const,
+          id: SERVER_EXECUTION_ATTENTION_DOC_ID,
+          value: { value: { entries: {} } },
+        }, {
+          op: "patch" as const,
+          id: SERVER_EXECUTION_ATTENTION_DOC_ID,
+          patches: [{ op: "remove" as const, path: "/value/entries" }],
+        }, {
+          op: "delete" as const,
+          id: SERVER_EXECUTION_ATTENTION_DOC_ID,
+        }]
+      ) {
+        assertThrows(
+          () => authored(41, { operations: [operation] }),
+          ProtocolError,
+          "server-owned",
+        );
+      }
+      resetServerExecutionConfig();
+      try {
+        assertThrows(
+          () =>
+            authored(41, {
+              operations: [{
+                op: "set",
+                id: SERVER_EXECUTION_ATTENTION_DOC_ID,
+                value: { value: { entries: {} } },
+              }],
+            }),
+          ProtocolError,
+          "server-owned",
+        );
+      } finally {
+        setServerExecutionConfig(true);
+      }
+    });
 
     await t.step(
       "authored creation may seed the log; a whole-doc rewrite of an EXISTING log is refused",

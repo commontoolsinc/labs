@@ -485,7 +485,9 @@ loop's duty).
   the handler ran.
 - An unresolved attention entry cannot compact. The same terminal
   contribution adds a safe summary to the per-space unresolved
-  attention index, while the stream entry remains authoritative. The
+  attention index, keyed first by stream sidecar and then by event ID,
+  while the stream entry remains authoritative. Authored commits cannot
+  mutate this server-owned index. The
   client retires the speculative echo, emits the complete safe
   `needs-attention` outcome, and keeps a persistent Retry/Dismiss
   surface. Retry is one authenticated same-space CAS: resolve the

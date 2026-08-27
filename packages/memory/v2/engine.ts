@@ -76,6 +76,7 @@ import {
   resolveScopeKey,
   type ScopeKey,
   scopeOfScopeKey,
+  SERVER_EXECUTION_ATTENTION_DOC_ID,
   SERVER_EXECUTION_EFFECTS_DOC_ID,
   type SessionEffectsDocValue,
   type SessionId,
@@ -2546,6 +2547,29 @@ const refuseMalformedAuthoredStreamWrites = (
 };
 
 /**
+ * Refuses authored-class mutations of the server-owned attention index.
+ * Terminal-cover commits and resolution transactions maintain this discovery
+ * hint together with the authoritative stream entry.
+ */
+const refuseAuthoredAttentionIndexWrites = (
+  commit: ClientCommit,
+  commitClass: CommitClass,
+): void => {
+  if (commitClass !== "authored") return;
+  for (const operation of commit.operations) {
+    if (
+      operation.op !== "sqlite" &&
+      operation.id === SERVER_EXECUTION_ATTENTION_DOC_ID
+    ) {
+      throw new ProtocolError(
+        `authored write to server-owned attention index ` +
+          `"${SERVER_EXECUTION_ATTENTION_DOC_ID}" refused`,
+      );
+    }
+  }
+};
+
+/**
  * Validate the commit's declared event appends against events.md §1/§4 and
  * resolve the stamp plan. Runs INSIDE the apply transaction, before the
  * commit seq is allocated; the returned plan is applied per-op in the
@@ -2593,6 +2617,7 @@ const validateEventAppends = (
   // The prefix-keyed shape guard runs in BOTH flag arms (M1+m4,
   // review 2026-08-11) — see its doc comment.
   refuseMalformedAuthoredStreamWrites(commit, commitClass, flagOn);
+  refuseAuthoredAttentionIndexWrites(commit, commitClass);
   if (!flagOn) return plan;
 
   // Declarations index — one per (doc-instance, eventId); duplicates in

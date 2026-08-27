@@ -3054,7 +3054,8 @@ export class Server {
         const indexValue = indexDocument?.value as
           | EventAttentionIndexValue
           | undefined;
-        const summary = indexValue?.entries?.[message.eventId];
+        const sidecarSummaries = indexValue?.entries?.[message.sidecarId];
+        const summary = sidecarSummaries?.[message.eventId];
         if (
           summary === undefined || summary.sidecarId !== message.sidecarId
         ) {
@@ -3134,7 +3135,11 @@ export class Server {
               id: SERVER_EXECUTION_ATTENTION_DOC_ID as never,
               patches: [{
                 op: "remove",
-                path: `/value/entries/${escapePointer(message.eventId)}`,
+                path: Object.keys(sidecarSummaries ?? {}).length === 1
+                  ? `/value/entries/${escapePointer(message.sidecarId)}`
+                  : `/value/entries/${escapePointer(message.sidecarId)}/${
+                    escapePointer(message.eventId)
+                  }`,
               }],
             }],
             ...(retryEventId === undefined ? {} : {

@@ -3471,7 +3471,7 @@ export class SpaceServer implements TransactionSealDestination {
               space: this.#options.space,
               id: SERVER_EXECUTION_ATTENTION_DOC_ID as never,
               scope: "space",
-              path: ["entries", entry.eventId],
+              path: ["entries", streamEntry.sidecarId, entry.eventId],
             }).withTx(tx).set({
               eventId: entry.eventId,
               sidecarId: streamEntry.sidecarId,

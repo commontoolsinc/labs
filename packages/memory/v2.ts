@@ -337,7 +337,7 @@ export type UnresolvedEventAttention = {
 };
 
 export type EventAttentionIndexValue = {
-  entries?: Record<string, UnresolvedEventAttention>;
+  entries?: Record<string, Record<string, UnresolvedEventAttention>>;
 };
 
 // ---------------------------------------------------------------------------

@@ -1362,11 +1362,11 @@ describe("Phase 3 events-down (serving side)", () => {
       const attentionIndex = Engine.read(engine, {
         id: SERVER_EXECUTION_ATTENTION_DOC_ID,
       })?.value as {
-        entries?: Record<string, { sidecarId?: string }>;
+        entries?: Record<string, Record<string, { sidecarId?: string }>>;
       } | undefined;
-      expect(attentionIndex?.entries?.[poison1.eventId]?.sidecarId).toBe(
-        sidecarId,
-      );
+      expect(
+        attentionIndex?.entries?.[sidecarId]?.[poison1.eventId]?.sidecarId,
+      ).toBe(sidecarId);
       const poisonRunsAtTerminal = probeRuns.get("poison-1");
       await waitUntil(
         () => (probeRuns.get("follower") ?? 0) >= 1,

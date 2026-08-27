@@ -1542,33 +1542,35 @@ export class RuntimeProcessor {
       "space",
     )?.value as EventAttentionIndexValue | undefined;
     const notices: EventAttentionListResponse["notices"] = [];
-    for (const summary of Object.values(index?.entries ?? {})) {
-      const sidecarSync = await provider.sync(
-        summary.sidecarId as never,
-        undefined,
-        "space",
-      );
-      if (sidecarSync.error !== undefined) throw sidecarSync.error;
-      const sidecar = provider.replica.getDocument(
-        summary.sidecarId as never,
-        "space",
-      )?.value as StreamEventsDocValue | undefined;
-      const entry = sidecar?.entries?.find((candidate) =>
-        candidate.eventId === summary.eventId
-      );
-      if (
-        entry?.status !== "needs-attention" ||
-        entry.attention === undefined ||
-        entry.resolution !== undefined ||
-        entry.firedAt?.user !== this.identity.did()
-      ) continue;
-      notices.push({
-        space: request.space,
-        eventId: entry.eventId,
-        sidecarId: summary.sidecarId,
-        reason: entry.reason ?? "Event delivery needs attention",
-        attention: entry.attention,
-      });
+    for (const sidecarSummaries of Object.values(index?.entries ?? {})) {
+      for (const summary of Object.values(sidecarSummaries)) {
+        const sidecarSync = await provider.sync(
+          summary.sidecarId as never,
+          undefined,
+          "space",
+        );
+        if (sidecarSync.error !== undefined) throw sidecarSync.error;
+        const sidecar = provider.replica.getDocument(
+          summary.sidecarId as never,
+          "space",
+        )?.value as StreamEventsDocValue | undefined;
+        const entry = sidecar?.entries?.find((candidate) =>
+          candidate.eventId === summary.eventId
+        );
+        if (
+          entry?.status !== "needs-attention" ||
+          entry.attention === undefined ||
+          entry.resolution !== undefined ||
+          entry.firedAt?.user !== this.identity.did()
+        ) continue;
+        notices.push({
+          space: request.space,
+          eventId: entry.eventId,
+          sidecarId: summary.sidecarId,
+          reason: entry.reason ?? "Event delivery needs attention",
+          attention: entry.attention,
+        });
+      }
     }
     return { notices };
   }
