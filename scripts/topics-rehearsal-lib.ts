@@ -1,9 +1,16 @@
 /**
  * Shared plumbing for the Topics content export/restore pair
- * (`topics-export.ts`, `topics-restore.ts`). Both scripts shell out to the
- * `cf` CLI rather than importing runtime internals, so they track the CLI's
- * contract — the surface the rehearsal runbook already teaches — instead of
- * private APIs.
+ * (`topics-export.ts`, `topics-restore.ts`) — the field vocabulary and the
+ * pure functions both sides agree on, plus the `cf` helpers below.
+ *
+ * The two halves reach their space differently, because they are asking
+ * different questions. A restore writes to a LIVE server, which only the CLI
+ * can address, so it shells out to `cf` and tracks that contract — the surface
+ * the rehearsal runbook already teaches. An export reads an offline snapshot
+ * thousands of entities deep, where a subprocess per read costs a `deno task`
+ * resolution and a fresh open of a multi-gigabyte database each time, so it
+ * opens the store once through `@commonfabric/state-inspector` and uses none
+ * of the `cf` helpers here.
  */
 
 export const repoRoot = new URL("..", import.meta.url).pathname;
