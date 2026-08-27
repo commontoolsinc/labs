@@ -56,6 +56,13 @@ const schemaConstrainsNothing = (schema: JSONSchema | undefined): boolean =>
 const MAX_PATH_RESOLUTION_LENGTH = 100;
 
 type LinkHop = {
+  /**
+   * The stored link's schema BEFORE any path narrowing (the ancestor-probe
+   * hop narrows by the remaining path), preserved for the crossing seam:
+   * narrowing can drop root-level `ifc` declarations, and the seam's
+   * subject is the link as stored.
+   */
+  storedSchema?: JSONSchema;
   link: NormalizedFullLink;
   source: NormalizedFullLink;
   kind: "value" | "write-redirect";
@@ -257,7 +264,11 @@ type LinkResolutionRecord = {
    * external closure neither bakes a stale verdict into this record nor
    * costs the walk its memoizability.
    */
-  readonly schemaHops: readonly { id: string; schema: JSONSchema }[];
+  readonly schemaHops: readonly {
+    id: string;
+    space: NormalizedFullLink["space"];
+    schema: JSONSchema;
+  }[];
 
   /**
    * Hop targets in another space. Their sync kick is unreserved, so it fires on
@@ -463,7 +474,7 @@ export function resolveLinkTracingDereferences(
     for (const trace of cached.traces) tx.recordCfcDereferenceTrace(trace);
     if (options.markIfcCrossings === true) {
       for (const hop of cached.schemaHops) {
-        markIfcBearingLinkCrossing(tx, hop.schema, hop.id);
+        markIfcBearingLinkCrossing(tx, hop.space, hop.schema, hop.id);
       }
     }
     for (const target of cached.crossSpaceTargets) {
@@ -480,7 +491,11 @@ export function resolveLinkTracingDereferences(
 
   const seen = new Set<string>();
   const traces: CfcDereferenceTrace[] = [];
-  const schemaHops: { id: string; schema: JSONSchema }[] = [];
+  const schemaHops: {
+    id: string;
+    space: NormalizedFullLink["space"];
+    schema: JSONSchema;
+  }[] = [];
   const crossSpaceTargets: NormalizedFullLink[] = [];
   // A resolution is memoized only when replaying `traces` and
   // `crossSpaceTargets` reproduces everything it left behind. A blocked follow
@@ -606,6 +621,7 @@ export function resolveLinkTracingDereferences(
         if (nextHop) {
           const remainingPath = link.path.slice(lastValid.length);
           let { schema, ...restLink } = nextHop.link;
+          const storedSchema = schema;
           if (schema !== undefined && remainingPath.length > 0) {
             schema = ContextualFlowControl.getSchemaAtPath(
               schema,
@@ -614,6 +630,7 @@ export function resolveLinkTracingDereferences(
           }
           nextHop = {
             ...nextHop,
+            ...(storedSchema !== undefined && { storedSchema }),
             link: {
               ...restLink,
               path: [...nextHop.link.path, ...remainingPath],
@@ -672,7 +689,11 @@ export function resolveLinkTracingDereferences(
       // and evaluated at mark time below (and on memo hits), for callers
       // that opt in.
       if (nextHop.link.schema !== undefined) {
-        schemaHops.push({ id: nextHop.link.id, schema: nextHop.link.schema });
+        schemaHops.push({
+          id: nextHop.link.id,
+          space: nextHop.link.space,
+          schema: nextHop.storedSchema ?? nextHop.link.schema,
+        });
       }
       const nextLink = nextHop.link;
       const crossSpace = nextLink.space !== link.space;
@@ -788,7 +809,7 @@ export function resolveLinkTracingDereferences(
 
   if (options.markIfcCrossings === true) {
     for (const hop of schemaHops) {
-      markIfcBearingLinkCrossing(tx, hop.schema, hop.id);
+      markIfcBearingLinkCrossing(tx, hop.space, hop.schema, hop.id);
     }
   }
 

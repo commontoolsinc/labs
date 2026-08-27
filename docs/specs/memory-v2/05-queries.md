@@ -378,12 +378,18 @@ stands.
 A discarded reference schema's `ifc` does not ride onto the result: write
 policy consumes declared schemas verbatim, so transplanting flow-control
 clauses between schemas would corrupt the declaration they came from. Instead
-the marking is independent of the combination: the read entry point marks its
-transaction cfc-relevant when the traversal's schema, the write-redirect
-resolution's schema, or the full value resolution's schema carries `ifc`
-(`schemaHasIfc`), the traversal marks every reference hop it crosses whose
-stored schema carries one, and enforcement reads stored cfc metadata and
-label views rather than combined schemas.
+the marking is independent of the combination, at the shared crossing seam
+(`markIfcBearingLinkCrossing`): every content-reading resolver — the read
+entry point's resolutions, the traversal's hops, link resolution's
+intermediate hops (as stored, before any path narrowing), the handle hop of
+an `asCell` crossing, schema-less query-result reads, and raw reads that
+resolve links on the way — marks its transaction cfc-relevant when the
+crossed link's stored schema carries `ifc` (`schemaHasIfc`). The seam loads
+the schema's external `cid:` closure first, so a cold declaration is
+resolvable at the check, and a document the space does not hold yet leaves a
+tracked read whose arrival re-runs the reader. Write-path resolutions leave
+relevance to the write-policy gate, and enforcement reads stored cfc
+metadata and label views rather than combined schemas.
 
 The sibling `combineSchema` is the strict best-effort pseudo-intersection,
 used to merge a compound schema's base keywords with its own `anyOf`/`oneOf`

@@ -17,7 +17,8 @@ import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import { Identity } from "@commonfabric/identity";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
-import type { JSONSchema } from "../src/builder/types.ts";
+import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
+import { decomposeSchema } from "../src/schema-decompose.ts";
 import type { Cell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { CellLinkRefPayload } from "../src/sigil-types.ts";
@@ -258,6 +259,113 @@ describe("link-ifc-read-relevance at resolution and handle hops", () => {
 
     const value = holder.get() as { item: Cell<{ name: string }> };
     expect(value.item.get()).toEqual({ name: "Ada" });
+    expect(tx.getCfcState().relevant).toBe(true);
+    expect(hopReasons().length).toBeGreaterThan(0);
+  });
+});
+
+describe("link-ifc-read-relevance closure, narrowing, and raw readers", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+  let seq = 0;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({ apiUrl: new URL(import.meta.url), storageManager });
+    tx = runtime.edit();
+    seq++;
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  const linkTo = (cell: Cell<unknown>, schema?: JSONSchema) => {
+    const link = cell.getAsNormalizedFullLink();
+    return linkRefFrom<CellLinkRefPayload>({
+      id: link.id,
+      space: link.space,
+      scope: link.scope,
+      path: [...link.path],
+      ...(schema !== undefined && { schema }),
+    });
+  };
+
+  const hopReasons = () =>
+    tx.getCfcState().diagnostics.filter((reason) =>
+      reason.startsWith("schema-ifc-hop:")
+    );
+
+  const holderOver = (storedSchema: JSONSchema): Cell<Holder> => {
+    const target = runtime.getCell(space, `target-${seq}-x`, undefined, tx);
+    target.setRaw({ name: "Ada" });
+    const holder = runtime.getCell<Holder>(
+      space,
+      `holder-${seq}-x`,
+      readerSchema,
+      tx,
+    );
+    holder.setRaw({ item: linkTo(target, storedSchema) } as never);
+    return holder;
+  };
+
+  it("loads a cold cid-backed labeled schema and marks the crossing", () => {
+    const labeled = {
+      type: "object",
+      properties: { name: { type: "string" } },
+      ifc: { confidentiality: ["confidential"] },
+    } as const satisfies JSONSchema;
+    const decomposed = decomposeSchema(labeled as JSONSchemaObj);
+    // Every closure document goes into the STORE as a cid: document — the
+    // registry stays cold, exactly as a link arriving over sync finds it.
+    for (const [hash, doc] of decomposed.documents) {
+      tx.writeValueOrThrow(
+        {
+          space,
+          id: `cid:${hash}`,
+          scope: "space",
+          path: [],
+        } as unknown as Parameters<typeof tx.writeValueOrThrow>[0],
+        doc,
+      );
+    }
+
+    const holder = holderOver({ $ref: decomposed.rootRef });
+
+    expect(holder.key("item").get()).toEqual({ name: "Ada" });
+    expect(tx.getCfcState().relevant).toBe(true);
+    expect(hopReasons().length).toBeGreaterThan(0);
+  });
+
+  it("marks a root-level ifc declaration narrowed away by an ancestor hop", () => {
+    const rootLabeled = {
+      type: "object",
+      properties: { name: { type: "string" } },
+      ifc: { integrity: ["asserted"] },
+    } as const satisfies JSONSchema;
+    const holder = holderOver(rootLabeled);
+
+    expect(holder.key("item").key("name").get()).toEqual("Ada");
+    expect(tx.getCfcState().relevant).toBe(true);
+    expect(hopReasons().length).toBeGreaterThan(0);
+  });
+
+  it("marks a schema-less query-result read crossing a labeled link", () => {
+    const holder = holderOver(labeledLinkSchema);
+
+    const proxy = holder.getAsQueryResult([], tx) as { item: { name: string } };
+    expect(proxy.item.name).toEqual("Ada");
+    expect(tx.getCfcState().relevant).toBe(true);
+    expect(hopReasons().length).toBeGreaterThan(0);
+  });
+
+  it("marks a raw read resolving through a labeled link on the way", () => {
+    const holder = holderOver(labeledLinkSchema);
+
+    expect(holder.key("item").key("name").getRaw()).toEqual("Ada");
     expect(tx.getCfcState().relevant).toBe(true);
     expect(hopReasons().length).toBeGreaterThan(0);
   });

@@ -8,18 +8,27 @@
 
 import type { JSONSchema, JSONSchemaObj } from "@commonfabric/api";
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import { isObjectOrArray } from "@commonfabric/utils/types";
+import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 
 import { ContextualFlowControl } from "./cfc.ts";
 import {
   cfcSchemaChildRoot,
   resolveCfcSchemaRefRoot,
 } from "./cfc/schema-refs.ts";
+import type { MemorySpace } from "@commonfabric/memory/interface";
+import type { URI } from "./sigil-types.ts";
+import {
+  collectExternalSchemaRefHashes,
+  containsExternalSchemaRef,
+} from "./schema-decompose.ts";
 import {
   externalResolutionMissCount,
+  lookupSchemaDocument,
   onSchemaRegistryClear,
+  registerSchemaDocument,
 } from "./schema-registry.ts";
 import { forEachSubschema } from "./schema-walk.ts";
+import type { IExtendedStorageTransaction } from "./storage/interface.ts";
 
 // Memo for `schemaHasIfc` top-level calls. Safe **only** because entries
 // are populated under an `isDeepFrozen` guard below: the predicate's
@@ -128,24 +137,78 @@ function _schemaHasIfcUncached(
 }
 
 /**
+ * Loads and registers the external schema-document closure behind
+ * `schema`'s `cid:` refs, transaction-level: an unregistered document is
+ * read through the transaction — a tracked read, so an absent document's
+ * arrival re-triggers the reader — verified, and registered; documents the
+ * registry already holds cost one lookup and are recursed for their own
+ * refs without a read. The fuller traversal-context loader
+ * (`loadExternalSchemaDocs` in traverse.ts) also feeds the schema tracker
+ * and availability bookkeeping; this one exists for the crossing seams
+ * that have no traversal context (link resolution, handle hops).
+ */
+export function ensureExternalSchemaClosure(
+  tx: IExtendedStorageTransaction,
+  space: MemorySpace,
+  schema: JSONSchema | undefined,
+): void {
+  if (schema === undefined || !containsExternalSchemaRef(schema)) return;
+  const pending = [...collectExternalSchemaRefHashes(schema)];
+  const seen = new Set<string>();
+  while (pending.length > 0) {
+    const hash = pending.pop()!;
+    if (seen.has(hash)) continue;
+    seen.add(hash);
+    if (lookupSchemaDocument(hash) === undefined) {
+      const result = tx.read({
+        space,
+        id: `cid:${hash}` as URI,
+        scope: "space",
+        path: [],
+      });
+      if (result.error !== undefined) continue;
+      const doc = result.ok.value;
+      if (!isObjectNotArray(doc) || !("value" in doc)) continue;
+      try {
+        registerSchemaDocument(
+          hash,
+          (doc as { value?: unknown }).value as JSONSchema,
+        );
+      } catch {
+        // A document whose content does not hash to its id is forged:
+        // neither registered nor recursed into.
+        continue;
+      }
+    }
+    const document = lookupSchemaDocument(hash);
+    if (document !== undefined) {
+      pending.push(...collectExternalSchemaRefHashes(document));
+    }
+  }
+}
+
+/**
  * The shared "actual link crossing" seam: marks `tx` cfc-relevant when the
  * link being crossed carries flow-control marking in its stored schema.
  * Reader precedence keeps a shaped reader's combined schema free of the
  * link's `ifc`, so the marking lives at the crossing rather than on the
- * combination's output. Call AFTER any external schema-document
- * registration for the schema (`loadExternalSchemaDocs` in traverse.ts),
- * so a cold `cid:` closure is resolvable when the walk consults it; a
- * closure still absent reads as unlabeled this pass, stays uncached (the
- * resolution-miss guard), and marks on the re-triggered pass that follows
- * the documents' arrival. The predicate is memoized; unlabeled links (the
- * common case) cost one cached lookup.
+ * combination's output. The schema's external closure is loaded first
+ * (`ensureExternalSchemaClosure`), so a cold `cid:`-backed declaration is
+ * resolvable when the predicate walks it — and a document the space does
+ * not hold yet leaves behind the tracked read whose arrival re-triggers
+ * the reader, which marks on that pass (the predicate's resolution-miss
+ * guard keeps the cold verdict uncached). The predicate is memoized;
+ * unlabeled links (the common case) cost one cached lookup.
  */
 export function markIfcBearingLinkCrossing(
-  tx: { markCfcRelevant(reason?: string): void },
+  tx: IExtendedStorageTransaction,
+  space: MemorySpace,
   linkSchema: JSONSchema | undefined,
   linkId: string,
 ): void {
-  if (linkSchema !== undefined && schemaHasIfc(linkSchema)) {
+  if (linkSchema === undefined) return;
+  ensureExternalSchemaClosure(tx, space, linkSchema);
+  if (schemaHasIfc(linkSchema)) {
     tx.markCfcRelevant(`schema-ifc-hop:${linkId}`);
   }
 }

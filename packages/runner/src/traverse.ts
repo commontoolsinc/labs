@@ -2389,7 +2389,7 @@ function followPointer(
   }
   // The crossing's own marking runs after the registration above, so a
   // cold external closure is resolvable when the predicate walks it.
-  markIfcBearingLinkCrossing(tx, link.schema, link.id);
+  markIfcBearingLinkCrossing(tx, link.space, link.schema, link.id);
   const schemaScope = schemaScopeForSelector(selector);
   if (!canFollowScopedLink(schemaScope, link.scope)) {
     // A broader-scoped read context cannot follow a link into a narrower scope
@@ -5619,7 +5619,12 @@ function getNextCellLink(
   if (lastLink !== undefined) {
     // This extra hop bypasses followPointer, so it carries the crossing
     // seam itself.
-    markIfcBearingLinkCrossing(tx, lastLink.schema, lastLink.id);
+    markIfcBearingLinkCrossing(
+      tx,
+      lastLink.space,
+      lastLink.schema,
+      lastLink.id,
+    );
     // The link may not have the asCell flags, so pull that from itemSchema.
     // Reader precedence, like every other crossing: the handle must not
     // carry the link's wider schema past the reader's.

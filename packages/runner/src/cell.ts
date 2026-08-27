@@ -2990,7 +2990,11 @@ export class CellImpl<T extends FabricValue>
     // Resolve all links ON THE WAY to the target, but don't resolve the final
     // link.
     const value = tx.readValueOrThrow(
-      resolveLink(this.runtime, tx, this.link, lastNode),
+      // A raw read still resolves links on the way to the target, and those
+      // crossings are content reads: the seam marks labeled hops.
+      resolveLink(this.runtime, tx, this.link, lastNode, {
+        markIfcCrossings: true,
+      }),
       readOptions,
     );
     // Deep-copy with desired frozenness, without native unwrapping — getRaw()
