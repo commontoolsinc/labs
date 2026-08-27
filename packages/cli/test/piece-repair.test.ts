@@ -314,6 +314,24 @@ describe("piece-repair", () => {
       expect(process.endProcess()).toBe(0);
       expect(process.errors).toEqual([]);
     });
+
+    it("says nothing at process end when the run threw", async () => {
+      // A plan pinned to another fixer is refused before the module is even
+      // imported. That refusal IS the report, and the CLI prints it on the
+      // way to a nonzero exit; a guard line beside it would be a second
+      // account of a run that already gave one.
+      const process = guardHarness();
+      await expect(
+        repairFromCommand({ ...OPTIONS, path: "topics", apply: true }, {
+          runRepair: () =>
+            Promise.reject(new Error("The plan runs another fixer.")),
+          printHint: () => {},
+          guard: process.deps,
+        }),
+      ).rejects.toThrow("another fixer");
+      expect(process.endProcess()).toBe(0);
+      expect(process.errors).toEqual([]);
+    });
   });
 
   describe("runRepair()", () => {
