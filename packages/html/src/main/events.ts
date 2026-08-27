@@ -7,6 +7,7 @@
 
 import {
   fabricFromNativeValue,
+  FabricInstance,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
 import {
@@ -236,16 +237,14 @@ export function serializeEvent(event: Event): SerializedEvent {
  * refuses a circular reference in turn, which is what keeps one from reaching a
  * crossing that has no representation for it.
  *
- * The order is what bounds the conversion to values the far side accepts. The
- * fabric conversion mints a `FabricError` from an `Error`, and the worker's
- * event ingress refuses a `FabricInstance` (`stripSigilCfcLabelViews()` in
- * `@commonfabric/runner/cfc`); an `Error` reaching a detail is ordinary --
- * `cf-file-input` dispatches one -- and the round trip renders it as `{}` and
- * gets there first.
+ * What the far side accepts is narrower than what the fabric conversion
+ * produces, and {@link holdsFabricInstance} is where that is enforced: a value
+ * carrying an instance is described instead, which is what a value reaching
+ * here has always been rendered as when nothing else could render it.
  *
- * TODO(danfuzz): once that ingress descends an instance rather than refusing
- * one, the fabric conversion can go first, and a `FabricBytes` in a detail
- * stops arriving as `{}`.
+ * TODO(danfuzz): once the ingress descends an instance rather than refusing
+ * one, that guard goes, the fabric conversion can go first, and a `FabricBytes`
+ * in a detail stops arriving as `{}`.
  */
 function toSerializableValue(value: unknown): FabricValue {
   try {
@@ -257,12 +256,38 @@ function toSerializableValue(value: unknown): FabricValue {
   }
 
   try {
-    return fabricFromNativeValue(value);
+    const fabric = fabricFromNativeValue(value);
+    if (!holdsFabricInstance(fabric)) return fabric;
   } catch {
     // Described below, as a value with neither rendering is.
   }
 
   return describeUnconvertible(value);
+}
+
+/**
+ * Whether a value holds a `FabricInstance` anywhere within it.
+ *
+ * The worker's event ingress refuses one -- `stripSigilCfcLabelViews()` in
+ * `@commonfabric/runner/cfc`, whose refusal is the tripwire naming the
+ * codec-mediated traversal it owes -- so an event carrying one is dropped
+ * rather than delivered. The conversion above mints a `FabricError` from an
+ * `Error`, and an `Error` in a detail is ordinary: `cf-file-input` dispatches
+ * `cf-error` with one. The round trip renders such a value first and gets
+ * there for its own reasons, which covers the plain case; this covers the rest,
+ * where the round trip refused the value for something else it held.
+ *
+ * No cycle tracking, the conversion having refused a circular reference before
+ * this is reached. Shared structure is walked once per position rather than
+ * once, which an event payload is small enough not to notice.
+ */
+function holdsFabricInstance(value: unknown): boolean {
+  if (value instanceof FabricInstance) return true;
+  if (value === null || typeof value !== "object") return false;
+
+  // A `FabricPrimitive` has no enumerable own properties, so it reports `false`
+  // from here without an arm of its own.
+  return Object.values(value).some(holdsFabricInstance);
 }
 
 /**

@@ -412,6 +412,36 @@ Deno.test("events - serializeEvent", async (t) => {
     assertEquals(serialized.detail, { error: {}, message: "upload failed" });
   });
 
+  await t.step(
+    "describes an `Error` alongside a `bigint` rather than dropping the event",
+    () => {
+      // The round trip refuses the value for the `bigint`, and the fabric
+      // conversion mints a `FabricError` from the `Error` -- which the worker's
+      // event ingress refuses, so an event carrying one never reaches its
+      // handler. Described instead, which is what such a value has always been.
+      const event = new MockCustomEvent("cf-error", {
+        detail: { error: new Error("boom"), count: 42n },
+      }) as unknown as Event;
+
+      const serialized = serializeEvent(event);
+
+      assertEquals(serialized.detail, "[object Object]");
+    },
+  );
+
+  await t.step("describes an `Error` carrying a `bigint` of its own", () => {
+    // The same shape reached the other way: what makes the round trip refuse
+    // the value is inside the `Error` rather than beside it.
+    const error = Object.assign(new Error("boom"), { count: 42n });
+    const event = new MockCustomEvent("cf-error", {
+      detail: { error, message: "upload failed" },
+    }) as unknown as Event;
+
+    const serialized = serializeEvent(event);
+
+    assertEquals(serialized.detail, "[object Object]");
+  });
+
   await t.step("describes a circular detail rather than passing one on", () => {
     // A circular value has no representation at the crossing, so it must not
     // reach one. Both conversions refuse it, for their own reasons.
