@@ -82,7 +82,6 @@ describe("all-no-op wave (the land-off tx-boundary pin)", () => {
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: false,
           },
         });
         await onServingRuntime?.(runtime);

@@ -587,19 +587,14 @@ client does not; this PR):
   shadow + flip notification; flag-OFF silent-flip byte-identity;
   own-echo exemption). The stage-F residual comment at `inputSynced`
   is rewritten to the resolved posture.
-- The Phase-2 revisit (b) — the pattern-updater CHECK half: the
-  `sx2-serving-loop` integration surface is AUTHORED
-  (`packages/patterns/integration/sx2-serving-loop.test.ts`) and the
-  machinery observation was made in the live bring-up runs (the
-  serving loop settles to watermark-covered quiescence with
-  `systemPatternAutoUpdate` flipped ON server-side against toolshed's
-  real routes — the environment the stage-F unit fixture could not
-  provide). Stated honestly: that surface is currently SKIP-LISTED in
-  the ON arm (it deterministically reproduces the demand-cycle
-  starvation fork — the owed row below), so its gates are witnessed
-  by the live bring-up evidence and the serving-loop unit suite, not
-  yet by CI; the row un-skips with the terminal-state follow-up. A
-  full stale-pointer roll-forward journey remains the named
+- The Phase-2 revisit (b) — the source-following half: RETIRED, not
+  covered. A serving tenure opens no piece, so it follows no piece's
+  source origin, and there is no server-side half left to verify. The
+  `sx2-serving-loop` integration surface
+  (`packages/patterns/integration/sx2-serving-loop.test.ts`) keeps its
+  remaining gates and runs in both arms, its ON-arm skip having been
+  retired with the demand-cycle starvation fork (the skip-list row
+  below). A full stale-pointer roll-forward journey remains the named
   follow-up.
 - M1's Phase-2 seam — per-run demanded identities: the demand
   carriage (watchedRootsForSpace per-instance entries + the
@@ -7803,13 +7798,15 @@ supply; OW29/OW32/OW34 closed):
       server-only compilation and closes the forgery path. The spec's
       named end-state (server-only compilation + real attestation,
       `api/cfc.ts` :132-140) remains the complete fix — this OW56 row.
-    - **Finding 2 — version-update is a dual-write under ON, client AND
-      server, unarbitrated.** Both runtimes default
-      `systemPatternAutoUpdate: true` (shell `env.ts`; serving factory
-      `server-execution.ts` :160-172), so both run the pattern-updater
-      check/fetch/compile/persist and attempt the pointer swap; they
-      RACE — OCC-guarded so the loser fails clean (`pattern-updater.ts`
-      :326-338), content-addressed so double-writes converge. NOT a
+    - **Finding 2 — version-update was a dual-write under ON, client AND
+      server, unarbitrated.** CLOSED: following a piece's source origin
+      now runs only where a piece is OPENED, and a serving tenure opens
+      none, so the server no longer fetches, compiles, or swaps on a
+      piece's behalf. What follows is the finding as recorded. Both
+      runtimes defaulted the update posture on, so both ran the
+      check/fetch/compile/persist and attempted the pointer swap; they
+      RACED — OCC-guarded so the loser failed clean,
+      content-addressed so double-writes converged. NOT a
       correctness bug (freshness is safe either way); the cost is a
       duplicated network fetch + full TS compile per piece per runtime,
       and mismatched compiler fingerprints (shell-baked vs server

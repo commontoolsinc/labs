@@ -740,7 +740,6 @@ describe("stage P2-F piece-start commit failure surfacing (F1)", () => {
       servingPosture: true,
       experimental: {
         serverExecution: true,
-        systemPatternAutoUpdate: true,
       },
     });
   });

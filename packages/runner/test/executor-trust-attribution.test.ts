@@ -225,7 +225,6 @@ describe("executor-trust-attribution", () => {
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: false,
           },
         });
         servingRuntime = runtime;

@@ -234,7 +234,6 @@ export const EXPERIMENTAL_ENV_VARS = {
   // proof (#5244); env-reachable so a process can opt out with an explicit
   // "false" while the flag exists.
   plainResultReceipts: "EXPERIMENTAL_PLAIN_RESULT_RECEIPTS",
-  systemPatternAutoUpdate: "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE",
   computedCellIds: "EXPERIMENTAL_COMPUTED_CELL_IDS",
   lazyMaterialization: "EXPERIMENTAL_LAZY_MATERIALIZATION",
   // Server-execution v2 (docs/specs/server-side-execution/): the
@@ -330,10 +329,6 @@ export const EXPERIMENTAL_FLAG_AUTHORITY = {
   // runs the handler, so a client on the other value reads back a receipt
   // shaped by a rule it does not share.
   plainResultReceipts: "server",
-  // Whether this deployment rolls patterns forward in place. Both runtimes
-  // race the update under the flag, OCC-guarded; a client on the other value
-  // either never participates or drags a deployment that opted out.
-  systemPatternAutoUpdate: "server",
   // Entity-id minting: a peer predating the `computed:` scheme throws on such
   // ids arriving via sync, so the scheme has to be fleet-wide.
   computedCellIds: "server",

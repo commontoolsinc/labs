@@ -4,7 +4,6 @@ import {
   normalizePatternSource,
   resolveSystemPatternSource,
   systemPatternSource,
-  systemPatternSourceForModuleName,
 } from "../src/pattern-source-scheme.ts";
 
 const HOST = "http://toolshed.test";
@@ -55,22 +54,6 @@ describe("resolveSystemPatternSource", () => {
     // Climbing back in is fine — it still addresses the route.
     expect(resolveSystemPatternSource("system:system/../system/home.tsx"))
       .toBe("/api/patterns/system/home.tsx");
-  });
-});
-
-describe("systemPatternSourceForModuleName", () => {
-  it("accepts a patterns-route module name", () => {
-    expect(systemPatternSourceForModuleName("/api/patterns/system/home.tsx"))
-      .toBe("system:system/home.tsx");
-  });
-
-  it("refuses a name that says nothing about a route", () => {
-    // How a program deployed from a file tree names its modules — the case
-    // this guard exists for.
-    expect(systemPatternSourceForModuleName("/participant-identity-card.tsx"))
-      .toBeUndefined();
-    expect(systemPatternSourceForModuleName("/main.tsx")).toBeUndefined();
-    expect(systemPatternSourceForModuleName("main.tsx")).toBeUndefined();
   });
 });
 

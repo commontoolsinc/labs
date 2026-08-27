@@ -6,8 +6,6 @@ import { type Cell, Runtime } from "@commonfabric/runner";
 import { loadPieces } from "../lib/piece.ts";
 import { withEnv } from "./utils.ts";
 
-const AUTO_UPDATE_ENV = "EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE";
-
 describe("CLI runtime creation", () => {
   it("applies deployed-client options to the piece-manager runtime", async () => {
     const identity = await Identity.fromPassphrase(
@@ -23,34 +21,38 @@ describe("CLI runtime creation", () => {
       return Promise.resolve(false);
     };
 
-    await withEnv(AUTO_UPDATE_ENV, "true", async () => {
-      try {
-        await expect(loadPieces({
-          apiUrl: "https://toolshed.test",
-          identity: keyPath,
-          space: "piece-runtime-creation",
-        })).rejects.toThrow("Could not connect");
-        expect(created?.apiUrl.href).toBe("https://toolshed.test/");
-        expect(created?.experimental.systemPatternAutoUpdate).toBe(true);
-
-        const output: unknown[][] = [];
-        const originalLog = console.log;
-        console.log = (...args: unknown[]) => output.push(args);
+    await withEnv(
+      "EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS",
+      "false",
+      async () => {
         try {
-          created!.navigateCallback!({
-            entityId: { "/": "fid1:cli-navigation-target" },
-          } as unknown as Cell<unknown>);
+          await expect(loadPieces({
+            apiUrl: "https://toolshed.test",
+            identity: keyPath,
+            space: "piece-runtime-creation",
+          })).rejects.toThrow("Could not connect");
+          expect(created?.apiUrl.href).toBe("https://toolshed.test/");
+          expect(created?.experimental.contentAddressedSchemas).toBe(false);
+
+          const output: unknown[][] = [];
+          const originalLog = console.log;
+          console.log = (...args: unknown[]) => output.push(args);
+          try {
+            created!.navigateCallback!({
+              entityId: { "/": "fid1:cli-navigation-target" },
+            } as unknown as Cell<unknown>);
+          } finally {
+            console.log = originalLog;
+          }
+          expect(output).toEqual([
+            ["navigateTo new piece id fid1:cli-navigation-target"],
+          ]);
         } finally {
-          console.log = originalLog;
+          Runtime.prototype.healthCheck = originalHealthCheck;
+          await Deno.remove(keyPath);
         }
-        expect(output).toEqual([
-          ["navigateTo new piece id fid1:cli-navigation-target"],
-        ]);
-      } finally {
-        Runtime.prototype.healthCheck = originalHealthCheck;
-        await Deno.remove(keyPath);
-      }
-    });
+      },
+    );
   });
 
   it("does not register navigation targets", async () => {

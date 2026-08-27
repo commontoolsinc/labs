@@ -35,7 +35,7 @@ describe("experimental-posture", () => {
     // default-on flag off across the fleet.
     publishExperimentalPosture({
       modernCellRep: true,
-      systemPatternAutoUpdate: undefined,
+      serverExecution: undefined,
     });
     expect(experimentalPosture()).toEqual({ modernCellRep: true });
   });
@@ -57,16 +57,11 @@ describe("experimental-posture", () => {
       publishExperimentalPosture({
         modernCellRep: true,
         serverExecution: false,
-        systemPatternAutoUpdate: false,
       });
-      publishServingExperimentalOverrides({
-        serverExecution: true,
-        systemPatternAutoUpdate: true,
-      });
+      publishServingExperimentalOverrides({ serverExecution: true });
       expect(experimentalPosture()).toEqual({
         modernCellRep: true,
         serverExecution: true,
-        systemPatternAutoUpdate: true,
       });
     });
 
@@ -75,14 +70,10 @@ describe("experimental-posture", () => {
       // at the end, and a diff of the meta document would read as a changed
       // posture when only the iteration order moved.
       publishExperimentalPosture({ serverExecution: false });
-      publishServingExperimentalOverrides({
-        modernCellRep: true,
-        systemPatternAutoUpdate: true,
-      });
+      publishServingExperimentalOverrides({ modernCellRep: true });
       expect(Object.keys(experimentalPosture() ?? {})).toEqual([
         "modernCellRep",
         "serverExecution",
-        "systemPatternAutoUpdate",
       ]);
     });
 

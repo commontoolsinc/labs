@@ -32,7 +32,6 @@ was last checked against the code.
 | [`contentAddressedSchemas`](#contentaddressedschemas)                       | `EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS` env / shell build define, or `RuntimeOptions.experimental`                                                                  | on                                                                                   | Robin McCollum (PR #5833)                             | finish the spec's Phase 3 (retire transport schema compression for link positions), then delete flag                                                                                                                              | implemented, on by default                                                      |
 | [`commitPreconditions`](#commitpreconditions)                               | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry)                             | on                                                                                   | Bernhard Seefeld (#4090)                              | fold into base scheduler semantics, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`plainResultReceipts`](#plainresultreceipts)                               | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env, or `RuntimeOptions.experimental`                                                                      | on                                                                                   | Mike Salisbury (verb contract WS-C)                   | fold into receipt semantics and delete flag after a bake period                                                                                                                                                                   | implemented, on by default                                                      |
-| [`systemPatternAutoUpdate`](#systempatternautoupdate)                       | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental`                                             | on in the shell (same-toolshed system sources, including all roots); ALSO on server-side under server-execution (`SERVING_RUNTIME_EXPERIMENTAL` in `toolshed/lib/server-execution.ts` forces it true for every serving runtime, and `/api/meta` publishes it — serving-loop.md §3e; both runtimes then race the update, OCC-guarded and content-addressed — verification-coverage.md OW56 finding 2) | Bernhard Seefeld (#4611; shell default-on #4619)      | graduate to always-on, then delete flag                                                                                                                                                                                           | implemented, on in the shell                                                    |
 | [`computedCellIds`](#computedcellids)                                       | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental`                                                                          | on                                                                                   | Robin McCollum (#4659)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | on                                                                                   | Bernhard Seefeld                                      | fold into base read semantics, then delete flag                                                             | implemented, on by default                                         |
 | [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | off (`SERVER_EXECUTION_DEFAULT_ENABLED = false` — the ONE first-party default; Phase 7 landed flip-READY, DARK; explicit `true` = the ON arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | the flip is its OWN one-line PR after the plan's Phase-7 ordered gates; then soak on main, then delete the flag and the OFF path (the split-out post-soak PR) | Phases 1–6 landed; Phase 7 flip-READY landed dark (owner ruling 2026-08-16): OFF by default everywhere, the ON arm fully selectable and CI-tested on an ON-built binary |
@@ -257,81 +256,6 @@ server](#clients-that-are-not-built-alongside-their-server).
   server-side precondition check in the memory engine. The single-use grant path
   then drops its availability check (`cfcGrantReceiptsAvailable` in
   `packages/runner/src/cfc/grants.ts`), not the receipts themselves.
-
-### `systemPatternAutoUpdate`
-
-- **Toggle via.** `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` environment variable
-  (through the canonical mapping) server-side, the shell build define of the
-  same name (injected by
-  [`packages/shell/felt.config.ts`](../../packages/shell/felt.config.ts) via
-  [`packages/shell/src/lib/env.ts`](../../packages/shell/src/lib/env.ts))
-  browser-side, or `RuntimeOptions.experimental.systemPatternAutoUpdate`.
-- **Added by.** Bernhard Seefeld, in "system-pattern auto-update (in-place
-  rollforward, flag-gated)" (#4611, 2026-07-08); defaulted on for the shell in
-  #4619 (2026-07-09).
-- **Purpose.** Rolls same-toolshed system-source patterns forward in place when
-  their source serves a newer content identity. Persisted default-app and home
-  roots reconcile before bootstrap. Every other watched pattern starts first;
-  its successful instantiation commit launches a background check, so network
-  and compilation never delay its current graph. An unstamped non-root recovers
-  its verified authored entry filename and becomes tracked only when that
-  same-origin route implements `?identity`. Missing/failing identity routes are
-  ordinary non-system sources and remain untouched. Every accepted move
-  downloads and compiles the complete authored closure and permits an in-place
-  `patternIdentity` swap only when the compiler-produced entry has exactly the
-  advertised identity and selected export symbol. Ordinary patterns preserve
-  their selected export; default-pattern routes select the official source's
-  `default` export. Fetch, compile, evaluation, identity-mismatch, and commit
-  failures leave the original pointer and running graph untouched. Equal
-  identities let ordinary patterns stop immediately (and persist newly proven
-  source provenance); roots take the fast path only after the persisted artifact
-  loads, so an unloadable root can rebuild through the same identity-authorized
-  source path before bootstrap. Persisted roots are resolved without starting. A
-  pre-provenance root may be back-filled only when its stored
-  `{ identity, symbol }` exactly equals the current official entry's advertised
-  content identity; stale, custom, and repository-pinned sourceless roots remain
-  pinned — except a stale sourceless root whose stored pattern the current
-  runtime explicitly cannot load (probe resolves `undefined`; a probe error
-  stays pinned, and `cfcEnforcementMode: "disabled"` — where the probe is
-  unsupported — stays pinned too): that root is replaced with the official
-  system root for the space kind (home.tsx / default-app.tsx), recording the
-  displaced ref under `displacedPattern` meta (see pattern-updates.md for the
-  full exception semantics). URL-based root creation and recreation stamp
-  provenance; custom `RuntimeProgram` recreation does not. Repository-pinned
-  sourceless patterns, cross-origin sources, default roots reached by the
-  generic post-start hook, and starts that intentionally install no pattern
-  watcher remain excluded. The check remains best-effort; if identity lookup or
-  replacement compilation is unavailable, an ordinary pattern keeps running and
-  the subsequent root start retains its normal loud failure behavior. The update
-  path does not consult build SHA metadata; a rolling deployment that mixes
-  identity/source/import revisions fails closed at the compiled-identity
-  comparison. See
-  [`docs/specs/pattern-imports/pattern-updates.md`](../specs/pattern-imports/pattern-updates.md).
-
-  **Current behavior.** Before a release, the existing golden replay tests load
-  representative state written by the previous pattern version. They verify that
-  the new version preserves the state's intended meaning and behavior. The
-  updater itself does not infer stable-key, stable-cause, migration, or
-  behavioral compatibility during deployment.
-
-  **Planned behavior.** The general piece-source lifecycle will reject known
-  structural schema incompatibilities before applying an unattended source
-  transition. Semantic compatibility will continue to be checked before release
-  rather than inferred by the runtime.
-- **Current default and planned end state.** The runner built-in default is off
-  like every flag in this category; the shell build injects `true` unless the
-  define is set to `"false"`, so the deployed product (and local shell dev
-  builds) run it on for roots and other same-toolshed system-source patterns.
-  Server-side processes (toolshed, CLI, background piece service) leave it off
-  unless the env var is set. End state: graduate to always-on for system sources
-  once golden-replay coverage has soaked, then delete the flag.
-- **Status on 2026-07-22.** Implemented; on in the shell for all tracked system
-  roots, home included
-  ([`systemPatternAutoUpdateHome`](#appendix-a-removed-and-never-shipped-flags)
-  removed), and for other patterns whose verified source path exposes
-  `?identity`; off elsewhere. Root reconciliation and broken-root repair run
-  before bootstrap, while ordinary-pattern checks run after instantiation.
-- **Path to removal.** Make the check unconditional and remove the flag.
 
 ### `computedCellIds`
 
@@ -1225,7 +1149,6 @@ useful part of the remaining work for that flag.
 
 The environment-backed flags (`EXPERIMENTAL_MODERN_CELL_REP`,
 `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS`,
-`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE`,
 `EXPERIMENTAL_COMPUTED_CELL_IDS`,
 `EXPERIMENTAL_LAZY_MATERIALIZATION`,
 `EXPERIMENTAL_SERVER_EXECUTION`) reach the runtime through the
@@ -1334,11 +1257,11 @@ server published anything.
 A serving toolshed runs two kinds of runtime, and what it publishes is the
 posture it SERVES at. The generic runtime it constructs for webhook pattern
 execution supplies the base; under server-execution the per-space serving
-runtimes force `serverExecution` and `systemPatternAutoUpdate` on top of it
-(`SERVING_RUNTIME_EXPERIMENTAL` in
+runtimes force `serverExecution` on top of it (`SERVING_RUNTIME_EXPERIMENTAL`
+in
 [`packages/toolshed/lib/server-execution.ts`](../../packages/toolshed/lib/server-execution.ts),
-the one place those two are written), and those override the base for as long
-as the serving loop runs. Every other flag reaches both runtimes from the same
+the one place it is written), and that overrides the base for as long as the
+serving loop runs. Every other flag reaches both runtimes from the same
 environment, so the base already carries it.
 
 Three rules govern what a client does with a declaration:
@@ -1547,19 +1470,27 @@ defaulted on in shell development builds, so those values outlive the code.
 Once that has aged out, this entry is pure history and belongs in neither this
 document nor any other.
 
+### `systemPatternAutoUpdate` / `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` (removed)
+
+The gate on rolling a same-toolshed system-source pattern forward in place.
+Following a piece's source origin is no longer a deployment posture: it is what
+opening a piece does, for every piece, described by
+[`docs/specs/piece-source-lifecycle.md`](../specs/piece-source-lifecycle.md).
+Nothing reconciles a piece nobody opened, so there is no fleet-wide behavior
+left for a flag to select. `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` is ignored
+wherever it is still set.
+
 ### `systemPatternAutoUpdateHome` / `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME` (removed)
 
-The second gate that held the **home** root (home.tsx) out of
-[`systemPatternAutoUpdate`](#systempatternautoupdate) while the
-stable-addressing question was open: the home root carries real user data
-(favorites, journal, the spaces list), and an in-place roll had to be proven
-state-preserving first. `home-golden-replay.test.ts` pins exactly that (seed
-representative home data, roll N→N+1 in place, prove every list survives), and
-the 2026-07-21 estuary incident — a runtime migration bricking every
-old-generation home root with no self-repair path because this flag was off —
-made the cost of the extra gate concrete. Removed at the flag owner's direction;
-home roots now ride `systemPatternAutoUpdate` like every other tracked system
-root.
+The second gate that held the **home** root (home.tsx) out of the system-pattern
+update while the stable-addressing question was open: the home root carries real
+user data (favorites, journal, the spaces list), and an in-place roll had to be
+proven state-preserving first. `home-golden-replay.test.ts` pins exactly that
+(seed representative home data, roll N→N+1 in place, prove every list
+survives), and the 2026-07-21 estuary incident — a runtime migration bricking
+every old-generation home root with no self-repair path because this flag was
+off — made the cost of the extra gate concrete. Removed at the flag owner's
+direction; the home root follows its origin like every other piece.
 
 ### `schedulerHistoricalMightWrite` (removed)
 

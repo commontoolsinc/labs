@@ -77,9 +77,7 @@ export type ExecutorHostOptions = {
 
   /** Build a serving runtime for one space over the loopback plane. The
    * factory owns auth and runtime options; it MUST pass
-   * `experimental: { serverExecution: true, systemPatternAutoUpdate:
-   * true }` — the flag posture and §3e's server-side pattern-update
-   * flip. */
+   * `experimental: { serverExecution: true }`. */
   createRuntime: (space: MemorySpace) => Promise<{
     runtime: Runtime;
     dispose: () => Promise<void>;
