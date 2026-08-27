@@ -200,31 +200,51 @@ function withStdin(payload: string | undefined, tokens: string[]): string[] {
 }
 
 /**
- * The payload of a leading `echo <value> |` on a command line, if it has one.
+ * A document's `echo <value> | cf …` line, as the tokens to match on — or
+ * null when the line is not one.
  *
- * Only that exact shape counts: everything before the first pipe has to be
- * `echo` and one word. A command piping its own output onward — `cf … | jq`,
- * a `$(cf …)` substitution — has something else there and reads as no
- * payload, which is what keeps this off every line the other demos quote.
+ * The shape is read out of the token stream by position: `echo`, one value,
+ * the bar, then the command. Every part of that has to be positional rather
+ * than found by searching the raw line. A bar inside the value is one
+ * character of a quoted token and not the separator, and the separator is
+ * the bar that stands alone — so `echo 'a|b' | cf …` carries `a|b`, where
+ * splitting the string at its first bar carried `a`. The command likewise
+ * starts where the bar ends rather than at the first `cf ` the line spells,
+ * which a value holding the word can otherwise be.
  */
-function extractStdin(line: string): string | undefined {
-  const bar = line.indexOf("|");
-  if (bar === -1) return undefined;
-  const before = tokenize(line.slice(0, bar));
-  if (before.length !== 2 || before[0] !== "echo") return undefined;
-  return before[1];
+function documentStdinCommand(line: string): string[] | null {
+  const tokens = tokenize(line);
+  if (tokens[0] !== "echo" || tokens[2] !== "|" || tokens[3] !== "cf") {
+    return null;
+  }
+  return ["echo", tokens[1]!, "|", ...dropSpaceFlag(tokens.slice(3))];
 }
+
+/**
+ * How many of its own arguments each demo helper takes before the command.
+ *
+ * The command's position is this table's to say, never the position of the
+ * first `cf` token: a helper argument can be spelled `cf` — a payload, a
+ * refusal's grep signature — and searching for the token finds that one
+ * first, recording everything after it as the argv. A helper the table does
+ * not name runs nothing, so a new one that does has to be added here.
+ */
+const HELPER_LEADING_ARGS: ReadonlyMap<string, number> = new Map([
+  ["run", 0],
+  ["run_loud", 0],
+  ["run_stdin", 1], // the value piped in
+  ["refused", 2], // the claim, and the signature that checks it holds
+  ["broken", 2], // the same
+]);
 
 /** Every command a demo runs, as normalized token lists: `run`, `run_loud`,
  * `run_stdin`, `refused` and `broken` lines execute theirs, and a `pending`
  * line's first argument is the command it promises. `run_loud` differs from
  * `run` only in how much of the output it shows, and `run_stdin` only in the
  * value it pipes in ahead of the same argv, so all three are commands the
- * demo ran. Slicing from the `cf` token is what lets a helper carry its own
- * leading arguments — `refused`'s claim and grep signature among them —
- * without a rule per helper. A `run_stdin` payload is the one such argument
- * that is part of the command rather than part of the act's bookkeeping, so
- * it rides back in through {@link withStdin} rather than being dropped. */
+ * demo ran. A `run_stdin` payload is the one helper argument that is part of
+ * the command rather than part of the act's bookkeeping, so it rides back in
+ * through {@link withStdin} rather than being dropped. */
 export function demoCommands(shText: string): string[][] {
   const commands: string[][] = [];
   for (const line of joinContinuations(shText)) {
@@ -232,15 +252,13 @@ export function demoCommands(shText: string): string[][] {
     const tokens = tokenize(trimmed);
     if (tokens.length === 0) continue;
     const head = tokens[0]!;
-    if (
-      head === "run" || head === "run_loud" || head === "run_stdin" ||
-      head === "refused" || head === "broken"
-    ) {
-      const at = tokens.indexOf("cf");
-      if (at !== -1) {
+    const leading = HELPER_LEADING_ARGS.get(head);
+    if (leading !== undefined) {
+      const at = leading + 1;
+      if (tokens[at] === "cf") {
         // The payload is the helper's first argument, and only `run_stdin`
         // has one that reaches the command line.
-        const payload = head === "run_stdin" && at >= 2 ? tokens[1] : undefined;
+        const payload = head === "run_stdin" ? tokens[1] : undefined;
         commands.push(withStdin(payload, dropSpaceFlag(tokens.slice(at))));
       }
       continue;
@@ -289,19 +307,19 @@ export function walkthroughCommands(
     while (logical.endsWith("\\") && i + 1 < lines.length) {
       logical = logical.slice(0, -1) + " " + lines[++i]!;
     }
-    const span = extractCf(logical);
-    if (!span) continue;
+    // An `echo <value> | cf …` line is read positionally; every other line
+    // finds its command in the raw text, where nothing precedes it.
+    let command = documentStdinCommand(logical);
+    if (command === null) {
+      const span = extractCf(logical);
+      command = span ? dropSpaceFlag(tokenize(span)) : null;
+    }
+    if (command === null) continue;
     if (exempt) {
       exempt = false;
       continue;
     }
-    out.push({
-      tokens: withStdin(
-        extractStdin(logical),
-        dropSpaceFlag(tokenize(span)),
-      ),
-      line: i + 1,
-    });
+    out.push({ tokens: command, line: i + 1 });
   }
   return out;
 }

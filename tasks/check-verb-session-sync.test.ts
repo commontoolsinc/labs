@@ -101,6 +101,22 @@ describe("check-verb-session-sync", () => {
         .toEqual([["echo", "25", "|", "cf", "set", "--piece", "a", "target"]]);
     });
 
+    it("does not mistake a payload spelled `cf` for the command", () => {
+      // Searching for the `cf` token found the payload first and read the
+      // rest as the argv, recording `cf cf set …` — a command no demo runs,
+      // against which the honest quote of the write reads as invented. The
+      // helper's shape says where the command starts; nothing is searched.
+      expect(demoCommands(`run_stdin 'cf' cf set --piece a target`))
+        .toEqual([["echo", "cf", "|", "cf", "set", "--piece", "a", "target"]]);
+    });
+
+    it("reads a refusal's own claim and signature past, not through", () => {
+      // The same hazard on the helper carrying two arguments: either can be
+      // spelled `cf`, and only the table knows the command is the third.
+      expect(demoCommands(`refused 'why' 'cf' cf get --piece a x`))
+        .toEqual([["cf", "get", "--piece", "a", "x"]]);
+    });
+
     it("leaves a command piping its own output onward with no payload", () => {
       // Only a leading `echo <value> |` is a stdin payload. A pipe after the
       // command belongs to the shell around it, and reading one as a payload
@@ -347,6 +363,28 @@ describe("check-verb-session-sync", () => {
       const demo = `run_stdin '25' cf set --piece a target\n`;
       const halved = "```bash\ncf set --piece a target\n```";
       expect(findViolations(demo, halved).length).toBe(1);
+    });
+
+    it("keeps a value holding a bar as one value on both sides", () => {
+      // Splitting the raw line at its first bar split INSIDE the quotes, so
+      // a document showing `a|b` matched a demo piping `a`: the separator is
+      // the bar that stands alone as a token, never the first bar character.
+      const pipesA = `run_stdin 'a' cf set --piece a target\n`;
+      const showsAB = "```bash\necho 'a|b' | cf set --piece a target\n```";
+      expect(findViolations(pipesA, showsAB).length).toBe(1);
+      const pipesAB = `run_stdin 'a|b' cf set --piece a target\n`;
+      expect(findViolations(pipesAB, showsAB)).toEqual([]);
+    });
+
+    it("keeps a value holding the word cf out of the command", () => {
+      // The document side reads its command positionally for the same
+      // reason the demo side does: found in the raw text, the first `cf `
+      // a value spells is taken for the start of the command.
+      const demo = `run_stdin 'x cf y' cf set --piece a target\n`;
+      const quoted = "```bash\necho 'x cf y' | cf set --piece a target\n```";
+      expect(findViolations(demo, quoted)).toEqual([]);
+      const drifted = "```bash\necho 'x cf y' | cf set --piece a label\n```";
+      expect(findViolations(demo, drifted).length).toBe(1);
     });
 
     it("keeps every write in the read/write tour matched to its demo", () => {
