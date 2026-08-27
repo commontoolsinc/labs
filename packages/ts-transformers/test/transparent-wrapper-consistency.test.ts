@@ -203,6 +203,59 @@ describe("transparent wrapper consistency", () => {
     }
   });
 
+  describe("capture shrinking", () => {
+    // A lift captures the fields its body actually reads. The dedup that
+    // decides this asks each data flow for its root identifier, so a spelling
+    // whose root goes unrecognized is not simply skipped — the free-identifier
+    // pass adds that root as its own capture, and a whole-object capture
+    // subsumes the narrower paths beside it. The lift then re-runs for any
+    // field of the object rather than for the one field it reads.
+    //
+    // These spellings parenthesize the whole wrapper and asserts to the
+    // receiver's own type. `(obj) as S` would not do: appending `.b` to it
+    // parses as the qualified type name `S.b`, not a read of the cast value.
+    const RECEIVERS: Readonly<Record<string, string>> = {
+      bare: "obj",
+      parenthesized: "(obj)",
+      "non-null": "obj!",
+      "as-cast": "(obj as S)",
+      satisfies: "(obj satisfies S)",
+      stacked: "((obj satisfies S) as S)!",
+    };
+
+    const source = (receiver: string) =>
+      `      import { pattern } from "commonfabric";
+      interface S { a: number; b: number; }
+      export default pattern<{ obj: S }, { x: number; y: number }>(({ obj }) => ({
+        x: obj.a * 2,
+        y: ${receiver}.b + 1,
+      }));
+    `;
+
+    /** The capture object the second lift is applied to, whitespace-flattened.
+     *  Sliced by width rather than matched to a closing paren, because the
+     *  captures themselves contain parentheses (`obj.key("b")`). */
+    const captureArgumentOf = (output: string): string => {
+      const flattened = output.replace(/\s+/g, " ");
+      const start = flattened.indexOf("__cfLift_2(");
+      expect(start).toBeGreaterThanOrEqual(0);
+      return flattened.slice(start, start + 120);
+    };
+
+    for (const [name, receiver] of Object.entries(RECEIVERS)) {
+      it(`captures only the field read behind a ${name} receiver`, async () => {
+        const captures = captureArgumentOf(
+          await transformSource(source(receiver), {
+            types: COMMONFABRIC_TYPES,
+          }),
+        );
+
+        expect(captures).toContain('obj.key("b")');
+        expect(captures).not.toContain("obj: obj");
+      });
+    }
+  });
+
   describe("normalizeDataFlows()", () => {
     // Built directly rather than through the pipeline: a partially emitted node
     // is synthetic, so a hand-built graph is the only way to put one in front
