@@ -105,7 +105,10 @@ describe("syncArgumentLinkTargets", () => {
   }
 
   async function run(root: Cell<unknown>, schema: JSONSchema | undefined) {
+    // Both ledgers are scoped to the walk under test, so a fixture's own
+    // reads and syncs never count toward an assertion about it.
     syncedIds.length = 0;
+    walkedIds.length = 0;
     await (runtime.runner as unknown as {
       syncArgumentLinkTargets(
         roots: readonly { cell: Cell<unknown>; schema?: JSONSchema }[],
