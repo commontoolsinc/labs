@@ -346,7 +346,10 @@ export class CellController<T> implements ReactiveController {
       : null;
   }
 
+  //
   // ReactiveController implementation
+  //
+
   hostConnected(): void {
     this._setupCellSubscription();
   }
@@ -356,7 +359,10 @@ export class CellController<T> implements ReactiveController {
     this._inputTiming?.cancel();
   }
 
+  //
   // Private methods
+  //
+
   private defaultGetValue(value: CellHandle<T> | T): T {
     if (isCellHandle(value)) {
       const cellValue = (value as CellHandle<T>).get();
