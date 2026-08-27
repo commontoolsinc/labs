@@ -181,7 +181,7 @@ function render(): void {
 const stops = [input.sink(render), state.sink(render)];
 run(
   (async () => {
-    const [, , stableBallot] = await Promise.all([
+    const [, currentState, stableBallot] = await Promise.all([
       input.pull(),
       state.pull(),
       output.resolve(),
@@ -190,11 +190,10 @@ run(
     if (!ballotId) {
       throw new Error("The per-user ballot identity could not be resolved.");
     }
-    if (state.get()?.ballots === undefined) {
-      await state.update((current) => ({
-        ...(current ?? DEFAULT_STATE),
-        ballots: current?.ballots ?? {},
-      }));
+    if (currentState === undefined) {
+      await state.set(DEFAULT_STATE);
+    } else if (currentState.ballots === undefined) {
+      await state.key("ballots").set({});
     }
   })(),
   undefined,

@@ -164,6 +164,25 @@ export const IFRAME_PATTERN = {
     );
   });
 
+  it("initializes a shared poll from an authoritative pull", async () => {
+    const guest = await Deno.readTextFile(
+      resolve(
+        ROOT,
+        "packages",
+        "patterns",
+        "iframe-team-poll",
+        "guest.ts",
+      ),
+    );
+
+    expect(guest).toContain("const [, currentState, stableBallot]");
+    expect(guest).toContain(
+      "if (currentState === undefined) {\n      await state.set(DEFAULT_STATE);",
+    );
+    expect(guest).toContain('await state.key("ballots").set({});');
+    expect(guest).not.toContain("await state.update(");
+  });
+
   it("hydrates session drafts before enabling edits", async () => {
     const guest = await Deno.readTextFile(
       resolve(
