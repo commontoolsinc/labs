@@ -7,9 +7,9 @@ import { ensureSyntaxTree } from "@codemirror/language";
 import { Decoration } from "@codemirror/view";
 import { buildProseDecorations } from "./prose-markdown.ts";
 
-// ---------------------------------------------------------------------------
+//
 // Helpers
-// ---------------------------------------------------------------------------
+//
 
 /** Create a headless EditorState with markdown+GFM parsing and a cursor position. */
 function createState(doc: string, cursor = 0): EditorState {
@@ -70,9 +70,9 @@ function isMark(deco: Decoration): boolean {
   return typeof deco.spec?.class === "string";
 }
 
-// ---------------------------------------------------------------------------
+//
 // Tests
-// ---------------------------------------------------------------------------
+//
 
 describe("buildProseDecorations", () => {
   it("returns empty array for empty document", () => {
