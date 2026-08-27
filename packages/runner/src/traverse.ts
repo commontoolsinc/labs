@@ -2356,7 +2356,7 @@ function followPointer(
 ] {
   // doc.address's path doesn't have the same value nesting semantics as
   // link path, but we don't use the path field from that argument.
-  let link = parseLink(doc.value, doc.address)!;
+  const link = parseLink(doc.value, doc.address)!;
   // We may access portions of the doc outside what we have in our doc
   // attestation, so set the target to the top level doc from the manager.
   const target: IMemorySpaceValueAddress = {
