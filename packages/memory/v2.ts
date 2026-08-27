@@ -321,13 +321,13 @@ export const SERVER_EXECUTION_WATERMARK_DOC_ID =
  * space — not per doc, not per piece, never vectorized. */
 export type WatermarkDocValue = { seq: number };
 
-// ---------------------------------------------------------------------------
+//
 // Events-down (server-execution v2 Phase 3, D-v2-1;
 // docs/specs/server-side-execution/events.md). The event is an AUTHORED
 // APPEND to a stream document — the client's only computational commit
 // under the flag. Protocol vocabulary, defined once here (protocol.md §7:
 // `eventId`/`firedAt` are commit-metadata additions for event appends).
-// ---------------------------------------------------------------------------
+//
 
 /**
  * The stream-entries SIDECAR doc id for one stream (events.md §1's "stream
@@ -478,7 +478,7 @@ export type EventAppendDecl = {
   eventId: string;
 };
 
-// ---------------------------------------------------------------------------
+//
 // The client-effect channel (server-execution v2 Phase 4;
 // docs/specs/server-side-execution/protocol.md §5). Session-scoped,
 // server-computed, client-enacted effects: the SpaceServer writes INTENT
@@ -486,7 +486,7 @@ export type EventAppendDecl = {
 // doc, the session's client enacts and ACKS by nonce (an ordinary authored
 // write into its own instance), and the next wave retires acked entries.
 // Protocol vocabulary, defined once here (the LD3 direction).
-// ---------------------------------------------------------------------------
+//
 
 /**
  * The well-known client-effects doc, one id per space (protocol.md §5,

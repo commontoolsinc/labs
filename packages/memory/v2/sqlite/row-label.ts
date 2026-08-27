@@ -55,9 +55,9 @@ const isFieldRef = (x: unknown): x is FieldRef =>
   isObjectNotArray(x) && typeof x.field === "string" &&
   Object.keys(x).length === 1;
 
-// ---------------------------------------------------------------------------
+//
 // Builders — each returns its serialized AST node.
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Run `re` (forced global) over a column's text ⟹ the ordered list of matches
@@ -194,9 +194,9 @@ function assertPrincipal(x: unknown, who: string) {
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // Validation — fail closed at authoring AND on wire-supplied specs.
-// ---------------------------------------------------------------------------
+//
 
 const MAX_REGEX_SOURCE = 512;
 
@@ -545,9 +545,9 @@ export function buildRowLabelSpec<C extends Record<string, unknown>>(
   return spec;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Evaluation — one pure function, shared by write gate, server, and read.
-// ---------------------------------------------------------------------------
+//
 
 class RowLabelEvalError extends Error {}
 
