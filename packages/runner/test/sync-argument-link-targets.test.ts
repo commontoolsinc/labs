@@ -265,6 +265,27 @@ describe("syncArgumentLinkTargets", () => {
     expect(syncedIds).toContain(id(behindMissing));
   });
 
+  it("walks a subtree once when two declared paths link to it", async () => {
+    const { make, commit } = docBuilder("diamond");
+    const leaf = make("leaf", { n: 1 });
+    const shared = make("shared", { child: leaf });
+    const root = make("root", { left: shared, right: shared });
+    await commit();
+    const childSchema = {
+      type: "object",
+      properties: { child: { type: "object" } },
+    } as JSONSchema;
+    await run(root, {
+      type: "object",
+      properties: { left: childSchema, right: childSchema },
+    } as JSONSchema);
+    // Both arms of the diamond reach the same document at the same path, so
+    // the second walk is dropped; the subtree below it is still synced.
+    expect(syncedIds).toContain(id(shared));
+    expect(syncedIds).toContain(id(leaf));
+    expect(syncedIds.filter((each) => each === id(leaf))).toHaveLength(1);
+  });
+
   it("gives an undeclared subtree below a declared root the two-hop budget", async () => {
     const { make, commit } = docBuilder("budget");
     const third = make("third", { n: 3 });
