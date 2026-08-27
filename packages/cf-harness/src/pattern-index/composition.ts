@@ -68,8 +68,16 @@ export const patternIndexDependencies = (
 ): readonly string[] => [
   ...new Set(
     files.flatMap((file) =>
-      [...file.contents.matchAll(/\bcf:pattern:([A-Za-z0-9_-]+)/g)]
-        .map((match) => match[1])
+      // Only IMPORT positions count: a static `from "cf:pattern:<id>"` (or a
+      // bare `import "..."` / dynamic `import("...")`). The id also appears
+      // in comments and prose — a search hint quoting the specifier, a
+      // description — and a mention is not a dependency: fetching it wastes
+      // a mount, and refusing over it rejects valid source.
+      [
+        ...file.contents.matchAll(
+          /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)["']cf:pattern:([A-Za-z0-9_-]+)["']/g,
+        ),
+      ].map((match) => match[1])
     ),
   ),
 ];

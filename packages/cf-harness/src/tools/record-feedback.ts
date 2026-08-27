@@ -135,12 +135,17 @@ export const recordFeedbackTool: HarnessToolDefinition<
     try {
       // Awaited, unlike the usage events a run reports on its own: this one
       // is what the tool was called to do, so whether it landed is the
-      // result.
-      await client.recordEvent({
+      // result — including a 2xx answer that says the event was not taken.
+      const answer = await client.recordEvent({
         patternId: input.patternId,
         eventType,
         ...(input.note !== undefined ? { note: input.note } : {}),
       });
+      if (answer.ok !== true) {
+        return errorOutput(
+          `the pattern index answered but did not record the ${eventType} event`,
+        );
+      }
     } catch (error) {
       return errorOutput(errorMessage(error));
     }

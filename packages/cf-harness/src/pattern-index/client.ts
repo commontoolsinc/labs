@@ -201,6 +201,16 @@ export class PatternIndexClient {
   readonly #signer: FirstPartyHttpSigner;
 
   constructor(options: PatternIndexClientOptions) {
+    // The function name is appended to the base's path, so a base carrying a
+    // query or fragment would put the function after that component and
+    // every request would sign and address the wrong URL. Refused here,
+    // where the misconfiguration is nameable, rather than as N opaque 404s.
+    const base = new URL(options.baseUrl);
+    if (base.search !== "" || base.hash !== "") {
+      throw new Error(
+        `pattern index base URL must not carry a query or fragment: ${options.baseUrl}`,
+      );
+    }
     this.#baseUrl = options.baseUrl;
     this.#fetchFn = options.fetchFn ?? defaultHarnessFetch;
     this.#signer = options.signer;

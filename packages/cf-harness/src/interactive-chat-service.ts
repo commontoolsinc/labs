@@ -35,7 +35,10 @@ import {
   reduceHarnessChatSessionStatus,
   resolveHarnessChatPolicy,
 } from "./contracts/interactive-chat.ts";
-import { BROWSER_SUBAGENT_PROFILE } from "./contracts/subagent.ts";
+import {
+  BROWSER_SUBAGENT_PROFILE,
+  isHarnessSubagentProfile,
+} from "./contracts/subagent.ts";
 import {
   type HarnessCredentialOwnerRef,
   harnessCredentialOwnersEqual,
@@ -1633,16 +1636,56 @@ export class HarnessInteractiveChatService {
     startedSubagents: Map<string, HarnessChatSubagentSummary>,
     message: HarnessToolTranscriptMessage,
   ): Promise<void> {
-    const subagent = startedSubagents.get(message.toolCallId);
+    // A child that died before its first message never announced itself, so
+    // its start is synthesized from the delegate output's own manifest —
+    // otherwise the failure below has no subagent to hang on and the viewer
+    // sees a delegation that simply never happened.
+    const parsedForStart = parseToolMessageContent(message.content);
+    const manifest = typeof parsedForStart?.subagent === "object" &&
+        parsedForStart.subagent !== null
+      ? (parsedForStart.subagent as {
+        manifest?: { childRunId?: string; profile?: string };
+      }).manifest
+      : undefined;
+    let subagent = startedSubagents.get(message.toolCallId);
+    if (
+      subagent === undefined && typeof manifest?.childRunId === "string" &&
+      typeof manifest.profile === "string" &&
+      isHarnessSubagentProfile(manifest.profile)
+    ) {
+      subagent = await this.#startSubagent(
+        sessionId,
+        turnId,
+        startedSubagents,
+        {
+          parentToolCallId: message.toolCallId,
+          childRunId: manifest.childRunId,
+          profile: manifest.profile,
+          // The manifest carries the goal's digest, not its text, so a
+          // synthesized start has none to show; the failure event that
+          // follows is the point.
+          goal: "",
+        },
+      );
+    }
     if (subagent === undefined) {
       return;
     }
     startedSubagents.delete(message.toolCallId);
-    const status = toolMessageStatus(parseToolMessageContent(message.content));
+    // A delegate_task output carries the child's verdict at
+    // `subagent.status`, not at the generic `ok` the tool-message reading
+    // knows — read the specific field first, or a failed child announces
+    // itself completed.
+    const parsed = parseToolMessageContent(message.content);
+    const childStatus =
+      typeof parsed?.subagent === "object" && parsed.subagent !== null &&
+        (parsed.subagent as { status?: unknown }).status === "failed"
+        ? "failed"
+        : toolMessageStatus(parsed);
     await this.#emit(sessionId, turnId, {
       kind: "subagent_completed",
       subagent,
-      status: status === "completed" ? "completed" : "failed",
+      status: childStatus === "completed" ? "completed" : "failed",
     });
   }
 

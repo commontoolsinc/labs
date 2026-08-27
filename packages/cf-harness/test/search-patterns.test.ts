@@ -226,6 +226,8 @@ describe("search-patterns", () => {
     const output = result.output as SearchPatternsToolErrorOutput;
     expect(output.status).toBe("error");
     expect(output.message).toContain("403");
-    expect(output.message).toContain("forbidden");
+    // The service body ("forbidden") stays off the model-facing message.
+    expect(output.message).toContain("searchPatterns failed (403)");
+    expect(output.message).not.toContain("forbidden");
   });
 });

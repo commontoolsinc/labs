@@ -3735,9 +3735,14 @@ export class CfHarnessPromptLoop {
         ? { fabricSessionFactory: this.engine.fabricSessionFactory }
         : {}),
       // Likewise the index client: a child searches and runs indexed
-      // patterns through the one the parent built.
+      // patterns through the one the parent built. The connection CONFIG
+      // rides along too, because the operator's dials live on it — a parent
+      // run with `publish: false` must not delegate its way into publishing.
       ...(this.engine.patternIndexClientFactory !== undefined
         ? { patternIndexClientFactory: this.engine.patternIndexClientFactory }
+        : {}),
+      ...(this.engine.config.patternIndex !== undefined
+        ? { patternIndex: this.engine.config.patternIndex }
         : {}),
       // The child's task is the goal it was delegated, which is the request a
       // pattern it authors and publishes was written to answer.
