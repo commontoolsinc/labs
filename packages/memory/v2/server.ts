@@ -193,6 +193,7 @@ const timing = getLogger("memory", { enabled: false });
 const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
 const MIN_REFRESH_QUEUE_DRAIN_WAIT_MS = 500;
 const SLOW_QUERY_THRESHOLD_MS = 100;
+const QUERY_EVALUATION_CACHE_MAX_SPACES = 8;
 const SLOW_QUERY_BUFFER_SIZE = 100;
 const DEFAULT_SESSION_OPEN_CHALLENGE_TTL_SECONDS = 300;
 const SESSION_OPEN_CHALLENGE_BYTES = 32;
@@ -1186,7 +1187,8 @@ export class Server {
   #connections = new Map<string, Connection>();
 
   /** Whole-evaluation caches, one per space (see QueryEvaluationCache in
-   * query.ts for the sharing, purity, and seq-rotation rules). */
+   * query.ts for the sharing, purity, and seq-rotation rules), held for at
+   * most QUERY_EVALUATION_CACHE_MAX_SPACES spaces in LRU order. */
   #queryEvaluationCaches = new Map<string, QueryEvaluationCache>();
   #engines = new Map<string, Promise<Engine.Engine>>();
   // The resolved-engine index for the SYNC cross-engine lease lookup
@@ -3980,18 +3982,38 @@ export class Server {
 
   #evaluationCacheFor(space: string): QueryEvaluationCache {
     let cache = this.#queryEvaluationCaches.get(space);
-    if (cache === undefined) {
-      cache = createQueryEvaluationCache();
+    if (cache !== undefined) {
+      // Recency bump: insertion order is the LRU order.
+      this.#queryEvaluationCaches.delete(space);
       this.#queryEvaluationCaches.set(space, cache);
+      return cache;
+    }
+    cache = createQueryEvaluationCache();
+    this.#queryEvaluationCaches.set(space, cache);
+    // An entry retains full cloned graph states (parsed documents
+    // included), and an inactive space's cache would otherwise linger
+    // until that space's next commit — which may never come. Bounding the
+    // SPACES held, least-recently-evaluated first, caps total retention at
+    // spaces × entries × corpus, on top of the per-commit rotation.
+    if (this.#queryEvaluationCaches.size > QUERY_EVALUATION_CACHE_MAX_SPACES) {
+      const oldest = this.#queryEvaluationCaches.keys().next().value;
+      if (oldest !== undefined) {
+        this.#queryEvaluationCaches.delete(oldest);
+      }
     }
     return cache;
   }
 
-  /** The space's evaluation-cache counters, for diagnostics and tests. */
+  /** The space's evaluation-cache counters, for diagnostics and tests.
+   * A peek: an absent (never-evaluated or evicted) space reads as empty
+   * rather than being created or recency-bumped by the question. */
   evaluationCacheDiagnostics(
     space: string,
   ): QueryEvaluationCacheDiagnostics {
-    return queryEvaluationCacheDiagnostics(this.#evaluationCacheFor(space));
+    const cache = this.#queryEvaluationCaches.get(space);
+    return cache === undefined
+      ? { seq: -1, entries: 0, hits: 0, misses: 0, rotations: 0 }
+      : queryEvaluationCacheDiagnostics(cache);
   }
 
   async evaluateGraphQuery(

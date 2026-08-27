@@ -325,9 +325,11 @@ const evaluationIdentityKey = (options: TrackGraphOptions): string =>
  * are few (a session class shares its watch corpus), so the bound exists
  * for the adversarial case, not the expected one; an insert past it is
  * skipped rather than evicting, since within one generation every entry is
- * equally live.
+ * equally live. Kept small because an entry retains a full cloned state —
+ * tracker, entities, and the manager's parsed documents — so the bound is
+ * a memory bound as much as a count.
  */
-const EVALUATION_CACHE_MAX_ENTRIES = 64;
+const EVALUATION_CACHE_MAX_ENTRIES = 16;
 
 export type QueryEvaluationCacheDiagnostics = {
   seq: number;
@@ -365,7 +367,7 @@ export type QueryEvaluationCacheDiagnostics = {
  */
 export type QueryEvaluationCache = {
   seq: number;
-  entries: Map<string, { state: TrackedGraphState; scopePure: boolean }>;
+  entries: Map<string, { state: TrackedGraphState; share: StateScopeClass }>;
   hits: number;
   misses: number;
   rotations: number;
@@ -389,17 +391,125 @@ export const queryEvaluationCacheDiagnostics = (
   rotations: cache.rotations,
 });
 
-const stateIsScopePure = (state: TrackedGraphState): boolean => {
-  for (const [key] of state.tracker) {
-    if (fromDocKey(key as QueryDocKey).scopeKey !== "space") return false;
+/**
+ * How an evaluation's reach constrains who may share its cache entry.
+ *
+ * `pure`: every key resolved under the space scope — the result is
+ * identical for every identity. `absent-residue`: identity-dependent ONLY
+ * through scoped value-link dead-ends (`missed` keys — docs that were
+ * ABSENT), which is the shape a live corpus actually produces: per-session
+ * draft cells linked from shared documents that no fresh session has ever
+ * written. Such an entry serves another identity by REWRITING those keys
+ * to the requester's own instances — sound because the keys are the only
+ * identity-dependent part of the state (nothing was delivered from them,
+ * nothing was traversed under them) — after verifying each is absent for
+ * the requester too. `tainted`: scoped PRESENT data reached the tracker,
+ * or a key did not classify; the entry stays keyed to its identity.
+ */
+type StateScopeClass =
+  | { kind: "pure" }
+  | {
+    kind: "absent-residue";
+    residue: { key: QueryDocKey; id: string; scope: CellScope }[];
   }
-  for (const [key] of state.missed) {
-    if (fromDocKey(key as QueryDocKey).scopeKey !== "space") return false;
+  | { kind: "tainted" };
+
+const classifyStateScope = (state: TrackedGraphState): StateScopeClass => {
+  for (const [key] of state.tracker) {
+    if (fromDocKey(key as QueryDocKey).scopeKey !== "space") {
+      return { kind: "tainted" };
+    }
   }
   for (const address of state.manager.loadedAddresses()) {
-    if (address.scopeKey !== "space") return false;
+    // Both halves checked deliberately: an explicit entity_scope_key can
+    // pair a non-space scope NAME with an aliased key, and such a load
+    // must never classify as shared. (Explicit foreign keys are
+    // lease-holder-only, and that whole session class bypasses the cache
+    // — this guards the invariant locally as well.)
+    if (address.scopeKey !== "space" || address.scope !== "space") {
+      return { kind: "tainted" };
+    }
   }
-  return true;
+  const residue: { key: QueryDocKey; id: string; scope: CellScope }[] = [];
+  for (const [key] of state.missed) {
+    const { id, scope, scopeKey } = fromDocKey(key as QueryDocKey);
+    if (scopeKey === "space") continue;
+    if (scope === "space") return { kind: "tainted" };
+    residue.push({ key: key as QueryDocKey, id, scope });
+  }
+  return residue.length === 0
+    ? { kind: "pure" }
+    : { kind: "absent-residue", residue };
+};
+
+/**
+ * Serve an `absent-residue` entry to `options`' identity: verify each
+ * residue doc is ABSENT for the requester too, then clone with the
+ * residue's miss keys rewritten to the requester's instances — so the
+ * clone's wake and dirty-refresh reactivity points at the docs the OWNING
+ * session would create, not the recording session's.
+ *
+ * The absence probes are load-bearing and cannot be skipped for a
+ * different identity: the requester's instance may have existed since
+ * before the entry was recorded (the recording walk never looked at it).
+ * They are also sufficient — entries live only within one engine seq, and
+ * absence cannot change without a commit. A present instance returns
+ * null: the caller evaluates normally, and that evaluation's tracker then
+ * carries the scoped doc, keying its own entry to the identity.
+ */
+const cloneWithRewrittenResidue = (
+  engine: Engine.Engine,
+  space: string,
+  state: TrackedGraphState,
+  residue: { key: QueryDocKey; id: string; scope: CellScope }[],
+  options: TrackGraphOptions,
+): TrackedGraphState | null => {
+  const identity: ScopeKeyIdentity = {
+    principal: options.principal,
+    sessionId: options.sessionId,
+  };
+  const mapping = new Map<string, string>();
+  for (const { key, id, scope } of residue) {
+    const requesterScopeKey = resolveScopeKey(scope, identity);
+    const requesterKey = `${space}/${requesterScopeKey}/${id}`;
+    if (requesterKey !== key) {
+      const probe = Engine.readState(engine, {
+        id,
+        scope,
+        scopeKey: requesterScopeKey,
+        principal: options.principal,
+        sessionId: options.sessionId,
+        branch: state.branch,
+      });
+      if (probe !== null && probe.document !== null) {
+        return null;
+      }
+      mapping.set(key, requesterKey);
+    }
+  }
+  const clone = cloneTrackedGraphStateForIdentity(engine, state, options);
+  if (mapping.size === 0) {
+    return clone;
+  }
+  const missed = new MapSetStringToPathSelectors(true);
+  for (const [key, selectors] of clone.missed) {
+    const mapped = mapping.get(key) ?? key;
+    for (const selector of selectors) {
+      missed.add(mapped, selector);
+    }
+  }
+  const missedBy = new Map<string, Set<string>>();
+  for (const [key, referrers] of clone.missedBy) {
+    missedBy.set(mapping.get(key) ?? key, referrers);
+  }
+  const missesOf = new Map<string, Set<string>>();
+  for (const [referrer, misses] of clone.missesOf) {
+    missesOf.set(
+      referrer,
+      new Set([...misses].map((miss) => mapping.get(miss) ?? miss)),
+    );
+  }
+  return { ...clone, missed, missedBy, missesOf };
 };
 
 /**
@@ -945,14 +1055,28 @@ export const trackGraph = (
     const entry = cache.entries.get(cacheKeys.pure) ??
       cache.entries.get(cacheKeys.identity);
     if (entry !== undefined) {
-      cache.hits++;
-      // A hit ran no traversal, and its stats say so: zero walk counters
-      // are the truth of what THIS call cost, not an accounting gap.
-      return {
-        serverSeq: currentSeq,
-        state: cloneTrackedGraphStateForIdentity(engine, entry.state, options),
-        stats: createQueryTraversalStats(),
-      };
+      const served = entry.share.kind === "absent-residue"
+        ? cloneWithRewrittenResidue(
+          engine,
+          space,
+          entry.state,
+          entry.share.residue,
+          options,
+        )
+        : cloneTrackedGraphStateForIdentity(engine, entry.state, options);
+      if (served !== null) {
+        cache.hits++;
+        // A hit ran no traversal, and its stats say so: zero walk counters
+        // are the truth of what THIS call cost, not an accounting gap.
+        return {
+          serverSeq: currentSeq,
+          state: served,
+          stats: createQueryTraversalStats(),
+        };
+      }
+      // A residue doc is PRESENT for this identity: the shared entry does
+      // not describe this session's reach. Evaluate normally — the result
+      // carries the scoped doc in its tracker, so it keys to the identity.
     }
     cache.misses++;
   }
@@ -1055,11 +1179,14 @@ export const trackGraph = (
   ) {
     // The cache keeps its own clone: the state returned below belongs to
     // the caller's session, whose refreshes and extensions mutate it.
-    const scopePure = stateIsScopePure(state);
-    cache.entries.set(scopePure ? cacheKeys.pure : cacheKeys.identity, {
-      state: cloneTrackedGraphState(engine, state),
-      scopePure,
-    });
+    const share = classifyStateScope(state);
+    cache.entries.set(
+      share.kind === "tainted" ? cacheKeys.identity : cacheKeys.pure,
+      {
+        state: cloneTrackedGraphState(engine, state),
+        share,
+      },
+    );
   }
   return {
     serverSeq: Engine.serverSeq(engine),
