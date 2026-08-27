@@ -191,6 +191,18 @@ const pendingPatchLogger = getLogger("storage.v2.pending-patch", {
   level: "warn",
   logCountEvery: 0,
 });
+/** Its OWN logger, deliberately, because the module logger above sits at
+ *  `level: "error"` and would swallow a warn. A session remount is the visible
+ *  end of a starvation that was previously indistinguishable from a doc simply
+ *  not being there (the profile-starvation fifth face was diagnosed from the
+ *  ABSENCE of lines), so this one has to survive the default posture. Bounded:
+ *  it fires only on an actual remount, which needs a terminated session AND an
+ *  ACL commit. */
+const sessionRemountLogger = getLogger("storage.v2.session-remount", {
+  enabled: true,
+  level: "warn",
+  logCountEvery: 0,
+});
 
 const EMPTY_OVERLAY: ReadonlyMap<string, unknown> = new Map();
 
@@ -1108,6 +1120,25 @@ export class StorageManager implements IStorageManager {
    * effects channel's construction-time sweep. */
   openedSpaces(): MemorySpace[] {
     return [...this.#providers.keys()];
+  }
+
+  /**
+   * IStorageManager — THE SESSION REMOUNT's trigger (see
+   * SpaceReplica.consumeOwedSessionRemount): an admitted commit touched
+   * `space`'s ACL document, so a session this manager holds on that space
+   * — revoked when an EARLIER ACL landed — may now re-open under a
+   * different verdict. The executor host calls this for every registered
+   * space server on every ACL-doc-touching admission; `space` is usually
+   * NOT the caller's own, because the session that starves is typically a
+   * CROSS-SPACE replica (a served dispatch's argument link into the
+   * viewer's home space).
+   *
+   * ALREADY-OPEN providers only. Opening one here would mount a session
+   * for a space this manager has never read, turning an unrelated ACL
+   * commit into a connection.
+   */
+  noteSpaceAclChanged(space: MemorySpace): void {
+    this.#providers.get(space)?.noteAclChanged();
   }
 
   isSchemaDocPersisted(space: MemorySpace, hash: string): boolean {
@@ -2409,6 +2440,13 @@ class Provider implements IStorageProvider, IOperationStorageCapability {
     return this.followReplacement((replica) => replica.ensureSession());
   }
 
+  /** See SpaceReplica.noteAclChanged (THE SESSION REMOUNT's latch). Only
+   *  the CURRENT replica: a replaced one is being torn down. */
+  noteAclChanged(): void {
+    if (this.#destroyed) return;
+    this.replica.noteAclChanged();
+  }
+
   listEntityIds(): Promise<string[] | undefined> {
     return this.followReplacement((replica) => replica.listEntityIds());
   }
@@ -2637,6 +2675,13 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
    *  during reconnect, which closes its watch view without a fresh watch result
    *  to record. */
   #sessionSession?: MemoryV2Client.SpaceSession;
+
+  /** THE SESSION REMOUNT's latch (see `noteAclChanged` /
+   *  `consumeOwedSessionRemount`): an admitted commit touched this space's
+   *  ACL doc, so the verdict a terminated session died of may have changed.
+   *  Cleared when the owed remount is consumed — or immediately, when there
+   *  is no memoized mount to replace. */
+  #aclChangedSinceMount = false;
   readonly #docs = new Map<string, DocumentRecord>();
   readonly #syncTasks = new Map<string, SyncTask>();
   readonly #commitPromises = new Set<Promise<unknown>>();
@@ -3106,6 +3151,167 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
 
   async ensureSession(): Promise<void> {
     await this.activeSessionHandle();
+  }
+
+  /**
+   * THE SESSION REMOUNT's latch (the fifth face of profile starvation).
+   *
+   * An admitted commit touched this space's ACL document, so the
+   * AUTHORIZATION VERDICT that terminated this replica's session may have
+   * changed. Record it; `sessionHandle()` consumes it on the next load.
+   *
+   * Why a latch instead of tearing the session down right here: the memory
+   * server emits the admitted-commit notice BEFORE it runs
+   * `#revokeDeauthorizedSessions` (both inside one `transact` — server.ts,
+   * `#notifyCommitAdmitted` then the `aclTouched` sweep). At notification
+   * time the session that the very same commit is about to revoke is still
+   * OPEN, so an eager teardown would inspect a live session, decline, and
+   * the revocation landing a moment later would starve exactly as before.
+   * Latching makes the fix independent of that ordering rather than
+   * dependent on it.
+   *
+   * Consumption is event-driven, not timed: the next load attempt calls
+   * `sessionHandle()`, and the serving loop already re-attempts a deferred
+   * event's load every drain (see the scheduler's `failHeadEventLoadPark`
+   * and the SpaceServer's deferral backstop), so the heal arrives on the
+   * cadence the deferral machinery already runs at.
+   */
+  noteAclChanged(): void {
+    if (this.#closed) return;
+    this.#aclChangedSinceMount = true;
+  }
+
+  /**
+   * THE SESSION REMOUNT itself. Drop a memoized session that an ACL verdict
+   * terminated, so the next `sessionHandle()` opens a fresh one.
+   *
+   * A revoked (or permanently denied) space session is TERMINAL for that
+   * session object: `terminateSession` (memory/v2/client.ts) closes it,
+   * clears its watch specs, and stores the verdict in `closeError`, which
+   * `#assertOpen()` then rethrows for every later call. Nothing on the read
+   * or commit path ever dropped the memoized mount — `sessionHandle()`
+   * clears it only in `close()`/`closeNow()` — so every subsequent pull
+   * reused the same dead session and the space read `unauthorized` forever.
+   * `storage/rejection.ts`'s `SessionError` note named this gap when it was
+   * written: "the convergence argument is sound, only the remount is
+   * missing."
+   *
+   * WHY AN ACL COMMIT IS THE ONLY TRIGGER. The verdict that killed the
+   * session is a function of the space's ACL, so re-opening on any other
+   * schedule re-runs a decision whose inputs have not changed — one doomed
+   * round-trip per retry, exactly the cost `isTransientCommitRejection`
+   * refuses to pay for `SessionError`. This is the space-root ensure's own
+   * discipline for the very same boot order, one layer down: latch the owed
+   * work at the fail-closed refusal, consume it when a commit touches
+   * `of:<space>` (executor/space-server.ts `#rootEnsureAwaitingOwner`).
+   *
+   * WHY IT CANNOT WIDEN AUTHORITY. This re-opens a session; it does not
+   * decide one. `session.open` re-runs the server's full admission against
+   * the ACL as it now stands, and under OW31's ruled read posture a serving
+   * mount carries `actingAs: "space-owner"`, so the server re-resolves the
+   * binding from the LANDED ACL and the session runs as whoever owns the
+   * space now. Two cases:
+   *   - the genesis case (this defect): the pre-genesis session opened under
+   *     the service envelope's fresh-space READ floor and the genesis ACL
+   *     `{user: OWNER}` de-authorized it by design. The re-open binds the
+   *     user, who is OWNER, and is admitted.
+   *   - a GENUINE de-authorization (the user removed, ownership moved): the
+   *     re-open is DENIED at `session.open`. `sessionHandle()`'s catch drops
+   *     the failed handle, the load keeps failing, and the served event
+   *     keeps deferring — the ratified wedge, which OW54's give-up arm
+   *     covers. Fail-closed, and loud.
+   */
+  private consumeOwedSessionRemount(): void {
+    if (!this.#aclChangedSinceMount) return;
+    const stale = this.#sessionHandle;
+    if (stale === undefined) {
+      // Nothing memoized to replace: the next open already re-decides.
+      this.#aclChangedSinceMount = false;
+      return;
+    }
+    // ONLY an ACL verdict. A handle still opening, a live session, a
+    // graceful close ("memory session closed"), and a transport drop (which
+    // the client's own `reconnect()`/`restore()` already heals) must all be
+    // left alone: this arm exists for the one termination class no other
+    // path recovers from.
+    const closeError = this.#sessionSession?.closeError;
+    if (
+      closeError === undefined ||
+      (closeError.name !== "SessionRevokedError" &&
+        closeError.name !== "AuthorizationError")
+    ) {
+      // The latch is deliberately LEFT SET here, and clearing it would be a
+      // race rather than a tidy-up. The notice arrives BEFORE the revocation
+      // (see `noteAclChanged`), so a pull landing in that window sees a still
+      // healthy session; discharging the latch on it would throw away the
+      // remount the revocation is about to make necessary. Leaving it set
+      // costs at most ONE re-open later, on a session some other verdict
+      // terminates — which an ACL change is a legitimate reason to re-evaluate
+      // anyway — and the latch clears when that remount runs.
+      return;
+    }
+    this.#aclChangedSinceMount = false;
+    this.#sessionHandle = undefined;
+    this.#sessionClient = undefined;
+    // Dropping the terminated session drops the `closeError` half of
+    // `authorizationError()` with it. That is the right direction — keeping it
+    // would report a denial for a space that may have just healed, and a
+    // caller like the CLI would refuse to act on an authorized space — but it
+    // does open a narrow window: for a denial that ONLY the close error
+    // recorded (the reconnect case that never produced a watch result;
+    // see `authorizationError`'s own note), `authorizationError()` reads
+    // undefined between the remount arming and the next pull re-recording it.
+    // No serving-loop caller reads it in that window, and no CLIENT manager is
+    // ever notified at all (the host is the only caller). FLAGGED, not filled.
+    this.#sessionSession = undefined;
+    // The dead session's views. `terminateSession` already closed the
+    // SESSION's own view; these are the replica's references to it, which a
+    // later refresh would otherwise overwrite rather than close (the leak
+    // `refreshWatchSet`'s own catch guards against).
+    this.#watchView?.close();
+    this.#watchView = null;
+    this.#subscribedWatchView?.close();
+    this.#subscribedWatchView = null;
+    // Close the connection the dead session rode: the next mount builds a
+    // fresh client, and leaving this one open would accumulate one
+    // connection per revocation.
+    stale.then(({ client }) => client.close()).catch(() => {});
+    sessionRemountLogger.warn("session-remount", () => [
+      `space ${this.#space}: the memoized session was terminated by ` +
+      `${closeError.name} and a commit touched its ACL doc; remounting. ` +
+      "A fresh session.open re-runs the server's admission against the " +
+      "ACL as it now stands (OW31: a serving mount's READ decisions " +
+      "resolve as the space's OWNER), so a genuine de-authorization is " +
+      "denied there rather than healed here.",
+    ]);
+    // DROP THE WATCH-SELECTOR TRACKER. The fresh session carries no
+    // watches — `terminateSession` cleared `#watchSpecs` and the server
+    // dropped the session from its registry — but the tracker still records
+    // every selector the DEAD session had successfully covered, and `pull()`
+    // answers a covered selector out of it WITHOUT ever reaching a session.
+    // So without this line, a doc the replica had read before the revocation
+    // is answered `{ok:{}}` from a replica that stopped receiving its
+    // updates: a SILENT STALE READ.
+    //
+    // The first pass flagged this as a residual with the claim that "each
+    // address re-installs on its next pull". That claim was FALSE, and an
+    // independent review (Cubic, P1 ×3 on this PR) was right to push on it:
+    // it holds only for an address whose pull FAILED, because a failed
+    // fetch removes its own selectors from the tracker — which is the
+    // starved-load case this PR fixes, and not this one. Reproduced before
+    // fixing: after the remount the read returned SUCCESS while the replica
+    // still held the pre-revocation value.
+    //
+    // Scope is deliberately the tracker ALONE — not `#docs`, not
+    // `#watchedIds`, not the conflict-admission state, all of which
+    // `reset()` also wipes (that is a rebuild-from-scratch; this is not).
+    // The cost is one genuine fetch per still-wanted address after a
+    // remount, which re-installs its watch on the fresh session. A remount
+    // is rare; the alternative is serving values from a subscription that
+    // no longer exists.
+    this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>(
+      () => this.#scopeKeyIdentity(),
+    );
   }
 
   async queryOperationField(
@@ -3771,6 +3977,16 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     if (entries.length === 0) {
       return { ok: {} };
     }
+    // The owed session remount, consumed BEFORE the watch-selector tracker
+    // is consulted below — not only at `sessionHandle()`. A selector the
+    // tracker already covers is answered from it and never reaches a
+    // session at all, so consuming only at the mount point leaves precisely
+    // the docs the replica had successfully read being served out of a
+    // subscription the revocation killed. Found by independent review
+    // (Cubic P1) and reproduced before fixing: the post-remount read
+    // returned SUCCESS carrying the pre-revocation value. Idempotent and
+    // cheap — a bare boolean test when nothing is owed.
+    this.consumeOwedSessionRemount();
 
     const normalizedEntries = normalizeSyncEntries(entries);
     // Phase 5's delegated-scoped-read fail-closed refusal, ENTRY-scoped
@@ -6937,6 +7153,9 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     if (this.#closed) {
       return Promise.reject(new Error("memory replica closed"));
     }
+    // The owed session remount, consumed at the memoization point — the one
+    // place every read and commit passes through on its way to a session.
+    this.consumeOwedSessionRemount();
     if (this.#sessionHandle === undefined) {
       // Defer the factory call until after #sessionHandle is installed. Session
       // setup can synchronously re-enter provider work (notably home-space ACL
@@ -7134,8 +7353,9 @@ const toRejectedError = (
   //    knows. Classified TERMINAL by the retry allow-list — not because the
   //    commit was evaluated (it was not), but because nothing on the retry path
   //    remounts the session: `sessionHandle()` memoizes the mount and clears it
-  //    only on close. The name still has to survive normalization here, or the
-  //    caller sees a generic TransactionError instead of the real cause.
+  //    on close, and (since 2026-08-26) when the space's ACL CHANGES — which a
+  //    commit retry is not. The name still has to survive normalization here,
+  //    or the caller sees a generic TransactionError instead of the real cause.
   //  - `InvalidMessageError`: a frame off the wire would not decode, and the
   //    client's `rejectPending` sweep (memory/v2/client.ts `onMessage`) rejected
   //    every in-flight request with it — including this commit, which may never

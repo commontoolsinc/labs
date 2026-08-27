@@ -416,6 +416,16 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   loadsSettled?(keys: readonly string[]): Promise<void>;
 
   /**
+   * THE SESSION REMOUNT's trigger: an admitted commit touched `space`'s ACL
+   * document. A space session this manager holds — revoked or denied by an
+   * EARLIER ACL verdict — is dropped so the next load re-opens it, because
+   * the ACL is the only input that decision has. Never widens authority: a
+   * genuine de-authorization is refused again at `session.open`. Implemented
+   * by the v2 StorageManager; the serving loop's host is its only caller.
+   */
+  noteSpaceAclChanged?(space: MemorySpace): void;
+
+  /**
    * Load cell from storage. Will also subscribe to new changes.
    *
    * @returns Promise that resolves when the cell sync is complete.
