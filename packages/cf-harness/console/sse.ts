@@ -1,6 +1,6 @@
 /**
  * The framing between the interactive chat service's event envelopes and the
- * Server-Sent Events stream the kickoff page reads. Everything here is pure so
+ * Server-Sent Events stream the console page reads. Everything here is pure so
  * the resume contract — what a browser reconnecting at `afterSequence` is owed,
  * and in what order — is testable without a model, a gateway, or a socket.
  */
@@ -8,10 +8,10 @@
 import type { HarnessChatEventEnvelope } from "../src/contracts/interactive-chat.ts";
 
 /** The SSE event name every chat envelope arrives under. */
-export const KICKOFF_CHAT_SSE_EVENT = "chat";
+export const CONSOLE_CHAT_SSE_EVENT = "chat";
 
 /** The SSE event name the server's own liveness ticks arrive under. */
-export const KICKOFF_PING_SSE_EVENT = "ping";
+export const CONSOLE_PING_SSE_EVENT = "ping";
 
 /**
  * One SSE frame. `data` is written as a single line because every payload here
@@ -28,7 +28,7 @@ export const sseFrame = (
 
 /** Frames one chat envelope, keyed by its sequence so a resume can name it. */
 export const chatEventFrame = (envelope: HarnessChatEventEnvelope): string =>
-  sseFrame(KICKOFF_CHAT_SSE_EVENT, JSON.stringify(envelope), envelope.sequence);
+  sseFrame(CONSOLE_CHAT_SSE_EVENT, JSON.stringify(envelope), envelope.sequence);
 
 /**
  * Frames a liveness tick. A session between tool calls publishes nothing for
@@ -37,7 +37,7 @@ export const chatEventFrame = (envelope: HarnessChatEventEnvelope): string =>
  * SSE event with no data is not delivered to the page.
  */
 export const pingFrame = (beat: number): string =>
-  sseFrame(KICKOFF_PING_SSE_EVENT, String(beat));
+  sseFrame(CONSOLE_PING_SSE_EVENT, String(beat));
 
 /**
  * The `afterSequence` a stream request asks to resume from, or `undefined` for

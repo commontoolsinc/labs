@@ -49,7 +49,7 @@ const reason = (error: unknown): string =>
 
 const prettyJson = (value: unknown): string => JSON.stringify(value, null, 2);
 
-export class KickoffIndexView extends LitElement {
+export class ConsoleIndexView extends LitElement {
   static override properties = {
     patterns: { attribute: false },
     eventTypes: { attribute: false },
@@ -506,4 +506,4 @@ export class KickoffIndexView extends LitElement {
   }
 }
 
-customElements.define("kickoff-index-view", KickoffIndexView);
+customElements.define("console-index-view", ConsoleIndexView);

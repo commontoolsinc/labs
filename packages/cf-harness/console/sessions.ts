@@ -16,10 +16,10 @@ import type {
  * session's own transcript to show once it is open; the listing needs only
  * enough of it to tell one session from another.
  */
-export const KICKOFF_TASK_PREVIEW_LIMIT = 200;
+export const CONSOLE_TASK_PREVIEW_LIMIT = 200;
 
 /** One row of the session list. */
-export interface KickoffSessionSummary {
+export interface ConsoleSessionSummary {
   sessionId: string;
   status: HarnessChatSessionLifecycle;
   reusable: boolean;
@@ -31,13 +31,13 @@ export interface KickoffSessionSummary {
 }
 
 /** The body `/api/sessions` answers with. */
-export interface KickoffSessionListing {
-  sessions: readonly KickoffSessionSummary[];
+export interface ConsoleSessionListing {
+  sessions: readonly ConsoleSessionSummary[];
 }
 
 const preview = (text: string): string =>
-  text.length > KICKOFF_TASK_PREVIEW_LIMIT
-    ? `${text.slice(0, KICKOFF_TASK_PREVIEW_LIMIT)}…`
+  text.length > CONSOLE_TASK_PREVIEW_LIMIT
+    ? `${text.slice(0, CONSOLE_TASK_PREVIEW_LIMIT)}…`
     : text;
 
 /**
@@ -76,12 +76,12 @@ const firstTaskTexts = (
  * millisecond are ordered by session id, so the listing is stable between two
  * requests that read the same state.
  */
-export const summarizeKickoffSessions = (
+export const summarizeConsoleSessions = (
   status: HarnessChatStatusResult,
   turns: readonly HarnessChatTurnRecord[],
-): KickoffSessionListing => {
+): ConsoleSessionListing => {
   const tasks = firstTaskTexts(turns);
-  const sessions = status.sessions.map((session): KickoffSessionSummary => {
+  const sessions = status.sessions.map((session): ConsoleSessionSummary => {
     const firstTaskText = tasks.get(session.sessionId);
     return {
       sessionId: session.sessionId,

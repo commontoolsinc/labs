@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { kickoffRunHandles, kickoffRunSteps } from "../../kickoff/steps.ts";
+import { consoleRunHandles, consoleRunSteps } from "../../console/steps.ts";
 import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
 import type { HarnessHandleTable } from "../../src/contracts/handle-table.ts";
 import type { HarnessCfcInvocationContext } from "../../src/contracts/cfc-invocation-context.ts";
@@ -36,10 +36,10 @@ const result = (
   content: typeof content === "string" ? content : JSON.stringify(content),
 });
 
-describe("kickoff/steps", () => {
-  describe("kickoffRunSteps()", () => {
+describe("console/steps", () => {
+  describe("consoleRunSteps()", () => {
     it("folds a tool call and its result into one step", () => {
-      const steps = kickoffRunSteps([
+      const steps = consoleRunSteps([
         { role: "user", content: "do it" },
         call("c1", "run_pattern", { sourceText: "x" }),
         result("c1", "run_pattern", { status: "ok" }),
@@ -55,7 +55,7 @@ describe("kickoff/steps", () => {
     });
 
     it("keeps an assistant message that carries text alongside its calls", () => {
-      const steps = kickoffRunSteps([
+      const steps = consoleRunSteps([
         { role: "assistant", content: "thinking out loud", toolCalls: [] },
       ]);
       expect(steps).toHaveLength(1);
@@ -63,7 +63,7 @@ describe("kickoff/steps", () => {
     });
 
     it("reports arguments and results it cannot parse as text", () => {
-      const steps = kickoffRunSteps([
+      const steps = consoleRunSteps([
         call("c1", "bash", "{not json"),
         result("c1", "bash", "plain output"),
       ]);
@@ -74,7 +74,7 @@ describe("kickoff/steps", () => {
     });
 
     it("names the child a delegate_task step started", () => {
-      const steps = kickoffRunSteps([
+      const steps = consoleRunSteps([
         call("c1", "delegate_task", { goal: "author it" }),
         result("c1", "delegate_task", {
           subagent: { childRunId: "run.subagent.1", status: "completed" },
@@ -84,7 +84,7 @@ describe("kickoff/steps", () => {
     });
 
     it("reads a skill resource the tool says it read as an ok step", () => {
-      const steps = kickoffRunSteps([
+      const steps = consoleRunSteps([
         call("c1", "read_skill_resource", { path: "SKILL.md" }),
         result("c1", "read_skill_resource", { status: "read", content: "#" }),
         call("c2", "read_skill_resource", { path: "logo.png" }),
@@ -100,7 +100,7 @@ describe("kickoff/steps", () => {
     });
 
     it("reads a skill script the tool says it executed as an ok step", () => {
-      const steps = kickoffRunSteps([
+      const steps = consoleRunSteps([
         call("c1", "run_skill_script", { script: "build.sh" }),
         result("c1", "run_skill_script", { status: "executed", exitCode: 0 }),
       ]);
@@ -108,7 +108,7 @@ describe("kickoff/steps", () => {
     });
 
     it("reads a status no tool succeeds under as an error step", () => {
-      const steps = kickoffRunSteps([
+      const steps = consoleRunSteps([
         call("c1", "run_pattern", {}),
         result("c1", "run_pattern", { status: "compile-error" }),
         call("c2", "bash", { command: "ls" }),
@@ -119,7 +119,7 @@ describe("kickoff/steps", () => {
     });
 
     it("brings a handle into scope at the step its token first appears", () => {
-      const steps = kickoffRunSteps([
+      const steps = consoleRunSteps([
         { role: "user", content: "do it" },
         call("c1", "run_pattern", { sourceText: "x" }),
         result("c1", "run_pattern", { resultRef: "cfh:a:aaaaa" }),
@@ -138,7 +138,7 @@ describe("kickoff/steps", () => {
     });
   });
 
-  describe("kickoffRunHandles()", () => {
+  describe("consoleRunHandles()", () => {
     const table: HarnessHandleTable = {
       type: "cf-harness.handle-table",
       version: 1,
@@ -154,11 +154,11 @@ describe("kickoff/steps", () => {
     };
 
     it("resolves a token against the run's own table", () => {
-      const steps = kickoffRunSteps([
+      const steps = consoleRunSteps([
         call("c1", "run_pattern", {}),
         result("c1", "run_pattern", { resultRef: "cfh:a:aaaaa" }),
       ]);
-      expect(kickoffRunHandles(steps, table)).toEqual([
+      expect(consoleRunHandles(steps, table)).toEqual([
         {
           token: "cfh:a:aaaaa",
           ref: "/of:fid1:aaa",
@@ -169,11 +169,11 @@ describe("kickoff/steps", () => {
     });
 
     it("still reports a token the table no longer holds", () => {
-      const steps = kickoffRunSteps([
+      const steps = consoleRunSteps([
         call("c1", "run_pattern", {}),
         result("c1", "run_pattern", { resultRef: "cfh:a:zzzzz" }),
       ]);
-      const handles = kickoffRunHandles(steps, table);
+      const handles = consoleRunHandles(steps, table);
       expect(handles).toHaveLength(1);
       expect(handles[0].token).toBe("cfh:a:zzzzz");
       expect(handles[0].ref).toBeUndefined();
@@ -181,7 +181,7 @@ describe("kickoff/steps", () => {
   });
 });
 
-describe("kickoff/steps CFC and disclosure", () => {
+describe("console/steps CFC and disclosure", () => {
   const call = (
     id: string,
     name: string,
@@ -210,7 +210,7 @@ describe("kickoff/steps CFC and disclosure", () => {
   });
 
   it("carries the CFC decision recorded for a call", () => {
-    const steps = kickoffRunSteps(
+    const steps = consoleRunSteps(
       [
         call("c1", "run_pattern", {}),
         result("c1", "run_pattern", { status: "ok" }),
@@ -237,7 +237,7 @@ describe("kickoff/steps CFC and disclosure", () => {
   });
 
   it("reads a step as denied when a policy event denied its observation", () => {
-    const steps = kickoffRunSteps(
+    const steps = consoleRunSteps(
       [
         call("c1", "bash", { command: "cat x" }),
         result("c1", "bash", { type: "cf-harness.observation-denied" }),
@@ -261,7 +261,7 @@ describe("kickoff/steps CFC and disclosure", () => {
 
   it("measures the longest numeric run a result let across as value", () => {
     const bytes = Array.from({ length: 40 }, (_, index) => index);
-    const steps = kickoffRunSteps([
+    const steps = consoleRunSteps([
       call("c1", "run_pattern", {}),
       result("c1", "run_pattern", { status: "ok", value: { bytes } }),
     ]);
@@ -270,7 +270,7 @@ describe("kickoff/steps CFC and disclosure", () => {
   });
 
   it("counts a sealed position rather than reading it as a value", () => {
-    const steps = kickoffRunSteps([
+    const steps = consoleRunSteps([
       call("c1", "run_pattern", {}),
       result("c1", "run_pattern", {
         status: "ok",
@@ -282,7 +282,7 @@ describe("kickoff/steps CFC and disclosure", () => {
   });
 
   it("attaches the CFC invocation context recorded for the call's output", () => {
-    const steps = kickoffRunSteps(
+    const steps = consoleRunSteps(
       [
         call("c1", "bash", { command: "ls" }),
         {
@@ -358,7 +358,7 @@ describe("kickoff/steps CFC and disclosure", () => {
       runManifest: { present: false },
       inputs: {},
     });
-    const steps = kickoffRunSteps(
+    const steps = consoleRunSteps(
       [
         call("c1", "read_file", { path: "a.txt" }),
         result("c1", "read_file", { path: "a.txt", content: "a" }),
@@ -381,7 +381,7 @@ describe("kickoff/steps CFC and disclosure", () => {
   });
 
   it("leaves a step with no invocation context recorded for another tool", () => {
-    const steps = kickoffRunSteps(
+    const steps = consoleRunSteps(
       [
         call("c1", "read_file", { path: "a.txt" }),
         result("c1", "read_file", { path: "a.txt", content: "a" }),
@@ -408,7 +408,7 @@ describe("kickoff/steps CFC and disclosure", () => {
   });
 
   it("measures a value in bytes rather than in code units", () => {
-    const steps = kickoffRunSteps([
+    const steps = consoleRunSteps([
       call("c1", "run_pattern", {}),
       result("c1", "run_pattern", { status: "ok", value: { note: "🙂" } }),
     ]);
@@ -417,7 +417,7 @@ describe("kickoff/steps CFC and disclosure", () => {
   });
 
   it("leaves a step with no invocation context when none names its output", () => {
-    const steps = kickoffRunSteps(
+    const steps = consoleRunSteps(
       [
         call("c1", "bash", { command: "ls" }),
         result("c1", "bash", { status: "ok" }),
@@ -430,7 +430,7 @@ describe("kickoff/steps CFC and disclosure", () => {
   });
 
   it("reports no disclosure for a result carrying no value at all", () => {
-    const steps = kickoffRunSteps([
+    const steps = consoleRunSteps([
       call("c1", "assign_slug", { slug: "x" }),
       result("c1", "assign_slug", { status: "ok", slug: "x" }),
     ]);

@@ -1,9 +1,9 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
-  KICKOFF_TASK_PREVIEW_LIMIT,
-  summarizeKickoffSessions,
-} from "../../kickoff/sessions.ts";
+  CONSOLE_TASK_PREVIEW_LIMIT,
+  summarizeConsoleSessions,
+} from "../../console/sessions.ts";
 import {
   createHarnessChatSessionStatus,
   type HarnessChatSessionStatus,
@@ -40,10 +40,10 @@ const turn = (
   policy: createHarnessChatSessionStatus({ sessionId }).policy,
 });
 
-describe("kickoff/sessions", () => {
-  describe("summarizeKickoffSessions()", () => {
+describe("console/sessions", () => {
+  describe("summarizeConsoleSessions()", () => {
     it("carries the lifecycle a session list is chosen from", () => {
-      const listing = summarizeKickoffSessions({
+      const listing = summarizeConsoleSessions({
         sessions: [
           session("session-1", "2026-01-01T00:05:00.000Z", {
             status: "turn_running",
@@ -64,7 +64,7 @@ describe("kickoff/sessions", () => {
     });
 
     it("names a session by the text of its earliest turn", () => {
-      const listing = summarizeKickoffSessions({
+      const listing = summarizeConsoleSessions({
         sessions: [session("session-1", "2026-01-01T00:05:00.000Z")],
       }, [
         turn("session-1", "turn-2", "2026-01-01T00:02:00.000Z", "and again"),
@@ -75,7 +75,7 @@ describe("kickoff/sessions", () => {
     });
 
     it("ignores the turns of every other session", () => {
-      const listing = summarizeKickoffSessions({
+      const listing = summarizeConsoleSessions({
         sessions: [session("session-1", "2026-01-01T00:05:00.000Z")],
       }, [
         turn("session-2", "turn-1", "2026-01-01T00:01:00.000Z", "other work"),
@@ -85,7 +85,7 @@ describe("kickoff/sessions", () => {
     });
 
     it("elides a first task past the preview limit", () => {
-      const listing = summarizeKickoffSessions({
+      const listing = summarizeConsoleSessions({
         sessions: [session("session-1", "2026-01-01T00:05:00.000Z")],
       }, [
         turn(
@@ -97,12 +97,12 @@ describe("kickoff/sessions", () => {
       ]);
 
       expect(listing.sessions[0].firstTaskText).toBe(
-        `${"x".repeat(KICKOFF_TASK_PREVIEW_LIMIT)}…`,
+        `${"x".repeat(CONSOLE_TASK_PREVIEW_LIMIT)}…`,
       );
     });
 
     it("orders the most recently touched session first", () => {
-      const listing = summarizeKickoffSessions({
+      const listing = summarizeConsoleSessions({
         sessions: [
           session("session-1", "2026-01-01T00:01:00.000Z"),
           session("session-3", "2026-01-01T00:09:00.000Z"),
@@ -118,7 +118,7 @@ describe("kickoff/sessions", () => {
     });
 
     it("orders sessions touched at the same instant by identifier", () => {
-      const listing = summarizeKickoffSessions({
+      const listing = summarizeConsoleSessions({
         sessions: [
           session("session-b", "2026-01-01T00:01:00.000Z"),
           session("session-a", "2026-01-01T00:01:00.000Z"),

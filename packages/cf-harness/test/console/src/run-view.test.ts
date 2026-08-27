@@ -1,7 +1,7 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import type { KickoffRunDetail } from "../../../kickoff/run-store.ts";
-import { KickoffRunView } from "../../../kickoff/src/run-view.ts";
+import type { ConsoleRunDetail } from "../../../console/run-store.ts";
+import { ConsoleRunView } from "../../../console/src/run-view.ts";
 
 const realFetch = globalThis.fetch;
 
@@ -28,10 +28,10 @@ const detailOf = (runId: string): Response =>
       handles: [],
       artifactNames: [],
       toolOutputNames: [],
-    } as unknown as KickoffRunDetail,
+    } as unknown as ConsoleRunDetail,
   );
 
-describe("kickoff/src/run-view", () => {
+describe("console/src/run-view", () => {
   afterEach(() => {
     globalThis.fetch = realFetch;
   });
@@ -39,7 +39,7 @@ describe("kickoff/src/run-view", () => {
   describe("refresh", () => {
     it("keeps the run that was asked for last when an earlier read answers after it", async () => {
       const held = heldFetch();
-      const view = new KickoffRunView();
+      const view = new ConsoleRunView();
       view.runId = "run-first";
       const first = view.refresh();
       view.runId = "run-second";
@@ -55,7 +55,7 @@ describe("kickoff/src/run-view", () => {
 
     it("leaves the newest run showing when an earlier read fails after it", async () => {
       const held = heldFetch();
-      const view = new KickoffRunView();
+      const view = new ConsoleRunView();
       view.runId = "run-first";
       const first = view.refresh();
       view.runId = "run-second";
@@ -72,7 +72,7 @@ describe("kickoff/src/run-view", () => {
 
     it("clears the detail rather than adopting a read of the run that was closed", async () => {
       const held = heldFetch();
-      const view = new KickoffRunView();
+      const view = new ConsoleRunView();
       view.runId = "run-first";
       const first = view.refresh();
       view.runId = undefined;

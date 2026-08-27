@@ -25,7 +25,7 @@ import type { HarnessPolicyDecisionRecord } from "../src/contracts/policy-trace.
 import type { HarnessCfcInvocationContext } from "../src/contracts/cfc-invocation-context.ts";
 
 /** One handle, as the timeline reports it. */
-export interface KickoffHandle {
+export interface ConsoleHandle {
   token: string;
   /** The address the handle stands for, when the run's table still holds it. */
   ref?: string;
@@ -35,10 +35,10 @@ export interface KickoffHandle {
 }
 
 /** What kind of step this is, which decides what the detail pane shows. */
-export type KickoffStepKind = "system" | "user" | "assistant" | "tool";
+export type ConsoleStepKind = "system" | "user" | "assistant" | "tool";
 
 /** How a step turned out, at a glance. */
-export type KickoffStepStatus = "ok" | "error" | "denied" | "none";
+export type ConsoleStepStatus = "ok" | "error" | "denied" | "none";
 
 /**
  * What a tool result let across as a value, beside what it sealed behind a
@@ -47,7 +47,7 @@ export type KickoffStepStatus = "ok" | "error" | "denied" | "none";
  * the size of what crossed as plain data is worth stating rather than leaving
  * to be read out of a JSON block.
  */
-export interface KickoffDisclosure {
+export interface ConsoleDisclosure {
   /** Bytes of JSON the result carried as value. */
   valueBytes: number;
   /** Positions the sanitizer replaced with an opaque link. */
@@ -61,9 +61,9 @@ export interface KickoffDisclosure {
 }
 
 /** One step of a run. */
-export interface KickoffStep {
+export interface ConsoleStep {
   index: number;
-  kind: KickoffStepKind;
+  kind: ConsoleStepKind;
 
   /** Assistant or user prose, and the system prompt for step zero. */
   text?: string;
@@ -95,7 +95,7 @@ export interface KickoffStep {
   handlesInScope: readonly string[];
 
   /** How the step turned out, from its own result and from CFC's verdict. */
-  status: KickoffStepStatus;
+  status: ConsoleStepStatus;
 
   /** The CFC decision for this call, when the run recorded one. */
   policy?: {
@@ -108,7 +108,7 @@ export interface KickoffStep {
   policyEvents: readonly HarnessPolicyEvent[];
 
   /** What the result let across as value, for a step whose result carries one. */
-  disclosure?: KickoffDisclosure;
+  disclosure?: ConsoleDisclosure;
 
   /**
    * The CFC invocation context recorded for this call. Under a posture that
@@ -206,7 +206,7 @@ const sealedPositions = (value: unknown): number => {
  * which is most of them: the question only arises where a schema admitted
  * something.
  */
-const disclosureOf = (output: unknown): KickoffDisclosure | undefined => {
+const disclosureOf = (output: unknown): ConsoleDisclosure | undefined => {
   const record = typeof output === "object" && output !== null
     ? output as Record<string, unknown>
     : undefined;
@@ -247,7 +247,7 @@ const statusOf = (
   outputText: string | undefined,
   decision: HarnessPolicyDecisionRecord | undefined,
   events: readonly HarnessPolicyEvent[],
-): KickoffStepStatus => {
+): ConsoleStepStatus => {
   if (
     decision?.decision === "denied" ||
     events.some((event) => event.severity === "denied")
@@ -284,12 +284,12 @@ const childRunIdOf = (output: unknown): string | undefined => {
  * together, and the assistant message that carried only the call has nothing
  * else to say.
  */
-export const kickoffRunSteps = (
+export const consoleRunSteps = (
   transcript: readonly HarnessTranscriptMessage[],
   policyDecisions: readonly HarnessPolicyDecisionRecord[] = [],
   policyEvents: readonly HarnessPolicyEvent[] = [],
   invocationContexts: readonly HarnessCfcInvocationContext[] = [],
-): readonly KickoffStep[] => {
+): readonly ConsoleStep[] => {
   // An invocation context names the output it was recorded for, which is the
   // same id the transcript's tool message carries as its result reference.
   // A tool that mints its output id only once the call has run — `read_file`
@@ -341,7 +341,7 @@ export const kickoffRunSteps = (
       held.push(event);
     }
   }
-  const steps: KickoffStep[] = [];
+  const steps: ConsoleStep[] = [];
   const inScope: string[] = [];
 
   const admit = (texts: readonly string[]): string[] => {
@@ -450,14 +450,14 @@ export const kickoffRunSteps = (
  * handle is the fact, and an address it did not keep is not a reason to hide
  * it.
  */
-export const kickoffRunHandles = (
-  steps: readonly KickoffStep[],
+export const consoleRunHandles = (
+  steps: readonly ConsoleStep[],
   handleTable?: HarnessHandleTable,
-): readonly KickoffHandle[] => {
+): readonly ConsoleHandle[] => {
   const entries = new Map<string, HarnessHandleEntry>(
     (handleTable?.entries ?? []).map((entry) => [entry.token, entry]),
   );
-  const handles: KickoffHandle[] = [];
+  const handles: ConsoleHandle[] = [];
   for (const step of steps) {
     for (const token of step.handlesIntroduced) {
       const entry = entries.get(token);

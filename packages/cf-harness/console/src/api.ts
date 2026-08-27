@@ -1,5 +1,5 @@
 /**
- * The kickoff server's HTTP surface, as the page calls it. The types come from
+ * The console server's HTTP surface, as the page calls it. The types come from
  * the server's own modules rather than being restated here, so a route that
  * changes shape is a type error in the page rather than a blank pane.
  */
@@ -14,15 +14,15 @@ import type {
   PatternIndexSearchRequest,
   PatternIndexSearchResponse,
 } from "../../src/pattern-index/client.ts";
-import type { KickoffRunDetail } from "../run-store.ts";
-import type { KickoffRunSummary } from "../runs.ts";
-import type { KickoffSessionSummary } from "../sessions.ts";
+import type { ConsoleRunDetail } from "../run-store.ts";
+import type { ConsoleRunSummary } from "../runs.ts";
+import type { ConsoleSessionSummary } from "../sessions.ts";
 
 export type {
+  ConsoleRunDetail,
+  ConsoleRunSummary,
+  ConsoleSessionSummary,
   HarnessChatEventEnvelope,
-  KickoffRunDetail,
-  KickoffRunSummary,
-  KickoffSessionSummary,
   PatternIndexEvent,
   PatternIndexListPatternsResponse,
   PatternIndexPattern,
@@ -94,19 +94,19 @@ export const cancelTurn = async (
 };
 
 export const listSessions = async (): Promise<
-  readonly KickoffSessionSummary[]
+  readonly ConsoleSessionSummary[]
 > =>
-  (await json<{ sessions: readonly KickoffSessionSummary[] }>(
+  (await json<{ sessions: readonly ConsoleSessionSummary[] }>(
     await fetch("/api/sessions"),
   )).sessions;
 
-export const listRuns = async (): Promise<readonly KickoffRunSummary[]> =>
-  (await json<{ runs: readonly KickoffRunSummary[] }>(
+export const listRuns = async (): Promise<readonly ConsoleRunSummary[]> =>
+  (await json<{ runs: readonly ConsoleRunSummary[] }>(
     await fetch("/api/runs"),
   )).runs;
 
-export const readRun = async (runId: string): Promise<KickoffRunDetail> =>
-  await json<KickoffRunDetail>(
+export const readRun = async (runId: string): Promise<ConsoleRunDetail> =>
+  await json<ConsoleRunDetail>(
     await fetch(`/api/runs/${encodeURIComponent(runId)}`),
   );
 

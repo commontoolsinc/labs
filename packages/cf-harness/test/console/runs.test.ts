@@ -1,13 +1,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { join } from "@std/path";
-import { kickoffRunLens, summarizeKickoffRun } from "../../kickoff/runs.ts";
+import { consoleRunLens, summarizeConsoleRun } from "../../console/runs.ts";
 import {
-  listKickoffRuns,
-  readKickoffRun,
-  readKickoffRunArtifact,
-  readKickoffToolOutput,
-} from "../../kickoff/run-store.ts";
+  listConsoleRuns,
+  readConsoleRun,
+  readConsoleRunArtifact,
+  readConsoleToolOutput,
+} from "../../console/run-store.ts";
 import { createHarnessRunState } from "../../src/run-state.ts";
 import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
 
@@ -84,10 +84,10 @@ const buildTranscript = (): HarnessTranscriptMessage[] => [
   result("c5", "record_feedback", { status: "ok" }),
 ];
 
-describe("kickoff/runs", () => {
-  describe("kickoffRunLens()", () => {
+describe("console/runs", () => {
+  describe("consoleRunLens()", () => {
     it("keeps every run_pattern attempt, so the fix rounds stay visible", () => {
-      const lens = kickoffRunLens(buildTranscript());
+      const lens = consoleRunLens(buildTranscript());
       expect(lens.patternAttempts.map((attempt) => attempt.status)).toEqual([
         "compile-error",
         "ok",
@@ -101,7 +101,7 @@ describe("kickoff/runs", () => {
     });
 
     it("reads the index calls and the address a person can open", () => {
-      const lens = kickoffRunLens(buildTranscript());
+      const lens = consoleRunLens(buildTranscript());
       expect(lens.searches[0].query).toBe("reading list #books");
       expect(lens.searches[0].hits[0]).toEqual({
         patternId: "p-books",
@@ -113,7 +113,7 @@ describe("kickoff/runs", () => {
     });
 
     it("names a search made on tags alone by its tags", () => {
-      const lens = kickoffRunLens([
+      const lens = consoleRunLens([
         call("c1", "search_patterns", { tags: ["#books", "#reading"] }),
         result("c1", "search_patterns", { status: "ok", results: [] }),
       ]);
@@ -121,7 +121,7 @@ describe("kickoff/runs", () => {
     });
 
     it("leaves a hit the index ranked no signal for without a score", () => {
-      const lens = kickoffRunLens([
+      const lens = consoleRunLens([
         call("c1", "search_patterns", { text: "books" }),
         result("c1", "search_patterns", {
           status: "ok",
@@ -135,7 +135,7 @@ describe("kickoff/runs", () => {
     });
 
     it("reports a call whose result did not parse rather than dropping it", () => {
-      const lens = kickoffRunLens([
+      const lens = consoleRunLens([
         call("c1", "run_pattern", { sourceText: "x" }),
         result("c1", "run_pattern", "the sandbox died mid-write"),
       ]);
@@ -144,9 +144,9 @@ describe("kickoff/runs", () => {
     });
   });
 
-  describe("summarizeKickoffRun()", () => {
+  describe("summarizeConsoleRun()", () => {
     it("titles a run by the last thing a person asked it", () => {
-      const summary = summarizeKickoffRun(
+      const summary = summarizeConsoleRun(
         runState("r1", "2026-01-01T00:00:01.000Z"),
         [
           { role: "user", content: "first task" },
@@ -158,7 +158,7 @@ describe("kickoff/runs", () => {
     });
 
     it("carries every piece the run named", () => {
-      const summary = summarizeKickoffRun(
+      const summary = summarizeConsoleRun(
         runState("r1", "2026-01-01T00:00:01.000Z"),
         buildTranscript(),
       );
@@ -226,21 +226,21 @@ describe("kickoff/runs", () => {
       await withArtifactRoot(async (root) => {
         await writeRun(root, "older", "2026-01-01T00:00:01.000Z");
         await writeRun(root, "newer", "2026-01-01T00:00:02.000Z");
-        const runs = await listKickoffRuns(root);
+        const runs = await listConsoleRuns(root);
         expect(runs.map((run) => run.runId)).toEqual(["newer", "older"]);
       });
     });
 
     it("is empty rather than failing when no run has been made", async () => {
       await withArtifactRoot(async (root) => {
-        expect(await listKickoffRuns(join(root, "absent"))).toEqual([]);
+        expect(await listConsoleRuns(join(root, "absent"))).toEqual([]);
       });
     });
 
     it("reads a run whole, with its tool outputs in call order", async () => {
       await withArtifactRoot(async (root) => {
         await writeRun(root, "r1", "2026-01-01T00:00:01.000Z");
-        const detail = await readKickoffRun(root, "r1");
+        const detail = await readConsoleRun(root, "r1");
         expect(detail?.lens.patternAttempts).toHaveLength(2);
         expect(detail?.artifactNames).toEqual([
           "run-state.json",
@@ -262,7 +262,7 @@ describe("kickoff/runs", () => {
           join(root, "r1", "tool-outputs", "unnumbered.json"),
           "{}",
         );
-        const detail = await readKickoffRun(root, "r1");
+        const detail = await readConsoleRun(root, "r1");
         expect(detail?.toolOutputNames.at(-1)).toBe("unnumbered.json");
       });
     });
@@ -271,7 +271,7 @@ describe("kickoff/runs", () => {
       await withArtifactRoot(async (root) => {
         await writeRun(root, "r1", "2026-01-01T00:00:01.000Z");
         expect(
-          await readKickoffToolOutput(
+          await readConsoleToolOutput(
             root,
             "r1",
             "r1_run_pattern_2-run_pattern.json",
@@ -283,13 +283,13 @@ describe("kickoff/runs", () => {
     it("refuses a run id or artifact name that escapes the run tree", async () => {
       await withArtifactRoot(async (root) => {
         await writeRun(root, "r1", "2026-01-01T00:00:01.000Z");
-        expect(await readKickoffRun(root, "../..")).toBeUndefined();
-        expect(await readKickoffRun(root, "a/b")).toBeUndefined();
+        expect(await readConsoleRun(root, "../..")).toBeUndefined();
+        expect(await readConsoleRun(root, "a/b")).toBeUndefined();
         expect(
-          await readKickoffToolOutput(root, "r1", "../transcript.json"),
+          await readConsoleToolOutput(root, "r1", "../transcript.json"),
         ).toBeUndefined();
         expect(
-          await readKickoffRunArtifact(root, "r1", "../transcript.json"),
+          await readConsoleRunArtifact(root, "r1", "../transcript.json"),
         ).toBeUndefined();
       });
     });
@@ -298,11 +298,11 @@ describe("kickoff/runs", () => {
       await withArtifactRoot(async (root) => {
         await writeRun(root, "r1", "2026-01-01T00:00:01.000Z");
         expect(
-          await readKickoffRunArtifact(root, "r1", "run-state.json"),
+          await readConsoleRunArtifact(root, "r1", "run-state.json"),
         ).toContain('"runId":"r1"');
         await Deno.writeTextFile(join(root, "r1", "secret.json"), "{}");
         expect(
-          await readKickoffRunArtifact(root, "r1", "secret.json"),
+          await readConsoleRunArtifact(root, "r1", "secret.json"),
         ).toBeUndefined();
       });
     });

@@ -8,7 +8,7 @@ import {
   patternsByScore,
   searchRequestOf,
   truncateId,
-} from "../../kickoff/index-inspector.ts";
+} from "../../console/index-inspector.ts";
 import type {
   PatternIndexEvent,
   PatternIndexListedPattern,
@@ -40,7 +40,7 @@ const event = (
   ...overrides,
 });
 
-describe("kickoff/index-inspector", () => {
+describe("console/index-inspector", () => {
   describe("patternsByScore", () => {
     it("puts the highest score first", () => {
       const sorted = patternsByScore([

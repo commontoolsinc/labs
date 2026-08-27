@@ -6,7 +6,7 @@
  */
 
 import { html, LitElement, nothing, type TemplateResult } from "lit";
-import type { KickoffHandle, KickoffStep } from "../steps.ts";
+import type { ConsoleHandle, ConsoleStep } from "../steps.ts";
 
 const json = (value: unknown): string => {
   try {
@@ -54,18 +54,18 @@ export const clampSelection = (selected: number, count: number): number =>
   Math.min(Math.max(selected, 0), Math.max(count - 1, 0));
 
 /** A step's one-line label in the rail. */
-const stepLabel = (step: KickoffStep): string =>
+const stepLabel = (step: ConsoleStep): string =>
   step.kind === "tool" ? step.toolName ?? "tool" : step.kind;
 
-export class KickoffSteps extends LitElement {
+export class ConsoleSteps extends LitElement {
   static override properties = {
     steps: { attribute: false },
     handles: { attribute: false },
     selected: { attribute: false },
   };
 
-  declare steps: readonly KickoffStep[];
-  declare handles: readonly KickoffHandle[];
+  declare steps: readonly ConsoleStep[];
+  declare handles: readonly ConsoleHandle[];
   declare selected: number;
 
   constructor() {
@@ -123,7 +123,7 @@ export class KickoffSteps extends LitElement {
   }
 
   /** The handles in scope at a step, the ones it introduced first. */
-  #scopeAt(step: KickoffStep): readonly KickoffHandle[] {
+  #scopeAt(step: ConsoleStep): readonly ConsoleHandle[] {
     const introduced = new Set(step.handlesIntroduced);
     return this.handles
       .filter((handle) => step.handlesInScope.includes(handle.token))
@@ -167,7 +167,7 @@ export class KickoffSteps extends LitElement {
     `;
   }
 
-  #handles(step: KickoffStep): TemplateResult {
+  #handles(step: ConsoleStep): TemplateResult {
     const scope = this.#scopeAt(step);
     if (scope.length === 0) {
       return html`
@@ -206,7 +206,7 @@ export class KickoffSteps extends LitElement {
   }
 
   /** What CFC decided about this call, and any event it raised. */
-  #policy(step: KickoffStep): TemplateResult | typeof nothing {
+  #policy(step: ConsoleStep): TemplateResult | typeof nothing {
     const labelEntries = step.invocation?.cfcInputLabels?.entries ?? [];
     if (
       step.policy === undefined && step.policyEvents.length === 0 &&
@@ -280,7 +280,7 @@ export class KickoffSteps extends LitElement {
    * the size of one is stated here rather than left to be counted out of the
    * JSON below.
    */
-  #disclosure(step: KickoffStep): TemplateResult | typeof nothing {
+  #disclosure(step: ConsoleStep): TemplateResult | typeof nothing {
     const disclosure = step.disclosure;
     if (disclosure === undefined) {
       return nothing;
@@ -314,7 +314,7 @@ export class KickoffSteps extends LitElement {
     `;
   }
 
-  #detail(step: KickoffStep): TemplateResult {
+  #detail(step: ConsoleStep): TemplateResult {
     if (step.kind !== "tool") {
       return html`
         <div class="pane">
@@ -414,4 +414,4 @@ export class KickoffSteps extends LitElement {
   }
 }
 
-customElements.define("kickoff-steps", KickoffSteps);
+customElements.define("console-steps", ConsoleSteps);

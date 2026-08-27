@@ -10,17 +10,17 @@ import { join } from "@std/path";
 import type { HarnessRunState } from "../src/run-state.ts";
 import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
 import {
-  type KickoffRunLens,
-  kickoffRunLens,
-  type KickoffRunSummary,
-  sortKickoffRuns,
-  summarizeKickoffRun,
+  type ConsoleRunLens,
+  consoleRunLens,
+  type ConsoleRunSummary,
+  sortConsoleRuns,
+  summarizeConsoleRun,
 } from "./runs.ts";
 import {
-  type KickoffHandle,
-  kickoffRunHandles,
-  kickoffRunSteps,
-  type KickoffStep,
+  type ConsoleHandle,
+  consoleRunHandles,
+  consoleRunSteps,
+  type ConsoleStep,
 } from "./steps.ts";
 
 /**
@@ -51,15 +51,15 @@ const readJson = async <Value>(path: string): Promise<Value | undefined> => {
 };
 
 /** Everything `/api/runs/<run-id>` answers with. */
-export interface KickoffRunDetail {
-  summary: KickoffRunSummary;
+export interface ConsoleRunDetail {
+  summary: ConsoleRunSummary;
   runState: HarnessRunState;
   transcript: readonly HarnessTranscriptMessage[];
-  lens: KickoffRunLens;
+  lens: ConsoleRunLens;
   /** The run as a timeline, which is what the step scrubber reads. */
-  steps: readonly KickoffStep[];
+  steps: readonly ConsoleStep[];
   /** Every handle the run introduced, resolved against its own table. */
-  handles: readonly KickoffHandle[];
+  handles: readonly ConsoleHandle[];
   /** The artifacts this run wrote, by name, for the raw pane to fetch. */
   artifactNames: readonly string[];
   /** The files under `tool-outputs/`, newest call last. */
@@ -142,10 +142,10 @@ const toolOutputNames = async (root: string): Promise<string[]> => {
 };
 
 /** Every run under the artifact root, most recently touched first. */
-export const listKickoffRuns = async (
+export const listConsoleRuns = async (
   artifactRoot: string,
-): Promise<readonly KickoffRunSummary[]> => {
-  const summaries: KickoffRunSummary[] = [];
+): Promise<readonly ConsoleRunSummary[]> => {
+  const summaries: ConsoleRunSummary[] = [];
   try {
     // `Deno.readDir` reports a missing directory on its first step rather than
     // at the call, so an artifact root that no run has been written to yet is
@@ -165,20 +165,20 @@ export const listKickoffRuns = async (
         join(root, "transcript.json"),
       ) ??
         [];
-      summaries.push(summarizeKickoffRun(runState, transcript));
+      summaries.push(summarizeConsoleRun(runState, transcript));
     }
   } catch {
     // No run has been made yet, so there is no tree to list.
     return [];
   }
-  return sortKickoffRuns(summaries);
+  return sortConsoleRuns(summaries);
 };
 
 /** One run read whole, or `undefined` when the artifact root holds no such run. */
-export const readKickoffRun = async (
+export const readConsoleRun = async (
   artifactRoot: string,
   runId: string,
-): Promise<KickoffRunDetail | undefined> => {
+): Promise<ConsoleRunDetail | undefined> => {
   const root = runRoot(artifactRoot, runId);
   if (root === undefined) {
     return undefined;
@@ -192,19 +192,19 @@ export const readKickoffRun = async (
   const transcript =
     await readJson<HarnessTranscriptMessage[]>(join(root, "transcript.json")) ??
       [];
-  const steps = kickoffRunSteps(
+  const steps = consoleRunSteps(
     transcript,
     runState.policyDecisions ?? [],
     runState.policyEvents,
     runState.cfcInvocationContexts ?? [],
   );
   return {
-    summary: summarizeKickoffRun(runState, transcript),
+    summary: summarizeConsoleRun(runState, transcript),
     runState,
     transcript,
-    lens: kickoffRunLens(transcript),
+    lens: consoleRunLens(transcript),
     steps,
-    handles: kickoffRunHandles(steps, runState.handleTable),
+    handles: consoleRunHandles(steps, runState.handleTable),
     artifactNames: await namesPresent(root, RUN_ARTIFACT_NAMES),
     toolOutputNames: await toolOutputNames(root),
   };
@@ -216,7 +216,7 @@ export const readKickoffRun = async (
  * name is refused rather than resolved, so this route reads run artifacts and
  * nothing else on the host.
  */
-export const readKickoffRunArtifact = async (
+export const readConsoleRunArtifact = async (
   artifactRoot: string,
   runId: string,
   name: string,
@@ -240,7 +240,7 @@ export const readKickoffRunArtifact = async (
  * the model itself read in full, which is the whole reason the inspector
  * exists.
  */
-export const readKickoffToolOutput = async (
+export const readConsoleToolOutput = async (
   artifactRoot: string,
   runId: string,
   name: string,
