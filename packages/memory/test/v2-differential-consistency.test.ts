@@ -46,7 +46,9 @@ import {
   toNaiveOps,
 } from "./naive-admission.ts";
 
-// --- Deterministic PRNG (mulberry32) -------------------------------------
+//
+// Deterministic PRNG (mulberry32)
+//
 
 const mulberry32 = (seed: number) => {
   let a = seed >>> 0;
@@ -64,7 +66,9 @@ const pick = <T>(rng: Rng, items: readonly T[]): T =>
   items[Math.floor(rng() * items.length)];
 const chance = (rng: Rng, p: number): boolean => rng() < p;
 
-// --- Schedule vocabulary --------------------------------------------------
+//
+// Schedule vocabulary
+//
 
 const ENTITIES = ["entity:A", "entity:B"] as const;
 const SESSIONS = [
@@ -105,7 +109,9 @@ interface AcceptedRecord {
   commit: ClientCommit;
 }
 
-// --- One schedule ----------------------------------------------------------
+//
+// One schedule
+//
 
 const STEPS = 25;
 

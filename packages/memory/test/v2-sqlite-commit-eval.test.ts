@@ -92,7 +92,9 @@ const VALID = ["alice@a.example", "bob@b.example", "dmarc=pass", "hi"];
 // fails closed at evaluation.
 const VIOLATING = ["not an address", "bob@b.example", "", "boom"];
 
-// --- applyCommit-level: atomic rollback with the cell ops -------------------
+//
+// applyCommit-level: atomic rollback with the cell ops
+//
 
 async function freshEngine() {
   const path = await Deno.makeTempFile({ suffix: ".sqlite" });
@@ -452,9 +454,11 @@ Deno.test("DELETE and rule-less-table writes stay plain on a rule-bearing db", a
   });
 });
 
-// --- direct applySqliteCommitWrite: shape rejects + caps --------------------
+//
+// direct applySqliteCommitWrite: shape rejects + caps
 // (No wrapping transaction here — these assert the THROW; rollback is the
 // applyCommit-level tests' concern.)
+//
 
 function bareDb(): Database {
   const db = new Database(":memory:");
