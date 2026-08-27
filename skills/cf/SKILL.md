@@ -128,6 +128,53 @@ See `docs/development/EXPERIMENTAL_OPTIONS.md` for available flags.
 
 **Local servers**: See `docs/development/LOCAL_DEV_SERVERS.md`
 
+## Naming a target
+
+Every read and every call names a target, and the spelling decides whether the
+answer composes into the next command.
+
+- `--piece <id|slug>` — the alias form. Convenient for a target you already
+  know; it carries no space, so `--space` rides beside it.
+- `/[@did:.../]of:fid1:<id>[@scope][/path]` — the canonical reference, the one
+  syntax the whole fabric shares. A space embedded in it supplies `--space` when
+  the flag is absent, and must agree with it when both are given. **An address
+  printed by one command is accepted by the next with no flag beside it.** The
+  alias form cannot do that, which is the reason to prefer the canonical one
+  whenever you are chaining commands rather than typing one.
+- On `cf get`, `cf set` and `cf call` a canonical reference may sit in the first
+  positional instead of on `--piece`: an address begins with `/` and a relative
+  path never does, so the two cannot collide.
+- A canonical reference ending `#argument` selects the piece's arguments cell —
+  the same selection `--input` makes, and it is accepted exactly where `--input`
+  is: `cf get`, `cf set`, and `cf piece get-label|set-label`. A command that
+  takes no `--input` refuses the suffix rather than ignoring it, `cf call` among
+  them. The suffix also needs the canonical form, so with `--url` or a bare id,
+  `--input` is the spelling that reaches it.
+
+`cf piece get|set|call` name the same commands under a deprecated spelling: they
+work and warn on stderr with the date they stop working. That date lives once,
+as `PIECE_DATA_SPELLING_END_DATE` in `packages/cli/commands/piece.ts`. Prefer
+the top-level spellings.
+
+## Where the read options go
+
+`--select`, `--schema` and `--filter` shape what a read returns, and every
+command that returns data carries all three: `cf get`, `cf wish`, `cf call`,
+`cf exec`. `--select` takes a field list, `--schema` a full JSON Schema, and
+naming both on one line is refused rather than resolved.
+
+Their position depends on whether a callable's own vocabulary is on the line.
+`cf get` and `cf wish` have none, so the flags sit anywhere. `cf call` and
+`cf exec` do, so the flags precede the name that opens that section — the verb,
+or the mounted file — and everything after it belongs to the callable. `--` is
+what ends the callable's section, which is why it appears on those two and is
+**refused** on `cf get`, `cf set` and `cf wish`: there is no section to close,
+and the words after it would be set aside unread.
+
+**Resolving a wish writes.** `cf wish` commits a cell to the space as part of
+resolving the query, so it is not a free read and not safe to issue
+speculatively against a space you do not intend to touch.
+
 ## Quick Command Reference
 
 | Operation          | Command                                                                                                                      |
@@ -508,6 +555,8 @@ mounts; auto-discovered spaces may appear writable but silently drop writes.
 - `docs/common/verbs/agents-over-the-cli.md` - Reaching a piece with no id in
   hand: what bounds each discovery surface, and what an empty answer does not
   prove
+- `packages/cli/README.md` - Piece references: the two reference forms, what
+  each carries, and where a canonical address may be written
 - `docs/common/verbs/over-the-cli.md` - The verb walkthrough: invocation ids and
   sessions, receipts, retries, and shaped reads, each step runnable
 - `packages/patterns/system/default-app.tsx` - System pieces (pieceRegistry

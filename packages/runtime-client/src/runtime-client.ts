@@ -9,6 +9,11 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import type { DID, Identity } from "@commonfabric/identity";
 import { Program } from "@commonfabric/js-compiler/interface";
+import type {
+  ApplyOpResolution,
+  OpCursor,
+  OperationFieldSnapshot,
+} from "@commonfabric/memory/v2";
 import { NameSchema } from "@commonfabric/runner/schemas";
 import type {
   ActionRunTraceEntry,
@@ -46,6 +51,7 @@ import {
   type LoggerTimingData,
   type LogLevel,
   NavigateRequestNotification,
+  type OperationUpdateNotification,
   type PatternSourcesResponse,
   PendingWritesNotification,
   type PieceSourceAction,
@@ -82,6 +88,10 @@ export const $conn = Symbol("$request");
 export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   #conn: InitializedRuntimeConnection;
   #pendingWrites = false;
+  #operationSubscriptions = new Map<
+    string,
+    (field: OperationFieldSnapshot) => void
+  >();
 
   private constructor(
     conn: InitializedRuntimeConnection,
@@ -94,6 +104,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     this.#conn.on("error", this._onError);
     this.#conn.on("telemetry", this._onTelemetry);
     this.#conn.on("pendingwriteschange", this._onPendingWritesChange);
+    this.#conn.on("operationupdate", this._onOperationUpdate);
   }
 
   /**
@@ -105,6 +116,125 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    */
   hasPendingWrites(): boolean {
     return this.#pendingWrites;
+  }
+
+  async operationCodecs<T>(
+    cell: CellHandle<T>,
+    operationSessionId?: string,
+  ): Promise<readonly string[]> {
+    const response = await this.#conn.request<
+      RequestType.OperationCapabilities
+    >({
+      type: RequestType.OperationCapabilities,
+      cell: cell.ref(),
+      ...(operationSessionId === undefined ? {} : { operationSessionId }),
+    });
+    return response.codecs;
+  }
+
+  async queryOperationField<T>(
+    cell: CellHandle<T>,
+    after?: OpCursor,
+    operationSessionId?: string,
+  ): Promise<OperationFieldSnapshot> {
+    const response = await this.#conn.request<RequestType.OperationQuery>({
+      type: RequestType.OperationQuery,
+      cell: cell.ref(),
+      ...(operationSessionId === undefined ? {} : { operationSessionId }),
+      ...(after === undefined ? {} : { after }),
+    });
+    return response.field;
+  }
+
+  async applyOperation<T>(
+    cell: CellHandle<T>,
+    operation: {
+      codec: string;
+      submissionId: string;
+      base: OpCursor | null;
+      baselineHash?: string;
+      payload: FabricValue;
+    },
+    operationSessionId?: string,
+  ): Promise<ApplyOpResolution> {
+    const response = await this.#conn.request<RequestType.OperationApply>({
+      type: RequestType.OperationApply,
+      cell: cell.ref(),
+      ...(operationSessionId === undefined ? {} : { operationSessionId }),
+      ...operation,
+      payload: operation.payload,
+    });
+    return response.resolution;
+  }
+
+  async subscribeOperationField<T>(
+    cell: CellHandle<T>,
+    callback: (field: OperationFieldSnapshot) => void,
+    after?: OpCursor,
+    operationSessionId?: string,
+  ): Promise<() => void> {
+    const subscriptionId = crypto.randomUUID();
+    this.#operationSubscriptions.set(subscriptionId, callback);
+    try {
+      const response = await this.#conn.request<
+        RequestType.OperationSubscribe
+      >({
+        type: RequestType.OperationSubscribe,
+        subscriptionId,
+        cell: cell.ref(),
+        ...(operationSessionId === undefined ? {} : { operationSessionId }),
+        ...(after === undefined ? {} : { after }),
+      });
+      if (!response.value) {
+        throw new Error("operation subscription was not installed");
+      }
+    } catch (error) {
+      this.#operationSubscriptions.delete(subscriptionId);
+      try {
+        await this.#conn.request<RequestType.OperationUnsubscribe>({
+          type: RequestType.OperationUnsubscribe,
+          subscriptionId,
+        });
+      } catch {
+        // The connection may have failed with the subscribe response. The
+        // local registration is already gone; a best-effort compensating
+        // unsubscribe prevents a worker-side subscription from leaking when
+        // only that response was lost.
+      }
+      throw error;
+    }
+    return () => {
+      if (!this.#operationSubscriptions.delete(subscriptionId)) return;
+      void this.#conn.request<RequestType.OperationUnsubscribe>({
+        type: RequestType.OperationUnsubscribe,
+        subscriptionId,
+      }).catch(() => undefined);
+    };
+  }
+
+  async releaseOperationField<T>(
+    cell: CellHandle<T>,
+    codec: string,
+    cursor: OpCursor,
+    operationSessionId?: string,
+  ): Promise<void> {
+    const response = await this.#conn.request<RequestType.OperationRelease>({
+      type: RequestType.OperationRelease,
+      cell: cell.ref(),
+      ...(operationSessionId === undefined ? {} : { operationSessionId }),
+      codec,
+      cursor,
+    });
+    if (!response.value) {
+      throw new Error("operation field was not released");
+    }
+  }
+
+  async closeOperationSession(operationSessionId: string): Promise<void> {
+    await this.#conn.request<RequestType.OperationSessionClose>({
+      type: RequestType.OperationSessionClose,
+      operationSessionId,
+    });
   }
 
   /**
@@ -767,6 +897,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   }
 
   async dispose(): Promise<void> {
+    this.#operationSubscriptions.clear();
     await this.#conn.dispose();
   }
 
@@ -801,5 +932,11 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   ): void => {
     this.#pendingWrites = data.pending;
     this.emit("pendingwriteschange", { pending: data.pending });
+  };
+
+  private _onOperationUpdate = (data: OperationUpdateNotification): void => {
+    this.#operationSubscriptions.get(data.subscriptionId)?.(
+      data.field,
+    );
   };
 }

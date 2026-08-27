@@ -418,6 +418,23 @@ export type PieceSourceAction =
   | { kind: "restore"; revisionId: string }
   | { kind: "follow"; revisionId: string };
 
+/** What one {@link PieceController.setPattern} write did beyond landing. */
+export interface PieceSourceSetResult {
+  /**
+   * The origin the write detached, and null when the piece was already
+   * detached.
+   *
+   * Taken from the snapshot the transition committed against, not from a
+   * read beside the call. `applyPieceSourceTransition` refuses inside the
+   * write transaction unless the piece's live origin still equals that
+   * snapshot's, so a write that committed detached exactly this — while a
+   * value any caller read before the call is a value the write may have
+   * moved off. A caller that records what it detached, so an operator can
+   * re-attach by hand, is right only with this one.
+   */
+  detachedOrigin: string | null;
+}
+
 export interface PreparedPieceSourceChange {
   action: PieceSourceAction;
   expected: PieceSourceSnapshot;
@@ -4061,7 +4078,9 @@ export class PieceController<T = unknown> {
   }
 
   /**
-   * Replace the piece's source with `program`.
+   * Replace the piece's source with `program`, detaching the piece from the
+   * origin it follows: what it runs afterwards is `program` and stays
+   * `program` until something writes it again.
    *
    * `expectedPattern` pins the reference this write may run over, exactly as
    * {@link changeSource}'s does and for the same window. The snapshot read
@@ -4079,6 +4098,11 @@ export class PieceController<T = unknown> {
    * execute-time validators remain the whole of enforcement, and
    * `dangerouslyAllowIncompatibleSchema` remains the only thing that opens
    * them.
+   *
+   * Returns the origin this write detached — see {@link PieceSourceSetResult}.
+   * A caller reporting what it detached has no other way to be right about
+   * it: the origin at the caller's own read is not the origin at the write,
+   * and only the snapshot this call commits against is.
    */
   async setPattern(
     program: RuntimeProgram,
@@ -4087,7 +4111,7 @@ export class PieceController<T = unknown> {
       dangerouslyAllowIncompatibleSchema?: boolean;
       expectedPattern?: { identity: string; symbol: string };
     },
-  ): Promise<void> {
+  ): Promise<PieceSourceSetResult> {
     const mutationVersion = ++this.#mutationVersion;
     let transition: PieceSourceTransition | undefined;
     try {
@@ -4144,6 +4168,10 @@ export class PieceController<T = unknown> {
         if (!options?.dangerouslyAllowIncompatibleSchema) {
           assertPatternSchemasBackwardCompatible(previousPattern, pattern);
         }
+        // The `null` is the origin: this transition detaches. A caller
+        // supplying the source has chosen what the piece runs, and a piece
+        // still carrying its origin could be repointed afterwards to
+        // whatever that origin ships, which is not what this caller named.
         transition = pieceSourceTransition(
           expected,
           "edit",
@@ -4187,10 +4215,17 @@ export class PieceController<T = unknown> {
           "Piece source was saved, but refreshing the running piece failed:",
           error,
         );
-        return;
+        // The transition committed, so it detached what its precondition
+        // named, whatever happened to the refresh afterwards.
+        return { detachedOrigin: transition.expected.origin };
       }
       throw pinnedSourceMoved(error, options?.expectedPattern);
     }
+    // The mutation assigns `transition` before the write it belongs to, and
+    // every earlier exit from it throws — so a mutation that resolved has
+    // one, and a mutation that did not took the catch above. Asserted rather
+    // than guarded because a guard here could never fire.
+    return { detachedOrigin: transition!.expected.origin };
   }
 
   async #runMutation(

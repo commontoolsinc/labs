@@ -210,6 +210,24 @@ export class ExecutorHost {
 
   #onCommitAdmitted(notice: AdmittedCommitNotice): void {
     if (this.#closed) return;
+    // THE SESSION REMOUNT's trigger (storage/v2.ts
+    // `consumeOwedSessionRemount`): this commit touched the ACL document
+    // (`of:<space>` — the memory server's aclDocId), which is the ONLY
+    // input the authorization verdict that revokes a session has. Every
+    // serving runtime is told, not just this space's: the session that
+    // starves is typically a CROSS-SPACE replica — a served dispatch's
+    // argument link into the viewer's home space, whose pre-genesis
+    // session that space's genesis ACL de-authorized. Latch-only and
+    // no-op unless a runtime actually holds a terminated session for the
+    // space, so the fan-out costs one map walk per ACL-doc admission.
+    if (
+      this.#spaces.size > 0 &&
+      notice.writes.some((write) => write.id === `of:${notice.space}`)
+    ) {
+      for (const server of this.#spaces.values()) {
+        server.noteSpaceAclChanged(notice.space as MemorySpace);
+      }
+    }
     // Phase 5's server-internal foreign wake needs NO host machinery
     // (survival-tested: a fan-out built here was mutation-probed
     // redundant and removed): a foreign commit's frames arrive on the

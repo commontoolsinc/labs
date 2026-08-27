@@ -3,12 +3,12 @@
 /**
  * Fails when a verb-session document drifts from the demo that runs it.
  *
- * Two documents describe the same session — the tour
- * (`docs/common/verbs/the-verb-session.md`) and the walkthrough
- * (`docs/common/verbs/session-walkthrough.md`) — and each may QUOTE commands
- * but never compose them: every `cf` line in one of their command blocks must
- * be a command `packages/cli/integration/verb-session-demo.sh` actually runs,
- * or sit under a `# not in the demo` comment saying why it cannot be. Nothing
+ * Each document is paired with the demo that runs the session it describes —
+ * the tour and the walkthrough with `verb-session-demo.sh`, the bulk tour with
+ * `bulk-ops-demo.sh` — and a document may QUOTE its demo's commands but never
+ * compose them: every `cf` line in one of its command blocks must be a command
+ * that demo actually runs, or sit under a `# not in the demo` comment saying
+ * why it cannot be. Nothing
  * executes a command block in a document, so a composed example can be wrong
  * from the day it is written and stay wrong through every editing pass — one
  * shipped that way and survived four of them. Both documents also name demo
@@ -39,9 +39,47 @@ export const DEMO_PATH = "packages/cli/integration/verb-session-demo.sh";
 export const WALKTHROUGH_PATH = "docs/common/verbs/session-walkthrough.md";
 export const TOUR_PATH = "docs/common/verbs/the-verb-session.md";
 
-/** Every document held to the demo. Both quote commands and name acts, and a
- * command invented in either is wrong the same way. */
-export const DOC_PATHS = [TOUR_PATH, WALKTHROUGH_PATH];
+/** The demo that runs the bulk piece operations, act by act. */
+export const BULK_DEMO_PATH = "packages/cli/integration/bulk-ops-demo.sh";
+
+/** The tour written from that demo, and held to it below. */
+export const BULK_TOUR_PATH = "docs/common/workflows/bulk-operations.md";
+
+/**
+ * Each document, paired with the demo that runs the session it describes.
+ *
+ * A document is held to its own demo and no other: the verb tour and its
+ * walkthrough describe one session, and the bulk tour describes a different
+ * one. Pairing them here is what lets a second story be added without either
+ * demo having to grow commands the other document quotes.
+ */
+export const DOC_DEMOS: ReadonlyArray<{ doc: string; demo: string }> = [
+  { doc: TOUR_PATH, demo: DEMO_PATH },
+  { doc: WALKTHROUGH_PATH, demo: DEMO_PATH },
+  { doc: BULK_TOUR_PATH, demo: BULK_DEMO_PATH },
+];
+
+/** Every document held to a demo. Each quotes commands and names acts, and a
+ * command invented in any of them is wrong the same way. */
+export const DOC_PATHS = DOC_DEMOS.map((pair) => pair.doc);
+
+/**
+ * The demo a document is held to, by the table rather than by a default.
+ *
+ * A document the table does not name has no demo to pick — every demo runs a
+ * different session, so choosing one for it would check it against a story it
+ * never described — and saying so is the whole of what this does.
+ */
+export function demoFor(doc: string): string {
+  const pair = DOC_DEMOS.find((entry) => entry.doc === doc);
+  if (pair === undefined) {
+    throw new Error(
+      `No demo is paired with ${doc}; name one as shPath, or add the ` +
+        `pairing to DOC_DEMOS.`,
+    );
+  }
+  return pair.demo;
+}
 
 /** The comment that exempts the next `cf` line in a walkthrough bash block.
  * The marker alone is not enough: an exemption without a reason is one
@@ -134,9 +172,10 @@ function extractCf(line: string): string | null {
   return span.trim();
 }
 
-/** Every command the demo runs, as normalized token lists: `run`, `refused`,
- * and `broken` lines execute theirs, and a `pending` line's first argument is
- * the command it promises. */
+/** Every command a demo runs, as normalized token lists: `run`, `run_loud`,
+ * `refused` and `broken` lines execute theirs, and a `pending` line's first
+ * argument is the command it promises. `run_loud` differs from `run` only in
+ * how much of the output it shows, so both are commands the demo ran. */
 export function demoCommands(shText: string): string[][] {
   const commands: string[][] = [];
   for (const line of joinContinuations(shText)) {
@@ -144,7 +183,10 @@ export function demoCommands(shText: string): string[][] {
     const tokens = tokenize(trimmed);
     if (tokens.length === 0) continue;
     const head = tokens[0]!;
-    if (head === "run" || head === "refused" || head === "broken") {
+    if (
+      head === "run" || head === "run_loud" || head === "refused" ||
+      head === "broken"
+    ) {
       const at = tokens.indexOf("cf");
       if (at !== -1) commands.push(dropSpaceFlag(tokens.slice(at)));
       continue;
@@ -320,9 +362,17 @@ export function findViolations(
   return violations;
 }
 
-/** Runs the check and returns the process exit code. The file paths and the
- * printers are injectable so a test can drive both verdicts; the defaults are
- * the repository's own files and the console. */
+/**
+ * Runs the check and returns the process exit code.
+ *
+ * The printers are injectable so a test can drive both verdicts, and so is
+ * the pairing. With neither path, every pairing in {@link DOC_DEMOS} runs.
+ * With both, they are the pairing. With `mdPath` alone, the document supplies
+ * its own demo from {@link DOC_DEMOS} — a document declared there is never
+ * held to another story's demo. Half a pairing that names nothing is refused
+ * rather than defaulted: a demo with no document to check, and a document the
+ * table does not know, each say what to pass.
+ */
 export async function main(deps: {
   shPath?: string;
   mdPath?: string;
@@ -331,16 +381,34 @@ export async function main(deps: {
 } = {}): Promise<number> {
   const log = deps.log ?? console.log;
   const error = deps.error ?? console.error;
-  const shText = await Deno.readTextFile(
-    deps.shPath ?? join(REPO_ROOT, DEMO_PATH),
-  );
-  const docPaths = deps.mdPath === undefined ? DOC_PATHS : [deps.mdPath];
-  const violations: string[] = [];
-  for (const docPath of docPaths) {
-    const mdText = await Deno.readTextFile(
-      docPath.startsWith("/") ? docPath : join(REPO_ROOT, docPath),
+  if (deps.shPath !== undefined && deps.mdPath === undefined) {
+    throw new Error(
+      "shPath names the demo to hold mdPath's document to; pass both.",
     );
-    violations.push(...findViolations(shText, mdText, docPath));
+  }
+  // An override names one pairing; otherwise every document is read against
+  // the demo it was written from. A named document that the table knows
+  // brings its own demo, so an override of the document alone cannot hold
+  // one story's document to another story's demo.
+  const pairs = deps.mdPath === undefined ? DOC_DEMOS : [{
+    doc: deps.mdPath,
+    demo: deps.shPath ?? demoFor(deps.mdPath),
+  }];
+  const demoText = new Map<string, string>();
+  const violations: string[] = [];
+  for (const { doc, demo } of pairs) {
+    if (!demoText.has(demo)) {
+      demoText.set(
+        demo,
+        await Deno.readTextFile(
+          demo.startsWith("/") ? demo : join(REPO_ROOT, demo),
+        ),
+      );
+    }
+    const mdText = await Deno.readTextFile(
+      doc.startsWith("/") ? doc : join(REPO_ROOT, doc),
+    );
+    violations.push(...findViolations(demoText.get(demo)!, mdText, doc));
   }
   if (violations.length > 0) {
     error(`verb-session sync: ${violations.length} violation(s)\n`);
@@ -348,7 +416,7 @@ export async function main(deps: {
     return 1;
   }
   log(
-    `Commands and act references in ${docPaths.length} document(s) all ` +
+    `Commands and act references in ${pairs.length} document(s) all ` +
       `match the demo.`,
   );
   return 0;

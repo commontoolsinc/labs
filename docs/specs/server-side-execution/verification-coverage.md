@@ -5712,14 +5712,19 @@ supply; OW29/OW32/OW34 closed):
     delivered-and-verified — an UNCAUGHT client-replica throw
     (`#validateArrivedSchemaDocuments`) that failed files wholesale
     (all red lanes real-toolshed; in-process harnesses unaffected;
-    main green at the identical base). The CI ON lanes now run
-    ensure-off (`cf test` needs nothing: no serving host exists in
-    `packages/cli` — the ruled opt-in is its status quo). Flagged, not
-    filled: the exposed delivery gap (computed delivered without its
-    verified `cid:` ref) is PRE-EXISTING machinery, latent again with
-    the lanes off; and no CI lane now exercises the production ensure
-    at the true topology — unit pins and the measurement harness carry
-    it until a lane opts in.
+    main green at the identical base). The CI ON lanes opted out of
+    the ensure while that gap was open (`cf test` needs nothing: no
+    serving host exists in `packages/cli` — the ruled opt-in is its
+    status quo); the exposed delivery gap became OW61's row, whose
+    arrival CONTAINMENT (per-doc quarantine, never a process kill)
+    landed with #6223, and whose residual client-side absorb defect
+    was root-caused and FIXED with #6292 (pre-watch-response
+    `session/effect` frames now reach the replica in wire order —
+    OW61's tail carries the mechanism). WITH THE OPT-OUT RETIRED
+    (the ensure-on lane flip PR, following #6223 and #6292): the ON
+    lanes run the production default again and ARE the CI coverage
+    of the ensure at the true topology — the "no CI lane exercises
+    the ensure" flag this tail carried is closed.
     **CATCH-UP-AND-START BUILT 2026-08-24 — the ruled close of the
     client-start class. RULED 2026-08-24: the coordinator's
     recommendation, ACKED verbatim by the owner ("so ack on all
@@ -6360,9 +6365,12 @@ supply; OW29/OW32/OW34 closed):
     serving plane's home-space session predated the genesis ACL
     (activation-before-genesis, the recorded boot order) and the ACL
     landing revoked it (`#revokeDeauthorizedSessions`,
-    memory/v2/server.ts — by design, heal-on-next-mount; a HOME
+    memory/v2/server.ts — by design; a HOME
     genesis is `{user: OWNER}` with no `"*"`, so the pre-genesis
-    session is de-authorized the moment it lands);
+    session is de-authorized the moment it lands. **This clause read
+    "by design, heal-on-next-mount" until 2026-08-26. That premise was
+    FALSE — nothing remounted — and its falsification is the FIFTH-FACE
+    member recorded at the end of this entry.**);
     `failHeadEventLoadPark` (scheduler/facade.ts) maps ANY load-park
     failure to the TERMINAL drop arm, and the drain sealed
     `{status: "dropped", consequenced: true}` with the watermark
@@ -6608,11 +6616,124 @@ supply; OW29/OW32/OW34 closed):
     double-charges the timing budget anyway — or have the shaper's
     release re-check barrier state. Sibling PRE-EXISTING hazard minted
     separately as **OW63** below.
-    STILL OPEN, untouched by this fix: shard 9
+    STILL OPEN, untouched by that fix: shard 9
     (`cfc-staged-publish`) stays UNHARVESTED — symptom-compatible,
     no store evidence, classification open — and the #6248 lane
     disposition remains the owner's call, now with the fix-before-flip
     option actually available.
+    **FIFTH FACE — THE MISSING SESSION REMOUNT. Store-proven
+    2026-08-26 (CI run 33021643751, the same board's shards 2 and 6,
+    both captures swept whole; forensics report
+    `session-remount-report.md`). FIXED the same day, its own seat.**
+    Not a new code region: a newly-falsified PREMISE, and the one
+    #6365's deferral arm rests on. Post-#6365 the disposition changed
+    exactly as designed — watermark held AT the click's entry (seq
+    17, not 18), `consequence_of` naming the eventId **0**,
+    `events.dropped` **0**, the entry left pending and
+    UNCONSEQUENCED — and the event still never ran: **350 deferrals
+    over 5m47s in shard 2 (329 in shard 6), `loadParkDeferrals` 349
+    / 328, ZERO successful loads**, every one
+    `ConnectionError: memory session revoked: unauthorized` on the
+    same three replicas, at the 250 ms backstop cadence decaying to
+    ~1 s. `processed − loadParkDeferrals == appended` exactly in both
+    shards — every unit of serving-loop progress after the failure
+    was a re-deferral, which is precisely the criterion `stats.ts`
+    sets for that counter. Discriminators, both stores swept:
+    `sidecarError` 0 (not #6312/#6320), `RetryImmediately`/`inSpace`
+    0 (never reached #6378), "no handler registered" 0 (not the
+    previous board's T3 face), `scheduler_basis` rows 197/197 and
+    228/228 in the shared space with 0 into home (not D3), the
+    profile program materialized fine (not OW45's write path). The
+    refused doc is PRESENT and durable: "sync completed without data"
+    was an AUTHORIZATION outcome, not an absence.
+    **The mechanism.** `SpaceReplica.sessionHandle()` (storage/v2.ts)
+    memoized the mount and dropped it only in `close()`, and
+    `terminateSession` (memory/v2/client.ts) is terminal for a
+    session — so every re-drain's load reused the very session the
+    server had revoked. `storage/rejection.ts`'s SessionError note
+    had already named the gap in prose ("the convergence argument is
+    sound, only the remount is missing"); `scheduler/facade.ts`'s
+    load-park docstring asserted the opposite ("healing by design on
+    the next mount"). The capture settled it in rejection.ts's
+    favour, and BOTH docstrings plus this entry's own clause above
+    are reconciled in the fix's PR.
+    **The fix — the space-root ensure's own re-arm, one layer down.**
+    Stage 1 solved the identical boot order for the ensure by
+    latching at the fail-closed refusal and consuming the latch when
+    an admitted commit touches `of:<space>`
+    (`#rootEnsureAwaitingOwner`). The session analog: `SpaceReplica`
+    latches an ACL-doc admission (`noteAclChanged`) and consumes it at
+    `sessionHandle()` (`consumeOwedSessionRemount`) — the one place
+    every read and commit reaches a session — dropping a mount that
+    `SessionRevokedError` or `AuthorizationError` terminated so the
+    next load re-opens. `ExecutorHost.#onCommitAdmitted` fans an
+    `of:<space>` write out to EVERY registered space server, because
+    the starved session is a CROSS-SPACE replica: the ACL commit and
+    the dead session are in different spaces.
+    **Why a LATCH and not an eager teardown, measured not assumed.**
+    The memory server emits the admitted-commit notice BEFORE it runs
+    `#revokeDeauthorizedSessions` (both inside one `transact`). At
+    notification time the session that same commit is about to revoke
+    is still OPEN, so an eager teardown inspects a live session,
+    declines, and the revocation lands a moment later — starving
+    exactly as before. Mutation-checked: making the trigger eager
+    reds the host-glue pin and only that pin.
+    **Soundness — the remount never decides.** It re-runs
+    `session.open`, which re-runs the server's admission against the
+    ACL as it now stands. One CORRECTION to the seat's own brief,
+    recorded because it changes what "fail closed" means here: under
+    OW31 a SERVING mount's READ decisions resolve as whoever OWNS the
+    space, so an ACL change that removes the USER does not
+    de-authorize the serving plane — it re-binds the NEW owner, which
+    is the outcome `#revokeDeauthorizedSessions`'s own comment asks
+    for ("the serving plane's next mount re-binds the new owner
+    instead of reading indefinitely under a stale identity"). The
+    denial the remount must respect is constructible on a principal
+    the ACL does not grant, and that is the general statement anyway.
+    Both are pinned.
+    **Pins, red-first, `executor-session-remount.test.ts`** (a real
+    memory server in ACL-enforce mode with the OW31 delegating class,
+    real signed loopback sessions): the reproduction (pre-genesis
+    session, genesis revokes it, 8 reads / 0 successes / all
+    "revoked", then the ACL notice heals it and the durable doc reads
+    through); fail-closed (one trigger, two outcomes, only the ACL
+    chooses); the ownership re-bind; NO CHURN (a live session survives
+    an ACL commit with zero new `session.open`s); and host glue (a real
+    ExecutorHost whose own admission observer carries the genesis —
+    nothing hand-fed); and the SILENT-STALE-READ pin (the Cubic-P1
+    class: post-remount reads for tracker-covered selectors returned
+    SUCCESS carrying the pre-revocation value — reproduced at the
+    pre-fix commit, fixed by dropping the dead mount's selectors from
+    the watch tracker at both consume sites, pinned both ways).
+    Mutations, all red, each reddening its own pin alone: no-op the
+    consume → the reproduction, fail-closed, ownership re-bind,
+    host-glue, and stale-read pins (no-churn stays green);
+    remove the host fan-out → host glue only; remove the ACL-verdict
+    guard → no-churn only; eager instead of latched → host glue only
+    (the measured ordering-independence proof); remove the tracker
+    drop → stale-read only; remove `pull()`'s consume → stale-read
+    only.
+    **Residual, FLAGGED not filled:** watches installed on the DEAD
+    session are not replayed on remount. The revocation had already
+    stopped their pushes (the server drops the session from its
+    registry and `terminateSession` clears `#watchSpecs`), and the
+    remount now DROPS the dead mount's selectors from the watch
+    tracker (the Cubic-P1 fix — the earlier claim that "each address
+    re-installs on its next pull" was FALSE for tracker-covered
+    selectors and is retracted), so post-remount reads re-install
+    coverage fresh instead of silently serving pre-revocation state —
+    but a general "replay the watch set on remount" still belongs
+    with the reconnect path's replay. **Also unchanged:** CLIENT runtimes get no host
+    notification, so a browser session revoked this way still stays
+    revoked; out of this seat's scope.
+    **The persistent-failure posture is UNCHANGED and still OWED to
+    OW54.** A load whose ACL never changes — or whose re-open is
+    denied — defers indefinitely, exactly as recorded above. The
+    remount removes the case where the heal existed in the design and
+    not in the code; it does not remove the need for a give-up arm.
+    The F1 barrier scenario above ("the load heals ... seconds") now
+    has an actual mechanism behind its premise for the fresh-space
+    boot order; it was written against a heal that did not exist.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
@@ -7744,10 +7865,13 @@ supply; OW29/OW32/OW34 closed):
     dependent: whether the computed doc's frame lands before its
     `cid:` sibling is delivery-window timing (CI hit it consistently;
     one local run at the same head did not). With the test lanes'
-    ensure opt-out (the RULED switch) the defect is LATENT again, not
-    fixed. SURFACED TO THE OWNER 2026-08-24 (the coordinator is
-    carrying it). RULED 2026-08-24 (owner, verbatim — the shipping
-    side is the fix):
+    ensure opt-out (the RULED switch) the defect was LATENT again, not
+    fixed — history: the opt-out retired with the ensure-on lane-flip
+    PR once the containment below and the client absorb fix (#6292,
+    this row's tail) had both landed, and the ON lanes run the
+    production default again. SURFACED TO THE OWNER 2026-08-24 (the
+    coordinator is carrying it). RULED 2026-08-24 (owner, verbatim —
+    the shipping side is the fix):
 
     > "seam 3: that's a bug then, and the most straightforward fix is
     > to make sure the subscription query results include cids when

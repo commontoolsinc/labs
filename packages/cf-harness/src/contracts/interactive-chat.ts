@@ -339,10 +339,21 @@ export interface HarnessChatFileChange {
   summary?: string;
 }
 
-export interface HarnessChatSubagentSummary {
+/**
+ * The `delegate_task` child an event belongs to. Events derived from a child's
+ * transcript carry it so a consumer can nest them under the parent tool call
+ * that started the child, which is the only identifier the parent feed already
+ * shows.
+ */
+export interface HarnessChatSubagentRef {
   parentToolCallId: string;
   childRunId?: string;
   profile: HarnessSubagentProfile;
+}
+
+export interface HarnessChatSubagentSummary extends HarnessChatSubagentRef {
+  /** The task the parent delegated, as the parent worded it. */
+  goal?: string;
   summary?: string;
 }
 
@@ -360,20 +371,24 @@ export type HarnessChatStructuredEvent =
   | {
     kind: "assistant_delta";
     text: string;
+    subagent?: HarnessChatSubagentRef;
   }
   | {
     kind: "assistant_completed";
     text: string;
+    subagent?: HarnessChatSubagentRef;
   }
   | {
     kind: "tool_started";
     tool: HarnessChatToolCallSummary;
+    subagent?: HarnessChatSubagentRef;
   }
   | {
     kind: "tool_progress";
     toolCallId: string;
     message: string;
     data?: Record<string, unknown>;
+    subagent?: HarnessChatSubagentRef;
   }
   | {
     kind: "tool_completed";
@@ -381,10 +396,12 @@ export type HarnessChatStructuredEvent =
     status: "completed" | "failed" | "denied";
     resultSummary?: string;
     error?: HarnessChatError;
+    subagent?: HarnessChatSubagentRef;
   }
   | {
     kind: "file_changed";
     change: HarnessChatFileChange;
+    subagent?: HarnessChatSubagentRef;
   }
   | {
     kind: "subagent_started";

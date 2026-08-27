@@ -53,6 +53,26 @@ export interface HarnessFabricSessionConfig {
   cfcFlowLabels?: HarnessFabricCfcFlowLabelsMode;
   cfcPosture?: CfcPosture;
 }
+/**
+ * Connection settings for the deployed pattern index: the base URL its
+ * functions are served under. When present, the run offers `search_patterns`
+ * in the tool surface and `run_pattern` accepts a `patternId` in place of
+ * inline source; when absent, both are unavailable.
+ *
+ * Requests carry the fabric session's identity, so this configuration goes
+ * with a fabric session and is refused without one.
+ */
+export interface HarnessPatternIndexConfig {
+  baseUrl: string;
+
+  /**
+   * Whether a pattern the model authored and ran successfully is published
+   * back to the index. Absent means published: a run that can read the index
+   * contributes to it, so what one run worked out is available to the next.
+   * `false` makes the run a reader only.
+   */
+  publish?: boolean;
+}
 export type HarnessModelProviderId =
   | "openai-compatible-gateway"
   | "openai-codex";
@@ -86,6 +106,7 @@ interface HarnessCommonConfig {
   cfcEnforcementMode: CfcEnforcementMode;
   cfcEnforcementModeSource: HarnessCfcEnforcementModeSource;
   fabricSession?: HarnessFabricSessionConfig;
+  patternIndex?: HarnessPatternIndexConfig;
   sandbox?: DockerRunscSandboxConfig;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -139,6 +160,7 @@ export interface ResolveHarnessConfigOptions {
   inheritedCfcEnforcementMode?: CfcEnforcementMode;
   cfcEnforcementModeOverride?: string | CfcEnforcementMode;
   fabricSession?: HarnessFabricSessionConfig;
+  patternIndex?: HarnessPatternIndexConfig;
   sandbox?: DockerRunscSandboxConfig;
   runManifest?: HarnessRunManifest;
   runManifestPath?: string;
@@ -267,6 +289,18 @@ export const resolveHarnessConfig = (
     );
   }
   if (
+    options.patternIndex !== undefined && options.fabricSession === undefined
+  ) {
+    // Index requests are signed with the fabric session's identity, and a
+    // pattern taken from the index is compiled into the session's space. With
+    // no session there is neither a signer nor anywhere to run what the index
+    // returns, so the combination is refused rather than yielding a tool that
+    // fails on its first call.
+    throw new Error(
+      "pattern index configuration requires a fabric session",
+    );
+  }
+  if (
     modelProvider === "openai-codex" &&
     (options.gatewayBaseUrl !== undefined ||
       options.gatewayAuthMode !== undefined ||
@@ -309,6 +343,9 @@ export const resolveHarnessConfig = (
     cfcEnforcementModeSource: resolveCfcEnforcementModeSource(options),
     ...(options.fabricSession !== undefined
       ? { fabricSession: options.fabricSession }
+      : {}),
+    ...(options.patternIndex !== undefined
+      ? { patternIndex: options.patternIndex }
       : {}),
   };
   if (modelProvider === "openai-codex") {

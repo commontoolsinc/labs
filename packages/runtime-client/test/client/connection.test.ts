@@ -5,6 +5,7 @@ import {
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { toValuePath } from "@commonfabric/memory/v2";
 import { getLogger } from "@commonfabric/utils/logger";
 import { RuntimeConnection } from "@/client/connection.ts";
 import { EventEmitter } from "@/client/emitter.ts";
@@ -13,6 +14,7 @@ import {
   type IPCClientMessage,
   type IPCClientNotification,
   NotificationType,
+  type OperationUpdateNotification,
   RequestType,
   RuntimeErrorCode,
 } from "@/protocol/mod.ts";
@@ -97,6 +99,34 @@ class ThrowingTransport extends EventEmitter<RuntimeTransportEvents>
 }
 
 describe("connection", () => {
+  it("routes collaborative operation notifications", async () => {
+    const transport = new FakeTransport();
+    const connection = await initializedConnection(transport);
+    const messages: unknown[] = [];
+    connection.on("operationupdate", (message) => messages.push(message));
+
+    const notification: OperationUpdateNotification = {
+      type: NotificationType.OperationUpdate,
+      subscriptionId: "subscription:1",
+      field: {
+        branch: "",
+        id: "of:connection",
+        scopeKey: "space",
+        path: toValuePath([]),
+        active: false,
+        codec: null,
+        cursor: null,
+        baselineHash: "baseline",
+        materialized: "value",
+        operations: [],
+      },
+    };
+    transport.emit("message", notification);
+
+    expect(messages).toEqual([notification]);
+    await connection.dispose();
+  });
+
   describe("RuntimeConnection disposal", () => {
     it("settles in-flight requests as cancellation on dispose", async () => {
       const transport = new FakeTransport([RequestType.Idle]);

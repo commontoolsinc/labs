@@ -20,6 +20,8 @@ import {
 } from "@commonfabric/piece/ops/bulk-local";
 
 import { type RepairRunRequest, runRepair, zeroRowFixer } from "../lib/bulk.ts";
+import { resetUnreportedRunGuardsForTest } from "../lib/unreported-run.ts";
+import { guardHarness } from "./unreported-run-helpers.ts";
 import { piece, repairFromCommand, setQuietMode } from "../commands/piece.ts";
 
 function captureStdout(fn: () => Promise<void>): Promise<string> {
@@ -83,6 +85,9 @@ const REPORT: RepairReport = {
 describe("piece-repair", () => {
   // The fixtures pass `quiet`, and the action applies it globally.
   afterEach(() => setQuietMode(false));
+  // The process-end hook is installed once per process, by the first run to
+  // arm a guard; a case that injects its own effects starts from none.
+  beforeEach(() => resetUnreportedRunGuardsForTest());
 
   describe("repairFromCommand()", () => {
     it("prints the emitted plan to stdout and the verdict tally as a hint", async () => {
@@ -237,6 +242,95 @@ describe("piece-repair", () => {
         actionHandler?: unknown;
       };
       expect(registered?.actionHandler).toBe(repairFromCommand);
+    });
+
+    it("reports the run and exits nonzero when the process outlives it", async () => {
+      // The repair runs one session rather than the retarget's grouped ones,
+      // and ends the same way if an await stops settling: the fixer's writes
+      // are half-made, the process drains, and code 0 says otherwise.
+      const process = guardHarness();
+      const abandoned = repairFromCommand(
+        { ...OPTIONS, path: "topics", apply: true },
+        {
+          runRepair: () => new Promise<RepairReport>(() => {}),
+          render: () => {},
+          printHint: () => {},
+          guard: process.deps,
+        },
+      );
+      await Promise.resolve();
+      expect(process.endProcess()).toBe(1);
+      expect(process.errors.join("\n")).toContain(
+        "Repair ended before it reported",
+      );
+      // `repairPieces` takes no row callback, so its rows settle where this
+      // process cannot see them. The line must say the count is unknown: a
+      // repair that wrote half its documents and reported "no row settled"
+      // would be telling the operator something false.
+      expect(process.errors.join("\n")).toContain(
+        "How many rows it settled is not known here",
+      );
+      expect(process.errors.join("\n")).not.toContain("No row settled");
+      expect(abandoned).toBeInstanceOf(Promise);
+    });
+
+    it("says the report failed, not that the run never returned, when output throws", async () => {
+      // The repair counts no rows either way, so what its line must get right
+      // here is the other half: the engine DID return, and the reason its
+      // count is unknown is the missing row callback rather than the return.
+      const process = guardHarness();
+      await expect(
+        repairFromCommand(
+          { ...OPTIONS, path: "topics", apply: true, json: true },
+          {
+            runRepair: () => Promise.resolve(REPORT),
+            render: () => {
+              throw new Error("stdout failed");
+            },
+            printHint: () => {},
+            guard: process.deps,
+          },
+        ),
+      ).rejects.toThrow("stdout failed");
+      expect(process.endProcess()).toBe(1);
+      const said = process.errors.join("\n");
+      expect(said).toContain("Repair ran to a report");
+      expect(said).not.toContain("still in flight");
+      expect(said).not.toContain("it did not return");
+      expect(said).toContain(
+        "this run counts its rows only in the report itself",
+      );
+    });
+
+    it("says nothing at process end once the run has reported", async () => {
+      const process = guardHarness();
+      await captureStdout(() =>
+        repairFromCommand({ ...OPTIONS, path: "topics" }, {
+          runRepair: () => Promise.resolve(REPORT),
+          printHint: () => {},
+          guard: process.deps,
+        })
+      );
+      expect(process.endProcess()).toBe(0);
+      expect(process.errors).toEqual([]);
+    });
+
+    it("says nothing at process end when the run threw", async () => {
+      // A plan pinned to another fixer is refused before the module is even
+      // imported. That refusal IS the report, and the CLI prints it on the
+      // way to a nonzero exit; a guard line beside it would be a second
+      // account of a run that already gave one.
+      const process = guardHarness();
+      await expect(
+        repairFromCommand({ ...OPTIONS, path: "topics", apply: true }, {
+          runRepair: () =>
+            Promise.reject(new Error("The plan runs another fixer.")),
+          printHint: () => {},
+          guard: process.deps,
+        }),
+      ).rejects.toThrow("another fixer");
+      expect(process.endProcess()).toBe(0);
+      expect(process.errors).toEqual([]);
     });
   });
 

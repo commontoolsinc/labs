@@ -73,9 +73,11 @@ export type {
 export type {
   ChangeGroup,
   IExtendedStorageTransaction,
+  IOperationStorageCapability,
   MemorySpace,
   TransactionCommitOptions,
 } from "./storage/interface.ts";
+export { hasOperationStorageCapability } from "./storage/interface.ts";
 export type {
   EntityIdListOptions,
   EntityIdListResult,
@@ -107,6 +109,7 @@ export {
   type ConsoleEvent,
   ConsoleMethod,
   Engine,
+  ensureCompilerStack,
   type EntryIdentityOptions,
   resolveEntryIdentity,
   type RuntimeProgram,

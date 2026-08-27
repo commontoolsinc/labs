@@ -8,6 +8,7 @@
 //   inspect commits  <db> [--session <prefix>] [--limit <n>]
 //   inspect hot      <db> [--limit <n>] [--branch <b>]
 //   inspect history  <db> <entity-id> [--scope <s>] [--branch <b>]
+//   inspect operations <db> [entity-id] [--scope <s>] [--branch <b>]
 //   inspect value-at <db> <entity-id> [--seq <n>] [--path a/b/c]
 //                    [--path-json '["a/b",""]'] [--doc] [--full-depth]
 // Multi-space (cross-space convergence):
@@ -29,6 +30,7 @@ import {
   listCommits,
   summarizeSpace,
 } from "./queries.ts";
+import { inspectOperationFields } from "./operations.ts";
 import { getValueAt } from "./reconstruct.ts";
 import {
   buildCrossSpaceLinkIndex,
@@ -55,6 +57,17 @@ const COMMAND_FLAGS = new Map<string, ReadonlySet<string>>([
   ["commits", new Set(["session", "limit", "json"])],
   ["hot", new Set(["limit", "branch", "json"])],
   ["history", new Set(["scope", "branch", "limit", "json"])],
+  [
+    "operations",
+    new Set([
+      "scope",
+      "branch",
+      "limit",
+      "history-limit",
+      "submission-after-seq",
+      "json",
+    ]),
+  ],
   [
     "value-at",
     new Set([
@@ -157,7 +170,9 @@ function formatSelectedPath(segments: string[], exact: boolean): string {
 function validateNumericFlags(
   flags: Record<string, string | boolean>,
 ): void {
-  for (const name of ["seq", "limit"]) {
+  for (
+    const name of ["seq", "limit", "history-limit", "submission-after-seq"]
+  ) {
     const raw = flags[name];
     if (raw === undefined) continue;
     const value = typeof raw === "string" ? Number(raw) : Number.NaN;
@@ -166,6 +181,21 @@ function validateNumericFlags(
       !Number.isSafeInteger(value) || value < 0
     ) {
       throw new Error(`\`--${name}\` must be a non-negative integer.`);
+    }
+  }
+}
+
+function validateOperationLimits(
+  command: string,
+  flags: Record<string, string | boolean>,
+): void {
+  if (command !== "operations") return;
+  for (const name of ["limit", "history-limit"]) {
+    const raw = flags[name];
+    if (raw === undefined) continue;
+    const value = typeof raw === "string" ? Number(raw) : Number.NaN;
+    if (!Number.isSafeInteger(value) || value < 1 || value > 1_000) {
+      throw new Error(`\`--${name}\` must be an integer from 1 to 1000.`);
     }
   }
 }
@@ -233,6 +263,9 @@ single-space:
   commits  <db> [--session <prefix>] [--limit <n>] [--json]
   hot      <db> [--limit <n>] [--branch <b>] [--json]
   history  <db> <entity-id> [--scope <s>] [--branch <b>] [--limit <n>] [--json]
+  operations <db> [entity-id] [--scope <s>] [--branch <b>] [--limit <n>]
+                              [--history-limit <n>]
+                              [--submission-after-seq <n>] [--json]
   value-at <db> <entity-id> [--seq <n>] [--path a/b/c] [--scope <s>]
                             [--path-json '["a/b",""]'] [--branch <b>]
                             [--doc] [--full-depth] [--json]
@@ -432,6 +465,7 @@ export function main(argv: string[]): number {
   try {
     validateEmptyFlagValues(flags);
     validateNumericFlags(flags);
+    validateOperationLimits(cmd, flags);
   } catch (e) {
     console.error(`error: ${(e as Error).message}`);
     return 1;
@@ -560,6 +594,41 @@ export function main(argv: string[]): number {
                 r.session.slice(0, 14)
               }\tlocal=${r.localSeq}\t${r.createdAt}`,
             );
+          }
+        });
+        return 0;
+      }
+      case "operations": {
+        const report = inspectOperationFields(space, {
+          id: tail[0],
+          scope: str(flags.scope),
+          branch: str(flags.branch),
+          fieldLimit: num(flags.limit),
+          historyLimit: num(flags["history-limit"]),
+          submissionAfterSeq: num(flags["submission-after-seq"]),
+        });
+        out(json, report, () => {
+          if (!report.available) {
+            console.log("operation tables are absent");
+            return;
+          }
+          for (const field of report.fields) {
+            console.log(
+              `${field.active ? "active" : "inactive"}\t${field.address.id}` +
+                `\t${field.address.scope}\t${field.address.pathPointer}` +
+                `\t${field.codec}` +
+                `\t${field.cursor.epoch}:${field.cursor.version}` +
+                `\tretained=${field.retainedFrom.version}` +
+                `\t${field.consistency.healthy ? "healthy" : "INCONSISTENT"}`,
+            );
+            console.log(
+              `  submissions=${field.submissions.length}` +
+                ` integrated=${field.integrated.length}` +
+                ` checkpoints=${field.checkpoints.length}`,
+            );
+          }
+          if (report.fieldsTruncated) {
+            console.log(`field list truncated at ${report.fieldLimit}`);
           }
         });
         return 0;

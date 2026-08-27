@@ -17,6 +17,9 @@ Add a line for each new document to the index below.
 
 ## Writes, storage, and sync
 
+- [`collaborative-fields.md`](collaborative-fields.md) — operation-based fields,
+  CodeMirror's opt-in editor path, retained cursors and reset behavior, and
+  offline inspection
 - [`schema-graph-queries.md`](schema-graph-queries.md) — the query that asks
   which documents a schema reaches, why the client and the memory server run
   one implementation of it, what the two packages exchange to do that, and

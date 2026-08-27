@@ -145,7 +145,8 @@ while read -r candidate; do
   [ -n "$candidate" ] || continue
   sqlite3 "$ENGINE_DIR/$candidate" "VACUUM INTO '$WORK/$candidate'" \
     2> /dev/null || continue
-  if deno run --allow-run --allow-read --allow-write \
+  if deno run --allow-read --allow-write --allow-env --allow-ffi \
+    --allow-net=github.com,release-assets.githubusercontent.com \
     "$REPO_ROOT/scripts/topics-export.ts" "$WORK/$candidate" \
     --out "$WORK/export.json" > "$WORK/export.log" 2>&1; then
     NEW_DB="$candidate"

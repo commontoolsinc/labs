@@ -19,11 +19,13 @@ import {
   isIPCRemoteNotification,
   isIPCRemoteResponse,
   isNavigateRequestNotification,
+  isOperationUpdateNotification,
   isPendingWritesNotification,
   isTelemetryNotification,
   isVDomBatchNotification,
   NavigateRequestNotification,
   NotificationType,
+  OperationUpdateNotification,
   PendingWritesNotification,
   RequestType,
   SerializedDomEvent,
@@ -115,6 +117,7 @@ export type RuntimeConnectionEvents = {
   telemetry: [TelemetryNotification];
   vdombatch: [VDomBatchNotification];
   pendingwriteschange: [PendingWritesNotification];
+  operationupdate: [OperationUpdateNotification];
 };
 
 export interface InitializedRuntimeConnection extends RuntimeConnection {}
@@ -542,6 +545,8 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
         this.emit("vdombatch", message);
       } else if (isPendingWritesNotification(message)) {
         this.emit("pendingwriteschange", message);
+      } else if (isOperationUpdateNotification(message)) {
+        this.emit("operationupdate", message);
       } else {
         console.warn(`Unknown notification: ${JSON.stringify(message)}`);
       }

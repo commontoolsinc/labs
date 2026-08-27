@@ -101,6 +101,8 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
   ["storage-stats-limit", "a count"],
   ["wait", "a patience in seconds"],
   ["group-size", "how many pieces one session serves; a count"],
+  ["history-limit", "an operation history row count"],
+  ["submission-after-seq", "a revision sequence number"],
   // Identifiers the caller brings from outside, or coins.
   ["did", "a DID, pasted from elsewhere"],
   ["as", "a DID whose view to approximate, pasted from elsewhere"],
@@ -160,6 +162,7 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
   ["inspect graph:scope", "the same"],
   ["inspect history:scope", "the same"],
   ["inspect html:scope", "the same"],
+  ["inspect operations:scope", "the same"],
   ["inspect piece:scope", "the same"],
   ["inspect timeline:scope", "the same"],
   ["inspect value-at:scope", "the same"],

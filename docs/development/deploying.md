@@ -74,6 +74,13 @@ variable rather than a secret: the value ends up in a bundle that anyone can
 read, so hiding it from review buys nothing and costs the ability to see what
 staging points at. The host it names is the one `deploy-rapids` keeps current.
 
+`STAGING_SHELL_PRESENCE_URL` optionally names the WebSocket service used for
+ephemeral collaborative-editor presence. When it is unset, the shell provides
+no default and co-presence stays disabled unless an editor supplies an explicit
+endpoint. Like the API URL, a configured presence URL is public build
+configuration, and the deployment job verifies it in both the built and
+published scripts.
+
 Publishing is not the same as working, and this job cannot tell the difference
 by uploading alone — it makes no request to the API it just configured. So it
 checks three things instead. An unset variable fails the job before the build,

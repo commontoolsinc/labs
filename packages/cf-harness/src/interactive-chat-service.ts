@@ -28,12 +28,17 @@ import {
   type HarnessChatStartTurnParams,
   type HarnessChatStatusResult,
   type HarnessChatStructuredEvent,
+  type HarnessChatSubagentRef,
+  type HarnessChatSubagentSummary,
   type HarnessChatTurnRecord,
   type HarnessChatTurnStatus,
   reduceHarnessChatSessionStatus,
   resolveHarnessChatPolicy,
 } from "./contracts/interactive-chat.ts";
-import { BROWSER_SUBAGENT_PROFILE } from "./contracts/subagent.ts";
+import {
+  BROWSER_SUBAGENT_PROFILE,
+  isHarnessSubagentProfile,
+} from "./contracts/subagent.ts";
 import {
   type HarnessCredentialOwnerRef,
   harnessCredentialOwnersEqual,
@@ -44,6 +49,7 @@ import {
   type HarnessToolCall,
   type HarnessToolTranscriptMessage,
   type HarnessTranscriptMessage,
+  type HarnessTranscriptSubagentContext,
   isResumableHarnessTranscript,
 } from "./contracts/transcript.ts";
 import type { HarnessChatSessionStore } from "./session-store.ts";
@@ -582,7 +588,9 @@ const toolMessageStatus = (
 const fileChangeFromToolMessage = (
   message: HarnessToolTranscriptMessage,
   parsedContent: ReadonlyRecord | undefined,
-): HarnessChatStructuredEvent | undefined => {
+):
+  | Extract<HarnessChatStructuredEvent, { kind: "file_changed" }>
+  | undefined => {
   if (
     parsedContent === undefined ||
     toolMessageStatus(parsedContent) !== "completed"
@@ -1405,6 +1413,11 @@ export class HarnessInteractiveChatService {
     // particular, a recovered unknown-outcome result must not be re-emitted as
     // a newly completed tool call.
     let observedTranscriptLength = transcript.length;
+    // The `delegate_task` children this turn has announced, keyed by the
+    // parent tool call that started each one. Membership is what closes the
+    // bracket: a `subagent_completed` is emitted only for a child whose
+    // `subagent_started` this turn already wrote.
+    const startedSubagents = new Map<string, HarnessChatSubagentSummary>();
 
     try {
       const loop = this.#createPromptLoop(
@@ -1417,6 +1430,20 @@ export class HarnessInteractiveChatService {
         signal,
         onTranscriptEvent: async (event) => {
           if (record.canceledTurnIds.has(turnId)) {
+            return;
+          }
+          if (event.subagent !== undefined) {
+            // A child carries its own transcript, whose length says nothing
+            // about the parent's, and a child loop runs once rather than
+            // replaying seeded history. Its messages therefore bypass the
+            // parent's replay gate entirely.
+            await this.#emitSubagentTranscriptEvent(
+              session.sessionId,
+              turnId,
+              startedSubagents,
+              event.subagent,
+              event,
+            );
             return;
           }
           // The loop replays the transcript it was seeded with before it
@@ -1432,7 +1459,12 @@ export class HarnessInteractiveChatService {
           // promoted into `record.transcript`: an interrupted turn must not
           // durably commit history a provider would reject. The full working
           // transcript is on disk in the run's artifacts either way.
-          await this.#emitTranscriptEvent(session.sessionId, turnId, event);
+          await this.#emitTranscriptEvent(
+            session.sessionId,
+            turnId,
+            event,
+            startedSubagents,
+          );
         },
       });
       if (record.canceledTurnIds.has(turnId)) {
@@ -1513,12 +1545,22 @@ export class HarnessInteractiveChatService {
     event: Parameters<
       NonNullable<RunHarnessTranscriptOptions["onTranscriptEvent"]>
     >[0],
+    startedSubagents: Map<string, HarnessChatSubagentSummary>,
   ): Promise<void> {
     switch (event.message.role) {
       case "assistant":
         await this.#emitAssistantMessage(sessionId, turnId, event.message);
         break;
       case "tool":
+        // The parent's own result for a `delegate_task` call closes that
+        // child's bracket, and does so before the parent tool line, so the
+        // nested block ends where the entry containing it reports.
+        await this.#emitSubagentCompletion(
+          sessionId,
+          turnId,
+          startedSubagents,
+          event.message,
+        );
         await this.#emitToolMessage(sessionId, turnId, event.message);
         break;
       case "system":
@@ -1527,11 +1569,133 @@ export class HarnessInteractiveChatService {
     }
   }
 
+  /**
+   * Derives from a `delegate_task` child's message exactly what the parent
+   * path derives from its own, tagged with the child it came from. Sharing the
+   * derivation is what keeps the withholding shared: a child tool result is
+   * summarized from the model-facing content the child's loop wrote, never
+   * from raw tool output.
+   */
+  async #emitSubagentTranscriptEvent(
+    sessionId: string,
+    turnId: string,
+    startedSubagents: Map<string, HarnessChatSubagentSummary>,
+    context: HarnessTranscriptSubagentContext,
+    event: Parameters<
+      NonNullable<RunHarnessTranscriptOptions["onTranscriptEvent"]>
+    >[0],
+  ): Promise<void> {
+    if (event.message.role === "system" || event.message.role === "user") {
+      return;
+    }
+    const subagent = await this.#startSubagent(
+      sessionId,
+      turnId,
+      startedSubagents,
+      context,
+    );
+    if (event.message.role === "assistant") {
+      await this.#emitAssistantMessage(
+        sessionId,
+        turnId,
+        event.message,
+        subagent,
+      );
+      return;
+    }
+    await this.#emitToolMessage(sessionId, turnId, event.message, subagent);
+  }
+
+  async #startSubagent(
+    sessionId: string,
+    turnId: string,
+    startedSubagents: Map<string, HarnessChatSubagentSummary>,
+    context: HarnessTranscriptSubagentContext,
+  ): Promise<HarnessChatSubagentRef> {
+    const existing = startedSubagents.get(context.parentToolCallId);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const subagent: HarnessChatSubagentSummary = {
+      parentToolCallId: context.parentToolCallId,
+      childRunId: context.childRunId,
+      profile: context.profile,
+      goal: context.goal,
+    };
+    startedSubagents.set(context.parentToolCallId, subagent);
+    await this.#emit(sessionId, turnId, {
+      kind: "subagent_started",
+      subagent,
+    });
+    return subagent;
+  }
+
+  async #emitSubagentCompletion(
+    sessionId: string,
+    turnId: string,
+    startedSubagents: Map<string, HarnessChatSubagentSummary>,
+    message: HarnessToolTranscriptMessage,
+  ): Promise<void> {
+    // A child that died before its first message never announced itself, so
+    // its start is synthesized from the delegate output's own manifest —
+    // otherwise the failure below has no subagent to hang on and the viewer
+    // sees a delegation that simply never happened.
+    const parsedForStart = parseToolMessageContent(message.content);
+    const manifest = typeof parsedForStart?.subagent === "object" &&
+        parsedForStart.subagent !== null
+      ? (parsedForStart.subagent as {
+        manifest?: { childRunId?: string; profile?: string };
+      }).manifest
+      : undefined;
+    let subagent = startedSubagents.get(message.toolCallId);
+    if (
+      subagent === undefined && typeof manifest?.childRunId === "string" &&
+      typeof manifest.profile === "string" &&
+      isHarnessSubagentProfile(manifest.profile)
+    ) {
+      subagent = await this.#startSubagent(
+        sessionId,
+        turnId,
+        startedSubagents,
+        {
+          parentToolCallId: message.toolCallId,
+          childRunId: manifest.childRunId,
+          profile: manifest.profile,
+          // The manifest carries the goal's digest, not its text, so a
+          // synthesized start has none to show; the failure event that
+          // follows is the point.
+          goal: "",
+        },
+      );
+    }
+    if (subagent === undefined) {
+      return;
+    }
+    startedSubagents.delete(message.toolCallId);
+    // A delegate_task output carries the child's verdict at
+    // `subagent.status`, not at the generic `ok` the tool-message reading
+    // knows — read the specific field first, or a failed child announces
+    // itself completed.
+    const parsed = parseToolMessageContent(message.content);
+    const childStatus =
+      typeof parsed?.subagent === "object" && parsed.subagent !== null &&
+        (parsed.subagent as { status?: unknown }).status === "failed"
+        ? "failed"
+        : toolMessageStatus(parsed);
+    await this.#emit(sessionId, turnId, {
+      kind: "subagent_completed",
+      subagent,
+      status: childStatus === "completed" ? "completed" : "failed",
+    });
+  }
+
   async #emitAssistantMessage(
     sessionId: string,
     turnId: string,
     message: HarnessAssistantTranscriptMessage,
+    subagent?: HarnessChatSubagentRef,
   ): Promise<void> {
+    const tag = subagent === undefined ? {} : { subagent };
     for (const toolCall of message.toolCalls ?? []) {
       await this.#emit(sessionId, turnId, {
         kind: "tool_started",
@@ -1539,6 +1703,7 @@ export class HarnessInteractiveChatService {
           toolCallId: toolCall.id,
           toolId: toolCall.function.name,
         },
+        ...tag,
       });
     }
     if (message.content.length === 0) {
@@ -1547,10 +1712,12 @@ export class HarnessInteractiveChatService {
     await this.#emit(sessionId, turnId, {
       kind: "assistant_delta",
       text: message.content,
+      ...tag,
     });
     await this.#emit(sessionId, turnId, {
       kind: "assistant_completed",
       text: message.content,
+      ...tag,
     });
   }
 
@@ -1558,7 +1725,9 @@ export class HarnessInteractiveChatService {
     sessionId: string,
     turnId: string,
     message: HarnessToolTranscriptMessage,
+    subagent?: HarnessChatSubagentRef,
   ): Promise<void> {
+    const tag = subagent === undefined ? {} : { subagent };
     const parsedContent = parseToolMessageContent(message.content);
     const status = toolMessageStatus(parsedContent);
     await this.#emit(sessionId, turnId, {
@@ -1569,10 +1738,11 @@ export class HarnessInteractiveChatService {
         toolId: message.toolName,
       },
       resultSummary: message.content,
+      ...tag,
     });
     const fileChange = fileChangeFromToolMessage(message, parsedContent);
     if (fileChange !== undefined) {
-      await this.#emit(sessionId, turnId, fileChange);
+      await this.#emit(sessionId, turnId, { ...fileChange, ...tag });
     }
   }
 

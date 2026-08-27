@@ -24,6 +24,7 @@ import {
   IPCRemoteResponse,
   NavigateRequestNotification,
   NotificationType,
+  OperationUpdateNotification,
   PendingWritesNotification,
   RequestType,
   TelemetryNotification,
@@ -137,7 +138,7 @@ export function isIPCRemoteResponse(
 }
 
 /**
- * Is `value` an {@link IPCRemoteNotification}? The disjunction of the seven
+ * Is `value` an {@link IPCRemoteNotification}? The disjunction of the eight
  * per-notification guards below, so this admits exactly what one of them
  * admits and adds nothing of its own.
  */
@@ -147,7 +148,21 @@ export function isIPCRemoteNotification(
   return isTelemetryNotification(value) || isCellUpdateNotification(value) ||
     isConsoleNotification(value) ||
     isNavigateRequestNotification(value) || isErrorNotification(value) ||
-    isVDomBatchNotification(value) || isPendingWritesNotification(value);
+    isVDomBatchNotification(value) || isPendingWritesNotification(value) ||
+    isOperationUpdateNotification(value);
+}
+
+/**
+ * Is `value` an {@link OperationUpdateNotification}? The field is checked as
+ * an object; its operation payload remains the codec consumer's concern.
+ */
+export function isOperationUpdateNotification(
+  value: unknown,
+): value is OperationUpdateNotification {
+  return isObjectNotArray(value) &&
+    value.type === NotificationType.OperationUpdate &&
+    typeof value.subscriptionId === "string" &&
+    isObjectNotArray(value.field);
 }
 
 /**

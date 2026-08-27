@@ -299,30 +299,6 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "pin. This FILE entry remains explicit until the phase-7 " +
         "coordinator lifts it.",
     },
-    {
-      // Filed 2026-08-25 from PR #6267's ON-lane investigation (issue
-      // #6304): the board's served `crossrefs` pivot carries a duplicated
-      // row under the ON posture — four rows for three topics — while the
-      // durable store holds exactly three array adds and the topics side
-      // is clean (the case's title assertion passed in the diagnostic CI
-      // run; the event stream holds three distinct consequenced addTopic
-      // events). Reproduces on every CI ON run of the shard; locally only
-      // without the file's schema-epoch guard, so the CI trigger is still
-      // unidentified (candidates: the ON-built binary posture, the
-      // browser co-tenants, Linux timing — #6304 carries the evidence).
-      // The case is #6304's acceptance test: fixing it removes this entry
-      // and the step runs again.
-      file: "integration/topic-board-child-contract.test.ts",
-      step:
-        "builds one pivot row per topic, claiming no edges before any mention",
-      phase: "phase-7",
-      reason: "Issue #6304: the served pivot diverges from the durable " +
-        "store under the ON posture — `crossrefs` reads four rows for " +
-        "three topics while the store holds exactly three adds and the " +
-        "topics list is clean, so the case's row-count assertion fails " +
-        "on a real serving/delivery defect the case exists to observe. " +
-        "Lifts when #6304 closes and the case greens ON.",
-    },
     // The sqlite identity pair's two FILE entries were LIFTED (OW53
     // CLOSED, 2026-08-22): the sqlite builtins consumed the RUNTIME's
     // ambient identity — the SERVICE, on a serving runtime — where the

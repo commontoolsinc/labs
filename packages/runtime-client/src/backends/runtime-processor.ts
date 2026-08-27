@@ -20,6 +20,10 @@ import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { setLLMUrl } from "@commonfabric/llm";
 import { type ACL, isACLUser, isCapability } from "@commonfabric/memory/acl";
 import {
+  type OperationFieldAddress,
+  toValuePath,
+} from "@commonfabric/memory/v2";
+import {
   PieceController,
   PiecesController,
   type PreparedPieceSourceChange,
@@ -36,6 +40,8 @@ import {
   entityIdFrom,
   getCellOrThrow,
   getPatternIdentityRef,
+  hasOperationStorageCapability,
+  type IOperationStorageCapability,
   isCell,
   isCellResult,
   markRendererInputTx,
@@ -122,6 +128,16 @@ import {
   type LoggerMetadata,
   type LogLevel,
   NotificationType,
+  type OperationApplyRequest,
+  type OperationApplyResponse,
+  type OperationCapabilitiesRequest,
+  type OperationCapabilitiesResponse,
+  type OperationFieldResponse,
+  type OperationQueryRequest,
+  type OperationReleaseRequest,
+  type OperationSessionCloseRequest,
+  type OperationSubscribeRequest,
+  type OperationUnsubscribeRequest,
   type PageCreateRequest,
   type PageGetAllRequest,
   type PageGetRequest,
@@ -171,6 +187,7 @@ import {
   type VDomUnmountRequest,
   type WriteStackTraceResponse,
 } from "@/protocol/mod.ts";
+
 import type { VDomOp } from "@/protocol/types.ts";
 import { cellRefToKey, describeFailure } from "@/shared/utils.ts";
 import { postToClient } from "./post-to-client.ts";
@@ -479,6 +496,17 @@ export const hasExplicitSubscriptionSchema = (schema: unknown): boolean =>
     typeof schema === "object" && schema !== null &&
     Object.keys(schema).length > 0);
 
+type RuntimeOperationTarget = {
+  capability: IOperationStorageCapability;
+  address: OperationFieldAddress;
+};
+
+type RuntimeOperationSession = {
+  cellKey: string;
+  target: RuntimeOperationTarget;
+  subscriptions: Set<string>;
+};
+
 export class RuntimeProcessor {
   private runtime: Runtime;
   private cc: PiecesController;
@@ -487,6 +515,11 @@ export class RuntimeProcessor {
   private _isDisposed = false;
   private disposingPromise: Promise<void> | undefined;
   private subscriptions = new Map<string, Cancel>();
+  private operationSubscriptions = new Map<
+    string,
+    { cancel?: Cancel; cancelled: boolean; sessionKey?: string }
+  >();
+  private operationSessions = new Map<string, RuntimeOperationSession>();
   private pieceSourceConfirmations = new Map<
     string,
     { token: string; prepared: PreparedPieceSourceChange }
@@ -808,6 +841,12 @@ export class RuntimeProcessor {
           cancel();
         }
         this.subscriptions.clear();
+        for (const subscription of this.operationSubscriptions.values()) {
+          subscription.cancelled = true;
+          subscription.cancel?.();
+        }
+        this.operationSubscriptions.clear();
+        this.operationSessions.clear();
         this.pieceSourceConfirmations.clear();
 
         // Clean up VDOM mounts
@@ -958,6 +997,224 @@ export class RuntimeProcessor {
 
   handleCellPush(request: CellPushRequest): void {
     this.applyCellWrite(request, /* blind */ false);
+  }
+
+  private operationSessionKey(cell: CellGetRequest["cell"]): string {
+    return JSON.stringify([
+      cell.space,
+      cell.id,
+      cell.scope ?? "space",
+      cell.path,
+    ]);
+  }
+
+  private operationTarget(
+    cell: CellGetRequest["cell"],
+    operationSessionId?: string,
+  ) {
+    if (
+      operationSessionId !== undefined &&
+      (operationSessionId.length === 0 || operationSessionId.length > 256)
+    ) {
+      throw new Error("operation session id is malformed");
+    }
+    const cellKey = this.operationSessionKey(cell);
+    const sessionKey = operationSessionId;
+    // A few unit harnesses construct the processor from its prototype. Keep
+    // this lazy initialization in addition to the class field so those
+    // read-only protocol harnesses exercise the same session behavior.
+    this.operationSessions ??= new Map();
+    const existing = sessionKey === undefined
+      ? undefined
+      : this.operationSessions.get(sessionKey);
+    if (existing !== undefined) {
+      if (existing.cellKey !== cellKey) {
+        throw new Error("operation session cannot change its source cell");
+      }
+      return { ...existing.target, sessionKey, session: existing };
+    }
+    const link = getCell(this.runtime, cell).resolveAsCell()
+      .getAsNormalizedFullLink();
+    const provider = this.runtime.storageManager.open(link.space);
+    const capability = hasOperationStorageCapability(provider)
+      ? provider
+      : provider.replica;
+    if (!hasOperationStorageCapability(capability)) {
+      throw new Error(
+        "runtime storage does not support collaborative operations",
+      );
+    }
+    const target = {
+      capability,
+      address: {
+        id: link.id,
+        scope: link.scope,
+        path: toValuePath(link.path),
+      },
+    };
+    if (sessionKey === undefined) {
+      return { ...target, sessionKey: undefined, session: undefined };
+    }
+    const session = {
+      cellKey,
+      target,
+      subscriptions: new Set<string>(),
+    };
+    this.operationSessions.set(sessionKey, session);
+    return { ...target, sessionKey, session };
+  }
+
+  async handleOperationCapabilities(
+    request: OperationCapabilitiesRequest,
+  ): Promise<OperationCapabilitiesResponse> {
+    const { capability } = this.operationTarget(
+      request.cell,
+      request.operationSessionId,
+    );
+    return { codecs: [...await capability.operationCodecs()] };
+  }
+
+  async handleOperationQuery(
+    request: OperationQueryRequest,
+  ): Promise<OperationFieldResponse> {
+    const { capability, address } = this.operationTarget(
+      request.cell,
+      request.operationSessionId,
+    );
+    const field = await capability.queryOperationField({
+      ...address,
+      ...(request.after === undefined ? {} : { after: request.after }),
+    });
+    return { field: field };
+  }
+
+  async handleOperationApply(
+    request: OperationApplyRequest,
+  ): Promise<OperationApplyResponse> {
+    const { capability, address } = this.operationTarget(
+      request.cell,
+      request.operationSessionId,
+    );
+    const resolution = await capability.applyOperation({
+      op: "apply-op",
+      ...address,
+      codec: request.codec,
+      submissionId: request.submissionId,
+      base: request.base,
+      ...(request.baselineHash === undefined
+        ? {}
+        : { baselineHash: request.baselineHash }),
+      payload: request.payload,
+    });
+    return { resolution: resolution };
+  }
+
+  async handleOperationSubscribe(
+    request: OperationSubscribeRequest,
+  ): Promise<BooleanResponse> {
+    if (this.operationSubscriptions.has(request.subscriptionId)) {
+      return { value: false };
+    }
+    const { capability, address, sessionKey, session } = this.operationTarget(
+      request.cell,
+      request.operationSessionId,
+    );
+    const subscription: {
+      cancel?: Cancel;
+      cancelled: boolean;
+      sessionKey?: string;
+    } = {
+      cancelled: false,
+      ...(sessionKey === undefined ? {} : { sessionKey }),
+    };
+    this.operationSubscriptions.set(request.subscriptionId, subscription);
+    session?.subscriptions.add(request.subscriptionId);
+    let cancel: Cancel;
+    try {
+      cancel = await capability.subscribeOperationField({
+        ...address,
+        ...(request.after === undefined ? {} : { after: request.after }),
+      }, (field) => {
+        if (
+          this.operationSubscriptions.get(request.subscriptionId) !==
+            subscription
+        ) return;
+        queueMicrotask(() =>
+          self.postMessage({
+            type: NotificationType.OperationUpdate,
+            subscriptionId: request.subscriptionId,
+            field: field,
+          })
+        );
+      });
+    } catch (error) {
+      if (
+        this.operationSubscriptions.get(request.subscriptionId) === subscription
+      ) {
+        this.operationSubscriptions.delete(request.subscriptionId);
+        session?.subscriptions.delete(request.subscriptionId);
+        if (
+          sessionKey !== undefined && session?.subscriptions.size === 0 &&
+          this.operationSessions.get(sessionKey) === session
+        ) {
+          this.operationSessions.delete(sessionKey);
+        }
+      }
+      throw error;
+    }
+    if (
+      this._isDisposed || subscription.cancelled ||
+      this.operationSubscriptions.get(request.subscriptionId) !== subscription
+    ) {
+      cancel();
+      return { value: false };
+    }
+    subscription.cancel = cancel;
+    return { value: true };
+  }
+
+  async handleOperationRelease(
+    request: OperationReleaseRequest,
+  ): Promise<BooleanResponse> {
+    const { capability, address } = this.operationTarget(
+      request.cell,
+      request.operationSessionId,
+    );
+    await capability.releaseOperationField({
+      op: "release-op-field",
+      ...address,
+      codec: request.codec,
+      cursor: request.cursor,
+    });
+    return { value: true };
+  }
+
+  handleOperationUnsubscribe(
+    request: OperationUnsubscribeRequest,
+  ): BooleanResponse {
+    const subscription = this.operationSubscriptions.get(
+      request.subscriptionId,
+    );
+    if (subscription === undefined) return { value: false };
+    this.operationSubscriptions.delete(request.subscriptionId);
+    subscription.cancelled = true;
+    subscription.cancel?.();
+    if (subscription.sessionKey !== undefined) {
+      const session = this.operationSessions?.get(subscription.sessionKey);
+      session?.subscriptions.delete(request.subscriptionId);
+      if (session?.subscriptions.size === 0) {
+        this.operationSessions.delete(subscription.sessionKey);
+      }
+    }
+    return { value: true };
+  }
+
+  handleOperationSessionClose(
+    request: OperationSessionCloseRequest,
+  ): BooleanResponse {
+    return {
+      value: this.operationSessions?.delete(request.operationSessionId),
+    };
   }
 
   // Shared write path for CellSet/CellPush. In blind mode the set's reads carry no
@@ -1799,6 +2056,20 @@ export class RuntimeProcessor {
         return this.handleCellResolveAsCell(request);
       case RequestType.CellGetCfcLabel:
         return await this.handleCellGetCfcLabel(request);
+      case RequestType.OperationQuery:
+        return await this.handleOperationQuery(request);
+      case RequestType.OperationCapabilities:
+        return await this.handleOperationCapabilities(request);
+      case RequestType.OperationApply:
+        return await this.handleOperationApply(request);
+      case RequestType.OperationRelease:
+        return await this.handleOperationRelease(request);
+      case RequestType.OperationSubscribe:
+        return await this.handleOperationSubscribe(request);
+      case RequestType.OperationUnsubscribe:
+        return this.handleOperationUnsubscribe(request);
+      case RequestType.OperationSessionClose:
+        return this.handleOperationSessionClose(request);
       case RequestType.GetCell:
         return this.handleGetCell(request);
       case RequestType.GetHomeSpaceCell:
