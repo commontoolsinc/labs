@@ -1,5 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { classifyStateScope, type TrackedGraphState } from "../v2/query.ts";
 import { Server } from "../v2/server.ts";
 import {
   encodeMemoryBoundary,
@@ -453,6 +454,29 @@ describe("v2 query evaluation cache", () => {
       expect(after.hits - before.hits).toBe(1);
       expect(upsertIds(syncB)).toEqual(upsertIds(syncA));
 
+      // The recording identity re-asking (as a one-shot graph query, which
+      // shares the cache) needs no rewrite at all: its residue keys are
+      // already its own.
+      messagesA.length = 0;
+      const beforeSame = server.evaluationCacheDiagnostics(space);
+      const same = await server.evaluateGraphQuery(
+        space,
+        {
+          roots: [{
+            id: "of:doc:linked",
+            selector: { path: [], schema: true },
+          }],
+        },
+        undefined,
+        undefined,
+        { principal: "did:key:z6Mk-residue-p1", sessionId: sessionA },
+      );
+      const afterSame = server.evaluationCacheDiagnostics(space);
+      expect(afterSame.hits - beforeSame.hits).toBe(1);
+      expect(same.entities.map((entity) => entity.id)).toContain(
+        "of:doc:linked",
+      );
+
       // The rewrite's reactivity pin: another session of the SAME principal
       // writes that principal's draft instance (a writer's own change is
       // not echoed back to it, so the watcher must be a different session),
@@ -603,10 +627,56 @@ describe("v2 query evaluation cache", () => {
       expect(after.misses - before.misses).toBe(2);
       expect(after.hits - before.hits).toBe(0);
       expect(upsertIds(syncC)).toContain("of:doc:draft");
+
+      // C's refused evaluation was cached under its identity, and the
+      // shared entry must not shadow it: the same identity asking the
+      // same question again — here as a one-shot graph query, which
+      // shares the cache with watch establishment — is served from it.
+      const again = await server.evaluateGraphQuery(
+        space,
+        {
+          roots: [{
+            id: "of:doc:linked",
+            selector: { path: [], schema: true },
+          }],
+        },
+        undefined,
+        undefined,
+        { principal: "did:key:z6Mk-present-p3", sessionId: sessionC },
+      );
+      const retried = server.evaluationCacheDiagnostics(space);
+      expect(retried.hits - after.hits).toBe(1);
+      expect(again.entities.map((entity) => entity.id)).toContain(
+        "of:doc:draft",
+      );
     } finally {
       connectionA.close();
       connectionC.close();
     }
+  });
+
+  it("classifies a scoped load without a tracker registration as tainted", () => {
+    // The shape meta-linked loads produce: the document was loaded through
+    // the manager but registered no tracker entry, so the tracker loop
+    // alone would misjudge the state as shareable.
+    const state = {
+      branch: "",
+      tracker: new Map(),
+      missed: new Map(),
+      missedBy: new Map(),
+      missesOf: new Map(),
+      entities: new Map(),
+      memo: new Map(),
+      manager: {
+        loadedAddresses: () => [{
+          id: "of:doc:meta",
+          type: "application/json",
+          scope: "session",
+          scopeKey: "session:p:s",
+        }],
+      },
+    } as unknown as TrackedGraphState;
+    expect(classifyStateScope(state)).toEqual({ kind: "tainted" });
   });
 
   it("evicts the least-recently-evaluated space's cache beyond the space bound", async () => {

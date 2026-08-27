@@ -414,7 +414,11 @@ type StateScopeClass =
   }
   | { kind: "tainted" };
 
-const classifyStateScope = (state: TrackedGraphState): StateScopeClass => {
+/** Exported for testing (the malformed-key guard is unreachable through
+ * a real walk while the scope-key vocabulary holds). */
+export const classifyStateScope = (
+  state: TrackedGraphState,
+): StateScopeClass => {
   for (const [key] of state.tracker) {
     if (fromDocKey(key as QueryDocKey).scopeKey !== "space") {
       return { kind: "tainted" };
@@ -432,9 +436,11 @@ const classifyStateScope = (state: TrackedGraphState): StateScopeClass => {
   }
   const residue: { key: QueryDocKey; id: string; scope: CellScope }[] = [];
   for (const [key] of state.missed) {
+    // The scope-key vocabulary is closed (isScopeKey), so a key that is
+    // not the space instance necessarily recovers a session or user
+    // scope; fromDocKey throws on anything outside the vocabulary.
     const { id, scope, scopeKey } = fromDocKey(key as QueryDocKey);
     if (scopeKey === "space") continue;
-    if (scope === "space") return { kind: "tainted" };
     residue.push({ key: key as QueryDocKey, id, scope });
   }
   return residue.length === 0
@@ -1052,31 +1058,43 @@ export const trackGraph = (
       pure: `P${queryKey}`,
       identity: `I${evaluationIdentityKey(options)}${queryKey}`,
     };
-    const entry = cache.entries.get(cacheKeys.pure) ??
-      cache.entries.get(cacheKeys.identity);
-    if (entry !== undefined) {
-      const served = entry.share.kind === "absent-residue"
+    const pureEntry = cache.entries.get(cacheKeys.pure);
+    let served: TrackedGraphState | null = null;
+    if (pureEntry !== undefined) {
+      served = pureEntry.share.kind === "absent-residue"
         ? cloneWithRewrittenResidue(
           engine,
           space,
-          entry.state,
-          entry.share.residue,
+          pureEntry.state,
+          pureEntry.share.residue,
           options,
         )
-        : cloneTrackedGraphStateForIdentity(engine, entry.state, options);
-      if (served !== null) {
-        cache.hits++;
-        // A hit ran no traversal, and its stats say so: zero walk counters
-        // are the truth of what THIS call cost, not an accounting gap.
-        return {
-          serverSeq: currentSeq,
-          state: served,
-          stats: createQueryTraversalStats(),
-        };
+        : cloneTrackedGraphStateForIdentity(engine, pureEntry.state, options);
+    }
+    if (served === null) {
+      // Either no shared entry, or its residue is PRESENT for this
+      // identity and the share was refused. The identity's own earlier
+      // evaluation — tainted, keyed to exactly this (principal,
+      // sessionId) — still answers; without this lookup a shared entry
+      // would shadow it and the identity would re-evaluate every time.
+      const identityEntry = cache.entries.get(cacheKeys.identity);
+      if (identityEntry !== undefined) {
+        served = cloneTrackedGraphStateForIdentity(
+          engine,
+          identityEntry.state,
+          options,
+        );
       }
-      // A residue doc is PRESENT for this identity: the shared entry does
-      // not describe this session's reach. Evaluate normally — the result
-      // carries the scoped doc in its tracker, so it keys to the identity.
+    }
+    if (served !== null) {
+      cache.hits++;
+      // A hit ran no traversal, and its stats say so: zero walk counters
+      // are the truth of what THIS call cost, not an accounting gap.
+      return {
+        serverSeq: currentSeq,
+        state: served,
+        stats: createQueryTraversalStats(),
+      };
     }
     cache.misses++;
   }
