@@ -262,10 +262,10 @@ id, and the validation reads through the query's manager, so a
 historical query (`atSeq`) requires the closure to exist and verify at
 that same sequence. A reference that fails this validation fails the
 query loudly (a QueryError), never silently as an empty match — the
-lenient selects-nothing gate is for LINK schemas inside delivered
-documents, where a hole is a wait-for-arrival state; an unresolvable
-selector reference is a client bug, and matching nothing would mask
-it. Past validation, resolution flows through the shared traversal
+lenient logged-and-selects-nothing rule is for LINK schemas inside
+delivered documents, where a broken declaration is corruption to note
+and read past; an unresolvable selector reference is the query's own
+naming, a client bug, and matching nothing would mask it. Past validation, resolution flows through the shared traversal
 with the documents already registered. What remains for clients is
 the sending half: a client may send a reference only for a schema
 whose documents it knows are persisted in that space — one it wrote,
@@ -399,8 +399,12 @@ exactly two guarantees, both about delivery rather than about values:
   closure against the delivering space's own store, and joins the whole
   closure to the delivered set and watch set. A missing or forged
   closure document fails the query loudly: the write-side guarantee
-  installed closures with their referrers, so a hole is a consistency
-  bug to surface, never to repair around. Scans are document-granular
+  installed closures with their referrers, so a hole here is a
+  consistency bug the boundary surfaces. A reader that meets one
+  anyway — tampering behind the boundary, a store predating the
+  validation — logs it and reads on with the declaration selecting
+  nothing, per the reader rule above; the boundary's loudness is what
+  keeps that leniency safe. Scans are document-granular
   (delivery is), so no selected path can shadow another, and their
   results are cached per document version, so in steady state a version
   is scanned once however many sessions or refreshes deliver it.
