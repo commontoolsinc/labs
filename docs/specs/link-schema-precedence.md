@@ -160,11 +160,12 @@ browser shell bakes the flag at build time, so a browser rollback ships
 with a redeploy. A fetched posture that declares nothing for the flag
 predates it and adopts as the legacy strict `false`; an explicit
 `experimental: null` (no Runtime yet) and an unreachable server adopt
-nothing. The rollback is plain ambient state like the other flags'
-configs — each Runtime construction sets it, dispose resets the default —
-so successive runtimes in one test process can run different flag states,
-while a real server constructs one posture and never changes it
-mid-flight. The
+nothing. The rollback is plain ambient last-construction-wins state:
+each Runtime construction sets it, and dispose deliberately does not
+reset it — serving runtimes are per-space and idle-disposed, so a
+teardown reset would lift a rollback out from under the survivors.
+Successive runtimes in one test process still get differing flag states,
+because every construction sets. The
 [registry section](../development/EXPERIMENTAL_OPTIONS.md#readerschemaprecedence)
 is the authority on the lifecycle and the removal path.
 

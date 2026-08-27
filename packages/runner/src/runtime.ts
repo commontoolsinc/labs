@@ -27,7 +27,6 @@ import {
 } from "./schema-doc-config.ts";
 import {
   getReaderSchemaPrecedenceConfig,
-  resetReaderSchemaPrecedenceConfig,
   setReaderSchemaPrecedenceConfig,
 } from "./reader-schema-precedence-config.ts";
 import { StaticCache } from "@commonfabric/static";
@@ -278,8 +277,9 @@ export interface ExperimentalOptions {
    * empty; a false reader stays false). Server-authoritative for deployed
    * CLIs (`EXPERIMENTAL_FLAG_AUTHORITY`); the browser shell bakes it at
    * build time. On by default; an explicit `false` is a temporary rollback
-   * override, ambient like the other flags (last construction wins,
-   * dispose resets).
+   * override, ambient with last-construction-wins semantics. Dispose does
+   * NOT reset it: serving runtimes are per-space and idle-disposed, so a
+   * teardown reset would lift a live rollback from under the survivors.
    */
   readerSchemaPrecedence?: boolean | undefined;
 
@@ -1535,7 +1535,6 @@ export class Runtime {
       this.defaultFrame = pushFrame({ runtime: this });
     } catch (error) {
       this.#releaseServerExecutionEnabler();
-      resetReaderSchemaPrecedenceConfig();
       throw error;
     }
   }
@@ -1951,7 +1950,11 @@ export class Runtime {
       // catch), so a REJECTING async teardown cannot leak the enabler.
       resetModernCellRepConfig();
       resetCommitPreconditionsConfig();
-      resetReaderSchemaPrecedenceConfig();
+      // readerSchemaPrecedence deliberately does NOT reset here: a server
+      // runs one serving runtime per space and disposes idle ones while
+      // the rest live, so a dispose-time reset would lift a rollback out
+      // from under them. The ambient changes only when a construction
+      // sets it (last construction wins).
     }
   }
 

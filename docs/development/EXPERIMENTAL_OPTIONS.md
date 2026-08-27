@@ -514,11 +514,13 @@ Still unbuilt, and recorded in the plan: handlers materialize eagerly.
   §5.3.4 for the query-pipeline context.
 - **Current default and planned end state.** On by default; an explicit
   `false` restores the strict pseudo-intersection (`combineSchema`) at link
-  crossings as a rollback override. The rollback is plain ambient state like
-  the other flags' configs: each Runtime construction sets it from its
-  resolved option and dispose resets the default, so successive runtimes in
-  one test process can run different flag states — a real server constructs
-  one posture and never changes it mid-flight. Compatibility: a server
+  crossings as a rollback override. The rollback is plain ambient
+  last-construction-wins state: each Runtime construction sets it from its
+  resolved option, and dispose deliberately does NOT reset it — a server
+  runs one serving runtime per space and disposes idle ones while the rest
+  live, so a teardown reset would lift a rollback out from under them.
+  Successive runtimes in one test process still get differing flag states,
+  because every construction sets (an unset option setting the default). Compatibility: a server
   posture that DECLARES no `readerSchemaPrecedence` predates the flag and
   necessarily runs the strict combine, so adoption treats absence as the
   legacy `false` until the compatibility window closes
@@ -527,7 +529,7 @@ Still unbuilt, and recorded in the plan: handlers materialize eagerly.
   marking off link schemas (`schemaHasIfc` at the read entry point and at
   traversal hops) is unconditional in both arms.
 - **Status on 2026-08-27.** Landed on by default in #6338; the rollback arm,
-  the ambient lifecycle (construction set, dispose reset, throwing
+  the ambient lifecycle (construction set, no teardown reset, throwing
   construction), and the default inheritance are covered by unit tests in
   `packages/runner/test/combine-schema.test.ts` and
   `packages/runner/test/experimental-options.test.ts`.
@@ -1494,11 +1496,12 @@ server](#clients-that-are-not-built-alongside-their-server).
 - In the browser the web worker is a separate JavaScript context, so its flags
   are independent of the main thread.
 - For most flags, creating a new `Runtime` overwrites the ambient config and
-  disposing it resets to the defaults. The exception is the OWNED claim:
-  `serverExecution`'s enabler is refcounted per Runtime — acquired at
-  construction, released by that runtime's dispose (or its throwing
-  construction) — so a co-hosted runtime's dispose cannot lift another's
-  live claim.
+  disposing it resets to the defaults. Two exceptions: `serverExecution`'s
+  enabler is an OWNED refcounted claim — acquired at construction, released
+  by that runtime's dispose (or its throwing construction) — so a co-hosted
+  runtime's dispose cannot lift another's live claim; and
+  `readerSchemaPrecedence` is construction-set only — dispose leaves it
+  standing, since serving runtimes are per-space and idle-disposed.
 
 ---
 

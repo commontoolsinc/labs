@@ -3,11 +3,13 @@
  * (`combineSchemaForLink` in traverse.ts): ON by default; an explicit
  * `false` restores the strict pseudo-intersection at link crossings.
  *
- * Plain last-write-wins module state, like the other experimental flags'
- * ambient configs: each Runtime construction sets it from its resolved
- * option, and dispose resets the default. A test process can therefore
- * construct successive runtimes with different flag states; a real server
- * constructs one posture and never changes it mid-flight.
+ * Plain last-write-wins module state: each Runtime construction sets it
+ * from its resolved option. Dispose deliberately does NOT reset it — a
+ * server runs one serving runtime per space and disposes idle ones while
+ * the rest live, so a teardown reset would lift a rollback out from under
+ * them. A test process gets differing flag states by constructing (every
+ * construction sets, an unset option setting the default), and the
+ * explicit reset below serves unit tests of this module.
  */
 
 let readerSchemaPrecedenceEnabled = true;

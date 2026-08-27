@@ -192,7 +192,7 @@ describe("ExperimentalOptions", () => {
       await sm.close();
     });
 
-    it("constructing Runtime with readerSchemaPrecedence false sets global config, and dispose restores it", async () => {
+    it("constructing Runtime with readerSchemaPrecedence false sets global config, and dispose leaves it", async () => {
       const sm = StorageManager.emulate({ as: signer });
       const runtime = new Runtime({
         apiUrl: new URL(import.meta.url),
@@ -203,10 +203,12 @@ describe("ExperimentalOptions", () => {
       expect(getReaderSchemaPrecedenceConfig()).toBe(false);
       expect(runtime.experimental.readerSchemaPrecedence).toBe(false);
 
+      // Serving runtimes are per-space and idle-disposed; a dispose must
+      // not lift a live rollback (the ambient family below pins the rest).
       await runtime.dispose();
       await sm.close();
 
-      expect(getReaderSchemaPrecedenceConfig()).toBe(true);
+      expect(getReaderSchemaPrecedenceConfig()).toBe(false);
     });
 
     it("disposing Runtime resets global config to the default", async () => {
@@ -365,7 +367,7 @@ describe("readerSchemaPrecedence ambient flag", () => {
     resetReaderSchemaPrecedenceConfig();
   });
 
-  it("sets the ambient state per construction and resets it on dispose", async () => {
+  it("sets the ambient state per construction; dispose leaves it standing", async () => {
     const smRollback = StorageManager.emulate({ as: signer });
     const rollback = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -375,10 +377,14 @@ describe("readerSchemaPrecedence ambient flag", () => {
     expect(getReaderSchemaPrecedenceConfig()).toBe(false);
     expect(rollback.experimental.readerSchemaPrecedence).toBe(false);
 
+    // A server runs one serving runtime per space and disposes idle ones
+    // while the rest live: a dispose must not lift the rollback out from
+    // under them.
     await rollback.dispose();
     await smRollback.close();
-    expect(getReaderSchemaPrecedenceConfig()).toBe(true);
+    expect(getReaderSchemaPrecedenceConfig()).toBe(false);
 
+    // The next construction decides — an unset option sets the default.
     const smDefault = StorageManager.emulate({ as: signer });
     const plain = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -390,7 +396,7 @@ describe("readerSchemaPrecedence ambient flag", () => {
     await smDefault.close();
   });
 
-  it("a THROWING construction resets the ambient state", async () => {
+  it("a THROWING construction also leaves the ambient to the next construction", async () => {
     const smBad = StorageManager.emulate({ as: signer });
     expect(() =>
       new Runtime({
@@ -399,7 +405,15 @@ describe("readerSchemaPrecedence ambient flag", () => {
         experimental: { readerSchemaPrecedence: false },
       })
     ).toThrow();
-    expect(getReaderSchemaPrecedenceConfig()).toBe(true);
     await smBad.close();
+
+    const smNext = StorageManager.emulate({ as: signer });
+    const next = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: smNext,
+    });
+    expect(getReaderSchemaPrecedenceConfig()).toBe(true);
+    await next.dispose();
+    await smNext.close();
   });
 });
