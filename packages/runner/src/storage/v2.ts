@@ -185,6 +185,18 @@ const pendingPatchLogger = getLogger("storage.v2.pending-patch", {
   level: "warn",
   logCountEvery: 0,
 });
+/** Its OWN logger, deliberately, because the module logger above sits at
+ *  `level: "error"` and would swallow a warn. A session remount is the visible
+ *  end of a starvation that was previously indistinguishable from a doc simply
+ *  not being there (the profile-starvation fifth face was diagnosed from the
+ *  ABSENCE of lines), so this one has to survive the default posture. Bounded:
+ *  it fires only on an actual remount, which needs a terminated session AND an
+ *  ACL commit. */
+const sessionRemountLogger = getLogger("storage.v2.session-remount", {
+  enabled: true,
+  level: "warn",
+  logCountEvery: 0,
+});
 
 const EMPTY_OVERLAY: ReadonlyMap<string, unknown> = new Map();
 
@@ -3115,7 +3127,7 @@ class SpaceReplica implements ISpaceReplica {
     // fresh client, and leaving this one open would accumulate one
     // connection per revocation.
     stale.then(({ client }) => client.close()).catch(() => {});
-    logger.warn("session-remount", () => [
+    sessionRemountLogger.warn("session-remount", () => [
       `space ${this.#space}: the memoized session was terminated by ` +
       `${closeError.name} and a commit touched its ACL doc; remounting. ` +
       "A fresh session.open re-runs the server's admission against the " +
