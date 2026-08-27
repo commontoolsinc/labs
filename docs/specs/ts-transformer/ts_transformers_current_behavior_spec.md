@@ -748,6 +748,13 @@ that reference to the defining module identity, export symbol, exact manifest
 digest, and an owning-space placeholder. Direct imports and pinned `cf:` imports
 retain the dependency's identity.
 
+Both recognizers read a declaration's initializer through the transparent wrapper set (parentheses, `as`, `<T>x`, `satisfies`, `!`, and partially emitted nodes), so an
+authored rule or ruleset is recognized however it is spelled. A spelling not
+stripped does not surface as a wrapper problem: the authoring pass reports the
+rule as invalid, and the `PolicyOf` pass reports that the binding must resolve
+to an `exchangeRules()` declaration — each naming the declaration rather than
+the wrapper that hid it.
+
 `WriteAuthorizedByValidationTransformer` separately validates writer-binding
 claims.
 
@@ -808,8 +815,11 @@ reports:
   (`src/transformers/verb-return-validation.ts`) — a block body contains a
   top-level `return <expr>` whose expression is **definitely plain-shaped**:
   an object/array literal, a string/number/boolean/null literal, a template
-  string, or arithmetic/concatenation over such operands (recursing through
-  parentheses, non-`any` assertions, and conditionals). The message points
+  string, or arithmetic/concatenation over such operands (recursing through the
+  transparent wrapper set — parentheses, `as`, `<T>x`, `satisfies`, `!`, and
+  partially emitted nodes — and through conditionals). An assertion whose type
+  is `any` opts the expression out whichever assertion form carries it, because
+  the validator then cannot judge the shape. The message points
   the author at declaring the result (`action<Event, Result>` /
   `handler<Event, State, Result>`) or using a bare `return;` for an early
   exit.
@@ -1024,6 +1034,19 @@ The rewriter uses normalized data-flow dependencies and ordered emitters:
 7. prefix unary
 8. container expression
 
+The container emitter owns a literal that holds other expressions, and a
+transparent wrapper around one: it rewrites the children and leaves the
+container unwrapped. It reads the transparent wrapper set (parentheses, `as`, `<T>x`, `satisfies`, `!`, and partially emitted nodes), so a wrapped container is owned on the
+same terms as a bare one.
+
+The data-flow analysis behind these emitters reads that same set twice. An
+expression wrapped in it is analyzed as the expression it wraps, which is what
+carries the inner analysis's `rewriteHint` out to the caller — a spelling not
+named there falls to the generic child walk, which merges through
+`mergeAnalyses` and drops the hint. Normalization then groups flows by their
+normalized text, and strips the set before comparing, so flows differing only
+by a wrapper collapse into one dependency instead of splitting.
+
 Key rewrite rules:
 
 - `a && b`: lowers to `when(condition, value)` only in pattern context
@@ -1120,7 +1143,13 @@ Transforms inline JSX event handlers:
 
 - `<el onClick={() => ...} />` ->
   `onClick={handler<Event,State>((event, params) => ...)(captures)}`
-- currently unwraps arrow functions only (not function expressions)
+- currently unwraps arrow functions only (not function expressions), and
+  reaches the arrow through the transparent wrapper set (parentheses, `as`, `<T>x`, `satisfies`, `!`, and partially emitted nodes)
+- boundary classification looks for the JSX attribute from the outermost
+  wrapper around the callback rather than from the callback itself, so
+  extraction and classification agree on where the callback sits. When they
+  disagree the cost is a false positive on legal source — a wrapped handler
+  draws `pattern-context:*` diagnostics its bare spelling does not
 - preserves body after recursive child transforms
 
 ### 9.3 Action strategy
@@ -1135,7 +1164,10 @@ Transforms `action(...)` to handler factory invocation:
   emitted `handler`, which is where the declared result would otherwise be
   lost: the rewritten call carries schemas rather than the authored type
   arguments. SchemaInjection lowers that slot (§10.3).
-- callback extraction currently supports arrow callbacks only
+- callback extraction supports arrow callbacks only, and reaches the arrow
+  through the transparent wrapper set (parentheses, `as`, `<T>x`, `satisfies`, `!`, and partially emitted nodes). The whole set comes off: a spelling left on hides the callback
+  from this strategy, and `action(...)` then survives into the emitted module,
+  where the runtime throws because `action` exists only to be lowered here
 
 ### 9.4 Array-method strategy
 
@@ -1591,6 +1623,12 @@ builder call to a named module-scope `const` and rewrites the original site to
 reference that name. Three builder shapes are registered in
 `HOISTABLE_BUILDERS`:
 
+A module-scope `const` initializer is read through the transparent wrapper set (parentheses, `as`, `<T>x`, `satisfies`, `!`, and partially emitted nodes) before its builder
+shape is matched, so a wrapped builder const registers in `__cfReg` on the same
+terms as a bare one. A spelling not stripped costs the const its
+content-addressed provenance and drops it to the SES source fallback at resolve
+time.
+
 - **Applied builders** (`lift`, `handler`): the site is `builder(...)(captures)`
   — the callee is itself the inner `builder(...)` call. Hoist the inner call,
   leave `__cfLift_N(captures)` / `__cfHandler_N(captures)` at the site (any
@@ -1850,10 +1888,10 @@ Behavior:
 2. evaluate literal options object — string, boolean and `null` literals,
    object and array literals, and numbers in any of their spellings (bare
    literal, sign-prefixed, or the `NaN` / `Infinity` globals, the latter only
-   where the name is not shadowed). Parentheses and the type-only assertion
-   forms (`as`, `satisfies`, `<T>x`) are transparent at any depth, including
-   nested inside a sign (`-(1 as number)`). A property whose value is none of
-   these is dropped from the options object.
+   where the name is not shadowed). The transparent wrapper set — parentheses
+   and the type-only assertion forms `as`, `satisfies`, `<T>x`, `!` — is
+   transparent at any depth, including nested inside a sign (`-(1 as number)`).
+   A property whose value is none of these is dropped from the options object.
 
    The code carries a `checker.getConstantValue()` fallback intended to recover
    a named constant or enum member. It runs, but the call returns `undefined`
@@ -1908,6 +1946,10 @@ in the one window where its inference is pure syntax: handler factories are
 already hoisted with LITERAL bound-state schemas, the pattern call carries its
 generated result-schema literal, and the callback's returned identifiers are
 not yet `.for(...)`-wrapped.
+
+Expressions this inference reads — the returned verb and the values it walks
+to reach an action — are read through the transparent wrapper set (parentheses, `as`, `<T>x`, `satisfies`, `!`, and partially emitted nodes), so a wrapped verb marks as its bare
+form does.
 
 For each `pattern(cb, argumentSchema, resultSchema)` call it marks
 result-schema stream properties `tier: "wrapper"` — the verb-listing mark

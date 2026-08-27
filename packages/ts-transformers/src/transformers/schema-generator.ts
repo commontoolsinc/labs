@@ -15,7 +15,10 @@ import {
   HelpersOnlyTransformer,
   TransformationContext,
 } from "../core/mod.ts";
-import { unwrapExpression } from "../utils/expression.ts";
+import {
+  unwrapExpression,
+  unwrapTransparentWrapperOnce,
+} from "../utils/expression.ts";
 import { createPropertyName } from "../utils/identifiers.ts";
 import { normalizeWriterIdentityFile } from "../utils/writer-identity-file.ts";
 import { compileCfcPolicyManifestsForSource } from "./cfc-policy-authoring.ts";
@@ -603,13 +606,11 @@ function evaluateExpression(
 ): unknown {
   // Wrappers that do not change the value: parentheses, and the type-only
   // assertion forms. Without this every parenthesized option is dropped, of
-  // whatever type -- `("text")` as surely as `(-1)`. The schema-generator side
-  // of this pair has always unwrapped them.
-  if (
-    ts.isParenthesizedExpression(node) || ts.isAsExpression(node) ||
-    ts.isTypeAssertionExpression(node) || ts.isSatisfiesExpression(node)
-  ) {
-    return evaluateExpression(node.expression, checker);
+  // whatever type -- `("text")` as surely as `(-1)`. Reading the shared set
+  // keeps that list the same one the rest of the pipeline looks through.
+  const unwrapped = unwrapTransparentWrapperOnce(node);
+  if (unwrapped) {
+    return evaluateExpression(unwrapped, checker);
   }
 
   if (ts.isStringLiteral(node)) return node.text;
