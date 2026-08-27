@@ -482,7 +482,7 @@ const cloneWithRewrittenResidue = (
   state: TrackedGraphState,
   residue: { key: QueryDocKey; id: string; scope: CellScope }[],
   options: TrackGraphOptions,
-): { state: TrackedGraphState; probeReads: number } | null => {
+): { state: TrackedGraphState | null; probeReads: number } => {
   const identity: ScopeKeyIdentity = {
     principal: options.principal,
     sessionId: options.sessionId,
@@ -503,7 +503,9 @@ const cloneWithRewrittenResidue = (
         branch: state.branch,
       });
       if (probe !== null && probe.document !== null) {
-        return null;
+        // Refused — but the probes already performed are reads this call
+        // made, and the caller's statistics must carry them.
+        return { state: null, probeReads };
       }
       mapping.set(key, requesterKey);
     }
@@ -1061,6 +1063,7 @@ export const trackGraph = (
     ? options.evaluationCache
     : undefined;
   let cacheKeys: { pure: string; identity: string } | undefined;
+  let refusalProbeReads = 0;
   if (cache !== undefined) {
     const currentSeq = Engine.serverSeq(engine);
     if (cache.engine !== engine || cache.seq !== currentSeq) {
@@ -1087,11 +1090,8 @@ export const trackGraph = (
           pureEntry.share.residue,
           options,
         );
-        if (rewritten !== null) {
-          served = rewritten.state;
-        }
-        probeReads = rewritten?.probeReads ??
-          pureEntry.share.residue.length;
+        served = rewritten.state;
+        probeReads = rewritten.probeReads;
       } else {
         served = cloneTrackedGraphStateForIdentity(
           engine,
@@ -1125,6 +1125,9 @@ export const trackGraph = (
         stats: { ...createQueryTraversalStats(), managerReads: probeReads },
       };
     }
+    // A refused share's probes were still reads this call performed; the
+    // full evaluation below reports them alongside its own.
+    refusalProbeReads = probeReads;
     cache.misses++;
   }
   const managerKey = options.readSeq === undefined
@@ -1210,7 +1213,8 @@ export const trackGraph = (
     entities.set(key, snapshot);
   }
 
-  stats.managerReads = manager.readCount - readCountBefore;
+  stats.managerReads = manager.readCount - readCountBefore +
+    refusalProbeReads;
 
   const state: TrackedGraphState = {
     branch,

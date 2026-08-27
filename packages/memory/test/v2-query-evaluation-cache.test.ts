@@ -871,6 +871,148 @@ describe("v2 query evaluation cache", () => {
     }
   });
 
+  it("holds the budget even when a later watch group fails", async () => {
+    const space = "did:key:z6Mk-eval-budget-failure";
+    const server = createServer("memory://eval-cache-budget-failure", 1);
+    const messages: ServerMessage[] = [];
+    const connection = server.connect((message) => messages.push(message));
+    try {
+      const sessionId = await openSession(connection, messages, space, "f");
+      await seedDocs(server, messages, space, sessionId, [
+        "of:doc:1",
+        "of:doc:2",
+      ]);
+      // One request, two groups: the first evaluates a valid two-document
+      // graph (inserting weight 2 against a budget of 1), the second
+      // fails evaluation. The failure must not skip the enforcement the
+      // first group's insert already owed.
+      await connection.receive(encodeMemoryBoundary({
+        type: "session.watch.add",
+        requestId: "f-watch",
+        space,
+        sessionId,
+        watches: [
+          {
+            id: "f-valid",
+            kind: "graph",
+            query: {
+              roots: [
+                { id: "of:doc:1", selector: { path: [], schema: true } },
+                { id: "of:doc:2", selector: { path: [], schema: true } },
+              ],
+            },
+          },
+          {
+            id: "f-broken",
+            kind: "graph",
+            query: {
+              branch: "broken",
+              roots: [{
+                id: "of:doc:1",
+                selector: {
+                  path: [],
+                  schema: { "$ref": "cid:fid1:does-not-exist" },
+                },
+              }],
+            },
+          },
+        ],
+      }));
+      const response = messages.shift() as ResponseMessage<WatchAddResult>;
+      expect(response.error).toBeDefined();
+      const diagnostics = server.evaluationCacheDiagnostics(space);
+      expect(diagnostics.weight).toBeLessThanOrEqual(1);
+    } finally {
+      connection.close();
+    }
+  });
+
+  it("reports only the probes a refused share actually performed", async () => {
+    const space = "did:key:z6Mk-eval-cache-refusal-count";
+    const engine = await openEngine({
+      url: new URL("memory:///eval-cache-refusal-count"),
+    });
+    const invocation = {
+      iss: "did:key:test",
+      aud: "did:key:service",
+      cmd: "/memory/transact",
+      sub: space,
+    };
+    const link = (id: string) => ({
+      "/": { "link@1": { path: [], id, space, scope: "session" } },
+    });
+    applyCommit(engine, {
+      sessionId: "refusal-seed",
+      invocation,
+      authorization: { proof: "ok" },
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set" as const,
+          id: "of:doc:linked",
+          value: {
+            value: {
+              draftOne: link("of:doc:draft1"),
+              draftTwo: link("of:doc:draft2"),
+            },
+          },
+        }],
+      },
+    });
+    // C's own first draft exists BEFORE any evaluation, so the shared
+    // entry's first probe refuses and the second residue is never read.
+    applyCommit(engine, {
+      sessionId: "refusal-c",
+      principal: "did:key:z6Mk-refusal-c",
+      invocation,
+      authorization: { proof: "ok" },
+      commit: {
+        localSeq: 2,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set" as const,
+          id: "of:doc:draft1",
+          scope: "session" as const,
+          value: { value: { mine: true } },
+        }],
+      },
+    });
+
+    const cache = createQueryEvaluationCache();
+    const query = {
+      roots: [{ id: "of:doc:linked", selector: { path: [], schema: true } }],
+    };
+    const seedIdentity = {
+      principal: "did:key:z6Mk-refusal-a",
+      sessionId: "refusal-a",
+    };
+    const cIdentity = {
+      principal: "did:key:z6Mk-refusal-c",
+      sessionId: "refusal-c",
+    };
+    trackGraph(space, engine, query, undefined, {
+      ...seedIdentity,
+      evaluationCache: cache,
+    });
+    expect(cache.misses).toBe(1);
+    const evaluated = trackGraph(space, engine, query, undefined, {
+      ...cIdentity,
+      evaluationCache: cache,
+    });
+    // The refusal's single probe rides the full evaluation's own reads.
+    expect(cache.misses).toBe(2);
+    expect(evaluated.stats.managerReads).toBeGreaterThan(1);
+    const fallback = trackGraph(space, engine, query, undefined, {
+      ...cIdentity,
+      evaluationCache: cache,
+    });
+    // Identity-fallback hit: exactly ONE probe was performed before the
+    // refusal — not the residue's full length.
+    expect(cache.hits).toBe(1);
+    expect(fallback.stats.managerReads).toBe(1);
+  });
+
   it("evicts the least-recently-evaluated space's cache beyond the space bound", async () => {
     const server = new Server({
       subscriptionRefreshDelayMs: 0,

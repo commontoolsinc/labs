@@ -3883,6 +3883,10 @@ export class Server {
               evaluationCache: this.#evaluationCacheFor(message.space),
             },
           );
+          // Enforced per evaluation, not per request: a later group's
+          // failure (or a failing operation-field attachment) must not
+          // leave an already-inserted entry over budget.
+          this.#enforceEvaluationCacheBudget();
           graphs.set(branch, tracked.state);
           for (const [docKey, entity] of tracked.state.entities) {
             recordUpdate(docKey, entity);
@@ -3955,7 +3959,6 @@ export class Server {
       session.lastSyncedSeq = serverSeq;
       session.operationCursors = nextOperationCursors;
       this.#notifyDemandChanged(message.space, "watch", session.principal);
-      this.#enforceEvaluationCacheBudget();
       recordSlowQueryDuration(
         "session.watch.add",
         message.space,
@@ -4071,25 +4074,30 @@ export class Server {
     // must not create a cache or evict a live space's on its way through.
     const cacheEligible = query.atSeq === undefined &&
       scopeContext.keyedSnapshots !== true;
-    const result = queryGraph(
-      space,
-      engine ?? await this.openEngine(space),
-      query,
-      reuse,
-      {
-        ...scopeContext,
-        ...(cacheEligible
-          ? { evaluationCache: this.#evaluationCacheFor(space) }
-          : {}),
-      },
-    );
-    if (cacheEligible) {
-      this.#enforceEvaluationCacheBudget();
+    try {
+      const result = queryGraph(
+        space,
+        engine ?? await this.openEngine(space),
+        query,
+        reuse,
+        {
+          ...scopeContext,
+          ...(cacheEligible
+            ? { evaluationCache: this.#evaluationCacheFor(space) }
+            : {}),
+        },
+      );
+      recordSlowQueryDuration("graph.query", space, startedAt, {
+        roots: query.roots.length,
+      });
+      return result;
+    } finally {
+      // The insert precedes the snapshot mapping, so enforcement must
+      // cover the throw path too.
+      if (cacheEligible) {
+        this.#enforceEvaluationCacheBudget();
+      }
     }
-    recordSlowQueryDuration("graph.query", space, startedAt, {
-      roots: query.roots.length,
-    });
-    return result;
   }
 
   async evaluateWatchSet(
