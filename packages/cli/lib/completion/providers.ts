@@ -975,13 +975,15 @@ const OPTION_VALUE_PROVIDERS: Readonly<Record<string, OptionProvider>> = {
   list: onlyOn(["piece survey", "piece repair"], pieceCandidates),
   // `cf piece survey --validator` reads a JSON-schema file.
   validator: () => Promise.resolve(directive({ kind: "files" })),
+  // `cf piece survey --diff` reads the plan an earlier survey wrote.
+  diff: onlyOn(
+    ["piece survey"],
+    () => Promise.resolve(directive({ kind: "files" })),
+  ),
   // `cf piece repair --fixer` names a TypeScript module whose default export
   // is the transform; `--plan` reads the rows a survey wrote.
   fixer: () => Promise.resolve(directive({ kind: "files", glob: "*.ts" })),
   plan: () => Promise.resolve(directive({ kind: "files" })),
-  // `cf piece survey --diff` reads the plan the survey is checked against,
-  // which is the file `--out` wrote.
-  diff: () => Promise.resolve(directive({ kind: "files" })),
   // `cf inspect --dir` is an extra directory to search for space DBs.
   dir: () => Promise.resolve(directive({ kind: "dirs" })),
   // `cf inspect html --out` and `cf check --output` write a file.

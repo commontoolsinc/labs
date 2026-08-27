@@ -136,13 +136,13 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list carries the three current phase-7 entries and keeps the flip bar explicit", async () => {
+Deno.test("main: the patterns list carries the two current phase-7 entries and keeps the flip bar explicit", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
-  // The topic step entry never drops its file; the lunch-poll-vote FILE
-  // entry is the one --ignore flag on stdout.
+  // The default-app step entry never drops its file; the lunch-poll-vote
+  // FILE entry is the one --ignore flag on stdout.
   assertEquals(out, ["--ignore=integration/lunch-poll-vote.test.ts"]);
-  // …the report carries all three remaining skips loudly…
+  // …the report carries both remaining skips loudly…
   assertMatch(
     err[0],
     /patterns: SKIP-STEP integration\/default-app\.test\.ts :: should persist and reload every rapidly created notebook note \(until phase-7; the rest of the file runs\)/,
@@ -151,13 +151,9 @@ Deno.test("main: the patterns list carries the three current phase-7 entries and
     err[0],
     /patterns: SKIP integration\/lunch-poll-vote\.test\.ts \(until phase-7\)/,
   );
-  assertMatch(
-    err[0],
-    /patterns: SKIP-STEP integration\/topic-board-child-contract\.test\.ts :: builds one pivot row per topic/,
-  );
-  // …and the list holds EXACTLY these three entries — an addition or a silent
+  // …and the list holds EXACTLY these two entries — an addition or a silent
   // lift both redden this pin.
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 3);
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 2);
   assertEquals(
     SERVER_EXECUTION_ON_SKIPS.patterns[0].file,
     "integration/default-app.test.ts",
@@ -192,33 +188,16 @@ Deno.test("main: the patterns list carries the three current phase-7 entries and
     /never issued/i,
   );
   assertMatch(SERVER_EXECUTION_ON_SKIPS.patterns[1].reason, /0\/8/);
-  // The topic-board entry is STEP-level under issue #6304: the pivot
-  // baseline case's row-count assertion fails on the ON arm's served-view
-  // divergence (four rows for three topics; the durable store holds
-  // three), so the case waits on that issue — it is #6304's acceptance
-  // test, and the entry lifts when it greens ON.
+  // The topic-board pivot-baseline entry is GONE (#6304 fixed): the
+  // guard lookup for that step resolves nothing, so the case runs in
+  // the ON lane — it is that issue's acceptance test.
   assertEquals(
-    SERVER_EXECUTION_ON_SKIPS.patterns[2].file,
-    "integration/topic-board-child-contract.test.ts",
-  );
-  assertEquals(
-    SERVER_EXECUTION_ON_SKIPS.patterns[2].step,
-    "builds one pivot row per topic, claiming no edges before any mention",
-  );
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[2].phase, "phase-7");
-  assertMatch(SERVER_EXECUTION_ON_SKIPS.patterns[2].reason, /#6304/);
-  assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[2].reason,
-    /four rows for three topics/,
-  );
-  const pivotEntry = serverExecutionOnStepSkip(
-    "patterns",
-    "integration/topic-board-child-contract.test.ts",
-    "builds one pivot row per topic, claiming no edges before any mention",
-  );
-  assert(
-    pivotEntry !== undefined,
-    "the pivot baseline step's guard entry must resolve",
+    serverExecutionOnStepSkip(
+      "patterns",
+      "integration/topic-board-child-contract.test.ts",
+      "builds one pivot row per topic, claiming no edges before any mention",
+    ),
+    undefined,
   );
   // The guard resolves the current direct-CI charge and pins its decisive
   // discriminators so a stale launcher-era reason cannot return silently.

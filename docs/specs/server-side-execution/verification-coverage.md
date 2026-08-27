@@ -7848,7 +7848,7 @@ supply; OW29/OW32/OW34 closed):
     subscription (`piece/src/ops/pieces-controller.ts` —
     `runtime.getSpaceCell(space).sync()`, no root-aware demand) —
     constructed by the CLI (`cli/lib/piece.ts`), agents-host
-    (`agents-host/src/fabric-runtime.ts`), AND cf-harness's
+    (`connectors/agents/host/src/fabric-runtime.ts`), AND cf-harness's
     run_pattern session (`cf-harness/src/fabric-session.ts`), so
     yes: cf-harness is also that shape, and the containment covers
     all three. Residual trigger: any live `schema-doc-quarantine` log

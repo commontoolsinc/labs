@@ -109,9 +109,9 @@ export const TASK_TEST_WEIGHTS: Readonly<Record<string, number>> = {
 // close even when individual package durations differ.
 export const WORKSPACE_TEST_WEIGHTS: Readonly<Record<string, number>> = {
   api: 2.3,
-  "agents-host (1/3)": 40,
-  "agents-host (2/3)": 33,
-  "agents-host (3/3)": 16,
+  "connectors/agents/host (1/3)": 40,
+  "connectors/agents/host (2/3)": 33,
+  "connectors/agents/host (3/3)": 16,
   "background-piece-service": 7.2,
   "cf-harness": 29.9,
   "cli (1/10)": 50.5,

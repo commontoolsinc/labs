@@ -18,6 +18,7 @@ export {
   findInternedSchema,
   internSchema,
   internSchemaAsTaggedHashString,
+  internSchemaPairAsKey,
   isInternedSchema,
 } from "./schema-intern.ts";
 
@@ -29,13 +30,13 @@ export {
   REJECTING_SELECTOR,
 } from "./path-selector.ts";
 
+export { emptySchemaObject, schemaForValueType } from "./basic-schemas.ts";
+
+export { isNontrivialSchema } from "./isNontrivialSchema.ts";
+
 export {
-  cloneSchemaMutable,
-  emptySchemaObject,
-  internSchemaPairAsKey,
-  isNontrivialSchema,
-  schemaForValueType,
   schemaWithoutProperties,
   schemaWithProperties,
-  toDeepFrozenSchema,
-} from "./schema-utils.ts";
+} from "./schema-rewrite.ts";
+
+export { cloneSchemaMutable, toDeepFrozenSchema } from "./schema-copy.ts";

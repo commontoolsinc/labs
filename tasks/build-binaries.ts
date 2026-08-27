@@ -6,6 +6,7 @@ import {
   computeCompilerVersion,
   renderVersionModule,
 } from "../packages/runner/src/compilation-cache/compiler-fingerprint.deno.ts";
+import { CONNECTOR_PATTERN_SOURCES } from "../packages/connectors/pattern-sources.ts";
 
 export interface BuildConfigInitializer {
   root: string;
@@ -150,8 +151,13 @@ export class BuildConfig {
     return this.path("packages", "static", "assets");
   }
 
-  patternsPath() {
-    return this.path("packages", "patterns");
+  patternPaths() {
+    return [
+      this.path("packages", "patterns"),
+      ...CONNECTOR_PATTERN_SOURCES.map((source) =>
+        this.path(...source.directory.split("/"))
+      ),
+    ];
   }
 
   staticTypesPath() {
@@ -299,8 +305,10 @@ async function buildToolshed(config: BuildConfig): Promise<void> {
       config.toolshedEnvPath(),
       "--include",
       config.staticAssetsPath(),
-      "--include",
-      config.patternsPath(),
+      ...config.patternPaths().flatMap((patternPath) => [
+        "--include",
+        patternPath,
+      ]),
       ...config.toolshedFlags,
       config.toolshedEntryPath(),
     ],

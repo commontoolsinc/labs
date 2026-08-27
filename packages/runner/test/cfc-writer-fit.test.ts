@@ -2,6 +2,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { FabricValue } from "@commonfabric/api";
 import { Identity } from "@commonfabric/identity";
+import { cfcAtom } from "@commonfabric/api/cfc";
 import {
   SEED_ENVELOPE_SCHEMA_HASH,
   writeSeedEnvelopeDoc,
@@ -859,6 +860,62 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
         await storageManager.close();
       }
     });
+  });
+
+  // Reserved CFC documents (policy manifests, release grants) hold policy
+  // state the runtime persists through its privileged writers, so they are
+  // not value-write targets the fit measures. The grant document declares no
+  // store policy of its own, and the transaction that authors one has read
+  // the resource it releases — a tainted join.
+  it("admits a reserved grant document under enforce-strict", async () => {
+    const storageManager = StorageManager.emulate({ as: signer });
+    const runtime = newRuntime(storageManager);
+    try {
+      await seedSecretSource(runtime, "writer-fit-grant-source");
+
+      const tx = runtime.edit();
+      tx.setCfcEnforcementMode("enforce-strict");
+      const source = runtime.getCell(
+        signer.did(),
+        "writer-fit-grant-source",
+        undefined,
+        tx,
+      );
+      const raw = source.getRaw() as { secret?: string };
+      expect(raw.secret).toBe("s3cr3t");
+      // The trusted policy-writer authors under a builtin identity, the one
+      // sanctioned writer of the reserved grant namespace.
+      tx.setCfcImplementationIdentity({
+        kind: "builtin",
+        builtinId: "cfc-grant-writer",
+      });
+      const written = tx.writeCfcGrant({
+        kind: "ShareGrant",
+        owner: signer.did(),
+        resource: "of:writer-fit-grant-resource",
+        audience: [cfcAtom.user(
+          "did:key:z6MkfZ3gV6ZKqmyWLTPYnPYRUYQBqTHTNCJgqbCkNBzYqZ4H",
+        )],
+        grantedAt: 1000,
+      });
+      expect(tx.prepareCfc()).not.toBe("");
+      expect((await tx.commit()).ok).toBeDefined();
+
+      // The grant persisted, carrying no derived label of its own: a
+      // consultation reading it inherits nothing from the releasing
+      // transaction.
+      const stored = storedDocument(storageManager, written.id);
+      expect(stored?.value).toBeDefined();
+      expect(stored?.cfc).toBeUndefined();
+      expect(
+        tx.getCfcState().diagnostics.filter((diagnostic) =>
+          diagnostic.includes(written.id)
+        ),
+      ).toEqual([]);
+    } finally {
+      await runtime.dispose();
+      await storageManager.close();
+    }
   });
 
   it("leaves untainted writes untouched under enforce-strict", async () => {

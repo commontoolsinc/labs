@@ -41,9 +41,9 @@ import {
 } from "./contracts/run-manifest.ts";
 import {
   type HarnessAssistantTranscriptMessage,
+  type HarnessToolCall,
   type HarnessToolTranscriptMessage,
   type HarnessTranscriptMessage,
-  inspectHarnessTranscriptPairing,
   isResumableHarnessTranscript,
 } from "./contracts/transcript.ts";
 import type { HarnessChatSessionStore } from "./session-store.ts";
@@ -83,7 +83,8 @@ interface HarnessInteractiveChatSessionRecord {
 
   /**
    * The last durable resumable transcript: the model history a following turn
-   * is built from. It advances only at a completed turn, so every snapshot
+   * is built from. Normal turns advance it only when they complete; legacy
+   * recovery may also atomically adopt a normalized transcript. Every snapshot
    * persisted alongside an event is one a provider accepts.
    */
   transcript: readonly HarnessTranscriptMessage[];
@@ -334,10 +335,170 @@ const interruptedTurnError = (
   },
 });
 
+/** A transcript defect whose missing history cannot be inferred honestly. */
+type HarnessTranscriptMalformation =
+  | "duplicate_tool_call_id"
+  | "tool_result_without_pending_call";
+
+/** Identifies where durable transcript normalization found malformed history. */
+class MalformedHarnessChatTranscriptError extends Error {
+  /** Kind of malformed history encountered. */
+  readonly malformation: HarnessTranscriptMalformation;
+  /** Zero-based index of the message where validation failed. */
+  readonly transcriptIndex: number;
+
+  /** Constructs an instance naming the defect and its transcript position. */
+  constructor(
+    malformation: HarnessTranscriptMalformation,
+    transcriptIndex: number,
+  ) {
+    super(
+      `durable chat transcript is malformed at message ${transcriptIndex}: ${malformation}`,
+    );
+    this.name = "MalformedHarnessChatTranscriptError";
+    this.malformation = malformation;
+    this.transcriptIndex = transcriptIndex;
+  }
+}
+
+/** Returns the chat error for malformed durable history. */
+const malformedTranscriptChatError = (
+  error: MalformedHarnessChatTranscriptError,
+): HarnessChatError => ({
+  code: "internal_error",
+  message:
+    "The durable chat transcript is malformed and cannot be safely repaired.",
+  details: {
+    reason: "malformed_transcript",
+    malformation: error.malformation,
+    transcriptIndex: error.transcriptIndex,
+  },
+});
+
+/** Returns a local protocol response for malformed durable history. */
+const malformedTranscriptError = (
+  requestId: string,
+  error: MalformedHarnessChatTranscriptError,
+): HarnessChatErrorResponse =>
+  createHarnessChatErrorResponse(
+    requestId,
+    malformedTranscriptChatError(error),
+  );
+
+/** Returns an explicit tool result whose execution outcome remains unknown. */
+const unknownToolOutcome = (
+  toolCall: HarnessToolCall,
+): HarnessToolTranscriptMessage => ({
+  role: "tool",
+  toolCallId: toolCall.id,
+  toolName: toolCall.function.name,
+  content: JSON.stringify({
+    type: "cf-harness.tool-outcome-unknown",
+    outcome: "unknown",
+    reason: "process_interrupted",
+    message:
+      "The run was interrupted after this tool call was recorded and before a result was recorded. Whether the tool ran or produced side effects is unknown. Inspect current state before deciding whether to retry.",
+  }),
+});
+
+/** Provider-safe transcript and tool results synthesized to make it safe. */
+interface NormalizedHarnessChatTranscript {
+  /** Transcript with every repairable tool call paired to one result. */
+  transcript: HarnessTranscriptMessage[];
+  /** Tool call IDs paired to synthesized unknown-outcome results. */
+  synthesizedToolCallIds: readonly string[];
+}
+
+/**
+ * Makes persisted tool exchanges safe for the next provider request without
+ * deleting model-visible history. Missing results become explicit
+ * unknown-outcome results at the declaring batch boundary, retaining both the
+ * original call (including any compaction continuation) and every later
+ * message. Existing results pair by call id across the whole transcript, not
+ * by adjacency; only results still missing after that scan are synthesized.
+ *
+ * A tool result without a pending call cannot be repaired honestly: inventing
+ * a call would claim an invocation that may never have happened, while deleting
+ * the result would erase the only remaining evidence. A reused call id is
+ * similarly ambiguous across batches. Callers therefore fail closed for that
+ * session before provider traffic rather than guessing.
+ */
+const normalizeIncompleteToolExchanges = (
+  transcript: readonly HarnessTranscriptMessage[],
+): NormalizedHarnessChatTranscript => {
+  const normalized: HarnessTranscriptMessage[] = [];
+  const synthesizedToolCallIds: string[] = [];
+  const seenToolCallIds = new Set<string>();
+  const pendingToolCalls = new Map<
+    string,
+    { toolCall: HarnessToolCall; transcriptIndex: number }
+  >();
+
+  for (const [index, message] of transcript.entries()) {
+    if (message.role === "tool") {
+      if (!pendingToolCalls.delete(message.toolCallId)) {
+        throw new MalformedHarnessChatTranscriptError(
+          "tool_result_without_pending_call",
+          index,
+        );
+      }
+      continue;
+    }
+    if (message.role !== "assistant" || !message.toolCalls?.length) {
+      continue;
+    }
+    const batchToolCallIds = new Set<string>();
+    for (const toolCall of message.toolCalls) {
+      if (
+        seenToolCallIds.has(toolCall.id) ||
+        batchToolCallIds.has(toolCall.id)
+      ) {
+        throw new MalformedHarnessChatTranscriptError(
+          "duplicate_tool_call_id",
+          index,
+        );
+      }
+      batchToolCallIds.add(toolCall.id);
+      seenToolCallIds.add(toolCall.id);
+      pendingToolCalls.set(toolCall.id, { toolCall, transcriptIndex: index });
+    }
+  }
+
+  const insertions = new Map<number, HarnessToolCall[]>();
+  for (const { toolCall, transcriptIndex } of pendingToolCalls.values()) {
+    // Keep a batch's real contiguous results in their recorded order, then
+    // close only its missing calls before later conversation or compaction can
+    // move the provider projection boundary past the declaring call.
+    let insertionIndex = transcriptIndex;
+    while (transcript[insertionIndex + 1]?.role === "tool") {
+      insertionIndex += 1;
+    }
+    const calls = insertions.get(insertionIndex) ?? [];
+    calls.push(toolCall);
+    insertions.set(insertionIndex, calls);
+  }
+  for (const [index, message] of transcript.entries()) {
+    normalized.push(message);
+    for (const toolCall of insertions.get(index) ?? []) {
+      normalized.push(unknownToolOutcome(toolCall));
+      synthesizedToolCallIds.push(toolCall.id);
+    }
+  }
+  return { transcript: normalized, synthesizedToolCallIds };
+};
+
 const unresumableSessionError = (sessionId: string): HarnessChatError => ({
   code: "incomplete_transcript",
   message:
     `chat session was marked not reusable by an earlier recovery: ${sessionId}`,
+});
+
+/** Reports a transcript normalization which could not be made durable. */
+const normalizationPersistenceError = (
+  sessionId: string,
+): HarnessChatError => ({
+  code: "incomplete_transcript",
+  message: `chat session history could not be normalized: ${sessionId}`,
 });
 
 /** A prompt loop reported success with history a provider would reject. */
@@ -392,52 +553,6 @@ const clearActiveTurnStatus = (
     status: "idle",
     reusable: true,
     updatedAt,
-  };
-};
-
-/**
- * Decide what a recorded session transcript that is not valid model history
- * should become.
- *
- * A transcript whose only defect is that it was cut off mid-turn rolls back to
- * its safe boundary: the prefix is genuinely resumable, and the conversation
- * survives. A transcript with no safe boundary would lose the whole
- * conversation to a silent truncation, and a structurally malformed one is
- * corrupt rather than merely cut short, so neither is repaired — the session is
- * refused instead, and the operator is told why.
- *
- * Returns `undefined` when the transcript is already valid.
- */
-const recoverSessionTranscript = (
-  transcript: readonly HarnessTranscriptMessage[],
-):
-  | { transcript: readonly HarnessTranscriptMessage[] }
-  | {
-    unrecoverable: HarnessChatError;
-    safeTranscript: readonly HarnessTranscriptMessage[];
-  }
-  | undefined => {
-  const pairing = inspectHarnessTranscriptPairing(transcript);
-  if (pairing.valid) {
-    return undefined;
-  }
-  const truncatedOnly = pairing.defects.every((defect) =>
-    defect.kind === "unresolved_tool_calls"
-  );
-  if (truncatedOnly && pairing.safeBoundary > 0) {
-    return { transcript: transcript.slice(0, pairing.safeBoundary) };
-  }
-  return {
-    safeTranscript: transcript.slice(0, pairing.safeBoundary),
-    unrecoverable: {
-      code: "incomplete_transcript",
-      message:
-        "recorded chat session history does not pair its tool calls with tool results and has no resumable prefix",
-      details: {
-        defects: pairing.defects,
-        safeBoundary: pairing.safeBoundary,
-      },
-    },
   };
 };
 
@@ -752,6 +867,28 @@ export class HarnessInteractiveChatService {
 
   async #terminalizeInterruptedTurnsFromStore(): Promise<void> {
     for (const record of [...this.#sessions.values()]) {
+      let normalized: NormalizedHarnessChatTranscript | undefined;
+      let malformation: MalformedHarnessChatTranscriptError | undefined;
+      try {
+        normalized = normalizeIncompleteToolExchanges(record.transcript);
+      } catch (error) {
+        if (error instanceof MalformedHarnessChatTranscriptError) {
+          malformation = error;
+        } else {
+          throw error;
+        }
+      }
+      const normalizedTranscript = normalized !== undefined &&
+          normalized.synthesizedToolCallIds.length > 0
+        ? normalized.transcript
+        : undefined;
+      const recoveryEmitOptions = (
+        options: HarnessInteractiveChatEmitOptions = {},
+      ): HarnessInteractiveChatEmitOptions =>
+        normalizedTranscript === undefined
+          ? options
+          : { ...options, transcript: normalizedTranscript };
+
       const activeTurnId = record.status.activeTurnId;
       const activeTurn = activeTurnId === undefined
         ? undefined
@@ -764,7 +901,7 @@ export class HarnessInteractiveChatService {
             activeTurnId,
             record.status.activeTurn?.status ?? "running",
           ),
-        });
+        }, recoveryEmitOptions());
       } else if (
         activeTurn !== undefined &&
         isTerminalTurnStatus(activeTurn.turn.status)
@@ -772,10 +909,17 @@ export class HarnessInteractiveChatService {
         const updatedAt = this.#now();
         const session = clearActiveTurnStatus(record.status, updatedAt);
         const nextTurn = activeTurnId === undefined ? undefined : activeTurn;
-        await this.#emit(record.status.sessionId, undefined, {
-          kind: "status_changed",
-          session,
-        }, nextTurn === undefined ? {} : { turnRecord: nextTurn });
+        await this.#emit(
+          record.status.sessionId,
+          undefined,
+          {
+            kind: "status_changed",
+            session,
+          },
+          recoveryEmitOptions(
+            nextTurn === undefined ? {} : { turnRecord: nextTurn },
+          ),
+        );
       }
 
       for (const turn of [...record.turns.values()]) {
@@ -792,10 +936,17 @@ export class HarnessInteractiveChatService {
           });
           if (record.status.activeTurnId === turn.turn.turnId) {
             const session = clearActiveTurnStatus(record.status, updatedAt);
-            await this.#emit(record.status.sessionId, undefined, {
-              kind: "status_changed",
-              session,
-            }, nextTurn === undefined ? {} : { turnRecord: nextTurn });
+            await this.#emit(
+              record.status.sessionId,
+              undefined,
+              {
+                kind: "status_changed",
+                session,
+              },
+              recoveryEmitOptions(
+                nextTurn === undefined ? {} : { turnRecord: nextTurn },
+              ),
+            );
           } else if (nextTurn !== undefined) {
             const session = {
               ...record.status,
@@ -804,7 +955,7 @@ export class HarnessInteractiveChatService {
             await this.#emit(record.status.sessionId, undefined, {
               kind: "status_changed",
               session,
-            }, { turnRecord: nextTurn });
+            }, recoveryEmitOptions({ turnRecord: nextTurn }));
           }
           continue;
         }
@@ -812,32 +963,25 @@ export class HarnessInteractiveChatService {
           kind: "turn_failed",
           turnId: turn.turn.turnId,
           error: interruptedTurnError(turn.turn.turnId, turn.turn.status),
-        });
+        }, recoveryEmitOptions());
       }
-    }
 
-    await this.#recoverRestoredSessionTranscripts();
-  }
-
-  /**
-   * Repair or refuse restored sessions whose recorded history a provider would
-   * reject.
-   *
-   * This runs after every interrupted turn is terminalized, and it has to:
-   * terminalizing a turn resolves the session to idle and reusable, so a
-   * session marked non-reusable before that point would have the marking
-   * overwritten.
-   */
-  async #recoverRestoredSessionTranscripts(): Promise<void> {
-    for (const record of [...this.#sessions.values()]) {
-      const recovered = recoverSessionTranscript(record.transcript);
-      if (recovered === undefined) {
-        // A recovery that already ran left the session not reusable, and left
-        // behind the resumable prefix that makes its history look repaired.
-        // The flag is the durable half of that decision, so it is what a later
-        // restart reads the refusal back from — whatever status the session
-        // carries, since a failed one accepts a new turn just as an idle one
-        // does.
+      if (malformation !== undefined) {
+        // Terminalization can make a session reusable, so apply the malformed
+        // transcript refusal only after every interrupted turn is settled.
+        record.recoveryError = malformedTranscriptChatError(malformation);
+        if (record.status.reusable) {
+          const updatedAt = this.#now();
+          await this.#emit(record.status.sessionId, undefined, {
+            kind: "status_changed",
+            session: { ...record.status, reusable: false, updatedAt },
+          });
+        }
+        continue;
+      }
+      if (normalizedTranscript === undefined) {
+        // A safe transcript does not explain a durable `reusable=false` marker.
+        // Preserve that refusal rather than inferring that the session is safe.
         if (!record.status.reusable) {
           record.recoveryError = unresumableSessionError(
             record.status.sessionId,
@@ -845,25 +989,28 @@ export class HarnessInteractiveChatService {
         }
         continue;
       }
+      if (record.transcript === normalizedTranscript) {
+        continue;
+      }
       const updatedAt = this.#now();
-      if (!("unrecoverable" in recovered)) {
-        // Passing the prefix through the emit adopts it only once the write
-        // commits, so a failed write leaves the record on the history the store
-        // still holds rather than on a prefix it never saved.
+      // No turn needed terminalization, so persist normalized history on its
+      // own status event. Adoption still happens only after the write commits.
+      try {
         await this.#emit(record.status.sessionId, undefined, {
           kind: "status_changed",
           session: { ...record.status, updatedAt },
-        }, { transcript: recovered.transcript });
-        continue;
+        }, { transcript: normalizedTranscript });
+      } catch (error) {
+        // #emit adopts the transcript only after the store commit, before it
+        // notifies the listener. A listener fault must still propagate, but it
+        // cannot turn already-durable provider-safe history into a refusal.
+        if (record.transcript !== normalizedTranscript) {
+          record.recoveryError = normalizationPersistenceError(
+            record.status.sessionId,
+          );
+        }
+        throw error;
       }
-      // The session is refused either way, but the corrupt history must not be
-      // written back: what lands is the resumable prefix, which for history
-      // corrupt from its first message is empty.
-      record.recoveryError = recovered.unrecoverable;
-      await this.#emit(record.status.sessionId, undefined, {
-        kind: "status_changed",
-        session: { ...record.status, reusable: false, updatedAt },
-      }, { transcript: recovered.safeTranscript });
     }
   }
 
@@ -1021,10 +1168,21 @@ export class HarnessInteractiveChatService {
     if (record.recoveryError !== undefined) {
       return createHarnessChatErrorResponse(requestId, record.recoveryError);
     }
+    let normalizedTranscript: NormalizedHarnessChatTranscript;
+    try {
+      normalizedTranscript = normalizeIncompleteToolExchanges(
+        record.transcript,
+      );
+    } catch (error) {
+      if (error instanceof MalformedHarnessChatTranscriptError) {
+        return malformedTranscriptError(requestId, error);
+      }
+      throw error;
+    }
     // Under the durable checkpoint invariant this holds by construction. It is
-    // kept so a regression surfaces here, named, instead of as an opaque
-    // provider rejection several layers away.
-    if (!isResumableHarnessTranscript(record.transcript)) {
+    // kept after legacy normalization so a regression surfaces here, named,
+    // instead of as an opaque provider rejection several layers away.
+    if (!isResumableHarnessTranscript(normalizedTranscript.transcript)) {
       return createHarnessChatErrorResponse(requestId, {
         code: "incomplete_transcript",
         message: `chat session history is not resumable: ${params.sessionId}`,
@@ -1085,7 +1243,13 @@ export class HarnessInteractiveChatService {
       await this.#emit(params.sessionId, turn.turnId, {
         kind: "turn_started",
         turn,
-      }, { turnRecord, createTurn: true });
+      }, {
+        turnRecord,
+        createTurn: true,
+        ...(normalizedTranscript.synthesizedToolCallIds.length > 0
+          ? { transcript: normalizedTranscript.transcript }
+          : {}),
+      });
     } catch (error) {
       if (error instanceof DurableTurnExistsError) {
         return turnExistsError(requestId, params.sessionId, turnId);
@@ -1236,6 +1400,10 @@ export class HarnessInteractiveChatService {
           : {}),
       },
     ];
+    // Prompt loops replay their initial transcript through onTranscriptEvent.
+    // Those messages are durable history, not activity from this turn: in
+    // particular, a recovered unknown-outcome result must not be re-emitted as
+    // a newly completed tool call.
     let observedTranscriptLength = transcript.length;
 
     try {

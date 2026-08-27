@@ -37,6 +37,26 @@ describe("Patterns API", () => {
       expect(text).toContain("export default Record");
     });
 
+    it("serves connector-owned patterns at their stable routes", async () => {
+      const agent = await app.request(
+        "/api/patterns/agent-sessions-debug/main.tsx",
+      );
+      expect(agent.status).toBe(200);
+      expect(await agent.text()).toContain('from "./presentation.ts"');
+
+      const dependency = await app.request(
+        "/api/patterns/agent-sessions-debug/presentation.ts",
+      );
+      expect(dependency.status).toBe(200);
+      expect(await dependency.text()).toContain("conversationState");
+
+      const github = await app.request(
+        "/api/patterns/github-activity/main.tsx",
+      );
+      expect(github.status).toBe(200);
+      expect(await github.text()).toContain("GitHub Activity");
+    });
+
     it("returns 404 for non-existent pattern", async () => {
       const response = await app.request(
         "/api/patterns/non-existent-pattern.tsx",
@@ -182,6 +202,14 @@ describe("Patterns API", () => {
     it("computes an identity for system/home.tsx", async () => {
       const response = await app.request(
         "/api/patterns/system/home.tsx?identity",
+      );
+      expect(response.status).toBe(200);
+      expect((await response.text()).trim()).toMatch(IDENTITY_RE);
+    });
+
+    it("computes an identity for a connector-owned pattern", async () => {
+      const response = await app.request(
+        "/api/patterns/agent-sessions-debug/main.tsx?identity",
       );
       expect(response.status).toBe(200);
       expect((await response.text()).trim()).toMatch(IDENTITY_RE);
