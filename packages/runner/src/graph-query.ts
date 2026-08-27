@@ -14,7 +14,7 @@
  */
 
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { internPathSelector } from "@commonfabric/data-model/schema-utils";
+import { internPathSelector } from "@commonfabric/data-model-schema";
 import type { MemorySpace } from "@commonfabric/memory/interface";
 import type { ScopeKey, ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import { isObjectNotArray } from "@commonfabric/utils/types";

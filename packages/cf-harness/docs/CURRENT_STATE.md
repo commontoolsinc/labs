@@ -73,9 +73,9 @@ The current package provides:
   on the audit trail; a completed turn's history is checked before it is
   promoted, and promotion commits with the completion or not at all; and a
   restored session whose recorded history does not pair its tool calls with tool
-  results keeps only its resumable prefix, resuming from that prefix when the
-  history was merely cut short and otherwise refusing the session with an
-  `incomplete_transcript` error rather than sending it to a provider;
+  results preserves that history and adds explicit unknown-outcome results for
+  missing results, while orphan results and duplicate call IDs refuse the
+  session locally rather than sending malformed history to a provider;
 - CFC modes `disabled`, `observe`, `enforce-explicit`, and `enforce-strict`,
   plus prompt-slot, invocation-context, policy-event, and model-influence
   evidence;
@@ -256,9 +256,14 @@ mode.
   explicitly preloaded by the caller; child skills are profile-controlled.
 - Resume is transcript-oriented and does not recover an arbitrary partially
   executed tool or orchestration state machine. An interrupted turn is never
-  replayed automatically: its tools may already have taken effect, so the
-  session resumes from the checkpoint before it and the operator decides what to
-  send next.
+  replayed automatically: new turns retain their last provider-safe durable
+  checkpoint, while restore and the next-turn boundary normalize legacy
+  incomplete tool-call batches by adding an explicit unknown-outcome result for
+  each missing result. This preserves legacy calls and later history without
+  claiming or replaying an interrupted side effect. A tool result with no
+  pending call or a duplicate call ID anywhere in the transcript fails closed
+  before provider traffic because the harness cannot honestly invent or delete
+  the missing history.
 - Raw operator artifacts use filesystem paths. Parent-visible child returns are
   sanitized, and the prompt loop swaps model-bound tool output and
   model-authored tool arguments through the address handle table; denial-path

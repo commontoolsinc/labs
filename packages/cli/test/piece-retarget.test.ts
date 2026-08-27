@@ -10,15 +10,15 @@ import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { PiecesController } from "@commonfabric/piece/ops";
 import type {
+  ApplyReport,
+  ApplySessions,
   RetargetOptions,
-  RetargetReport,
-  RetargetSessions,
 } from "@commonfabric/piece/ops/bulk-retarget";
 import { decode } from "@commonfabric/utils/encoding";
 
 import { runRetarget } from "../lib/bulk.ts";
 import {
-  formatRetargetRow,
+  formatApplyRow,
   piece,
   retargetFromCommand,
   setQuietMode,
@@ -37,6 +37,11 @@ function captureStdout(fn: () => Promise<void>): Promise<string> {
 }
 
 class ExitSentinel extends Error {}
+
+/** The engine option shape this seam forwards; only `accepted` is read. */
+interface ApplyOptionsLike {
+  accepted?: readonly string[];
+}
 
 const OPTIONS = {
   apiUrl: "http://localhost:8000",
@@ -73,7 +78,7 @@ const PLAN_TEXT = [
   "",
 ].join("\n");
 
-const REPORT: RetargetReport = {
+const REPORT: ApplyReport = {
   rows: [
     { piece: "fid1:aaa", phase: "items", verdict: "applied", elapsedMs: 412 },
     { piece: "fid1:bbb", phase: "items", verdict: "landed", elapsedMs: 18 },
@@ -86,16 +91,62 @@ describe("piece-retarget", () => {
   // The fixtures pass `quiet`, and the action applies it globally.
   afterEach(() => setQuietMode(false));
 
-  describe("formatRetargetRow()", () => {
+  describe("formatApplyRow()", () => {
     it("puts the verdict, the piece, its phase, and its cost on one line", () => {
-      expect(formatRetargetRow(REPORT.rows[0])).toBe(
+      expect(formatApplyRow(REPORT.rows[0])).toBe(
         "applied fid1:aaa items 412ms",
+      );
+    });
+
+    it("labels a row with no write as carrying the plan's recorded origin", () => {
+      const origin = "https://origins.test/member.tsx";
+      // No write happened, so the plan's reading is the only value there is
+      // — and the line says whose reading it is rather than claiming a
+      // detach.
+      expect(
+        formatApplyRow({
+          piece: "fid1:aaa",
+          phase: "items",
+          verdict: "outstanding",
+          origin,
+        }),
+      ).toBe(`outstanding fid1:aaa items origin ${origin}`);
+    });
+
+    it("states what an applied row detached, and stays quiet when the plan agreed", () => {
+      const origin = "https://origins.test/member.tsx";
+      expect(
+        formatApplyRow({ ...REPORT.rows[0], origin, detachedOrigin: origin }),
+      ).toBe(`applied fid1:aaa items 412ms detached ${origin}`);
+    });
+
+    it("names both origins on an applied row whose plan had gone stale", () => {
+      const recorded = "https://origins.test/recorded.tsx";
+      const live = "https://origins.test/live.tsx";
+      // The operator re-attaches from what was detached; the recorded value
+      // rides along because a plan that disagrees with the run is a plan
+      // they must not re-attach from.
+      expect(
+        formatApplyRow({
+          ...REPORT.rows[0],
+          origin: recorded,
+          detachedOrigin: live,
+        }),
+      ).toBe(
+        `applied fid1:aaa items 412ms detached ${live} ` +
+          `(plan recorded ${recorded})`,
+      );
+      // The write found the piece already detached: nothing was detached,
+      // and saying so is what keeps the recorded value from reading as one.
+      expect(formatApplyRow({ ...REPORT.rows[0], origin: recorded })).toBe(
+        `applied fid1:aaa items 412ms detached nothing ` +
+          `(plan recorded ${recorded})`,
       );
     });
 
     it("carries what a row broke, and omits what a row does not have", () => {
       expect(
-        formatRetargetRow({
+        formatApplyRow({
           piece: "fid1:ccc",
           verdict: "refused",
           problem: "The source resolves to idC, not the idB this row recorded.",
@@ -136,6 +187,138 @@ describe("piece-retarget", () => {
       // what it exists for.
       expect(printedWhenSettled).toEqual([1, 2]);
       expect(hints).toEqual(["applied: 1 · landed: 1 · written: 1"]);
+    });
+
+    it("names each row that landed with a warning", async () => {
+      const hints: string[] = [];
+      const warned: ApplyReport = {
+        rows: [
+          { ...REPORT.rows[0], warning: "the piece ran with a warning" },
+          REPORT.rows[1],
+        ],
+        applied: 1,
+        complete: true,
+      };
+      await captureStdout(() =>
+        retargetFromCommand(OPTIONS, {
+          runRetarget: () => Promise.resolve(warned),
+          printHint: (message) => {
+            hints.push(message);
+          },
+        })
+      );
+      // A warned row landed, so it is not among the stopped rows the exit
+      // message names; the hint is the only place a human reads it.
+      expect(hints).toContain(
+        "applied: fid1:aaa warned: the piece ran with a warning",
+      );
+    });
+
+    it("names the rows this run detached, counting no row it did not write", async () => {
+      const hints: string[] = [];
+      // The landed row carries the origin its plan recorded and was NOT
+      // written by this run — the piece was already on its target. Counting
+      // it would claim a detach that did not happen here, so the count comes
+      // off what the writes observed rather than off the recorded value.
+      const following: ApplyReport = {
+        rows: [
+          {
+            ...REPORT.rows[0],
+            origin: "https://origins.test/member.tsx",
+            detachedOrigin: "https://origins.test/member.tsx",
+          },
+          { ...REPORT.rows[1], origin: "https://origins.test/other.tsx" },
+        ],
+        applied: 1,
+        complete: true,
+      };
+      await captureStdout(() =>
+        retargetFromCommand({ ...OPTIONS, apply: true }, {
+          runRetarget: () => Promise.resolve(following),
+          printHint: (message) => {
+            hints.push(message);
+          },
+        })
+      );
+      expect(hints).toContain(
+        "detached from an origin: 1 of 2 rows; the report names each " +
+          "origin, and re-attaching is by hand.",
+      );
+      expect(hints.some((hint) => hint.includes("would detach"))).toBe(false);
+      // The plan agreed with the write, so there is nothing stale to say.
+      expect(hints.some((hint) => hint.includes("not what the write"))).toBe(
+        false,
+      );
+    });
+
+    it("names the rows whose recorded origin was not what the write detached", async () => {
+      const hints: string[] = [];
+      const stale: ApplyReport = {
+        rows: [
+          {
+            ...REPORT.rows[0],
+            origin: "https://origins.test/recorded.tsx",
+            detachedOrigin: "https://origins.test/live.tsx",
+          },
+          { ...REPORT.rows[1], origin: "https://origins.test/other.tsx" },
+        ],
+        applied: 1,
+        complete: true,
+      };
+      await captureStdout(() =>
+        retargetFromCommand({ ...OPTIONS, apply: true }, {
+          runRetarget: () => Promise.resolve(stale),
+          printHint: (message) => {
+            hints.push(message);
+          },
+        })
+      );
+      // An operator re-attaching from the plan file would restore an origin
+      // this run never touched, so the run says which file to work from.
+      expect(hints).toContain(
+        "the plan's recorded origin was not what the write detached on 1 " +
+          "of 2 rows; re-attach from this report rather than from the plan.",
+      );
+    });
+
+    it("names the rows an apply would detach when nothing was written", async () => {
+      const hints: string[] = [];
+      // The dry run: no row was written, so the only true claim is the
+      // conditional one — and the landed row is excluded there too, an
+      // apply of this plan having nothing left to write for it.
+      const dry: ApplyReport = {
+        rows: [
+          {
+            piece: "fid1:aaa",
+            phase: "items",
+            verdict: "outstanding",
+            origin: "https://origins.test/member.tsx",
+          },
+          {
+            piece: "fid1:bbb",
+            phase: "items",
+            verdict: "landed",
+            origin: "https://origins.test/other.tsx",
+          },
+        ],
+        applied: 0,
+        complete: true,
+      };
+      await captureStdout(() =>
+        retargetFromCommand(OPTIONS, {
+          runRetarget: () => Promise.resolve(dry),
+          printHint: (message) => {
+            hints.push(message);
+          },
+        })
+      );
+      expect(hints).toContain(
+        "an apply would detach a recorded origin on 1 of 2 rows; the report " +
+          "names each origin, and re-attaching is by hand.",
+      );
+      expect(hints.some((hint) => hint.startsWith("detached from"))).toBe(
+        false,
+      );
     });
 
     it("passes the plan path, the apply flag, and the group size through", async () => {
@@ -214,7 +397,7 @@ describe("piece-retarget", () => {
 
     it("exits nonzero on a stopped run, naming every unattempted piece", async () => {
       const errors: string[] = [];
-      const stopped: RetargetReport = {
+      const stopped: ApplyReport = {
         rows: [
           { piece: "fid1:aaa", verdict: "applied", elapsedMs: 5 },
           {
@@ -266,7 +449,7 @@ describe("piece-retarget", () => {
                 complete: false,
                 stopReason: "The plan names space did:key:test; this run " +
                   "targets did:key:other.",
-              } as RetargetReport),
+              } as ApplyReport),
             printHint: () => {},
             printError: (message) => {
               errors.push(message);
@@ -291,7 +474,7 @@ describe("piece-retarget", () => {
               "onRow",
               "planPath",
             ]);
-            const dry: RetargetReport = {
+            const dry: ApplyReport = {
               rows: [{
                 piece: "fid1:aaa",
                 phase: "items",
@@ -332,7 +515,7 @@ describe("piece-retarget", () => {
                 ],
                 applied: 0,
                 complete: false,
-              } as RetargetReport),
+              } as ApplyReport),
             printHint: () => {},
             printError: (message) => {
               errors.push(message);
@@ -348,6 +531,37 @@ describe("piece-retarget", () => {
       expect(message).toContain("  moved-elsewhere: fid1:bbb");
       // A dry run's outstanding row is that run's answer, not its defect.
       expect(message).not.toContain("fid1:aaa");
+    });
+
+    it("names every accepted piece where quiet cannot silence it", async () => {
+      // The acceptance is recorded at the only moment it is still a
+      // decision — before the move — so it goes to the note rather than a
+      // hint, which `--quiet` would silence.
+      const notes: string[] = [];
+      const hints: string[] = [];
+      let accepted: readonly string[] | undefined;
+      await captureStdout(() =>
+        retargetFromCommand(
+          { ...OPTIONS, apply: true, acceptUnretained: ["fid1:aaa"] },
+          {
+            runRetarget: (_config, request) => {
+              accepted = request.accept;
+              return Promise.resolve(REPORT);
+            },
+            printHint: (message) => {
+              hints.push(message);
+            },
+            printNote: (message) => {
+              notes.push(message);
+            },
+          },
+        )
+      );
+      expect(accepted).toEqual(["fid1:aaa"]);
+      expect(notes).toEqual([
+        "accepted as unrollbackable: fid1:aaa (moving it leaves no reversal)",
+      ]);
+      expect(hints.join("\n")).not.toContain("unrollbackable");
     });
 
     it("routes cf piece retarget to retargetFromCommand", () => {
@@ -387,6 +601,22 @@ describe("piece-retarget", () => {
       expect(options?.apply).toBe(true);
       expect(options?.groupSize).toBe(4);
       expect(options?.onRow).toBeDefined();
+    });
+
+    it("passes the named acceptances through to the library", async () => {
+      let options: ApplyOptionsLike | undefined;
+      await runRetarget({} as never, {
+        planPath: "/plans/upgrade.jsonl",
+        accept: ["fid1:aaa"],
+        apply: true,
+      }, {
+        readTextFile: () => Promise.resolve(PLAN_TEXT),
+        retargetPieces: (_sessions, given) => {
+          options = given as unknown as ApplyOptionsLike;
+          return Promise.resolve(REPORT);
+        },
+      });
+      expect(options?.accepted).toEqual(["fid1:aaa"]);
     });
 
     it("omits the knobs the command did not ask for", async () => {
@@ -431,7 +661,7 @@ describe("piece-retarget", () => {
           opened.push(controller);
           return Promise.resolve(controller);
         },
-        retargetPieces: async (sessions: RetargetSessions) => {
+        retargetPieces: async (sessions: ApplySessions) => {
           // Two groups, each released at its boundary: the run holds one
           // session at a time rather than accumulating them.
           await sessions.close(await sessions.open());

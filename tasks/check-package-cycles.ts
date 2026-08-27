@@ -35,9 +35,9 @@
  * by the workspace member list rather than by the shape of the path, because
  * neither follows from the other. A member's directory name is not its package
  * name — `packages/background-piece-service` publishes
- * `@commonfabric/background-piece` — and a member can sit inside another
- * member's directory, as `packages/connectors/agents` does, so the longest
- * matching member owns a file rather than the first path segment.
+ * `@commonfabric/background-piece` — and a member can sit several directories
+ * below `packages`, as `packages/connectors/agents/connector` does, so the
+ * longest matching member owns a file rather than the first path segment.
  *
  * A type-only import counts. It disappears before the code runs, so it cannot
  * deadlock a module graph, but it still means one package's source cannot be
@@ -70,12 +70,6 @@ export interface AllowedCycle {
 // layering defect. Removing one is the point of the entry: break the cycle,
 // delete the line, and this check confirms it is gone.
 export const ALLOWLIST: readonly AllowedCycle[] = [
-  {
-    packages: ["api", "data-model"],
-    reason:
-      "api's cfc module freezes values with data-model's deep-freeze, while " +
-      "data-model's `FabricSpecialObject` classes are typed by api.",
-  },
   {
     packages: ["memory", "runner"],
     reason:
@@ -133,9 +127,10 @@ export function extractSpecifiers(source: string): string[] {
  * The workspace member holding a repo-relative path, as its directory under
  * `packages/`, or undefined for a path in no member.
  *
- * The longest matching member wins, because a member can sit inside another
- * member's directory: `packages/connectors/agents` is its own package, and a
- * file of its own is not a file of anything named `connectors`.
+ * The longest matching member wins, because a member can sit several
+ * directories below `packages`: `packages/connectors/agents/connector` is its
+ * own package, and a file of its own is not a file of anything named
+ * `connectors`.
  */
 export function packageOfPath(
   path: string,

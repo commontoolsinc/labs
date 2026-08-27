@@ -1291,7 +1291,7 @@ pushGrowthWakes, watchWakes, warmWakes}, settle: {series, dropped},
 settleAdvances: {count, lastDelta, series, dropped}, events:
 {appended, processed, coalescedPerWaveMax, skippedIdempotent,
 drainInFlightSkips, lt1LeftoversPurged, lt1LateSealsRefused,
-orphanDeliveriesRefused}, memo:
+orphanDeliveriesRefused, loadParkDeferrals, dropped}, memo:
 {hits, misses, inflight}, outbox: {queued, completed, failed,
 budgetDeferrals}, lease:
 {held, lost}, push: {prioritizedSessions, followerSessions,
@@ -1426,6 +1426,32 @@ delivering server-emitted entries, never the double's signature —
 per-event run counts are (and a store-side per-event consequence-commit
 count is not one either: it reads 1 for a same-wave double and 2 for a
 late-seal split with a surviving intent sibling — W3 review B1).
+
+The `events` block's DISPOSITION counters (verification-coverage.md's
+OW45 residue member, 2026-08-26): `loadParkDeferrals` — served events
+deferred because the dispatch preflight's head-event LOAD PARK failed,
+counted per deferral (the head's and each later-arrived same-space
+entry the arrival-order barrier holds behind it), each with a WARN
+naming the failing doc keys and the error. events.md §5's T3 predicate
+is "no
+runnable handler", never "the run raced", so a transient read failure
+over a durably-existing doc defers rather than dropping: the entry
+stays pending and UNCONSEQUENCED and a later drain re-delivers it.
+The deferral is deliberately NOT on the queued class's bounded
+creation-race budget — that budget hardens into events.md §5's drop,
+which for
+this cause would be the at-least-once discharge the arm exists to
+prevent — so a load that never heals defers indefinitely and its
+backstop rescan keeps the space out of the idle park; a give-up arm
+for that case is OW54's separately tracked territory. `dropped` —
+terminal drop notices SEALED onto a durable entry, the previously
+unmeasurable half: an event discharged this way left `appended ==
+processed` reading clean while a user's action was permanently gone,
+so only the WARN and the entry's own `status` field carried it. Both
+are read together, never alone: `loadParkDeferrals` growing while
+`processed` does not names a load that never heals, and a rising
+`dropped` on a space whose pieces all start names a disposition bug
+rather than routine unrunnable-event cleanup.
 
 ## 8. Tripwires (grep-able FORBIDDEN list)
 

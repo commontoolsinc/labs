@@ -273,6 +273,30 @@ export type ServedEventDispatch = {
        * runnable handler', never 'the run raced'". */
       kind: "error" | "dropped" | "deferred";
       message: string;
+      /** Which deferral this is, when the drain needs to tell them
+       * apart. `load-park`: the dispatch preflight parked the head on
+       * an in-flight replica load its closure reads and that load
+       * FAILED (verification-coverage.md's OW45 residue member — the
+       * live shape is a serving session revoked by a genesis ACL
+       * landing after activation, healing on the next mount). Its
+       * retry budget is the drain's, not the queued class's bounded
+       * creation-race window: the input is a doc that durably EXISTS
+       * and only the read path failed, so hardening it into §5's drop
+       * would be the same at-least-once discharge this arm exists to
+       * prevent. Absent on the cold-view piece-load deferral, which
+       * keeps its bounded budget (a piece that never materializes has
+       * no runnable handler and must eventually harden).
+       *
+       * ONLY meaningful when `kind` is `deferred`; the terminal arms
+       * never set it (independent review, Cubic P3). Deliberately NOT
+       * modelled as a discriminated union: the producer builds `kind`
+       * dynamically — `notifyEventDropped` takes it as
+       * `"dropped" | "deferred"` and cannot narrow to a branch — so a
+       * union would only relocate the looseness into a cast at the one
+       * call site. The producer-side guarantee is exact instead:
+       * `cause` is forwarded solely from `failHeadEventLoadPark`, which
+       * always pairs it with `servedKind: "deferred"`. */
+      cause?: "load-park";
     },
   ) => void;
 };
@@ -356,9 +380,10 @@ export type QueuedEvent = {
    * Whether a transient failure for this event should be retried. `true` routes
    * a transient commit failure through the exponential-backoff window and lets
    * the inSpace-name resolution path (RetryImmediately) re-run the handler;
-   * `false` makes both drop on the first failure (a speculative lineage origin or
-   * an internal one-shot opts out this way). There is no retry count: a windowed
-   * commit failure is bounded by the retry window, and RetryImmediately is
+   * `false` drops an unserved one-shot on either failure. A served event still
+   * re-runs RetryImmediately in its current wave: the server owns the result,
+   * while transient commit retries remain disabled and belong to the drain's
+   * wave cadence. There is no name-resolution retry count: RetryImmediately is
    * bounded by the monotonic space-name cache (each re-run resolves at least one
    * previously-unresolved name, and a resolved name never becomes pending again).
    */

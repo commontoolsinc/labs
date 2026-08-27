@@ -168,7 +168,7 @@ Deno.test("pattern unit cache follows sources and shard selector", async () => {
   const job = workflow.slice(start, end);
   assert(
     job.includes(
-      "hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'tasks/integration.ts')",
+      "hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'packages/connectors/agents/debug-view/**/*.ts', 'packages/connectors/agents/debug-view/**/*.tsx', 'packages/connectors/github/activity-view/**/*.ts', 'packages/connectors/github/activity-view/**/*.tsx', 'packages/connectors/pattern-sources.ts', 'tasks/integration.ts', 'tasks/pattern-files.ts')",
     ),
     "pattern unit cache must rotate when source or file assignment changes",
   );

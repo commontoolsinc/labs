@@ -195,6 +195,12 @@ jobs:
           deno task run-recorded gate repo check-completion-slots --
           deno task check-completion-slots
 
+      - name: 🚧 Guard against a CLI command nobody documented
+        timeout-minutes: *work-timeout
+        run: >-
+          deno task run-recorded gate repo check-command-docs --
+          deno task check-command-docs
+
       - name: 🔎 Check generated commonfabric/cfc types are up to date
         timeout-minutes: *work-timeout
         working-directory: packages/static
@@ -938,15 +944,21 @@ jobs:
           # then returns, so the test steps never race a not-yet-listening
           # server. The server logs to --log-file, which the launcher prints on
           # success and dumps if the server exits before binding.
-          # Space-root ensure OFF for test lanes (OW45 arm-B stage 1,
-          # RULED 2026-08-24: production spaces always get a default
-          # pattern; tests may switch it off — the ensured root's
-          # content-addressed computed cells otherwise land in every
-          # fixture space's subscriptions).
+          # Space-root ensure ON — the production default (unset knob).
+          # The lanes opted out while OW61's crash class was open (the
+          # ensured root's content-addressed computed cells landed in
+          # fixture spaces' plain subscriptions and the arrival throw
+          # killed the consumers); with the arrival containment (#6223)
+          # and the client absorb fix (#6292) merged the lanes run the
+          # production posture again, and these ON lanes ARE the CI
+          # coverage of the ensure at the true topology (the OW45/OW61
+          # rows' flagged gap). `schema-doc-quarantine` log lines are
+          # expected to be ZERO here; a live one is contained (not a
+          # process kill) but is evidence that another client
+          # absorb/ordering defect remains — OW61's residual trigger.
           CFTS_AI_GATEWAY_URL="" \
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
           EXPERIMENTAL_SERVER_EXECUTION=true \
-          SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false \
           ./common-binaries/toolshed --port="$TOOLSHED_PORT" \
             --background --log-file="$RUNNER_TEMP/toolshed.log"
 
@@ -1003,7 +1015,6 @@ jobs:
           SX_ON_IGNORE=$(deno run --allow-read ../../tasks/server-execution-on-skips.ts ${{ matrix.suite_name }})
           API_URL="http://localhost:${TOOLSHED_PORT}/" \
           EXPERIMENTAL_SERVER_EXECUTION=true \
-          SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false \
           INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/${JUNIT_NAME}.xml ${SX_ON_IGNORE}" \
           deno task integration
 
@@ -1441,12 +1452,12 @@ jobs:
           chmod +x ./common-binaries/toolshed
           # --background waits until the server has bound its port before it
           # returns, so the test steps never race a not-yet-listening server.
-          # Space-root ensure OFF for test lanes (see the package ON
-          # lane's note; RULED 2026-08-24).
+          # Space-root ensure ON — the production default (see the
+          # package ON lane's note: the opt-out retired with OW61's
+          # arrival containment (#6223) and client absorb fix (#6292)).
           CFTS_AI_GATEWAY_URL="" \
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
           EXPERIMENTAL_SERVER_EXECUTION=true \
-          SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false \
           ./common-binaries/toolshed \
             --background --log-file="$RUNNER_TEMP/toolshed.log"
 
@@ -1505,7 +1516,6 @@ jobs:
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
           EXPERIMENTAL_SERVER_EXECUTION=true \
-          SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false \
           PATTERN_INTEGRATION_SHARD="${{ matrix.shard }}/${{ matrix.total }}" \
           CF_COMPILE_CACHE_FILE="${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json" \
           deno test --no-check --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
@@ -1630,7 +1640,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ${{ github.workspace }}/.compile-cache/pattern-unit-coverage-${{ matrix.chunk }}.json
-          key: cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.total }}-${{ matrix.chunk }}-${{ hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'tasks/integration.ts') }}
+          key: cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.total }}-${{ matrix.chunk }}-${{ hashFiles('packages/patterns/**/*.ts', 'packages/patterns/**/*.tsx', 'packages/connectors/agents/debug-view/**/*.ts', 'packages/connectors/agents/debug-view/**/*.tsx', 'packages/connectors/github/activity-view/**/*.ts', 'packages/connectors/github/activity-view/**/*.tsx', 'packages/connectors/pattern-sources.ts', 'tasks/integration.ts', 'tasks/pattern-files.ts') }}
           restore-keys: |
             cc-pattern-unit-coverage-${{ hashFiles('packages/ts-transformers/**', 'packages/js-compiler/**', 'packages/runner/src/harness/**', 'packages/runner/src/pattern-coverage.ts', 'packages/runner/src/sandbox/**', 'packages/schema-generator/**', 'packages/api/**', 'packages/static/assets/types/**', 'deno.jsonc', 'deno.lock') }}-${{ matrix.total }}-${{ matrix.chunk }}-
 
@@ -2132,9 +2142,10 @@ jobs:
       # the host the deploy-rapids job above keeps current. It is a variable
       # rather than a secret because it is served in plaintext inside the
       # bundle, and because the checks below can then name it when they fail.
-      - name: 🔎 Require a staging API host
+      - name: 🔎 Validate staging shell endpoints
         env:
           API_URL: ${{ vars.STAGING_SHELL_API_URL }}
+          PRESENCE_URL: ${{ vars.STAGING_SHELL_PRESENCE_URL }}
         run: |
           # An empty API_URL builds a shell that falls back to its own origin,
           # which serves static assets and no API. Require a value up front, so
@@ -2142,6 +2153,13 @@ jobs:
           if [ -z "$API_URL" ]; then
             echo "::error::API_URL is empty: the STAGING_SHELL_API_URL variable is unset."
             exit 1
+          fi
+          if [ -n "$PRESENCE_URL" ]; then
+            PRESENCE_URL="$(deno eval '
+              import { optionalPresenceUrl } from "./packages/shell/src/lib/presence-url.ts";
+              console.log(optionalPresenceUrl(Deno.env.get("PRESENCE_URL"))?.href ?? "");
+            ')"
+            echo "PRESENCE_URL=$PRESENCE_URL" >> "$GITHUB_ENV"
           fi
 
       - name: 🏗️ Build shell with staging API URL
@@ -2153,6 +2171,10 @@ jobs:
           # `$API_URL` token. Confirm it landed before anything is uploaded.
           if ! grep -rqF -e "$API_URL" dist/scripts; then
             echo "::error::The built shell does not reference $API_URL."
+            exit 1
+          fi
+          if [ -n "$PRESENCE_URL" ] && ! grep -rqF -e "$PRESENCE_URL" dist/scripts; then
+            echo "::error::The built shell does not reference $PRESENCE_URL."
             exit 1
           fi
         env:
@@ -2192,3 +2214,10 @@ jobs:
             exit 1
           fi
           echo "Published shell targets $API_URL"
+          if [ -n "$PRESENCE_URL" ] && ! grep -qF -e "$PRESENCE_URL" published-scripts.js; then
+            echo "::error::The published shell does not reference $PRESENCE_URL."
+            exit 1
+          fi
+          if [ -n "$PRESENCE_URL" ]; then
+            echo "Published shell targets presence service $PRESENCE_URL"
+          fi

@@ -1280,9 +1280,11 @@ export class Scheduler {
     eventLink: NormalizedFullLink,
     event: any,
     // Whether a transient commit failure converges via the backoff window (and
-    // the inSpace-name resolution path re-runs the handler). `false` opts out:
-    // the event drops on the first failure without retrying. Defaults to `true`
-    // so every real user event through `cell.send` gets backpressure.
+    // the inSpace-name resolution path re-runs an unserved handler). `false`
+    // opts out: the event drops on the first failure without retrying. A served
+    // RetryImmediately still re-runs in its current wave; commit retry remains
+    // disabled. Defaults to `true` so every real user event through `cell.send`
+    // gets backpressure.
     retries: boolean = true,
     // Internal-only commit callback. This runs after the final commit result,
     // including a dropped failure, so it must not perform external side
@@ -2840,22 +2842,99 @@ export class Scheduler {
     this.queueExecution();
   }
 
+  /**
+   * The head event's required replica load FAILED.
+   *
+   * events.md §5's T3 drop predicate is "no runnable handler", never
+   * "the run raced" — and a load failure is the second: the doc the
+   * closure reads EXISTS durably, only the read path failed. The live
+   * shape (verification-coverage.md's OW45 residue member, store-proven
+   * on CI run 32929764230) is a serving session revoked by the genesis
+   * ACL landing after activation — `unauthorized` on a cross-space read
+   * of a doc the server itself wrote one second earlier. Sealing §5's
+   * dropped-event notice for that DISCHARGED at-least-once on a healthy
+   * trusted user action and advanced the watermark past it, so nothing
+   * ever re-ran it: the click was silently lost.
+   *
+   * CORRECTED 2026-08-26. This docstring used to add "healing by design
+   * on the next mount", and that was FALSE: nothing remounted. Run
+   * 33021643751 (the same board's shards 2 and 6) measured 350 deferrals
+   * over 5m47s off one revoked session, zero successful loads — the
+   * deferral below waiting for a heal that did not exist, exactly as
+   * `storage/rejection.ts`'s SessionError note had said ("the
+   * convergence argument is sound, only the remount is missing"). The
+   * remount now exists: an admitted commit touching the space's ACL doc
+   * re-arms the session (storage/v2.ts `consumeOwedSessionRemount`,
+   * triggered by executor/host.ts), so the deferral's convergence
+   * argument holds. What has NOT changed is the persistent-failure
+   * posture spelled out below: a load whose ACL never changes — or whose
+   * re-open is denied — defers indefinitely, which is OW54's territory.
+   *
+   * A SERVED event therefore DEFERS — no consequence written, the
+   * durable entry left pending and UNCONSEQUENCED, a later drain
+   * re-delivering it. The deferral carries the drain's arrival-order
+   * BARRIER with it (events.md §2, mirroring the sidecar-sync-failure
+   * arm): every later-arrived durable served entry behind it IN THE
+   * SAME SPACE defers too, or a later arrival's consequence lands ahead
+   * of an earlier one. Two exclusions, both deliberate: cross-space
+   * queue neighbours (§2's order is per-space) and LT1 in-process
+   * copies (`served` with no `streamEntry`), which have no durable
+   * entry to re-drain and are a running event's same-wave cascade
+   * children rather than later arrivals.
+   *
+   * Client-side (no `served`) there is no durable entry to re-drain, so
+   * the drop keeps today's shape — the same split events.ts makes for a
+   * piece-load failure.
+   */
   private failHeadEventLoadPark(event: QueuedEvent, error: unknown): void {
     if (this.headEventLoadPark?.eventId !== event.id) return;
+    const keys = this.headEventLoadPark.keys.join(", ");
     this.headEventLoadPark = null;
     this.headEventLoadParkHistory = null;
     const detail = error instanceof Error ? error.message : String(error);
+    if (event.served === undefined) {
+      this.dropEvent(
+        event,
+        `Event dropped: required replica load failed before dispatch (${detail})`,
+      );
+      this.queueExecution();
+      return;
+    }
+    // WARN per deferral, naming the failing doc keys and the error: a
+    // deferral that never clears is a user action that never lands, and
+    // `events.loadParkDeferrals` counts what the log spells out.
     this.dropEvent(
       event,
-      `Event dropped: required replica load failed before dispatch (${detail})`,
+      `Event deferred: required replica load failed before dispatch ` +
+        `(${keys}: ${detail}); the entry stays pending and a later drain ` +
+        `re-delivers it`,
+      { servedKind: "deferred", cause: "load-park" },
     );
+    for (const later of [...this.eventQueue]) {
+      if (later.eventLink.space !== event.eventLink.space) continue;
+      if (later.served?.streamEntry === undefined) continue;
+      this.dropEvent(
+        later,
+        `Event deferred: held behind ${event.id}, whose required replica ` +
+          `load failed before dispatch (${keys}); later-arrived events wait ` +
+          `behind it`,
+        { servedKind: "deferred", cause: "load-park" },
+      );
+    }
     this.queueExecution();
   }
 
   private dropEvent(
     event: QueuedEvent,
     reason: string,
-    options: { quiet?: boolean } = {},
+    options: {
+      quiet?: boolean;
+      /** Defaults to the terminal `dropped` arm. `deferred` leaves the
+       * durable entry UNCONSEQUENCED for a later drain (events.md §5);
+       * only meaningful for a served event. */
+      servedKind?: "dropped" | "deferred";
+      cause?: "load-park";
+    } = {},
   ): void {
     if (this.headEventLoadPark?.eventId === event.id) {
       this.headEventLoadPark = null;
@@ -2873,7 +2952,7 @@ export class Scheduler {
       },
       event,
       reason,
-      "dropped",
+      options.servedKind ?? "dropped",
       options,
     );
   }

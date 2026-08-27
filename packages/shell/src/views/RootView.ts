@@ -10,7 +10,11 @@ import {
   type RuntimeClient,
   RuntimeErrorCode,
 } from "@commonfabric/runtime-client";
-import { runtimeContext, spaceContext } from "@commonfabric/ui";
+import {
+  presenceUrlContext,
+  runtimeContext,
+  spaceContext,
+} from "@commonfabric/ui";
 import { provide } from "@lit/context";
 import { Task, TaskStatus } from "@lit/task";
 import { css, html, PropertyValues } from "lit";
@@ -39,6 +43,7 @@ import {
   ENVIRONMENT,
   EXPERIMENTAL,
   EXPERIMENTAL_DEFINES,
+  PRESENCE_URL,
 } from "../lib/env.ts";
 import { runtimeHostFlags } from "../lib/host-toggles.ts";
 import { type BrowserTelemetry, initBrowserOtel } from "../lib/otel.ts";
@@ -149,6 +154,10 @@ export class XRootView extends BaseView implements ShellApp {
   @provide({ context: spaceContext })
   @state()
   private accessor space: DID | undefined = undefined;
+
+  @provide({ context: presenceUrlContext })
+  @state()
+  private accessor presenceUrl: string | undefined = PRESENCE_URL?.href;
 
   // The runtime task runs when AppState changes, and determines if a
   // new RuntimeInternals must be created — only when identity or host

@@ -328,7 +328,7 @@ describe("baseline store", () => {
   });
 
   it("reports a baseline whose pattern file is gone, and only that one", async () => {
-    await withTree(async ({ baselines, patterns }) => {
+    await withTree(async ({ baselines }) => {
       await writeBaseline(
         baselines,
         "system/home.tsx",
@@ -341,10 +341,10 @@ describe("baseline store", () => {
         contractOf(),
         new Date(),
       );
-      await Deno.mkdir(`${patterns}/system`, { recursive: true });
-      await Deno.writeTextFile(`${patterns}/system/home.tsx`, "// still here");
-
-      const findings = await findRetired(baselines, patterns);
+      const findings = await findRetired(
+        baselines,
+        new Set(["system/home.tsx"]),
+      );
       expect(findings.length).toBe(1);
       expect(findings[0]).toMatchObject({
         kind: "retired",

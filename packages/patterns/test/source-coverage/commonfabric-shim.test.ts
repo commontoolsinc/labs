@@ -81,6 +81,27 @@ let generateTextResult: {
   result: "",
   error: undefined,
 };
+let fetchJsonResult: unknown = defaultFetchJsonResult();
+
+function defaultFetchJsonResult(): unknown {
+  return {
+    name: "stub-repo",
+    owner: { login: "stub-owner" },
+    description: "stub description",
+    stargazers_count: 123,
+    forks_count: 0,
+    language: "TypeScript",
+    html_url: "https://example.com/stub-repo",
+  };
+}
+
+export function setFetchJsonResult(result: unknown): void {
+  fetchJsonResult = result;
+}
+
+export function clearFetchJsonResult(): void {
+  fetchJsonResult = defaultFetchJsonResult();
+}
 
 export function setWishResult(query: string, result: unknown): void {
   wishResults.set(query, result);
@@ -301,15 +322,7 @@ export function fetchJson<T>(
     pending: false,
     // A GitHub-repo-shaped stub: covers both `stargazers_count` readers and
     // patterns that walk further into the response (owner, name, etc.).
-    result: {
-      name: "stub-repo",
-      owner: { login: "stub-owner" },
-      description: "stub description",
-      stargazers_count: 123,
-      forks_count: 0,
-      language: "TypeScript",
-      html_url: "https://example.com/stub-repo",
-    } as T,
+    result: fetchJsonResult as T,
     error: undefined,
   };
 }

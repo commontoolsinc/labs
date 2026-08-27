@@ -1,7 +1,8 @@
 import { Database } from "@db/sqlite";
 import type { FabricValue } from "@commonfabric/api";
 import { valueEqual } from "@commonfabric/data-model/fabric-value";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
+import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
 import { isSubschema } from "../../runner/src/schema-walk.ts";
@@ -15,6 +16,7 @@ import {
   touchedPointerPaths,
 } from "./patch.ts";
 import {
+  encodePointer,
   isPrefixPath,
   parentPath,
   parsePointer,
@@ -26,11 +28,18 @@ import {
   type OutboxAppendRow,
 } from "./execution-outbox.ts";
 import {
+  createDefaultOperationCodecRegistry,
+  operationBaselineHash,
+  type OperationCodecRegistry,
+} from "./operation-codec.ts";
+import {
   containsReservedSchemaRefSubstring,
   containsSyncSchemaRefString,
   findSyncSchemaRef,
 } from "./sync-schema-ref.ts";
 import {
+  type ApplyOpOperation,
+  type ApplyOpResolution,
   type BranchName,
   type CellScope,
   type ClientCommit,
@@ -38,6 +47,7 @@ import {
   commitPreconditionValueHash,
   decodeMemoryBoundary,
   DEFAULT_BRANCH,
+  type DeleteOperation,
   type DerivedWriteAnnotation,
   type EffectIntentEntry,
   encodeMemoryBoundary,
@@ -46,12 +56,18 @@ import {
   type EventAppendDecl,
   EventAppendDuplicateError,
   getServerExecutionConfig,
+  type IntegratedOperation,
   isEntityDocument,
   isScopeKey,
+  type OpCursor,
   type Operation,
+  type OperationFieldQuery,
+  type OperationFieldSnapshot,
   type PatchOp,
+  type PatchOperation,
   ProtocolError,
   type Reference,
+  type ReleaseOpFieldOperation,
   resolvePrincipalSessionKey,
   resolveScopeKey,
   type ScopeKey,
@@ -59,6 +75,7 @@ import {
   SERVER_EXECUTION_EFFECTS_DOC_ID,
   type SessionEffectsDocValue,
   type SessionId,
+  type SetOperation,
   type SqliteOperation,
   STREAM_ENTRIES_DOC_PREFIX,
   streamEntriesDocId,
@@ -67,6 +84,7 @@ import {
   type StreamEventsDocValue,
   type StreamLinkRef,
   tableDeclaresRowLabel,
+  type ValuePath,
 } from "../v2.ts";
 
 // The scope_key vocabulary is PROTOCOL vocabulary and lives in the
@@ -89,6 +107,26 @@ const DEFAULT_SCOPE_KEY: ScopeKey = "space";
 const normalizeScope = (scope: CellScope | undefined): CellScope =>
   scope ?? DEFAULT_SCOPE;
 
+const integratedOperationId = (
+  address: {
+    branch: BranchName;
+    id: EntityId;
+    scopeKey: string;
+    path: readonly string[];
+  },
+  epoch: number,
+  version: number,
+): string =>
+  `op:${
+    hashStringOf(encodeMemoryBoundary({
+      branch: address.branch,
+      id: address.id,
+      scopeKey: address.scopeKey,
+      path: [...address.path],
+      epoch,
+      version,
+    }))
+  }`;
 export const resolveCommitSessionKey = (
   sessionId: SessionId,
   principal?: string,
@@ -225,6 +263,70 @@ CREATE TABLE IF NOT EXISTS snapshot (
   PRIMARY KEY (branch, id, scope_key, seq)
 );
 CREATE INDEX IF NOT EXISTS idx_snapshot_lookup ON snapshot (branch, id, scope_key, seq);
+
+CREATE TABLE IF NOT EXISTS op_field_epoch (
+  branch         TEXT    NOT NULL DEFAULT '',
+  id             TEXT    NOT NULL,
+  scope_key      TEXT    NOT NULL DEFAULT 'space',
+  path           JSON    NOT NULL,
+  epoch          INTEGER NOT NULL,
+  codec          TEXT    NOT NULL,
+  version        INTEGER NOT NULL,
+  baseline_hash  TEXT    NOT NULL,
+  materialized   JSON    NOT NULL,
+  active         INTEGER NOT NULL DEFAULT 1,
+  commit_seq     INTEGER NOT NULL,
+  PRIMARY KEY (branch, id, scope_key, path)
+);
+
+CREATE TABLE IF NOT EXISTS op_submission (
+  branch              TEXT    NOT NULL DEFAULT '',
+  id                  TEXT    NOT NULL,
+  scope_key           TEXT    NOT NULL DEFAULT 'space',
+  path                JSON    NOT NULL,
+  epoch               INTEGER NOT NULL,
+  submission_id       TEXT    NOT NULL,
+  codec               TEXT    NOT NULL,
+  base_version        INTEGER NOT NULL,
+  submitted_payload   JSON    NOT NULL,
+  integrated_from     INTEGER NOT NULL,
+  integrated_to       INTEGER NOT NULL,
+  integrated_payload  JSON    NOT NULL,
+  commit_seq          INTEGER NOT NULL,
+  op_index            INTEGER NOT NULL,
+  PRIMARY KEY (branch, id, scope_key, path, epoch, submission_id),
+  FOREIGN KEY (commit_seq) REFERENCES "commit"(seq)
+);
+CREATE INDEX IF NOT EXISTS idx_op_submission_commit
+  ON op_submission (commit_seq, op_index);
+
+CREATE TABLE IF NOT EXISTS op_integrated (
+  branch         TEXT    NOT NULL DEFAULT '',
+  id             TEXT    NOT NULL,
+  scope_key      TEXT    NOT NULL DEFAULT 'space',
+  path           JSON    NOT NULL,
+  epoch          INTEGER NOT NULL,
+  version        INTEGER NOT NULL,
+  op_id          TEXT    NOT NULL UNIQUE,
+  submission_id  TEXT    NOT NULL,
+  payload        JSON    NOT NULL,
+  commit_seq     INTEGER NOT NULL,
+  PRIMARY KEY (branch, id, scope_key, path, epoch, version),
+  FOREIGN KEY (commit_seq) REFERENCES "commit"(seq)
+);
+
+CREATE TABLE IF NOT EXISTS op_checkpoint (
+  branch        TEXT    NOT NULL DEFAULT '',
+  id            TEXT    NOT NULL,
+  scope_key     TEXT    NOT NULL DEFAULT 'space',
+  path          JSON    NOT NULL,
+  epoch         INTEGER NOT NULL,
+  version       INTEGER NOT NULL,
+  materialized  JSON    NOT NULL,
+  commit_seq    INTEGER NOT NULL,
+  PRIMARY KEY (branch, id, scope_key, path, epoch, version),
+  FOREIGN KEY (commit_seq) REFERENCES "commit"(seq)
+);
 
 CREATE TABLE IF NOT EXISTS branch (
   name           TEXT    NOT NULL PRIMARY KEY,
@@ -407,6 +509,12 @@ VALUES (
   :acting_session,
   :capability_ref
 )
+`;
+
+const UPDATE_COMMIT_RESOLUTION = `
+UPDATE "commit"
+SET resolution = :resolution
+WHERE seq = :seq
 `;
 
 const INSERT_REVISION = `
@@ -805,6 +913,7 @@ interface PreparedStatements {
   selectSetDeleteConflict: PreparedStatement;
   selectSetDeleteConflictExcludingSession: PreparedStatement;
   upsertHead: PreparedStatement;
+  updateCommitResolution: PreparedStatement;
   updateBranchHead: PreparedStatement;
   deleteBranch: PreparedStatement;
   deleteOldSnapshots: PreparedStatement;
@@ -815,7 +924,9 @@ export type Engine = {
   database: Database;
   snapshotInterval: number;
   snapshotRetention: number;
+  operationCheckpointInterval: number;
   legacyCommitMetadataRefsRequired: boolean;
+  operationCodecs: OperationCodecRegistry;
   statements: PreparedStatements;
 
   /**
@@ -880,10 +991,40 @@ export class PreconditionFailedError extends Error {
 // ProtocolError moved to the wire-shape module (../v2.ts) with the shared
 // scope-key vocabulary that throws it; re-exported near the imports above.
 
+export class UnsupportedOpCodecError extends ProtocolError {
+  override name = "UnsupportedOpCodecError";
+}
+
+export class OpFieldBaselineMismatchError extends ProtocolError {
+  override name = "OpFieldBaselineMismatchError";
+}
+
+export class OpCursorMismatchError extends ProtocolError {
+  override name = "OpCursorMismatchError";
+}
+
+export class OpHistoryUnavailableError extends ProtocolError {
+  override name = "OpHistoryUnavailableError";
+}
+
+export class OpSubmissionMismatchError extends ProtocolError {
+  override name = "OpSubmissionMismatchError";
+}
+
+export class OpFieldWriteConflictError extends ProtocolError {
+  override name = "OpFieldWriteConflictError";
+}
+
+export class OpCodecError extends ProtocolError {
+  override name = "OpCodecError";
+}
+
 export type OpenOptions = {
   url: URL;
   snapshotInterval?: number;
   snapshotRetention?: number;
+  operationCheckpointInterval?: number;
+  operationCodecs?: OperationCodecRegistry;
 };
 
 export type InvocationRecord = {
@@ -997,7 +1138,7 @@ export type AppliedRevision = {
   seq: number;
   opIndex: number;
   commitSeq: number;
-  op: Operation["op"];
+  op: SetOperation["op"] | PatchOperation["op"] | DeleteOperation["op"];
   document?: EntityDocument;
   patches?: PatchOp[];
 };
@@ -1027,6 +1168,7 @@ export type AppliedCommit = {
    * The commit itself still records and advances the space log.
    */
   elidedOpIndexes?: number[];
+  operationResolutions?: ApplyOpResolution[];
 };
 
 export type ReadOptions = {
@@ -1053,7 +1195,7 @@ export type EntityState = {
   branch: BranchName;
   seq: number;
   opIndex: number;
-  op: Operation["op"];
+  op: AppliedRevision["op"];
   document: EntityDocument | null;
 };
 
@@ -1091,7 +1233,7 @@ type RevisionRow = {
   scope_key: string;
   seq: number;
   op_index: number;
-  op: Operation["op"];
+  op: AppliedRevision["op"];
   data: string | null;
   commit_seq: number;
 };
@@ -1099,7 +1241,7 @@ type RevisionRow = {
 type ReadRow = {
   seq: number;
   op_index: number;
-  op: Operation["op"];
+  op: AppliedRevision["op"];
   data: string | null;
 };
 
@@ -1125,6 +1267,7 @@ type BranchRow = {
 
 export const DEFAULT_SNAPSHOT_INTERVAL = 10;
 export const DEFAULT_SNAPSHOT_RETENTION = 2;
+export const DEFAULT_OPERATION_CHECKPOINT_INTERVAL = 100;
 
 const prepareStatements = (database: Database): PreparedStatements => ({
   insertAuthorization: database.prepare(INSERT_AUTHORIZATION),
@@ -1167,6 +1310,7 @@ const prepareStatements = (database: Database): PreparedStatements => ({
     SELECT_SET_DELETE_CONFLICT_EXCLUDING_SESSION,
   ),
   upsertHead: database.prepare(UPSERT_HEAD),
+  updateCommitResolution: database.prepare(UPDATE_COMMIT_RESOLUTION),
   updateBranchHead: database.prepare(UPDATE_BRANCH_HEAD),
   deleteBranch: database.prepare(DELETE_BRANCH),
   deleteOldSnapshots: database.prepare(DELETE_OLD_SNAPSHOTS),
@@ -1192,6 +1336,85 @@ const columnDefault = (
     { name: string; dflt_value: string | null }
   >;
   return rows.find((row) => row.name === column)?.dflt_value;
+};
+
+const hasTable = (database: Database, table: string): boolean =>
+  database.prepare(`
+    SELECT 1 AS present
+    FROM sqlite_master
+    WHERE type = 'table' AND name = :table
+  `).get({ table }) !== undefined;
+
+const migrateIntegratedOperationIds = (database: Database): void => {
+  if (
+    !hasTable(database, "op_integrated") ||
+    hasColumn(database, "op_integrated", "op_id")
+  ) {
+    return;
+  }
+
+  database.transaction(() => {
+    database.exec(`
+      ALTER TABLE op_integrated RENAME TO op_integrated_id_migration;
+
+      CREATE TABLE op_integrated (
+        branch         TEXT    NOT NULL DEFAULT '',
+        id             TEXT    NOT NULL,
+        scope_key      TEXT    NOT NULL DEFAULT 'space',
+        path           JSON    NOT NULL,
+        epoch          INTEGER NOT NULL,
+        version        INTEGER NOT NULL,
+        op_id          TEXT    NOT NULL UNIQUE,
+        submission_id  TEXT    NOT NULL,
+        payload        JSON    NOT NULL,
+        commit_seq     INTEGER NOT NULL,
+        PRIMARY KEY (branch, id, scope_key, path, epoch, version),
+        FOREIGN KEY (commit_seq) REFERENCES "commit"(seq)
+      );
+    `);
+
+    const rows = database.prepare(`
+      SELECT branch, id, scope_key, path, epoch, version,
+             submission_id, payload, commit_seq
+      FROM op_integrated_id_migration
+      ORDER BY branch, id, scope_key, path, epoch, version
+    `).all() as Array<{
+      branch: BranchName;
+      id: EntityId;
+      scope_key: string;
+      path: string;
+      epoch: number;
+      version: number;
+      submission_id: string;
+      payload: string;
+      commit_seq: number;
+    }>;
+    const insert = database.prepare(`
+      INSERT INTO op_integrated (
+        branch, id, scope_key, path, epoch, version, op_id,
+        submission_id, payload, commit_seq
+      ) VALUES (
+        :branch, :id, :scope_key, :path, :epoch, :version, :op_id,
+        :submission_id, :payload, :commit_seq
+      )
+    `);
+    for (const row of rows) {
+      insert.run({
+        ...row,
+        op_id: integratedOperationId(
+          {
+            branch: row.branch,
+            id: row.id,
+            scopeKey: row.scope_key,
+            path: parsePointer(row.path),
+          },
+          row.epoch,
+          row.version,
+        ),
+      });
+    }
+    database.exec("DROP TABLE op_integrated_id_migration");
+  }).immediate();
 };
 
 type ForeignKeyShape = {
@@ -1491,8 +1714,18 @@ export const open = async (
     url,
     snapshotInterval = DEFAULT_SNAPSHOT_INTERVAL,
     snapshotRetention = DEFAULT_SNAPSHOT_RETENTION,
+    operationCheckpointInterval = DEFAULT_OPERATION_CHECKPOINT_INTERVAL,
+    operationCodecs = createDefaultOperationCodecRegistry(),
   }: OpenOptions,
 ): Promise<Engine> => {
+  if (
+    !Number.isSafeInteger(operationCheckpointInterval) ||
+    operationCheckpointInterval <= 0
+  ) {
+    throw new TypeError(
+      "operationCheckpointInterval must be a positive safe integer",
+    );
+  }
   const database = await new Database(toDatabaseAddress(url), { create: true });
   database.exec(NEW_DB_PRAGMAS);
   database.exec(PRAGMAS);
@@ -1506,12 +1739,15 @@ export const open = async (
   migrateCommitDelegation(database);
   migrateExecutionOutboxEventCarriage(database);
   migrateSchedulerObservationTablesToBasis(database);
+  migrateIntegratedOperationIds(database);
   return {
     url,
     database,
     snapshotInterval,
     snapshotRetention,
+    operationCheckpointInterval,
     legacyCommitMetadataRefsRequired: commitMetadataRefsRequired(database),
+    operationCodecs,
     statements: prepareStatements(database),
     documentCache: new Map(),
   };
@@ -1622,6 +1858,222 @@ export const read = (
     ...(scopeKey === undefined ? {} : { scopeKey }),
   })?.document ?? null;
 };
+
+export const queryOperationField = (
+  engine: Engine,
+  {
+    id,
+    path,
+    scope,
+    principal,
+    sessionId,
+    branch = DEFAULT_BRANCH,
+    after,
+  }: OperationFieldQuery,
+): OperationFieldSnapshot => {
+  assertDefaultOperationBranch(branch);
+  validateOperationPath(path);
+  if (typeof id !== "string" || id.length === 0) {
+    throw new ProtocolError("operation field id is malformed");
+  }
+  if (after !== undefined && !validateCursor(after)) {
+    throw new OpCursorMismatchError(
+      "operation field query cursor is malformed",
+    );
+  }
+  const declaredScope = normalizeScope(scope);
+  const scopeKey = resolveScopeKey(scope, { principal, sessionId });
+  const params = operationFieldParams(branch, id, scopeKey, path);
+  const field = selectOperationField(engine, params);
+  const document = readStateForScopeKey(engine, {
+    id,
+    branch,
+    scope: declaredScope,
+    scopeKey,
+  })?.document ?? null;
+  const active = field?.active === 1;
+  let currentMaterialized: FabricValue;
+  try {
+    currentMaterialized = valueAtOperationPath(document, path);
+  } catch (error) {
+    if (active) throw error;
+    // An inactive watch remains meaningful after its field or owning entity is
+    // deleted. Null is the ordinary projection for that absent value; a later
+    // activation still requires the field to exist and pass codec validation.
+    currentMaterialized = null;
+  }
+  const epoch = active ? field.epoch : null;
+  const retainedVersion = active
+    ? retainedOperationVersion(engine, params, field)
+    : 0;
+  if (
+    active && after?.epoch === epoch && after.version > field.version
+  ) {
+    throw new OpCursorMismatchError(
+      "operation field query cursor is in the future",
+    );
+  }
+  const reset = active && (
+    (after === undefined && retainedVersion > 0) ||
+    (after !== undefined && after.epoch !== epoch) ||
+    (after?.epoch === epoch && after.version < retainedVersion)
+  );
+  const afterVersion = active && !reset && after?.epoch === epoch
+    ? after.version
+    : reset
+    ? field.version
+    : 0;
+  return {
+    id,
+    ...(declaredScope === DEFAULT_SCOPE ? {} : { scope: declaredScope }),
+    path,
+    branch,
+    scopeKey,
+    active,
+    codec: active ? field.codec : null,
+    cursor: active ? { epoch: field.epoch, version: field.version } : null,
+    baselineHash: active
+      ? field.baseline_hash
+      : operationBaselineHash(currentMaterialized),
+    materialized: active
+      ? decodeMemoryBoundary(field.materialized)
+      : currentMaterialized,
+    ...(active
+      ? {
+        retainedFrom: { epoch: field.epoch, version: retainedVersion },
+        ...(reset ? { reset: true } : {}),
+      }
+      : {}),
+    operations: active
+      ? decodedIntegratedOperations(
+        field.epoch,
+        selectIntegratedOperations(engine, {
+          ...params,
+          epoch: field.epoch,
+          after_version: afterVersion,
+        }),
+      )
+      : [],
+  };
+};
+
+export type OperationHistoryPruneResult = {
+  cursor: OpCursor;
+  prunedOperations: number;
+};
+
+/**
+ * Prunes replay rows only when the active head has a storage-owned checkpoint
+ * that exactly matches both collaborative and ordinary materialized state.
+ * Submitted rows remain available for audit and duplicate detection.
+ */
+export const pruneOperationFieldHistory = (
+  engine: Engine,
+  {
+    id,
+    path,
+    scope,
+    principal,
+    sessionId,
+    branch = DEFAULT_BRANCH,
+  }: OperationFieldQuery,
+): OperationHistoryPruneResult =>
+  engine.database.transaction((txEngine: Engine) => {
+    assertDefaultOperationBranch(branch);
+    validateOperationPath(path);
+    if (typeof id !== "string" || id.length === 0) {
+      throw new ProtocolError("operation field id is malformed");
+    }
+    const declaredScope = normalizeScope(scope);
+    const scopeKey = resolveScopeKey(scope, { principal, sessionId });
+    const params = operationFieldParams(branch, id, scopeKey, path);
+    const field = selectOperationField(txEngine, params);
+    if (!field || field.active !== 1) {
+      throw new OpHistoryUnavailableError(
+        "only active operation field history can be pruned",
+      );
+    }
+    const checkpoint = txEngine.database.prepare(`
+      SELECT version, materialized
+      FROM op_checkpoint
+      WHERE branch = :branch AND id = :id AND scope_key = :scope_key
+        AND path = :path AND epoch = :epoch AND version <= :version
+      ORDER BY version DESC
+      LIMIT 1
+    `).get({
+      ...params,
+      epoch: field.epoch,
+      version: field.version,
+    }) as { version: number; materialized: string } | undefined;
+    if (!checkpoint || checkpoint.version === 0) {
+      throw new OpHistoryUnavailableError(
+        "operation field has no compacting checkpoint",
+      );
+    }
+    const replayRows = selectIntegratedOperations(txEngine, {
+      ...params,
+      epoch: field.epoch,
+      after_version: checkpoint.version,
+    });
+    if (
+      replayRows.length !== field.version - checkpoint.version ||
+      replayRows.some((row, index) =>
+        row.version !== checkpoint.version + index + 1
+      )
+    ) {
+      throw new ProtocolError(
+        "operation history after checkpoint is not contiguous",
+      );
+    }
+    let replayed = decodeMemoryBoundary(checkpoint.materialized);
+    const codec = txEngine.operationCodecs.require(field.codec);
+    for (const row of replayRows) {
+      const result = codec.integrate({
+        materialized: replayed,
+        submitted: decodeMemoryBoundary(row.payload),
+        intervening: [],
+      });
+      if (
+        result.operations.length !== 1 ||
+        encodeMemoryBoundary(result.operations[0]) !== row.payload
+      ) {
+        throw new ProtocolError(
+          "operation codec did not reproduce integrated history",
+        );
+      }
+      replayed = result.materialized;
+    }
+    const document = readStateForScopeKey(txEngine, {
+      id,
+      branch,
+      scope: declaredScope,
+      scopeKey,
+    })?.document ?? null;
+    const ordinaryMaterialized = encodeMemoryBoundary(
+      valueAtOperationPath(document, path),
+    );
+    if (
+      encodeMemoryBoundary(replayed) !== field.materialized ||
+      field.materialized !== ordinaryMaterialized
+    ) {
+      throw new ProtocolError(
+        "operation checkpoint diverged from materialized field state",
+      );
+    }
+    const prunedOperations = txEngine.database.prepare(`
+      DELETE FROM op_integrated
+      WHERE branch = :branch AND id = :id AND scope_key = :scope_key
+        AND path = :path AND epoch = :epoch AND version <= :version
+    `).run({
+      ...params,
+      epoch: field.epoch,
+      version: checkpoint.version,
+    });
+    return {
+      cursor: { epoch: field.epoch, version: checkpoint.version },
+      prunedOperations,
+    };
+  }).immediate(engine);
 
 export const readState = (
   engine: Engine,
@@ -2044,6 +2496,7 @@ const refuseMalformedAuthoredStreamWrites = (
       }
       continue;
     }
+    if (operation.op !== "patch") continue;
     for (const patch of operation.patches) {
       if (patch.path !== STREAM_ENTRIES_POINTER) continue;
       if (
@@ -2207,6 +2660,7 @@ const validateEventAppends = (
         });
       }
     } else {
+      if (operation.op !== "patch") continue;
       for (const [patchIndex, patch] of operation.patches.entries()) {
         const appended = appendedEntriesOfPatch(patch);
         if (appended === null) {
@@ -3194,6 +3648,713 @@ const commitVerifiedSchemaDocRefs = (
   return cache;
 };
 
+type OperationFieldRow = {
+  epoch: number;
+  codec: string;
+  version: number;
+  baseline_hash: string;
+  materialized: string;
+  active: number;
+};
+
+type OperationSubmissionRow = {
+  epoch: number;
+  submission_id: string;
+  codec: string;
+  base_version: number;
+  submitted_payload: string;
+  integrated_from: number;
+  integrated_to: number;
+  integrated_payload: string;
+};
+
+type IntegratedOperationRow = {
+  version: number;
+  op_id: string;
+  submission_id: string;
+  payload: string;
+};
+
+const encodedOperationPath = (path: readonly string[]): string =>
+  encodePointer(path);
+
+const operationFieldParams = (
+  branch: BranchName,
+  id: EntityId,
+  scopeKey: string,
+  path: readonly string[],
+) => ({ branch, id, scope_key: scopeKey, path: encodedOperationPath(path) });
+
+const valueAtOperationPath = (
+  document: EntityDocument | null,
+  path: readonly string[],
+): FabricValue => {
+  let value: FabricValue = document?.value ?? null;
+  for (const part of path) {
+    if (Array.isArray(value)) {
+      const index = Number(part);
+      if (!Number.isInteger(index) || index < 0 || index >= value.length) {
+        throw new ProtocolError(
+          `operation field path is missing: ${path.join(".")}`,
+        );
+      }
+      value = value[index];
+    } else if (
+      value !== null && typeof value === "object" &&
+      Object.hasOwn(value, part)
+    ) {
+      value = (value as Record<string, FabricValue>)[part];
+    } else {
+      throw new ProtocolError(
+        `operation field path is missing: ${path.join(".")}`,
+      );
+    }
+  }
+  return value;
+};
+
+const selectOperationField = (
+  engine: Engine,
+  params: ReturnType<typeof operationFieldParams>,
+): OperationFieldRow | undefined =>
+  engine.database.prepare(`
+    SELECT epoch, codec, version, baseline_hash, materialized, active
+    FROM op_field_epoch
+    WHERE branch = :branch AND id = :id AND scope_key = :scope_key
+      AND path = :path
+  `).get(params) as OperationFieldRow | undefined;
+
+const selectIntegratedOperations = (
+  engine: Engine,
+  params: ReturnType<typeof operationFieldParams> & {
+    epoch: number;
+    after_version: number;
+  },
+): IntegratedOperationRow[] =>
+  engine.database.prepare(`
+    SELECT version, op_id, submission_id, payload
+    FROM op_integrated
+    WHERE branch = :branch AND id = :id AND scope_key = :scope_key
+      AND path = :path AND epoch = :epoch AND version > :after_version
+    ORDER BY version
+  `).all(params) as IntegratedOperationRow[];
+
+const retainedOperationVersion = (
+  engine: Engine,
+  params: ReturnType<typeof operationFieldParams>,
+  field: OperationFieldRow,
+): number => {
+  const row = engine.database.prepare(`
+    SELECT MIN(version) AS version
+    FROM op_integrated
+    WHERE branch = :branch AND id = :id AND scope_key = :scope_key
+      AND path = :path AND epoch = :epoch
+  `).get({ ...params, epoch: field.epoch }) as { version: number | null };
+  return row.version === null ? field.version : row.version - 1;
+};
+
+const assertDefaultOperationBranch = (branch: BranchName): void => {
+  if (branch !== DEFAULT_BRANCH) {
+    throw new ProtocolError(
+      "collaborative operation fields only support the default branch",
+    );
+  }
+};
+
+const decodedIntegratedOperations = (
+  epoch: number,
+  rows: readonly IntegratedOperationRow[],
+): IntegratedOperation[] =>
+  rows.map((row) => ({
+    opId: row.op_id,
+    cursor: { epoch, version: row.version },
+    submissionId: row.submission_id,
+    payload: decodeMemoryBoundary(row.payload),
+  }));
+
+const MAX_OPERATION_PAYLOAD_BYTES = 1_000_000;
+const MAX_OPERATION_BATCH_UPDATES = 256;
+const operationValueByteLength = (value: FabricValue): number =>
+  new TextEncoder().encode(encodeMemoryBoundary(value)).byteLength;
+
+function validateOperationPath(path: unknown): asserts path is ValuePath {
+  if (
+    !Array.isArray(path) || path.length > 256 ||
+    path.some((part) => typeof part !== "string" || part.length > 1024)
+  ) {
+    throw new ProtocolError("operation field path is malformed or too large");
+  }
+}
+
+const validateCursor = (cursor: unknown): cursor is OpCursor =>
+  cursor !== null && typeof cursor === "object" &&
+  Number.isSafeInteger((cursor as { epoch?: unknown }).epoch) &&
+  (cursor as { epoch: number }).epoch > 0 &&
+  Number.isSafeInteger((cursor as { version?: unknown }).version) &&
+  (cursor as { version: number }).version >= 0;
+
+const validateApplyOperation = (operation: ApplyOpOperation): void => {
+  validateOperationPath(operation.path);
+  if (
+    typeof operation.id !== "string" || operation.id.length === 0 ||
+    typeof operation.codec !== "string" ||
+    !/@[1-9][0-9]*$/.test(operation.codec) ||
+    typeof operation.submissionId !== "string" ||
+    operation.submissionId.length === 0 || operation.submissionId.length > 256
+  ) {
+    throw new ProtocolError("apply-op identity fields are malformed");
+  }
+  if (operation.base !== null && !validateCursor(operation.base)) {
+    throw new OpCursorMismatchError("apply-op cursor is malformed");
+  }
+  if (
+    operation.base === null
+      ? typeof operation.baselineHash !== "string" ||
+        operation.baselineHash.length === 0
+      : operation.baselineHash !== undefined
+  ) {
+    throw new OpFieldBaselineMismatchError(
+      "baselineHash is required exactly when apply-op base is null",
+    );
+  }
+  if (
+    operationValueByteLength(operation.payload) > MAX_OPERATION_PAYLOAD_BYTES
+  ) {
+    throw new OpCodecError("operation payload exceeds the byte limit");
+  }
+  const updates = operation.payload !== null &&
+      typeof operation.payload === "object" &&
+      !Array.isArray(operation.payload)
+    ? (operation.payload as { updates?: unknown }).updates
+    : undefined;
+  if (Array.isArray(updates) && updates.length > MAX_OPERATION_BATCH_UPDATES) {
+    throw new OpCodecError("operation payload exceeds the update-count limit");
+  }
+};
+
+const storedOperationResolution = (
+  operationIndex: number,
+  address: ApplyOpResolution["address"],
+  row: OperationSubmissionRow,
+  duplicate: boolean,
+): ApplyOpResolution => {
+  const payloads = decodeMemoryBoundary<FabricValue[]>(row.integrated_payload);
+  return {
+    operationIndex,
+    address,
+    codec: row.codec,
+    submissionId: row.submission_id,
+    from: { epoch: row.epoch, version: row.integrated_from },
+    to: { epoch: row.epoch, version: row.integrated_to },
+    operations: payloads.map((payload, index) => ({
+      opId: integratedOperationId(
+        address,
+        row.epoch,
+        row.integrated_from + index + 1,
+      ),
+      cursor: { epoch: row.epoch, version: row.integrated_from + index + 1 },
+      submissionId: row.submission_id,
+      payload,
+    })),
+    duplicate,
+  };
+};
+
+const applyOperation = (
+  engine: Engine,
+  options: {
+    branch: BranchName;
+    seq: number;
+    opIndex: number;
+    operation: ApplyOpOperation;
+    principal?: string;
+    sessionId: SessionId;
+    scopeKeyOverride?: string;
+  },
+): { resolution: ApplyOpResolution; revision?: AppliedRevision } => {
+  const { branch, seq, opIndex, operation, principal, sessionId } = options;
+  assertDefaultOperationBranch(branch);
+  validateApplyOperation(operation);
+  if (isStreamEntriesDocId(operation.id)) {
+    throw new ProtocolError(
+      "apply-op cannot mutate a stream sidecar document",
+    );
+  }
+  const scope = normalizeScope(operation.scope);
+  const scopeKey = options.scopeKeyOverride ??
+    resolveScopeKey(operation.scope, { principal, sessionId });
+  const params = operationFieldParams(
+    branch,
+    operation.id,
+    scopeKey,
+    operation.path,
+  );
+  const address: ApplyOpResolution["address"] = {
+    branch,
+    id: operation.id,
+    ...(scope === DEFAULT_SCOPE ? {} : { scope }),
+    scopeKey,
+    path: operation.path,
+  };
+  const priorField = selectOperationField(engine, params);
+  const submissionEpoch = priorField?.active === 1
+    ? priorField.epoch
+    : (priorField?.epoch ?? 0) + 1;
+
+  const duplicate = engine.database.prepare(`
+    SELECT epoch, submission_id, codec, base_version, submitted_payload,
+           integrated_from, integrated_to, integrated_payload
+    FROM op_submission
+    WHERE branch = :branch AND id = :id AND scope_key = :scope_key
+      AND path = :path AND epoch = :epoch
+      AND submission_id = :submission_id
+  `).get({
+    ...params,
+    epoch: submissionEpoch,
+    submission_id: operation.submissionId,
+  }) as
+    | OperationSubmissionRow
+    | undefined;
+  if (duplicate) {
+    if (
+      duplicate.codec !== operation.codec ||
+      (operation.base !== null && operation.base.epoch !== duplicate.epoch) ||
+      duplicate.base_version !== (operation.base?.version ?? 0) ||
+      (operation.base === null &&
+        operation.baselineHash !== priorField?.baseline_hash) ||
+      duplicate.submitted_payload !== encodeMemoryBoundary(operation.payload)
+    ) {
+      throw new OpSubmissionMismatchError(
+        `operation submission replay mismatch: ${operation.submissionId}`,
+      );
+    }
+    return {
+      resolution: storedOperationResolution(opIndex, address, duplicate, true),
+    };
+  }
+
+  const currentDocument = readStateForScopeKey(engine, {
+    branch,
+    id: operation.id,
+    scope,
+    scopeKey,
+  })?.document ?? null;
+  const currentMaterialized = valueAtOperationPath(
+    currentDocument,
+    operation.path,
+  );
+  const activeField = priorField?.active === 1 ? priorField : undefined;
+
+  let epoch: number;
+  let currentVersion: number;
+  let baselineHash: string;
+  let intervening: FabricValue[];
+  if (!activeField) {
+    if (operation.base !== null) {
+      throw new OpCursorMismatchError(
+        "inactive operation fields require a null base",
+      );
+    }
+    const currentHash = operationBaselineHash(currentMaterialized);
+    if (operation.baselineHash !== currentHash) {
+      throw new OpFieldBaselineMismatchError(
+        "operation field baseline hash mismatch",
+      );
+    }
+    epoch = (priorField?.epoch ?? 0) + 1;
+    currentVersion = 0;
+    baselineHash = currentHash;
+    intervening = [];
+    engine.database.prepare(`
+      INSERT INTO op_checkpoint (
+        branch, id, scope_key, path, epoch, version, materialized, commit_seq
+      ) VALUES (
+        :branch, :id, :scope_key, :path, :epoch, 0, :materialized, :commit_seq
+      )
+    `).run({
+      ...params,
+      epoch,
+      materialized: encodeMemoryBoundary(currentMaterialized),
+      commit_seq: seq,
+    });
+  } else {
+    if (operation.codec !== activeField.codec) {
+      throw new OpCodecError(
+        "operation field codec cannot change within an epoch",
+      );
+    }
+    let baseVersion: number;
+    if (operation.base === null) {
+      if (operation.baselineHash !== activeField.baseline_hash) {
+        throw new OpFieldBaselineMismatchError(
+          "operation field baseline hash mismatch",
+        );
+      }
+      baseVersion = 0;
+    } else {
+      if (operation.base.epoch !== activeField.epoch) {
+        throw new OpCursorMismatchError("operation field epoch mismatch");
+      }
+      if (operation.base.version > activeField.version) {
+        throw new OpCursorMismatchError(
+          "operation field base version is in the future",
+        );
+      }
+      baseVersion = operation.base.version;
+    }
+    epoch = activeField.epoch;
+    currentVersion = activeField.version;
+    baselineHash = activeField.baseline_hash;
+    const retainedVersion = retainedOperationVersion(
+      engine,
+      params,
+      activeField,
+    );
+    if (baseVersion < retainedVersion) {
+      throw new OpHistoryUnavailableError(
+        `operation field history before version ${retainedVersion} is unavailable`,
+      );
+    }
+    intervening = selectIntegratedOperations(engine, {
+      ...params,
+      epoch,
+      after_version: baseVersion,
+    }).map((row) => decodeMemoryBoundary(row.payload));
+    if (
+      operationBaselineHash(currentMaterialized) !==
+        operationBaselineHash(decodeMemoryBoundary(activeField.materialized))
+    ) {
+      throw new ProtocolError(
+        "operation field materialization diverged from the entity value",
+      );
+    }
+  }
+
+  let result;
+  try {
+    let codec;
+    try {
+      codec = engine.operationCodecs.require(operation.codec);
+    } catch {
+      throw new UnsupportedOpCodecError(
+        `unknown operation codec: ${operation.codec}`,
+      );
+    }
+    result = codec.integrate({
+      materialized: currentMaterialized,
+      submitted: operation.payload,
+      intervening,
+    });
+  } catch (cause) {
+    if (cause instanceof ProtocolError) throw cause;
+    throw new OpCodecError(
+      `operation codec ${operation.codec} rejected the payload: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    );
+  }
+  if (result.operations.length > MAX_OPERATION_BATCH_UPDATES) {
+    throw new OpCodecError("operation codec produced too many operations");
+  }
+  try {
+    if (
+      operationValueByteLength(result.materialized) >
+        MAX_OPERATION_PAYLOAD_BYTES
+    ) {
+      throw new OpCodecError(
+        "operation materialized value exceeds the byte limit",
+      );
+    }
+    for (const payload of result.operations) {
+      if (operationValueByteLength(payload) > MAX_OPERATION_PAYLOAD_BYTES) {
+        throw new OpCodecError(
+          "integrated operation exceeds the byte limit",
+        );
+      }
+    }
+  } catch (cause) {
+    if (cause instanceof ProtocolError) throw cause;
+    throw new OpCodecError(
+      `operation codec produced an invalid Fabric value: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    );
+  }
+  if (
+    result.operations.length === 0 &&
+    !valueEqual(result.materialized, currentMaterialized)
+  ) {
+    throw new OpCodecError(
+      "operation codec changed the materialized value without producing an operation",
+    );
+  }
+
+  const nextVersion = currentVersion + result.operations.length;
+  engine.database.prepare(`
+    INSERT INTO op_field_epoch (
+      branch, id, scope_key, path, epoch, codec, version,
+      baseline_hash, materialized, active, commit_seq
+    ) VALUES (
+      :branch, :id, :scope_key, :path, :epoch, :codec, :version,
+      :baseline_hash, :materialized, 1, :commit_seq
+    )
+    ON CONFLICT (branch, id, scope_key, path) DO UPDATE SET
+      epoch = excluded.epoch,
+      codec = excluded.codec,
+      version = excluded.version,
+      baseline_hash = excluded.baseline_hash,
+      materialized = excluded.materialized,
+      active = 1,
+      commit_seq = excluded.commit_seq
+  `).run({
+    ...params,
+    epoch,
+    codec: operation.codec,
+    version: nextVersion,
+    baseline_hash: baselineHash,
+    materialized: encodeMemoryBoundary(result.materialized),
+    commit_seq: seq,
+  });
+
+  for (const [index, payload] of result.operations.entries()) {
+    engine.database.prepare(`
+      INSERT INTO op_integrated (
+        branch, id, scope_key, path, epoch, version, op_id,
+        submission_id, payload, commit_seq
+      ) VALUES (
+        :branch, :id, :scope_key, :path, :epoch, :version, :op_id,
+        :submission_id, :payload, :commit_seq
+      )
+    `).run({
+      ...params,
+      epoch,
+      version: currentVersion + index + 1,
+      op_id: integratedOperationId(
+        address,
+        epoch,
+        currentVersion + index + 1,
+      ),
+      submission_id: operation.submissionId,
+      payload: encodeMemoryBoundary(payload),
+      commit_seq: seq,
+    });
+  }
+  if (
+    result.operations.length !== 0 &&
+    Math.floor(nextVersion / engine.operationCheckpointInterval) >
+      Math.floor(currentVersion / engine.operationCheckpointInterval)
+  ) {
+    engine.database.prepare(`
+      INSERT INTO op_checkpoint (
+        branch, id, scope_key, path, epoch, version, materialized, commit_seq
+      ) VALUES (
+        :branch, :id, :scope_key, :path, :epoch, :version,
+        :materialized, :commit_seq
+      )
+    `).run({
+      ...params,
+      epoch,
+      version: nextVersion,
+      materialized: encodeMemoryBoundary(result.materialized),
+      commit_seq: seq,
+    });
+    const priorCheckpoint = engine.database.prepare(`
+      SELECT version
+      FROM op_checkpoint
+      WHERE branch = :branch AND id = :id AND scope_key = :scope_key
+        AND path = :path AND epoch = :epoch AND version < :version
+      ORDER BY version DESC
+      LIMIT 1
+    `).get({ ...params, epoch, version: nextVersion }) as
+      | { version: number }
+      | undefined;
+    if (priorCheckpoint !== undefined && priorCheckpoint.version > 0) {
+      engine.database.prepare(`
+        DELETE FROM op_integrated
+        WHERE branch = :branch AND id = :id AND scope_key = :scope_key
+          AND path = :path AND epoch = :epoch AND version <= :version
+      `).run({
+        ...params,
+        epoch,
+        version: priorCheckpoint.version,
+      });
+    }
+  }
+  engine.database.prepare(`
+    INSERT INTO op_submission (
+      branch, id, scope_key, path, epoch, submission_id, codec,
+      base_version, submitted_payload, integrated_from, integrated_to,
+      integrated_payload, commit_seq, op_index
+    ) VALUES (
+      :branch, :id, :scope_key, :path, :epoch, :submission_id, :codec,
+      :base_version, :submitted_payload, :integrated_from, :integrated_to,
+      :integrated_payload, :commit_seq, :op_index
+    )
+  `).run({
+    ...params,
+    epoch,
+    submission_id: operation.submissionId,
+    codec: operation.codec,
+    base_version: operation.base?.version ?? 0,
+    submitted_payload: encodeMemoryBoundary(operation.payload),
+    integrated_from: currentVersion,
+    integrated_to: nextVersion,
+    integrated_payload: encodeMemoryBoundary(result.operations),
+    commit_seq: seq,
+    op_index: opIndex,
+  });
+
+  const submissionRow: OperationSubmissionRow = {
+    epoch,
+    submission_id: operation.submissionId,
+    codec: operation.codec,
+    base_version: operation.base?.version ?? 0,
+    submitted_payload: encodeMemoryBoundary(operation.payload),
+    integrated_from: currentVersion,
+    integrated_to: nextVersion,
+    integrated_payload: encodeMemoryBoundary(result.operations),
+  };
+  const resolution = storedOperationResolution(
+    opIndex,
+    address,
+    submissionRow,
+    false,
+  );
+  if (result.operations.length === 0) return { resolution };
+
+  const revision = writeOperation(engine, {
+    branch,
+    seq,
+    opIndex,
+    principal,
+    sessionId,
+    scopeKeyOverride: options.scopeKeyOverride,
+    operation: {
+      op: "patch",
+      id: operation.id,
+      ...(operation.scope === undefined ? {} : { scope: operation.scope }),
+      patches: [{
+        op: "replace",
+        path: encodePointer(["value", ...operation.path]),
+        value: result.materialized,
+      }],
+    },
+  });
+  return { resolution, revision };
+};
+
+const releaseOperationField = (
+  engine: Engine,
+  options: {
+    branch: BranchName;
+    operation: ReleaseOpFieldOperation;
+    principal?: string;
+    sessionId: SessionId;
+    scopeKeyOverride?: string;
+  },
+): void => {
+  const { branch, operation, principal, sessionId } = options;
+  assertDefaultOperationBranch(branch);
+  validateOperationPath(operation.path);
+  if (!validateCursor(operation.cursor)) {
+    throw new OpCursorMismatchError(
+      "operation field release cursor is malformed",
+    );
+  }
+  if (typeof operation.codec !== "string") {
+    throw new OpCodecError("operation field release codec is malformed");
+  }
+  const scopeKey = options.scopeKeyOverride ??
+    resolveScopeKey(operation.scope, { principal, sessionId });
+  const params = operationFieldParams(
+    branch,
+    operation.id,
+    scopeKey,
+    operation.path,
+  );
+  const field = selectOperationField(engine, params);
+  if (
+    !field || field.active !== 1 || field.epoch !== operation.cursor.epoch ||
+    field.version !== operation.cursor.version
+  ) {
+    throw new OpCursorMismatchError("operation field release cursor mismatch");
+  }
+  if (field.codec !== operation.codec) {
+    throw new OpCodecError("operation field release codec mismatch");
+  }
+  engine.database.prepare(`
+    UPDATE op_field_epoch SET active = 0
+    WHERE branch = :branch AND id = :id AND scope_key = :scope_key
+      AND path = :path
+  `).run(params);
+};
+
+const releaseEntityOperationFields = (
+  engine: Engine,
+  branch: BranchName,
+  id: EntityId,
+  scopeKey: string,
+): void => {
+  engine.database.prepare(`
+    UPDATE op_field_epoch SET active = 0
+    WHERE branch = :branch AND id = :id AND scope_key = :scope_key
+  `).run({ branch, id, scope_key: scopeKey });
+};
+
+const assertOperationFieldsPreserved = (
+  engine: Engine,
+  options: {
+    branch: BranchName;
+    operation: SetOperation | PatchOperation;
+    principal?: string;
+    sessionId: SessionId;
+    scopeKeyOverride?: string;
+  },
+): void => {
+  const { branch, operation, principal, sessionId } = options;
+  const scopeKey = options.scopeKeyOverride ??
+    resolveScopeKey(operation.scope, { principal, sessionId });
+  const activeFields = engine.database.prepare(`
+    SELECT path, materialized
+    FROM op_field_epoch
+    WHERE branch = :branch AND id = :id AND scope_key = :scope_key
+      AND active = 1
+  `).all({ branch, id: operation.id, scope_key: scopeKey }) as Array<{
+    path: string;
+    materialized: string;
+  }>;
+  if (activeFields.length === 0) return;
+
+  const currentDocument = readStateForScopeKey(engine, {
+    branch,
+    id: operation.id,
+    scope: normalizeScope(operation.scope),
+    scopeKey,
+  })?.document;
+  const nextDocument = operation.op === "set"
+    ? operation.value
+    : applyPatchToDocument(currentDocument ?? undefined, operation.patches);
+  for (const field of activeFields) {
+    const path = parsePointer(field.path);
+    let nextValue: FabricValue;
+    try {
+      nextValue = valueAtOperationPath(nextDocument, path);
+    } catch {
+      throw new OpFieldWriteConflictError(
+        `ordinary write removes active operation field: ${path.join(".")}`,
+      );
+    }
+    const materialized = decodeMemoryBoundary(field.materialized);
+    if (
+      operationBaselineHash(nextValue) !== operationBaselineHash(materialized)
+    ) {
+      throw new OpFieldWriteConflictError(
+        `ordinary write changes active operation field: ${path.join(".")}`,
+      );
+    }
+  }
+};
+
 const applyCommitTransaction = (
   engine: Engine,
   {
@@ -3268,10 +4429,16 @@ const applyCommitTransaction = (
         ? [opIndex]
         : []
     );
+    const storedResolution = decodeMemoryBoundary(existing.resolution) as
+      & FabricValue
+      & { operationResolutions?: ApplyOpResolution[] };
     return {
       seq: existing.seq,
       branch: existing.branch,
       revisions: replayedRevisions,
+      ...(storedResolution.operationResolutions
+        ? { operationResolutions: storedResolution.operationResolutions }
+        : {}),
       ...(replayedElided.length > 0 ? { elidedOpIndexes: replayedElided } : {}),
       replayed: true,
     };
@@ -3738,7 +4905,7 @@ const applyCommitTransaction = (
       }
       continue;
     }
-    if (operation.op === "delete" || operation.op === "patch") {
+    if (operation.op !== "set") {
       throw new ProtocolError(
         `memory v2 commit cannot ${operation.op} content-addressed document ${operation.id}`,
       );
@@ -3960,6 +5127,7 @@ const applyCommitTransaction = (
   });
 
   const revisions: AppliedRevision[] = [];
+  const operationResolutions: ApplyOpResolution[] = [];
   for (const [opIndex, operation] of commit.operations.entries()) {
     if (operation.op === "sqlite") {
       // Execute the SQL inside this commit's transaction (atomic with the cell
@@ -3970,6 +5138,50 @@ const applyCommitTransaction = (
         sessionId,
       });
       continue;
+    }
+    if (operation.op === "apply-op") {
+      const applied = applyOperation(engine, {
+        branch,
+        seq,
+        opIndex,
+        operation,
+        principal: scanPrincipal,
+        sessionId: scanSession,
+        scopeKeyOverride: scopeKeyByOpIndex.get(opIndex),
+      });
+      operationResolutions.push(applied.resolution);
+      if (applied.revision) revisions.push(applied.revision);
+      continue;
+    }
+    if (operation.op === "release-op-field") {
+      releaseOperationField(engine, {
+        branch,
+        operation,
+        principal: scanPrincipal,
+        sessionId: scanSession,
+        scopeKeyOverride: scopeKeyByOpIndex.get(opIndex),
+      });
+      continue;
+    }
+    if (operation.op === "delete") {
+      releaseEntityOperationFields(
+        engine,
+        branch,
+        operation.id,
+        scopeKeyByOpIndex.get(opIndex) ??
+          resolveScopeKey(operation.scope, {
+            principal: scanPrincipal,
+            sessionId: scanSession,
+          }),
+      );
+    } else {
+      assertOperationFieldsPreserved(engine, {
+        branch,
+        operation,
+        principal: scanPrincipal,
+        sessionId: scanSession,
+        scopeKeyOverride: scopeKeyByOpIndex.get(opIndex),
+      });
     }
     if (elidedCidSetOpIndexes.has(opIndex)) continue;
     // Event-append stamping (Phase 3): a declared append's entry gets its
@@ -4015,6 +5227,17 @@ const applyCommitTransaction = (
     revisions.push(revision);
   }
 
+  if (operationResolutions.length > 0) {
+    engine.statements.updateCommitResolution.run({
+      seq,
+      resolution: encodeMemoryBoundary({
+        seq,
+        ...(resolvedPendingReads.length > 0 ? { resolvedPendingReads } : {}),
+        operationResolutions,
+      }),
+    });
+  }
+
   validateStoredSyncSchemaRefs(engine, branch, revisions, original);
 
   // Per-stream `eventWatermark` maintenance (Phase 3; events.md §4): a
@@ -4045,6 +5268,7 @@ const applyCommitTransaction = (
     seq,
     branch,
     revisions,
+    ...(operationResolutions.length > 0 ? { operationResolutions } : {}),
     ...(elidedCidSetOpIndexes.size > 0
       ? {
         elidedOpIndexes: [...elidedCidSetOpIndexes].toSorted((a, b) => a - b),
@@ -4237,9 +5461,7 @@ const writeOperation = (
     branch: BranchName;
     seq: number;
     opIndex: number;
-    // `sqlite` ops are handled in the apply loop (applySqliteOperation), never
-    // here — they are not entity revisions.
-    operation: Exclude<Operation, SqliteOperation>;
+    operation: SetOperation | PatchOperation | DeleteOperation;
     principal?: string;
     sessionId: SessionId;
 

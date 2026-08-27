@@ -184,7 +184,7 @@ function notifyEventDropped(
   },
   reason: string,
   servedKind: "dropped" | "deferred" = "dropped",
-  options: { quiet?: boolean } = {},
+  options: { quiet?: boolean; cause?: "load-park" } = {},
 ): void {
   if (options.quiet === true) {
     // A routine, counted pre-dispatch removal (the serving loop's LT1
@@ -196,10 +196,17 @@ function notifyEventDropped(
   // The serving drain's terminal arms (events.md §5): `dropped` — no
   // runnable handler, the drain writes the dropped-event notice as the
   // event's consequence and advances the stream past it (non-wedging);
-  // `deferred` — the handler was UNREACHABLE (a cold-view load), no
-  // consequence is written and a later wave re-drains the entry.
+  // `deferred` — the handler was UNREACHABLE (a cold-view load, or a
+  // required replica load that failed at the dispatch preflight's
+  // park), no consequence is written and a later wave re-drains the
+  // entry. `cause` tells the two deferrals apart for the drain's retry
+  // budget (see ServedEventDispatch.onFailure).
   try {
-    args.served?.onFailure?.({ kind: servedKind, message: reason });
+    args.served?.onFailure?.({
+      kind: servedKind,
+      message: reason,
+      ...(options.cause !== undefined ? { cause: options.cause } : {}),
+    });
   } catch (callbackError) {
     logger.error(
       "schedule-error",
@@ -234,7 +241,7 @@ export function dropQueuedEvent(
   event: QueuedEvent,
   reason: string,
   servedKind: "dropped" | "deferred" = "dropped",
-  options: { quiet?: boolean } = {},
+  options: { quiet?: boolean; cause?: "load-park" } = {},
 ): void {
   const index = state.eventQueue.indexOf(event);
   if (index >= 0) state.eventQueue.splice(index, 1);
@@ -1334,20 +1341,14 @@ export async function dispatchQueuedEvent(state: {
   // originStatus() fallback ("confirmed") would let a descendant of a failed
   // origin run.
   const requeueForNameResolution = () => {
-    // The rebuilt entry does NOT carry `served`, and no served copy may
-    // reach this path: both served constructors (the drain's and cell.ts's
-    // LT1 emission) queue with retries: false, whose RetryImmediately
-    // branch drops instead of requeueing. Requeueing one anyway would
-    // silently shed the acting identity and the failure hook — and what a
-    // served RETRY even means (which wave owns it, who re-seals) is
-    // UNSTATED semantics that must be decided, not defaulted, if this
-    // assert ever fires.
-    if (queuedEvent.served !== undefined) {
-      throw new Error(
-        "requeueForNameResolution reached with a served event; served " +
-          "retry semantics are undecided (see the comment at this assert)",
-      );
-    }
+    // A served name-resolution retry re-enters this scheduler settle. If it
+    // runs before the flush deadline, the installed destination seals its
+    // warmed-cache run into the current wave; a cut instead leaves the
+    // existing LT1-purge/durable-drain cadence in charge. The retry keeps the
+    // served carriage: acting identity, stream-entry consequence mark, LT1
+    // ownership, and failure hook. This does not opt the event into commit
+    // retries; `retry` remains false and a failed commit still belongs to the
+    // wave/drain cadence.
     const requeued: QueuedEvent = {
       id: queuedEvent.id,
       // The flag rides every requeue with the id it describes: dropping it
@@ -1364,6 +1365,9 @@ export async function dispatchQueuedEvent(state: {
       runtimeInjectedEventKeys: queuedEvent.runtimeInjectedEventKeys,
       retry,
       onCommit,
+      ...(queuedEvent.served !== undefined
+        ? { served: queuedEvent.served }
+        : {}),
     };
     insertInEnqueueOrder(state.eventQueue, requeued);
     if (requeued.originTx !== undefined) {
@@ -1446,10 +1450,12 @@ export async function dispatchQueuedEvent(state: {
       if (tx.status().status === "ready") {
         tx.abort(error);
       }
-      if (retry) {
+      if (retry || served !== undefined) {
         requeueForNameResolution();
       } else {
-        // retries: false is a one-shot; it does not re-run to resolve names.
+        // An unserved retries:false event is a one-shot; it does not re-run to
+        // resolve names. Served events take the same-wave arm above because
+        // the server, not a later client speculation, owns their result.
         logger.warn(
           "scheduler",
           "Event handler needed inSpace-name resolution but opted out of " +

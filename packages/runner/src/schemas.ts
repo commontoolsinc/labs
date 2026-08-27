@@ -4,7 +4,7 @@
  * /!\ interfaces and utilities.
  */
 
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 
 import { NAME, type Schema, UI } from "./shared.ts";
 

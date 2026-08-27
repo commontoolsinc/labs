@@ -24,7 +24,7 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import { Identity } from "@commonfabric/identity";
 import { registerSchemaDocument } from "../src/schema-registry.ts";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";

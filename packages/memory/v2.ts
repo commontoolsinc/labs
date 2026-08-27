@@ -12,7 +12,7 @@ import {
   fabricFromJsonValue,
   jsonFromFabricValue,
 } from "@commonfabric/data-model/codecs";
-import { internPathSelector } from "@commonfabric/data-model/schema-utils";
+import { internPathSelector } from "@commonfabric/data-model-schema";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
@@ -744,6 +744,77 @@ export type DeleteOperation = {
   scope?: CellScope;
 };
 
+export type OpCursor = {
+  epoch: number;
+  version: number;
+};
+
+export const CODEMIRROR_CHANGESET_CODEC = "codemirror-changeset@1";
+
+export type OperationFieldAddress = {
+  id: EntityId;
+  scope?: CellScope;
+  path: ValuePath;
+};
+
+export type ApplyOpOperation = OperationFieldAddress & {
+  op: "apply-op";
+  codec: string;
+  submissionId: string;
+  base: OpCursor | null;
+  baselineHash?: string;
+  payload: FabricValue;
+};
+
+export type ReleaseOpFieldOperation = OperationFieldAddress & {
+  op: "release-op-field";
+  codec: string;
+  cursor: OpCursor;
+};
+
+export type IntegratedOperation = {
+  opId: string;
+  cursor: OpCursor;
+  submissionId: string;
+  payload: FabricValue;
+};
+
+export type ApplyOpResolution = {
+  operationIndex: number;
+  address: OperationFieldAddress & {
+    branch: BranchName;
+    scopeKey: string;
+  };
+  codec: string;
+  submissionId: string;
+  from: OpCursor;
+  to: OpCursor;
+  operations: IntegratedOperation[];
+  duplicate: boolean;
+};
+
+export type OperationFieldQuery = OperationFieldAddress & {
+  branch?: BranchName;
+  after?: OpCursor;
+  principal?: string;
+  sessionId?: SessionId;
+};
+
+export type OperationFieldSnapshot = OperationFieldAddress & {
+  branch: BranchName;
+  scopeKey: string;
+  active: boolean;
+  codec: string | null;
+  cursor: OpCursor | null;
+  baselineHash: string;
+  materialized: FabricValue;
+  operations: IntegratedOperation[];
+  /** Lowest cursor from which the retained integrated suffix is contiguous. */
+  retainedFrom?: OpCursor;
+  /** Replace local codec state from `materialized` before continuing. */
+  reset?: boolean;
+};
+
 /**
  * A SQLite write folded into the commit, applied inside the same transaction as
  * the cell ops (atomic). It is NOT an entity revision — it has no `id` and never
@@ -761,6 +832,8 @@ export type Operation =
   | SetOperation
   | PatchOperation
   | DeleteOperation
+  | ApplyOpOperation
+  | ReleaseOpFieldOperation
   | SqliteOperation;
 
 export type ConfirmedRead = {
@@ -891,6 +964,10 @@ export type MemoryProtocolFlags = {
   modernCellRep: boolean;
   commitPreconditions: boolean;
 
+  /** The server integrates durable collaborative operation streams. */
+  applyOp: boolean;
+  /** Versioned operation codecs registered by this server build. */
+  operationCodecs?: readonly string[];
   /** Hash-keyed per-frame schema table. */
   syncSchemaTableV2: boolean;
 
@@ -951,6 +1028,8 @@ export type MemoryProtocolFlags = {
 export type WireMemoryProtocolFlags = {
   modernCellRep?: boolean;
   commitPreconditions?: boolean;
+  applyOp?: boolean;
+  operationCodecs?: readonly string[];
   syncSchemaTableV2?: boolean;
   sqliteCommitRowLabelEval?: boolean;
   pendingReadStacks?: boolean;
@@ -1106,7 +1185,18 @@ export type GraphWatchSpec = {
   query: GraphQuery;
 };
 
-export type WatchSpec = QueryWatchSpec | GraphWatchSpec;
+export type OperationWatchSpec = {
+  id: string;
+  kind: "operation";
+  query: Omit<OperationFieldQuery, "principal" | "sessionId">;
+};
+
+export type WatchSpec = QueryWatchSpec | GraphWatchSpec | OperationWatchSpec;
+
+export type OperationFieldDelivery = {
+  watchId: string;
+  field: OperationFieldSnapshot;
+};
 
 export type SessionSyncUpsert = {
   branch: BranchName;
@@ -1163,6 +1253,7 @@ export type SessionSync = {
   caughtUpLocalSeq?: number;
   upserts: SessionSyncUpsert[];
   removes: SessionSyncRemove[];
+  operationFields?: OperationFieldDelivery[];
 };
 
 export type WatchSetResult = {
@@ -1193,6 +1284,19 @@ export type GraphQueryRequest = {
   space: string;
   sessionId: SessionId;
   query: GraphQuery;
+};
+
+export type OperationFieldQueryResult = {
+  serverSeq: number;
+  field: OperationFieldSnapshot;
+};
+
+export type OperationFieldQueryRequest = {
+  type: "op.query";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  query: Omit<OperationFieldQuery, "principal" | "sessionId">;
 };
 
 export type EntityIdListRequest = {
@@ -1401,6 +1505,7 @@ export type ClientMessage =
   | SessionOpenRequest
   | TransactRequest
   | GraphQueryRequest
+  | OperationFieldQueryRequest
   | EntityIdListRequest
   | EntityIdLookupRequest
   | SqliteQueryRequest
@@ -1569,6 +1674,8 @@ export function resetOwnWriteEchoConfig(): void {
 export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   modernCellRep: getModernCellRepConfig(),
   commitPreconditions: getCommitPreconditionsConfig(),
+  applyOp: true,
+  operationCodecs: [CODEMIRROR_CHANGESET_CODEC],
   // A build-inherent capability, not configuration: this build's engine always
   // evaluates row-label rules at commit (sqlite/commit-eval.ts), so it always
   // advertises the fact. Peers that see it absent (an older server) keep their
@@ -1616,6 +1723,22 @@ export const parseMemoryProtocolFlags = (
   if (
     commitPreconditions !== undefined &&
     typeof commitPreconditions !== "boolean"
+  ) {
+    return null;
+  }
+
+  const applyOp = value.applyOp;
+  if (applyOp !== undefined && typeof applyOp !== "boolean") {
+    return null;
+  }
+
+  const operationCodecs = value.operationCodecs;
+  if (
+    operationCodecs !== undefined &&
+    (!Array.isArray(operationCodecs) ||
+      operationCodecs.some((codec) =>
+        typeof codec !== "string" || !/@[1-9][0-9]*$/.test(codec)
+      ) || new Set(operationCodecs).size !== operationCodecs.length)
   ) {
     return null;
   }
@@ -1687,6 +1810,10 @@ export const parseMemoryProtocolFlags = (
   return {
     modernCellRep: modernCellRep === true,
     commitPreconditions: commitPreconditions === true,
+    applyOp: applyOp === true,
+    ...(operationCodecs === undefined
+      ? {}
+      : { operationCodecs: [...operationCodecs].sort() as string[] }),
     syncSchemaTableV2: syncSchemaTableV2 === true,
     // Absent (an older peer) parses to false: the capability must be
     // POSITIVELY advertised for the runner to relax its write gate.
@@ -1712,6 +1839,10 @@ export const wireMemoryProtocolFlags = (
 ): WireMemoryProtocolFlags => ({
   modernCellRep: flags.modernCellRep,
   commitPreconditions: flags.commitPreconditions,
+  applyOp: flags.applyOp,
+  ...(flags.operationCodecs === undefined
+    ? {}
+    : { operationCodecs: flags.operationCodecs }),
   syncSchemaTableV2: flags.syncSchemaTableV2,
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
   pendingReadStacks: flags.pendingReadStacks,

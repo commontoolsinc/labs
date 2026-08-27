@@ -17,6 +17,7 @@ import type { CellScope } from "@commonfabric/api";
 import {
   type Cell,
   getPatternIdentityRef,
+  getPatternSource,
   type JSONSchema,
   schemaAcceptsOpaqueCellValue,
 } from "@commonfabric/runner";
@@ -277,6 +278,10 @@ export async function surveyPieces(
       patternIdentity: pin.patternIdentity,
       symbol: pin.symbol,
       retained: pin.retained,
+      // The origin rides the row so the artifact records what the plan was
+      // built against. It is this read and nothing later: what a run
+      // detaches is the run's to report, on its own row.
+      ...(pin.origin === undefined ? {} : { origin: pin.origin }),
       ...(pin.revisionId === undefined ? {} : { revisionId: pin.revisionId }),
     };
     // An own-property check: a phase named like an `Object.prototype` member
@@ -370,6 +375,17 @@ export interface PiecePin {
   /** The entry export the identity runs. */
   symbol: string;
 
+  /**
+   * The origin the piece follows, exactly as it records it; absent when the
+   * piece is detached. Read raw rather than classified, as
+   * `readRestorableSource` in [piece-restore.ts](./piece-restore.ts) reads it
+   * and for the same reason: a classified read reports an origin this runtime
+   * cannot resolve as detached, while a write detaches such an origin like
+   * any other, so reading it classified would leave exactly those pieces
+   * unrecorded.
+   */
+  origin?: string;
+
   /** The current source revision, when the piece keeps a log. */
   revisionId?: string;
 
@@ -378,11 +394,12 @@ export interface PiecePin {
 }
 
 /**
- * Read one piece's source pin: identity, symbol, current revision when a log
- * exists, and whether the identity's source is verifiably retained. One
- * synced read of the piece plus one retained-source load cached per identity
- * — the piece is never run, and nothing else is pulled. Returns `undefined`
- * for a piece carrying no pattern identity.
+ * Read one piece's source pin: identity, symbol, the origin it follows,
+ * current revision when a log exists, and whether the identity's source is
+ * verifiably retained. One synced read of the piece plus one
+ * retained-source load cached per identity — the piece is never run, and
+ * nothing else is pulled. Returns `undefined` for a piece carrying no
+ * pattern identity.
  */
 export async function readPiecePin(
   pieces: PiecesController,
@@ -391,12 +408,21 @@ export async function readPiecePin(
   scope?: CellScope,
 ): Promise<PiecePin | undefined> {
   const controller = await pieces.get(piece, false, undefined, scope);
-  const state = readPieceSourceMetadata(pieces.runtime, controller.getCell());
+  const cell = controller.getCell();
+  const state = readPieceSourceMetadata(pieces.runtime, cell);
   if (state.pattern === undefined) return undefined;
+  const recorded = getPatternSource(cell);
+  // An empty recorded origin names no place a source can be resolved from,
+  // and the plan codec refuses one — a survey must not emit a plan its own
+  // codec rejects — so it reads as detached here.
+  const origin = recorded === undefined || recorded === ""
+    ? undefined
+    : recorded;
   return {
     piece: controller.id,
     patternIdentity: state.pattern.identity,
     symbol: state.pattern.symbol,
+    ...(origin === undefined ? {} : { origin }),
     ...(state.currentRevisionId === undefined
       ? {}
       : { revisionId: state.currentRevisionId }),
@@ -422,7 +448,7 @@ const MEMBER_LIST_SCHEMA = {
  * per piece. Bare document existence would be cheaper and would lie: a
  * malformed entry document exists while nothing can restore from it.
  */
-async function isSourceRetained(
+export async function isSourceRetained(
   pieces: PiecesController,
   identity: string,
   cache: Map<string, boolean>,

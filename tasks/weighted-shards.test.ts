@@ -44,6 +44,21 @@ describe("weighted-shards", () => {
     }
   });
 
+  it("rejects invalid shard counts", () => {
+    for (const total of [0, -1, 1.5, Number.POSITIVE_INFINITY]) {
+      expect(() => assignWeightedShards([], total)).toThrow(
+        `Shard count must be a positive safe integer, got ${total}.`,
+      );
+    }
+  });
+
+  it("rejects invalid item weights", () => {
+    for (const weight of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => assignWeightedShards([{ name: "item", weight }], 1))
+        .toThrow("Weight for item must be positive and finite.");
+    }
+  });
+
   it("places grouped items on distinct shards", () => {
     const assignments = assignWeightedShards([
       { name: "piece-1", weight: 5, group: "piece" },

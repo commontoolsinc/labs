@@ -14,7 +14,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
-import { Runtime } from "@commonfabric/runner";
+import { Runtime, setPatternSource } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import {
@@ -22,10 +22,10 @@ import {
   resolveLocalSourceProgram,
 } from "../../src/ops/bulk-local.deno.ts";
 import {
+  type ApplyReport,
+  type ApplyRow,
+  type ApplySessions,
   retargetPieces,
-  type RetargetReport,
-  type RetargetRow,
-  type RetargetSessions,
 } from "../../src/ops/bulk-retarget.deno.ts";
 import type {
   PiecePlan,
@@ -56,7 +56,7 @@ describe("bulk-retarget", () => {
   let runtimes: Runtime[];
   let opens: number;
   let closes: number;
-  let sessions: RetargetSessions;
+  let sessions: ApplySessions;
   let dir: string;
 
   beforeEach(async () => {
@@ -172,7 +172,7 @@ describe("bulk-retarget", () => {
    * survive with the outcomes it already holds, counting the preflight's
    * close as the first.
    */
-  function failingCloseAt(nth: number): RetargetSessions {
+  function failingCloseAt(nth: number): ApplySessions {
     let attempts = 0;
     return {
       open: () => sessions.open(),
@@ -191,7 +191,7 @@ describe("bulk-retarget", () => {
    * another writer putting `main` on it — the race a group session's own
    * read is there to catch.
    */
-  function raceTo(main: string, victim: string): RetargetSessions {
+  function raceTo(main: string, victim: string): ApplySessions {
     let raced = false;
     let sessionIndex = 0;
     return {
@@ -214,6 +214,57 @@ describe("bulk-retarget", () => {
                     dangerouslyAllowIncompatibleSchema: true,
                   });
                   await pieces.synced();
+                }
+                return target.get(id, run);
+              };
+            }
+            const value = Reflect.get(target, prop, receiver);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        }) as PiecesController;
+      },
+      close: (pieces) => sessions.close(pieces),
+    };
+  }
+
+  /**
+   * Sessions in which another writer changes `victim`'s ORIGIN — and only
+   * its origin — between the engine's classifying read and the write step's
+   * own. The pattern reference is untouched, so the row still classifies as
+   * outstanding and the write still commits; what moves is the value the
+   * write detaches, which is the reading the report has to take from the
+   * write rather than from the plan.
+   */
+  function changeOriginBeforeWrite(
+    victim: string,
+    origin: string,
+  ): ApplySessions {
+    let sessionIndex = 0;
+    return {
+      open: async () => {
+        sessionIndex += 1;
+        const applySession = sessionIndex >= 2;
+        let reads = 0;
+        const pieces = await sessions.open();
+        return new Proxy(pieces, {
+          get(target, prop, receiver) {
+            if (prop === "get") {
+              return async (id: string, run?: boolean) => {
+                if (id === victim && applySession) {
+                  reads += 1;
+                  // The engine reads once to classify the row, and the write
+                  // step reads again to write it. Landing on the second is
+                  // landing inside the window the write itself closes.
+                  if (reads === 2) {
+                    const piece = await target.get(id, false);
+                    const { error } = await pieces.runtime.editWithRetry(
+                      (tx) => {
+                        setPatternSource(piece.getCell(), tx, origin);
+                      },
+                    );
+                    if (error !== undefined) throw error;
+                    await pieces.synced();
+                  }
                 }
                 return target.get(id, run);
               };
@@ -275,6 +326,119 @@ describe("bulk-retarget", () => {
     expect(pin?.patternIdentity).toBe(
       (plan.rows[0].op as RetargetOp).patternIdentity,
     );
+  });
+
+  it("carries the plan's origin onto every report row, and the write detaches it", async () => {
+    const { plan, ids } = await seed(1);
+    const origin = "https://origins.test/member.tsx";
+    const stamper = await sessions.open();
+    const target = await stamper.get(ids[0], false);
+    const { error } = await stamper.runtime.editWithRetry((tx) => {
+      setPatternSource(target.getCell(), tx, origin);
+    });
+    if (error !== undefined) throw error;
+    await stamper.synced();
+    await sessions.close(stamper);
+    const following: PiecePlan = {
+      header: plan.header,
+      rows: [{
+        ...plan.rows[0],
+        expect: { ...plan.rows[0].expect, origin },
+      }],
+    };
+
+    const dry = await retargetPieces(sessions, { plan: following });
+    const applied = await retargetPieces(sessions, {
+      plan: following,
+      apply: true,
+    });
+
+    // The dry run has no write to report, so it carries the plan's record
+    // and nothing about a detach — that being the only moment the detach is
+    // still a decision.
+    expect(dry.rows[0].verdict).toBe("outstanding");
+    expect(dry.rows[0].origin).toBe(origin);
+    expect(dry.rows[0].detachedOrigin).toBeUndefined();
+    // The applied row carries both, and here they agree: nothing moved the
+    // origin between the survey and the write.
+    expect(applied.rows[0].verdict).toBe("applied");
+    expect(applied.rows[0].origin).toBe(origin);
+    expect(applied.rows[0].detachedOrigin).toBe(origin);
+    // What the report records is a real detach: the piece follows nothing
+    // afterwards, and re-attaching it is by hand from the string the row
+    // carried.
+    expect((await pinOf(ids[0]))?.origin).toBeUndefined();
+  });
+
+  it("reports the origin the write detached, not the one the plan recorded", async () => {
+    const { plan, ids } = await seed(1);
+    const recorded = "https://origins.test/recorded.tsx";
+    const live = "https://origins.test/live.tsx";
+    const stamper = await sessions.open();
+    const target = await stamper.get(ids[0], false);
+    const { error } = await stamper.runtime.editWithRetry((tx) => {
+      setPatternSource(target.getCell(), tx, recorded);
+    });
+    if (error !== undefined) throw error;
+    await stamper.synced();
+    await sessions.close(stamper);
+    const following: PiecePlan = {
+      header: plan.header,
+      rows: [{
+        ...plan.rows[0],
+        expect: { ...plan.rows[0].expect, origin: recorded },
+      }],
+    };
+
+    const report = await retargetPieces(
+      changeOriginBeforeWrite(ids[0], live),
+      { plan: following, apply: true },
+    );
+
+    // Only the reference is a precondition, so moving the origin alone does
+    // not refuse the row — the write lands and detaches what it found.
+    expect(report.rows[0].verdict).toBe("applied");
+    expect(report.rows[0].detachedOrigin).toBe(live);
+    // The plan's reading survives beside it rather than being overwritten:
+    // an operator whose plan said one thing while the run did another is
+    // owed both, the disagreement being what tells them the plan went stale.
+    expect(report.rows[0].origin).toBe(recorded);
+    expect((await pinOf(ids[0]))?.origin).toBeUndefined();
+  });
+
+  it("reports no detached origin when the write found the piece already detached", async () => {
+    const { plan, ids } = await seed(1);
+    const recorded = "https://origins.test/recorded.tsx";
+    const stamper = await sessions.open();
+    const target = await stamper.get(ids[0], false);
+    const { error } = await stamper.runtime.editWithRetry((tx) => {
+      setPatternSource(target.getCell(), tx, recorded);
+    });
+    if (error !== undefined) throw error;
+    await stamper.synced();
+    // Somebody detaches the piece by hand between the survey and the run.
+    await target.changeSource({ kind: "detach" });
+    await stamper.synced();
+    await sessions.close(stamper);
+    const following: PiecePlan = {
+      header: plan.header,
+      rows: [{
+        ...plan.rows[0],
+        expect: { ...plan.rows[0].expect, origin: recorded },
+      }],
+    };
+
+    const report = await retargetPieces(sessions, {
+      plan: following,
+      apply: true,
+    });
+
+    // The row's write detached nothing, and reporting the recorded origin as
+    // detached would send an operator re-attaching an origin this run never
+    // touched. The plan's reading stays, labelled as the plan's.
+    expect(report.rows[0].verdict).toBe("applied");
+    expect(report.rows[0].detachedOrigin).toBeUndefined();
+    expect(report.rows[0].origin).toBe(recorded);
   });
 
   it("resumes as a re-invocation: landed rows are not rewritten", async () => {
@@ -368,7 +532,7 @@ describe("bulk-retarget", () => {
     // The failure holds for the whole armed session, so the state check's
     // own re-read fails too and the row honestly reports unknown state.
     let armed = false;
-    const flaky: RetargetSessions = {
+    const flaky: ApplySessions = {
       open: async () => {
         const pieces = await sessions.open();
         return new Proxy(pieces, {
@@ -392,8 +556,8 @@ describe("bulk-retarget", () => {
       armed = true;
     };
 
-    const first: RetargetReport = await (async () => {
-      const preflightAware: RetargetSessions = {
+    const first: ApplyReport = await (async () => {
+      const preflightAware: ApplySessions = {
         open: (() => {
           let calls = 0;
           return async () => {
@@ -429,7 +593,7 @@ describe("bulk-retarget", () => {
 
   it("blocks the start on a preflight read failure, naming the row", async () => {
     const { plan, ids } = await seed(2);
-    const flaky: RetargetSessions = {
+    const flaky: ApplySessions = {
       open: async () => {
         const pieces = await sessions.open();
         return new Proxy(pieces, {
@@ -507,7 +671,7 @@ describe("bulk-retarget", () => {
     let attempts = 0;
     // Preflight and the first apply group open; the second group's session
     // does not, after two writes have already been committed.
-    const failingGroup: RetargetSessions = {
+    const failingGroup: ApplySessions = {
       open: () => {
         attempts += 1;
         if (attempts === 3) {
@@ -556,7 +720,7 @@ describe("bulk-retarget", () => {
     await sessions.close(namer);
     const before = { opens, closes };
     let attempts = 0;
-    const strayGroup: RetargetSessions = {
+    const strayGroup: ApplySessions = {
       open: () => {
         attempts += 1;
         // Preflight and the first apply group serve the plan's space; the
@@ -602,7 +766,7 @@ describe("bulk-retarget", () => {
   it("hands a row callback's throw back rather than failing the row it settled", async () => {
     const { plan, ids } = await seed(3);
     const before = { opens, closes };
-    const seen: RetargetRow[] = [];
+    const seen: ApplyRow[] = [];
     let failure: unknown;
 
     // The reporter gives up on the first row whose write lands.
@@ -644,7 +808,7 @@ describe("bulk-retarget", () => {
     const elsewhere = `${spaceName}-elsewhere`;
     const before = { opens, closes };
     let attempts = 0;
-    const strayGroup: RetargetSessions = {
+    const strayGroup: ApplySessions = {
       open: () => {
         attempts += 1;
         return attempts === 3 ? openSession(elsewhere) : sessions.open();
@@ -827,7 +991,7 @@ describe("bulk-retarget", () => {
     // load within a session: the cache is the session's, so the loads a run
     // pays are its session count, not its row count.
     let loads = 0;
-    const counted: RetargetSessions = {
+    const counted: ApplySessions = {
       open: async () => {
         const pieces = await sessions.open();
         const patternManager = new Proxy(pieces.runtime.patternManager, {
@@ -992,5 +1156,159 @@ describe("bulk-retarget", () => {
     await expect(
       retargetPieces(sessions, { plan, groupSize: 0 }),
     ).rejects.toThrow("positive integer");
+  });
+  it("refuses a live run over a row whose prior source is not retained", async () => {
+    // The reversibility gate, and it belongs here rather than at the
+    // reversal: accepting "this piece cannot be rolled back" is only a
+    // decision while the piece has not moved yet.
+    const { plan, ids } = await seed(2);
+    const unretained: PiecePlan = {
+      header: plan.header,
+      rows: plan.rows.map((row, index) =>
+        index === 0
+          ? { ...row, expect: { ...row.expect, retained: false } }
+          : row
+      ),
+    };
+    await expect(
+      retargetPieces(sessions, { plan: unretained, apply: true }),
+    ).rejects.toThrow("the prior source is not retained for " + ids[0]);
+    // Nothing was written: the run never started.
+    expect((await pinOf(ids[1]))?.patternIdentity).toBe(
+      plan.rows[1].expect.patternIdentity,
+    );
+  });
+
+  it("reports over an unretained row on a dry run, asking for no acceptance", async () => {
+    // A dry run moves nothing, and reporting where such a piece stands is
+    // how the operator finds out there is something to decide.
+    const { plan } = await seed(2);
+    const unretained: PiecePlan = {
+      header: plan.header,
+      rows: plan.rows.map((row, index) =>
+        index === 0
+          ? { ...row, expect: { ...row.expect, retained: false } }
+          : row
+      ),
+    };
+    const report = await retargetPieces(sessions, { plan: unretained });
+    expect(report.rows.map((row) => row.verdict)).toEqual([
+      "outstanding",
+      "outstanding",
+    ]);
+    expect(report.complete).toBe(true);
+  });
+
+  it("runs an unretained row once the operator accepts it by name", async () => {
+    const { plan, ids } = await seed(2);
+    const unretained: PiecePlan = {
+      header: plan.header,
+      rows: plan.rows.map((row, index) =>
+        index === 0
+          ? { ...row, expect: { ...row.expect, retained: false } }
+          : row
+      ),
+    };
+    const report = await retargetPieces(sessions, {
+      plan: unretained,
+      accepted: [ids[0]],
+      apply: true,
+    });
+    expect(report.applied).toBe(2);
+    expect(report.complete).toBe(true);
+  });
+
+  it("refuses an acceptance that covers no unretained row of the plan", async () => {
+    // An operator who believes they accounted for a piece must not be
+    // accounting for none.
+    const { plan, ids } = await seed(2);
+    const unretained: PiecePlan = {
+      header: plan.header,
+      rows: plan.rows.map((row, index) =>
+        index === 0
+          ? { ...row, expect: { ...row.expect, retained: false } }
+          : row
+      ),
+    };
+    await expect(
+      retargetPieces(sessions, {
+        plan: unretained,
+        accepted: [ids[1]],
+        apply: true,
+      }),
+    ).rejects.toThrow("nothing accepts as unrollbackable for " + ids[1]);
+  });
+  it("refuses a piece another writer moved between the recheck and the write", async () => {
+    // The window the engine's recheck alone cannot close. In one group
+    // session the victim is read twice: once by the recheck that proves its
+    // standing, once by the write itself. A writer landing between the two
+    // is invisible to the recheck, and a write that adopted whatever it
+    // found would commit over that change. The write carries the proved
+    // reference as its own precondition instead, so the row is refused —
+    // the same rule the rollback's write step holds to.
+    const { plan, ids } = await seed(3);
+    await Deno.writeTextFile(`${dir}/member-v3.tsx`, memberSource("three"));
+    const victim = ids[0];
+    let gets = 0;
+    let raced = false;
+    let sessionIndex = 0;
+    const raceBeforeWrite: ApplySessions = {
+      open: async () => {
+        sessionIndex += 1;
+        const applySession = sessionIndex >= 2;
+        const pieces = await sessions.open();
+        return new Proxy(pieces, {
+          get(target, prop, receiver) {
+            if (prop === "get") {
+              return async (id: string, run?: boolean) => {
+                if (id === victim && applySession) {
+                  gets += 1;
+                  // The second read of this piece in the apply session is
+                  // the write's own; the first was the recheck. Racing
+                  // here lands exactly between them.
+                  if (gets === 2 && !raced) {
+                    raced = true;
+                    const other = await resolveLocalSourceProgram(
+                      pieces.runtime,
+                      { main: `${dir}/member-v3.tsx` },
+                    );
+                    const piece = await target.get(id, false);
+                    await piece.setPattern(other, {
+                      dangerouslyAllowIncompatibleSchema: true,
+                    });
+                    await pieces.synced();
+                  }
+                }
+                return target.get(id, run);
+              };
+            }
+            const value = Reflect.get(target, prop, receiver);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        }) as PiecesController;
+      },
+      close: (pieces) => sessions.close(pieces),
+    };
+    const report = await retargetPieces(raceBeforeWrite, {
+      plan,
+      apply: true,
+    });
+    expect(raced).toBe(true);
+    expect(report.rows[0].verdict).toBe("refused");
+    expect(report.rows[0].problem).toContain("this write was proved against");
+    // The other writer's change stands: the run stopped rather than writing
+    // over something this plan never accounted for.
+    const pin = await pinOf(victim);
+    expect(pin?.patternIdentity).toBe(
+      await programEntryIdentity(
+        await resolveLocalSourceProgram((await sessions.open()).runtime, {
+          main: `${dir}/member-v3.tsx`,
+        }),
+      ),
+    );
+    expect(report.applied).toBe(0);
+    expect(report.complete).toBe(false);
+    expect(report.rows[1].verdict).toBe("unattempted");
+    expect(report.rows[2].verdict).toBe("unattempted");
   });
 });

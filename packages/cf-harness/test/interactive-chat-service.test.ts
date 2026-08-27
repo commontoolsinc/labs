@@ -1772,7 +1772,7 @@ Deno.test("a session stays reusable after a turn fails mid-tool", async () => {
   );
 });
 
-Deno.test("a rollback whose write fails leaves the record on the stored history", async () => {
+Deno.test("a normalization whose write fails leaves the record on the stored history", async () => {
   const corrupt: HarnessTranscriptMessage[] = [
     { role: "user", content: "Read both files" },
     {
@@ -1815,8 +1815,8 @@ Deno.test("a rollback whose write fails leaves the record on the stored history"
 
   await assertRejects(() => service.initializeFromStore());
 
-  // The rollback never committed, so the record must still name the history the
-  // store holds rather than a prefix that only ever existed in memory.
+  // The normalization never committed, so the record still names the history
+  // held by the store and remains unavailable for a provider request.
   const started = await service.startTurn("req-1", {
     sessionId: "session-1",
     turnId: "turn-1",

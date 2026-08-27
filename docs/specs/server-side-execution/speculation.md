@@ -391,7 +391,25 @@ either: the predicate demands the derivation itself — `derived` — not
 merely a server-side write (`!== "derived"`, conservative, converging
 on the next cover). The elision posture above is unchanged: no rewrite
 means the doc's seq stays BELOW the floor, and the predicate is never
-consulted. Carriage: the covering commit's class rides session-frame
+consulted. **A content-addressed doc the store holds witnesses at ANY cover seq
+(#6304, 2026-08-25): its stored envelope is immutable — admission
+refuses a `cid:` delete or patch outright, and a `cid:` set unless
+the whole stored envelope, metadata included, is value-equal;
+identical rewrites are elided — so its cover never advances and the
+floor comparison can never pass for it. The witness rests on that
+commit-boundary immutability: a metadata-write carve-out for `cid:`
+docs (a label merge for two sources of one hash, say) would have to
+revisit it.
+Nothing newer can be pending at the id, and retiring the layer
+renders the STORED value whatever the layer holds: the store wins,
+the disposition every divergence gets (a divergent speculative cid
+layer is inadmissible content that can never arrive; holding the
+entry for it would strand the entry, and its sibling layers,
+forever). A cid doc with NO confirmed cover still holds the entry:
+nothing has served the schema document yet. Pinned in
+`speculation-arrival-gate.test.ts` — scripted with its mutation, and
+on a real replica for identical, divergent, and unstored cid
+writes.** Carriage: the covering commit's class rides session-frame
 upserts as `coverClass` (populated only under the flag — the OFF wire
 is byte-identical), is recorded on the replica's confirmed record
 (frames on integrate; `authored`/`derived` at own-commit promotions),

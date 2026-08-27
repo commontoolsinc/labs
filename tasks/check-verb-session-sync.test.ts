@@ -17,10 +17,13 @@ import { expect } from "@std/expect";
 import { dirname, fromFileUrl, join } from "@std/path";
 import {
   actReferences,
+  BULK_DEMO_PATH,
+  BULK_TOUR_PATH,
   commandMatches,
   DEMO_PATH,
   demoActs,
   demoCommands,
+  demoFor,
   findViolations,
   joinContinuations,
   main,
@@ -204,11 +207,72 @@ describe("check-verb-session-sync", () => {
           "```bash\ncf frobnicate --nothing-like-this\n```\n",
         );
         const errors: string[] = [];
-        expect(await main({ mdPath, error: (l) => errors.push(l) })).toBe(1);
+        // A document the table does not name says which demo it is held to.
+        expect(
+          await main({
+            mdPath,
+            shPath: DEMO_PATH,
+            error: (l) => errors.push(l),
+          }),
+        ).toBe(1);
         expect(errors.length).toBeGreaterThanOrEqual(2);
       } finally {
         await Deno.remove(mdPath);
       }
+    });
+
+    it("holds a document to the demo shPath names", async () => {
+      // The pairing is the injectable unit: the same document is a violation
+      // against the default demo and clean against the demo that runs it.
+      const dir = await Deno.makeTempDir();
+      try {
+        const mdPath = `${dir}/tour.md`;
+        const shPath = `${dir}/demo.sh`;
+        await Deno.writeTextFile(
+          mdPath,
+          "```bash\ncf frobnicate --nothing-like-this\n```\n",
+        );
+        await Deno.writeTextFile(
+          shPath,
+          "#!/usr/bin/env bash\nrun cf frobnicate --nothing-like-this\n",
+        );
+        const lines: string[] = [];
+        expect(await main({ mdPath, shPath, log: (l) => lines.push(l) }))
+          .toBe(0);
+        // The same document against the verb demo, which does not run it.
+        expect(await main({ mdPath, shPath: DEMO_PATH, error: () => {} }))
+          .toBe(1);
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("refuses a demo that names no document to check against it", async () => {
+      // Silently ignoring it would leave the caller believing the run used
+      // the demo they passed.
+      await expect(main({ shPath: "/nowhere/demo.sh" })).rejects.toThrow(
+        /pass both/,
+      );
+    });
+
+    it("gives a named document the demo the table pairs it with", async () => {
+      // Not a default: the bulk tour quotes commands the verb demo never
+      // runs, so defaulting would report every one of them as invented.
+      const lines: string[] = [];
+      expect(
+        await main({ mdPath: BULK_TOUR_PATH, log: (l) => lines.push(l) }),
+      ).toBe(0);
+      expect(lines.join("\n")).toContain("1 document(s)");
+      expect(demoFor(BULK_TOUR_PATH)).toBe(BULK_DEMO_PATH);
+      expect(demoFor(TOUR_PATH)).toBe(DEMO_PATH);
+    });
+
+    it("refuses a document no demo is paired with", async () => {
+      // The other half of the same rule: half a pairing that names nothing
+      // is refused rather than sent to whichever demo happens to be first.
+      await expect(main({ mdPath: "docs/nowhere.md" })).rejects.toThrow(
+        /No demo is paired with/,
+      );
     });
 
     it("does not let a reasonless marker exempt anything", () => {

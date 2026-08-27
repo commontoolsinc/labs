@@ -1,8 +1,10 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import { markIfcBearingLinkCrossing } from "./schema-ifc.ts";
 import { isObjectOrArray } from "@commonfabric/utils/types";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
-import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
+import {
+  internSchema,
+  isNontrivialSchema,
+} from "@commonfabric/data-model-schema";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
   linkPayloadAtProbe,

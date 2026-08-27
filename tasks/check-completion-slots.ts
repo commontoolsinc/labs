@@ -101,6 +101,8 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
   ["storage-stats-limit", "a count"],
   ["wait", "a patience in seconds"],
   ["group-size", "how many pieces one session serves; a count"],
+  ["history-limit", "an operation history row count"],
+  ["submission-after-seq", "a revision sequence number"],
   // Identifiers the caller brings from outside, or coins.
   ["did", "a DID, pasted from elsewhere"],
   ["as", "a DID whose view to approximate, pasted from elsewhere"],
@@ -111,6 +113,18 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
   ["cause-prefix", "a prefix the caller chooses"],
   ["name", "a name the caller chooses"],
   ["session", "a session id, read out of the data being inspected"],
+  [
+    "revision",
+    "a revision id from one piece's own source log, read off the listing " +
+    "`cf piece restore` prints for it",
+  ],
+  [
+    "accept-unretained",
+    "a piece address out of the run's own unretained refusal — the rows of " +
+    "the plan in hand whose prior source is not retained, which the piece " +
+    "registry neither holds nor bounds: it omits the holder-created members " +
+    "a bulk operation moves, and its slugs are not addresses this flag takes",
+  ],
   ["branch", "a branch name; the default is the empty one"],
   ["cfc-xattr-namespace", "a namespace the caller chooses"],
   // Expressions and lists with their own grammar.
@@ -148,6 +162,7 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
   ["inspect graph:scope", "the same"],
   ["inspect history:scope", "the same"],
   ["inspect html:scope", "the same"],
+  ["inspect operations:scope", "the same"],
   ["inspect piece:scope", "the same"],
   ["inspect timeline:scope", "the same"],
   ["inspect value-at:scope", "the same"],

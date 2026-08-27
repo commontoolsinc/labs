@@ -244,7 +244,7 @@ ambient-state one.
   outcome (committed or requeued — every abort arm reports its
   event-handler contributions as requeued), by a deferral (no mark; the
   rescan retries), by its final callback when nothing of it reached a
-  wave (an aborted run, a name-resolution drop), or by a notice that
+  wave (an aborted run), or by a notice that
   failed to stage — a still-pending entry then re-drains exactly as
   before. Releasing at the copy's SEAL would not do: the mark rides an
   uncommitted wave while the entry is still pending, and a re-drain in
@@ -442,8 +442,12 @@ loop's duty).
   paths, one durable fate: a PRE-SEAL refusal (transport,
   authorization, a handler abort — the non-CFC give-up classes)
   settles the copy through the scheduler's commit disposition, which
-  drops it without scheduler-side retry (served copies opt out of
-  backoff; the wave IS their retry cadence, serving-loop.md §3d). A
+  drops it without scheduler-side commit retry (served copies opt out
+  of backoff; the wave IS their retry cadence, serving-loop.md §3d).
+  `RetryImmediately` after in-space name resolution is not a commit
+  failure: the scheduler requeues that copy with its served carriage,
+  and the current settle runs it against the warmed name cache unless
+  the flush deadline hands it back to the durable drain cadence. A
   STORAGE-TIME commit-rule refusal (`RowLabelCommitError`) never
   reaches that disposition on a served copy — the handler tx sealed
   into the wave and its commit resolved at seal-accept — and instead

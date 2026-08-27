@@ -5712,14 +5712,19 @@ supply; OW29/OW32/OW34 closed):
     delivered-and-verified — an UNCAUGHT client-replica throw
     (`#validateArrivedSchemaDocuments`) that failed files wholesale
     (all red lanes real-toolshed; in-process harnesses unaffected;
-    main green at the identical base). The CI ON lanes now run
-    ensure-off (`cf test` needs nothing: no serving host exists in
-    `packages/cli` — the ruled opt-in is its status quo). Flagged, not
-    filled: the exposed delivery gap (computed delivered without its
-    verified `cid:` ref) is PRE-EXISTING machinery, latent again with
-    the lanes off; and no CI lane now exercises the production ensure
-    at the true topology — unit pins and the measurement harness carry
-    it until a lane opts in.
+    main green at the identical base). The CI ON lanes opted out of
+    the ensure while that gap was open (`cf test` needs nothing: no
+    serving host exists in `packages/cli` — the ruled opt-in is its
+    status quo); the exposed delivery gap became OW61's row, whose
+    arrival CONTAINMENT (per-doc quarantine, never a process kill)
+    landed with #6223, and whose residual client-side absorb defect
+    was root-caused and FIXED with #6292 (pre-watch-response
+    `session/effect` frames now reach the replica in wire order —
+    OW61's tail carries the mechanism). WITH THE OPT-OUT RETIRED
+    (the ensure-on lane flip PR, following #6223 and #6292): the ON
+    lanes run the production default again and ARE the CI coverage
+    of the ensure at the true topology — the "no CI lane exercises
+    the ensure" flag this tail carried is closed.
     **CATCH-UP-AND-START BUILT 2026-08-24 — the ruled close of the
     client-start class. RULED 2026-08-24: the coordinator's
     recommendation, ACKED verbatim by the owner ("so ack on all
@@ -5998,6 +6003,85 @@ supply; OW29/OW32/OW34 closed):
     The lift bar remains 10/10 quiet-and-loaded ON. Full ledger and
     per-run evidence paths:
     [`ow45-default-app-reload-post-6292-remeasure-2026-08-26.md`](../../history/plans/server-execution-v2/optimize/ow45-default-app-reload-post-6292-remeasure-2026-08-26.md).
+    **ROOT-CAUSED 2026-08-26: the campaign launcher split browser and
+    serving pattern-source authority; the seventh event was durable but
+    STRANDED before served admission, and the recursive setup error was a
+    finite witness of that divergence rather than the event's refusal.** The
+    off-repository launcher gave the browser the run's independent 97xx
+    `API_URL` but did not set `API_URL` on the toolshed process. Toolshed's
+    supported remote-source posture therefore used the default
+    `http://localhost:8000` while storage and the browser used the run
+    toolshed. Only red r01 had an unrelated old toolshed answering on 8000:
+    the browser compiled current note identity `30y74xQLD…#default`; the
+    serving updater fetched `c-jbvEpTaj…#default`, whose source maps exactly
+    to repository commit `8ca18b71e`. Green r02/r03 got connection refused
+    from the implicit source host, so no conflicting candidate was installed;
+    a self-source live control likewise avoided the path.
+
+    Store classification, now definitive: the seventh `Create` WAS emitted
+    and durably appended at seq 87, with a registered handler, but its sidecar
+    has no consequence, terminal status, error, or reason; the durable served
+    watermark covers only through seq 81. The client speculative path
+    materialized an orphan seventh note, but the served handler did not run
+    and no seventh notebook append exists. Precisely: the event is stranded
+    BEFORE served queue admission/terminal classification — not refused,
+    dropped, or never issued. The six completed actions/consequences are
+    seqs 36/37, 43/45, 53/55, 60/63, 69/71, and 81/83. Loaded green r02 has
+    all seven authored actions and consequences, ending at seqs 84/86.
+
+    The exact captured candidate was `c-jbvEpTaj…#default`, validated against
+    a note argument whose `parentNotebook` points at the notebook root. The
+    embedded NotePiece/NotebookPiece schema follows
+    `note.parentNotebook.notes[0].parentNotebook` back to the same value under
+    the same schema pair, so the schema progress guard returns “recursive
+    schema validation made no progress.” Offline replay terminates; the
+    validator is not the endless loop. An exact-old-source live probe
+    reproduced the error after all seven appends had landed, and a
+    comment-only identity split reproduced the family, ruling out the old
+    note semantics and a fixed note index. A narrow idle trace saw the same
+    client setup error but drained all observed idle branches and failed
+    normally in 22 s, so the setup error neither automatically refuses an
+    event nor intrinsically leaks the idle barrier.
+
+    Established causal chain: omitted server `API_URL` → conflicting source
+    identity → live-piece swap requests → finite recursive-argument setup
+    error; under r01's ordering, served progress then failed to reach the
+    final durable event, so `waitForRuntimeIdle`'s event/durability fixpoint
+    could not resolve before the unchanged 600 s harness bound. OPEN LIMIT:
+    the durable store names the pending event but cannot reconstruct which
+    original client scheduler collection or promise held it after the error;
+    diagnostic timing did not recreate that state. Load is not necessary
+    (r01 and the identity-only red were quiet), and `event-view-lag` alone is
+    insufficient (quiet r03 had it and greened).
+
+    No production fix: distinct source and storage hosts are supported, and
+    forcing self-source would change that contract without a mechanism pin.
+    The exact measurement fix seat is the off-repository launcher: pass the
+    run port as the server's `API_URL` and preflight that browser and serving
+    source authorities report the expected identity. No repository-owned
+    deterministic regression can directly pin that launcher, and the live
+    timing probe did not isolate a local behavior change suitable for a
+    mutation check. The STEP skip and bound guard therefore STAY. The lift bar
+    remains a separate 10/10 quiet-and-loaded campaign under the corrected
+    source-authority posture. Full RCA and evidence map:
+    [`ow45-default-app-store-incomplete-root-cause-2026-08-26.md`](../../history/plans/server-execution-v2/optimize/ow45-default-app-store-incomplete-root-cause-2026-08-26.md).
+    **DIRECT CI UNSKIP PROBE, 2026-08-26: RED — NO LIFT.** Head
+    `66a969ca02e8962ae44eeb4da264a575da421893`, Actions run
+    [33008274232, ON shard 5](https://github.com/commontoolsinc/labs/actions/runs/33008274232/job/98307864923).
+    The registry had no default-app entry, the job printed that no listed
+    skip was in its file list, and the exact rapid-note step ran. The other
+    nine ON pattern shards passed. Shard 5 failed only this target after
+    5m22s, when `waitForCondition` reached its unchanged 300000 ms bound.
+    The final client trace reported `eventInvocationCount: 7` and
+    `notebookInvocationCount: 7`, but `isNotebook: false`, `notesLength: 0`,
+    `notebookActionCount: 0`, 84 stored UI note chips, and zero rendered note
+    chips. The log had zero `pattern-swap-setup-error`, recursive-schema
+    errors, and `pattern-load-error`. This is therefore a current true-CI ON
+    failure distinct from the split-source off-repository launcher failure;
+    the direct CI artifact does not establish the durable disposition of any
+    note action or assign the new failure's root cause. The STEP entry is
+    restored with this current charge. Its bound guard and separate lift bar
+    remain.
     Sibling entry, landed mid-review: #5744 (lunch-poll profile-first
     join) re-skipped `integration/lunch-poll-vote.test.ts` as a FILE
     entry on this row's b04 signature — its recorded reds PREDATE the
@@ -6076,7 +6160,8 @@ supply; OW29/OW32/OW34 closed):
     complains when it succeeds), which is what makes the store the
     only usable witness; the worker console bridge was verified live
     at all three levels first, so the silence is a finding rather
-    than a blind instrument. **NOT DETERMINED, deliberately:**
+    than a blind instrument. **CAMPAIGN FORK, DELIBERATELY LEFT
+    UNDETERMINED AT THAT HEAD:**
     whether that commit was REFUSED, DROPPED in flight, or NEVER
     ISSUED. The guest's space appears in NO server-side line at all —
     including none of the 50-73 per-run
@@ -6140,12 +6225,34 @@ supply; OW29/OW32/OW34 closed):
     here is WRITE-direction and occurs at ensure-OFF, so OW61's
     separate client-side ABSORB investigation is not expected to
     close this shape.
-    **DISPOSITION: NO LIFT. The entry STAYS, its reason reworded to
-    the narrowed charge — the b04 class it was minted for is closed
-    at this head, and it now stands on the guest-profile
-    program-materialization loss. The lift bar is UNCHANGED: this
-    entry's own gate evidence at the merged head, 10/10, never by
-    inference from the default-app gate.**
+    **SUPERSEDED CAMPAIGN DISPOSITION: NO LIFT.** The 2026-08-24
+    campaign kept the entry on the narrowed guest-profile
+    program-materialization charge and left the mechanism fork open.
+    **CURRENT DISPOSITION: RESOLVED — the server never issued the
+    materialization commit on its first served attempt.** Under ON the
+    client may run the handler speculatively, but intentionally discards
+    that seal and waits for the authoritative server transaction.
+    **OWNER RULING 2026-08-26:** “with ON, the transaction should go
+    through the server. it's in this case fine for the client to just
+    wait for that to complete vs speculatively running things.” The
+    server reached `ProfileHome.inSpace()` before the anonymous target
+    name was cached; name resolution warmed the cache and threw
+    `RetryImmediately`, but `retries: false` caused the served event to
+    be dropped instead of rerun. The scheduler now preserves the served
+    carriage across that name-resolution requeue and reruns it in the
+    same settle. Ordinary transient commit retries remain disabled. The
+    red-first scheduler regression failed at one attempt before the fix
+    and passes at two; production-shaped ensure-OFF ON evidence moved
+    from 2/8 target-member reds on current main to 0/8, with all eight
+    guest stores carrying the 98-operation `patternIdentity`
+    materialization. Baseline head: `37b45336a`; diagnostic fix head:
+    `8524f4ec1`; rebased smokes: f10 at `622ef2bda` and f11 at
+    `e158eb0c3`. The run stores and logs remain on the measuring box at
+    `/Users/berni/labs-worktrees/lunch-member-evidence/`; the running
+    report is `/Users/berni/labs-worktrees/lunch-member-report.md`.
+    This was neither a server refusal nor loss of a required client wire
+    send; it was the server name-resolution retry gate preventing
+    issuance.
     **THE ENSURE-ON PROFILE-SURFACE MEMBER ROOT-CAUSED AND FIXED
     2026-08-25 (PR #6312) — the n=3 side probe's "create surface never renders"
     shape and the #6248 board's profile-shard family, reproduced
@@ -6231,8 +6338,13 @@ supply; OW29/OW32/OW34 closed):
     re-runs; its own defect, untouched. (iii) The lunch FILE entry's
     third member (ensure-OFF: the guest's ~98-101-op
     program-materialization commit never landing) is a DIFFERENT,
-    post-click stage and is untouched — the entry and its lift bar
-    stand exactly as written. (iv) Whether the #6248 board's
+    post-click stage; it is now resolved by the served-event
+    name-resolution requeue described in that entry's current
+    disposition. The 2026-08-26 owner ruling and evidence recorded there
+    supersede the earlier 10/10 lift bar with the requested approximately
+    eight-run re-baseline, a red-first mechanism regression, and eight
+    post-fix runs. (iv)
+    Whether the #6248 board's
     POST-fill shape (shards 2/6: fill succeeded, click landed,
     `#profile` never resolved) is this same clobber on a later
     surface or another member is undetermined — re-measure on that
@@ -6253,9 +6365,12 @@ supply; OW29/OW32/OW34 closed):
     serving plane's home-space session predated the genesis ACL
     (activation-before-genesis, the recorded boot order) and the ACL
     landing revoked it (`#revokeDeauthorizedSessions`,
-    memory/v2/server.ts — by design, heal-on-next-mount; a HOME
+    memory/v2/server.ts — by design; a HOME
     genesis is `{user: OWNER}` with no `"*"`, so the pre-genesis
-    session is de-authorized the moment it lands);
+    session is de-authorized the moment it lands. **This clause read
+    "by design, heal-on-next-mount" until 2026-08-26. That premise was
+    FALSE — nothing remounted — and its falsification is the FIFTH-FACE
+    member recorded at the end of this entry.**);
     `failHeadEventLoadPark` (scheduler/facade.ts) maps ANY load-park
     failure to the TERMINAL drop arm, and the drain sealed
     `{status: "dropped", consequenced: true}` with the watermark
@@ -6303,6 +6418,322 @@ supply; OW29/OW32/OW34 closed):
     shared-profile's, profile-embed's, and staged-publish's steps
     with an owed row) is the owner's call, deliberately not taken by
     the diagnosis seat.
+    **FIXED 2026-08-26 (its own deliberate seal-adjacent pass, no
+    riders — the OW58 caution above is why): the load-park failure arm
+    DEFERS a served event instead of dropping it.**
+    `failHeadEventLoadPark` (scheduler/facade.ts) now settles a served
+    event through the `deferred` arm — no consequence sealed, the
+    durable entry left pending and UNCONSEQUENCED, the standard
+    re-drain re-delivering it — and carries the drain's arrival-order
+    BARRIER with it (events.md §2, mirroring the sidecar-sync-failure
+    arm), in TWO halves, because the deferral can land in two places.
+    IN THE QUEUE: every later-arrived durable served entry behind the
+    head IN THE SAME SPACE defers too. MID-DRAIN-PASS: the
+    scheduler-side barrier can only hold what is already queued, and
+    the drain awaits a `sync()` per new sidecar — so a park failure can
+    land between one entry's queueing and the next's, and the next
+    entry would queue behind the barrier's back and overtake. The
+    second half (`#loadParkDeferredInPass`) makes the pass STOP there,
+    the same `break` the sidecar-sync arm makes; found in this seat's
+    own adversarial pass, and its mutation reds `["A","B","A"]` exactly
+    like the in-queue one. Its CHECK POSITION is load-bearing and was
+    got wrong first: the loop awaits TWICE per entry (a new sidecar's
+    `sync()` and then the stream doc's), and a rejection landing in
+    either window sweeps only what was queued at that instant — so the
+    check sits past BOTH, immediately before
+    `#drainInFlight.set`/`queueEvent`. Independent review (Codex P1 on
+    PR #6365) caught it one await too early. **Coverage gap recorded,
+    NOT filled:** the pin discriminates the check's EXISTENCE (delete
+    it → red) but NOT its POSITION — measured, not assumed: with the
+    check moved back to the pre-review position the pin still passes.
+    Discriminating the position needs the park rejection to land inside
+    the stream-doc-sync window specifically. **PIN OWED, CONSTRUCTION
+    SKETCHED** (review F7 corrected this seat's earlier "a flaky pin
+    would be worse than none" — the construction is fully CAUSAL, not
+    timing-raced, so that framing overstated): hold B at its sidecar
+    sync (the shipped gate), wait for A2's park to be CREATED (a
+    parkObserved hook in the seam, as the scheduler pin already does),
+    arm a second gate on B's stream-doc sync (`cell.sync()` always
+    reaches `syncCell` — verified, no warm-cache short-circuit),
+    release the sidecar gate, hold at the stream gate, reject the park,
+    disarm, release. Every step causally ordered, no timers. Recorded
+    rather than built here only to keep this round scoped to the two P1
+    pins; see review-6365-report.md F7. Until it exists the position
+    rests on the code comment and this record. Two
+    exclusions, deliberate: cross-space
+    queue neighbours (§2's order is per-space) and LT1 in-process
+    copies (`served` with no `streamEntry` — no durable entry to
+    re-drain, and a running event's same-wave cascade children rather
+    than later arrivals; their entry re-drains WITH a `streamEntry`,
+    the `lt1LeftoversPurged` semantics). CLIENT-side (no `served`) the
+    drop keeps today's shape — there is no durable entry to re-drain,
+    so deferring would lose the event outright; the same split
+    events.ts already makes for a piece-load failure, and client-side
+    the two arms are behaviourally indistinguishable anyway (both
+    remove the event and abort its onCommit). T3's genuine
+    no-runnable-handler drop is UNTOUCHED — only the load-FAILURE
+    routing changed.
+    **Persistent-failure posture, stated:** a load that never heals
+    defers INDEFINITELY — durable, visible, re-tried each drain. The
+    deferral is deliberately kept OFF the queued class's bounded
+    creation-race budget (`EVENT_DEFERRAL_DROP_THRESHOLD`, which
+    hardens into §5's drop after 8 deferrals) by a typed
+    `cause: "load-park"` on the served failure outcome: that budget
+    exists because a piece which never materializes has no runnable
+    handler, whereas here the input doc EXISTS durably and only the
+    read path failed, so hardening would restore exactly the
+    at-least-once discharge this fix removes. Indefinite deferral is
+    strictly better than silent loss and is the accepted posture; its
+    cost is that the backstop rescan keeps ticking, so a never-healing
+    load holds the space out of its idle park. A give-up arm for that
+    case is OW54's separately tracked territory and was deliberately
+    NOT built here.
+    **The price, quantified (review §2 — it was asserted but not
+    costed).** Per poisoned space, per 250 ms backstop tick: one drain
+    pass, one queueEvent, one preflight, one park, one real load attempt
+    against the failing backend, and 1+N WARN lines (head plus barrier
+    victims). So ~4 load attempts/s and, for a 10-event backlog, ~44 log
+    lines/s sustained — a WARN-flood cost the fix frames as
+    observability. Same-space later served events are head-of-line
+    blocked indefinitely BY DESIGN (order over liveness). Cross-space
+    events are not deferred, but the scheduler is head-serial, so the
+    poisoned head occupies the head slot for one park-to-rejection
+    latency every tick — negligible for the production error (a revoked
+    session rejects immediately) but a TIMEOUT-class slow failure would
+    stall co-scheduled dispatch at 4 Hz. That slow-failure case is what
+    makes OW54 worth scheduling rather than itself deferring
+    indefinitely.
+    **Weakening recorded (review F5), and it is DELIBERATE but was
+    unstated.** The arm's `#eventDeferrals.delete(entry.eventId)` on
+    every load-park deferral — head and barrier victims alike — means
+    the cold-view give-up guarantee is no longer "8 deferrals" but "8
+    CONSECUTIVE cold-view deferrals uninterrupted by a load-park
+    failure". Under a FLAPPING serving session (revoke/remount cycling
+    — the production mechanism here) a genuinely unrunnable event whose
+    cold-view deferrals interleave with load-park failures at least once
+    per ~7 ticks never hardens, wedging the park criterion active for an
+    event T3 licenses dropping. The intent was only to keep the budgets
+    unmixed; the sharper alternative — leave the cold-view count ALONE
+    rather than resetting it, since not-mixing is not the same as
+    resetting — preserves the hardening bound and belongs in OW54's
+    design space. Not changed here: it is a behaviour change to the
+    cold-view arm, which this deliberately scoped pass does not touch.
+    Observability gap CLOSED with the fix: `events.loadParkDeferrals`
+    counts each deferral (head and barrier alike) and `events.dropped`
+    counts terminal drop notices sealed onto a durable entry — the
+    previously invisible half; a loud WARN per deferral names the
+    failing doc keys and the error. serving-loop.md §7 carries both.
+    Pins, red-first: `executor-events-down.test.ts`'s "a served event
+    whose HEAD-EVENT LOAD PARK fails DEFERS instead of terminally
+    dropping" (a new `GatedStorageManager.loadParkFailAddress` seam
+    reports one doc as an in-flight load and REJECTS its park settle
+    with the production error text; observed pre-fix red: BOTH entries
+    sealed `{consequenced: true, status: "dropped", reason: "Event
+    dropped: required replica load failed before dispatch"}` — the
+    exact CI store shape) and
+    `scheduler-event-load-park.test.ts`'s "a SERVED event's load-park
+    failure reaches the drain as a load-park DEFERRAL, not a drop"
+    (the contract the SpaceServer's `onFailure` branches on; the
+    pre-existing client-side drop pin beside it is unchanged).
+    A third pin covers the mid-pass half: the drain's sync gate holds a
+    pass at B's sidecar with A2's park already failed inside it, and
+    after healing and release the log still reads `["A","A","B"]`.
+    **CORRECTED 2026-08-26 (independent review F3 — this record briefly
+    claimed a mutation red that does not reproduce, the one thing it
+    must never do).** The original in-queue row was measured BEFORE the
+    mid-pass half existed and never re-run after; with both halves
+    present, emptying the in-queue loop leaves the suite GREEN, because
+    that pin's two handlers both read the ARMED doc — so a barrier-less
+    B parks on the same failure and self-defers through the HEAD arm.
+    The in-queue half is now discriminated by its own pin: the
+    `DISJOINT_CLOSURE_LOG_PATTERN` gives `pushA` an extra `gate` input
+    linked to a SEPARATE doc, the seam arms only that doc (so B stays
+    perfectly runnable), and the park rejection is HELD
+    (`loadParkSettle`) until both entries are provably queued —
+    `events.processed` up by two with the head parked — so the mid-pass
+    half cannot be what preserves the order. A fifth pin discriminates
+    the typed-cause budget bypass (review F4, the posture's load-bearing
+    half, previously unpinned): a PERSISTENT failure, waited past
+    `EVENT_DEFERRAL_DROP_THRESHOLD` on the `loadParkDeferrals` counter
+    rather than a sleep, must still seal nothing — then heals and
+    delivers once.
+    Mutations, all red, all re-run at this head: restore the drop
+    routing → both entries seal dropped and the log never grows past the
+    warm-up (and the scheduler-level pin reads `kind: "dropped"`); empty
+    the in-queue barrier loop → "B1 must not consequence while the
+    earlier-arrived A2 is deferred", `["A","B","A"]`, the OW45 arm-B b01
+    overtake shape; drop the `#loadParkDeferredInPass` check → the same
+    overtake through the mid-pass gap; fall the load-park arm through
+    into the threshold accounting → "a persistent load failure must
+    never harden into events.md §5's drop". The barrier's TWO
+    EXCLUSIONS are pinned too — they were the coverage ratchet's two
+    uncovered lines, and were COVERED rather than accepted: a
+    scheduler-level pin queues, behind a parked served head, a
+    same-space durable sibling, another SPACE's durable entry, and a
+    `streamEntry`-less LT1 copy, and asserts the sweep takes only the
+    first. Independently red: drop the cross-space guard → "another
+    space's entry must not be swept"; drop the LT1 guard → "a
+    streamEntry-less LT1 copy must not be swept". Construction note for
+    whoever edits it — both traps cost this seat a red: `addEventHandler`
+    stamps `populateDependencies` onto the HANDLER FUNCTION OBJECT, so
+    each stream needs its own function (sharing one makes all four park
+    on the armed doc), and same-stream sends COALESCE by doc id, so the
+    cross-space neighbour needs its own id rather than the sibling's
+    with the space swapped. Battery green at the fix:
+    executor-events-down
+    (26 steps, the α3 retry machinery untouched), executor-fan-out,
+    executor-serving-loop, scheduler-event-load-park,
+    executor-space-server, executor-watermark, executor-stats,
+    executor-wave, executor-cross-space, and the full
+    `packages/runner` package (1301 passed / 7549 steps / 0 failed).
+    **THE BARRIER INVARIANT AS STATED IS NOT CLOSED — a THIRD path gets
+    past both halves (review F1, structural from the code; not built as
+    a repro, and NOT a landing blocker because both the re-mark and the
+    shaper routing pre-date this PR and the pre-fix behaviour — terminal
+    drop — was strictly worse).** The drain re-marks durable entries
+    renderer-trusted before queueing (space-server.ts), and
+    `Scheduler.queueEvent` routes any renderer-trusted payload with
+    `doNotLoadPieceIfNotRunning=false` — what the drain passes — through
+    `holdShapedEvent`. The wake shaper's first `BURST_CAPACITY` (10)
+    deliveries per piece-group are synchronous, so the barrier sees
+    those; overflow sits in `group.pending` and releases as a batch on
+    the next window tick (≤1000 ms) straight into `queueSchedulerEvent`,
+    knowing nothing of a barrier sweep that ran while it was held.
+    Scenario, and the fresh-space backlog drain IS the OW45 window:
+    >10 renderer-trusted served entries for one piece drain in one pass;
+    1–10 queue, 11+ are shaper-held with their `#drainInFlight` guards
+    set (so re-drains skip them). Head 1's park fails → the in-queue
+    sweep defers 2–10 and the mid-pass break stops further queueing, but
+    11+ are in NEITHER place. The window tick releases 11 into the
+    now-empty queue; the load heals (this failure heals on next mount,
+    seconds); the rescan re-drains 1–10 BEHIND 11 → 11's consequence
+    lands ahead of 1–10, the §2 inversion the barrier exists to prevent.
+    (If the load still fails when 11 heads, 11 self-parks and order
+    self-heals; the overtake needs the heal inside the
+    release-to-rescan window — a real race for a transient failure.)
+    Named follow-up shape: exempt DRAIN RE-DISPATCHES from shaping —
+    they are re-deliveries of already-shaped input, so re-shaping
+    double-charges the timing budget anyway — or have the shaper's
+    release re-check barrier state. Sibling PRE-EXISTING hazard minted
+    separately as **OW63** below.
+    STILL OPEN, untouched by that fix: shard 9
+    (`cfc-staged-publish`) stays UNHARVESTED — symptom-compatible,
+    no store evidence, classification open — and the #6248 lane
+    disposition remains the owner's call, now with the fix-before-flip
+    option actually available.
+    **FIFTH FACE — THE MISSING SESSION REMOUNT. Store-proven
+    2026-08-26 (CI run 33021643751, the same board's shards 2 and 6,
+    both captures swept whole; forensics report
+    `session-remount-report.md`). FIXED the same day, its own seat.**
+    Not a new code region: a newly-falsified PREMISE, and the one
+    #6365's deferral arm rests on. Post-#6365 the disposition changed
+    exactly as designed — watermark held AT the click's entry (seq
+    17, not 18), `consequence_of` naming the eventId **0**,
+    `events.dropped` **0**, the entry left pending and
+    UNCONSEQUENCED — and the event still never ran: **350 deferrals
+    over 5m47s in shard 2 (329 in shard 6), `loadParkDeferrals` 349
+    / 328, ZERO successful loads**, every one
+    `ConnectionError: memory session revoked: unauthorized` on the
+    same three replicas, at the 250 ms backstop cadence decaying to
+    ~1 s. `processed − loadParkDeferrals == appended` exactly in both
+    shards — every unit of serving-loop progress after the failure
+    was a re-deferral, which is precisely the criterion `stats.ts`
+    sets for that counter. Discriminators, both stores swept:
+    `sidecarError` 0 (not #6312/#6320), `RetryImmediately`/`inSpace`
+    0 (never reached #6378), "no handler registered" 0 (not the
+    previous board's T3 face), `scheduler_basis` rows 197/197 and
+    228/228 in the shared space with 0 into home (not D3), the
+    profile program materialized fine (not OW45's write path). The
+    refused doc is PRESENT and durable: "sync completed without data"
+    was an AUTHORIZATION outcome, not an absence.
+    **The mechanism.** `SpaceReplica.sessionHandle()` (storage/v2.ts)
+    memoized the mount and dropped it only in `close()`, and
+    `terminateSession` (memory/v2/client.ts) is terminal for a
+    session — so every re-drain's load reused the very session the
+    server had revoked. `storage/rejection.ts`'s SessionError note
+    had already named the gap in prose ("the convergence argument is
+    sound, only the remount is missing"); `scheduler/facade.ts`'s
+    load-park docstring asserted the opposite ("healing by design on
+    the next mount"). The capture settled it in rejection.ts's
+    favour, and BOTH docstrings plus this entry's own clause above
+    are reconciled in the fix's PR.
+    **The fix — the space-root ensure's own re-arm, one layer down.**
+    Stage 1 solved the identical boot order for the ensure by
+    latching at the fail-closed refusal and consuming the latch when
+    an admitted commit touches `of:<space>`
+    (`#rootEnsureAwaitingOwner`). The session analog: `SpaceReplica`
+    latches an ACL-doc admission (`noteAclChanged`) and consumes it at
+    `sessionHandle()` (`consumeOwedSessionRemount`) — the one place
+    every read and commit reaches a session — dropping a mount that
+    `SessionRevokedError` or `AuthorizationError` terminated so the
+    next load re-opens. `ExecutorHost.#onCommitAdmitted` fans an
+    `of:<space>` write out to EVERY registered space server, because
+    the starved session is a CROSS-SPACE replica: the ACL commit and
+    the dead session are in different spaces.
+    **Why a LATCH and not an eager teardown, measured not assumed.**
+    The memory server emits the admitted-commit notice BEFORE it runs
+    `#revokeDeauthorizedSessions` (both inside one `transact`). At
+    notification time the session that same commit is about to revoke
+    is still OPEN, so an eager teardown inspects a live session,
+    declines, and the revocation lands a moment later — starving
+    exactly as before. Mutation-checked: making the trigger eager
+    reds the host-glue pin and only that pin.
+    **Soundness — the remount never decides.** It re-runs
+    `session.open`, which re-runs the server's admission against the
+    ACL as it now stands. One CORRECTION to the seat's own brief,
+    recorded because it changes what "fail closed" means here: under
+    OW31 a SERVING mount's READ decisions resolve as whoever OWNS the
+    space, so an ACL change that removes the USER does not
+    de-authorize the serving plane — it re-binds the NEW owner, which
+    is the outcome `#revokeDeauthorizedSessions`'s own comment asks
+    for ("the serving plane's next mount re-binds the new owner
+    instead of reading indefinitely under a stale identity"). The
+    denial the remount must respect is constructible on a principal
+    the ACL does not grant, and that is the general statement anyway.
+    Both are pinned.
+    **Pins, red-first, `executor-session-remount.test.ts`** (a real
+    memory server in ACL-enforce mode with the OW31 delegating class,
+    real signed loopback sessions): the reproduction (pre-genesis
+    session, genesis revokes it, 8 reads / 0 successes / all
+    "revoked", then the ACL notice heals it and the durable doc reads
+    through); fail-closed (one trigger, two outcomes, only the ACL
+    chooses); the ownership re-bind; NO CHURN (a live session survives
+    an ACL commit with zero new `session.open`s); and host glue (a real
+    ExecutorHost whose own admission observer carries the genesis —
+    nothing hand-fed); and the SILENT-STALE-READ pin (the Cubic-P1
+    class: post-remount reads for tracker-covered selectors returned
+    SUCCESS carrying the pre-revocation value — reproduced at the
+    pre-fix commit, fixed by dropping the dead mount's selectors from
+    the watch tracker at both consume sites, pinned both ways).
+    Mutations, all red, each reddening its own pin alone: no-op the
+    consume → the reproduction, fail-closed, ownership re-bind,
+    host-glue, and stale-read pins (no-churn stays green);
+    remove the host fan-out → host glue only; remove the ACL-verdict
+    guard → no-churn only; eager instead of latched → host glue only
+    (the measured ordering-independence proof); remove the tracker
+    drop → stale-read only; remove `pull()`'s consume → stale-read
+    only.
+    **Residual, FLAGGED not filled:** watches installed on the DEAD
+    session are not replayed on remount. The revocation had already
+    stopped their pushes (the server drops the session from its
+    registry and `terminateSession` clears `#watchSpecs`), and the
+    remount now DROPS the dead mount's selectors from the watch
+    tracker (the Cubic-P1 fix — the earlier claim that "each address
+    re-installs on its next pull" was FALSE for tracker-covered
+    selectors and is retracted), so post-remount reads re-install
+    coverage fresh instead of silently serving pre-revocation state —
+    but a general "replay the watch set on remount" still belongs
+    with the reconnect path's replay. **Also unchanged:** CLIENT runtimes get no host
+    notification, so a browser session revoked this way still stays
+    revoked; out of this seat's scope.
+    **The persistent-failure posture is UNCHANGED and still OWED to
+    OW54.** A load whose ACL never changes — or whose re-open is
+    denied — defers indefinitely, exactly as recorded above. The
+    remount removes the case where the heal existed in the design and
+    not in the code; it does not remove the need for a give-up arm.
+    The F1 barrier scenario above ("the load heals ... seconds") now
+    has an actual mechanism behind its premise for the fresh-space
+    boot order; it was written against a heal that did not exist.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
@@ -7434,10 +7865,13 @@ supply; OW29/OW32/OW34 closed):
     dependent: whether the computed doc's frame lands before its
     `cid:` sibling is delivery-window timing (CI hit it consistently;
     one local run at the same head did not). With the test lanes'
-    ensure opt-out (the RULED switch) the defect is LATENT again, not
-    fixed. SURFACED TO THE OWNER 2026-08-24 (the coordinator is
-    carrying it). RULED 2026-08-24 (owner, verbatim — the shipping
-    side is the fix):
+    ensure opt-out (the RULED switch) the defect was LATENT again, not
+    fixed — history: the opt-out retired with the ensure-on lane-flip
+    PR once the containment below and the client absorb fix (#6292,
+    this row's tail) had both landed, and the ON lanes run the
+    production default again. SURFACED TO THE OWNER 2026-08-24 (the
+    coordinator is carrying it). RULED 2026-08-24 (owner, verbatim —
+    the shipping side is the fix):
 
     > "seam 3: that's a bug then, and the most straightforward fix is
     > to make sure the subscription query results include cids when
@@ -7530,7 +7964,7 @@ supply; OW29/OW32/OW34 closed):
     subscription (`piece/src/ops/pieces-controller.ts` —
     `runtime.getSpaceCell(space).sync()`, no root-aware demand) —
     constructed by the CLI (`cli/lib/piece.ts`), agents-host
-    (`agents-host/src/fabric-runtime.ts`), AND cf-harness's
+    (`connectors/agents/host/src/fabric-runtime.ts`), AND cf-harness's
     run_pattern session (`cf-harness/src/fabric-session.ts`), so
     yes: cf-harness is also that shape, and the containment covers
     all three. Residual trigger: any live `schema-doc-quarantine` log
@@ -7689,6 +8123,34 @@ supply; OW29/OW32/OW34 closed):
     never landed at all (`deferred-start-conflict-exhausted` never
     became a live log key; the recovery's keys are
     `deferred-start-catchup` / `deferred-start-catchup-failed`).**
+  - **OW63 — the wake shaper can invert same-space arrival order
+    across PIECES, with no load-park involved (PRE-EXISTING; minted
+    2026-08-26 from the independent review of PR #6365, finding F1's
+    sibling). NOT OWED BY THAT PR** — it neither introduced nor
+    worsened this; it is recorded because reading the barrier's
+    reachability exposed it. events.md §2 orders served entries
+    "across streams in one space, arrival order", but the wake shaper
+    buckets held events per PIECE-GROUP, and two pieces in one space
+    have SEPARATE buckets with independent burst budgets and window
+    ticks. So a later-arrived entry for piece Y whose bucket is cold
+    (synchronous, inside `BURST_CAPACITY`) can consequence ahead of an
+    earlier-arrived entry for piece X whose bucket is saturated and
+    therefore held to the next window tick (≤1000 ms). No failure of
+    any kind is required — only a burst on one piece and normal
+    traffic on another, which is ordinary multi-piece load. What is
+    NOT yet established: whether any §2-visible consequence ordering
+    actually depends on cross-piece order in practice (same-piece and
+    same-stream order are preserved by the shaper's own FIFO), so the
+    first move is to decide whether §2's "across streams in one space"
+    is meant to bind across pieces at all — a SPEC question for the
+    owner before it is a code question. If it does bind, the candidate
+    shapes are the same two F1 names for the load-park case: exempt
+    drain re-dispatches from shaping (re-deliveries of already-shaped
+    input — re-shaping double-charges the timing budget), or give the
+    shaper a space-level ordering constraint rather than a per-group
+    one. Unpinned and unmeasured; structural from the code only
+    (`wake-shaping.ts`'s per-group `pending` + window tick, and the
+    drain's per-entry `queueEvent`).
 
 ## 4. Standing rule
 

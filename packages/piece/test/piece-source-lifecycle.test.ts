@@ -1339,7 +1339,9 @@ describe("piece source lifecycle", () => {
     const heldSyncEntered = defer<void>();
     const releaseHeldSync = defer<void>();
     let interceptDetach = true;
-    let newerEdit: Promise<void> | undefined;
+    // Only awaited, never read: this test is about what the newer edit does
+    // to the detach beside it, not about what it returns.
+    let newerEdit: Promise<unknown> | undefined;
 
     runtime.editWithRetry = (async (action, maxRetries) => {
       const result = await originalEditWithRetry(action, maxRetries);

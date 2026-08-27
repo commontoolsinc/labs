@@ -1,4 +1,4 @@
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import {
   type CellScope,
   type EntitySnapshot,
@@ -51,7 +51,8 @@ export const sameSnapshot = (
 };
 
 export const isEmptySync = (sync: SessionSync): boolean =>
-  sync.upserts.length === 0 && sync.removes.length === 0;
+  sync.upserts.length === 0 && sync.removes.length === 0 &&
+  (sync.operationFields?.length ?? 0) === 0;
 
 /**
  * Build a session cache entry for one tracked instance. The instance key
@@ -177,6 +178,7 @@ export const groupedQueries = (
 ): Map<string, GraphQuery> => {
   const grouped = new Map<string, GraphQuery>();
   for (const watch of watches) {
+    if (watch.kind === "operation") continue;
     const branch = watch.query.branch ?? "";
     const existing = grouped.get(branch);
     if (existing === undefined) {
@@ -219,12 +221,20 @@ const watchRootIdentity = (root: GraphQuery["roots"][number]): string =>
   ]);
 
 const watchQueryIdentity = (watch: WatchSpec): string =>
-  JSON.stringify({
-    branch: watch.query.branch ?? "",
-    atSeq: watch.query.atSeq ?? null,
-    excludeSent: watch.query.excludeSent === true,
-    roots: watch.query.roots.map(watchRootIdentity).toSorted(),
-  });
+  watch.kind === "operation"
+    ? JSON.stringify({
+      branch: watch.query.branch ?? "",
+      id: watch.query.id,
+      scope: watch.query.scope ?? DEFAULT_SCOPE,
+      path: watch.query.path,
+      after: watch.query.after ?? null,
+    })
+    : JSON.stringify({
+      branch: watch.query.branch ?? "",
+      atSeq: watch.query.atSeq ?? null,
+      excludeSent: watch.query.excludeSent === true,
+      roots: watch.query.roots.map(watchRootIdentity).toSorted(),
+    });
 
 export const sameWatchSpec = (
   left: WatchSpec,

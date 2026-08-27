@@ -112,6 +112,14 @@ arguments cell the way `--input` does. Only commands that take `--input` accept
 it; `#` is reserved for the suffix, so a path key containing `#` needs the
 positional path spelling.
 
+`cf piece apply` replaces a piece's whole input rather than one path within it.
+It validates the document against the pattern's `argumentSchema` and re-executes
+the pattern with it, so a field the schema requires and the document omits is
+refused before anything is written. `cf set` writes at one path and validates
+only that path, which makes the two different operations on the same cell: reach
+for `apply` when the new input is a whole document, and for `set` when it is one
+value in a document that is otherwise correct.
+
 ## Piece discovery
 
 `cf piece ls` lists the pieces in the selected space's piece registry. It reads
@@ -119,9 +127,10 @@ the default pattern and starts each registered piece to obtain its name and
 pattern metadata. It does not enumerate every stored piece root.
 
 `cf piece inspect --pattern-identity` prints one piece's source pin — pattern
-identity, export symbol, current source revision when the piece keeps a log, and
-whether the identity's source is retained in the space — without running the
-piece and without pulling its input, result, or link graph.
+identity, export symbol, current source revision when the piece keeps a log, the
+origin it follows when it follows one, and whether the identity's source is
+retained in the space — without running the piece and without pulling its input,
+result, or link graph.
 
 `cf piece survey` reads a holder's own collection — the enumeration `piece ls`
 cannot provide — one cheap identity read per member, the holder last, and emits
@@ -133,8 +142,8 @@ containment claim; each entry takes either reference form, and a canonical
 entry's embedded space composes the way it does on `--piece` — supplying the
 space when `--space` is absent, agreeing with it otherwise. Read-only. To watch
 the surface work rather than read about it, `integration/bulk-ops-demo.sh`
-narrates a board-sized survey and repair end to end against a running server,
-with the unbuilt write stages shown as pending acts.
+narrates the whole of it — survey, repair, retarget, and the reversal — end to
+end against a running server.
 
 `cf piece repair` runs a caller-supplied fixer — a TypeScript module whose
 default export is a pure transform from a piece's stored input document to the
@@ -143,6 +152,59 @@ by default, reporting the exact per-piece diff and writing nothing; under
 `--apply` it writes each row in its own transaction, and a plan from a dry run
 drives the apply row for row under its document-hash preconditions (`--plan`).
 The design is `docs/plans/piece-bulk-operations.md`, stage 2.
+
+`cf piece retarget` applies a survey plan's retarget rows: the plan is the whole
+input — it names the pieces, the reference each must still be on, and the source
+each moves to — so the command carries no selection of its own. Serial in plan
+order, each row's precondition proved in the session that writes it, stopping at
+the first failure with every unattempted piece named. Dry by default. Sessions
+are grouped (`--group-size`), so a group boundary is a resume point: a piece
+already on its row's target reads as landed and is not rewritten, which makes
+re-invoking the same command the resume. Applying implies no verdict — the
+verification is `cf piece survey --diff`, a separate invocation by design.
+
+Each write detaches its piece from the origin it follows: what it runs
+afterwards is the source the plan names. That is recorded rather than gated —
+the survey reads the origin into the row's `expect.origin` and every report row
+for that piece carries it, on the dry run as much as under `--apply`, so what an
+apply would detach is in hand while it is still a decision. A row the run wrote
+carries a second value, the origin its write actually detached, which is the one
+to re-attach from: only the pattern reference is a precondition, so a piece
+whose origin alone moved since the survey is still written and detached off what
+it holds at the write. The report names both when they differ, and says so.
+Re-attaching afterwards is by hand.
+
+`--apply` refuses to start over a row whose prior source is not retained
+(`expect.retained: false`), because such a piece cannot be returned once it has
+moved — accepting that after the move is asking past the point of no return.
+Each one must be named on `--accept-unretained <piece>`: repeatable, per piece,
+with no blanket form, and an acceptance covering no unretained row of the plan
+is itself refused. The other way past is to supply the legacy source, so a
+reversal has something to restore. A dry run is not gated — it moves nothing,
+and reporting where such a piece stands is how an operator finds out there is
+something to decide. `cf piece rollback` holds acceptances to the same rule at
+the other moment, in the same spelling.
+
+`cf piece rollback` reverses a retarget from that same plan, needing no second
+artifact: each row's precondition becomes the reference the retarget produced,
+and its operation restores the retained revision carrying the reference the row
+recorded. It runs on the retarget's engine, so preconditions, stops, naming, and
+resume are the same. A piece whose prior source is not retained has no restore
+to run: such a row refuses the derivation by name, and the only way past is
+`--accept-unretained <piece>`, which leaves that one piece out and says so —
+repeatable, per piece, with no blanket form. The other way past is to supply the
+legacy source and retarget onto it.
+
+`cf piece restore` returns one piece to a revision of its own append-only source
+log, in front of the runtime's restore of a retained revision. Without
+`--revision` the run lists what the piece could be returned to — the id, when it
+was accepted, the reference it carries, whether its source is still retained,
+and whether the piece runs it now; with one but without `--apply` it is the
+preflight for that revision alone. A piece already standing where the restore
+would leave it — running the named revision's reference and following no origin
+— is reported as such and not rewritten. A piece that runs that reference while
+still following an origin is not there: restoring severs the origin, so the run
+writes and names the origin it would cut.
 
 `cf piece slugs` lists the space's slug index: every name assigned through
 `--slug` or `set-slug`, each resolved to the piece it names. The index records
@@ -222,6 +284,26 @@ An absent path is also rejected rather than creating policy metadata without a
 value. An `observes` update is rejected when it would combine with an existing
 observation class instead of preserving the requested class. Omitting `observes`
 from a later update preserves an existing unambiguous class.
+
+## Invocation sessions
+
+An invocation id is the caller's own word for one call, and another caller can
+choose the same one. What separates them is the session it was chosen within:
+the pair decides which outcome a replay reads, and it is what keeps an outcome's
+address unguessable. `cf invocation-session` is where a session comes from.
+
+```bash
+export CF_INVOCATION_SESSION=$(cf invocation-session new)
+```
+
+`new` prints one id on stdout and nothing else, so a command substitution
+captures exactly it. Mint one per agent run and carry it in the environment
+rather than in `--invocation-session <id>`, which every `cf call` also accepts:
+an environment variable stays out of the process listing an argument shows up
+in. A call naming an invocation id with no session in scope is refused: an id is
+replayable only within the session it was chosen in, and a session minted on the
+spot would make the replay name a different invocation. A call naming neither
+gets both, minted for that one call.
 
 ## Output Conventions
 
@@ -806,10 +888,15 @@ The supported output switches are:
   `--json`, the full survey result); its tally and findings go to stderr.
   `piece repair` reserves stdout the same way — the emitted plan, or under
   `--json` the full report in the canonical FabricValue encoding — with its
-  verdict tally and dry-run diff going to stderr. `piece render --watch --json`
-  writes only JSON render records to stdout; watch status goes to stderr.
-  Rendering a piece without a UI fails instead of returning an empty successful
-  JSON stream.
+  verdict tally and dry-run diff going to stderr. `piece retarget` and
+  `piece rollback` reserve stdout for their report in every mode — a line per
+  row as each settles, one canonical document under `--json`, or nothing beside
+  `--out` — and start the pieces they write, so the runtime's console goes to
+  stderr whether or not `--json` is on the line. `piece restore` reserves stdout
+  for its revision listing, or the whole outcome as JSON under `--json`.
+  `piece render --watch --json` writes only JSON render records to stdout; watch
+  status goes to stderr. Rendering a piece without a UI fails instead of
+  returning an empty successful JSON stream.
 - `cf get` and `cf wish` always return JSON. Their `--json` options are
   accepted, documented no-ops for callers that select JSON explicitly.
 - `cf check --json` compiles without evaluating and prints one object with a
@@ -855,6 +942,26 @@ Every registered top-level command appears in `cf --help`. The direct
 launchers use them. Shell completion is the exception: it drops commands whose
 description opens with `Internal:`, because those are spawned by `cf fuse` and
 never typed at a prompt.
+
+## Evaluating patterns from another tool
+
+`cf init` writes a TypeScript environment an external tool can evaluate patterns
+in: the configuration and type declarations an editor, a scratch checkout, or a
+generated workspace needs to resolve `commonfabric` the way this repository
+does. It reaches no space — everything it does is to the current directory,
+where it writes three things:
+
+- `.cf-types/`, holding the declarations for `commonfabric`, `turndown`,
+  `cf-env` and the JSX runtime, one `index.d.ts` each.
+- `.cf-docs/`, holding a copy of the top-level pattern documentation.
+- `tsconfig.json` — **written whole, over whatever was already there.**
+
+The configuration is generated from the runtime's own compiler options and is
+not merged with the file it replaces, so a directory that is already a
+TypeScript project loses its `compilerOptions`, its `include`, and everything
+else it had, without a prompt and without a backup. A second run replaces the
+generated one in turn, discarding any edit made to it. Run it in a directory
+that exists for patterns, or in a copy.
 
 ## Installing `cf` on PATH
 

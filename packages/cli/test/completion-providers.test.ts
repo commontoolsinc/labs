@@ -228,8 +228,8 @@ const DIRECTIVE_CASES: Array<[string, string, string | undefined]> = [
   ["cf fuse unmount ", "dirs", undefined],
   ["cf piece repair --fixer ", "files", "*.ts"],
   ["cf piece repair --plan ", "files", undefined],
-  ["cf piece survey --validator ", "files", undefined],
   ["cf piece survey --diff ", "files", undefined],
+  ["cf piece survey --validator ", "files", undefined],
   ["cf test --pattern-coverage-dir ", "dirs", undefined],
   ["cf test --timing-measures-out ", "files", undefined],
   ["cf fuse mount --cfc-writeback-state ", "files", undefined],
@@ -354,6 +354,7 @@ Deno.test("provider keys report which commands each option provider answers on",
   assertEquals(options.get("to"), ["space clone"]);
   assertEquals(options.get("scope"), ["wish"]);
   assertEquals(options.get("list"), ["piece survey", "piece repair"]);
+  assertEquals(options.get("diff"), ["piece survey"]);
   assertEquals(options.get("select"), ["piece get", "get"]);
   assertEquals(options.get("root"), [
     "check",
@@ -364,6 +365,12 @@ Deno.test("provider keys report which commands each option provider answers on",
     "test",
     "inspect graph",
   ]);
+  // `--accept-unretained` takes a row of the plan in hand, not a piece of the
+  // registry: the registry omits the holder-created members a bulk operation
+  // moves, and offers slugs the flag rejects outright. So the slot is decided
+  // in NO_OPTION_CANDIDATES rather than provided here, and a provider keyed
+  // for it would be offering a set that is wrong in both directions.
+  assertFalse(options.has("accept-unretained"));
   // A positional entry is keyed by command path already, so it carries no
   // command list of its own.
   assert(positionals.has("piece call:callable"));

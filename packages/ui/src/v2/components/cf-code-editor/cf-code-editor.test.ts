@@ -19,6 +19,7 @@ describe("CFCodeEditor", () => {
     expect(element.timingDelay).toBe(500);
     expect(element.autofocus).toBe(false);
     expect(element.cursorPosition).toBe("start");
+    expect(element.collaborative).toBe(false);
     // No reference map, so mentions are minted as wiki-links.
     expect(element.references).toBe(null);
     // No extra hosts; a pasted page URL is judged against this document's own.

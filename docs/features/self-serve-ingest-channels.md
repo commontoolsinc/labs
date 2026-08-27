@@ -254,11 +254,13 @@ otherwise force arbitrary allocation with a garbage signature.
 
 ### Client
 
-`cf ingest mint|list|rotate|revoke`, alongside `cf acl`. The CLI is the only
-client that can sign today — the shell cannot sign at all (zero references to
-`toolshed-http-auth` across `packages/shell`, `packages/lib-shell`,
-`packages/runtime-client`), and the in-pattern `fetch` builtin is bound to the
-three-entry allowlist above.
+`cf ingest mint|ls|rotate|revoke`, alongside `cf acl`. `cf ingest rotate <id>`
+mints a new token for a channel the caller owns, leaving the channel and its
+grants in place — the spelling for a token that leaked or aged, where revoking
+would take the channel down with it. The CLI is the only client that can sign
+today — the shell cannot sign at all (zero references to `toolshed-http-auth`
+across `packages/shell`, `packages/lib-shell`, `packages/runtime-client`), and
+the in-pattern `fetch` builtin is bound to the three-entry allowlist above.
 
 **This is a real limitation, stated plainly:** CLI signing needs a plaintext
 PKCS#8 key file on disk (`packages/cli/lib/identity.ts:33-37`), while a shell

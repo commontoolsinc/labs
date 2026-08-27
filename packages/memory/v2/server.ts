@@ -4,7 +4,7 @@ import * as Path from "@std/path";
 import type { FabricPlainObject } from "@commonfabric/api";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
-import { SpanStatusCode, trace } from "@opentelemetry/api";
+import { metrics, SpanStatusCode, trace } from "@opentelemetry/api";
 
 import {
   aclDocId,
@@ -30,6 +30,7 @@ import {
   type EntityIdLookupResult,
   type EntitySnapshot,
   EventAppendDuplicateError,
+  getMemoryProtocolFlags,
   getOwnWriteEchoConfig,
   getServerExecutionConfig,
   type GraphQuery,
@@ -38,7 +39,11 @@ import {
   type HelloMessage,
   isScopeKey,
   MAX_ENTITY_ID_PAGE_SIZE,
+  type MemoryProtocolFlags,
+  type OpCursor,
   type Operation,
+  type OperationFieldQueryRequest,
+  type OperationFieldQueryResult,
   parseMemoryProtocolFlags,
   resolveScopeKey,
   type ResponseMessage,
@@ -96,6 +101,10 @@ import {
   executionLeaseHolder,
   liveExecutionLeaseHolder,
 } from "./execution-lease.ts";
+import {
+  createDefaultOperationCodecRegistry,
+  type OperationCodecRegistry,
+} from "./operation-codec.ts";
 import { compressServerMessageSchemas } from "./sync-schema-table.ts";
 import {
   buildDiffSync,
@@ -138,6 +147,35 @@ export { SessionRegistry } from "./session-registry.ts";
 // OTLP SDK installed. Spans created here are purely additive observability and
 // do not affect write/fan-out behavior.
 const tracer = trace.getTracer("memory-server", "1.0.0");
+const operationMeter = metrics.getMeter("memory-server", "1.0.0");
+const operationApplyCount = operationMeter.createCounter(
+  "ct.memory.operation.applies",
+  { description: "Accepted apply-op operations." },
+);
+const operationTransformSuffix = operationMeter.createHistogram(
+  "ct.memory.operation.transform_suffix",
+  { description: "Canonical operations transformed over per apply-op." },
+);
+const operationPayloadBytes = operationMeter.createHistogram(
+  "ct.memory.operation.payload_bytes",
+  { description: "Encoded submitted apply-op payload bytes." },
+);
+const operationIntegrationDuration = operationMeter.createHistogram(
+  "ct.memory.operation.integration.duration_ms",
+  { description: "Memory commit persistence time for apply-op commits." },
+);
+const operationResetCount = operationMeter.createCounter(
+  "ct.memory.operation.resets",
+  { description: "Operation snapshots requiring canonical client reset." },
+);
+const operationCodecFailureCount = operationMeter.createCounter(
+  "ct.memory.operation.codec_failures",
+  { description: "Operation codec or history failures by error class." },
+);
+const operationActiveWatchCount = operationMeter.createHistogram(
+  "ct.memory.operation.active_watches",
+  { description: "Active operation watches observed during sync assembly." },
+);
 
 /**
  * Timing-only logger. It never logs — the statistics behind `time()` are
@@ -471,6 +509,64 @@ export type DemandedInstanceRow = {
   root: boolean;
 };
 
+const addOperationWatchTrackedIds = (
+  trackedIds: Set<string>,
+  watches: readonly WatchSpec[],
+  identity: { principal?: string; sessionId: string },
+): Set<string> => {
+  for (const watch of watches) {
+    if (watch.kind === "operation") {
+      trackedIds.add(
+        toDirtyKey(
+          watch.query.id,
+          resolveScopeKey(watch.query.scope, identity),
+        ),
+      );
+    }
+  }
+  return trackedIds;
+};
+
+const graphWatchRoots = (watches: readonly WatchSpec[]) =>
+  watches
+    .filter((watch) => watch.kind !== "operation")
+    .flatMap((watch) => watch.query.roots);
+
+type ReadAdmissionRoot = {
+  id: string;
+  scope?: CellScope;
+  entityScopeKey?: ScopeKey;
+};
+
+const watchReadRoots = (
+  watches: readonly WatchSpec[],
+): ReadAdmissionRoot[] => {
+  const roots: ReadAdmissionRoot[] = [];
+  for (const watch of watches) {
+    if (watch.kind === "operation") {
+      roots.push({
+        id: watch.query.id,
+        ...(watch.query.scope === undefined
+          ? {}
+          : { scope: watch.query.scope }),
+      });
+    } else {
+      roots.push(...watch.query.roots);
+    }
+  }
+  return roots;
+};
+
+const graphWatchRootQueries = (watches: readonly WatchSpec[]) =>
+  watches
+    .filter((watch) => watch.kind !== "operation")
+    .flatMap((watch) =>
+      watch.query.roots.map((root) => ({
+        branch: watch.query.branch ?? "",
+        root,
+      }))
+    );
+
 class Connection {
   #ready = false;
   #closed = false;
@@ -725,7 +821,10 @@ class Connection {
         });
         return;
       }
-      const response = respondToHello(parsed);
+      const response = respondToHello(
+        parsed,
+        this.server.memoryProtocolFlags(),
+      );
       if (response.type === "hello.ok") {
         response.sessionOpen = this.issueSessionOpenAuth();
       }
@@ -792,6 +891,26 @@ class Connection {
         }
         {
           const response = await this.server.graphQuery(parsed);
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
+        return;
+      case "op.query":
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
+        {
+          const response = await this.server.operationFieldQuery(parsed);
           this.sendSessionResponse(
             parsed.space,
             parsed.sessionId,
@@ -1111,6 +1230,7 @@ export class Server {
     removes: SessionCacheEntry[];
   }>();
   #store?: URL;
+  #operationCodecs: OperationCodecRegistry;
   // Injected on-disk SQLite sources (Phase 7), keyed by handle cell id. A
   // registered id is attached read-only from its descriptor path instead of the
   // cell-derived per-(space,id) file. v1 in-memory; persistence is deferred (see
@@ -1144,6 +1264,9 @@ export class Server {
       sessions?: SessionRegistry;
       store?: URL;
 
+      operationCodecs?: OperationCodecRegistry;
+      /** Engine-owned interval for operation checkpoints and bounded retention. */
+      operationCheckpointInterval?: number;
       /**
        * Coalescing delay for the batched subscription fan-out, in
        * milliseconds. `"manual"` never arms the refresh timer: dirty spaces
@@ -1228,10 +1351,19 @@ export class Server {
   ) {
     this.#sessions = options.sessions ?? new SessionRegistry();
     this.#store = options.store;
+    this.#operationCodecs = options.operationCodecs ??
+      createDefaultOperationCodecRegistry();
     // Push-priority counters (Phase 6): module-level provider for the
     // health route, same last-registration-wins posture as the runner's
     // serving-loop stats registry (one co-hosted server per process).
     pushPriorityStatsProvider = () => this.pushPriorityStats();
+  }
+
+  memoryProtocolFlags(): MemoryProtocolFlags {
+    return {
+      ...getMemoryProtocolFlags(),
+      operationCodecs: this.#operationCodecs.ids(),
+    };
   }
 
   /** A copy of the push-priority counters (Phase 6, protocol.md §3). */
@@ -2830,6 +2962,21 @@ export class Server {
         // rejected attempts remain visible in the same dashboard breakdowns as
         // successful transactions. `entity.count` keeps its existing meaning.
         const commitTelemetry = classifyCommitTelemetry(message.commit);
+        const applyOperations = message.commit.operations.filter((operation) =>
+          operation.op === "apply-op"
+        );
+        for (const operation of applyOperations) {
+          try {
+            operationPayloadBytes.record(
+              new TextEncoder().encode(encodeMemoryBoundary(operation.payload))
+                .byteLength,
+              { codec: operation.codec },
+            );
+          } catch {
+            // Admission below reports malformed Fabric values as a typed
+            // protocol error. Telemetry must not pre-empt that response.
+          }
+        }
         span.setAttribute("commit.kind", commitTelemetry.kind);
         span.setAttribute("entity.count", commitTelemetry.entityCount);
         span.setAttribute(
@@ -2909,6 +3056,9 @@ export class Server {
             { principal: session.principal, sessionId: message.sessionId },
           );
           let commit: Engine.AppliedCommit;
+          const operationIntegrationStartedAt = applyOperations.length === 0
+            ? undefined
+            : performance.now();
           try {
             commit = tracer.startActiveSpan(
               "memory.commit.persist",
@@ -2931,6 +3081,12 @@ export class Server {
               },
             );
           } finally {
+            if (operationIntegrationStartedAt !== undefined) {
+              operationIntegrationDuration.record(
+                performance.now() - operationIntegrationStartedAt,
+                { apply_count: applyOperations.length },
+              );
+            }
             // Detach BEFORE any await. `engine.database` is shared per space, so
             // holding a cell-db attached across the post-commit await would let a
             // concurrent connection's commit attach a SECOND cell-db — breaking the
@@ -2939,6 +3095,21 @@ export class Server {
             // attachments.
             for (const alias of sqliteAttachments.values()) {
               detachDatabase(engine.database, alias);
+            }
+          }
+          for (const resolution of commit.operationResolutions ?? []) {
+            const operation =
+              message.commit.operations[resolution.operationIndex];
+            if (operation?.op === "apply-op") {
+              const attributes = {
+                codec: resolution.codec,
+                duplicate: resolution.duplicate,
+              };
+              operationApplyCount.add(1, attributes);
+              operationTransformSuffix.record(
+                resolution.from.version - (operation.base?.version ?? 0),
+                attributes,
+              );
             }
           }
           // Mark dirty immediately after the durable apply so the next batch
@@ -2951,22 +3122,13 @@ export class Server {
           // decides the flush-time echo shape.
           const committedWrites: Array<{ id: string; scopeKey: ScopeKey }> = [];
           const dirtyOps = new Map<string, DirtyOp>();
-          const elided = new Set(commit.elidedOpIndexes ?? []);
-          for (
-            const [opIndex, operation] of message.commit.operations.entries()
-          ) {
-            if (operation.op === "sqlite") continue;
-            // An elided content-addressed re-set changed nothing — no head
-            // moved, so there is no novelty to fan out or classify (it is
-            // excluded from the dirty keys AND from the admitted-commit
-            // feed's write list below: activation follows novelty).
-            if (elided.has(opIndex)) continue;
-            const scopeKey = resolveScopeKey(operation.scope, {
-              principal: session.principal,
-              sessionId: message.sessionId,
-            });
-            committedWrites.push({ id: operation.id, scopeKey });
-            dirtyOps.set(toDirtyKey(operation.id, scopeKey), operation.op);
+          for (const revision of commit.revisions) {
+            const scopeKey = revision.scopeKey as ScopeKey;
+            committedWrites.push({ id: revision.id, scopeKey });
+            dirtyOps.set(
+              toDirtyKey(revision.id, scopeKey),
+              revision.op,
+            );
           }
           if (dirtyOps.size > 0) {
             this.markSpaceDirty(message.space, dirtyOps.keys(), {
@@ -3055,6 +3217,15 @@ export class Server {
             ok: commit,
           };
         } catch (error) {
+          if (
+            error instanceof Engine.OpCodecError ||
+            error instanceof Engine.UnsupportedOpCodecError
+          ) {
+            operationCodecFailureCount.add(1, {
+              error: error.name,
+              codec: applyOperations[0]?.codec ?? "unknown",
+            });
+          }
           let retryAfterSeq: number | undefined;
           if (error instanceof Engine.ConflictError) {
             span.setAttribute("ct.conflict", true);
@@ -3085,7 +3256,7 @@ export class Server {
               : error instanceof EventAppendDuplicateError
               ? "EventAppendDuplicateError"
               : error instanceof Engine.ProtocolError
-              ? "ProtocolError"
+              ? error.name
               // A RowLabelCommitError (Phase 3.c commit-time row-label refusal,
               // sqlite/commit-eval.ts) is TERMINAL: re-running recomputes the
               // identical refused write, so the client must not retry it.
@@ -3219,6 +3390,69 @@ export class Server {
         message.requestId,
         toError(
           "QueryError",
+          error instanceof Error ? error.message : String(error),
+        ),
+      );
+    }
+  }
+
+  async operationFieldQuery(
+    message: OperationFieldQueryRequest,
+  ): Promise<ResponseMessage<OperationFieldQueryResult>> {
+    const session = this.#sessions.get(message.space, message.sessionId);
+    if (session === null) {
+      return respondTypedError<OperationFieldQueryResult>(
+        message.requestId,
+        toError("SessionError", "Unknown session for space"),
+      );
+    }
+    try {
+      const engine = await this.openEngine(message.space);
+      const deny = this.#authorizeCurrentSessionWithEngine(
+        engine,
+        message.space,
+        message.sessionId,
+        session,
+        "READ",
+      );
+      if (deny) {
+        return respondTypedError<OperationFieldQueryResult>(
+          message.requestId,
+          deny,
+        );
+      }
+      const denyForeign = this.#denyForeignServingScopedRead(
+        message.space,
+        session,
+        [{ id: message.query.id, scope: message.query.scope }],
+      );
+      if (denyForeign) {
+        return respondTypedError<OperationFieldQueryResult>(
+          message.requestId,
+          denyForeign,
+        );
+      }
+      const field = Engine.queryOperationField(engine, {
+        ...message.query,
+        principal: session.principal,
+        sessionId: message.sessionId,
+      });
+      if (field.reset === true) {
+        operationResetCount.add(1, { source: "query", codec: field.codec! });
+      }
+      return {
+        type: "response",
+        requestId: message.requestId,
+        ok: {
+          serverSeq: Engine.serverSeq(engine),
+          field,
+        },
+      };
+    } catch (error) {
+      return respondTypedError<OperationFieldQueryResult>(
+        message.requestId,
+        toError(
+          error instanceof Engine.ProtocolError ? error.name : "QueryError",
           error instanceof Error ? error.message : String(error),
         ),
       );
@@ -3399,7 +3633,7 @@ export class Server {
       const denyForeign = this.#denyForeignServingScopedRead(
         message.space,
         session,
-        message.watches.flatMap((watch) => watch.query.roots),
+        watchReadRoots(message.watches),
       );
       if (denyForeign) {
         return respondTypedError<WatchSetResult>(
@@ -3410,7 +3644,7 @@ export class Server {
     }
     if (
       this.#namesExplicitInstance(
-        message.watches.flatMap((watch) => watch.query.roots),
+        graphWatchRoots(message.watches),
       )
     ) {
       // protocol.md §2's read row: explicit entity_scope_key roots are
@@ -3419,12 +3653,7 @@ export class Server {
       const deny = await this.#denyExplicitInstanceReads(
         message.space,
         session,
-        message.watches.flatMap((watch) =>
-          watch.query.roots.map((root) => ({
-            branch: watch.query.branch ?? "",
-            root,
-          }))
-        ),
+        graphWatchRootQueries(message.watches),
       );
       if (deny) {
         return respondTypedError<WatchSetResult>(message.requestId, deny);
@@ -3432,6 +3661,7 @@ export class Server {
     }
 
     try {
+      const nextOperationCursors = new Map<string, OpCursor>();
       const { serverSeq, graphs, entities } = await this.evaluateWatchSet(
         message.space,
         message.watches,
@@ -3453,10 +3683,22 @@ export class Server {
         // frames are byte-identical to before.
         session.leaseHolderReads === true,
       );
+      await this.attachOperationFields(
+        message.space,
+        message.sessionId,
+        sync,
+        message.watches,
+        nextOperationCursors,
+      );
       session.watches = message.watches;
+      session.operationCursors = nextOperationCursors;
       session.graphs = graphs;
       session.entities = entities;
-      session.trackedIds = trackedIdsFromEntries(entities.values());
+      session.trackedIds = addOperationWatchTrackedIds(
+        trackedIdsFromEntries(entities.values()),
+        message.watches,
+        { principal: session.principal, sessionId: message.sessionId },
+      );
       this.#addMissedToTrackedIds(session.trackedIds, graphs.values());
       session.lastSyncedSeq = serverSeq;
       this.#notifyDemandChanged(message.space, "watch", session.principal);
@@ -3519,7 +3761,7 @@ export class Server {
       const denyForeign = this.#denyForeignServingScopedRead(
         message.space,
         session,
-        message.watches.flatMap((watch) => watch.query.roots),
+        watchReadRoots(message.watches),
       );
       if (denyForeign) {
         return respondTypedError<WatchAddResult>(
@@ -3530,7 +3772,7 @@ export class Server {
     }
     if (
       this.#namesExplicitInstance(
-        message.watches.flatMap((watch) => watch.query.roots),
+        graphWatchRoots(message.watches),
       )
     ) {
       // protocol.md §2's read row: explicit entity_scope_key roots are
@@ -3543,12 +3785,7 @@ export class Server {
       const deny = await this.#denyExplicitInstanceReads(
         message.space,
         session,
-        [...message.watches, ...session.watches].flatMap((watch) =>
-          watch.query.roots.map((root) => ({
-            branch: watch.query.branch ?? "",
-            root,
-          }))
-        ),
+        graphWatchRootQueries([...message.watches, ...session.watches]),
       );
       if (deny) {
         return respondTypedError<WatchAddResult>(message.requestId, deny);
@@ -3558,6 +3795,7 @@ export class Server {
     try {
       const startedAt = performance.now();
       const engine = aclEngine ?? await this.openEngine(message.space);
+      const nextOperationCursors = new Map(session.operationCursors);
       const existingById = new Map(
         session.watches.map((watch) => [watch.id, watch] as const),
       );
@@ -3646,36 +3884,53 @@ export class Server {
         }
       }
 
-      // Diff first, commit the session cache after (review finding S4 —
-      // the build-then-commit discipline the push path's commitEntities
-      // states): the cache is the delivered-entries diff base, so any
-      // failure between here and the response must leave it untouched —
-      // a cache that already claims the frame's entries delivered while
-      // the requester got a QueryError elides them from every later
-      // diff, a durable silent under-delivery for the session. This
-      // also keeps the catch's "evaluation state is staged" comment
-      // true. No throw-capable step sits between the diff and the
-      // commit TODAY (the closure pass that motivated the reorder was
-      // removed with the per-frame resend — OW61's reversal ruling);
-      // the ordering is kept as hygiene so the next inserted step does
-      // not silently reintroduce the poisoning.
+      // Build the complete result before mutating the session. Its entity
+      // cache is the delivered-entry diff base, and operation snapshot
+      // attachment can reject a stale or future cursor. A failed watch.add
+      // must leave both kinds of delivery state untouched or later syncs can
+      // omit data the requester never received.
       const upserts: SessionCacheEntry[] = [];
       for (const [key, entry] of updates) {
         if (!sameSnapshot(session.entities.get(key), entry)) {
           upserts.push(entry);
         }
       }
-      for (const [key, entry] of updates) {
-        session.entities.set(key, entry);
-        session.trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
-      }
-
       const serverSeq = Engine.serverSeq(engine);
       const fromSeq = session.lastSyncedSeq;
+      const entities = new Map(session.entities);
+      const trackedIds = new Set(session.trackedIds);
+      for (const [key, entry] of updates) {
+        entities.set(key, entry);
+        trackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
+      }
+      addOperationWatchTrackedIds(trackedIds, nextWatches, {
+        principal: session.principal,
+        sessionId: message.sessionId,
+      });
+      this.#addMissedToTrackedIds(trackedIds, graphs.values());
+      const sync: SessionSync = {
+        type: "sync",
+        fromSeq,
+        toSeq: serverSeq,
+        upserts: upserts.toSorted((left, right) =>
+          left.branch.localeCompare(right.branch) ||
+          left.id.localeCompare(right.id)
+        ),
+        removes: [],
+      };
+      await this.attachOperationFields(
+        message.space,
+        message.sessionId,
+        sync,
+        newWatches,
+        nextOperationCursors,
+      );
+      session.entities = entities;
+      session.trackedIds = trackedIds;
       session.graphs = graphs;
       session.watches = nextWatches;
-      this.#addMissedToTrackedIds(session.trackedIds, graphs.values());
       session.lastSyncedSeq = serverSeq;
+      session.operationCursors = nextOperationCursors;
       this.#notifyDemandChanged(message.space, "watch", session.principal);
       recordSlowQueryDuration(
         "session.watch.add",
@@ -3689,18 +3944,13 @@ export class Server {
         ok: {
           serverSeq,
           sync: {
-            type: "sync",
-            fromSeq,
-            toSeq: serverSeq,
+            ...sync,
             upserts: upserts.toSorted((left, right) =>
               left.branch.localeCompare(right.branch) ||
               left.id.localeCompare(right.id)
             ).map((entry) =>
-              // Keyed for a live lease-holder session (stage A, OW17's
-              // wire leg; see watchSet).
               toWireUpsert(entry, session.leaseHolderReads === true)
             ),
-            removes: [],
           },
         },
       };
@@ -3829,6 +4079,13 @@ export class Server {
     // its own here). The session-identity recovery below remains as the
     // fallback for frames without a record (none are built today).
     const record = this.#deliveredFrameEntries.get(undelivered);
+    for (const delivery of sync.operationFields ?? []) {
+      // A failed send did not advance the client. Forget the delivery cursor so
+      // the recomputed frame includes a complete safe snapshot rather than
+      // risking a gap. Mixed document/operation frames also carry a delivery
+      // record, so this rollback belongs before either document path returns.
+      session.operationCursors.delete(delivery.watchId);
+    }
     // Wire frames carry scope NAMES; the session's own identity recovers
     // the instance keys (M4). An unresolvable scope cannot have been in a
     // frame built FOR this session — skip defensively rather than throw
@@ -4007,9 +4264,9 @@ export class Server {
           const pendingCaughtUpLocalSeq = session.pendingCaughtUpLocalSeq;
           const hasPendingCatchUp =
             pendingCaughtUpLocalSeq > session.caughtUpLocalSeq;
-          const finishCatchUp = (
+          const finishCatchUp = async (
             sync: SessionSync,
-          ): SessionEffectMessage => {
+          ): Promise<SessionEffectMessage> => {
             if (hasPendingCatchUp) {
               session.caughtUpLocalSeq = Math.max(
                 session.caughtUpLocalSeq,
@@ -4020,6 +4277,7 @@ export class Server {
               }
               sync.caughtUpLocalSeq = session.caughtUpLocalSeq;
             }
+            await this.attachOperationFields(space, sessionId, sync);
             return {
               type: "session/effect",
               space,
@@ -4031,11 +4289,14 @@ export class Server {
             fromSeq = session.lastSyncedSeq,
             toSeq?: number,
           ): Promise<SessionEffectMessage | null> => {
-            if (!hasPendingCatchUp) {
-              return null;
-            }
             const serverSeq = toSeq ??
               Engine.serverSeq(await this.openEngine(space));
+            const mayCarryOperations = session.watches.some((watch) =>
+              watch.kind === "operation"
+            ) && serverSeq > fromSeq;
+            if (!hasPendingCatchUp && !mayCarryOperations) {
+              return null;
+            }
             session.lastSyncedSeq = Math.max(session.lastSyncedSeq, serverSeq);
             const sync: SessionSync = {
               type: "sync",
@@ -4044,7 +4305,14 @@ export class Server {
               upserts: [],
               removes: [],
             };
-            return finishCatchUp(sync);
+            const message = await finishCatchUp(sync);
+            if (
+              !hasPendingCatchUp &&
+              (sync.operationFields?.length ?? 0) === 0
+            ) {
+              return null;
+            }
+            return message;
           };
           if (session.watches.length === 0) {
             return await emptyCatchUp();
@@ -4226,13 +4494,6 @@ export class Server {
                 );
               }
             };
-            // The frame-under-construction's watch scope: committed tracked
-            // ids plus this batch's — observation attachment must scope
-            // against THIS set, not the yet-uncommitted session state.
-            const candidateTrackedIds = new Set(session.trackedIds);
-            for (const [, entry] of updates) {
-              candidateTrackedIds.add(toDirtyKey(entry.id, entry.scopeKey));
-            }
             const toSeq = Engine.serverSeq(engine);
             if (upserts.length === 0) {
               // The watched set was re-evaluated current as of toSeq even though it
@@ -4247,7 +4508,7 @@ export class Server {
             recordSlowQueryDuration("session.watch.refresh", space, startedAt, {
               watches: session.watches.length,
             });
-            const message = finishCatchUp({
+            const message = await finishCatchUp({
               type: "sync",
               fromSeq,
               toSeq,
@@ -4325,6 +4586,11 @@ export class Server {
           // needed to bring the withheld instances back.)
           const evaluatedTrackedIds = trackedIdsFromEntries(entities.values());
           this.#addMissedToTrackedIds(evaluatedTrackedIds, graphs.values());
+          addOperationWatchTrackedIds(
+            evaluatedTrackedIds,
+            session.watches,
+            { principal: session.principal, sessionId },
+          );
           const commitWatchState = () => {
             // (d′) — flag 2, the full-evaluation branch: the
             // set is REPLACED (this is where it can shrink — R-D's coarse
@@ -4369,7 +4635,7 @@ export class Server {
             commitWatchState();
             return await emptyCatchUp(sync.fromSeq, sync.toSeq);
           }
-          const message = finishCatchUp(sync);
+          const message = await finishCatchUp(sync);
           // As on the incremental branch: retain the frame's true
           // instance-keyed entries for exact delivery rollback.
           this.#deliveredFrameEntries.set(message, delivered);
@@ -4398,6 +4664,42 @@ export class Server {
         }
       },
     );
+  }
+
+  private async attachOperationFields(
+    space: string,
+    sessionId: string,
+    sync: SessionSync,
+    watches?: readonly WatchSpec[],
+    operationCursors?: Map<string, OpCursor>,
+  ): Promise<void> {
+    const session = this.#sessions.get(space, sessionId);
+    if (session === null) return;
+    const operationWatches = (watches ?? session.watches).filter((watch) =>
+      watch.kind === "operation"
+    );
+    if (operationWatches.length === 0) return;
+    operationActiveWatchCount.record(operationWatches.length);
+    const cursors = operationCursors ?? session.operationCursors;
+    const engine = await this.openEngine(space);
+    sync.operationFields = operationWatches.map((watch) => {
+      const after = cursors.get(watch.id) ?? watch.query.after;
+      const field = Engine.queryOperationField(engine, {
+        ...watch.query,
+        ...(after === undefined ? {} : { after }),
+        principal: session.principal,
+        sessionId,
+      });
+      if (field.reset === true) {
+        operationResetCount.add(1, { source: "watch", codec: field.codec! });
+      }
+      if (field.cursor === null) {
+        cursors.delete(watch.id);
+      } else {
+        cursors.set(watch.id, field.cursor);
+      }
+      return { watchId: watch.id, field };
+    });
   }
 
   markSpaceDirty(
@@ -4556,6 +4858,7 @@ export class Server {
         continue;
       }
       for (const watch of session.watches) {
+        if (watch.kind === "operation") continue;
         for (const root of watch.query.roots) {
           const scope = root.scope ?? "space";
           if (scope === "space") {
@@ -4613,9 +4916,9 @@ export class Server {
   /**
    * (d′) — the space's DEMAND SET (design §2.1's definition;
    * the successor of `watchedRootsForSpace`): the union over the space's
-   * CLIENT sessions of `session.trackedIds` — memory v2's schema-narrowed,
-   * instance-keyed closure of each session's watches (roots and every doc
-   * the selectors' schemas reach, absent targets included) — one row per
+   * CLIENT sessions of each graph watch's schema-narrowed, instance-keyed
+   * closure (roots and every doc the selectors' schemas reach, absent targets
+   * included) — one row per
    * (instance key, session), each carrying the session's demanding
    * identity, `root: true` on the rows that are watch ROOTS. The service
    * principal's sessions are excluded (their watches are the serving
@@ -4647,6 +4950,7 @@ export class Server {
       // The session's watch ROOT keys (instance-keyed like trackedIds).
       const rootKeys = new Set<string>();
       for (const watch of session.watches) {
+        if (watch.kind === "operation") continue;
         for (const root of watch.query.roots) {
           const scope = root.scope ?? "space";
           if (scope === "space") {
@@ -4668,6 +4972,12 @@ export class Server {
           }
         }
       }
+      // Operation watches share session dirtiness tracking so their updates
+      // wake the push loop, but they are not graph execution demand. Rebuild
+      // the graph-only provenance from delivered entries plus traversal misses
+      // before producing demand rows.
+      const graphTrackedIds = trackedIdsFromEntries(session.entities.values());
+      this.#addMissedToTrackedIds(graphTrackedIds, session.graphs.values());
       const emit = (dirtyKey: string, root: boolean) => {
         const rowKey = `${dirtyKey}\0${session.id}`;
         if (rows.has(rowKey)) {
@@ -4689,7 +4999,9 @@ export class Server {
         });
       };
       for (const dirtyKey of session.trackedIds) {
-        emit(dirtyKey, rootKeys.has(dirtyKey));
+        if (graphTrackedIds.has(dirtyKey)) {
+          emit(dirtyKey, rootKeys.has(dirtyKey));
+        }
       }
       for (const dirtyKey of rootKeys) emit(dirtyKey, true);
     }
@@ -5075,7 +5387,7 @@ export class Server {
   #denyForeignServingScopedRead(
     space: string,
     session: SessionState,
-    roots: Iterable<GraphQuery["roots"][number]>,
+    roots: Iterable<ReadAdmissionRoot>,
   ): V2Error | undefined {
     if (!getServerExecutionConfig()) return undefined;
     if (session.principal === undefined) return undefined;
@@ -5487,7 +5799,7 @@ export class Server {
   respond(payload: string): Promise<string | null> {
     const parsed = parseClientMessage(payload);
     if (parsed?.type === "hello") {
-      const response = respondToHello(parsed);
+      const response = respondToHello(parsed, this.memoryProtocolFlags());
       if (response.type !== "hello.ok") {
         return Promise.resolve(encodeMemoryBoundary(response));
       }
@@ -5641,7 +5953,11 @@ export class Server {
       if (url.protocol === "file:") {
         await FS.ensureDir(Path.toFileUrl(Path.dirname(Path.fromFileUrl(url))));
       }
-      return await Engine.open({ url });
+      return await Engine.open({
+        url,
+        operationCodecs: this.#operationCodecs,
+        operationCheckpointInterval: this.options.operationCheckpointInterval,
+      });
     })();
     // The SYNC engine view (server-execution v2 Phase 5): the read-row
     // admission's cross-engine lease lookup (protocol.md §2, FP2) must
@@ -5786,6 +6102,24 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       query: parsed.query as unknown as GraphQueryRequest["query"],
+    };
+  }
+
+  if (
+    parsed.type === "op.query" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    isObjectNotArray(parsed.query) &&
+    typeof parsed.query.id === "string" &&
+    Array.isArray(parsed.query.path)
+  ) {
+    return {
+      type: "op.query",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      query: parsed.query as unknown as OperationFieldQueryRequest["query"],
     };
   }
 

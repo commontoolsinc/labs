@@ -4,7 +4,7 @@ import type {
   JSONSchemaObj,
 } from "@commonfabric/api";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import { internSchema } from "@commonfabric/data-model/schema-hash";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { getPatternEnvironment } from "../builder/env.ts";

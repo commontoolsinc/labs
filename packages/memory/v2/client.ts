@@ -17,6 +17,8 @@ import {
   MAX_ENTITY_ID_PAGE_SIZE,
   MEMORY_PROTOCOL,
   type MemoryProtocolFlags,
+  type OperationFieldQuery,
+  type OperationFieldQueryResult,
   parseMemoryProtocolFlags,
   type ResponseMessage,
   type SessionEffectMessage,
@@ -698,6 +700,13 @@ export class SpaceSession {
     beforeIssue?: () => void,
   ): Promise<AppliedCommit> {
     this.#assertOpen();
+    if (
+      commit.operations.some((operation) =>
+        operation.op === "apply-op" || operation.op === "release-op-field"
+      ) && this.client.serverFlags?.applyOp !== true
+    ) {
+      throw protocolError("memory server does not support apply-op");
+    }
     const existing = this.#outstandingCommits.get(commit.localSeq);
     if (existing) {
       return await existing.pending.promise;
@@ -735,6 +744,24 @@ export class SpaceSession {
       query,
     });
 
+    this.noteResult(result.serverSeq);
+    return result;
+  }
+
+  async queryOperationField(
+    query: Omit<OperationFieldQuery, "principal" | "sessionId">,
+  ): Promise<OperationFieldQueryResult> {
+    this.#assertOpen();
+    if (this.client.serverFlags?.applyOp !== true) {
+      throw protocolError("memory server does not support apply-op");
+    }
+    const result = await this.client.request<OperationFieldQueryResult>({
+      type: "op.query",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      query,
+    });
     this.noteResult(result.serverSeq);
     return result;
   }
@@ -852,6 +879,7 @@ export class SpaceSession {
       (result) => {
         this.noteResult(result.serverSeq);
         this.#watchSpecs = watches;
+        this.noteOperationWatchCursors(result.sync);
         if (this.#watchView === null) {
           this.#watchView = WatchView.fromSync(result.sync);
         } else {
@@ -895,6 +923,46 @@ export class SpaceSession {
             [...this.#watchSpecs, ...watches].map((watch) => [watch.id, watch]),
           ).values(),
         ];
+        this.noteOperationWatchCursors(result.sync);
+        if (this.#watchView === null) {
+          this.#watchView = WatchView.fromSync(result.sync);
+        } else {
+          this.#watchView.applySync(result.sync, false);
+        }
+        this.scheduleAck(result.serverSeq);
+        return {
+          view: this.#watchView,
+          precedingSyncs: this.takePrecedingWatchSyncs(),
+          sync: result.sync,
+        };
+      },
+    );
+  }
+
+  /** Removes watches from both the live session and reconnect intent. */
+  async watchRemoveSync(
+    watchIds: readonly string[],
+  ): Promise<WatchMutationResult> {
+    const removed = new Set(watchIds);
+    return await this.runWatchMutation(
+      () => {
+        const watches = this.#watchSpecs.filter((watch) =>
+          !removed.has(watch.id)
+        );
+        // Cancellation is local intent even when the request fails: a later
+        // reconnect must not restore a watch its last subscriber removed.
+        this.#watchSpecs = watches;
+        return this.client.request<WatchSetResult>({
+          type: "session.watch.set",
+          requestId: crypto.randomUUID(),
+          space: this.space,
+          sessionId: this.#sessionId,
+          watches,
+        });
+      },
+      (result) => {
+        this.noteResult(result.serverSeq);
+        this.noteOperationWatchCursors(result.sync);
         if (this.#watchView === null) {
           this.#watchView = WatchView.fromSync(result.sync);
         } else {
@@ -933,6 +1001,7 @@ export class SpaceSession {
       return;
     }
     this.noteResult(effect.toSeq);
+    this.noteOperationWatchCursors(effect);
     if (this.#watchView === null) {
       this.#watchView = WatchView.fromSync(effect);
       this.#precedingWatchSyncs.push(effect);
@@ -981,6 +1050,7 @@ export class SpaceSession {
       );
       if (restored.sync) {
         this.noteCaughtUpLocalSeq(restored.sync.caughtUpLocalSeq);
+        this.noteOperationWatchCursors(restored.sync);
         if (this.#watchView === null) {
           this.#watchView = WatchView.fromSync(restored.sync);
         } else {
@@ -1167,6 +1237,10 @@ export class SpaceSession {
   private takePrecedingWatchSyncs(): SessionSync[] {
     const syncs = this.#precedingWatchSyncs;
     this.#precedingWatchSyncs = [];
+    // Effects can arrive between request issue and response application. They
+    // were observed against the old watch spec, so replay their operation
+    // cursors after the mutation has installed the new spec as well.
+    for (const sync of syncs) this.noteOperationWatchCursors(sync);
     return syncs;
   }
 
@@ -1226,6 +1300,31 @@ export class SpaceSession {
 
   private noteResult(serverSeq: number): void {
     this.#serverSeq = Math.max(this.#serverSeq, serverSeq);
+  }
+
+  private noteOperationWatchCursors(sync: SessionSync): void {
+    if ((sync.operationFields?.length ?? 0) === 0) return;
+    const delivered = new Map(
+      sync.operationFields!.map((delivery) =>
+        [
+          delivery.watchId,
+          delivery.field.cursor,
+        ] as const
+      ),
+    );
+    this.#watchSpecs = this.#watchSpecs.map((watch) => {
+      if (watch.kind !== "operation" || !delivered.has(watch.id)) {
+        return watch;
+      }
+      const query = { ...watch.query };
+      const cursor = delivered.get(watch.id);
+      if (cursor === null) {
+        delete query.after;
+      } else if (cursor !== undefined) {
+        query.after = cursor;
+      }
+      return { ...watch, query };
+    });
   }
 
   private noteCaughtUpLocalSeq(localSeq: number | undefined): void {
@@ -1895,7 +1994,8 @@ const isResponse = (message: unknown): message is ResponseMessage<unknown> => {
 };
 
 const isEmptySync = (sync: SessionSync): boolean =>
-  sync.upserts.length === 0 && sync.removes.length === 0;
+  sync.upserts.length === 0 && sync.removes.length === 0 &&
+  (sync.operationFields?.length ?? 0) === 0;
 
 const isSessionRevokedError = (error: unknown): boolean =>
   error instanceof Error && error.name === "SessionRevokedError";

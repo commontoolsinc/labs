@@ -207,7 +207,11 @@ Deno.test("BuildConfig resolves workspace paths against the root", async () => {
       config.staticAssetsPath(),
       join(root, "packages", "static", "assets"),
     );
-    assertEquals(config.patternsPath(), join(root, "packages", "patterns"));
+    assertEquals(config.patternPaths(), [
+      join(root, "packages", "patterns"),
+      join(root, "packages", "connectors", "agents", "debug-view"),
+      join(root, "packages", "connectors", "github", "activity-view"),
+    ]);
     assertEquals(
       config.staticTypesPath(),
       join(root, "packages", "static", "assets", "types"),

@@ -19,6 +19,8 @@ import {
   type URI,
 } from "@commonfabric/memory/interface";
 import {
+  type ApplyOpOperation,
+  type ApplyOpResolution,
   canResolveScopeKey,
   type CellScope,
   type ClientCommit,
@@ -31,7 +33,10 @@ import {
   type EntityIdListResult,
   getCommitPreconditionsConfig,
   getServerExecutionConfig,
+  type OperationFieldQuery,
+  type OperationFieldSnapshot,
   type PatchOp,
+  type ReleaseOpFieldOperation,
   resolveScopeKey,
   type ScopeKey,
   type ScopeKeyIdentity,
@@ -55,7 +60,7 @@ import {
   PatchApplyError,
 } from "../../../memory/v2/patch.ts";
 import type { JSONSchema } from "../builder/types.ts";
-import { internSchemaAsTaggedHashString } from "@commonfabric/data-model/schema-hash";
+import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import type { Cancel } from "../cancel.ts";
 import type { Cell } from "../cell.ts";
 import { collectExternalSchemaRefHashes } from "../schema-decompose.ts";
@@ -81,6 +86,7 @@ import * as Differential from "./differential.ts";
 import type {
   IMemoryAddress,
   IMergedChanges,
+  IOperationStorageCapability,
   IPreconditionFailedError,
   IRemoteStorageProviderSettings,
   ISpaceReplica,
@@ -181,6 +187,18 @@ const logger = getLogger("storage.v2", {
   level: "error",
 });
 const pendingPatchLogger = getLogger("storage.v2.pending-patch", {
+  enabled: true,
+  level: "warn",
+  logCountEvery: 0,
+});
+/** Its OWN logger, deliberately, because the module logger above sits at
+ *  `level: "error"` and would swallow a warn. A session remount is the visible
+ *  end of a starvation that was previously indistinguishable from a doc simply
+ *  not being there (the profile-starvation fifth face was diagnosed from the
+ *  ABSENCE of lines), so this one has to survive the default posture. Bounded:
+ *  it fires only on an actual remount, which needs a terminated session AND an
+ *  ACL commit. */
+const sessionRemountLogger = getLogger("storage.v2.session-remount", {
   enabled: true,
   level: "warn",
   logCountEvery: 0,
@@ -1102,6 +1120,25 @@ export class StorageManager implements IStorageManager {
    * effects channel's construction-time sweep. */
   openedSpaces(): MemorySpace[] {
     return [...this.#providers.keys()];
+  }
+
+  /**
+   * IStorageManager — THE SESSION REMOUNT's trigger (see
+   * SpaceReplica.consumeOwedSessionRemount): an admitted commit touched
+   * `space`'s ACL document, so a session this manager holds on that space
+   * — revoked when an EARLIER ACL landed — may now re-open under a
+   * different verdict. The executor host calls this for every registered
+   * space server on every ACL-doc-touching admission; `space` is usually
+   * NOT the caller's own, because the session that starves is typically a
+   * CROSS-SPACE replica (a served dispatch's argument link into the
+   * viewer's home space).
+   *
+   * ALREADY-OPEN providers only. Opening one here would mount a session
+   * for a space this manager has never read, turning an unrelated ACL
+   * commit into a connection.
+   */
+  noteSpaceAclChanged(space: MemorySpace): void {
+    this.#providers.get(space)?.noteAclChanged();
   }
 
   isSchemaDocPersisted(space: MemorySpace, hash: string): boolean {
@@ -2125,6 +2162,14 @@ type ProviderSyncRequest = {
   instance?: ScopeKey;
 };
 
+type ProviderOperationSubscription = {
+  query: Omit<OperationFieldQuery, "principal" | "sessionId">;
+  callback: (snapshot: OperationFieldSnapshot) => void;
+  cancel?: Cancel;
+  install?: Promise<void>;
+  closed: boolean;
+};
+
 /**
  * Minimal marker sink — structurally the Runtime's `RuntimeTelemetry`.
  * Kept structural (type-only import) so the storage layer takes no runtime
@@ -2132,7 +2177,7 @@ type ProviderSyncRequest = {
  */
 type TelemetrySink = { submit(marker: RuntimeTelemetryMarker): void };
 
-class Provider implements IStorageProvider {
+class Provider implements IStorageProvider, IOperationStorageCapability {
   replica: SpaceReplica;
   // Registered reads to replay when a provisional replica is replaced, keyed
   // by document and then by the normalized selector. A normalized selector is
@@ -2145,6 +2190,7 @@ class Provider implements IStorageProvider {
   >();
   #destroyed = false;
   #routeAbort = new AbortController();
+  #operationSubscriptions = new Set<ProviderOperationSubscription>();
 
   constructor(
     readonly options: ProviderOptions,
@@ -2245,6 +2291,102 @@ class Provider implements IStorageProvider {
     );
   }
 
+  operationCodecs(): Promise<readonly string[]> {
+    return this.followReplacement((replica) => replica.operationCodecs());
+  }
+
+  queryOperationField(
+    query: Omit<OperationFieldQuery, "principal" | "sessionId">,
+  ): Promise<OperationFieldSnapshot> {
+    return this.followReplacement((replica) =>
+      replica.queryOperationField(query)
+    );
+  }
+
+  applyOperation(operation: ApplyOpOperation): Promise<ApplyOpResolution> {
+    return this.followReplacement((replica) =>
+      replica.applyOperation(operation)
+    );
+  }
+
+  releaseOperationField(operation: ReleaseOpFieldOperation): Promise<void> {
+    return this.followReplacement((replica) =>
+      replica.releaseOperationField(operation)
+    );
+  }
+
+  async subscribeOperationField(
+    query: Omit<OperationFieldQuery, "principal" | "sessionId">,
+    callback: (snapshot: OperationFieldSnapshot) => void,
+  ): Promise<Cancel> {
+    if (this.#destroyed) throw new Error("memory provider closed");
+    const subscription: ProviderOperationSubscription = {
+      query,
+      callback,
+      closed: false,
+    };
+    this.#operationSubscriptions.add(subscription);
+    try {
+      await this.ensureOperationSubscription(subscription);
+    } catch (error) {
+      subscription.closed = true;
+      this.#operationSubscriptions.delete(subscription);
+      throw error;
+    }
+    if (subscription.closed || this.#destroyed) {
+      throw new Error("memory provider closed");
+    }
+    return () => {
+      if (subscription.closed) return;
+      subscription.closed = true;
+      this.#operationSubscriptions.delete(subscription);
+      subscription.cancel?.();
+      subscription.cancel = undefined;
+    };
+  }
+
+  private ensureOperationSubscription(
+    subscription: ProviderOperationSubscription,
+  ): Promise<void> {
+    if (subscription.install !== undefined) return subscription.install;
+    const install = this.installOperationSubscription(subscription);
+    subscription.install = install;
+    const clear = () => {
+      if (subscription.install === install) subscription.install = undefined;
+    };
+    install.then(clear, clear);
+    return install;
+  }
+
+  private async installOperationSubscription(
+    subscription: ProviderOperationSubscription,
+  ): Promise<void> {
+    while (!subscription.closed && !this.#destroyed) {
+      const replica = this.replica;
+      let cancel: Cancel;
+      try {
+        cancel = await replica.subscribeOperationField(
+          subscription.query,
+          subscription.callback,
+        );
+      } catch (error) {
+        if (replica !== this.replica && !this.#destroyed) continue;
+        throw error;
+      }
+      if (subscription.closed || this.#destroyed) {
+        cancel();
+        return;
+      }
+      if (replica !== this.replica) {
+        cancel();
+        continue;
+      }
+      subscription.cancel?.();
+      subscription.cancel = cancel;
+      return;
+    }
+  }
+
   canReplaceProvisionalReplica(): boolean {
     const { generation, writeIssuedGeneration } = this.options.routeState;
     return writeIssuedGeneration !== generation;
@@ -2260,6 +2402,10 @@ class Provider implements IStorageProvider {
     this.#routeAbort = new AbortController();
     const replacement = this.createReplica();
     this.replica = replacement;
+    for (const subscription of this.#operationSubscriptions) {
+      subscription.cancel?.();
+      subscription.cancel = undefined;
+    }
     previous.redirectOverlappingReadsTo((uri, selector, scope, instance) =>
       this.replaySync(replacement, uri, selector, scope, instance)
     );
@@ -2267,11 +2413,14 @@ class Provider implements IStorageProvider {
     previous.closeNow();
     const requests = [...this.#syncRequests.values()]
       .flatMap((bySelector) => [...bySelector.values()]);
-    await Promise.all(
-      requests.map(({ uri, selector, scope, instance }) =>
+    await Promise.all([
+      ...requests.map(({ uri, selector, scope, instance }) =>
         this.replaySync(replacement, uri, selector, scope, instance)
       ),
-    );
+      ...[...this.#operationSubscriptions].map((subscription) =>
+        this.ensureOperationSubscription(subscription)
+      ),
+    ]);
   }
 
   synced(): Promise<void> {
@@ -2289,6 +2438,13 @@ class Provider implements IStorageProvider {
 
   ensureSession(): Promise<void> {
     return this.followReplacement((replica) => replica.ensureSession());
+  }
+
+  /** See SpaceReplica.noteAclChanged (THE SESSION REMOUNT's latch). Only
+   *  the CURRENT replica: a replaced one is being torn down. */
+  noteAclChanged(): void {
+    if (this.#destroyed) return;
+    this.replica.noteAclChanged();
   }
 
   listEntityIds(): Promise<string[] | undefined> {
@@ -2348,6 +2504,11 @@ class Provider implements IStorageProvider {
       return;
     }
     this.#destroyed = true;
+    for (const subscription of this.#operationSubscriptions) {
+      subscription.closed = true;
+      subscription.cancel?.();
+    }
+    this.#operationSubscriptions.clear();
     this.#routeAbort.abort(new Error("memory replica closed"));
     this.options.routeState.generation++;
     await this.replica.close();
@@ -2356,6 +2517,11 @@ class Provider implements IStorageProvider {
   async destroyNow(): Promise<void> {
     if (!this.#destroyed) {
       this.#destroyed = true;
+      for (const subscription of this.#operationSubscriptions) {
+        subscription.closed = true;
+        subscription.cancel?.();
+      }
+      this.#operationSubscriptions.clear();
       this.#routeAbort.abort(new Error("memory replica closed"));
       this.options.routeState.generation++;
     }
@@ -2480,7 +2646,7 @@ const docKey = (id: URI, instance: string): string => `${instance}\0${id}`;
  * caller knows it, the explicit instance key. */
 type LocalDocAddress = { id: URI; scope?: CellScope; scopeKey?: ScopeKey };
 
-class SpaceReplica implements ISpaceReplica {
+class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
   readonly #space: MemorySpace;
   readonly #subscription: IStorageSubscription;
   readonly #scopeKeyIdentity: () => ScopeKeyIdentity;
@@ -2509,11 +2675,16 @@ class SpaceReplica implements ISpaceReplica {
    *  during reconnect, which closes its watch view without a fresh watch result
    *  to record. */
   #sessionSession?: MemoryV2Client.SpaceSession;
+
+  /** THE SESSION REMOUNT's latch (see `noteAclChanged` /
+   *  `consumeOwedSessionRemount`): an admitted commit touched this space's
+   *  ACL doc, so the verdict a terminated session died of may have changed.
+   *  Cleared when the owed remount is consumed — or immediately, when there
+   *  is no memoized mount to replace. */
+  #aclChangedSinceMount = false;
   readonly #docs = new Map<string, DocumentRecord>();
   readonly #syncTasks = new Map<string, SyncTask>();
-  readonly #commitPromises = new Set<
-    Promise<Result<Unit, StorageTransactionRejected>>
-  >();
+  readonly #commitPromises = new Set<Promise<unknown>>();
   // Issued-but-unsettled commits that carry pending reads, keyed by localSeq.
   // Scanned by cascadeDroppedDependency when a dependency's optimistic writes
   // are dropped. See the InFlightCommit doc for why zero-pending-read commits
@@ -2551,6 +2722,11 @@ class SpaceReplica implements ISpaceReplica {
     string,
     Set<(document: EntityDocument | undefined) => void>
   >();
+  readonly #operationSinks = new Map<
+    string,
+    Set<(snapshot: OperationFieldSnapshot) => void>
+  >();
+  readonly #operationWatchRemovals = new Map<string, Promise<void>>();
   #watchView: MemoryV2Client.WatchView | null = null;
   // The specific view instance that `consumeUpdates` is iterating. This can
   // diverge from `#watchView` (the client may hand back a fresh view instance
@@ -2977,6 +3153,301 @@ class SpaceReplica implements ISpaceReplica {
     await this.activeSessionHandle();
   }
 
+  /**
+   * THE SESSION REMOUNT's latch (the fifth face of profile starvation).
+   *
+   * An admitted commit touched this space's ACL document, so the
+   * AUTHORIZATION VERDICT that terminated this replica's session may have
+   * changed. Record it; `sessionHandle()` consumes it on the next load.
+   *
+   * Why a latch instead of tearing the session down right here: the memory
+   * server emits the admitted-commit notice BEFORE it runs
+   * `#revokeDeauthorizedSessions` (both inside one `transact` — server.ts,
+   * `#notifyCommitAdmitted` then the `aclTouched` sweep). At notification
+   * time the session that the very same commit is about to revoke is still
+   * OPEN, so an eager teardown would inspect a live session, decline, and
+   * the revocation landing a moment later would starve exactly as before.
+   * Latching makes the fix independent of that ordering rather than
+   * dependent on it.
+   *
+   * Consumption is event-driven, not timed: the next load attempt calls
+   * `sessionHandle()`, and the serving loop already re-attempts a deferred
+   * event's load every drain (see the scheduler's `failHeadEventLoadPark`
+   * and the SpaceServer's deferral backstop), so the heal arrives on the
+   * cadence the deferral machinery already runs at.
+   */
+  noteAclChanged(): void {
+    if (this.#closed) return;
+    this.#aclChangedSinceMount = true;
+  }
+
+  /**
+   * THE SESSION REMOUNT itself. Drop a memoized session that an ACL verdict
+   * terminated, so the next `sessionHandle()` opens a fresh one.
+   *
+   * A revoked (or permanently denied) space session is TERMINAL for that
+   * session object: `terminateSession` (memory/v2/client.ts) closes it,
+   * clears its watch specs, and stores the verdict in `closeError`, which
+   * `#assertOpen()` then rethrows for every later call. Nothing on the read
+   * or commit path ever dropped the memoized mount — `sessionHandle()`
+   * clears it only in `close()`/`closeNow()` — so every subsequent pull
+   * reused the same dead session and the space read `unauthorized` forever.
+   * `storage/rejection.ts`'s `SessionError` note named this gap when it was
+   * written: "the convergence argument is sound, only the remount is
+   * missing."
+   *
+   * WHY AN ACL COMMIT IS THE ONLY TRIGGER. The verdict that killed the
+   * session is a function of the space's ACL, so re-opening on any other
+   * schedule re-runs a decision whose inputs have not changed — one doomed
+   * round-trip per retry, exactly the cost `isTransientCommitRejection`
+   * refuses to pay for `SessionError`. This is the space-root ensure's own
+   * discipline for the very same boot order, one layer down: latch the owed
+   * work at the fail-closed refusal, consume it when a commit touches
+   * `of:<space>` (executor/space-server.ts `#rootEnsureAwaitingOwner`).
+   *
+   * WHY IT CANNOT WIDEN AUTHORITY. This re-opens a session; it does not
+   * decide one. `session.open` re-runs the server's full admission against
+   * the ACL as it now stands, and under OW31's ruled read posture a serving
+   * mount carries `actingAs: "space-owner"`, so the server re-resolves the
+   * binding from the LANDED ACL and the session runs as whoever owns the
+   * space now. Two cases:
+   *   - the genesis case (this defect): the pre-genesis session opened under
+   *     the service envelope's fresh-space READ floor and the genesis ACL
+   *     `{user: OWNER}` de-authorized it by design. The re-open binds the
+   *     user, who is OWNER, and is admitted.
+   *   - a GENUINE de-authorization (the user removed, ownership moved): the
+   *     re-open is DENIED at `session.open`. `sessionHandle()`'s catch drops
+   *     the failed handle, the load keeps failing, and the served event
+   *     keeps deferring — the ratified wedge, which OW54's give-up arm
+   *     covers. Fail-closed, and loud.
+   */
+  private consumeOwedSessionRemount(): void {
+    if (!this.#aclChangedSinceMount) return;
+    const stale = this.#sessionHandle;
+    if (stale === undefined) {
+      // Nothing memoized to replace: the next open already re-decides.
+      this.#aclChangedSinceMount = false;
+      return;
+    }
+    // ONLY an ACL verdict. A handle still opening, a live session, a
+    // graceful close ("memory session closed"), and a transport drop (which
+    // the client's own `reconnect()`/`restore()` already heals) must all be
+    // left alone: this arm exists for the one termination class no other
+    // path recovers from.
+    const closeError = this.#sessionSession?.closeError;
+    if (
+      closeError === undefined ||
+      (closeError.name !== "SessionRevokedError" &&
+        closeError.name !== "AuthorizationError")
+    ) {
+      // The latch is deliberately LEFT SET here, and clearing it would be a
+      // race rather than a tidy-up. The notice arrives BEFORE the revocation
+      // (see `noteAclChanged`), so a pull landing in that window sees a still
+      // healthy session; discharging the latch on it would throw away the
+      // remount the revocation is about to make necessary. Leaving it set
+      // costs at most ONE re-open later, on a session some other verdict
+      // terminates — which an ACL change is a legitimate reason to re-evaluate
+      // anyway — and the latch clears when that remount runs.
+      return;
+    }
+    this.#aclChangedSinceMount = false;
+    this.#sessionHandle = undefined;
+    this.#sessionClient = undefined;
+    // Dropping the terminated session drops the `closeError` half of
+    // `authorizationError()` with it. That is the right direction — keeping it
+    // would report a denial for a space that may have just healed, and a
+    // caller like the CLI would refuse to act on an authorized space — but it
+    // does open a narrow window: for a denial that ONLY the close error
+    // recorded (the reconnect case that never produced a watch result;
+    // see `authorizationError`'s own note), `authorizationError()` reads
+    // undefined between the remount arming and the next pull re-recording it.
+    // No serving-loop caller reads it in that window, and no CLIENT manager is
+    // ever notified at all (the host is the only caller). FLAGGED, not filled.
+    this.#sessionSession = undefined;
+    // The dead session's views. `terminateSession` already closed the
+    // SESSION's own view; these are the replica's references to it, which a
+    // later refresh would otherwise overwrite rather than close (the leak
+    // `refreshWatchSet`'s own catch guards against).
+    this.#watchView?.close();
+    this.#watchView = null;
+    this.#subscribedWatchView?.close();
+    this.#subscribedWatchView = null;
+    // Close the connection the dead session rode: the next mount builds a
+    // fresh client, and leaving this one open would accumulate one
+    // connection per revocation.
+    stale.then(({ client }) => client.close()).catch(() => {});
+    sessionRemountLogger.warn("session-remount", () => [
+      `space ${this.#space}: the memoized session was terminated by ` +
+      `${closeError.name} and a commit touched its ACL doc; remounting. ` +
+      "A fresh session.open re-runs the server's admission against the " +
+      "ACL as it now stands (OW31: a serving mount's READ decisions " +
+      "resolve as the space's OWNER), so a genuine de-authorization is " +
+      "denied there rather than healed here.",
+    ]);
+    // DROP THE WATCH-SELECTOR TRACKER. The fresh session carries no
+    // watches — `terminateSession` cleared `#watchSpecs` and the server
+    // dropped the session from its registry — but the tracker still records
+    // every selector the DEAD session had successfully covered, and `pull()`
+    // answers a covered selector out of it WITHOUT ever reaching a session.
+    // So without this line, a doc the replica had read before the revocation
+    // is answered `{ok:{}}` from a replica that stopped receiving its
+    // updates: a SILENT STALE READ.
+    //
+    // The first pass flagged this as a residual with the claim that "each
+    // address re-installs on its next pull". That claim was FALSE, and an
+    // independent review (Cubic, P1 ×3 on this PR) was right to push on it:
+    // it holds only for an address whose pull FAILED, because a failed
+    // fetch removes its own selectors from the tracker — which is the
+    // starved-load case this PR fixes, and not this one. Reproduced before
+    // fixing: after the remount the read returned SUCCESS while the replica
+    // still held the pre-revocation value.
+    //
+    // Scope is deliberately the tracker ALONE — not `#docs`, not
+    // `#watchedIds`, not the conflict-admission state, all of which
+    // `reset()` also wipes (that is a rebuild-from-scratch; this is not).
+    // The cost is one genuine fetch per still-wanted address after a
+    // remount, which re-installs its watch on the fresh session. A remount
+    // is rare; the alternative is serving values from a subscription that
+    // no longer exists.
+    this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>(
+      () => this.#scopeKeyIdentity(),
+    );
+  }
+
+  async queryOperationField(
+    query: Omit<OperationFieldQuery, "principal" | "sessionId">,
+  ): Promise<OperationFieldSnapshot> {
+    const { session } = await this.activeSessionHandle();
+    return (await session.queryOperationField(query)).field;
+  }
+
+  async operationCodecs(): Promise<readonly string[]> {
+    const { client } = await this.activeSessionHandle();
+    if (client.serverFlags?.applyOp !== true) return [];
+    return client.serverFlags.operationCodecs ?? [];
+  }
+
+  async applyOperation(
+    operation: ApplyOpOperation,
+  ): Promise<ApplyOpResolution> {
+    const { client, session } = await this.activeSessionHandle();
+    if (client.serverFlags?.applyOp !== true) {
+      throw new Error("memory server does not support apply-op");
+    }
+    const localSeq = this.#nextLocalSeq++;
+    const request = session.transact({
+      localSeq,
+      reads: { confirmed: [], pending: [] },
+      operations: [operation],
+    }, () => this.markRouteWriteIssued());
+    this.#commitPromises.add(request);
+    let applied;
+    try {
+      applied = await request;
+    } finally {
+      this.#commitPromises.delete(request);
+    }
+    const resolution = applied.operationResolutions?.[0];
+    if (resolution === undefined) {
+      throw new Error("apply-op commit returned no operation resolution");
+    }
+    return resolution;
+  }
+
+  async releaseOperationField(
+    operation: ReleaseOpFieldOperation,
+  ): Promise<void> {
+    const { client, session } = await this.activeSessionHandle();
+    if (client.serverFlags?.applyOp !== true) {
+      throw new Error("memory server does not support release-op-field");
+    }
+    const localSeq = this.#nextLocalSeq++;
+    const request = session.transact({
+      localSeq,
+      reads: { confirmed: [], pending: [] },
+      operations: [operation],
+    }, () => this.markRouteWriteIssued());
+    this.#commitPromises.add(request);
+    try {
+      await request;
+    } finally {
+      this.#commitPromises.delete(request);
+    }
+  }
+
+  async subscribeOperationField(
+    query: Omit<OperationFieldQuery, "principal" | "sessionId">,
+    callback: (snapshot: OperationFieldSnapshot) => void,
+  ): Promise<Cancel> {
+    const watchId = `operation:${hashStringOf(query)}`;
+    let callbacks = this.#operationSinks.get(watchId);
+    if (callbacks === undefined) {
+      callbacks = new Set();
+      this.#operationSinks.set(watchId, callbacks);
+    }
+    callbacks.add(callback);
+
+    try {
+      await this.#operationWatchRemovals.get(watchId);
+      const { session } = await this.activeSessionHandle();
+      const { view, precedingSyncs, sync } = await session.watchAddSync([{
+        id: watchId,
+        kind: "operation",
+        query,
+      }]);
+      if (this.#closed) {
+        view.close();
+        throw new Error("memory replica closed");
+      }
+      this.#watchView = view;
+      for (const precedingSync of precedingSyncs) {
+        this.applySessionSync(precedingSync, "integrate");
+      }
+      this.applySessionSync(sync, "integrate");
+      this.#consumeWatchView(view);
+    } catch (error) {
+      callbacks.delete(callback);
+      if (callbacks.size === 0) this.#operationSinks.delete(watchId);
+      throw error;
+    }
+
+    return () => {
+      const current = this.#operationSinks.get(watchId);
+      current?.delete(callback);
+      if (current?.size !== 0) return;
+      this.#operationSinks.delete(watchId);
+      const removal = this.#removeOperationWatch(watchId).finally(() => {
+        if (this.#operationWatchRemovals.get(watchId) === removal) {
+          this.#operationWatchRemovals.delete(watchId);
+        }
+      });
+      this.#operationWatchRemovals.set(watchId, removal);
+    };
+  }
+
+  async #removeOperationWatch(watchId: string): Promise<void> {
+    try {
+      const { session } = await this.activeSessionHandle();
+      const { view, precedingSyncs, sync } = await session.watchRemoveSync([
+        watchId,
+      ]);
+      if (this.#closed) {
+        view.close();
+        return;
+      }
+      this.#watchView = view;
+      for (const precedingSync of precedingSyncs) {
+        this.applySessionSync(precedingSync, "integrate");
+      }
+      this.applySessionSync(sync, "integrate");
+      this.#consumeWatchView(view);
+    } catch (error) {
+      if (!this.#closed) {
+        console.warn("failed to remove operation watch", error);
+      }
+    }
+  }
+
   async sqliteQuery(
     db: SqliteDbRef,
     sql: string,
@@ -3299,6 +3770,7 @@ class SpaceReplica implements ISpaceReplica {
     this.cancelQueuedWatchRefresh();
     this.#watchView?.close();
     this.#watchView = null;
+    this.#operationSinks.clear();
     // Also close the view the update consumer is bound to, in case it diverged
     // from #watchView; otherwise its pending next() never settles and the
     // `Promise.allSettled([...#updatePromises])` below hangs forever.
@@ -3337,6 +3809,8 @@ class SpaceReplica implements ISpaceReplica {
     ]);
     await Promise.allSettled([...this.#syncPromises]);
     await Promise.allSettled([...this.#updatePromises]);
+    await Promise.allSettled([...this.#operationWatchRemovals.values()]);
+    this.#operationWatchRemovals.clear();
     this.#syncTasks.clear();
     this.#watchSelectorTracker = new SelectorTracker<Result<Unit, PullError>>(
       () => this.#scopeKeyIdentity(),
@@ -3471,6 +3945,8 @@ class SpaceReplica implements ISpaceReplica {
     // verdicts settle off the same teardown rejection.
     void Promise.allSettled([...this.#syncPromises]);
     void Promise.allSettled([...this.#updatePromises]);
+    void Promise.allSettled([...this.#operationWatchRemovals.values()]);
+    this.#operationWatchRemovals.clear();
     void Promise.allSettled([...this.#suppressedVerdicts]);
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica closed"));
     this.#syncTasks.clear();
@@ -3501,6 +3977,16 @@ class SpaceReplica implements ISpaceReplica {
     if (entries.length === 0) {
       return { ok: {} };
     }
+    // The owed session remount, consumed BEFORE the watch-selector tracker
+    // is consulted below — not only at `sessionHandle()`. A selector the
+    // tracker already covers is answered from it and never reaches a
+    // session at all, so consuming only at the mount point leaves precisely
+    // the docs the replica had successfully read being served out of a
+    // subscription the revocation killed. Found by independent review
+    // (Cubic P1) and reproduced before fixing: the post-remount read
+    // returned SUCCESS carrying the pre-revocation value. Idempotent and
+    // cheap — a bare boolean test when nothing is owed.
+    this.consumeOwedSessionRemount();
 
     const normalizedEntries = normalizeSyncEntries(entries);
     // Phase 5's delegated-scoped-read fail-closed refusal, ENTRY-scoped
@@ -4171,22 +4657,27 @@ class SpaceReplica implements ISpaceReplica {
         view.close();
         throw error;
       }
-      if (this.#updatePromises.size === 0) {
-        this.#subscribedWatchView = view;
-        const updates = this.consumeUpdates(view.subscribeSync())
-          .finally(() => {
-            this.#updatePromises.delete(updates);
-            if (this.#subscribedWatchView === view) {
-              this.#subscribedWatchView = null;
-              this.applyParkedAcceptsNow();
-            }
-          });
-        this.#updatePromises.add(updates);
-      }
+      this.#consumeWatchView(view);
       return { ok: {} };
     } catch (error) {
       return { error: toPullError(error) };
     }
+  }
+
+  #consumeWatchView(view: MemoryV2Client.WatchView): void {
+    if (this.#subscribedWatchView === view) return;
+    const previous = this.#subscribedWatchView;
+    this.#subscribedWatchView = view;
+    previous?.close();
+    const updates = this.consumeUpdates(view.subscribeSync())
+      .finally(() => {
+        this.#updatePromises.delete(updates);
+        if (this.#subscribedWatchView === view) {
+          this.#subscribedWatchView = null;
+          this.applyParkedAcceptsNow();
+        }
+      });
+    this.#updatePromises.add(updates);
   }
 
   private enqueueWatchRefresh(
@@ -5576,6 +6067,15 @@ class SpaceReplica implements ISpaceReplica {
     sync: SessionSync,
     type: "pull" | "integrate",
   ): void {
+    for (const delivery of sync.operationFields ?? []) {
+      for (const callback of this.#operationSinks.get(delivery.watchId) ?? []) {
+        try {
+          callback(delivery.field);
+        } catch (error) {
+          console.error("operation field subscriber failed", error);
+        }
+      }
+    }
     if (
       sync.upserts.length === 0 &&
       sync.removes.length === 0
@@ -6653,6 +7153,9 @@ class SpaceReplica implements ISpaceReplica {
     if (this.#closed) {
       return Promise.reject(new Error("memory replica closed"));
     }
+    // The owed session remount, consumed at the memoization point — the one
+    // place every read and commit passes through on its way to a session.
+    this.consumeOwedSessionRemount();
     if (this.#sessionHandle === undefined) {
       // Defer the factory call until after #sessionHandle is installed. Session
       // setup can synchronously re-enter provider work (notably home-space ACL
@@ -6850,8 +7353,9 @@ const toRejectedError = (
   //    knows. Classified TERMINAL by the retry allow-list — not because the
   //    commit was evaluated (it was not), but because nothing on the retry path
   //    remounts the session: `sessionHandle()` memoizes the mount and clears it
-  //    only on close. The name still has to survive normalization here, or the
-  //    caller sees a generic TransactionError instead of the real cause.
+  //    on close, and (since 2026-08-26) when the space's ACL CHANGES — which a
+  //    commit retry is not. The name still has to survive normalization here,
+  //    or the caller sees a generic TransactionError instead of the real cause.
   //  - `InvalidMessageError`: a frame off the wire would not decode, and the
   //    client's `rejectPending` sweep (memory/v2/client.ts `onMessage`) rejected
   //    every in-flight request with it — including this commit, which may never

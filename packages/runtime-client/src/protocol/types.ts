@@ -6,6 +6,12 @@ import type {
 } from "@commonfabric/data-model/fabric-value";
 import type { DID } from "@commonfabric/identity";
 import { type Program } from "@commonfabric/js-compiler/interface";
+import type {
+  ApplyOpResolution,
+  IntegratedOperation,
+  OpCursor,
+  OperationFieldSnapshot,
+} from "@commonfabric/memory/v2";
 import type { CfcConfClause } from "@commonfabric/runner/cfc";
 import type { CfcLabelView } from "@commonfabric/runner/cfc/label-view-core";
 import type {
@@ -127,6 +133,27 @@ export enum RequestType {
 
   /** Reads a cell's display CFC label, without its value. */
   CellGetCfcLabel = "cell:getCfcLabel",
+
+  /** Lists the operation codecs available for a cell. */
+  OperationCapabilities = "operation:capabilities",
+
+  /** Reads a cell's operation-backed state and retained operation tail. */
+  OperationQuery = "operation:query",
+
+  /** Applies one codec-specific operation to a cell. */
+  OperationApply = "operation:apply",
+
+  /** Releases retained operations through a cursor. */
+  OperationRelease = "operation:release",
+
+  /** Starts notifying the client of a cell's operation-backed changes. */
+  OperationSubscribe = "operation:subscribe",
+
+  /** Stops an operation subscription. */
+  OperationUnsubscribe = "operation:unsubscribe",
+
+  /** Forgets a client's pinned operation target. */
+  OperationSessionClose = "operation:session-close",
 
   // Runtime operations
 
@@ -419,6 +446,9 @@ export enum NotificationType {
    * whether a reload would drop an unconfirmed write.
    */
   PendingWritesChanged = "callback:pending-writes",
+
+  /** Reports a new operation-backed snapshot for a subscription. */
+  OperationUpdate = "operation:update",
 }
 
 /**
@@ -881,6 +911,99 @@ export type CellGetCfcLabelRequest = BaseRequest & {
    */
   cell: CellRef;
 };
+
+/** The {@link RequestType.OperationQuery} request. */
+export type OperationQueryRequest = BaseRequest & {
+  type: RequestType.OperationQuery;
+  cell: CellRef;
+  operationSessionId?: string;
+  after?: OpCursor;
+};
+
+/** The {@link RequestType.OperationCapabilities} request. */
+export type OperationCapabilitiesRequest = BaseRequest & {
+  type: RequestType.OperationCapabilities;
+  cell: CellRef;
+  operationSessionId?: string;
+};
+
+/** The {@link RequestType.OperationApply} request. */
+export type OperationApplyRequest = BaseRequest & {
+  type: RequestType.OperationApply;
+  cell: CellRef;
+  operationSessionId?: string;
+  codec: string;
+  submissionId: string;
+  base: OpCursor | null;
+  baselineHash?: string;
+  payload: RealmEncodedValue;
+};
+
+/** The {@link RequestType.OperationSubscribe} request. */
+export type OperationSubscribeRequest = BaseRequest & {
+  type: RequestType.OperationSubscribe;
+  subscriptionId: string;
+  cell: CellRef;
+  operationSessionId?: string;
+  after?: OpCursor;
+};
+
+/** The {@link RequestType.OperationRelease} request. */
+export type OperationReleaseRequest = BaseRequest & {
+  type: RequestType.OperationRelease;
+  cell: CellRef;
+  operationSessionId?: string;
+  codec: string;
+  cursor: OpCursor;
+};
+
+/** The {@link RequestType.OperationUnsubscribe} request. */
+export type OperationUnsubscribeRequest = BaseRequest & {
+  type: RequestType.OperationUnsubscribe;
+  subscriptionId: string;
+};
+
+/** The {@link RequestType.OperationSessionClose} request. */
+export type OperationSessionCloseRequest = BaseRequest & {
+  type: RequestType.OperationSessionClose;
+  operationSessionId: string;
+};
+
+/** A response carrying one operation-backed field snapshot. */
+export type OperationFieldResponse = {
+  field: WireOperationFieldSnapshot;
+};
+
+/** A response naming the operation codecs available for a cell. */
+export type OperationCapabilitiesResponse = {
+  codecs: string[];
+};
+
+/** A response carrying the authoritative resolution of an operation. */
+export type OperationApplyResponse = {
+  resolution: WireApplyOpResolution;
+};
+
+/** An integrated operation encoded for a structured-clone boundary. */
+export type WireIntegratedOperation = Omit<IntegratedOperation, "payload"> & {
+  payload: RealmEncodedValue;
+};
+
+/** An apply result encoded for a structured-clone boundary. */
+export type WireApplyOpResolution = Omit<ApplyOpResolution, "operations"> & {
+  operations: WireIntegratedOperation[];
+};
+
+/** An operation field encoded for a structured-clone boundary. */
+export type WireOperationFieldSnapshot =
+  & Omit<
+    OperationFieldSnapshot,
+    "materialized" | "operations"
+  >
+  & {
+    materialized: RealmEncodedValue;
+    operations: WireIntegratedOperation[];
+  };
 
 /**
  * The {@link RequestType.GetCell} request. `cause` is what derives the
@@ -2290,6 +2413,13 @@ export type IPCClientRequest =
   | CellUnsubscribeRequest
   | CellResolveAsCellRequest
   | CellGetCfcLabelRequest
+  | OperationCapabilitiesRequest
+  | OperationQueryRequest
+  | OperationApplyRequest
+  | OperationReleaseRequest
+  | OperationSubscribeRequest
+  | OperationUnsubscribeRequest
+  | OperationSessionCloseRequest
   | GetCellRequest
   | GetHomeSpaceCellRequest
   | EnsureHomePatternRunningRequest
@@ -2711,6 +2841,13 @@ export type VDomBatchNotification = {
   mountId?: number;
 };
 
+/** A new operation-backed snapshot for one active subscription. */
+export type OperationUpdateNotification = {
+  type: NotificationType.OperationUpdate;
+  subscriptionId: string;
+  field: WireOperationFieldSnapshot;
+};
+
 /**
  * Every shape a successful response can carry. The arm a given request yields
  * is fixed by {@link Commands} rather than chosen here.
@@ -2741,7 +2878,10 @@ export type RemoteResponse =
   | VDomMountResponse
   | DetectNonIdempotentResponse
   | PatternSourcesResponse
-  | UploadBlobResponse;
+  | UploadBlobResponse
+  | OperationCapabilitiesResponse
+  | OperationFieldResponse
+  | OperationApplyResponse;
 
 /**
  * Everything the worker reports without being asked. Each arm is recognized
@@ -2754,7 +2894,8 @@ export type IPCRemoteNotification =
   | ErrorNotification
   | TelemetryNotification
   | VDomBatchNotification
-  | PendingWritesNotification;
+  | PendingWritesNotification
+  | OperationUpdateNotification;
 
 /**
  * The request-and-response pairing for every {@link RequestType}. This is what
@@ -2891,6 +3032,34 @@ export type Commands = {
   [RequestType.CellGetCfcLabel]: {
     request: CellGetCfcLabelRequest;
     response: CfcLabelViewResponse;
+  };
+  [RequestType.OperationCapabilities]: {
+    request: OperationCapabilitiesRequest;
+    response: OperationCapabilitiesResponse;
+  };
+  [RequestType.OperationQuery]: {
+    request: OperationQueryRequest;
+    response: OperationFieldResponse;
+  };
+  [RequestType.OperationApply]: {
+    request: OperationApplyRequest;
+    response: OperationApplyResponse;
+  };
+  [RequestType.OperationRelease]: {
+    request: OperationReleaseRequest;
+    response: BooleanResponse;
+  };
+  [RequestType.OperationSubscribe]: {
+    request: OperationSubscribeRequest;
+    response: BooleanResponse;
+  };
+  [RequestType.OperationUnsubscribe]: {
+    request: OperationUnsubscribeRequest;
+    response: BooleanResponse;
+  };
+  [RequestType.OperationSessionClose]: {
+    request: OperationSessionCloseRequest;
+    response: BooleanResponse;
   };
   // Page requests
   [RequestType.PageCreate]: {

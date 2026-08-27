@@ -1,4 +1,16 @@
 export {
+  type ApplyOptions,
+  applyPlan,
+  type ApplyReport,
+  type ApplyRow,
+  type ApplySessions,
+  type ApplyVerdict,
+  type PlanOperation,
+  type ReferenceOp,
+  type WorkRow,
+} from "./bulk-apply.ts";
+export {
+  acceptUnretained,
   canonicalPieceAddress,
   decodePlan,
   deriveRollbackPlan,
@@ -14,8 +26,20 @@ export {
   type RestoreOp,
   type RetargetOp,
   type RetargetSource,
+  type RollbackDerivationOptions,
   type SurveyProblem,
 } from "./bulk-plan.ts";
+export { type RollbackOptions, rollbackPieces } from "./bulk-rollback.ts";
+export {
+  readRestorableSource,
+  type RestorableRevision,
+  type RestorableSource,
+  type RestoreOptions,
+  type RestoreOutcome,
+  restorePiece,
+  type RestoreTarget,
+  selectRestoreRevision,
+} from "./piece-restore.ts";
 export {
   assertPlanRunsFixer,
   collectLinkPaths,
@@ -39,6 +63,7 @@ export {
 } from "./bulk-diff.ts";
 export {
   HOLDER_PHASE,
+  isSourceRetained,
   LIST_PHASE,
   type PiecePin,
   type PieceSelector,
@@ -59,6 +84,7 @@ export {
   type PiecePatternSourceRef,
   type PieceSourceAction,
   type PieceSourceActionResult,
+  PieceSourceChangedError,
   type PieceSourceCompatibilityIssues,
   type PreparedPieceSourceChange,
 } from "./piece-controller.ts";
