@@ -60,9 +60,15 @@ import {
   branchReadChain,
   type BranchReadLink,
   reconstructDocument,
+  reconstructOutcome,
   visibleRevisionRows,
 } from "./reconstruct.ts";
-import type { EntityDocument, ReconstructOptions } from "./reconstruct.ts";
+import type {
+  AbsenceStatus,
+  EntityDocument,
+  ReconstructOptions,
+  ReconstructOutcome,
+} from "./reconstruct.ts";
 
 export type EntityKind =
   | "piece" // a running pattern instance (result cell + lineage meta)
@@ -71,7 +77,39 @@ export type EntityKind =
   | "schema" // a JSONSchema stored as a cell value
   | "owned-cell" // a cell owned by a piece (carries a `result` back-link)
   | "free-cell" // a standalone cell, owned by no piece
-  | "unknown";
+  | "deleted" // a tombstone: the visible head row is a `delete`
+  | "unknown"; // present but unreadable, or a shape nothing above recognizes
+
+/** How an entity that carries no document reads: its kind, and its label. */
+export interface AbsentEntity {
+  kind: EntityKind;
+  label: string;
+}
+
+/**
+ * Name an entity by WHY it has no document. `deleted` is its own kind because a
+ * tombstone is an ordinary thing to find and says what happened; the rest are
+ * `unknown`, which therefore means the entity is there and cannot be read. A
+ * tombstone's original shape is genuinely gone at HEAD — recovering "this was a
+ * piece" takes a reconstruction at the seq before the delete.
+ */
+export function absentEntity(status: AbsenceStatus): AbsentEntity {
+  return { kind: ABSENT_KIND[status], label: ABSENT_LABEL[status] };
+}
+
+const ABSENT_KIND: Record<AbsenceStatus, EntityKind> = {
+  deleted: "deleted",
+  empty: "unknown",
+  absent: "unknown",
+  undecodable: "unknown",
+};
+
+const ABSENT_LABEL: Record<AbsenceStatus, string> = {
+  deleted: "(deleted)",
+  empty: "(no data)",
+  absent: "(absent)",
+  undecodable: "(undecodable)",
+};
 
 // LEGACY-PROCESS-CELL: `"legacy"` collapses out when the process-cell era is
 // retired, leaving `"modern" | "n/a"` (see top-of-file retirement note).
@@ -452,7 +490,10 @@ const KIND_ORDER: Record<EntityKind, number> = {
   schema: 3,
   "owned-cell": 4,
   "free-cell": 5,
+  // Unreadable entities sort above tombstones: corruption is worth looking at,
+  // and a deletion is the ordinary end of an entity's life.
   unknown: 6,
+  deleted: 7,
 };
 
 /** Every kind an entity classifies as, in the order a listing presents them. */
@@ -648,9 +689,15 @@ export function countEntities(
   return visibleEntityRows(space, opts).length;
 }
 
-/** An entity's kind without modeling it; `unknown` when it cannot be read. */
-function kindOf(doc: EntityDocument | undefined): EntityKind {
-  return doc === undefined ? "unknown" : classifyDocument(doc).kind;
+/**
+ * An entity's kind without modeling it. An entity carrying no document is named
+ * by WHY it carries none, so a tombstone answers `deleted` and only a genuinely
+ * unreadable one answers `unknown`.
+ */
+function kindOf(outcome: ReconstructOutcome): EntityKind {
+  return outcome.status === "present"
+    ? classifyDocument(outcome.document).kind
+    : absentEntity(outcome.status).kind;
 }
 
 /**
@@ -699,8 +746,8 @@ export function listEntityModels(
   const kind = opts.kind;
 
   // A listing describes the space's RECORDS, so it keeps tombstones (they model
-  // as `unknown`) — which also keeps `extent.total` counting exactly the set
-  // this pass returns.
+  // as `deleted`, which is why `--kind deleted` can ask for them) — and that
+  // keeps `extent.total` counting exactly the set this pass returns.
   const rows = visibleEntityRows(space, {
     branch,
     scope,
@@ -710,7 +757,7 @@ export function listEntityModels(
   // Single reconstruction pass: cache docs + build the module index inline.
   // Only matching documents are cached; a `kind` scan may pass over far more
   // entities than it keeps, and holding every value would cost the space.
-  const docs = new Map<string, EntityDocument | undefined>();
+  const outcomes = new Map<string, ReconstructOutcome>();
   const moduleIndex = new Map<string, ModuleEntry>();
   const indexModule = (id: string, doc: EntityDocument | undefined): void => {
     const v = doc?.value;
@@ -721,22 +768,26 @@ export function listEntityModels(
       moduleIndex.set(v.identity, { id, filename: v.filename, kind: v.kind });
     }
   };
-  // A throw and a tombstone both yield no document, and only one of them is an
-  // error: a deleted entity is definitively not a `piece`, while an entity that
-  // would not decode might have been one. A `kind` filter drops both, so the
-  // two have to stay distinguishable or the dropped error goes unreported.
-  const read = (
-    id: string,
-  ): { doc: EntityDocument | undefined; failed: boolean } => {
-    try {
-      return {
-        doc: reconstructDocument(space, { id, branch, scope }),
-        failed: false,
-      };
-    } catch {
-      return { doc: undefined, failed: true };
-    }
-  };
+  // A tombstone and a corrupt payload both yield no document, and only one of
+  // them is an error: a deleted entity is definitively not a `piece`, while an
+  // entity that would not decode might have been one. The outcome keeps the two
+  // apart, so a `kind` filter that drops an error can still report it.
+  const read = (id: string): ReconstructOutcome =>
+    reconstructOutcome(space, { id, branch, scope });
+  const documentOf = (o: ReconstructOutcome): EntityDocument | undefined =>
+    o.status === "present" ? o.document : undefined;
+  // An entity that is HERE and cannot be read. A tombstone is not one: it says
+  // what happened to it.
+  const isUnreadable = (o: ReconstructOutcome): boolean =>
+    o.status === "undecodable" || o.status === "empty";
+  // Whether corruption could be hiding the kind that was asked for. It cannot
+  // hide a tombstone: what makes an entity `deleted` is the OP of its visible
+  // row, which is read before any payload is, and an unreadable row's op is a
+  // `set` or a `patch`. So a `deleted` scan is exhaustive even over rows it
+  // could not decode, and counting them would make a complete listing report
+  // itself partial — turning `--require-complete` into a nonzero exit over an
+  // answer that was whole.
+  const concealable = kind !== "deleted";
 
   const kept: EntityScanRow[] = [];
   let truncated = false;
@@ -751,10 +802,11 @@ export function listEntityModels(
   // happened to land on the cap.
   for (; scanned < rows.length; scanned++) {
     const r = rows[scanned];
-    const { doc, failed } = read(r.id);
+    const outcome = read(r.id);
+    const doc = documentOf(outcome);
     indexModule(r.id, doc);
-    if (kind !== undefined && kindOf(doc) !== kind) {
-      if (failed) unreadable++;
+    if (kind !== undefined && kindOf(outcome) !== kind) {
+      if (concealable && isUnreadable(outcome)) unreadable++;
       continue;
     }
     if (kept.length === limit) {
@@ -762,7 +814,7 @@ export function listEntityModels(
       scanned++;
       break;
     }
-    docs.set(r.id, doc);
+    outcomes.set(r.id, outcome);
     kept.push(r);
   }
 
@@ -779,8 +831,8 @@ export function listEntityModels(
   // and `lineage.argument` already do — so it keeps its cheap scan.
   const wanted = new Set<string>();
   if (kind !== undefined) {
-    for (const doc of docs.values()) {
-      const identity = patternIdentityOf(doc);
+    for (const o of outcomes.values()) {
+      const identity = patternIdentityOf(documentOf(o));
       if (
         identity !== undefined && moduleIndex.get(identity)?.kind !== "source"
       ) {
@@ -798,7 +850,7 @@ export function listEntityModels(
   // The walk ends the moment nothing is still wanted.
   for (; wanted.size > 0 && scanned < rows.length; scanned++) {
     const r = rows[scanned];
-    const { doc } = read(r.id);
+    const doc = documentOf(read(r.id));
     indexModule(r.id, doc);
     const v = doc?.value;
     // A `source` entity supersedes a `compiled` one, so a want is only settled
@@ -807,15 +859,16 @@ export function listEntityModels(
   }
 
   const out: EntityModel[] = kept.map((r): EntityModel => {
-    const doc = docs.get(r.id);
-    if (doc === undefined) {
+    const outcome = outcomes.get(r.id)!;
+    if (outcome.status !== "present") {
+      const { kind, label } = absentEntity(outcome.status);
       return {
         id: r.id,
         scope,
-        kind: "unknown",
+        kind,
         regime: "n/a",
         owned: false,
-        label: "(undecodable)",
+        label,
         paths: [],
         valueShape: "absent",
         lineage: {},
@@ -823,9 +876,13 @@ export function listEntityModels(
         links: 0,
       };
     }
-    const m = modelFromDocument(doc, { id: r.id, scope, moduleIndex });
+    const m = modelFromDocument(outcome.document, {
+      id: r.id,
+      scope,
+      moduleIndex,
+    });
     m.revisions = r.revisions;
-    m.links = countLinks(doc.value);
+    m.links = countLinks(outcome.document.value);
     return m;
   });
 
@@ -905,8 +962,11 @@ export function describePiece(
 ): PieceModel | { error: string } {
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
-  const doc = reconstructDocument(space, { id, branch, scope });
-  if (doc === undefined) return { error: "entity absent" };
+  const outcome = reconstructOutcome(space, { id, branch, scope });
+  if (outcome.status !== "present") {
+    return { error: `entity ${absentEntity(outcome.status).label}` };
+  }
+  const doc = outcome.document;
   const c = classifyDocument(doc);
   if (c.kind !== "piece") return { error: `not a piece (kind=${c.kind})` };
 
@@ -942,28 +1002,27 @@ export function describePiece(
 
   let input: PieceModel["input"];
   if (c.lineage.argument) {
-    const adoc = reconstructDocument(space, {
+    const a = reconstructOutcome(space, {
       id: c.lineage.argument,
       branch,
       scope,
     });
     input = {
       id: c.lineage.argument,
-      summary: adoc ? summarize(adoc.value) : "(absent)",
+      summary: a.status === "present"
+        ? summarize(a.document.value)
+        : absentEntity(a.status).label,
     };
   }
 
   const ownedCells: PieceCellRef[] = (c.lineage.internal ?? []).map(
     (cid): PieceCellRef => {
-      const cdoc = reconstructDocument(space, { id: cid, branch, scope });
-      if (cdoc === undefined) {
-        return {
-          id: cid,
-          kind: "unknown",
-          label: "(absent)",
-          summary: "(absent)",
-        };
+      const child = reconstructOutcome(space, { id: cid, branch, scope });
+      if (child.status !== "present") {
+        const { kind, label } = absentEntity(child.status);
+        return { id: cid, kind, label, summary: label };
       }
+      const cdoc = child.document;
       const cc = classifyDocument(cdoc);
       return {
         id: cid,
