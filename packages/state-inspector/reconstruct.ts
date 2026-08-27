@@ -106,10 +106,11 @@ const MAX_SEQ = Number.MAX_SAFE_INTEGER;
 
 /**
  * Read a stored document payload through the memory layer's rule, with THIS
- * package's decoder. The rule — default an absent payload, refuse a root that is
- * not a tree of paths — belongs to the engine and is shared rather than
- * re-derived. The decoder is ours, because a durable file may hold untagged
- * plain-JSON rows that the engine's own boundary decoder does not accept.
+ * package's decoder. The rule — handle an absent payload without asking the
+ * decoder, and refuse a root that is not a tree of paths — belongs to the engine
+ * and is shared rather than re-derived. The decoder is ours, because a durable
+ * file may hold untagged plain-JSON rows that the engine's own boundary decoder
+ * does not accept.
  */
 function storedDocument(data: string | null): StoredDocument {
   return decodeStoredDocumentPayload(decodeStored, data);
