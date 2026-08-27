@@ -2,7 +2,7 @@
 status: historical
 created: 2026-08-27
 archived: 2026-08-27
-reason: "Record of the one observed silent partial apply, and of a parent/child migration that neither rollback nor restore could reverse."
+reason: "Record of the one observed silent partial apply, and of a parent/child migration no tool could reverse because both directions fail on data, not on a waivable schema proof."
 ---
 
 # A retarget that wrote 75 rows and reported success
@@ -93,10 +93,10 @@ over 113 members, at `--group-size 5` and again at the default, and passes. So
 the trigger is not one boundary; it is load- or state-dependent, and this run
 remains the only observation of it.
 
-## The reversal that had no path
+## The reversal no flag could open
 
 The same rehearsal then tried to undo the migration, with the board already
-moved. Both directions refused.
+moved. Every direction refused.
 
 Children first, through the derived rollback plan:
 
@@ -123,15 +123,44 @@ rather than counted.
 
 Neither `rollback` nor `restore` carries
 `--dangerously-allow-incompatible-schema`; only `setsrc` and a stamped
-retarget row do. That asymmetry is deliberate — the override belongs per row,
-where the plan records which rows ran with the gate open, rather than per run
-where 125 decisions collapse into one — and it means the way back from a
-forced forward move is a retarget onto the prior source with the override
-stamped. That requires the prior source on disk: `getsrc` cannot retrieve a
-retained revision, so it comes from the repository by mapping pattern identity
-to commit.
+retarget row do. The obvious reading — that the way back is a retarget onto
+the prior source with the override stamped — was tried on this board and
+**failed with the identical error**, the row carrying `allowIncompatible: true`
+in the plan:
+
+```text
+failed fid1:jtdD… holder 8036ms - updated arguments do not match the
+  candidate schema: topics: 0: missing required property createdByName;
+  the piece is still on its recorded reference
+```
+
+The override was not ignored. It answers a different question. The forward
+refusal was a **proof about schemas** — "pattern schemas are not backward
+compatible", defaults changed under a constraint, a result field removed — and
+that proof is what the flag waives. Both reverse refusals are **validation of
+real data**: the migrated children no longer publish `createdByName`, so the
+old board's argument genuinely lacks a required property, and the old child's
+`myName` resolves through a parent cell that no longer exists. No flag makes
+absent data present. So the deadlock is not that the reverse tools lack the
+override; it is that **the override cannot help**, and adding it to them would
+not change either outcome.
+
+Recovering the prior state therefore means restoring the prior *content*, not
+the prior source.
+
+The prior source itself is not the obstacle, and an early guess that it "comes
+from the repository" is wrong: `cf inspect piece <snapshot> <entity> --code
+--json` returns the full `pattern.code` from the store — the board's
+pre-migration `main.tsx` came back at 14,085 characters under identity
+`MKlcErXYo-…`. What does not come back is the module **graph**. That source
+imports from and re-exports `./topic.tsx`, three topic generations are live on
+this board, and only one of them — which 15 of the 125 children run, against
+87 on another — exports the symbols the board compiles against. Pairing the
+modules back into the graph that produced a given identity is guesswork:
+recompiling a plausible pair yielded a different identity than the original.
+Nothing records which graph produced an identity.
 
 **Not established here:** whether this deadlock generalizes beyond one board
-whose children link into its argument, whether the backwards retarget succeeds
-on it, or whether a content export and restore is a working recourse. None of
-the three was tested.
+whose children link into its argument, or whether a content export and restore
+is a working recourse. Neither was tested. What was measured is one board,
+both directions, override stamped, all three tools refusing.
