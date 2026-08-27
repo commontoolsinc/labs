@@ -107,31 +107,48 @@ export class CellController<T> implements ReactiveController {
    * delivery supersedes it, or when the binding moves to a different cell.
    */
   private _localEdit: { value: T } | undefined;
-  // Number of in-flight cell writes started by the default setter.
+
+  /** Number of in-flight cell writes started by the default setter. */
   private _inFlightWrites = 0;
-  // Re-entrancy marker: a subscription delivery firing synchronously from our
-  // own optimistic set() (as opposed to a backend push). A local echo must not
-  // release the edit — only durable/bound state catching up may.
+
+  /**
+   * Re-entrancy marker: a subscription delivery firing synchronously from our
+   * own optimistic set() (as opposed to a backend push). A local echo must not
+   * release the edit — only durable/bound state catching up may.
+   */
   private _applyingLocalWrite = false;
-  // All writes settled but bound state never converged (e.g. a rebind swapped
-  // in a pre-write snapshot first): deliveries are FIFO, so the next one
-  // reflects post-write state and is authoritative.
+
+  /**
+   * All writes settled but bound state never converged (e.g. a rebind swapped
+   * in a pre-write snapshot first): deliveries are FIFO, so the next one
+   * reflects post-write state and is authoritative.
+   */
   private _settledAwaitingRelease = false;
-  // Last authoritative user-visible value. Survives same-cell rebinds so a
-  // replacement handle that has not hydrated yet (get() still undefined)
-  // does not repaint emptiness over it.
+
+  /**
+   * Last authoritative user-visible value. Survives same-cell rebinds so a
+   * replacement handle that has not hydrated yet (get() still undefined)
+   * does not repaint emptiness over it.
+   */
   private _lastKnownValue: T | undefined;
-  // Whether the current subscription has received a real (asynchronous)
-  // delivery. subscribe()'s synchronous initial callback merely echoes the
-  // handle's local cache — for a freshly minted rebound handle that is
-  // "no information yet", NOT an authoritative undefined. Once any real
-  // delivery arrives, an undefined value is an authoritative clear and must
-  // repaint (it may not be masked by _lastKnownValue).
+
+  /**
+   * Whether the current subscription has received a real (asynchronous)
+   * delivery. subscribe()'s synchronous initial callback merely echoes the
+   * handle's local cache — for a freshly minted rebound handle that is
+   * "no information yet", NOT an authoritative undefined. Once any real
+   * delivery arrives, an undefined value is an authoritative clear and must
+   * repaint (it may not be masked by _lastKnownValue).
+   */
   private _bindingHydrated = false;
-  // True only while subscribe() runs its synchronous initial callback.
+
+  /** True only while subscribe() runs its synchronous initial callback. */
   private _subscribeEcho = false;
-  // Bumped when binding to a different persistent cell, so settle callbacks
-  // from writes against a previous binding cannot release the new one.
+
+  /**
+   * Bumped when binding to a different persistent cell, so settle callbacks
+   * from writes against a previous binding cannot release the new one.
+   */
   private _bindEpoch = 0;
 
   constructor(
