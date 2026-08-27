@@ -92,7 +92,11 @@ export const createFabricInstantiationRecorder =
         // Keyless records are rare — a session-only root is the defect one
         // per run at most in practice — so this buffer's bound protects
         // memory against pathology without ever evicting the evidence a
-        // single invocation's window needs.
+        // single invocation's window needs: only a NEWER keyless record
+        // evicts from here, and sequence is monotonic, so whatever evicts
+        // in-window evidence sits in that same window itself. Eviction can
+        // change which keyless record a window names, never whether it
+        // names one.
         if (PatternManager.isKeylessPatternIdentity(record.identity)) {
           keyless.push(record);
           if (keyless.length > BUFFER_LIMIT) {

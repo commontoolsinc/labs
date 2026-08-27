@@ -211,7 +211,11 @@ export class PatternIndexClient {
         `pattern index base URL must not carry a query or fragment: ${options.baseUrl}`,
       );
     }
-    this.#baseUrl = options.baseUrl;
+    // The parsed base is what gets joined, not the configured string: a bare
+    // trailing "?" or "#" parses to an empty search/hash the guard cannot
+    // see, and appending to the raw string would put the function after the
+    // delimiter.
+    this.#baseUrl = base.origin + base.pathname;
     this.#fetchFn = options.fetchFn ?? defaultHarnessFetch;
     this.#signer = options.signer;
   }

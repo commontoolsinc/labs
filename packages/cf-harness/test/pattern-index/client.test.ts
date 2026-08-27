@@ -62,6 +62,34 @@ const createClient = (
 };
 
 describe("PatternIndexClient", () => {
+  it("refuses a base URL carrying a query or fragment", () => {
+    for (
+      const baseUrl of [
+        "https://index.test/api?x=1",
+        "https://index.test/api#frag",
+      ]
+    ) {
+      expect(() =>
+        new PatternIndexClient({
+          baseUrl,
+          fetchFn: () => Promise.resolve(jsonResponse({})),
+          signer,
+        })
+      ).toThrow("query or fragment");
+    }
+  });
+
+  it("joins functions onto the parsed base, so a bare trailing delimiter cannot survive", async () => {
+    // "https://index.test/api?" parses to an empty search the guard cannot
+    // see; appending to the raw string would address "…api?/searchPatterns".
+    const { client, requests } = createClient(
+      [jsonResponse({ results: [] })],
+      "https://index.test/api?",
+    );
+    await client.searchPatterns({ tags: ["todo"] });
+    expect(requests[0].url).toBe("https://index.test/api/searchPatterns");
+  });
+
   it("posts a signed CF1 request to the named index function", async () => {
     const { client, requests } = createClient([
       jsonResponse({ results: [] }),
