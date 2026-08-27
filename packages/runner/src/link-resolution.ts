@@ -4,10 +4,7 @@ import {
   markIfcBearingLinkCrossing,
 } from "./schema-ifc.ts";
 import { isObjectOrArray } from "@commonfabric/utils/types";
-import {
-  internSchema,
-  isNontrivialSchema,
-} from "@commonfabric/data-model-schema";
+import { internSchema } from "@commonfabric/data-model-schema";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
   linkPayloadAtProbe,
@@ -48,15 +45,16 @@ export type ResolvedFullLink = NormalizedFullLink & {
 };
 
 /**
- * Whether `schema` constrains nothing at all: absent, JSON Schema `true`, or
- * an empty object. Such a schema selects every value, so it says nothing the
+ * Whether `schema` constrains nothing at all: absent, or a TRUE schema in
+ * the canonical sense (`ContextualFlowControl.isTrueSchema`) — JSON Schema
+ * `true`, `{}`, or an object carrying only internal flags, `default`, or
+ * `$defs`. Such a schema selects every value, so it says nothing the
  * schema a resolution is already carrying does not, and a hop onto a link
- * bearing one keeps carrying rather than adopting it. `false` is not one of
- * these — it selects nothing, which is information.
+ * bearing one keeps carrying rather than adopting it. `false` is not one
+ * of these — it selects nothing, which is information.
  */
 const schemaConstrainsNothing = (schema: JSONSchema | undefined): boolean =>
-  schema === undefined || schema === true ||
-  (isObjectOrArray(schema) && !isNontrivialSchema(schema));
+  schema === undefined || ContextualFlowControl.isTrueSchema(schema);
 
 const MAX_PATH_RESOLUTION_LENGTH = 100;
 
