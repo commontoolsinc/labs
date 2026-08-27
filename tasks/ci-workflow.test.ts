@@ -561,6 +561,66 @@ Deno.test("Dashboard publishes only from main, never from a pull request", async
   );
 });
 
+Deno.test("One commit publishes one set of release artifacts", async () => {
+  // A release artifact is named after the commit it was built from, and the
+  // deploy hands the bastion a commit rather than a build. So a commit has one
+  // tarball and one checksum for that tarball, and they stay as they were
+  // published. Two builds of one commit do not produce the same tarball: the
+  // binaries are compiled again, and `tar` records modification times. Publish
+  // a second build over a first and a reader can come away holding one build's
+  // tarball beside the other build's checksum, which is what the deploy's
+  // `sha256sum -c` reports as a failure. docs/development/deploying.md covers
+  // the invariant.
+  const contents = await workflow("deno.yml");
+
+  // Main can receive the same head commit twice, which starts two runs of that
+  // commit. Grouping a push by the commit makes the second run wait for the
+  // first, so the two builds never publish at once. Grouping it by anything
+  // that differs between runs of one commit, `github.run_id` among them, puts
+  // them in separate groups and lets them overlap.
+  assertStringIncludes(
+    contents,
+    "\nconcurrency:\n" +
+      "  group: ${{ github.workflow }}-" +
+      "${{ github.event.pull_request.number || github.sha }}\n" +
+      "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}\n",
+  );
+
+  // Waiting alone leaves the second run free to publish over the first once the
+  // first has finished, so the publish itself is what holds the bytes still: a
+  // commit that already has both objects keeps them. The pair is published
+  // together, in the one branch, because publishing just one of them is how a
+  // commit ends up with two builds' halves.
+  const upload = stepBlock(
+    jobBlock(contents, "attest-binaries"),
+    "📤 Upload artifacts to Google Cloud Storage",
+  );
+  const guard =
+    'if gsutil -q stat "$BUCKET/$TARBALL" && gsutil -q stat "$BUCKET/$CHECKSUM"; then';
+  const guardStart = upload.indexOf(guard);
+  assert(
+    guardStart >= 0,
+    "the published pair is not looked for before it is published",
+  );
+  const branchStart = upload.indexOf("\n          else\n", guardStart);
+  const branchEnd = upload.indexOf("\n          fi\n", branchStart);
+  assert(
+    branchStart >= 0 && branchEnd > branchStart,
+    "publishing branch not found",
+  );
+  const branch = upload.slice(branchStart, branchEnd);
+
+  for (const object of ["$TARBALL", "$CHECKSUM"]) {
+    const copy = `gsutil cp "release/${object}" "$BUCKET/"`;
+    assertStringIncludes(branch, copy);
+    assertEquals(
+      upload.split(copy).length - 1,
+      1,
+      `${copy} runs somewhere other than the branch that publishes the pair`,
+    );
+  }
+});
+
 Deno.test("Deploy steps call the bastion wrapper the way it accepts", async () => {
   // The bastion's /opt/cf/deploy.sh takes an environment name and a
   // 40-character commit SHA, and nothing else. Hand it a third argument, an
