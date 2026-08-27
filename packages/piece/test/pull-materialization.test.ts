@@ -7147,6 +7147,16 @@ describe("piece pull materialization", () => {
       expect(winnerReceipt.ref).toEqual(
         runtime.patternManager.getArtifactEntryRef(winnerPattern),
       );
+      // Each revision names its own caller's transaction too. This is the
+      // field that would drift first if a receipt ever started reporting the
+      // history's last entry rather than what the caller committed: both
+      // revisions are in the history, and only their order distinguishes
+      // them.
+      const revisions = getPieceSourceRevisions(piece);
+      const revisionIds = revisions.map((revision) => revision.revisionId);
+      expect(firstReceipt.revisionId).not.toBe(winnerReceipt.revisionId);
+      expect(revisionIds).toContain(firstReceipt.revisionId);
+      expect(revisions.at(-1)?.revisionId).toBe(winnerReceipt.revisionId);
       expect(getPatternIdentityRef(piece)).toEqual(
         runtime.patternManager.getArtifactEntryRef(winnerPattern),
       );
@@ -7169,7 +7179,7 @@ describe("piece pull materialization", () => {
     }
   });
 
-  it("does not install an older controller mutation after a newer one", async () => {
+  it("keeps the newer mutation's schema when an older one fails after it", async () => {
     const initialProgram = compiledResultNarrowingProgram(
       "string | number | boolean",
     );
@@ -7200,6 +7210,12 @@ describe("piece pull materialization", () => {
     const controller = new PieceController(pieces, piece);
     const firstRunEntered = defer<void>();
     const releaseFirstRun = defer<void>();
+    // Only the losing update is intercepted: it is held until the winner has
+    // finished, then fails, which is what an update superseded before it
+    // commits does — the identity precondition inside the setup transaction
+    // refuses it. The winner runs the real update path, so the pointer it
+    // commits and the receipt it returns are the ones production would
+    // produce rather than values this fixture invented.
     const originalRunPatternUpdate = pieces.runPatternUpdate.bind(pieces);
     pieces.runPatternUpdate = async (
       pattern,
@@ -7213,16 +7229,6 @@ describe("piece pull materialization", () => {
         throw new Error(
           "piece pattern changed while the source update was compiling",
         );
-      }
-      if (pattern === winnerPattern) {
-        const { error } = await runtime.editWithRetry((tx) => {
-          piece.withTx(tx).setMetaRaw("patternIdentity", winnerRef);
-        });
-        if (error) throw error;
-        return {
-          cell: piece.asSchema(winnerPattern.resultSchema),
-          commit: { pattern: winnerRef },
-        };
       }
       return await originalRunPatternUpdate(
         pattern,
@@ -7244,13 +7250,18 @@ describe("piece pull materialization", () => {
       const firstUpdate = expect(controller.setPattern(firstProgram)).rejects
         .toThrow(/pattern changed while the source update was compiling/);
       await firstRunEntered.promise;
-      await controller.setPattern(winnerProgram);
+      const winnerReceipt = await controller.setPattern(winnerProgram);
       releaseFirstRun.resolve();
       await firstUpdate;
 
+      // The loser's failure is handled after the winner installed its schema,
+      // and must leave that schema in place rather than reconciling back to
+      // the version it was carrying.
       expect(controller.getCell().getAsNormalizedFullLink().schema).toEqual(
         winnerPattern.resultSchema,
       );
+      expect(winnerReceipt.ref).toEqual(winnerRef);
+      expect(getPatternIdentityRef(piece)).toEqual(winnerRef);
     } finally {
       releaseFirstRun.resolve();
       pieces.runPatternUpdate = originalRunPatternUpdate;

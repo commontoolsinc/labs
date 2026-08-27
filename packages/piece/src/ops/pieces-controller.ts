@@ -1358,6 +1358,12 @@ export class PiecesController<T = unknown> {
   // id `pieceId`, applies the provided `pattern` (which may be
   // its current pattern -- useful when we are only updating inputs),
   // and optionally applies `inputs` if provided.
+  //
+  // Reports a failure as itself, whether it happened before or after the
+  // setup transaction committed. `runPatternUpdate` below runs the same
+  // post-commit work and differs precisely here: it issues a receipt, so it
+  // reports a post-commit failure as a `PatternSetupPostCommitError` carrying
+  // that receipt. Callers classifying failures by message want this one.
   async runWithPattern(
     pattern: Pattern | Module,
     pieceId: string,

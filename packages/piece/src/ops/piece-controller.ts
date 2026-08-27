@@ -4523,12 +4523,17 @@ export class PieceController<T = unknown> {
       });
     } catch (error) {
       if (transition !== undefined && committedRef !== undefined) {
-        const warning = pieceSourceErrorMessage(
-          error instanceof PatternSetupPostCommitError ? error.cause : error,
-        );
+        // The wrapper says only that post-commit work failed, which this line
+        // already says; what a reader needs is which work and why. Log the
+        // cause, the same failure `refresh.warning` reports, so the console
+        // and the receipt describe the failure identically.
+        const cause = error instanceof PatternSetupPostCommitError
+          ? error.cause
+          : error;
+        const warning = pieceSourceErrorMessage(cause);
         console.warn(
           "Piece source was saved, but refreshing the running piece failed:",
-          error,
+          cause,
         );
         // The transition committed, so it detached what its precondition
         // named, whatever happened to the refresh afterwards.

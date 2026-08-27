@@ -40,7 +40,6 @@ import {
   readTargetPositionals,
   setCellValueFromCommand,
   setPieceSourceFromCommand,
-  setsrcRefreshWarning,
   setsrcSuccessLine,
   warnDeprecatedPieceSpelling,
   withDeprecatedSpellingWarning,
@@ -2344,6 +2343,11 @@ describe("cli piece parsing", () => {
   });
 
   it("reports a setsrc refresh failure without negating its commit", async () => {
+    // A refresh failure does not undo the commit, so the command still
+    // succeeds and still reports what committed — the warning is additional,
+    // never a replacement. Both halves are asserted here because reporting
+    // only one of them is a distinct wrong answer: the warning alone reads as
+    // a failed deploy, the success line alone hides a piece that will not run.
     const update = {
       status: "committed" as const,
       ref: { identity: "B".repeat(43), symbol: "default" },
@@ -2354,6 +2358,7 @@ describe("cli piece parsing", () => {
         warning: "dependency unavailable",
       },
     };
+    const rendered: string[] = [];
     const warned: string[] = [];
 
     await applyPieceSourceCommandAction(
@@ -2375,18 +2380,104 @@ describe("cli piece parsing", () => {
             },
             update,
           }),
-        render: () => {},
+        render: (message) => rendered.push(message),
         warn: (message) => warned.push(message),
         hint: () => {},
       },
     );
 
-    expect(setsrcRefreshWarning(update)).toBe(
+    expect(rendered).toEqual([
+      `Committed source update for piece ${PIECE} ` +
+      `(Pattern Ref: cf:module/${"B".repeat(43)}#default, ` +
+      `Revision: revision-2)`,
+    ]);
+    expect(warned).toEqual([
       `Source revision revision-2 committed as ` +
-        `cf:module/${"B".repeat(43)}#default, but refreshing the running ` +
-        `piece failed: dependency unavailable`,
-    );
-    expect(warned).toEqual([setsrcRefreshWarning(update)!]);
+      `cf:module/${"B".repeat(43)}#default, but refreshing the running ` +
+      `piece failed: dependency unavailable`,
+    ]);
+  });
+
+  it("sends the setsrc refresh warning to stderr", async () => {
+    // The success line goes to stdout and the warning must not, or a caller
+    // redirecting stdout to a log keeps the receipt and loses the warning
+    // silently. Asserted against the real default sink rather than an
+    // injected one, since the default is the thing that can regress.
+    const errors: string[] = [];
+    const originalError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args.join(" "));
+    };
+
+    try {
+      await applyPieceSourceCommandAction(
+        {
+          apiUrl: API_URL,
+          space: SPACE,
+          identity: "/tmp/test.key",
+          piece: PIECE,
+        },
+        "/repo/pattern.tsx",
+        {
+          setPieceSourceFromCommand: () =>
+            Promise.resolve({
+              config: {
+                apiUrl: API_URL,
+                space: SPACE,
+                identity: "/tmp/test.key",
+                piece: PIECE,
+              },
+              update: {
+                status: "committed" as const,
+                ref: { identity: "B".repeat(43), symbol: "default" },
+                revisionId: "revision-2",
+                detachedOrigin: null,
+                refresh: {
+                  status: "failed" as const,
+                  warning: "dependency unavailable",
+                },
+              },
+            }),
+          render: () => {},
+          hint: () => {},
+        },
+      );
+    } finally {
+      console.error = originalError;
+    }
+
+    expect(errors.filter((line) => line.includes("refreshing the running")))
+      .toHaveLength(1);
+  });
+
+  it("prints no setsrc receipt when the update fails to commit", async () => {
+    // A commit failure is the case the receipt exists for: the action must
+    // report nothing that reads as success and must let the failure out, which
+    // is what `cf`'s top-level handler turns into a non-zero exit.
+    const rendered: string[] = [];
+    const warned: string[] = [];
+    const hinted: string[] = [];
+
+    await expect(applyPieceSourceCommandAction(
+      {
+        apiUrl: API_URL,
+        space: SPACE,
+        identity: "/tmp/test.key",
+        piece: PIECE,
+      },
+      "/repo/pattern.tsx",
+      {
+        setPieceSourceFromCommand: () =>
+          Promise.reject(new Error("commit refused by storage")),
+        render: (message) => rendered.push(message),
+        warn: (message) => warned.push(message),
+        hint: (message) => hinted.push(message),
+      },
+    )).rejects.toThrow("commit refused by storage");
+
+    expect(rendered).toEqual([]);
+    expect(warned).toEqual([]);
+    expect(hinted).toEqual([]);
   });
 
   it("propagates a setsrc failure before the setup transaction commits", async () => {

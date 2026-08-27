@@ -5031,7 +5031,15 @@ export class Runner {
     };
   }
 
-  /** Runs a pattern and returns its reconciled result-cell view. */
+  /**
+   * Runs a pattern and returns its reconciled result-cell view.
+   *
+   * This surface never issues a receipt, so a failure after the setup
+   * transaction commits reaches the caller as the failure itself. Callers that
+   * classify such a failure by message — `isCfcMigrationRejection` among them
+   * — depend on that, which is why the unwrap below stands guard at the
+   * boundary even though `#runSynced` mints no receipt for this path.
+   */
   async runSynced(
     resultCell: Cell<any>,
     pattern: Pattern | Module,
@@ -5044,6 +5052,7 @@ export class Runner {
         pattern,
         inputs,
         options,
+        false,
       )).cell;
     } catch (error) {
       if (error instanceof PatternSetupPostCommitError) {
@@ -5056,8 +5065,32 @@ export class Runner {
   /**
    * Runs a pattern and returns the accepted setup transaction's receipt.
    *
-   * The operation owns the transaction so the receipt always represents a
-   * storage verdict, never writes merely staged in a caller-owned transaction.
+   * A resolved call is proof that storage accepted this transaction. Three
+   * conditions make that so, and each is enforced here rather than inferred
+   * from the caller's options, so narrowing one cannot quietly downgrade the
+   * receipt into a claim nothing checked:
+   *
+   * - the operation owns the transaction, so the receipt reports a storage
+   *   verdict and never writes merely staged in a caller-owned transaction;
+   * - a commit that storage rejects throws, and never falls through to the
+   *   post-commit work that a receipt-less run tolerates;
+   * - a setup that recorded no pattern pointer throws, because a receipt
+   *   naming no pattern is not a receipt.
+   *
+   * Two properties of the store are the caller's to respect. A transaction
+   * whose writes all match what storage already holds is elided before it is
+   * sent, so a receipt for a wholly redundant setup reports acceptance of a
+   * commit the server never saw; `setPattern`'s source transition appends a
+   * fresh revision, which is what keeps its commit non-empty. And on a runtime
+   * that seals into a wave rather than committing to storage — a serving
+   * runtime, or a speculation overlay under experimental server execution —
+   * acceptance means "taken into the wave", which a later withdrawal can undo.
+   * The setup transaction is stamped as bookkeeping specifically so it commits
+   * for real rather than diverting into that overlay.
+   *
+   * @throws PatternSetupPostCommitError when the transaction commits and the
+   * work that refreshes the running piece then fails. Its `.commit` is the
+   * accepted transaction's receipt and its `.cause` the later failure.
    */
   async runSyncedWithCommit(
     resultCell: Cell<any>,
@@ -5077,16 +5110,33 @@ export class Runner {
       pattern,
       inputs,
       options,
+      true,
     );
-    return { cell: result.cell, commit: result.commit! };
+    if (result.commit === undefined) {
+      // `#runSynced` issues a receipt on every path it can reach with
+      // `requireCommit`, so this is unreachable rather than merely unlikely.
+      // It is a throw and not an assertion because the alternative is handing
+      // back a receipt whose pattern is undefined.
+      throw new Error("the pattern setup did not produce a commit receipt");
+    }
+    return { cell: result.cell, commit: result.commit };
   }
 
-  /** Helper for `runSynced()` and `runSyncedWithCommit()`. */
+  /**
+   * Helper for `runSynced()` and `runSyncedWithCommit()`.
+   *
+   * `requireCommit` is what separates them. It makes an owned transaction
+   * mandatory, turns a rejected commit and a pointer-less setup into throws,
+   * and is the only condition under which a receipt is issued at all — so a
+   * receipt-less caller cannot receive a `PatternSetupPostCommitError` that
+   * hides its failure's own type behind a wrapper.
+   */
   async #runSynced(
     resultCell: Cell<any>,
     pattern: Pattern | Module,
     inputs: any,
     options: RunSyncedOptions | undefined,
+    requireCommit: boolean,
   ): Promise<{
     cell: Cell<any>;
     commit?: PatternSetupCommitReceipt;
@@ -5108,6 +5158,14 @@ export class Runner {
     // scheduler if the transaction isn't committed before the first functions
     // run. Though most likely the worst case is just extra invocations.
     const givenTx = resultCell.tx?.status().status === "ready" && resultCell.tx;
+    if (givenTx && requireCommit) {
+      // `runSyncedWithCommit` rejects a bound cell before it starts, but the
+      // awaits above yield, and a transaction attached during them would
+      // otherwise reach the staging path below and produce no receipt at all.
+      throw new Error(
+        "a committed pattern setup receipt requires an unbound result cell",
+      );
+    }
     let setupRes: ReturnType<typeof this.setupInternal> | undefined;
     let commit: PatternSetupCommitReceipt | undefined;
     const assertExpectedPatternIdentity = (
@@ -5150,6 +5208,13 @@ export class Runner {
         // runSynced's own setup tx (async surface, e.g. compileAndRun's
         // continuation on a served run): no scheduler run around it;
         // bookkeeping per serving-loop.md §3d.
+        //
+        // The kind also decides where this transaction lands. Under
+        // experimental server execution a derivation or event-handler run is
+        // diverted into the speculation overlay, whose acceptance is a seal
+        // that a later withdrawal can undo; bookkeeping commits to storage.
+        // A receipt minted from an overlay seal would claim durability it
+        // does not have, so re-stamping this one is not a naming change.
         this.runtime.stampServerRun(tx, {
           actionId: `piece-run-synced/${resultCell.sourceURI}`,
           kind: "bookkeeping",
@@ -5177,14 +5242,30 @@ export class Runner {
         ) {
           throw error.reason;
         }
-        if (options?.expectedPatternIdentity) {
+        // A caller owed a receipt is owed the storage verdict too: continuing
+        // here would run the post-commit work over a setup storage refused and
+        // then report no receipt for it. The identity arm below predates the
+        // receipt and covers its own callers; neither subsumes the other.
+        if (requireCommit || options?.expectedPatternIdentity) {
           throw error;
         }
         logger.error("pattern-setup-error", "Error setting up pattern", error);
         setupRes = undefined;
       } else {
         setupRes = outcome.ok;
-        commit = { pattern: setupRes.patternRef! };
+        if (requireCommit) {
+          const patternRef = setupRes.patternRef;
+          if (patternRef === undefined) {
+            // `setupInternal` returns without a pointer when it resolves no
+            // pattern at all. A caller passing one cannot reach that, so this
+            // guards the type's edge rather than a live path — and it fails
+            // loudly instead of minting a receipt that names nothing.
+            throw new Error(
+              "the pattern setup committed without recording a pattern identity",
+            );
+          }
+          commit = { pattern: patternRef };
+        }
       }
     }
 

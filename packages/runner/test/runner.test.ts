@@ -1831,6 +1831,83 @@ describe("setup/start", () => {
     }
   });
 
+  it("runSyncedWithCommit rejects a commit storage refused", async () => {
+    // The receipt's whole claim is that storage accepted the transaction, so
+    // a rejected commit has to reach the caller as that rejection. Reported
+    // through a resolved `{ error }` — the shape `editWithRetry` uses for a
+    // refusal it did not throw — because a receipt path that treats it as
+    // anything other than a failure would report success for a write storage
+    // turned down.
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    };
+    const resultCell = runtime.getCell(
+      space,
+      "runSyncedWithCommit rejected commit",
+    );
+    const originalEditWithRetry = runtime.editWithRetry.bind(runtime);
+    const failure = new Error("commit refused by storage");
+    runtime.editWithRetry = (() => Promise.resolve({ error: failure })) as any;
+
+    try {
+      await expect(runtime.runSyncedWithCommit(
+        resultCell,
+        trustExecutable(runtime, pattern),
+        {},
+        {
+          expectedPatternIdentity: {
+            identity: "of:fid1:expected",
+            symbol: "default",
+          },
+        },
+      )).rejects.toThrow("commit refused by storage");
+    } finally {
+      runtime.editWithRetry = originalEditWithRetry;
+    }
+  });
+
+  it("runSyncedWithCommit rejects a setup that recorded no pattern identity", async () => {
+    // Setup answers without a pattern pointer when it resolves no pattern at
+    // all — neither supplied nor stored — and a receipt naming no pattern is
+    // not a receipt. A caller cannot reach that state through this method's
+    // signature, so setup is answered directly here: what is pinned is the
+    // refusal, which is the only thing standing between that shape and a
+    // receipt whose `pattern` is undefined.
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    };
+    const resultCell = runtime.getCell(
+      space,
+      "runSyncedWithCommit without pattern identity",
+    );
+    await runtime.runSynced(resultCell, trustExecutable(runtime, pattern), {});
+    const previous = getPatternIdentityRef(resultCell);
+    expect(previous).toBeDefined();
+
+    const runner = runtime.runner as unknown as {
+      setupInternal(...args: unknown[]): unknown;
+    };
+    const originalSetupInternal = runner.setupInternal.bind(runtime.runner);
+    runner.setupInternal = () => ({ resultCell, needsStart: false });
+
+    try {
+      await expect(runtime.runSyncedWithCommit(
+        resultCell,
+        trustExecutable(runtime, pattern),
+        {},
+        { expectedPatternIdentity: previous! },
+      )).rejects.toThrow("without recording a pattern identity");
+    } finally {
+      runner.setupInternal = originalSetupInternal;
+    }
+  });
+
   it("runSynced preserves its legacy error when post-commit work fails", async () => {
     const pattern = (marker: string): Pattern => ({
       argumentSchema: { type: "object", properties: {} },

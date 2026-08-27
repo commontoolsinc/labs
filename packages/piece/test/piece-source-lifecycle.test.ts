@@ -1793,20 +1793,32 @@ describe("piece source lifecycle", () => {
 
   it("does not report a direct edit as unsaved after its refresh fails", async () => {
     const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    // Injected at the post-commit work `setPattern` actually performs:
+    // `runPatternUpdate` synchronizes the pattern AFTER its setup transaction
+    // is accepted, so a failure here is the refresh failing over a committed
+    // edit. Stubbing anything the update path does not call would leave this
+    // case asserting the clean path under a failure's name — which is why the
+    // receipt's `refresh` status is asserted below rather than only the
+    // history operation.
     const mutablePieces = pieces as unknown as {
-      runWithPattern: typeof pieces.runWithPattern;
+      syncPattern: typeof pieces.syncPattern;
     };
-    const runWithPattern = pieces.runWithPattern.bind(pieces);
-    mutablePieces.runWithPattern = async (...args) => {
-      await runWithPattern(...args);
+    const syncPattern = pieces.syncPattern.bind(pieces);
+    mutablePieces.syncPattern = async (...args) => {
+      await syncPattern(...args);
       throw new Error("direct edit refresh failed");
     };
+    let receipt: Awaited<ReturnType<typeof piece.setPattern>>;
     try {
-      await piece.setPattern(versionProgram("v2"));
+      receipt = await piece.setPattern(versionProgram("v2"));
     } finally {
-      mutablePieces.runWithPattern = runWithPattern;
+      mutablePieces.syncPattern = syncPattern;
     }
 
+    expect(receipt.refresh).toEqual({
+      status: "failed",
+      warning: "direct edit refresh failed",
+    });
     expect(
       (await readPieceSourceState(runtime, piece.getCell())).history.at(-1)
         ?.operation,

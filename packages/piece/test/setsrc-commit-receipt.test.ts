@@ -76,6 +76,7 @@ describe("setsrc commit receipt", () => {
       status: "committed",
       ref: durable,
       revisionId: revision?.revisionId,
+      detachedOrigin: null,
       refresh: { status: "completed" },
     });
     expect(receipt.ref.identity).not.toBe(before?.identity);
@@ -86,11 +87,22 @@ describe("setsrc commit receipt", () => {
   });
 
   it("performs no additional cell synchronization after the update operation returns its receipt", async () => {
+    // What the receipt replaces: confirming the write by synchronizing the
+    // piece and re-reading its pattern pointer. Such a read answers a
+    // different question — what the piece points at now, which a concurrent
+    // update may have moved — and `syncCell` resolves normally over a
+    // provider error, so a cache hit reads as durable truth. Adding one back
+    // after the receipt is the regression this case fails on.
+    //
+    // The counter is validated before it is trusted: synchronizations during
+    // the update must be non-zero, or a zero afterwards would be measuring a
+    // broken instrument rather than the absence of a read-back.
     const piece = await pieces.create(markedProgram("v1"), { input: {} });
     await runtime.idle();
     const originalRun = pieces.runPatternUpdate.bind(pieces);
     const originalSyncCell = storageManager.syncCell.bind(storageManager);
     let receiptIssued = false;
+    let synchronizationsDuringUpdate = 0;
     let synchronizationsAfterReceipt = 0;
 
     pieces.runPatternUpdate = (async (...args) => {
@@ -100,6 +112,7 @@ describe("setsrc commit receipt", () => {
     }) as typeof pieces.runPatternUpdate;
     storageManager.syncCell = ((cell, options) => {
       if (receiptIssued) synchronizationsAfterReceipt++;
+      else synchronizationsDuringUpdate++;
       return originalSyncCell(cell, options);
     }) as typeof storageManager.syncCell;
 
@@ -107,6 +120,8 @@ describe("setsrc commit receipt", () => {
       const receipt = await piece.setPattern(markedProgram("v2"));
 
       expect(receipt.status).toBe("committed");
+      expect(receipt.refresh).toEqual({ status: "completed" });
+      expect(synchronizationsDuringUpdate).toBeGreaterThan(0);
       expect(synchronizationsAfterReceipt).toBe(0);
     } finally {
       pieces.runPatternUpdate = originalRun;

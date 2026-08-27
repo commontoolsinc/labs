@@ -236,17 +236,20 @@ the input interface casually against a piece you care about.
 > (see "Recovering the piece").
 
 > **`setsrc` can half-succeed.** Saving the source and refreshing the running
-> piece are separate steps, and the second can fail on its own:
+> piece are separate steps, and the second can fail on its own. The command
+> still exits 0, because the source update did commit:
 >
 > ```
 > Piece source was saved, but refreshing the running piece failed: [Error: updated arguments do not match the candidate schema: profileAvatar: value does not match type string]
+> Committed source update for piece bafy… (Pattern Ref: cf:module/Qy36SQqu…#default, Revision: 0f2c…)
+> Source revision 0f2c… committed as cf:module/Qy36SQqu…#default, but refreshing the running piece failed: updated arguments do not match the candidate schema: profileAvatar: value does not match type string
 > ```
 >
-> The piece is now on the new source and will not start. `setsrc` reports the
-> accepted pattern ref and source revision, then repeats the refresh failure as
-> an explicit warning before the next-step hints; do not treat the committed
-> receipt as proof that the running piece refreshed successfully. See "A piece
-> that saved its source and will not start".
+> The piece is now on the new source and will not start. Read the whole output,
+> not its tail and not stdout alone: the success line is the only thing on
+> stdout, so `setsrc … > log` records what committed and drops both warnings. A
+> committed receipt is proof the source update landed, never proof the running
+> piece refreshed. See "A piece that saved its source and will not start".
 
 ## Option B — migrate the populated name-keyed poll to a fresh piece
 
