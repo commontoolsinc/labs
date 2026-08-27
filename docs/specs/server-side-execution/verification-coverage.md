@@ -6236,10 +6236,17 @@ supply; OW29/OW32/OW34 closed):
     stopped firing and every boundary write of a minted pattern VALUE
     emitted the keyless ref. Landed: (1) boundary serializer treats a
     keyless ref as no-ref (full graph); (2) `Runner.setup` skips the
-    durable `patternIdentity`/`patternSetupIdentity` stamps and the
-    `onPatternInstantiated` report for keyless refs — keyless pieces
-    genuinely carry no pointer, the verdict `getPatternIdentityRef`'s
-    own doc always claimed; (3) `substituteOpPatternRefs` no longer
+    durable `patternIdentity`/`patternSetupIdentity` stamps for
+    keyless refs — keyless pieces genuinely carry no pointer, the
+    verdict `getPatternIdentityRef`'s own doc always claimed; the
+    `onPatternInstantiated` report deliberately does NOT share that
+    gate (it reports the SESSION pointer, keyless included — it is a
+    session-side reporting channel, and cf-harness's stranded-piece
+    guard consumes exactly the keyless evidence via `keylessSince`;
+    coupling it to the stamp made that guard fail open, caught on the
+    board by the pre-existing `fabric-instantiations` pin and now
+    pinned report-flows-AND-store-stays-clean in the scan test);
+    (3) `substituteOpPatternRefs` no longer
     substitutes the keyless `$patternRef` sentinel — the durable inputs
     doc carries the full embedded graph and the instantiating session
     registers a session-side resolution hint keyed by the inputs doc,
