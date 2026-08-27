@@ -38,7 +38,7 @@ import {
   effectTargetKey,
   markEffectCompletion,
 } from "../executor/effect-completion.ts";
-import { waveRunContextOf } from "../executor/wave.ts";
+import { waveRunContextOf, waveSettlementOf } from "../executor/wave.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
@@ -697,13 +697,24 @@ export function sqliteDatabase(
       }
       sendResult(tx, handle);
       // The scheduler retries this same action closure after a stale-basis
-      // rejection. Marking it initialized while the write is still staged
-      // would turn that retry into a no-op and leave the handle absent. The
-      // guard becomes durable only with the transaction that materializes it.
-      tx.addCommitCallback((_settledTx, result) => {
-        if (!result.error) {
-          initialized = true;
+      // rejection. In a serving runtime, a successful transaction commit only
+      // seals the write into its wave; the wave can still withdraw it. Advance
+      // the one-shot guard only when the handle is durable at the destination.
+      // Failed older attempts never reset it, so a later durable attempt wins.
+      tx.addCommitCallback((settledTx, result) => {
+        if (result.error) {
+          return;
         }
+        const waveSettlement = waveSettlementOf(settledTx);
+        if (waveSettlement === undefined) {
+          initialized = true;
+          return;
+        }
+        void waveSettlement.then((waveResult) => {
+          if (!waveResult.error) {
+            initialized = true;
+          }
+        });
       });
     }
   };
