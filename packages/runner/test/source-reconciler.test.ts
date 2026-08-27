@@ -668,6 +668,30 @@ describe("piece source reconciliation", () => {
       expect(getPieceReconciliation(piece)).toEqual(first);
     });
 
+    it("names a failure that is not an Error at all", async () => {
+      const piece = await preparePiece(() => Promise.reject("nope"));
+      await stampSource(piece, PARENT_SOURCE);
+
+      expect(await reconcile(piece)).toBe("unavailable");
+
+      expect(getPieceReconciliation(piece)?.detail).toBe("nope");
+    });
+
+    it("falls back to a phrase when a failure says nothing at all", async () => {
+      // An error with neither message nor name, and nothing else to read.
+      const silent = new Error();
+      silent.name = "";
+      const piece = await preparePiece(() => Promise.reject(silent));
+      await stampSource(piece, PARENT_SOURCE);
+
+      expect(await reconcile(piece)).toBe("unavailable");
+
+      // Non-empty, so it survives being read back and the record settles.
+      expect(getPieceReconciliation(piece)?.detail).toBe(
+        "the origin could not be reached",
+      );
+    });
+
     it("names what a fabric origin holds even when nothing moved", async () => {
       const piece = await preparePiece(refuseEveryFetch);
       const runningRef = getPatternIdentityRef(piece)!;
