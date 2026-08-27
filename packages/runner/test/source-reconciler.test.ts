@@ -633,6 +633,40 @@ describe("piece source reconciliation", () => {
       expect(getPieceReconciliation(piece)?.detail).toContain("schema differs");
     });
 
+    it("records an origin whose route refused the connection", async () => {
+      // The commonest way an origin is out of reach is a request that throws
+      // rather than answering. Its caller turns that into `unavailable`, so
+      // recording has to happen before it gets there.
+      const piece = await preparePiece(() =>
+        Promise.reject(new Error("connection refused"))
+      );
+      await stampSource(piece, PARENT_SOURCE);
+
+      // The caller reports it as unavailable, which is what a reader of the
+      // outcome sees; the record is what survives past this call.
+      expect(await reconcile(piece)).toBe("unavailable");
+
+      expect(getPieceReconciliation(piece)).toMatchObject({
+        outcome: "unreachable",
+        origin: PARENT_SOURCE,
+        detail: "connection refused",
+      });
+    });
+
+    it("names what a fabric origin holds even when nothing moved", async () => {
+      const piece = await preparePiece(refuseEveryFetch);
+      const runningRef = getPatternIdentityRef(piece)!;
+      await stampSource(piece, `cf:pattern:${runningRef.identity}`);
+
+      expect(await reconcile(piece)).toBe("current");
+
+      // Nothing moved, and the record still says which source was weighed.
+      expect(getPieceReconciliation(piece)).toMatchObject({
+        outcome: "followed",
+        offered: runningRef,
+      });
+    });
+
     it("records an origin whose kind nothing follows yet", async () => {
       const piece = await preparePiece(refuseEveryFetch);
       const origin = `https://programs.test${PARENT_PATH}`;

@@ -89,15 +89,6 @@ export type ReconcileOutcome =
   | "unavailable";
 
 /**
- * What a reconciliation's outcome leaves on the piece, or nothing when the
- * outcome is not about following an origin.
- *
- * The three outcomes that end with the piece running what its origin holds are
- * one state to a reader: how it got there is the revision log's business, not
- * this record's. `detached` and `unusable` are read off the recorded origin
- * itself, so a record would only restate what the piece already says.
- */
-/**
  * What each reconciliation result becomes on the piece, and which leave
  * nothing behind.
  *
@@ -303,7 +294,21 @@ export class SourceReconciler {
       storedSource,
       snapshot: getPieceSourceSnapshot(resultCell)!,
     };
-    const outcome = await this.#dispatch(resultCell, state, signal);
+    // A dispatch that throws is the commonest way an origin turns out to be
+    // out of reach: a refused connection, a resolver that gave up. Its caller
+    // turns that into `unavailable`, so without catching it here the one
+    // failure a reader most needs recorded is the one that records nothing.
+    // A cancelled reconciliation is not an outcome at all, and keeps whatever
+    // the piece already said.
+    let outcome: ReconcileOutcome;
+    try {
+      outcome = await this.#dispatch(resultCell, state, signal);
+    } catch (error) {
+      if (signal.aborted || this.#disposed) throw error;
+      state.detail = error instanceof Error ? error.message : String(error);
+      await this.#record(resultCell, state, "unavailable", signal);
+      throw error;
+    }
     await this.#record(resultCell, state, outcome, signal);
     return outcome;
   }
@@ -559,6 +564,10 @@ export class SourceReconciler {
       }, signal);
     }
     if (target === undefined) return "unavailable";
+    // What the origin turned out to name, whichever way this arrives at it,
+    // so that the record identifies the source this evaluated even when
+    // nothing moved and even when adopting it fails.
+    state.offered = target;
     if (
       target.identity === state.running.identity &&
       target.symbol === state.running.symbol

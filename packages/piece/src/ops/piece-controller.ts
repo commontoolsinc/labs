@@ -4204,8 +4204,15 @@ export class PieceController<T = unknown> {
       // back rather than reconstructed, because recording an origin normalizes
       // it and this has to match what the piece now stores.
       const settled = getPieceSourceSnapshot(this.#cell);
-      if (prepared.origin !== null && settled !== null) {
-        await this.#recordReconciliation(settled!, settled!.origin!, {
+      // Only when the piece is still on the revision this transition wrote.
+      // Another transition landing in between describes a different piece
+      // than the candidate below, and recording against it would say that
+      // piece adopted source it never saw.
+      if (
+        settled !== undefined && settled.revisionId === transition.revisionId &&
+        settled.origin !== null
+      ) {
+        await this.#recordReconciliation(settled, settled.origin, {
           outcome: "followed",
           offered: prepared.candidate,
         });
