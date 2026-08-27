@@ -241,7 +241,9 @@ export class VDomRenderer {
     return this.mountId;
   }
 
-  // ============== Private Methods ==============
+  //
+  // Private Methods
+  //
 
   private handleVDomBatch = (notification: VDomBatchNotification): void => {
     if (this.disposed) return;

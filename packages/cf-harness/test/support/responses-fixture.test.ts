@@ -55,12 +55,12 @@ const turn = (
   ...overrides,
 });
 
-// ---------------------------------------------------------------------------
+//
 // The property that matters: converting a fixture must not change the
 // assistant message the harness derives from it. Both production paths are
 // driven with the same fixture — Chat Completions reads it directly, the
 // Responses path reads the converted form — and the results must agree.
-// ---------------------------------------------------------------------------
+//
 
 const assertPathsAgree = async (chatFixture: Record<string, unknown>) => {
   // gemini-* stays on Chat Completions and consumes the fixture as written.
@@ -129,9 +129,9 @@ Deno.test("converted fixtures preserve text alongside multiple tool calls", asyn
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Conversion details and pass-through rules.
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("responsesBodyFromChatFixture leaves non-chat bodies untouched", () => {
   // Model listings and error payloads flow through the same stub boundary.
@@ -214,9 +214,9 @@ Deno.test("responsesBodyFromChatFixture carries id and usage through", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Request projection.
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("chatViewOfRequest projects a Responses request to the chat view", () => {
   const view = chatViewOfRequest({

@@ -414,7 +414,9 @@ Deno.test("bash tool executes the command through the sandbox shell runtime", as
   assertEquals(context.currentDir, "/workspace/repo");
 });
 
-// --- recoverable vs fatal tool-boundary narrowing (D9 / cf-review) ----------
+//
+// recoverable vs fatal tool-boundary narrowing (D9 / cf-review)
+//
 
 Deno.test("bash tool: a SandboxPathEscapeError on cwd is a recoverable result, not a throw", async () => {
   class PathEscapeSandbox extends FakeSandboxRuntime {
