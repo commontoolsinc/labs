@@ -301,6 +301,25 @@ interface RequestMessage {
 }
 ```
 
+The server-owned attention resolver addresses one immutable event-stream entry
+by its stream sidecar, event ID, and stamped sequence. Retry and Dismiss are
+same-space atomic decisions. A replay returns the first recorded resolution,
+including after ordinary event compaction removes the resolved source entry.
+
+```typescript
+// Shown at module scope.
+interface EventAttentionResolveRequest {
+  type: "event.attention.resolve";
+  requestId: string;
+  space: SpaceId;
+  sessionId: SessionId;
+  sidecarId: string;
+  eventId: string;
+  seq: number;
+  action: "retry" | "dismiss";
+}
+```
+
 Per-commit invocation / authorization persistence is deferred in this pass.
 
 ### 4.2.2 Server → Client: Response and Session Effect
@@ -354,24 +373,10 @@ interface SessionRevoked {
 
 Live data delivery is not routed through the initiating request id.
 
-The server-owned attention resolver addresses one immutable event-stream entry
-by its stream sidecar, event ID, and stamped sequence. Retry and Dismiss are
-same-space atomic decisions. A replay returns the first recorded resolution,
-including after ordinary event compaction removes the resolved source entry.
+Attention resolution returns this result through the response envelope:
 
 ```typescript
 // Shown at module scope.
-interface EventAttentionResolveRequest {
-  type: "event.attention.resolve";
-  requestId: string;
-  space: SpaceId;
-  sessionId: SessionId;
-  sidecarId: string;
-  eventId: string;
-  seq: number;
-  action: "retry" | "dismiss";
-}
-
 interface EventAttentionResolveResult {
   serverSeq: number;
   resolution:

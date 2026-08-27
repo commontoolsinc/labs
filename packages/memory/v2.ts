@@ -336,9 +336,13 @@ export function eventAttentionIndexKey(value: string): string {
 
 /** Encode one immutable stream-entry identity for the attention index. Event
  * ids may be admitted again below the stream watermark, so the engine-stamped
- * sequence is the part that distinguishes two entries in the same stream. */
-export function eventAttentionEntryKey(eventId: string, seq: number): string {
-  return JSON.stringify([eventId, seq]);
+ * sequence is the part that distinguishes two entries in the same stream.
+ * Legacy seq-less entries use the protocol's sequence-zero identity. */
+export function eventAttentionEntryKey(
+  eventId: string,
+  seq: number | undefined,
+): string {
+  return JSON.stringify([eventId, seq ?? 0]);
 }
 
 export type UnresolvedEventAttention = {

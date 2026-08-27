@@ -1579,7 +1579,7 @@ export class RuntimeProcessor {
       )?.value as StreamEventsDocValue | undefined;
       const entries = new Map(
         sidecar?.entries?.map((entry) =>
-          [eventAttentionEntryKey(entry.eventId, entry.seq!), entry] as const
+          [eventAttentionEntryKey(entry.eventId, entry.seq), entry] as const
         ),
       );
       for (const summary of summaries) {

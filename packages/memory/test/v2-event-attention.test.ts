@@ -108,6 +108,7 @@ describe("event attention resolution", () => {
     principal: string,
     eventId: string,
     stream: StreamLinkRef = STREAM,
+    legacySeqless = false,
   ): Promise<number> => {
     const engine = await server.engineForSpace(SPACE);
     const sidecarId = streamEntriesDocId(stream);
@@ -140,7 +141,28 @@ describe("event attention resolution", () => {
     const value = Engine.read(engine, { id: sidecarId })!
       .value as StreamEventsDocValue;
     const entry = value.entries!.at(-1)!;
-    const seq = entry.seq!;
+    const stampedSeq = entry.seq!;
+    if (legacySeqless) {
+      Engine.applyCommit(engine, {
+        space: SPACE,
+        sessionId,
+        principal,
+        commitClass: "system",
+        commit: {
+          localSeq: nextSeedLocalSeq++,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "patch",
+            id: sidecarId,
+            patches: [{
+              op: "remove",
+              path: `/value/entries/${value.entries!.indexOf(entry)}/seq`,
+            }],
+          }],
+        },
+      });
+    }
+    const seq = legacySeqless ? 0 : stampedSeq;
     const attention = {
       phase: "dispatch-load" as const,
       failureClass: "session-revoked" as const,
@@ -391,6 +413,31 @@ describe("event attention resolution", () => {
       (Engine.read(engine, { id: SIDECAR })!.value as StreamEventsDocValue)
         .entries,
     ).toEqual([]);
+  });
+
+  it("resolves a legacy seq-less entry through its sequence-zero identity", async () => {
+    const sessionId = await openSession(ALICE);
+    const eventId = "evt-legacy-seqless";
+    await seedAttention(sessionId, ALICE, eventId, STREAM, true);
+    const engine = await server.engineForSpace(SPACE);
+
+    const response = await resolveAttention({
+      type: "event.attention.resolve",
+      requestId: "dismiss-legacy-seqless",
+      space: SPACE,
+      sessionId,
+      eventId,
+      seq: 0,
+      sidecarId: SIDECAR,
+      action: "dismiss",
+    });
+
+    expect(response.error).toBeUndefined();
+    expect(response.ok!.resolution).toEqual({ kind: "dismissed" });
+    const entry = (Engine.read(engine, { id: SIDECAR })!
+      .value as StreamEventsDocValue).entries![0];
+    expect(entry.seq).toBeUndefined();
+    expect(entry.resolution).toEqual({ kind: "dismissed" });
   });
 
   it("routes attention resolution through the session protocol", async () => {

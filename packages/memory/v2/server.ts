@@ -3039,7 +3039,8 @@ export class Server {
           | StreamEventsDocValue
           | undefined;
         const entryIndex = sidecarValue?.entries?.findIndex((entry) =>
-          entry?.eventId === message.eventId && entry.seq === message.seq
+          entry?.eventId === message.eventId &&
+          (entry.seq ?? 0) === message.seq
         ) ?? -1;
         const original = entryIndex < 0
           ? undefined

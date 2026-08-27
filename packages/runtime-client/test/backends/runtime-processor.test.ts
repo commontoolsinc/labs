@@ -3521,6 +3521,15 @@ describe("runtime-processor", () => {
           code: attention.code,
           firstFailureAt: attention.firstFailureAt,
         },
+        [eventAttentionEntryKey("evt-legacy", 0)]: {
+          eventId: "evt-legacy",
+          seq: 0,
+          sidecarId,
+          phase: attention.phase,
+          failureClass: attention.failureClass,
+          code: attention.code,
+          firstFailureAt: attention.firstFailureAt,
+        },
       };
       const provider = {
         sync: () => Promise.resolve({}),
@@ -3550,6 +3559,12 @@ describe("runtime-processor", () => {
                   status: "needs-attention",
                   attention,
                   resolution: { kind: "dismissed" },
+                  firedAt: { user: cfcSigner.did() },
+                }, {
+                  eventId: "evt-legacy",
+                  status: "needs-attention",
+                  reason: "legacy reason",
+                  attention,
                   firedAt: { user: cfcSigner.did() },
                 }],
               },
@@ -3599,6 +3614,13 @@ describe("runtime-processor", () => {
           seq: 41,
           sidecarId,
           reason: "safe reason",
+          attention,
+        }, {
+          space,
+          eventId: "evt-legacy",
+          seq: 0,
+          sidecarId,
+          reason: "legacy reason",
           attention,
         }],
       });
