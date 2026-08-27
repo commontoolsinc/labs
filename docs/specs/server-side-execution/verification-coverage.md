@@ -5712,14 +5712,19 @@ supply; OW29/OW32/OW34 closed):
     delivered-and-verified — an UNCAUGHT client-replica throw
     (`#validateArrivedSchemaDocuments`) that failed files wholesale
     (all red lanes real-toolshed; in-process harnesses unaffected;
-    main green at the identical base). The CI ON lanes now run
-    ensure-off (`cf test` needs nothing: no serving host exists in
-    `packages/cli` — the ruled opt-in is its status quo). Flagged, not
-    filled: the exposed delivery gap (computed delivered without its
-    verified `cid:` ref) is PRE-EXISTING machinery, latent again with
-    the lanes off; and no CI lane now exercises the production ensure
-    at the true topology — unit pins and the measurement harness carry
-    it until a lane opts in.
+    main green at the identical base). The CI ON lanes opted out of
+    the ensure while that gap was open (`cf test` needs nothing: no
+    serving host exists in `packages/cli` — the ruled opt-in is its
+    status quo); the exposed delivery gap became OW61's row, whose
+    arrival CONTAINMENT (per-doc quarantine, never a process kill)
+    landed with #6223, and whose residual client-side absorb defect
+    was root-caused and FIXED with #6292 (pre-watch-response
+    `session/effect` frames now reach the replica in wire order —
+    OW61's tail carries the mechanism). WITH THE OPT-OUT RETIRED
+    (the ensure-on lane flip PR, following #6223 and #6292): the ON
+    lanes run the production default again and ARE the CI coverage
+    of the ensure at the true topology — the "no CI lane exercises
+    the ensure" flag this tail carried is closed.
     **CATCH-UP-AND-START BUILT 2026-08-24 — the ruled close of the
     client-start class. RULED 2026-08-24: the coordinator's
     recommendation, ACKED verbatim by the owner ("so ack on all
@@ -7860,10 +7865,13 @@ supply; OW29/OW32/OW34 closed):
     dependent: whether the computed doc's frame lands before its
     `cid:` sibling is delivery-window timing (CI hit it consistently;
     one local run at the same head did not). With the test lanes'
-    ensure opt-out (the RULED switch) the defect is LATENT again, not
-    fixed. SURFACED TO THE OWNER 2026-08-24 (the coordinator is
-    carrying it). RULED 2026-08-24 (owner, verbatim — the shipping
-    side is the fix):
+    ensure opt-out (the RULED switch) the defect was LATENT again, not
+    fixed — history: the opt-out retired with the ensure-on lane-flip
+    PR once the containment below and the client absorb fix (#6292,
+    this row's tail) had both landed, and the ON lanes run the
+    production default again. SURFACED TO THE OWNER 2026-08-24 (the
+    coordinator is carrying it). RULED 2026-08-24 (owner, verbatim —
+    the shipping side is the fix):
 
     > "seam 3: that's a bug then, and the most straightforward fix is
     > to make sure the subscription query results include cids when
