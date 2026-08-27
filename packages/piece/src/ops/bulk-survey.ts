@@ -410,7 +410,17 @@ export async function readPiecePin(
   const controller = await pieces.get(piece, false, undefined, scope);
   const cell = controller.getCell();
   const state = readPieceSourceMetadata(pieces.runtime, cell);
-  if (state.pattern === undefined) return undefined;
+  // A KEYLESS piece carries no durable pointer (the never-durable
+  // contract; L3(a), RULED 2026-08-27). In the session that set it up the
+  // runner's session pointer names it, so the survey reports the honest
+  // row — a builder-run piece, `retained: false` (no source closure can
+  // exist for a session identity). A fresh session finds neither and the
+  // piece surfaces as the designed "carries no pattern identity" problem.
+  const sessionRef = state.pattern === undefined
+    ? pieces.runtime.runner.sessionPatternPointerFor(cell)
+    : undefined;
+  const patternRef = state.pattern ?? sessionRef;
+  if (patternRef === undefined) return undefined;
   const recorded = getPatternSource(cell);
   // An empty recorded origin names no place a source can be resolved from,
   // and the plan codec refuses one — a survey must not emit a plan its own
@@ -420,15 +430,15 @@ export async function readPiecePin(
     : recorded;
   return {
     piece: controller.id,
-    patternIdentity: state.pattern.identity,
-    symbol: state.pattern.symbol,
+    patternIdentity: patternRef.identity,
+    symbol: patternRef.symbol,
     ...(origin === undefined ? {} : { origin }),
     ...(state.currentRevisionId === undefined
       ? {}
       : { revisionId: state.currentRevisionId }),
     retained: await isSourceRetained(
       pieces,
-      state.pattern.identity,
+      patternRef.identity,
       retainedByIdentity,
     ),
   };

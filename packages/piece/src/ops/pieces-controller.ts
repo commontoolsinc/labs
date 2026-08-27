@@ -1890,7 +1890,11 @@ export class PiecesController<T = unknown> {
       // cannot proceed or fails for its own reasons, surface the ORIGINAL start
       // error; nothing is torn down or overwritten.
       const runtime = this.runtime;
-      const ref = getPatternIdentityRef(rootToStart);
+      // Keyless pieces resolve through the session pointer (never stamped
+      // durably); a fresh session correctly finds nothing and surfaces the
+      // original start error.
+      const ref = getPatternIdentityRef(rootToStart) ??
+        runtime.runner.sessionPatternPointerFor(rootToStart);
       if (ref === undefined) throw startError;
       let pattern;
       try {
@@ -2403,7 +2407,11 @@ async function getCellByIdOrPiece(
     }
     if (
       getMetaLink(piece, "result") === undefined &&
-      getPatternIdentityRef(piece) === undefined
+      getPatternIdentityRef(piece) === undefined &&
+      // A KEYLESS piece carries no durable pointer (the never-durable
+      // contract; L3(a), RULED 2026-08-27); in the session that set it up
+      // the runner's session pointer vouches for it.
+      pieces.runtime.runner.sessionPatternPointerFor(piece) === undefined
     ) {
       throw new Error(
         `Piece ${cellId} has neither a parent result nor a pattern`,

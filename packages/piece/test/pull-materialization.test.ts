@@ -5922,7 +5922,11 @@ describe("piece pull materialization", () => {
       "source-less-set-pattern-" + crypto.randomUUID(),
       { start: true },
     );
-    const previous = getPatternIdentityRef(piece)!;
+    // A hand-built (keyless) piece writes no durable pattern pointer (the
+    // never-durable contract; L3(a), RULED 2026-08-27); its session
+    // identity lives on the runner.
+    expect(getPatternIdentityRef(piece)).toBeUndefined();
+    expect(runtime.runner.sessionPatternPointerFor(piece)).toBeDefined();
     expect(getPieceSourceRevisions(piece)).toEqual([]);
 
     const controller = new PieceController(pieces, piece);
@@ -5933,12 +5937,12 @@ describe("piece pull materialization", () => {
     expect(
       getPieceSourceRevisions(piece).map((revision) => revision.operation),
     ).toEqual(["edit"]);
+    // The displaced executable was a session-built value no session can
+    // reload: a keyless identity never lands durably, so no
+    // `displacedPattern` record is stamped — the history's absent baseline
+    // is the record that the pre-edit past was programmatic.
     expect((await readPieceSourceState(runtime, piece)).displacedPattern)
-      .toEqual({
-        identity: previous.identity,
-        symbol: previous.symbol,
-        displacedAt: expect.any(Number),
-      });
+      .toBeUndefined();
     expect(await controller.result.get()).toEqual({
       version: "source-backed",
       output: 15,

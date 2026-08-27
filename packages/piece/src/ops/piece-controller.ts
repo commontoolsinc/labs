@@ -3570,9 +3570,20 @@ export class PieceController<T = unknown> {
     return clone;
   }
 
+  /**
+   * The piece's pattern pointer: the durable meta, or — for a KEYLESS piece
+   * in the session that set it up — the runner's session-side pointer (the
+   * never-durable contract, L3(a) RULED 2026-08-27: a keyless piece stamps
+   * nothing durably; a fresh session correctly finds neither).
+   */
+  #patternPointer(): { identity: string; symbol: string } | undefined {
+    return getPatternIdentityRef(this.#cell) ??
+      this.#pieces.runtime.runner.sessionPatternPointerFor(this.#cell);
+  }
+
   /** Return a stable reference to the pattern currently running this piece. */
   async getPatternRef(): Promise<PiecePatternRef | undefined> {
-    const ref = getPatternIdentityRef(this.#cell);
+    const ref = this.#patternPointer();
     if (!ref) return undefined;
 
     const source: PiecePatternSourceRef = {
@@ -3689,7 +3700,7 @@ export class PieceController<T = unknown> {
     ref: { identity: string; symbol: string };
   }> {
     await this.#cell.sync();
-    const ref = getPatternIdentityRef(this.#cell);
+    const ref = this.#patternPointer();
     if (!ref) throw new Error("piece missing pattern identity");
     const runtime = this.#pieces.runtime;
     const pattern = await runtime.patternManager.loadPatternByIdentity(
@@ -3724,7 +3735,7 @@ export class PieceController<T = unknown> {
     }
     | undefined
   > {
-    const ref = getPatternIdentityRef(this.#cell);
+    const ref = this.#patternPointer();
     if (!ref) throw new Error("piece missing pattern identity");
     const program = await this.#pieces.runtime.patternManager
       .getPatternSourceProgramByIdentity(
@@ -3760,7 +3771,10 @@ export class PieceController<T = unknown> {
     }
     const { pattern: previousPattern, ref: previousRef } = await this
       .#loadCurrentPattern();
-    const expected = getPieceSourceSnapshot(this.#cell);
+    const expected = getPieceSourceSnapshot(
+      this.#cell,
+      this.#pieces.runtime.runner.sessionPatternPointerFor(this.#cell),
+    );
     if (expected === undefined) {
       throw new Error("piece missing source state");
     }
@@ -4160,7 +4174,10 @@ export class PieceController<T = unknown> {
           ]);
           previousRef = storedRef;
         }
-        const expected = getPieceSourceSnapshot(this.#cell);
+        const expected = getPieceSourceSnapshot(
+          this.#cell,
+          this.#pieces.runtime.runner.sessionPatternPointerFor(this.#cell),
+        );
         if (expected === undefined) {
           throw new Error("piece missing source state");
         }

@@ -8625,11 +8625,18 @@ export function getPieceSourceRevisions(
   return revisions;
 }
 
-/** The source state guarded by a lifecycle transition. */
+/**
+ * The source state guarded by a lifecycle transition. `sessionPattern` is a
+ * KEYLESS piece's session-side pointer (the never-durable contract; L3(a),
+ * RULED 2026-08-27 — the durable meta legitimately holds nothing for one):
+ * callers that resolved it through the runner pass it so a builder-run
+ * piece still has a source state to transition FROM.
+ */
 export function getPieceSourceSnapshot(
   resultCell: Cell<unknown>,
+  sessionPattern?: { identity: string; symbol: string },
 ): PieceSourceSnapshot | undefined {
-  const pattern = getPatternIdentityRef(resultCell);
+  const pattern = getPatternIdentityRef(resultCell) ?? sessionPattern;
   if (pattern === undefined) return undefined;
   const revisions = getPieceSourceRevisions(resultCell);
   return {
@@ -8753,7 +8760,17 @@ export async function preparePieceSourceTransitionBaseline(
   options: { allowUnavailable?: boolean } = {},
 ): Promise<PieceSourceTransitionBaseline> {
   await prepareSourceClosureVerification();
-  const current = getPieceSourceSnapshot(resultCell);
+  // A KEYLESS expected pattern is session-side by construction — the durable
+  // pointer holds nothing and cannot move; movement for such a piece is a
+  // REAL pointer appearing, which the durable read (which wins when present)
+  // still surfaces. A real expected pattern gets no fallback: a cleared or
+  // changed durable pointer must read as moved.
+  const current = getPieceSourceSnapshot(
+    resultCell,
+    PatternManager.isKeylessPatternIdentity(expected.pattern.identity)
+      ? expected.pattern
+      : undefined,
+  );
   if (
     current === undefined ||
     !samePieceSourceSnapshot(current, expected)
@@ -8790,7 +8807,15 @@ export function applyPieceSourceTransition(
   transition: PieceSourceTransition,
 ): void {
   const candidate = resultCell.withTx(tx);
-  const current = getPieceSourceSnapshot(candidate);
+  // Same keyless-expected fallback as the prepare step above.
+  const current = getPieceSourceSnapshot(
+    candidate,
+    PatternManager.isKeylessPatternIdentity(
+        transition.expected.pattern.identity,
+      )
+      ? transition.expected.pattern
+      : undefined,
+  );
   if (
     current === undefined ||
     !samePieceSourceSnapshot(current, transition.expected)
@@ -8823,7 +8848,13 @@ export function applyPieceSourceTransition(
   ) {
     verifyRetainedPattern(nextPattern);
   }
-  if (transition.baseline.kind === "unavailable") {
+  if (
+    transition.baseline.kind === "unavailable" &&
+    // A keyless displaced identity must never land durably (L3(a)): the
+    // displaced executable was a session-built value no session can reload,
+    // and the history's absent baseline is the honest record of that.
+    !PatternManager.isKeylessPatternIdentity(current.pattern.identity)
+  ) {
     candidate.setMetaRaw("displacedPattern", {
       identity: current.pattern.identity,
       symbol: current.pattern.symbol,
