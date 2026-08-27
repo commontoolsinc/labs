@@ -251,9 +251,9 @@ describe("properties named after Object.prototype members", () => {
   });
 });
 
-// `path-utils` and `piece-helpers` are exported surfaces, so they get direct
-// coverage rather than being exercised only through a cell.
 describe("path helpers and prototype-named segments", () => {
+  // `path-utils` and `piece-helpers` are exported surfaces, so they get direct
+  // coverage rather than being exercised only through a cell.
   it("getValueAtPath does not hand back an inherited member", () => {
     expect(getValueAtPath({}, ["toString"])).toBe(undefined);
     expect(getValueAtPath({}, ["valueOf"])).toBe(undefined);

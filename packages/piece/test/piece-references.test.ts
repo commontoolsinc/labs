@@ -12,8 +12,8 @@ type MockDoc = {
   getEntityId: () => unknown;
 };
 
-// Create a mock environment for testing reference detection
 describe("Piece reference detection", () => {
+  // Create a mock environment for testing reference detection
   // Test the core logic of direct reference finding without maybeGetCellLink
   it("should find all direct references in an argument structure", () => {
     // Create mock data with multiple references

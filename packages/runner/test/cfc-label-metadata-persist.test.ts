@@ -15,18 +15,18 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-label-metadata");
 
-// Inv-12 Stage 0 (SC-14/SC-25 prerequisite; docs/specs/
-// cfc-label-metadata-confidentiality.md §3): the carried `cfcLabelView` on a
-// link write round-trips through the main thread (worker →
-// `CellHandle.deserialize` → `mapCellRefsToSigilLinks` → worker) and is
-// main-thread-influenceable. `prepareBoundaryCommit` must therefore treat an
-// inbound view as an untrusted display artifact and persist link-origin
-// labels from the worker-authoritative source — the link source's STORED
-// label map — so a tampered/redacted/incomplete view cannot WEAKEN what the
-// stored metadata provides (the round-trip hazard confirmed on the labs#4622
-// review thread: response-side redaction would otherwise persist redacted,
-// under-labeled views on copy-forward writes).
 describe("CFC persist-seam link-label re-derivation (inv-12 Stage 0)", () => {
+  // Inv-12 Stage 0 (SC-14/SC-25 prerequisite; docs/specs/
+  // cfc-label-metadata-confidentiality.md §3): the carried `cfcLabelView` on a
+  // link write round-trips through the main thread (worker →
+  // `CellHandle.deserialize` → `mapCellRefsToSigilLinks` → worker) and is
+  // main-thread-influenceable. `prepareBoundaryCommit` must therefore treat an
+  // inbound view as an untrusted display artifact and persist link-origin
+  // labels from the worker-authoritative source — the link source's STORED
+  // label map — so a tampered/redacted/incomplete view cannot WEAKEN what the
+  // stored metadata provides (the round-trip hazard confirmed on the labs#4622
+  // review thread: response-side redaction would otherwise persist redacted,
+  // under-labeled views on copy-forward writes).
   type PersistedEntry = {
     path: string[];
     origin?: string;

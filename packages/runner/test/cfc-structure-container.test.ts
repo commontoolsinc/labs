@@ -9,11 +9,11 @@ import type { CfcAddress } from "../src/cfc/mod.ts";
 const signer = await Identity.fromPassphrase("runner-cfc-structure-container");
 const space = signer.did();
 
-// Unit coverage for the structure-container declaration seam (S16): list
-// coordinators (filter/flatMap) declare their result container so prepare
-// re-derives its `structure` label from J every reconcile. The end-to-end
-// behavior is in cfc-flow-pointwise.test.ts; this pins the tx plumbing.
 describe("CFC structure-container declaration (tx plumbing)", () => {
+  // Unit coverage for the structure-container declaration seam (S16): list
+  // coordinators (filter/flatMap) declare their result container so prepare
+  // re-derives its `structure` label from J every reconcile. The end-to-end
+  // behavior is in cfc-flow-pointwise.test.ts; this pins the tx plumbing.
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 

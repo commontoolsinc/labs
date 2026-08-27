@@ -3,15 +3,14 @@ import { expect } from "@std/expect";
 
 import { composeLocalContext } from "./test-records.ts";
 
-// The arm of composeLocalContext() that records a branch runs when git named
-// one. Nothing but the ambient checkout drove it before: a working checkout
-// sits on a branch, while the detached merge commit continuous integration
-// builds a pull request from reports an empty branch, so the line ran on some
-// runs and not on others. These cases state the facts the composition is given
-// and assert what it makes of them, so each arm runs on every run and under
-// every configuration.
-
 describe("composeLocalContext() flap coverage", () => {
+  // The arm of composeLocalContext() that records a branch runs when git named
+  // one. Nothing but the ambient checkout drove it before: a working checkout
+  // sits on a branch, while the detached merge commit continuous integration
+  // builds a pull request from reports an empty branch, so the line ran on some
+  // runs and not on others. These cases state the facts the composition is
+  // given and assert what it makes of them, so each arm runs on every run and
+  // under every configuration.
   it("carries the branch when git named one", () => {
     const context = composeLocalContext({
       commit: "a".repeat(40),

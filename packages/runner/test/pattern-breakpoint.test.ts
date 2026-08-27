@@ -2,10 +2,10 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { patternBreakpoint } from "../src/pattern-breakpoint.ts";
 
-// patternBreakpoint stands in for `fn(argument)` when a debugger breakpoint is
-// set: it logs context, pauses at `debugger` (a no-op with no debugger
-// attached), then calls through only when the argument validated.
 describe("patternBreakpoint", () => {
+  // patternBreakpoint stands in for `fn(argument)` when a debugger breakpoint
+  // is set: it logs context, pauses at `debugger` (a no-op with no debugger
+  // attached), then calls through only when the argument validated.
   it("calls the function with the argument when the argument is valid", () => {
     const logs: unknown[][] = [];
     const originalLog = console.log;

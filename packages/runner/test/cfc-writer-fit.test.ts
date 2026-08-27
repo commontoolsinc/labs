@@ -134,16 +134,16 @@ const writerFitDiagnostics = (
   tx: { getCfcState(): { diagnostics: string[] } },
 ) => tx.getCfcState().diagnostics.filter((d) => d.includes("writer-fit"));
 
-// H4 writer-fit (SC-18b, spec §8.12.4): a write whose derived flow label does
-// not fit the target's write ceiling — its DECLARED store policy joined with
-// the residency clause its own space contributes. Under `enforce-explicit`
-// the derived component is a measurement, not a write ceiling — the write
-// persists and the misfit is flagged as a diagnostic (SC-18a/c). Under
-// `enforce-strict` the same misfit is a fail-closed reject (the strict-only
-// delta of docs/specs/cfc-enforcement-matrix.md §4), leaving the §8.12.5
-// outs: upgrade the store label in the same tx, write to a fitting store, or
-// write to a store whose space the clause already names.
 describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
+  // H4 writer-fit (SC-18b, spec §8.12.4): a write whose derived flow label does
+  // not fit the target's write ceiling — its DECLARED store policy joined with
+  // the residency clause its own space contributes. Under `enforce-explicit`
+  // the derived component is a measurement, not a write ceiling — the write
+  // persists and the misfit is flagged as a diagnostic (SC-18a/c). Under
+  // `enforce-strict` the same misfit is a fail-closed reject (the strict-only
+  // delta of docs/specs/cfc-enforcement-matrix.md §4), leaving the §8.12.5
+  // outs: upgrade the store label in the same tx, write to a fitting store, or
+  // write to a store whose space the clause already names.
   it("rejects a confidentiality misfit under enforce-strict with the SC-18c reason", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = newRuntime(storageManager);

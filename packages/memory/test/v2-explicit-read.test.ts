@@ -589,15 +589,14 @@ Deno.test("the persisted lease-holder exemption does not survive session resume 
 // treat a changed `entityScopeKey` on an existing watch id as a changed
 // spec, never silently the same watch.
 
-// OW17's wire leg (server-execution v2 stage A, 2026-08-16): a LIVE lease
-// holder may name two instances of one (branch, id, scope) — its frames and
-// query results carry the instance key (`scopeKey`) per entry, so the two
-// stay apart on its wire and in its replica (the serving replica holding
-// BOTH the service instance and a demander's instance of one doc). The
-// wire collapse guard stays for everyone else: a NON-holder's wire carries
-// scope names only, so its ambiguous read set is still refused loudly.
-
 Deno.test("stage A: a lease holder names two instances of one (branch, id, scope) and receives BOTH, keyed — watch.set, watch.add, graph.query, and the push frame; the collapse guard still refuses a non-holder (OW17's wire leg)", async () => {
+  // OW17's wire leg (server-execution v2 stage A, 2026-08-16): a LIVE lease
+  // holder may name two instances of one (branch, id, scope) — its frames and
+  // query results carry the instance key (`scopeKey`) per entry, so the two
+  // stay apart on its wire and in its replica (the serving replica holding BOTH
+  // the service instance and a demander's instance of one doc). The wire
+  // collapse guard stays for everyone else: a NON-holder's wire carries scope
+  // names only, so its ambiguous read set is still refused loudly.
   const server = newServer("memory://explicit-read-two-instances");
   setServerExecutionConfig(true);
   try {

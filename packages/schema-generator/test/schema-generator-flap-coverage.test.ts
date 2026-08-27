@@ -4,13 +4,12 @@ import ts from "typescript";
 import { SchemaGenerator } from "../src/schema-generator.ts";
 import { asObjectSchema, createTestProgram, getTypeFromCode } from "./utils.ts";
 
-// The branches exercised here otherwise run only when a pattern compiles
-// "cold" through the transformer. When the compile cache is warm those code
-// paths are skipped, so the lines are recorded as covered in some CI runs and
-// uncovered in others. These unit tests drive the same branches directly with
-// hand-built type declarations so they are covered on every run.
-
 describe("SchemaGenerator flap coverage", () => {
+  // The branches exercised here otherwise run only when a pattern compiles
+  // "cold" through the transformer. When the compile cache is warm those code
+  // paths are skipped, so the lines are recorded as covered in some CI runs and
+  // uncovered in others. These unit tests drive the same branches directly with
+  // hand-built type declarations so they are covered on every run.
   it("resolves the element type of an array type alias to the concrete element schema", async () => {
     // type-utils.ts getArrayElementInfo: when a property's TypeNode is a
     // reference to a type alias whose right-hand side is `Element[]`, the

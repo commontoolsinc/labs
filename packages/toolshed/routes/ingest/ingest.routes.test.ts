@@ -7,14 +7,14 @@ if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
 }
 
-// Smoke tests: confirm POST /api/ingest/:id is mounted and its transport-level
-// branches behave. Driven through the real `app` (not a freshly-mounted router)
-// because the handler imports the `runtime` singleton from `@/index.ts`, which
-// is uninitialized under test — so any path that reaches storage yields 502,
-// which is itself the storage-error contract. The full auth + validation
-// contract is unit-tested against a real runtime in ingest.utils.test.ts
-// (processIngest).
 describe("Ingest route (smoke: wired up + transport paths)", () => {
+  // Smoke tests: confirm POST /api/ingest/:id is mounted and its
+  // transport-level branches behave. Driven through the real `app` (not a
+  // freshly-mounted router) because the handler imports the `runtime` singleton
+  // from `@/index.ts`, which is uninitialized under test — so any path that
+  // reaches storage yields 502, which is itself the storage-error contract. The
+  // full auth + validation contract is unit-tested against a real runtime in
+  // ingest.utils.test.ts (processIngest).
   it("POST /api/ingest/:id without a bearer token -> 401", async () => {
     const res = await app.request("/api/ingest/ing_nope", {
       method: "POST",

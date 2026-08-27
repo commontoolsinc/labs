@@ -15,12 +15,12 @@ import {
   toolshedRuntimeOptions,
 } from "@/runtime-options.ts";
 
-// Pins toolshed's runtime wiring decisions (CT-1814): the runtime's storage
-// base is MEMORY_URL while patterns fetch against the public API_URL; the
-// storage manager passes through untouched; EXPERIMENTAL_* flags come from
-// the injected env reader via the canonical mapping; and the shared
-// first-party posture (the CFC pin) rides along from the preset.
 Deno.test("toolshedRuntimeOptions splits MEMORY_URL/API_URL and honors the env reader", () => {
+  // Pins toolshed's runtime wiring decisions (CT-1814): the runtime's storage
+  // base is MEMORY_URL while patterns fetch against the public API_URL; the
+  // storage manager passes through untouched; EXPERIMENTAL_* flags come from
+  // the injected env reader via the canonical mapping; and the shared
+  // first-party posture (the CFC pin) rides along from the preset.
   const storageManager = {
     sentinel: true,
   } as unknown as RuntimeOptions["storageManager"];
@@ -53,12 +53,12 @@ Deno.test("toolshedRuntimeOptions splits MEMORY_URL/API_URL and honors the env r
   assertEquals(options.cfcEnforcementMode, "enforce-explicit");
 });
 
-// The runtime→OTel bridge attach rides Runtime construction (CT plan: the
-// bridge is a second consumer of the RuntimeTelemetry bus). Off by default;
-// on OTEL_ENABLED it attaches and flips the preflight-telemetry gate. Without
-// a registered OTel provider the API hands the bridge no-op instruments, so
-// the enabled path is safe to exercise in a test.
 Deno.test("createToolshedRuntime attaches the OTel bridge only when enabled", async () => {
+  // The runtime→OTel bridge attach rides Runtime construction (CT plan: the
+  // bridge is a second consumer of the RuntimeTelemetry bus). Off by default;
+  // on OTEL_ENABLED it attaches and flips the preflight-telemetry gate. Without
+  // a registered OTel provider the API hands the bridge no-op instruments, so
+  // the enabled path is safe to exercise in a test.
   const signer = await Identity.fromPassphrase("runtime-options-otel-test");
   const config = {
     MEMORY_URL: "http://memory.test:8000/",
@@ -112,12 +112,12 @@ Deno.test("createToolshedRuntime attaches the OTel bridge only when enabled", as
   );
 });
 
-// What `/api/meta` reports, and therefore what a client not built alongside
-// this server adopts (docs/development/EXPERIMENTAL_OPTIONS.md). Taken from
-// the constructed Runtime rather than re-read from the environment, so the
-// published posture includes the defaults and preset resolution the server is
-// actually running under — a second reading could disagree with the first.
 Deno.test("createToolshedRuntime publishes the posture it resolved", async () => {
+  // What `/api/meta` reports, and therefore what a client not built alongside
+  // this server adopts (docs/development/EXPERIMENTAL_OPTIONS.md). Taken from
+  // the constructed Runtime rather than re-read from the environment, so the
+  // published posture includes the defaults and preset resolution the server is
+  // actually running under — a second reading could disagree with the first.
   const signer = await Identity.fromPassphrase("runtime-options-posture-test");
   const storageManager = StorageManager.emulate({ as: signer });
   publishExperimentalPosture(null);

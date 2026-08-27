@@ -215,9 +215,9 @@ async function runTest() {
   console.log(`Counter reached ${finalValue} (expected ${expectedValue})`);
 }
 
-// The test runs without a per-test deadline. See
-// docs/development/waiting-in-tests.md.
 Deno.test({
+  // The test runs without a per-test deadline. See
+  // docs/development/waiting-in-tests.md.
   name: "derive array leak test",
   fn: runTest,
   sanitizeResources: false,

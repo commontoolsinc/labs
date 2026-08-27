@@ -1568,10 +1568,10 @@ describe("CFC label view helpers", () => {
   });
 });
 
-// Inv-12 Stage 0: the display redaction that already covers the top-level
-// cfcLabel at the IPC response sites, extended to the cfcLabelView copies
-// riding sigil links inside response values.
 describe("redactSigilCfcLabelViewsForDisplay", () => {
+  // Inv-12 Stage 0: the display redaction that already covers the top-level
+  // cfcLabel at the IPC response sites, extended to the cfcLabelView copies
+  // riding sigil links inside response values.
   const caveat = {
     type: "https://commonfabric.org/cfc/atom/Caveat",
     kind: "derived-from",

@@ -223,12 +223,12 @@ describe("startServerExecutionHost OFF witness", () => {
   });
 });
 
-// The RULED test switch's env parsing (OW45 arm-B stage 1, RULED
-// 2026-08-24): unset and "true" are the production posture (ensure ON);
-// only the literal "false" switches the space-root ensure off; garbage
-// FAILS TO PRODUCTION (ON, with a warning) — a typo must never silently
-// strip production spaces of their roots.
 describe("ensureSpaceRootsFromEnv", () => {
+  // The RULED test switch's env parsing (OW45 arm-B stage 1, RULED 2026-08-24):
+  // unset and "true" are the production posture (ensure ON); only the literal
+  // "false" switches the space-root ensure off; garbage FAILS TO PRODUCTION
+  // (ON, with a warning) — a typo must never silently strip production spaces
+  // of their roots.
   const envOf2 =
     (values: Record<string, string | undefined>) => (name: string) =>
       values[name];

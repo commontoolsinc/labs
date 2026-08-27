@@ -3,12 +3,12 @@ import { assert, assertEquals, assertThrows } from "@std/assert";
 import { applyDefaults, DEFAULT_TEST_TIMEOUT_MS } from "../config.ts";
 import { runDenoWebTest } from "./utils.ts";
 
-// A test that waits on something which never arrives used to take the whole run
-// down: astral's own deadline on `page.evaluate` eventually threw a `RetryError`
-// that named no test, printed no summary, and skipped every test file after it.
-// The harness now stops waiting on a test of its own accord, so a stuck test is
-// one named failure among otherwise normal results.
 Deno.test("a stuck test fails by name and the run continues", async function () {
+  // A test that waits on something which never arrives used to take the whole
+  // run down: astral's own deadline on `page.evaluate` eventually threw a
+  // `RetryError` that named no test, printed no summary, and skipped every test
+  // file after it. The harness now stops waiting on a test of its own accord,
+  // so a stuck test is one named failure among otherwise normal results.
   const run = await runDenoWebTest("timeout-project");
 
   run.assert(!run.success, "the run fails");

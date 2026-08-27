@@ -30,10 +30,10 @@ const GOLDEN_ID = "of:fid1:d7_RmD4fNpTUheithVm0Q1Vha0Rn32c06qA_hOHE8x8";
 // old token live. A failure = coordinate a change, never just update the literal.
 const GOLDEN_CHANNEL_ID = "ing_jMjaGfRO0Kg0BUegs9mzwImZ-CKcmlVw-wDbmV41_bs";
 
-// The journal sink is the security-critical write path (durable, marked, into a
-// caller-provided space). These exercise it directly against an emulated store
-// (no ACL layer — see the cross-space test's caveat).
 describe("ingest journal sink", () => {
+  // The journal sink is the security-critical write path (durable, marked, into
+  // a caller-provided space). These exercise it directly against an emulated
+  // store (no ACL layer — see the cross-space test's caveat).
   let signer: Identity;
   let space: ReturnType<Identity["did"]>;
   let storageManager: ReturnType<typeof StorageManager.emulate>;

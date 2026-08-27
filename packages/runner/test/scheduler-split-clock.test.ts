@@ -12,13 +12,12 @@ import {
 import type { SchedulerNode } from "../src/scheduler/node-record.ts";
 import type { QueuedEvent } from "../src/scheduler/types.ts";
 
-// F11: a readiness/parked decision must read `performance.now()` once. When the
-// head-event park check is evaluated twice with two different clock reads, an
-// event whose `notBefore` falls between them is classed as neither ready nor
-// parked — so the quiescent continuation resolves idle() with the event still
-// queued and undispatched.
-
 describe("split-clock readiness decisions", () => {
+  // F11: a readiness/parked decision must read `performance.now()` once. When
+  // the head-event park check is evaluated twice with two different clock
+  // reads, an event whose `notBefore` falls between them is classed as neither
+  // ready nor parked — so the quiescent continuation resolves idle() with the
+  // event still queued and undispatched.
   const realNow = performance.now.bind(performance);
 
   afterEach(() => {

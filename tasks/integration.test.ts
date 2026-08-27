@@ -395,11 +395,12 @@ Deno.test("generated port offsets span the documented range", () => {
   assertEquals(offsets[offsets.length - 1], GENERATED_PORT_OFFSET_RANGE.last);
 });
 
-// Keeps the recorded list honest against the runtime that enforces it. A
-// blocked port is rejected before any connection is opened, so pointing these
-// probes at a host that cannot resolve reaches no network service: the blocked
-// answer arrives first, and any other port would fail on the name instead.
 Deno.test("every recorded blocked port is one fetch refuses", async () => {
+  // Keeps the recorded list honest against the runtime that enforces it. A
+  // blocked port is rejected before any connection is opened, so pointing these
+  // probes at a host that cannot resolve reaches no network service: the
+  // blocked answer arrives first, and any other port would fail on the name
+  // instead.
   const stillBlocked: number[] = [];
   for (const port of ports.blockedPorts) {
     try {

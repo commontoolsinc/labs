@@ -21,12 +21,12 @@ import { cfcLabelViewForDereference } from "../src/cfc/label-view-state.ts";
 const signer = await Identity.fromPassphrase("runner-cfc-envelope-version");
 const space = signer.did();
 
-// A stored envelope whose version this build postdates cannot be treated
-// as absent — that would read a labeled document as unlabeled. Every
-// reader fails closed instead: the metadata reader throws, the
-// applies-to-path probe reports that policy applies, and the commit path
-// classifies the envelope as unreadable and rejects the write.
 describe("CFC envelope version guard", () => {
+  // A stored envelope whose version this build postdates cannot be treated as
+  // absent — that would read a labeled document as unlabeled. Every reader
+  // fails closed instead: the metadata reader throws, the applies-to-path probe
+  // reports that policy applies, and the commit path classifies the envelope as
+  // unreadable and rejects the write.
   const seedWithVersion = async (
     runtime: Runtime,
     name: string,

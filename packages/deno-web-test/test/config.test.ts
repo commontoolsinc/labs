@@ -22,11 +22,11 @@ Deno.test("config is applied", async function () {
   );
 });
 
-// The settings a config carries decide how the whole suite runs: which browser
-// flags it gets, how long a test may take, what is served next to it. A run
-// that cannot read them and continues on the defaults instead fails somewhere
-// else entirely, for a reason that says nothing about the config.
 Deno.test("a config that throws on import fails the run", async function () {
+  // The settings a config carries decide how the whole suite runs: which
+  // browser flags it gets, how long a test may take, what is served next to it.
+  // A run that cannot read them and continues on the defaults instead fails
+  // somewhere else entirely, for a reason that says nothing about the config.
   const run = await runDenoWebTest("broken-config-project");
 
   run.assert(!run.success, "the run fails");

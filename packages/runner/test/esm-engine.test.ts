@@ -13,10 +13,10 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 
-// Phase D3.2: the Engine ESM compile path (compileToRecordGraph) runs the real
-// CF transformer pipeline, emits per-module CommonJS, assembles content-
-// addressed records + runtime records, and security-verifies every body.
 describe("Engine.compileToRecordGraph", () => {
+  // Phase D3.2: the Engine ESM compile path (compileToRecordGraph) runs the
+  // real CF transformer pipeline, emits per-module CommonJS, assembles content-
+  // addressed records + runtime records, and security-verifies every body.
   let runtime: Runtime;
   let engine: Engine;
   let storageManager: ReturnType<typeof StorageManager.emulate>;

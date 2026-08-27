@@ -1,10 +1,11 @@
 import { assertEquals } from "@std/assert";
 import { EnvSchema } from "@/env.ts";
 
-// Regression guard for the z.coerce.boolean() footgun: Boolean("false") === true,
-// which would silently enable telemetry (and, with the all-span exporter, ship
-// every HTTP request span) when an operator set OTEL_ENABLED=false to disable it.
 Deno.test("OTEL_ENABLED parses strictly: only 'true'/'1' enable telemetry", () => {
+  // Regression guard for the z.coerce.boolean() footgun: Boolean("false") ===
+  // true, which would silently enable telemetry (and, with the all-span
+  // exporter, ship every HTTP request span) when an operator set
+  // OTEL_ENABLED=false to disable it.
   const otel = (v: string | undefined) =>
     EnvSchema.parse(v === undefined ? {} : { OTEL_ENABLED: v }).OTEL_ENABLED;
 
@@ -77,11 +78,11 @@ Deno.test("INGEST_SELF_SERVE_ENABLED is off unless explicitly enabled", () => {
   assertEquals(flag("1"), true);
 });
 
-// The memory websocket pong deadline has to be tunable per deployment: it
-// must exceed the memory server's longest synchronous busy stretch, which an
-// operator observes in production, and 0 must disable the timeout entirely
-// (Deno.upgradeWebSocket's contract for idleTimeout).
 Deno.test("MEMORY_WS_IDLE_TIMEOUT_SECONDS defaults to 300 and accepts overrides", () => {
+  // The memory websocket pong deadline has to be tunable per deployment: it
+  // must exceed the memory server's longest synchronous busy stretch, which an
+  // operator observes in production, and 0 must disable the timeout entirely
+  // (Deno.upgradeWebSocket's contract for idleTimeout).
   const idle = (value: string | undefined) =>
     EnvSchema.parse(
       value === undefined ? {} : { MEMORY_WS_IDLE_TIMEOUT_SECONDS: value },

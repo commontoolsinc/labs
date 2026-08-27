@@ -141,8 +141,8 @@ describe("assertWriteSafe", () => {
   });
 });
 
-// Regression tests for guard bypasses found in code review.
 describe("guard hardening (review findings)", () => {
+  // Regression tests for guard bypasses found in code review.
   it("rejects quoted/bracketed core-table identifiers (read + write)", () => {
     expect(() => assertReadOnly('SELECT * FROM "commit"')).toThrow(GuardError);
     expect(() => assertReadOnly("SELECT * FROM [commit]")).toThrow(GuardError);

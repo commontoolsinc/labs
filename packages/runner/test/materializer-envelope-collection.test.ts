@@ -235,16 +235,16 @@ describe("materializer envelope collection", () => {
   });
 });
 
-// The branch at the runner's envelope-derivation site: presence of
-// materializerWriteInputPaths switches envelope collection off the
-// opaque-result fallback (collect ALL writable args) onto the path-filtered
-// collector — for a send-only computed with an unwritten writable arg, that
-// flips "collect all" to "collect none". Intended precision: with analyzed
-// write metadata, writable args that were never written would appear in the
-// write paths if written. Pinned here at the only level where the branch
-// selection is observable (the scheduler's materializer index after a real
-// runner-driven run).
 describe("materializer envelope branch selection", () => {
+  // The branch at the runner's envelope-derivation site: presence of
+  // materializerWriteInputPaths switches envelope collection off the
+  // opaque-result fallback (collect ALL writable args) onto the path-filtered
+  // collector — for a send-only computed with an unwritten writable arg, that
+  // flips "collect all" to "collect none". Intended precision: with analyzed
+  // write metadata, writable args that were never written would appear in the
+  // write paths if written. Pinned here at the only level where the branch
+  // selection is observable (the scheduler's materializer index after a real
+  // runner-driven run).
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
 

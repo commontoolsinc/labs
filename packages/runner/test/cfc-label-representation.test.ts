@@ -9,13 +9,13 @@ import {
   transformCfcLabelForCrossSpacePersist,
 } from "../src/cfc/label-representation.ts";
 
-// Inv-12 Stage 1 (SC-25; docs/specs/cfc-label-metadata-confidentiality.md §2;
-// spec §4.6.4.1): the cross-space representation transform. Every
-// commitment-classified source-bearing atom field is replaced by its
-// canonical digest wrapped in the self-describing marker `{digestOf:
-// "<hash>"}`; public-classified and unclassified fields persist verbatim.
-// The transform is deterministic, idempotent, and copy-on-write.
 describe("CFC label representation transform (inv-12 Stage 1)", () => {
+  // Inv-12 Stage 1 (SC-25; docs/specs/cfc-label-metadata-confidentiality.md §2;
+  // spec §4.6.4.1): the cross-space representation transform. Every
+  // commitment-classified source-bearing atom field is replaced by its
+  // canonical digest wrapped in the self-describing marker `{digestOf:
+  // "<hash>"}`; public-classified and unclassified fields persist verbatim. The
+  // transform is deterministic, idempotent, and copy-on-write.
   const alice = "did:key:alice";
   const bob = "did:key:bob";
 

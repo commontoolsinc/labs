@@ -5,12 +5,12 @@ import { llmToolExecutionHelpers } from "../src/builtins/llm-dialog.ts";
 
 const { buildToolCatalog, flattenTools } = llmToolExecutionHelpers;
 
-// A name addresses one tool. A pattern supplying a second under a name the
-// dialog answers to would leave the catalog, the flattened list the UI reads,
-// the CFC gates, and the system prompt each free to describe a different one —
-// and the prompt describes the built-ins in prose that no lookup can redirect.
-// The name is refused where it is registered instead.
 describe("llmDialog reserved tool names", () => {
+  // A name addresses one tool. A pattern supplying a second under a name the
+  // dialog answers to would leave the catalog, the flattened list the UI reads,
+  // the CFC gates, and the system prompt each free to describe a different one
+  // — and the prompt describes the built-ins in prose that no lookup can
+  // redirect. The name is refused where it is registered instead.
   const toolsCellNamed = (name: string) => ({
     get: () => ({
       [name]: {

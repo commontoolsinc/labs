@@ -34,12 +34,12 @@ import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("load-by-identity");
 const space = signer.did();
 
-// The load-by-identity warm path: build + evaluate a pattern directly from
-// cached compiled modules (no TS source, no resolve, no recompile), and the
-// cold-recovery path: recreate the pattern from the stored TypeScript alone
-// (content-addressed source set) when the compiled set is unavailable — the
-// runtime-version-bump scenario.
 describe("load by module identity (warm + version-bump recovery)", () => {
+  // The load-by-identity warm path: build + evaluate a pattern directly from
+  // cached compiled modules (no TS source, no resolve, no recompile), and the
+  // cold-recovery path: recreate the pattern from the stored TypeScript alone
+  // (content-addressed source set) when the compiled set is unavailable — the
+  // runtime-version-bump scenario.
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let engine: Engine;

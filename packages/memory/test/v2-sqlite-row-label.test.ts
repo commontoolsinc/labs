@@ -753,8 +753,8 @@ Deno.test("an unsupported spec version fails closed", () => {
   );
 });
 
-// endorsedBy variant mints the endorsed claim kind.
 Deno.test("endorsedBy mints claimed-endorsed-by", () => {
+  // endorsedBy variant mints the endorsed claim kind.
   const schema = table(
     { reviewer: "text" },
     (f) => ({
@@ -772,9 +772,9 @@ Deno.test("endorsedBy mints claimed-endorsed-by", () => {
   ]);
 });
 
-// Zero matches in an integrity position mints nothing (the claim simply is not
-// made) — distinct from >1 which is an error.
 Deno.test("zero matches in an integrity position mints no claim", () => {
+  // Zero matches in an integrity position mints nothing (the claim simply is
+  // not made) — distinct from >1 which is an error.
   const schema = table(
     { reviewer: "text" },
     (f) => ({

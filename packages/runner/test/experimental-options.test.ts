@@ -206,14 +206,13 @@ describe("ExperimentalOptions", () => {
   });
 });
 
-// The serverExecution ambient-flag OWNERSHIP family (PR #5439 threads
-// r3731191424, r3731191435, r3731191451): the flag is a process-global
-// admission input, so its lifecycle must be reference-counted across ALL
-// owners (explicit-enabler Runtimes AND the ExecutorHost), survive
-// construction/dispose failures, and never be stomped by a co-hosted
-// non-serving runtime.
-
 describe("serverExecution ambient-flag ownership", () => {
+  // The serverExecution ambient-flag OWNERSHIP family (PR #5439 threads
+  // r3731191424, r3731191435, r3731191451): the flag is a process-global
+  // admission input, so its lifecycle must be reference-counted across ALL
+  // owners (explicit-enabler Runtimes AND the ExecutorHost), survive
+  // construction/dispose failures, and never be stomped by a co-hosted
+  // non-serving runtime.
   afterEach(() => {
     resetModernCellRepConfig();
     resetCommitPreconditionsConfig();

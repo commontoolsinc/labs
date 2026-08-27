@@ -821,11 +821,11 @@ export const tag = "util";
   });
 });
 
-// CT-1819: the boot path defers composition, capturing per-module LINE COUNTS
-// instead of bodies — pin that the count-shaped inputs are byte-equivalent to
-// the body-shaped ones, and that the parser's lazy slot has one-shot,
-// lookup-driven semantics.
 describe("deferred composition inputs and lazy registration (CT-1819)", () => {
+  // CT-1819: the boot path defers composition, capturing per-module LINE COUNTS
+  // instead of bodies — pin that the count-shaped inputs are byte-equivalent to
+  // the body-shaped ones, and that the parser's lazy slot has one-shot,
+  // lookup-driven semantics.
   const raw = (mappings: string, sources: string[] = ["a.ts"]): SourceMap =>
     ({
       version: 3,

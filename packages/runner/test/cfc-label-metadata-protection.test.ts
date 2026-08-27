@@ -41,16 +41,16 @@ type PersistedEntry = {
   };
 };
 
-// Inv-12 Stage 1 (SC-25; docs/specs/cfc-label-metadata-confidentiality.md
-// §2/§5; spec §4.6.4.1 "Cross-space derived labels"): at the cross-space
-// persist seam, prepareBoundaryCommit applies the classification table to
-// every source-bearing atom field of entries whose observations originate
-// OUTSIDE the destination space — link-origin entries whose link source
-// lives in another space (including the carried sigil `cfcLabelView`
-// entries, the in-value copy) and flow-derived entries whose join consumed a
-// labeled foreign observation. Same-space-only labels persist verbatim.
-// Behind `cfcLabelMetadataProtection: off | observe | enforce`.
 describe("CFC cross-space label-metadata persist transform (inv-12 Stage 1)", () => {
+  // Inv-12 Stage 1 (SC-25; docs/specs/cfc-label-metadata-confidentiality.md
+  // §2/§5; spec §4.6.4.1 "Cross-space derived labels"): at the cross-space
+  // persist seam, prepareBoundaryCommit applies the classification table to
+  // every source-bearing atom field of entries whose observations originate
+  // OUTSIDE the destination space — link-origin entries whose link source lives
+  // in another space (including the carried sigil `cfcLabelView` entries, the
+  // in-value copy) and flow-derived entries whose join consumed a labeled
+  // foreign observation. Same-space-only labels persist verbatim. Behind
+  // `cfcLabelMetadataProtection: off | observe | enforce`.
   const fullSource = { space: spaceA, id: "of:remote-origin", path: [] };
   const caveatAtom = {
     type: CFC_ATOM_TYPE.Caveat,

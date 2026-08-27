@@ -26,10 +26,10 @@ import {
 } from "@commonfabric/memory/v2";
 import type { CellLinkRefPayload, URI } from "../src/sigil-types.ts";
 
-// The Phase 1 writer: with the flag on, a schema-bearing link is stamped
-// with a cid: reference and the commit materializes the schema documents
-// into the destination space (the write-side delivery guarantee).
 describe("schema-doc-writer", () => {
+  // The Phase 1 writer: with the flag on, a schema-bearing link is stamped with
+  // a cid: reference and the commit materializes the schema documents into the
+  // destination space (the write-side delivery guarantee).
   let server: MemoryV2Server.Server;
   let writerStorage: EmulatedStorageManager;
   let readerStorage: EmulatedStorageManager;

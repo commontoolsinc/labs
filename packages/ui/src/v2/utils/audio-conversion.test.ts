@@ -10,11 +10,11 @@ import {
   resample,
 } from "./audio-conversion.ts";
 
-// Note: We're testing the exported helper functions directly
-// The main convertToWav function requires browser AudioContext which isn't available in Deno tests
-// In a real browser environment, we would test the full conversion pipeline
-
 describe("audio-conversion", () => {
+  // Note: We're testing the exported helper functions directly The main
+  // convertToWav function requires browser AudioContext which isn't available
+  // in Deno tests In a real browser environment, we would test the full
+  // conversion pipeline
   describe("WAV file format", () => {
     it("should create valid WAV header structure", () => {
       // Create a simple PCM data array

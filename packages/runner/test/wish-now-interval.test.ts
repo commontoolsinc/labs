@@ -10,14 +10,14 @@ import type { CommitError } from "../src/storage/interface.ts";
 const signer = await Identity.fromPassphrase("wish built-in tests");
 const space = signer.did();
 
-// The `#now/N` grid ticks on a recurring wall-clock-boundary timer. These cases
-// observe the grid value advancing across a boundary, driving the beat with
-// `clock.tick` and reading the coarsened value before and after. They are split
-// out of `wish.test.ts` because the grid's heartbeat and its shared result cell
-// carry state across a suite's cases: run alongside the ~30 other `#now` cases,
-// the beat fires but the observed value stays frozen. In their own file each
-// case starts from a clean grid.
 describe("interval #now wish", () => {
+  // The `#now/N` grid ticks on a recurring wall-clock-boundary timer. These
+  // cases observe the grid value advancing across a boundary, driving the beat
+  // with `clock.tick` and reading the coarsened value before and after. They
+  // are split out of `wish.test.ts` because the grid's heartbeat and its shared
+  // result cell carry state across a suite's cases: run alongside the ~30 other
+  // `#now` cases, the beat fires but the observed value stays frozen. In their
+  // own file each case starts from a clean grid.
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: ReturnType<Runtime["edit"]>;

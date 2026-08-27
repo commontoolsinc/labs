@@ -21,14 +21,14 @@ type StoredEntry = {
   observes?: string;
 };
 
-// Epic C stage C5 (docs/specs/cfc-observation-classes.md §8): an authored
-// `ifc.observes` classes the declared entry, and the sqlite null-origin
-// merge uses it to declare its conservative whole-schema union as
-// `observes:"value"` — content-channel only. Shape/enumerate consumers of a
-// query's result rows (length, membership — the count consumer) no longer
-// inherit the union; class-unaware readers still treat the entry as
-// covering (the exact pre-C5 behavior — over-taint, fail-safe).
 describe("CFC declared observation classes (C5)", () => {
+  // Epic C stage C5 (docs/specs/cfc-observation-classes.md §8): an authored
+  // `ifc.observes` classes the declared entry, and the sqlite null-origin merge
+  // uses it to declare its conservative whole-schema union as
+  // `observes:"value"` — content-channel only. Shape/enumerate consumers of a
+  // query's result rows (length, membership — the count consumer) no longer
+  // inherit the union; class-unaware readers still treat the entry as covering
+  // (the exact pre-C5 behavior — over-taint, fail-safe).
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 

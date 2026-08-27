@@ -14,13 +14,13 @@ import { StorageManager } from "../src/storage/cache.deno.ts";
 const signer = await Identity.fromPassphrase("runner-cfc-envelope-staging");
 const space = signer.did();
 
-// The CFC envelope store rides the transaction's shared schema-document
-// staging (`stageSchemaDocClosure`) rather than a bespoke write: the
-// envelope document registers in the realm registry, dedupes per
-// transaction, and elides once the space's server has confirmed it —
-// while `loadSchemaDocument`'s read side keeps verifying what the SPACE
-// holds, so a registry hit can never mask a missing document.
 describe("CFC envelope schema documents ride the shared staging path", () => {
+  // The CFC envelope store rides the transaction's shared schema-document
+  // staging (`stageSchemaDocClosure`) rather than a bespoke write: the envelope
+  // document registers in the realm registry, dedupes per transaction, and
+  // elides once the space's server has confirmed it — while
+  // `loadSchemaDocument`'s read side keeps verifying what the SPACE holds, so a
+  // registry hit can never mask a missing document.
   const setup = async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({

@@ -2162,13 +2162,14 @@ describe("keyed collections via elementById", () => {
   });
 });
 
-// Single-session checks of the mergeable methods' guards and minority branches:
-// the transaction/shape preconditions, the absent-array initialization, the
-// cell-reference (keyed-entity) matching path used by addUnique/removeByValue,
-// the no-op early returns, the element-schema `$defs` carry-through, and the
-// in-transaction accumulation of repeated ops on one path. These do not need
-// concurrency, only the op machinery, so they run against a single runtime.
 describe("mergeable op guards and single-session branches", () => {
+  // Single-session checks of the mergeable methods' guards and minority
+  // branches: the transaction/shape preconditions, the absent-array
+  // initialization, the cell-reference (keyed-entity) matching path used by
+  // addUnique/removeByValue, the no-op early returns, the element-schema
+  // `$defs` carry-through, and the in-transaction accumulation of repeated ops
+  // on one path. These do not need concurrency, only the op machinery, so they
+  // run against a single runtime.
   let server: MemoryV2Server.Server;
   let storage1: EmulatedStorageManager;
   let rt: Runtime;

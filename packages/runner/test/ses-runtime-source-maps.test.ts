@@ -5,11 +5,12 @@ import { identitySourceMap } from "@commonfabric/js-compiler/source-map";
 
 import { SESRuntime } from "../src/sandbox/ses-runtime.ts";
 
-// The runner-facing source-map surface of the SES runtime: the module-graph boot
-// path registers deferred providers (CT-1819), and both coordinate lookup and
-// stack parsing read what those providers materialize. The provider semantics
-// themselves belong to `SourceMapParser` and are covered by its own tests.
 describe("SESRuntime source-map registration", () => {
+  // The runner-facing source-map surface of the SES runtime: the module-graph
+  // boot path registers deferred providers (CT-1819), and both coordinate
+  // lookup and stack parsing read what those providers materialize. The
+  // provider semantics themselves belong to `SourceMapParser` and are covered
+  // by its own tests.
   it("lazy providers materialize once, on first lookup", () => {
     const runtime = new SESRuntime();
     let providerCalls = 0;

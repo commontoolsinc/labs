@@ -123,10 +123,11 @@ describe("checkSqliteWriteCeiling", () => {
   });
 });
 
-// Regression: every one of these used to FAIL OPEN — a labeled value over the
-// `body` ceiling slipped through because its target column couldn't be resolved
-// and "no ceiling found" was treated as "no ceiling". They must now reject.
 describe("checkSqliteWriteCeiling — fail closed (was fail-open)", () => {
+  // Regression: every one of these used to FAIL OPEN — a labeled value over the
+  // `body` ceiling slipped through because its target column couldn't be
+  // resolved and "no ceiling found" was treated as "no ceiling". They must now
+  // reject.
   it("interleaved literal in VALUES (positional ? mis-maps)", () => {
     // The `?` binds to `body` (capped), but a naive parser maps it to `subject`.
     expect(

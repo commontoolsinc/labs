@@ -9,15 +9,15 @@ import {
   spaceContext,
 } from "./runtime-context.ts";
 
-// Host-embedding contract seam 2 (docs/features/host-embedding.md §2):
-// `runtimeContext` and `spaceContext` are the only REQUIRED contexts a host
-// provides; `presenceUrlContext` is optional and degrades to disabled. A host
-// and the mounted components must agree on the context *identity* — with
-// `@lit/context`, `createContext(key)` returns the string key itself, so the
-// key string is the wire identity of the seam. A rename, or a merge into a
-// different context, silently breaks every embedder's provide/consume wiring.
-// These assertions go red when that identity changes.
 describe("host embedding contract: runtime/space contexts", () => {
+  // Host-embedding contract seam 2 (docs/features/host-embedding.md §2):
+  // `runtimeContext` and `spaceContext` are the only REQUIRED contexts a host
+  // provides; `presenceUrlContext` is optional and degrades to disabled. A host
+  // and the mounted components must agree on the context *identity* — with
+  // `@lit/context`, `createContext(key)` returns the string key itself, so the
+  // key string is the wire identity of the seam. A rename, or a merge into a
+  // different context, silently breaks every embedder's provide/consume wiring.
+  // These assertions go red when that identity changes.
   it("runtimeContext is keyed 'runtime'", () => {
     expect(runtimeContext).toBe("runtime");
   });
