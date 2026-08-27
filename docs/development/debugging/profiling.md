@@ -348,8 +348,14 @@ process:
   `traverse` and `runner/start/*` appear here meaning the *server's* work.
 - `logCounts` — the same per-logger counts, which is how a warning storm shows
   up as a number rather than as a log to grep.
-- `slowQueries` — the last hundred query or watch operations over 100 ms, with
-  the space and the root and watch counts.
+- `slowQueries` — the last hundred query, watch, or commit operations over
+  100 ms, with the space and the root and watch counts. A `transact` entry
+  also carries the commit's operation and read counts, its outcome (`ok`,
+  the error name, or `threw` — a slow rejected commit records like a slow
+  applied one), and `lockWaitMs`: how long the commit waited for the space
+  publication lock before evaluating. Flush passes hold that same lock, so
+  a `transact` whose `lockWaitMs` dominates its elapsed time was queued
+  behind fan-out, not expensive itself.
 - `servingLoop` — the serving loop's counters
   ([`serving-loop.md` §7](../../specs/server-side-execution/serving-loop.md)),
   present only when this process serves. `settle.series` is a ready-made
