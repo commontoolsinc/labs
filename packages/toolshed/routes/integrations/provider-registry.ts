@@ -45,9 +45,9 @@ import type { AppRouteHandler } from "@/lib/types.ts";
 
 const logger = getLogger("provider-registry");
 
-// ---------------------------------------------------------------------------
+//
 // Shared CORS configuration for all OAuth2 provider routes
-// ---------------------------------------------------------------------------
+//
 
 const OAUTH_CORS_CONFIG = {
   origin: "*",
@@ -58,9 +58,9 @@ const OAUTH_CORS_CONFIG = {
   credentials: true,
 };
 
-// ---------------------------------------------------------------------------
+//
 // Descriptor catalog — add new OAuth2 providers here
-// ---------------------------------------------------------------------------
+//
 
 const DESCRIPTORS: ProviderDescriptor[] = [
   GoogleDescriptor,
@@ -73,9 +73,9 @@ const DESCRIPTORS: ProviderDescriptor[] = [
   StravaDescriptor,
 ];
 
-// ---------------------------------------------------------------------------
+//
 // Descriptor → OAuth2ProviderConfig
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Resolve a ProviderDescriptor to a fully populated OAuth2ProviderConfig.
@@ -120,9 +120,9 @@ async function resolveProviderConfig(
   };
 }
 
-// ---------------------------------------------------------------------------
+//
 // Single-provider router factory
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Create a fully wired Hono router for a single OAuth2 provider.
@@ -189,9 +189,9 @@ async function createProviderRouter(
   return router;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Public API
-// ---------------------------------------------------------------------------
+//
 
 /**
  * Build routers for all registered OAuth2 provider descriptors.
