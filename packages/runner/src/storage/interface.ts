@@ -494,6 +494,7 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   resolveEventAttention?(
     space: MemorySpace,
     eventId: string,
+    seq: number,
     sidecarId: string,
     action: "retry" | "dismiss",
   ): Promise<EventAttentionResolveResult>;
@@ -2533,6 +2534,7 @@ export interface ISpaceReplica extends ISpace {
 
   resolveEventAttention?(
     eventId: string,
+    seq: number,
     sidecarId: string,
     action: "retry" | "dismiss",
   ): Promise<EventAttentionResolveResult>;

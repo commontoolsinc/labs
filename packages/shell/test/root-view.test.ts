@@ -486,6 +486,7 @@ describe("XRootView", () => {
       const notice: EventAttentionNotice = {
         space: "did:key:z6Mk-shell-attention" as never,
         eventId: "evt-original",
+        seq: 1,
         sidecarId: "of:stream-events:attention",
         reason: "This event could not be delivered.",
         attention: {
@@ -508,6 +509,14 @@ describe("XRootView", () => {
       expect(markup).toContain(notice.reason);
       expect(markup).toContain("Dismiss");
       expect(markup).toContain("Retry");
+      expect(markup).toContain('role="status"');
+      expect(markup).toContain('aria-live="polite"');
+      const styles = (XRootView.styles as { cssText: string }).cssText;
+      expect(styles).toContain("var(--shell-surface");
+      expect(styles).toContain("var(--cf-theme-color-surface");
+      expect(styles).not.toContain("var(--background, #fff)");
+      expect(styles).toContain("max-height: calc(100dvh - 2rem)");
+      expect(styles).toContain("overflow-y: auto");
 
       await view._resolveEventAttention(notice, "retry");
       expect(resolutions).toEqual([{ notice, action: "retry" }]);
@@ -525,6 +534,56 @@ describe("XRootView", () => {
       expect(templateMarkup(view.render())).not.toContain(
         "Event needs attention",
       );
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps equal event IDs from different sidecars independently actionable", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const view = new XRootView();
+      const resolved: EventAttentionNotice[] = [];
+      (view as unknown as { runtime: unknown }).runtime = {
+        resolveEventAttention: (notice: EventAttentionNotice) => {
+          resolved.push(notice);
+          return Promise.resolve({ kind: "dismissed" });
+        },
+      };
+      const space = "did:key:z6Mk-shell-shared-event" as never;
+      const notice = (
+        sidecarId: string,
+        reason: string,
+      ): EventAttentionNotice => ({
+        space,
+        eventId: "evt-shared",
+        seq: 7,
+        sidecarId,
+        reason,
+        attention: {
+          phase: "dispatch-load",
+          failureClass: "connection",
+          code: "delivery-failure-budget-exhausted",
+          firstFailureAt: 10,
+          lastFailureAt: 70_000,
+          accumulatedFailureMs: 60_000,
+          failureCount: 2,
+          recovery: "explicit-retry",
+        },
+      });
+      const first = notice("of:stream-events:first", "first stream");
+      const second = notice("of:stream-events:second", "second stream");
+      (view as unknown as { space: unknown }).space = space;
+      view._handleEventNeedsAttention(first);
+      view._handleEventNeedsAttention(second);
+
+      expect(templateMarkup(view.render())).toContain("first stream");
+      expect(templateMarkup(view.render())).toContain("second stream");
+      await view._resolveEventAttention(first, "dismiss");
+      expect(resolved).toEqual([first]);
+      expect(templateMarkup(view.render())).not.toContain("first stream");
+      expect(templateMarkup(view.render())).toContain("second stream");
     } finally {
       restore();
     }
@@ -576,6 +635,7 @@ describe("XRootView", () => {
       ): EventAttentionNotice => ({
         space: space as never,
         eventId,
+        seq: 1,
         sidecarId: `of:stream-events:${eventId}`,
         reason,
         attention: {
@@ -620,6 +680,170 @@ describe("XRootView", () => {
     }
   });
 
+  it("preserves a live notice that arrives during its retained-list refresh", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const view = new XRootView();
+      const identity = await Identity.fromPassphrase(
+        "root-view-attention-live-refresh-test",
+      );
+      const space = "did:key:z6Mk-shell-live-refresh" as never;
+      const refresh = Promise.withResolvers<readonly EventAttentionNotice[]>();
+      (view as unknown as { runtime: unknown }).runtime = {
+        listEventAttention: () => refresh.promise,
+      };
+      const previous = view.app;
+      view.app = {
+        ...view.app,
+        identity,
+        view: { spaceDid: space } as typeof view.app.view,
+      };
+      (view as unknown as {
+        willUpdate(changed: Map<string, unknown>): void;
+      }).willUpdate(new Map([["app", previous]]));
+      const notice: EventAttentionNotice = {
+        space,
+        eventId: "evt-live-refresh",
+        seq: 8,
+        sidecarId: "of:stream-events:live-refresh",
+        reason: "live during refresh",
+        attention: {
+          phase: "dispatch-load",
+          failureClass: "connection",
+          code: "delivery-failure-budget-exhausted",
+          firstFailureAt: 10,
+          lastFailureAt: 70_000,
+          accumulatedFailureMs: 60_000,
+          failureCount: 2,
+          recovery: "explicit-retry",
+        },
+      };
+      view._handleEventNeedsAttention(notice);
+      refresh.resolve([]);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(templateMarkup(view.render())).toContain("live during refresh");
+    } finally {
+      restore();
+    }
+  });
+
+  it("does not restore a resolved card from an older retained-list result", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const view = new XRootView();
+      const identity = await Identity.fromPassphrase(
+        "root-view-attention-resolved-refresh-test",
+      );
+      const space = "did:key:z6Mk-shell-resolved-refresh" as never;
+      const refresh = Promise.withResolvers<readonly EventAttentionNotice[]>();
+      (view as unknown as { runtime: unknown }).runtime = {
+        listEventAttention: () => refresh.promise,
+        resolveEventAttention: () => Promise.resolve({ kind: "dismissed" }),
+      };
+      const previous = view.app;
+      view.app = {
+        ...view.app,
+        identity,
+        view: { spaceDid: space } as typeof view.app.view,
+      };
+      (view as unknown as {
+        willUpdate(changed: Map<string, unknown>): void;
+      }).willUpdate(new Map([["app", previous]]));
+      const notice: EventAttentionNotice = {
+        space,
+        eventId: "evt-resolved-refresh",
+        seq: 9,
+        sidecarId: "of:stream-events:resolved-refresh",
+        reason: "must stay resolved",
+        attention: {
+          phase: "dispatch-load",
+          failureClass: "connection",
+          code: "delivery-failure-budget-exhausted",
+          firstFailureAt: 10,
+          lastFailureAt: 70_000,
+          accumulatedFailureMs: 60_000,
+          failureCount: 2,
+          recovery: "explicit-retry",
+        },
+      };
+      view._handleEventNeedsAttention(notice);
+      await view._resolveEventAttention(notice, "dismiss");
+      refresh.resolve([notice]);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(templateMarkup(view.render())).not.toContain("must stay resolved");
+    } finally {
+      restore();
+    }
+  });
+
+  it("lets the newest same-space refresh own an A to B to A navigation", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const view = new XRootView();
+      const identity = await Identity.fromPassphrase(
+        "root-view-attention-refresh-owner-test",
+      );
+      const firstSpace = "did:key:z6Mk-shell-refresh-owner-a" as never;
+      const secondSpace = "did:key:z6Mk-shell-refresh-owner-b" as never;
+      const oldA = Promise.withResolvers<readonly EventAttentionNotice[]>();
+      const b = Promise.withResolvers<readonly EventAttentionNotice[]>();
+      const newA = Promise.withResolvers<readonly EventAttentionNotice[]>();
+      const refreshes = [oldA.promise, b.promise, newA.promise];
+      (view as unknown as { runtime: unknown }).runtime = {
+        listEventAttention: () => refreshes.shift()!,
+      };
+      const setSpace = (space: string) => {
+        const previous = view.app;
+        view.app = {
+          ...view.app,
+          identity,
+          view: { spaceDid: space } as typeof view.app.view,
+        };
+        (view as unknown as {
+          willUpdate(changed: Map<string, unknown>): void;
+        }).willUpdate(new Map([["app", previous]]));
+      };
+      const notice = (reason: string): EventAttentionNotice => ({
+        space: firstSpace,
+        eventId: `evt-${reason}`,
+        seq: 10,
+        sidecarId: `of:stream-events:${reason}`,
+        reason,
+        attention: {
+          phase: "dispatch-load",
+          failureClass: "connection",
+          code: "delivery-failure-budget-exhausted",
+          firstFailureAt: 10,
+          lastFailureAt: 70_000,
+          accumulatedFailureMs: 60_000,
+          failureCount: 2,
+          recovery: "explicit-retry",
+        },
+      });
+
+      setSpace(firstSpace);
+      setSpace(secondSpace);
+      setSpace(firstSpace);
+      newA.resolve([notice("new A")]);
+      b.resolve([]);
+      await Promise.resolve();
+      await Promise.resolve();
+      oldA.resolve([notice("old A")]);
+      await Promise.resolve();
+      await Promise.resolve();
+      const markup = templateMarkup(view.render());
+      expect(markup).toContain("new A");
+      expect(markup).not.toContain("old A");
+    } finally {
+      restore();
+    }
+  });
+
   it("coalesces duplicate attention actions and keeps a failed action visible", async () => {
     const restore = installBrowserGlobals();
     const originalError = console.error;
@@ -631,6 +855,7 @@ describe("XRootView", () => {
       const notice: EventAttentionNotice = {
         space: "did:key:z6Mk-shell-attention-failure" as never,
         eventId: "evt-action-failure",
+        seq: 1,
         sidecarId: "of:stream-events:action-failure",
         reason: "still needs attention",
         attention: {
@@ -707,6 +932,7 @@ describe("XRootView", () => {
       const notice: EventAttentionNotice = {
         space: firstSpace,
         eventId: "evt-navigation",
+        seq: 1,
         sidecarId: "of:stream-events:navigation",
         reason: "navigation guard",
         attention: {

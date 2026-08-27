@@ -31,12 +31,14 @@ import { setLLMUrl } from "@commonfabric/llm";
 import { type ACL, isACLUser, isCapability } from "@commonfabric/memory/acl";
 import {
   type ApplyOpResolution,
+  eventAttentionEntryKey,
   type EventAttentionIndexValue,
   type OperationFieldAddress,
   type OperationFieldSnapshot,
   SERVER_EXECUTION_ATTENTION_DOC_ID,
   type StreamEventsDocValue,
   toValuePath,
+  type UnresolvedEventAttention,
 } from "@commonfabric/memory/v2";
 import {
   PieceController,
@@ -255,12 +257,14 @@ export function subscribeEventAttentionNotifications(
     if (
       outcome.kind !== "needs-attention" ||
       outcome.sidecarId === undefined ||
+      typeof outcome.seq !== "number" ||
       outcome.attention === undefined
     ) return;
     post({
       type: NotificationType.EventNeedsAttention,
       space: outcome.space,
       eventId: outcome.eventId,
+      seq: outcome.seq,
       sidecarId: outcome.sidecarId,
       reason: outcome.reason,
       attention: outcome.attention,
@@ -1554,20 +1558,33 @@ export class RuntimeProcessor {
       "space",
     )?.value as EventAttentionIndexValue | undefined;
     const notices: EventAttentionListResponse["notices"] = [];
+    const summariesBySidecar = new Map<string, UnresolvedEventAttention[]>();
     for (const sidecarSummaries of Object.values(index?.entries ?? {})) {
       for (const summary of Object.values(sidecarSummaries)) {
-        const sidecarSync = await provider.sync(
-          summary.sidecarId as never,
-          undefined,
-          "space",
-        );
-        if (sidecarSync.error !== undefined) throw sidecarSync.error;
-        const sidecar = provider.replica.getDocument(
-          summary.sidecarId as never,
-          "space",
-        )?.value as StreamEventsDocValue | undefined;
-        const entry = sidecar?.entries?.find((candidate) =>
-          candidate.eventId === summary.eventId
+        const summaries = summariesBySidecar.get(summary.sidecarId) ?? [];
+        summaries.push(summary);
+        summariesBySidecar.set(summary.sidecarId, summaries);
+      }
+    }
+    for (const [sidecarId, summaries] of summariesBySidecar) {
+      const sidecarSync = await provider.sync(
+        sidecarId as never,
+        undefined,
+        "space",
+      );
+      if (sidecarSync.error !== undefined) throw sidecarSync.error;
+      const sidecar = provider.replica.getDocument(
+        sidecarId as never,
+        "space",
+      )?.value as StreamEventsDocValue | undefined;
+      const entries = new Map(
+        sidecar?.entries?.map((entry) =>
+          [eventAttentionEntryKey(entry.eventId, entry.seq!), entry] as const
+        ),
+      );
+      for (const summary of summaries) {
+        const entry = entries.get(
+          eventAttentionEntryKey(summary.eventId, summary.seq),
         );
         if (
           entry?.status !== "needs-attention" ||
@@ -1578,7 +1595,8 @@ export class RuntimeProcessor {
         notices.push({
           space: request.space,
           eventId: entry.eventId,
-          sidecarId: summary.sidecarId,
+          seq: summary.seq,
+          sidecarId,
           reason: entry.reason ?? "Event delivery needs attention",
           attention: entry.attention,
         });
@@ -1598,6 +1616,7 @@ export class RuntimeProcessor {
       this.runtime.storageManager,
       request.space,
       request.eventId,
+      request.seq,
       request.sidecarId,
       request.action,
     );

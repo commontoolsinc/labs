@@ -293,7 +293,8 @@ interface RequestMessage {
     | "entity-id.exists"
     | "session.watch.set"
     | "session.watch.add"
-    | "session.ack";
+    | "session.ack"
+    | "event.attention.resolve";
   requestId: string;
   space: SpaceId;
   sessionId?: SessionId;
@@ -327,6 +328,12 @@ interface ResponseMessage<Result> {
     // keep reopening a denied session or to terminate it. An older server sends
     // no marker, so its AuthorizationError is read as permanent.
     retriable?: boolean;
+    // Positive, versioned evidence that the server reached a durable no-commit
+    // verdict. Delivery recovery may use this to distinguish a permanent
+    // protocol failure from an ambiguous transport or storage outcome.
+    permanentEvidence?: true;
+    // Engine revision whose ACL state produced an authorization denial.
+    aclRevision?: number;
   };
 }
 
@@ -346,6 +353,32 @@ interface SessionRevoked {
 ```
 
 Live data delivery is not routed through the initiating request id.
+
+The server-owned attention resolver addresses one immutable event-stream entry
+by its stream sidecar, event ID, and stamped sequence. Retry and Dismiss are
+same-space atomic decisions. A replay returns the first recorded resolution,
+including after ordinary event compaction removes the resolved source entry.
+
+```typescript
+// Shown at module scope.
+interface EventAttentionResolveRequest {
+  type: "event.attention.resolve";
+  requestId: string;
+  space: SpaceId;
+  sessionId: SessionId;
+  sidecarId: string;
+  eventId: string;
+  seq: number;
+  action: "retry" | "dismiss";
+}
+
+interface EventAttentionResolveResult {
+  serverSeq: number;
+  resolution:
+    | { kind: "dismissed" }
+    | { kind: "retried"; eventId: string };
+}
+```
 
 ### 4.2.3 Session Sync Payload
 

@@ -7307,16 +7307,18 @@ supply; OW29/OW32/OW34 closed):
     Terminal cover is one entry-local `{status: "needs-attention",
     consequenced: true}` notice plus the per-space unresolved-attention
     discovery index, keyed by prototype-safe encodings of stream sidecar and
-    event ID and protected
+    immutable `(eventId, seq)` identity and protected
     from authored writes. The entry stays authoritative and uncompactable
     until resolution. The arrival barrier opens only after the notice's
     wave confirms the whole terminal contribution committed; failed
-    checkpoint or notice writes fail closed and are counted. Retry and
-    Dismiss resolve the original and remove the index item in one
-    same-space CAS. Retry appends at most one fresh ID with `retryOf`,
+    checkpoint or notice writes fail closed and are counted. Retry and Dismiss
+    resolve the original, remove the unresolved index item, and record a durable
+    resolution tombstone in one same-space CAS. Retry appends at most one fresh
+    ID with `retryOf`,
     exact server-copied payload and admission provenance, and the
-    original user's current session; concurrent and replayed requests
-    return the recorded winner. The runtime-client and persistent shell
+    original user's current session; concurrent and replayed requests return the
+    recorded winner after source-entry compaction as well. The runtime-client and
+    persistent shell
     surface carry the complete safe attention object for the active space,
     and reconnect discovery reads the unresolved index back through the
     authoritative entry. Health reads recompute active failed-state duration
@@ -7329,10 +7331,13 @@ supply; OW29/OW32/OW34 closed):
     ordering, CFC versus preparation-crash classification,
     `RowLabelCommitError` operation-owner attribution through an actual
     refused-wave outcome, current-ACL routing, ambiguous-outcome
-    exclusion, exact-provenance Retry, Retry/Dismiss and lost-response
-    races, cross-user/sessionless rejection, unresolved retention,
-    runtime-client forwarding, shell persistence, and the end-to-end
-    transient and persistent load paths. OQ-19's foreign-derived
+    exclusion, exact-provenance Retry, Retry/Dismiss and lost-response races,
+    lost-response replay after source compaction, equal event IDs within and
+    across streams, cross-user/sessionless rejection, unresolved retention,
+    in-flight retry ownership at the budget boundary, runtime-client forwarding,
+    mutation-aware shell refresh ownership, dark-theme and live-region
+    presentation, and the end-to-end transient and persistent load paths.
+    OQ-19's foreign-derived
     freshness mechanism remains its separate currentness design and is
     not part of this closure.
   - **OW55 — the serving runtimes' pattern-fetch trust surface

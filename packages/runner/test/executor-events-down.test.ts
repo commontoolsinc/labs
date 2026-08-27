@@ -35,6 +35,7 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import {
   decodeMemoryBoundary,
+  eventAttentionEntryKey,
   eventAttentionIndexKey,
   SERVER_EXECUTION_ATTENTION_DOC_ID,
   streamEntriesDocId,
@@ -1310,10 +1311,19 @@ describe("Phase 3 events-down (serving side)", () => {
     // so its commit-prep records the refusal and the commit is rejected
     // before storage.
     const probeRuns = new Map<string, number>();
+    const gatedRetryStarted = Promise.withResolvers<void>();
+    const releaseGatedRetry = Promise.withResolvers<void>();
     const cancelProbe = servingRuntime!.scheduler.addEventHandler(
-      (tx, event) => {
+      async (tx, event) => {
         const kind = (event as { kind?: string }).kind ?? "unknown";
-        probeRuns.set(kind, (probeRuns.get(kind) ?? 0) + 1);
+        const runs = (probeRuns.get(kind) ?? 0) + 1;
+        probeRuns.set(kind, runs);
+        if (kind === "gated-retry" && runs > 1) {
+          gatedRetryStarted.resolve();
+          await releaseGatedRetry.promise;
+          return;
+        }
+        if (kind === "follower" || kind === "gated-follower") return;
         const resolved = servingRuntime!.getCell<{ name: string }>(
           space,
           `${poisonedDocName}-resolved`,
@@ -1420,7 +1430,7 @@ describe("Phase 3 events-down (serving side)", () => {
       } | undefined;
       expect(
         attentionIndex?.entries?.[eventAttentionIndexKey(sidecarId)]?.[
-          eventAttentionIndexKey(poison1.eventId)
+          eventAttentionEntryKey(poison1.eventId, poison1.seq!)
         ]?.sidecarId,
       ).toBe(sidecarId);
       const poisonRunsAtTerminal = probeRuns.get("poison-1");
@@ -1434,7 +1444,53 @@ describe("Phase 3 events-down (serving side)", () => {
       expect(
         host!.stats().events.needsAttention.byPhase["commit-preparation"],
       ).toBe(1);
+
+      await waitUntil(
+        () => entryByKind("follower")?.consequenced === true,
+        "the first terminal cover's follower to consequence",
+      );
+      result.key("bump").send({ kind: "gated-retry" });
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () =>
+          entryByKind("gated-retry")?.deliveryDeferral?.failureCount !==
+            undefined,
+        "the gated event's first commit-preparation checkpoint",
+      );
+      await gatedRetryStarted.promise;
+
+      const skipsBefore = host!.stats().events.drainInFlightSkips;
+      deliveryNow += 60_000;
+      const wake = clientRuntime.edit();
+      clientRuntime.getCell<number>(space, "gated-retry-wake", undefined)
+        .withTx(wake).set(1);
+      expect((await wake.commit()).error).toBeUndefined();
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () => host!.stats().events.drainInFlightSkips > skipsBefore,
+        "the expired checkpoint scan to observe its in-flight owner",
+      );
+      const stillRunning = entryByKind("gated-retry")!;
+      expect(stillRunning.consequenced).not.toBe(true);
+      expect(stillRunning.status).toBeUndefined();
+      expect(stillRunning.attention).toBeUndefined();
+
+      releaseGatedRetry.resolve();
+      await waitUntil(
+        () => entryByKind("gated-retry")?.consequenced === true,
+        "the in-flight clean retry to consequence normally",
+      );
+      const succeeded = entryByKind("gated-retry")!;
+      expect(succeeded.status).toBeUndefined();
+      expect(succeeded.attention).toBeUndefined();
+      expect(succeeded.deliveryDeferral).toBeUndefined();
+      expect(probeRuns.get("gated-retry")).toBe(2);
+      expect(consequenceCommitsNaming(succeeded.eventId)).toHaveLength(1);
+      expect(host!.stats().events.needsAttention.total).toBe(1);
     } finally {
+      releaseGatedRetry.resolve();
       console.error = realConsoleError;
       cancelProbe();
       cancelDemand();
@@ -3996,6 +4052,7 @@ describe("Phase 3 events-down (serving side)", () => {
       const retried = await clientManager.resolveEventAttention(
         space,
         terminal.eventId,
+        terminal.seq!,
         sidecarId,
         "retry",
       );
@@ -4170,6 +4227,7 @@ describe("Phase 3 events-down (serving side)", () => {
       const retryResult = await clientManager.resolveEventAttention(
         space,
         terminal.eventId,
+        terminal.seq!,
         sidecarIdsIn(engine)[0],
         "retry",
       );
@@ -4189,6 +4247,7 @@ describe("Phase 3 events-down (serving side)", () => {
       const replay = await clientManager.resolveEventAttention(
         space,
         terminal.eventId,
+        terminal.seq!,
         sidecarIdsIn(engine)[0],
         "retry",
       );

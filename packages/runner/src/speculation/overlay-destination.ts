@@ -139,6 +139,7 @@ const SPECULATION_ENACTABLE_EFFECT_KINDS = new Set(["navigateTo"]);
 export type EventIntentOutcome = {
   space: MemorySpace;
   eventId: string;
+  seq?: number;
   sidecarId?: string;
   kind: "dropped" | "errored" | "refused" | "needs-attention";
   reason: string;
@@ -1435,6 +1436,7 @@ export class SpeculationOverlayDestination
       this.#notifyIntentOutcome({
         space,
         eventId: entry.eventId,
+        seq: entry.seq,
         sidecarId,
         kind: "needs-attention",
         reason,

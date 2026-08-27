@@ -1064,6 +1064,7 @@ export type ResolveEventAttentionRequest = BaseRequest & {
   type: RequestType.ResolveEventAttention;
   space: DID;
   eventId: string;
+  seq: number;
   sidecarId: string;
   action: "retry" | "dismiss";
 };
@@ -2796,6 +2797,7 @@ export type PendingWritesNotification = {
 export type EventAttentionNotice = {
   space: DID;
   eventId: string;
+  seq: number;
   sidecarId: string;
   reason: string;
   attention: DeliveryAttention;

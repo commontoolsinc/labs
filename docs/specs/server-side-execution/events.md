@@ -488,23 +488,27 @@ loop's duty).
 - An unresolved attention entry cannot compact. The same terminal
   contribution adds a safe summary to the per-space unresolved
   attention index, keyed first by prototype-safe encodings of the stream
-  sidecar and then the event ID,
-  while the stream entry remains authoritative. Authored commits cannot
+  sidecar and then the immutable `(eventId, seq)` entry identity. Equal event
+  IDs below one stream's watermark, or on different streams, remain separate
+  notices and resolve independently, while the stream entry remains
+  authoritative. Authored commits cannot
   mutate this server-owned index. The
   client retires the speculative echo, emits the complete safe
   `needs-attention` outcome, and keeps a persistent Retry/Dismiss
   surface for the active space; navigation clears the prior space's cards and
-  stale refresh results cannot restore them. Retry is one authenticated
-  same-space CAS: resolve the
+  stale refresh results cannot restore them. The live notice, discovery result,
+  and resolution request carry the exact stamped sequence. Retry is one
+  authenticated same-space CAS: resolve the
   original, append exactly one fresh event with `retryOf`, and remove
-  the index item. The server copies the exact captured stream, payload,
+  the unresolved index item while recording the resolution in a durable
+  server-owned tombstone. The server copies the exact captured stream, payload,
   `rendererTrusted`, and `runtimeInjectedEventKeys`, and stamps the
   original acting user's current session; a different user or a
   sessionless caller cannot retry it. Dismiss resolves and removes the
   index item without appending. Concurrent or replayed resolution
-  requests return the recorded winner and append nothing else. The
-  original event ID never reopens; resolved entries may compact under
-  the ordinary watermark rule.
+  requests return the recorded winner and append nothing else, even after the
+  original entry compacts. The original event identity never reopens; resolved
+  entries may compact under the ordinary watermark rule.
 - Client offline at fire time (RULED 2026-08-02): events accumulate
   client-side as unacked authored commits and discharge on reconnect
   in fired order — PER STREAM: a stream's sidecar carries only that

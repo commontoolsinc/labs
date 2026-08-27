@@ -43,6 +43,7 @@ import * as Engine from "@commonfabric/memory/v2/engine";
 import {
   type DeliveryAttention,
   type DeliveryDeferral,
+  eventAttentionEntryKey,
   eventAttentionIndexKey,
   SERVER_EXECUTION_ATTENTION_DOC_ID,
   type StreamEventEntry,
@@ -3111,6 +3112,11 @@ export class SpaceServer implements TransactionSealDestination {
             this.#deliveryFailureBudgetMs(),
           );
           if (attention !== undefined) {
+            if (this.#drainInFlight.has(entry.eventId)) {
+              this.#options.stats.events.drainInFlightSkips += 1;
+              this.#loadParkDeferredInPass = true;
+              break;
+            }
             this.#loadParkDeferredInPass = true;
             this.#drainInFlight.set(entry.eventId, "marked");
             this.#sealEventConsequenceNotice(
@@ -3471,10 +3477,11 @@ export class SpaceServer implements TransactionSealDestination {
               path: [
                 "entries",
                 eventAttentionIndexKey(streamEntry.sidecarId),
-                eventAttentionIndexKey(entry.eventId),
+                eventAttentionEntryKey(entry.eventId, streamEntry.seq),
               ],
             }).withTx(tx).set({
               eventId: entry.eventId,
+              seq: streamEntry.seq,
               sidecarId: streamEntry.sidecarId,
               phase: outcome.attention.phase,
               failureClass: outcome.attention.failureClass,

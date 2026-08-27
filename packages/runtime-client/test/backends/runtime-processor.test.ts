@@ -19,6 +19,7 @@ import { Identity, realmValueFromKeyPair } from "@commonfabric/identity";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import {
   decodeMemoryBoundary,
+  eventAttentionEntryKey,
   eventAttentionIndexKey,
   SERVER_EXECUTION_ATTENTION_DOC_ID,
 } from "@commonfabric/memory/v2";
@@ -3442,6 +3443,7 @@ describe("runtime-processor", () => {
         kind: "needs-attention",
         space,
         eventId: "evt-complete",
+        seq: 40,
         sidecarId,
         reason: "complete",
         attention,
@@ -3451,6 +3453,7 @@ describe("runtime-processor", () => {
         type: NotificationType.EventNeedsAttention,
         space,
         eventId: "evt-complete",
+        seq: 40,
         sidecarId,
         reason: "complete",
         attention,
@@ -3500,16 +3503,18 @@ describe("runtime-processor", () => {
 
     it("lists only authoritative unresolved notices and dispatches resolution", async () => {
       const summaries = {
-        [eventAttentionIndexKey("evt-valid")]: {
+        [eventAttentionEntryKey("evt-valid", 41)]: {
           eventId: "evt-valid",
+          seq: 41,
           sidecarId,
           phase: attention.phase,
           failureClass: attention.failureClass,
           code: attention.code,
           firstFailureAt: attention.firstFailureAt,
         },
-        [eventAttentionIndexKey("evt-resolved")]: {
+        [eventAttentionEntryKey("evt-resolved", 42)]: {
           eventId: "evt-resolved",
+          seq: 42,
           sidecarId,
           phase: attention.phase,
           failureClass: attention.failureClass,
@@ -3534,12 +3539,14 @@ describe("runtime-processor", () => {
               value: {
                 entries: [{
                   eventId: "evt-valid",
+                  seq: 41,
                   status: "needs-attention",
                   reason: "safe reason",
                   attention,
                   firedAt: { user: cfcSigner.did() },
                 }, {
                   eventId: "evt-resolved",
+                  seq: 42,
                   status: "needs-attention",
                   attention,
                   resolution: { kind: "dismissed" },
@@ -3558,12 +3565,14 @@ describe("runtime-processor", () => {
             resolveEventAttention(
               requestSpace: unknown,
               eventId: unknown,
+              seq: unknown,
               requestSidecarId: unknown,
               action: unknown,
             ) {
               resolveCalls.push([
                 requestSpace,
                 eventId,
+                seq,
                 requestSidecarId,
                 action,
               ]);
@@ -3587,6 +3596,7 @@ describe("runtime-processor", () => {
         notices: [{
           space,
           eventId: "evt-valid",
+          seq: 41,
           sidecarId,
           reason: "safe reason",
           attention,
@@ -3597,6 +3607,7 @@ describe("runtime-processor", () => {
           type: RequestType.ResolveEventAttention,
           space,
           eventId: "evt-valid",
+          seq: 41,
           sidecarId,
           action: "dismiss",
         }),
@@ -3604,6 +3615,7 @@ describe("runtime-processor", () => {
       expect(resolveCalls).toEqual([[
         space,
         "evt-valid",
+        41,
         sidecarId,
         "dismiss",
       ]]);
@@ -3614,6 +3626,7 @@ describe("runtime-processor", () => {
       const sidecarError = new Error("sidecar failed");
       const summary = {
         eventId: "evt-failed",
+        seq: 43,
         sidecarId,
         phase: attention.phase,
         failureClass: attention.failureClass,
@@ -3643,7 +3656,8 @@ describe("runtime-processor", () => {
             value: {
               entries: {
                 [eventAttentionIndexKey(sidecarId)]: {
-                  [eventAttentionIndexKey(summary.eventId)]: summary,
+                  [eventAttentionEntryKey(summary.eventId, summary.seq)]:
+                    summary,
                 },
               },
             },
@@ -3660,6 +3674,7 @@ describe("runtime-processor", () => {
           type: RequestType.ResolveEventAttention,
           space,
           eventId: "evt-unsupported",
+          seq: 44,
           sidecarId,
           action: "retry",
         }),

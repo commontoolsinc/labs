@@ -392,7 +392,10 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   /** Retry or dismiss one notice under this runtime's authenticated session. */
   async resolveEventAttention(
-    notice: Pick<EventAttentionNotice, "space" | "eventId" | "sidecarId">,
+    notice: Pick<
+      EventAttentionNotice,
+      "space" | "eventId" | "seq" | "sidecarId"
+    >,
     action: "retry" | "dismiss",
   ): Promise<EventAttentionResolveResponse["resolution"]> {
     const response = await this.#conn.request<
@@ -401,6 +404,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       type: RequestType.ResolveEventAttention,
       space: notice.space,
       eventId: notice.eventId,
+      seq: notice.seq,
       sidecarId: notice.sidecarId,
       action,
     }) as EventAttentionResolveResponse;

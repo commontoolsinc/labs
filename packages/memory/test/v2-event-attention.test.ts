@@ -5,8 +5,10 @@ import { Server } from "../v2/server.ts";
 import { SessionRegistry } from "../v2/session-registry.ts";
 import {
   encodeMemoryBoundary,
+  eventAttentionEntryKey,
   eventAttentionIndexKey,
   type EventAttentionIndexValue,
+  type EventAttentionResolveRequest,
   getMemoryProtocolFlags,
   type HelloOkMessage,
   MEMORY_PROTOCOL,
@@ -48,9 +50,11 @@ describe("event attention resolution", () => {
   let sessions: InvalidatingSessionRegistry;
   const connections: Connection[] = [];
   let nextSeedLocalSeq = 100;
+  const seededAttentionSeqs = new Map<string, number>();
 
   beforeEach(() => {
     setServerExecutionConfig(true);
+    seededAttentionSeqs.clear();
     sessions = new InvalidatingSessionRegistry();
     server = new Server({
       store: new URL(`memory://event-attention-${crypto.randomUUID()}`),
@@ -104,7 +108,7 @@ describe("event attention resolution", () => {
     principal: string,
     eventId: string,
     stream: StreamLinkRef = STREAM,
-  ): Promise<void> => {
+  ): Promise<number> => {
     const engine = await server.engineForSpace(SPACE);
     const sidecarId = streamEntriesDocId(stream);
     Engine.applyCommit(engine, {
@@ -135,9 +139,8 @@ describe("event attention resolution", () => {
     });
     const value = Engine.read(engine, { id: sidecarId })!
       .value as StreamEventsDocValue;
-    const entry = value.entries!.find((candidate) =>
-      candidate.eventId === eventId
-    )!;
+    const entry = value.entries!.at(-1)!;
+    const seq = entry.seq!;
     const attention = {
       phase: "dispatch-load" as const,
       failureClass: "session-revoked" as const,
@@ -152,7 +155,7 @@ describe("event attention resolution", () => {
       id: SERVER_EXECUTION_ATTENTION_DOC_ID,
     })?.value as EventAttentionIndexValue | undefined;
     const sidecarKey = eventAttentionIndexKey(sidecarId);
-    const eventKey = eventAttentionIndexKey(eventId);
+    const entryKey = eventAttentionEntryKey(eventId, seq);
     Engine.applyCommit(engine, {
       space: SPACE,
       sessionId,
@@ -187,6 +190,11 @@ describe("event attention resolution", () => {
               path: `/value/entries/${value.entries!.indexOf(entry)}/attention`,
               value: attention,
             },
+            {
+              op: "add",
+              path: "/value/eventWatermark",
+              value: seq,
+            },
           ],
         }, {
           op: "set",
@@ -197,8 +205,9 @@ describe("event attention resolution", () => {
                 ...(currentIndex?.entries ?? {}),
                 [sidecarKey]: {
                   ...(currentIndex?.entries?.[sidecarKey] ?? {}),
-                  [eventKey]: {
+                  [entryKey]: {
                     eventId,
+                    seq,
                     sidecarId,
                     phase: attention.phase,
                     failureClass: attention.failureClass,
@@ -212,13 +221,56 @@ describe("event attention resolution", () => {
         }],
       },
     });
+    seededAttentionSeqs.set(JSON.stringify([sidecarId, eventId]), seq);
+    return seq;
+  };
+
+  const resolveAttention = (
+    request: Omit<EventAttentionResolveRequest, "seq"> & { seq?: number },
+  ) => {
+    const seq = request.seq ?? seededAttentionSeqs.get(
+      JSON.stringify([request.sidecarId, request.eventId]),
+    );
+    if (seq === undefined) throw new Error("missing seeded attention seq");
+    return server.resolveEventAttention({ ...request, seq });
+  };
+
+  const compactAttentionEntry = async (
+    principal: string,
+    eventId: string,
+    seq: number,
+    sidecarId = SIDECAR,
+  ): Promise<void> => {
+    const engine = await server.engineForSpace(SPACE);
+    const current = Engine.read(engine, { id: sidecarId })!
+      .value as StreamEventsDocValue;
+    const entryIndex =
+      current.entries?.findIndex((entry) =>
+        entry.eventId === eventId && entry.seq === seq
+      ) ?? -1;
+    if (entryIndex < 0) throw new Error("missing compacted attention entry");
+    Engine.applyCommit(engine, {
+      space: SPACE,
+      sessionId: "server-test-compactor",
+      principal,
+      commitClass: "system",
+      commit: {
+        localSeq: nextSeedLocalSeq++,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: sidecarId,
+          patches: [{ op: "remove", path: `/value/entries/${entryIndex}` }],
+        }],
+      },
+    });
   };
 
   it("Retry atomically resolves the original and appends one exact-provenance successor", async () => {
     const sessionId = await openSession(ALICE);
     await seedAttention(sessionId, ALICE, "evt-original");
 
-    const first = await server.resolveEventAttention({
+    const first = await resolveAttention({
       type: "event.attention.resolve",
       requestId: "retry-1",
       space: SPACE,
@@ -249,11 +301,17 @@ describe("event attention resolution", () => {
     expect(retry.retryOf).toBe(original.eventId);
     expect(retry.firedAt).toEqual({ user: ALICE, session: sessionId });
     expect(retry.seq).toBeGreaterThan(original.seq!);
+    const indexAfterRetry = Engine.read(engine, {
+      id: SERVER_EXECUTION_ATTENTION_DOC_ID,
+    })?.value as EventAttentionIndexValue;
+    expect(indexAfterRetry.entries).toEqual({});
     expect(
-      Engine.read(engine, { id: SERVER_EXECUTION_ATTENTION_DOC_ID })?.value,
-    ).toEqual({ entries: {} });
+      indexAfterRetry.resolutions?.[eventAttentionIndexKey(SIDECAR)]?.[
+        eventAttentionEntryKey(original.eventId, original.seq!)
+      ]?.resolution,
+    ).toEqual(original.resolution);
 
-    const replay = await server.resolveEventAttention({
+    const replay = await resolveAttention({
       type: "event.attention.resolve",
       requestId: "retry-lost-response",
       space: SPACE,
@@ -268,8 +326,25 @@ describe("event attention resolution", () => {
         .entries,
     ).toHaveLength(2);
 
+    await compactAttentionEntry(ALICE, original.eventId, original.seq!);
+    const replayAfterCompaction = await resolveAttention({
+      type: "event.attention.resolve",
+      requestId: "retry-after-compaction",
+      space: SPACE,
+      sessionId,
+      eventId: original.eventId,
+      seq: original.seq,
+      sidecarId: SIDECAR,
+      action: "dismiss",
+    });
+    expect(replayAfterCompaction.ok!.resolution).toEqual(first.ok!.resolution);
+    expect(
+      (Engine.read(engine, { id: SIDECAR })!.value as StreamEventsDocValue)
+        .entries,
+    ).toHaveLength(1);
+
     const bobSession = await openSession(BOB);
-    const crossUserReplay = await server.resolveEventAttention({
+    const crossUserReplay = await resolveAttention({
       type: "event.attention.resolve",
       requestId: "retry-cross-user-replay",
       space: SPACE,
@@ -283,8 +358,8 @@ describe("event attention resolution", () => {
 
   it("Dismiss records resolution without an append", async () => {
     const sessionId = await openSession(ALICE);
-    await seedAttention(sessionId, ALICE, "evt-dismiss");
-    const response = await server.resolveEventAttention({
+    const seq = await seedAttention(sessionId, ALICE, "evt-dismiss");
+    const response = await resolveAttention({
       type: "event.attention.resolve",
       requestId: "dismiss",
       space: SPACE,
@@ -299,6 +374,23 @@ describe("event attention resolution", () => {
       .value as StreamEventsDocValue).entries!;
     expect(entries).toHaveLength(1);
     expect(entries[0].resolution).toEqual({ kind: "dismissed" });
+
+    await compactAttentionEntry(ALICE, "evt-dismiss", seq);
+    const replay = await resolveAttention({
+      type: "event.attention.resolve",
+      requestId: "dismiss-after-compaction",
+      space: SPACE,
+      sessionId,
+      eventId: "evt-dismiss",
+      seq,
+      sidecarId: SIDECAR,
+      action: "retry",
+    });
+    expect(replay.ok!.resolution).toEqual({ kind: "dismissed" });
+    expect(
+      (Engine.read(engine, { id: SIDECAR })!.value as StreamEventsDocValue)
+        .entries,
+    ).toEqual([]);
   });
 
   it("routes attention resolution through the session protocol", async () => {
@@ -324,7 +416,11 @@ describe("event attention resolution", () => {
     }));
     const opened = messages.shift() as ResponseMessage<{ sessionId: string }>;
     const sessionId = opened.ok!.sessionId;
-    await seedAttention(sessionId, ALICE, "evt-protocol-dismiss");
+    const seq = await seedAttention(
+      sessionId,
+      ALICE,
+      "evt-protocol-dismiss",
+    );
 
     await connection.receive(encodeMemoryBoundary({
       type: "event.attention.resolve",
@@ -332,6 +428,7 @@ describe("event attention resolution", () => {
       space: SPACE,
       sessionId,
       eventId: "evt-protocol-dismiss",
+      seq,
       sidecarId: SIDECAR,
       action: "dismiss",
     }));
@@ -348,6 +445,7 @@ describe("event attention resolution", () => {
       space: SPACE,
       sessionId,
       eventId: "evt-protocol-dismiss",
+      seq,
       sidecarId: SIDECAR,
       action: "dismiss",
     }));
@@ -367,11 +465,11 @@ describe("event attention resolution", () => {
       action: "retry" as const,
     };
     const [retryA, retryB] = await Promise.all([
-      server.resolveEventAttention({
+      resolveAttention({
         ...retryRequest,
         requestId: "retry-race-a",
       }),
-      server.resolveEventAttention({
+      resolveAttention({
         ...retryRequest,
         requestId: "retry-race-b",
       }),
@@ -395,12 +493,12 @@ describe("event attention resolution", () => {
       sidecarId: SIDECAR,
     };
     const [retry, dismiss] = await Promise.all([
-      server.resolveEventAttention({
+      resolveAttention({
         ...request,
         requestId: "race-retry",
         action: "retry",
       }),
-      server.resolveEventAttention({
+      resolveAttention({
         ...request,
         requestId: "race-dismiss",
         action: "dismiss",
@@ -422,36 +520,44 @@ describe("event attention resolution", () => {
     expect(retryEntries.length).toBe(
       original.resolution?.kind === "retried" ? 1 : 0,
     );
-    expect(
-      Engine.read(engine, { id: SERVER_EXECUTION_ATTENTION_DOC_ID })?.value,
-    ).toEqual({ entries: {} });
+    const indexAfterRace = Engine.read(engine, {
+      id: SERVER_EXECUTION_ATTENTION_DOC_ID,
+    })?.value as EventAttentionIndexValue;
+    expect(indexAfterRace.entries).toEqual({});
   });
 
   it("keeps equal event IDs from different streams independently resolvable", async () => {
     const sessionId = await openSession(ALICE);
-    await seedAttention(sessionId, ALICE, "evt-shared");
-    await seedAttention(sessionId, ALICE, "evt-shared", SECOND_STREAM);
+    const firstSeq = await seedAttention(sessionId, ALICE, "evt-shared");
+    const secondSeq = await seedAttention(
+      sessionId,
+      ALICE,
+      "evt-shared",
+      SECOND_STREAM,
+    );
 
     const engine = await server.engineForSpace(SPACE);
     const before = Engine.read(engine, {
       id: SERVER_EXECUTION_ATTENTION_DOC_ID,
     })?.value as EventAttentionIndexValue;
-    const sharedEventKey = eventAttentionIndexKey("evt-shared");
+    const firstEntryKey = eventAttentionEntryKey("evt-shared", firstSeq);
+    const secondEntryKey = eventAttentionEntryKey("evt-shared", secondSeq);
     expect(
-      before.entries?.[eventAttentionIndexKey(SIDECAR)]?.[sharedEventKey]
+      before.entries?.[eventAttentionIndexKey(SIDECAR)]?.[firstEntryKey]
         ?.sidecarId,
     ).toBe(SIDECAR);
     expect(
-      before.entries?.[eventAttentionIndexKey(SECOND_SIDECAR)]?.[sharedEventKey]
+      before.entries?.[eventAttentionIndexKey(SECOND_SIDECAR)]?.[secondEntryKey]
         ?.sidecarId,
     ).toBe(SECOND_SIDECAR);
 
-    const first = await server.resolveEventAttention({
+    const first = await resolveAttention({
       type: "event.attention.resolve",
       requestId: "same-id-first",
       space: SPACE,
       sessionId,
       eventId: "evt-shared",
+      seq: firstSeq,
       sidecarId: SIDECAR,
       action: "dismiss",
     });
@@ -464,36 +570,84 @@ describe("event attention resolution", () => {
     ).toBeUndefined();
     expect(
       afterFirst.entries?.[eventAttentionIndexKey(SECOND_SIDECAR)]?.[
-        sharedEventKey
+        secondEntryKey
       ]?.sidecarId,
     ).toBe(SECOND_SIDECAR);
 
-    const second = await server.resolveEventAttention({
+    const second = await resolveAttention({
       type: "event.attention.resolve",
       requestId: "same-id-second",
       space: SPACE,
       sessionId,
       eventId: "evt-shared",
+      seq: secondSeq,
       sidecarId: SECOND_SIDECAR,
       action: "dismiss",
     });
     expect(second.error).toBeUndefined();
+    const indexAfterBoth = Engine.read(engine, {
+      id: SERVER_EXECUTION_ATTENTION_DOC_ID,
+    })?.value as EventAttentionIndexValue;
+    expect(indexAfterBoth.entries).toEqual({});
+  });
+
+  it("keeps repeated event IDs in one stream independently resolvable by seq", async () => {
+    const sessionId = await openSession(ALICE);
+    const firstSeq = await seedAttention(sessionId, ALICE, "evt-repeated");
+    const secondSeq = await seedAttention(sessionId, ALICE, "evt-repeated");
+    expect(secondSeq).toBeGreaterThan(firstSeq);
+
+    const first = await resolveAttention({
+      type: "event.attention.resolve",
+      requestId: "repeated-first",
+      space: SPACE,
+      sessionId,
+      eventId: "evt-repeated",
+      seq: firstSeq,
+      sidecarId: SIDECAR,
+      action: "dismiss",
+    });
+    expect(first.error).toBeUndefined();
+
+    const engine = await server.engineForSpace(SPACE);
+    const afterFirst = Engine.read(engine, {
+      id: SERVER_EXECUTION_ATTENTION_DOC_ID,
+    })?.value as EventAttentionIndexValue;
+    const sidecarEntries = afterFirst.entries?.[
+      eventAttentionIndexKey(SIDECAR)
+    ];
     expect(
-      Engine.read(engine, { id: SERVER_EXECUTION_ATTENTION_DOC_ID })?.value,
-    ).toEqual({ entries: {} });
+      sidecarEntries?.[eventAttentionEntryKey("evt-repeated", firstSeq)],
+    ).toBeUndefined();
+    expect(
+      sidecarEntries?.[eventAttentionEntryKey("evt-repeated", secondSeq)]?.seq,
+    ).toBe(secondSeq);
+
+    const second = await resolveAttention({
+      type: "event.attention.resolve",
+      requestId: "repeated-second",
+      space: SPACE,
+      sessionId,
+      eventId: "evt-repeated",
+      seq: secondSeq,
+      sidecarId: SIDECAR,
+      action: "dismiss",
+    });
+    expect(second.error).toBeUndefined();
   });
 
   it("removes one event summary without hiding another event in its stream", async () => {
     const sessionId = await openSession(ALICE);
-    await seedAttention(sessionId, ALICE, "evt-first");
-    await seedAttention(sessionId, ALICE, "evt-second");
+    const firstSeq = await seedAttention(sessionId, ALICE, "evt-first");
+    const secondSeq = await seedAttention(sessionId, ALICE, "evt-second");
 
-    const first = await server.resolveEventAttention({
+    const first = await resolveAttention({
       type: "event.attention.resolve",
       requestId: "same-stream-first",
       space: SPACE,
       sessionId,
       eventId: "evt-first",
+      seq: firstSeq,
       sidecarId: SIDECAR,
       action: "dismiss",
     });
@@ -503,17 +657,22 @@ describe("event attention resolution", () => {
       id: SERVER_EXECUTION_ATTENTION_DOC_ID,
     })?.value as EventAttentionIndexValue;
     const summaries = afterFirst.entries?.[eventAttentionIndexKey(SIDECAR)];
-    expect(summaries?.[eventAttentionIndexKey("evt-first")]).toBeUndefined();
-    expect(summaries?.[eventAttentionIndexKey("evt-second")]?.eventId).toBe(
+    expect(
+      summaries?.[eventAttentionEntryKey("evt-first", firstSeq)],
+    ).toBeUndefined();
+    expect(
+      summaries?.[eventAttentionEntryKey("evt-second", secondSeq)]?.eventId,
+    ).toBe(
       "evt-second",
     );
 
-    const second = await server.resolveEventAttention({
+    const second = await resolveAttention({
       type: "event.attention.resolve",
       requestId: "same-stream-second",
       space: SPACE,
       sessionId,
       eventId: "evt-second",
+      seq: secondSeq,
       sidecarId: SIDECAR,
       action: "dismiss",
     });
@@ -524,7 +683,7 @@ describe("event attention resolution", () => {
     const sessionId = await openSession(ALICE);
     await seedAttention(sessionId, ALICE, "__proto__");
 
-    const response = await server.resolveEventAttention({
+    const response = await resolveAttention({
       type: "event.attention.resolve",
       requestId: "prototype-key",
       space: SPACE,
@@ -536,9 +695,10 @@ describe("event attention resolution", () => {
 
     expect(response.error).toBeUndefined();
     const engine = await server.engineForSpace(SPACE);
-    expect(
-      Engine.read(engine, { id: SERVER_EXECUTION_ATTENTION_DOC_ID })?.value,
-    ).toEqual({ entries: {} });
+    const indexAfterPrototype = Engine.read(engine, {
+      id: SERVER_EXECUTION_ATTENTION_DOC_ID,
+    })?.value as EventAttentionIndexValue;
+    expect(indexAfterPrototype.entries).toEqual({});
   });
 
   it("resolution is restricted to the original acting user and a live session", async () => {
@@ -546,7 +706,7 @@ describe("event attention resolution", () => {
     const bobSession = await openSession(BOB);
     await seedAttention(aliceSession, ALICE, "evt-owned");
 
-    const crossUser = await server.resolveEventAttention({
+    const crossUser = await resolveAttention({
       type: "event.attention.resolve",
       requestId: "cross-user",
       space: SPACE,
@@ -574,7 +734,7 @@ describe("event attention resolution", () => {
       },
     });
     server.options.acl = { mode: "enforce" };
-    const aclDenied = await server.resolveEventAttention({
+    const aclDenied = await resolveAttention({
       type: "event.attention.resolve",
       requestId: "acl-denied",
       space: SPACE,
@@ -588,7 +748,7 @@ describe("event attention resolution", () => {
       permanentEvidence: true,
     });
 
-    const sessionless = await server.resolveEventAttention({
+    const sessionless = await resolveAttention({
       type: "event.attention.resolve",
       requestId: "sessionless",
       space: SPACE,
@@ -609,7 +769,7 @@ describe("event attention resolution", () => {
     await seedAttention(sessionId, ALICE, "evt-replaced-session");
     sessions.invalidateAfterNextGet = true;
 
-    const response = await server.resolveEventAttention({
+    const response = await resolveAttention({
       type: "event.attention.resolve",
       requestId: "replaced-session",
       space: SPACE,
@@ -625,12 +785,13 @@ describe("event attention resolution", () => {
 
   it("returns protocol errors for missing authoritative and discovery state", async () => {
     const sessionId = await openSession(ALICE);
-    const missingCover = await server.resolveEventAttention({
+    const missingCover = await resolveAttention({
       type: "event.attention.resolve",
       requestId: "missing-cover",
       space: SPACE,
       sessionId,
       eventId: "evt-missing",
+      seq: 1,
       sidecarId: SIDECAR,
       action: "dismiss",
     });
@@ -656,7 +817,7 @@ describe("event attention resolution", () => {
         }],
       },
     });
-    const missingIndex = await server.resolveEventAttention({
+    const missingIndex = await resolveAttention({
       type: "event.attention.resolve",
       requestId: "missing-index",
       space: SPACE,

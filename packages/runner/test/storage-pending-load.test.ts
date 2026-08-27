@@ -30,6 +30,7 @@ describe("storage pending-load generations", () => {
         storage,
         space,
         "of:event",
+        1,
         "of:sidecar",
         "retry",
       ),

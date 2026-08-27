@@ -102,6 +102,7 @@ describe("connection", () => {
       type: NotificationType.EventNeedsAttention,
       space: "did:key:z6Mk-connection-attention",
       eventId: "evt-attention",
+      seq: 17,
       sidecarId: "of:stream-events:connection-attention",
       reason: "delivery needs attention",
       attention: {

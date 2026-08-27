@@ -1105,6 +1105,7 @@ export class StorageManager implements IStorageManager {
   async resolveEventAttention(
     space: MemorySpace,
     eventId: string,
+    seq: number,
     sidecarId: string,
     action: "retry" | "dismiss",
   ): Promise<EventAttentionResolveResult> {
@@ -1112,7 +1113,7 @@ export class StorageManager implements IStorageManager {
     if (replica.resolveEventAttention === undefined) {
       throw new Error("storage replica does not support event attention");
     }
-    return await replica.resolveEventAttention(eventId, sidecarId, action);
+    return await replica.resolveEventAttention(eventId, seq, sidecarId, action);
   }
 
   /** IStorageManager (server-execution v2 Phase 4): first-open observer
@@ -3523,11 +3524,12 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
 
   async resolveEventAttention(
     eventId: string,
+    seq: number,
     sidecarId: string,
     action: "retry" | "dismiss",
   ): Promise<EventAttentionResolveResult> {
     const { session } = await this.activeSessionHandle();
-    return await session.resolveEventAttention(eventId, sidecarId, action);
+    return await session.resolveEventAttention(eventId, seq, sidecarId, action);
   }
 
   /** Pending (undischarged) event intents — the offline queue's live

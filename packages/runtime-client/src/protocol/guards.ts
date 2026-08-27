@@ -270,6 +270,7 @@ export function isEventNeedsAttentionNotification(
     value.type === NotificationType.EventNeedsAttention &&
     typeof value.space === "string" &&
     typeof value.eventId === "string" &&
+    typeof value.seq === "number" &&
     typeof value.sidecarId === "string" &&
     typeof value.reason === "string" &&
     isObjectNotArray(value.attention)

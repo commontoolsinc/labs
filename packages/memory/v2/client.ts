@@ -777,6 +777,7 @@ export class SpaceSession {
 
   async resolveEventAttention(
     eventId: string,
+    seq: number,
     sidecarId: string,
     action: "retry" | "dismiss",
   ): Promise<EventAttentionResolveResult> {
@@ -787,6 +788,7 @@ export class SpaceSession {
       space: this.space,
       sessionId: this.#sessionId,
       eventId,
+      seq,
       sidecarId,
       action,
     });

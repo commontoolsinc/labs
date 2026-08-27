@@ -401,6 +401,7 @@ describe("RuntimeClient", () => {
     const notice = {
       space: "did:key:z6Mk-runtime-client-attention" as never,
       eventId: "evt-original",
+      seq: 42,
       sidecarId: "of:stream-events:attention",
       reason: "This event could not be delivered.",
       attention: {
@@ -444,6 +445,7 @@ describe("RuntimeClient", () => {
         type: RequestType.ResolveEventAttention,
         space: notice.space,
         eventId: notice.eventId,
+        seq: notice.seq,
         sidecarId: notice.sidecarId,
         action: "retry",
       }]);

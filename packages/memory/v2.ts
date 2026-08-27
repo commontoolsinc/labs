@@ -334,8 +334,16 @@ export function eventAttentionIndexKey(value: string): string {
   return JSON.stringify(value);
 }
 
+/** Encode one immutable stream-entry identity for the attention index. Event
+ * ids may be admitted again below the stream watermark, so the engine-stamped
+ * sequence is the part that distinguishes two entries in the same stream. */
+export function eventAttentionEntryKey(eventId: string, seq: number): string {
+  return JSON.stringify([eventId, seq]);
+}
+
 export type UnresolvedEventAttention = {
   eventId: string;
+  seq: number;
   sidecarId: string;
   phase: DeliveryFailurePhase;
   failureClass: DeliveryFailureClass;
@@ -343,8 +351,20 @@ export type UnresolvedEventAttention = {
   firstFailureAt: number;
 };
 
+/** Durable idempotency record for a resolved attention entry. It survives
+ * ordinary stream compaction so a caller replaying after a lost response gets
+ * the recorded Retry/Dismiss winner instead of creating a second outcome. */
+export type ResolvedEventAttention = {
+  eventId: string;
+  seq: number;
+  sidecarId: string;
+  principal: string;
+  resolution: EventAttentionResolution;
+};
+
 export type EventAttentionIndexValue = {
   entries?: Record<string, Record<string, UnresolvedEventAttention>>;
+  resolutions?: Record<string, Record<string, ResolvedEventAttention>>;
 };
 
 // ---------------------------------------------------------------------------
@@ -1553,6 +1573,7 @@ export type EventAttentionResolveRequest = {
   space: string;
   sessionId: SessionId;
   eventId: string;
+  seq: number;
   sidecarId: string;
   action: "retry" | "dismiss";
 };

@@ -1,7 +1,7 @@
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
 
-import type { FabricPlainObject } from "@commonfabric/api";
+import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { metrics, SpanStatusCode, trace } from "@opentelemetry/api";
@@ -31,6 +31,7 @@ import {
   type EntityIdLookupResult,
   type EntitySnapshot,
   EventAppendDuplicateError,
+  eventAttentionEntryKey,
   eventAttentionIndexKey,
   type EventAttentionIndexValue,
   type EventAttentionResolveRequest,
@@ -3005,6 +3006,32 @@ export class Server {
             deny,
           );
         }
+        const indexDocument = Engine.read(engine, {
+          id: SERVER_EXECUTION_ATTENTION_DOC_ID as never,
+        });
+        const indexValue = indexDocument?.value as
+          | EventAttentionIndexValue
+          | undefined;
+        const sidecarKey = eventAttentionIndexKey(message.sidecarId);
+        const entryKey = eventAttentionEntryKey(message.eventId, message.seq);
+        const indexEntries = indexValue?.entries;
+        const sidecarSummaries = indexEntries !== undefined &&
+            Object.hasOwn(indexEntries, sidecarKey)
+          ? indexEntries[sidecarKey]
+          : undefined;
+        const summary = sidecarSummaries !== undefined &&
+            Object.hasOwn(sidecarSummaries, entryKey)
+          ? sidecarSummaries[entryKey]
+          : undefined;
+        const resolutionSidecars = indexValue?.resolutions;
+        const sidecarResolutions = resolutionSidecars !== undefined &&
+            Object.hasOwn(resolutionSidecars, sidecarKey)
+          ? resolutionSidecars[sidecarKey]
+          : undefined;
+        const recorded = sidecarResolutions !== undefined &&
+            Object.hasOwn(sidecarResolutions, entryKey)
+          ? sidecarResolutions[entryKey]
+          : undefined;
         const sidecarDocument = Engine.read(engine, {
           id: message.sidecarId as never,
         });
@@ -3012,24 +3039,44 @@ export class Server {
           | StreamEventsDocValue
           | undefined;
         const entryIndex = sidecarValue?.entries?.findIndex((entry) =>
-          entry?.eventId === message.eventId
+          entry?.eventId === message.eventId && entry.seq === message.seq
         ) ?? -1;
         const original = entryIndex < 0
           ? undefined
           : sidecarValue!.entries![entryIndex];
+        const principal = session.principal;
+        if (original === undefined && recorded !== undefined) {
+          if (principal === undefined || recorded.principal !== principal) {
+            return respondTypedError<EventAttentionResolveResult>(
+              message.requestId,
+              toError(
+                "AuthorizationError",
+                "Only the original acting user may resolve this event",
+              ),
+            );
+          }
+          return {
+            type: "response",
+            requestId: message.requestId,
+            ok: {
+              serverSeq: Engine.serverSeq(engine),
+              resolution: recorded.resolution,
+            },
+          };
+        }
         if (
           original?.status !== "needs-attention" ||
           original.attention === undefined ||
           original.consequenced !== true
         ) {
           throw new Engine.ProtocolError(
-            `event ${message.eventId} has no authoritative attention cover`,
+            `event ${message.eventId} at seq ${message.seq} has no ` +
+              "authoritative attention cover",
           );
         }
         if (
-          original.firedAt?.user === undefined ||
-          session.principal === undefined ||
-          original.firedAt.user !== session.principal
+          original.firedAt?.user === undefined || principal === undefined ||
+          original.firedAt.user !== principal
         ) {
           return respondTypedError<EventAttentionResolveResult>(
             message.requestId,
@@ -3049,28 +3096,13 @@ export class Server {
             },
           };
         }
-        const indexDocument = Engine.read(engine, {
-          id: SERVER_EXECUTION_ATTENTION_DOC_ID as never,
-        });
-        const indexValue = indexDocument?.value as
-          | EventAttentionIndexValue
-          | undefined;
-        const sidecarKey = eventAttentionIndexKey(message.sidecarId);
-        const eventKey = eventAttentionIndexKey(message.eventId);
-        const indexEntries = indexValue?.entries;
-        const sidecarSummaries = indexEntries !== undefined &&
-            Object.hasOwn(indexEntries, sidecarKey)
-          ? indexEntries[sidecarKey]
-          : undefined;
-        const summary = sidecarSummaries !== undefined &&
-            Object.hasOwn(sidecarSummaries, eventKey)
-          ? sidecarSummaries[eventKey]
-          : undefined;
         if (
-          summary === undefined || summary.sidecarId !== message.sidecarId
+          summary === undefined || summary.sidecarId !== message.sidecarId ||
+          summary.eventId !== message.eventId || summary.seq !== message.seq
         ) {
           throw new Engine.ProtocolError(
-            `event ${message.eventId} has no unresolved attention notice`,
+            `event ${message.eventId} at seq ${message.seq} has no ` +
+              "unresolved attention notice",
           );
         }
         const retryEventId = message.action === "retry"
@@ -3100,7 +3132,7 @@ export class Server {
                 ? {}
                 : { payload: original.payload }),
               firedAt: {
-                user: session.principal,
+                user: principal,
                 session: message.sessionId,
               },
               ...(original.rendererTrusted === true
@@ -3113,6 +3145,45 @@ export class Server {
             }],
           });
         }
+        const recordedResolution = {
+          eventId: message.eventId,
+          seq: message.seq,
+          sidecarId: message.sidecarId,
+          principal,
+          resolution,
+        };
+        const indexPatches: Array<
+          | { op: "remove"; path: string }
+          | { op: "add"; path: string; value: FabricValue }
+        > = [{
+          op: "remove",
+          path: Object.keys(sidecarSummaries ?? {}).length === 1
+            ? `/value/entries/${escapePointer(sidecarKey)}`
+            : `/value/entries/${escapePointer(sidecarKey)}/${
+              escapePointer(entryKey)
+            }`,
+        }];
+        if (resolutionSidecars === undefined) {
+          indexPatches.push({
+            op: "add",
+            path: "/value/resolutions",
+            value: { [sidecarKey]: { [entryKey]: recordedResolution } },
+          });
+        } else if (sidecarResolutions === undefined) {
+          indexPatches.push({
+            op: "add",
+            path: `/value/resolutions/${escapePointer(sidecarKey)}`,
+            value: { [entryKey]: recordedResolution },
+          });
+        } else {
+          indexPatches.push({
+            op: "add",
+            path: `/value/resolutions/${escapePointer(sidecarKey)}/${
+              escapePointer(entryKey)
+            }`,
+            value: recordedResolution,
+          });
+        }
         const commit = Engine.applyCommit(engine, {
           // Server-owned transaction identity: the requesting user's session
           // has its own localSeq namespace, so borrowing it here would collide
@@ -3120,11 +3191,11 @@ export class Server {
           // records the requesting current session in `firedAt`.
           sessionId: this.#directSessionId,
           space: message.space,
-          principal: session.principal,
+          principal,
           commitClass: "system",
           ...(retryEventId === undefined ? {} : {
             systemEventActor: {
-              principal: session.principal,
+              principal,
               sessionId: message.sessionId,
             },
           }),
@@ -3143,14 +3214,7 @@ export class Server {
             }, {
               op: "patch",
               id: SERVER_EXECUTION_ATTENTION_DOC_ID as never,
-              patches: [{
-                op: "remove",
-                path: Object.keys(sidecarSummaries ?? {}).length === 1
-                  ? `/value/entries/${escapePointer(sidecarKey)}`
-                  : `/value/entries/${escapePointer(sidecarKey)}/${
-                    escapePointer(eventKey)
-                  }`,
-              }],
+              patches: indexPatches,
             }],
             ...(retryEventId === undefined ? {} : {
               eventAppends: [{
@@ -6516,6 +6580,8 @@ export const parseClientMessage = (
     typeof parsed.space === "string" &&
     typeof parsed.sessionId === "string" &&
     typeof parsed.eventId === "string" && parsed.eventId.length > 0 &&
+    typeof parsed.seq === "number" && Number.isSafeInteger(parsed.seq) &&
+    parsed.seq >= 0 &&
     typeof parsed.sidecarId === "string" && parsed.sidecarId.length > 0 &&
     (parsed.action === "retry" || parsed.action === "dismiss")
   ) {
@@ -6525,6 +6591,7 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       eventId: parsed.eventId,
+      seq: parsed.seq,
       sidecarId: parsed.sidecarId,
       action: parsed.action,
     };
