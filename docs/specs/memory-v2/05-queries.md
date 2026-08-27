@@ -386,8 +386,12 @@ an `asCell` crossing, schema-less query-result reads, and raw reads that
 resolve links on the way — marks its transaction cfc-relevant when the
 crossed link's stored schema carries `ifc` (`schemaHasIfc`). The seam loads
 the schema's external `cid:` closure first, so a cold declaration is
-resolvable at the check, and a document the space does not hold yet leaves a
-tracked read whose arrival re-runs the reader. Write-path resolutions leave
+resolvable at the check. The schema-document registry is realm-global and
+content-addressed — a hash registered from any space serves every space's
+check without a read, which is sound because equal hashes name equal bytes.
+Only a document the registry does not hold is read in the referrer space:
+that read is tracked, and when the document is also locally absent the
+delivery channel is asked for it, so its arrival re-runs the reader. Write-path resolutions leave
 relevance to the write-policy gate, and enforcement reads stored cfc
 metadata and label views rather than combined schemas.
 

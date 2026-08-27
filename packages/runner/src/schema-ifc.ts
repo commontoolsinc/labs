@@ -216,11 +216,14 @@ export function ensureExternalSchemaClosure(
  * link's `ifc`, so the marking lives at the crossing rather than on the
  * combination's output. The schema's external closure is loaded first
  * (`ensureExternalSchemaClosure`), so a cold `cid:`-backed declaration is
- * resolvable when the predicate walks it — and a document the space does
- * not hold yet leaves behind the tracked read whose arrival re-triggers
- * the reader, which marks on that pass (the predicate's resolution-miss
- * guard keeps the cold verdict uncached). The predicate is memoized;
- * unlabeled links (the common case) cost one cached lookup.
+ * resolvable when the predicate walks it. The registry is realm-global: a
+ * hash registered from any space short-circuits the read, soundly, since
+ * equal hashes name equal bytes. A document the registry lacks is read in
+ * the referrer space — tracked, and requested through the caller's
+ * delivery channel when locally absent — so its arrival re-triggers the
+ * reader, which marks on that pass (the predicate's resolution-miss guard
+ * keeps the cold verdict uncached). The predicate is memoized; unlabeled
+ * links (the common case) cost one cached lookup.
  */
 export function markIfcBearingLinkCrossing(
   tx: IExtendedStorageTransaction,

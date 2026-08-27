@@ -77,10 +77,13 @@ this category default off unless their section says otherwise.
 
 The mapping from environment variable to flag is defined once, canonically, as
 `EXPERIMENTAL_ENV_VARS` in
-[`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts),
-and read by `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and
-the background piece service all go through that one mapping, so their wirings
-cannot drift; the shell reads the same variables from its build-time defines.
+[`packages/runner/src/experimental-posture.ts`](../../packages/runner/src/experimental-posture.ts)
+(re-exported by `runtime-presets.ts`), and read by
+`experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and the
+background piece service all go through that one mapping, so their wirings
+cannot drift; the shell reads the same variables from its build-time defines
+through the same canonical parser, then adopts the deployment's published
+posture at boot with the defines as its explicit overrides.
 `EXPERIMENTAL_ENV_VARS` itself is the authority on which flags are
 env-reachable — a flag that deliberately is not, `commitPreconditions` today,
 is mapped to `null` there, which records the decision rather than leaving an
@@ -1302,7 +1305,8 @@ All first-party processes build their `RuntimeOptions` through a construction
 preset in
 [`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts),
 and the environment-backed flags reach the runtime through the one canonical
-mapping, `experimentalOptionsFromEnv`, in that same file. That mapping accepts
+mapping, `experimentalOptionsFromEnv`, in
+[`packages/runner/src/experimental-posture.ts`](../../packages/runner/src/experimental-posture.ts). That mapping accepts
 exactly `"true"` and `"false"`: an unset variable stays `undefined`, which the
 runtime reads as "use the built-in default", and any other value is ignored with
 a warning. (The distinction between unset and an explicit `false` matters,
@@ -1315,7 +1319,7 @@ Server Process (Deno)
   |
   +-- ENV: EXPERIMENTAL_* = "true" | "false"
   |
-  +-- runner/runtime-presets.ts  --> experimentalOptionsFromEnv(Deno.env.get)
+  +-- runner/experimental-posture.ts --> experimentalOptionsFromEnv(Deno.env.get)
   +-- toolshed/runtime-options.ts --> runtimePresets.productionServer({ experimental, ... })
   +-- toolshed/index.ts           --> new Runtime(toolshedRuntimeOptions(...))
 ```
@@ -1333,9 +1337,10 @@ LOCAL modes (`cf test`, `cf dev`) run against emulated storage, have no
 deployment to ask, and do read the environment alone, through this same
 mapping.
 
-### Browser-side (build-time injection)
+### Browser-side (build-time defines, boot-time adoption)
 
-Browser-side flags are injected at build time and carried to the web worker that
+Browser-side defines are injected at build time; at boot the shell adopts the
+deployment's published posture and carries the result to the web worker that
 hosts the runtime.
 
 ```
@@ -1343,11 +1348,14 @@ Build Time (shell)
   |
   +-- ENV: EXPERIMENTAL_* = <value>
   +-- felt.config.ts   --> esbuild define: $EXPERIMENTAL_*
-  +-- src/lib/env.ts   --> EXPERIMENTAL.<flag> = <value>
+  +-- src/lib/env.ts   --> EXPERIMENTAL_DEFINES (raw) + EXPERIMENTAL (parsed
+  |                        fallbacks, canonical parser)
   |
 Browser (main thread)
-  +-- shell/runtime.ts --> reads EXPERIMENTAL from env.ts
-  +-- RuntimeClient.initialize(transport, { ..., experimental: EXPERIMENTAL })
+  +-- views/RootView.ts --> experimentalOptionsForDeployedClient(
+  |                           { apiUrl, env: EXPERIMENTAL_DEFINES, fetch })
+  |                         explicit define > /api/meta declaration > baked default
+  +-- RuntimeClient.initialize(transport, { ..., experimental })
         |  postMessage (IPC), InitializationData carries experimental + CFC dials
         v
 Browser web worker
@@ -1355,17 +1363,18 @@ Browser web worker
         --> new Runtime(runtimePresets.browserWorker({ experimental, cfcEnforcementMode, cfcFlowLabels, ... }))
 ```
 
-Because the shell bakes the flags into the bundle at build time, changing a
-browser-side flag requires rebuilding the shell. Server-side flags take effect
-on restart without a rebuild. The browser is also the one place a CFC dial is
+A define baked into the bundle is the browser's explicit override and needs a
+rebuild to change; the server-authoritative flags follow the deployment's
+`/api/meta` on the next page load, so a runtime rollback applied server-side
+reaches already-built shells. The browser is also the one place a CFC dial is
 host-controlled at construction: the `browserWorker` preset takes
 `cfcEnforcementMode` and `cfcFlowLabels` from the shell's initialization data.
 
 ### Clients that are not built alongside their server
 
-The shell cannot disagree with its server: toolshed bakes the defines and
-serves the bundle, so a browser runs the posture of the deployment it loaded
-from. Every other client is installed, deployed, or checked out on its own
+The shell disagrees with its server only by explicit define: toolshed bakes
+the defines and serves the bundle, and the page adopts the deployment's
+published posture at boot. Every other client is installed, deployed, or checked out on its own
 schedule — the `cf` binary, the pieces controller a FUSE mount opens, the
 agents host, the background-piece admin CLI — and the environment they read
 belongs to whoever launched them, not to the deployment they talk to. Left
@@ -1382,7 +1391,7 @@ cf / pieces controller / agents host / cast-admin
   +-- GET <apiUrl>/api/meta  --> { experimental: { <flag>: <boolean>, ... } }
   |     the posture the SERVER runs at
   |
-  +-- runner/runtime-presets.ts --> experimentalOptionsForDeployedClient()
+  +-- runner/experimental-posture.ts --> experimentalOptionsForDeployedClient()
   |     explicit EXPERIMENTAL_* > server declaration > built-in default
   |
   +-- runtimePresets.remoteClient({ experimental, ... })
@@ -1390,10 +1399,12 @@ cf / pieces controller / agents host / cast-admin
 
 What the server publishes is the posture its constructed `Runtime` resolved —
 built-in defaults and preset resolution included, not a second reading of its
-own environment that could disagree with the first. A flag the server left
-unresolved is omitted, and a server that has no `Runtime` yet publishes
-`null`; a client reads either as "this deployment said nothing" and keeps its
-own default. Absence of a declaration is never a declaration of `false`, which
+own environment that could disagree with the first — flattened at read time,
+so a live read-back (`readerSchemaPrecedence`'s claim state) is advertised as
+it stands now. A flag the server left unresolved is omitted, and a server
+that has no `Runtime` yet publishes `null`; with one exception a client reads
+either as "this deployment said nothing" and keeps its
+own default. The exception is `readerSchemaPrecedence`: a posture that was fetched but declares nothing for it is a pre-flag server necessarily running the strict combine, and adoption reads the absence as the legacy `false` (its section has the detail). Absence of a declaration is never a declaration of `false`, which
 is what lets a client of an older server behave exactly as it did before the
 server published anything.
 
@@ -1415,7 +1426,7 @@ Three rules govern what a client does with a declaration:
   also how you disagree with a deployment on purpose.
 - **Only a server-authoritative flag is adopted.**
   `EXPERIMENTAL_FLAG_AUTHORITY` in
-  [`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts)
+  [`packages/runner/src/experimental-posture.ts`](../../packages/runner/src/experimental-posture.ts)
   classifies every flag as `"server"` or `"client"`, type-gated the same way as
   the environment mapping, so a new flag does not compile until someone decides
   whether a `cf` binary follows the deployment on it. Every flag is `"server"`
@@ -1541,8 +1552,8 @@ First-party construction config is centralized in
 which is the place to touch when adding or changing a flag that construction
 config reaches:
 
-- `EXPERIMENTAL_ENV_VARS` is the single environment-variable mapping for
-  `ExperimentalOptions`, typed as
+- `EXPERIMENTAL_ENV_VARS` (in `experimental-posture.ts`, re-exported here) is
+  the single environment-variable mapping for `ExperimentalOptions`, typed as
   `Record<keyof ExperimentalOptions, string |
   null>`, so every flag must be
   listed there (a real env var name, or `null` for "programmatic-only").

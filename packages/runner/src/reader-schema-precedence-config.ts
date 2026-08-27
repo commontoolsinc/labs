@@ -23,18 +23,24 @@
  */
 
 let disablerCount = 0;
+// Claims belong to a reset epoch: a release issued before a reset must not
+// decrement the fresh epoch's count (to -1, hiding one future claim), so
+// each claim captures the epoch it was acquired in and releases only there.
+let claimEpoch = 0;
 
 /**
  * Claims the rollback: the strict combine stays in effect process-wide
- * while any claim is live. Returns an idempotent release.
+ * while any claim is live. Returns an idempotent release, inert after a
+ * `resetReaderSchemaPrecedenceConfig()`.
  */
 export function acquireReaderSchemaPrecedenceDisabler(): () => void {
+  const epoch = claimEpoch;
   disablerCount += 1;
   let released = false;
   return () => {
     if (released) return;
     released = true;
-    disablerCount -= 1;
+    if (epoch === claimEpoch) disablerCount -= 1;
   };
 }
 
@@ -45,10 +51,11 @@ export function getReaderSchemaPrecedenceConfig(): boolean {
 
 /**
  * Restores the flag to its default, abandoning live claims. Test cleanup
- * only — a claim's own release is a no-op after this, and double-releasing
- * someone else's claim is exactly what the ownership model exists to
- * prevent.
+ * only — an abandoned claim's release becomes a no-op (the epoch moved on),
+ * so a stale release can neither underflow the count nor un-claim a
+ * rollback acquired after the reset.
  */
 export function resetReaderSchemaPrecedenceConfig(): void {
   disablerCount = 0;
+  claimEpoch += 1;
 }
