@@ -38,19 +38,33 @@ an empty space rather than an error.
 
 ## What is being upgraded from
 
-Read out of the 2026-07-22 snapshot rather than assumed. What matters here is
-the split, not the totals: the topics are **not** on one version, and a run
-re-reads its own generation counts before moving anything.
+The topics are **not** on one version, and that is the durable fact. How many
+versions, which identities, and how many pieces on each are NOT durable — a
+run reads them for itself, because every one of them has already turned over
+once.
 
-| | pieces | pattern identity |
-| --- | ---: | --- |
-| topic generation A | 39 | `PB0GumS5vkDPyKAWciwh-4UtypoJwKFUXcDj3SsspHY` |
-| topic generation B | 34 | `-85Wmyd9iwUjbpwnTYR2YolxkMUHup9WHY6YsRUDA1E` |
-| board | 1 | `WpIRvAWL_WW45Q89ekZAlHWLObhQ16NDmQzvv_q2aI8` |
+The 2026-07-22 snapshot held 73 topics on two generations. The 2026-08-27
+snapshot held 125 on **three**, and not one identity from the earlier reading
+survived — the board's included, which had been redeployed in between. Any
+identity written into this document is a fact about the day it was written.
 
-Both topic generations are legacy — `createdByName` present, no
-`rejectMutation`, no body-at-create — and differ only slightly (681 vs 686
-authored lines of `topic.tsx`). The board's `main.tsx` mentions
+Read the split with a survey, which enumerates the collection and groups it by
+the identity each piece is actually on:
+
+```bash
+deno task cf piece survey --piece of:fid1:jtdD-… --path topics \
+  --api-url http://localhost:<port> --space <did> --identity <key> --quiet \
+  > survey-before.jsonl
+grep -o '"patternIdentity":"[^"]*"' survey-before.jsonl | sort | uniq -c
+```
+
+The plan header row carries the cross-check that matters —
+`enumerated: {collection, registry, registeredOutside}`. A non-zero
+`registeredOutside` is a piece the registry knows and the collection does not,
+which is the shape a migration silently skips.
+
+The topic generations are legacy — `createdByName` present, no
+`rejectMutation`, no body-at-create. The board's `main.tsx` mentions
 `AddTopicEvent.body` but not `rejectMutation`, so it predates #4991 as well.
 
 (The space holds 319 pieces across 150 pattern identities in total; only the
@@ -241,11 +255,13 @@ revision:
 
 ```bash
 deno task cf test packages/patterns/topics/multi-user.test.tsx
+deno task cf test packages/patterns/topics/render-shape.test.tsx
 deno task cf test packages/patterns/topics/topics-rejections.test.tsx
 deno task cf test packages/patterns/topics/topics.test.tsx
 
 TOPICS_TEST_ARGS=(
   --test packages/patterns/topics/multi-user.test.tsx
+  --test packages/patterns/topics/render-shape.test.tsx
   --test packages/patterns/topics/topics-rejections.test.tsx
   --test packages/patterns/topics/topics.test.tsx
 )
@@ -254,15 +270,21 @@ TOPICS_TEST_ARGS=(
 The quoted `"${TOPICS_TEST_ARGS[@]}"` expansion repeats every `--test` entry.
 Deployment packages and type-checks attached tests but does not run them.
 
+The board goes FIRST, and the order in this block is the order to run them.
+The `--api-url` port is whatever the clone was served on — `--port-offset 10`
+gives 8010, but a second clone served alongside it will be somewhere else, and
+the two are told apart by nothing except that port.
+
 ```bash
-# each topic, one at a time, against the CLONE's api-url
-deno task cf piece setsrc packages/patterns/topics/topic.tsx \
-  "${TOPICS_TEST_ARGS[@]}" \
-  --piece <topic-fid> --api-url http://localhost:8010 --space <did> …
-# then, last:
+# the board first: it is the both-shapes board, and moving it first is what
+# keeps the setup readable at every intermediate step
 deno task cf piece setsrc packages/patterns/topics/main.tsx \
   "${TOPICS_TEST_ARGS[@]}" \
   --piece fid1:jtdD-… --api-url http://localhost:8010 --space <did> …
+# then each topic, one at a time, generation A before generation B
+deno task cf piece setsrc packages/patterns/topics/topic.tsx \
+  "${TOPICS_TEST_ARGS[@]}" \
+  --piece <topic-fid> --api-url http://localhost:8010 --space <did> …
 ```
 
 Expect the compat checker to fail on the legacy→current transition and to need
