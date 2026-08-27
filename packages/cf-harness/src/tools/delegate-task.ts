@@ -33,7 +33,7 @@ export const delegateTaskTool: HarnessToolDefinition<
             ...HARNESS_SUBAGENT_PROFILES,
           ] satisfies HarnessSubagentProfile[],
           description:
-            "Named subagent profile to spawn. Defaults to the harness default profile.",
+            'Named subagent profile to spawn. Defaults to the harness default profile. Authoring or running a Common Fabric pattern goes through "pattern-author": it is the one profile preloaded with the pattern authoring skills, which neither the default profile nor the parent run carries — authoring anywhere else means guessing the pattern API.',
         },
         context: {
           type: "string",

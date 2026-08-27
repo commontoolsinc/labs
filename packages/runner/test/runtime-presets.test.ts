@@ -266,6 +266,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
         moduleByteCache,
         trustSnapshotProvider,
         patternCoverage,
+        onPatternInstantiated,
         cfcEnforcementMode: "enforce-strict",
         cfcFlowLabels: "persist",
       })).toEqual({
@@ -275,6 +276,7 @@ describe("runtimePresets conformance (CT-1814)", () => {
         moduleByteCache,
         trustSnapshotProvider,
         patternCoverage,
+        onPatternInstantiated,
         cfcEnforcementMode: "enforce-strict",
         cfcFlowLabels: "persist",
       });

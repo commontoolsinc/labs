@@ -1,0 +1,1079 @@
+#!/usr/bin/env -S deno run -A
+
+/**
+ * The kickoff surface: type a task, watch the harness work, open what it
+ * built. One HTTP server holding one in-process
+ * `HarnessInteractiveChatService`, one static page reading its events over
+ * Server-Sent Events, and nothing else.
+ *
+ *   deno task --cwd packages/cf-harness kickoff
+ *   open http://127.0.0.1:8100
+ *
+ * The server binds 127.0.0.1, and loopback is where its trust ends rather than
+ * where it begins: a page anywhere on the web can drive requests at this
+ * socket, and a hostile name that resolves to 127.0.0.1 can make these routes
+ * same-origin. So every request has to name this server's own host, and every
+ * `/api` route has to carry the per-process token the page is handed as a
+ * `SameSite=Strict` cookie when it loads — a token a cross-origin caller
+ * cannot send and a rebound origin cannot obtain. Do not put this behind a
+ * public address.
+ *
+ * Two pieces of configuration are what make a run able to finish with a link
+ * rather than a transcript. The fabric session — API URL, identity keyfile,
+ * space *name* — reaches the engine as `fabricSession` in the base prompt-loop
+ * options, which is what backs `run_pattern` and `assign_slug`; the space has
+ * to be a name because `assign_slug` composes its URL from one and offers no
+ * URL at all for a space named by `did:key`. The chat policy then has to name
+ * those tools: the default parent tool surface does not include them, so a
+ * session started with the default policy has a fabric session and no way to
+ * use it.
+ */
+
+import { parseArgs } from "@std/cli/parse-args";
+import {
+  dirname,
+  extname,
+  fromFileUrl,
+  join,
+  resolve,
+  toFileUrl,
+} from "@std/path";
+
+const moduleDir = dirname(fromFileUrl(import.meta.url));
+import {
+  defaultHarnessCredentialStorePath,
+  FileHarnessCredentialStore,
+} from "../src/auth/credential-store.ts";
+import {
+  OpenAICodexAuthService,
+  OpenAICodexCredentialResolver,
+} from "../src/auth/openai-codex.ts";
+import {
+  defaultHarnessProviderSettingsPath,
+  FileHarnessProviderSettingsStore,
+  resolveHarnessModelProviderPreference,
+} from "../src/auth/provider-settings.ts";
+import type {
+  HarnessFabricCfcEnforcementMode,
+  HarnessFabricCfcFlowLabelsMode,
+  HarnessFabricSessionConfig,
+  HarnessModelProviderId,
+  HarnessPatternIndexConfig,
+} from "../src/config.ts";
+import type { CfcPosture } from "@commonfabric/runner";
+import {
+  DEFAULT_HARNESS_CHAT_POLICY,
+  type HarnessChatError,
+  type HarnessChatEventEnvelope,
+  type HarnessChatPolicy,
+  type HarnessChatResponse,
+} from "../src/contracts/interactive-chat.ts";
+import { HARNESS_CREDENTIAL_OWNER_REF_TYPE } from "../src/contracts/run-manifest.ts";
+import { createCliPromptSlotBinding } from "../src/contracts/prompt-slot.ts";
+import { PATTERN_AUTHOR_SUBAGENT_PROFILE } from "../src/contracts/subagent.ts";
+import type { BuiltinToolId } from "../src/contracts/tool-descriptor.ts";
+import {
+  createHarnessInteractiveChatService,
+  type HarnessInteractiveChatEventListener,
+  type HarnessInteractiveChatService,
+} from "../src/interactive-chat-service.ts";
+import { OpenAICodexResponsesClient } from "../src/model/openai-codex-responses.ts";
+import {
+  CFC_INVOCATION_CONTEXT_DIR_ENV,
+  CFC_RESULT_DIR_ENV,
+} from "../src/sandbox/docker-runsc.ts";
+import type { CreateHarnessPromptLoopOptions } from "../src/prompt-loop.ts";
+import type { HarnessChatSessionStore } from "../src/session-store.ts";
+import {
+  listKickoffRuns,
+  readKickoffRun,
+  readKickoffRunArtifact,
+  readKickoffToolOutput,
+} from "./run-store.ts";
+import {
+  type KickoffSessionListing,
+  summarizeKickoffSessions,
+} from "./sessions.ts";
+import {
+  chatEventFrame,
+  envelopesAfter,
+  isUndelivered,
+  parseAfterSequence,
+  pingFrame,
+} from "./sse.ts";
+
+/** Loopback only. See the module comment on what does and does not protect. */
+const HOSTNAME = "127.0.0.1";
+
+/** The cookie the page carries this process's token back in. */
+const TOKEN_COOKIE = "cf_harness_kickoff_token";
+
+/**
+ * The host names a request may address this server by: its own loopback
+ * addresses at its own port, and the bare forms when the port is the one a
+ * browser leaves out. Any other `Host` is a name that resolved here without
+ * being this server, which is what a DNS rebinding attack looks like on the
+ * wire.
+ */
+const allowedHosts = (port: number): readonly string[] => [
+  `127.0.0.1:${port}`,
+  `localhost:${port}`,
+  ...(port === 80 ? ["127.0.0.1", "localhost"] : []),
+];
+
+const allowedOrigins = (port: number): readonly string[] =>
+  allowedHosts(port).map((host) => `http://${host}`);
+
+/** One cookie's value out of a `Cookie` header, or nothing. */
+const cookieValue = (
+  header: string | null,
+  name: string,
+): string | undefined => {
+  for (const pair of header?.split(";") ?? []) {
+    const separator = pair.indexOf("=");
+    if (separator > 0 && pair.slice(0, separator).trim() === name) {
+      return pair.slice(separator + 1).trim();
+    }
+  }
+  return undefined;
+};
+
+/**
+ * The paths served from the built page rather than from an API route: the page
+ * itself, and the two directories felt emits into.
+ */
+const ASSET_PATH = /^\/(scripts\/|styles\/|build-manifest\.json$|$)/;
+
+/**
+ * What the page is allowed to load and where it may send what it holds.
+ * Everything it needs comes from this origin, so `'self'` covers its script,
+ * its stylesheet, its fetches and its event stream; `style-src` allows inline
+ * as well because the run tree indents a row with a `style` attribute. The
+ * page renders text a run produced — a model's words, a tool's output, a
+ * pattern's source — and this is what keeps markup that reached it that way
+ * from loading a script or sending a run's artifacts anywhere else.
+ */
+const CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "object-src 'none'",
+  "base-uri 'none'",
+  "form-action 'none'",
+  "frame-ancestors 'none'",
+].join("; ");
+
+const CONTENT_TYPES: Readonly<Record<string, string>> = {
+  ".html": "text/html; charset=utf-8",
+  ".js": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".map": "application/json; charset=utf-8",
+};
+
+const contentType = (extension: string): string =>
+  CONTENT_TYPES[extension] ?? "application/octet-stream";
+
+const DEFAULT_PORT = 8100;
+const DEFAULT_FABRIC_API_URL = "http://localhost:8000";
+
+/**
+ * The CFC posture a kickoff session runs its fabric session under. This
+ * surface exists to show CFC working, so the named bundle is on by default
+ * rather than opted into: `max-enforcement` spreads
+ * `MAX_ENFORCEMENT_CFC_OPTIONS` over the runtime `run_pattern` deploys into —
+ * flow labels `persist`, write floor, policy evaluation, declared monotonicity
+ * and label-metadata protection at `enforce`, trigger-read gating on, the
+ * standard prompt-caveat policy, and public-only ceilings on the network-fetch
+ * sinks. `--fabric-cfc-posture none` turns it off for a run that wants the
+ * first-party default instead.
+ *
+ * The bundle leaves the enforcement pin at `enforce-explicit`; raising to
+ * `enforce-strict` stays a deliberate per-session move, so it has its own flag
+ * and no default here.
+ */
+const DEFAULT_FABRIC_CFC_POSTURE: CfcPosture = "max-enforcement";
+
+/** The CLI's own default model, so both entrypoints bill the same route. */
+const DEFAULT_MODEL = "gpt-5.6-terra";
+
+/** How often the stream publishes a liveness tick, in milliseconds. */
+const PING_INTERVAL_MS = 15_000;
+
+/**
+ * The owner every credential this server reads is filed under. `local` is the
+ * key the single-user local host writes, so a harness connected once through
+ * `cf-harness config`/Loom Settings is connected here too.
+ */
+const KICKOFF_CREDENTIAL_OWNER = {
+  type: HARNESS_CREDENTIAL_OWNER_REF_TYPE,
+  version: 1,
+  ownerKey: "local",
+} as const;
+
+/**
+ * The tools a kickoff session is allowed, over the default parent surface: the
+ * two that need a fabric session, and the two that need an index. Each is
+ * withheld again by the prompt loop when its backing is absent, so naming them
+ * here asks for them rather than asserting they exist.
+ */
+const FABRIC_TOOL_IDS = [
+  "run_pattern",
+  "assign_slug",
+] as const satisfies readonly BuiltinToolId[];
+
+const PATTERN_INDEX_TOOL_IDS = [
+  "search_patterns",
+  "record_feedback",
+] as const satisfies readonly BuiltinToolId[];
+
+/** Everything the server needs before it can serve a single request. */
+interface KickoffConfig {
+  port: number;
+  workspacePath: string;
+  artifactRoot: string;
+  cfcResultDir: string;
+  cfcInvocationContextDir: string;
+  harnessHome: string;
+  model: string;
+  fabricSession: HarnessFabricSessionConfig;
+  patternIndex?: HarnessPatternIndexConfig;
+  sessionDbPath?: string;
+  maxModelTurns?: number;
+  skillsRoot?: string;
+}
+
+const nonEmpty = (value: string | undefined): string | undefined =>
+  value === undefined || value.trim() === "" ? undefined : value.trim();
+
+const requiredUrl = (value: string, flag: string): string => {
+  try {
+    new URL(value);
+  } catch {
+    throw new Error(`${flag} must be a valid URL: ${value}`);
+  }
+  return value;
+};
+
+const positiveInteger = (value: string, flag: string): number => {
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new Error(`${flag} must be a positive integer: ${value}`);
+  }
+  return parsed;
+};
+
+/**
+ * Resolves configuration from flags over environment over defaults. The space
+ * is rejected when it is a `did:key`: a run in such a space can build a piece
+ * and never hand back an address for it, which is the one outcome this surface
+ * exists to avoid.
+ */
+export const resolveKickoffConfig = (
+  args: readonly string[],
+  env: Record<string, string | undefined>,
+  cwd: string,
+): KickoffConfig => {
+  const parsed = parseArgs(args, {
+    string: [
+      "port",
+      "workspace",
+      "artifact-root",
+      "model",
+      "fabric-api-url",
+      "fabric-identity",
+      "fabric-space",
+      "pattern-index-url",
+      "session-db",
+      "max-model-turns",
+      "fabric-cfc-enforcement-mode",
+      "fabric-cfc-flow-labels",
+      "fabric-cfc-posture",
+    ],
+  });
+  const flag = (name: string): string | undefined =>
+    typeof parsed[name] === "string" ? nonEmpty(parsed[name]) : undefined;
+
+  const port = flag("port") !== undefined
+    ? positiveInteger(flag("port")!, "--port")
+    : nonEmpty(env.CF_HARNESS_KICKOFF_PORT) !== undefined
+    ? positiveInteger(env.CF_HARNESS_KICKOFF_PORT!, "CF_HARNESS_KICKOFF_PORT")
+    : DEFAULT_PORT;
+
+  const dataDir = resolve(
+    cwd,
+    nonEmpty(env.CF_HARNESS_KICKOFF_DIR) ?? ".cf-harness-kickoff",
+  );
+  const workspacePath = resolve(
+    cwd,
+    flag("workspace") ?? nonEmpty(env.CF_HARNESS_KICKOFF_WORKSPACE) ??
+      join(dataDir, "workspace"),
+  );
+  const artifactRoot = resolve(
+    cwd,
+    flag("artifact-root") ?? nonEmpty(env.CF_HARNESS_ARTIFACT_ROOT) ??
+      join(dataDir, "runs"),
+  );
+
+  // The sandbox's two CFC sidecar transports. The harness refuses to start an
+  // enforcing run without them, and they are scratch directories the host and
+  // the sandbox exchange files through, so this surface sites them itself
+  // rather than asking an operator to name a path before their first run.
+  const cfcResultDir = resolve(
+    cwd,
+    nonEmpty(env[CFC_RESULT_DIR_ENV]) ?? join(dataDir, "cfc", "results"),
+  );
+  const cfcInvocationContextDir = resolve(
+    cwd,
+    nonEmpty(env[CFC_INVOCATION_CONTEXT_DIR_ENV]) ??
+      join(dataDir, "cfc", "invocation-context"),
+  );
+
+  const identityKeyPath = flag("fabric-identity") ??
+    nonEmpty(env.CF_HARNESS_FABRIC_IDENTITY);
+  const space = flag("fabric-space") ?? nonEmpty(env.CF_HARNESS_FABRIC_SPACE);
+  if (identityKeyPath === undefined || space === undefined) {
+    throw new Error(
+      "a fabric session is required: set --fabric-identity/CF_HARNESS_FABRIC_IDENTITY and --fabric-space/CF_HARNESS_FABRIC_SPACE",
+    );
+  }
+  if (space.startsWith("did:")) {
+    throw new Error(
+      `--fabric-space must be a space name rather than a DID: assign_slug composes a URL from the name, and offers none for ${space}`,
+    );
+  }
+  const posture = flag("fabric-cfc-posture") ??
+    nonEmpty(env.CF_HARNESS_FABRIC_CFC_POSTURE);
+  if (
+    posture !== undefined && posture !== "none" && posture !== "max-enforcement"
+  ) {
+    throw new Error(
+      `--fabric-cfc-posture must be max-enforcement or none: ${posture}`,
+    );
+  }
+  const flowLabels = flag("fabric-cfc-flow-labels") ??
+    nonEmpty(env.CF_HARNESS_FABRIC_CFC_FLOW_LABELS);
+  if (
+    flowLabels !== undefined &&
+    !["off", "observe", "persist"].includes(flowLabels)
+  ) {
+    throw new Error(
+      `--fabric-cfc-flow-labels must be off, observe, or persist: ${flowLabels}`,
+    );
+  }
+  const fabricEnforcement = flag("fabric-cfc-enforcement-mode") ??
+    nonEmpty(env.CF_HARNESS_FABRIC_CFC_ENFORCEMENT_MODE);
+  if (
+    fabricEnforcement !== undefined &&
+    !["enforce-explicit", "enforce-strict"].includes(fabricEnforcement)
+  ) {
+    throw new Error(
+      `--fabric-cfc-enforcement-mode must be enforce-explicit or enforce-strict: ${fabricEnforcement}`,
+    );
+  }
+  const fabricSession: HarnessFabricSessionConfig = {
+    apiUrl: requiredUrl(
+      flag("fabric-api-url") ?? nonEmpty(env.CF_HARNESS_FABRIC_API_URL) ??
+        DEFAULT_FABRIC_API_URL,
+      "--fabric-api-url",
+    ),
+    identityKeyPath: resolve(cwd, identityKeyPath),
+    space,
+    ...(posture === "none"
+      ? {}
+      : { cfcPosture: (posture ?? DEFAULT_FABRIC_CFC_POSTURE) as CfcPosture }),
+    ...(flowLabels !== undefined
+      ? { cfcFlowLabels: flowLabels as HarnessFabricCfcFlowLabelsMode }
+      : {}),
+    ...(fabricEnforcement !== undefined
+      ? {
+        cfcEnforcementMode:
+          fabricEnforcement as HarnessFabricCfcEnforcementMode,
+      }
+      : {}),
+  };
+
+  // The repo's skills/ tree gives the pattern-author subagent its preloaded
+  // pattern-dev + pattern-schema skills; without a skills root the parent
+  // model authors patterns blind and burns turns on idiom errors.
+  const skillsRootFlag = flag("skills-root") ??
+    nonEmpty(env.CF_HARNESS_KICKOFF_SKILLS_ROOT) ??
+    resolve(cwd, join(moduleDir, "../../../skills"));
+
+  const patternIndexUrl = flag("pattern-index-url") ??
+    nonEmpty(env.CF_HARNESS_PATTERN_INDEX_URL);
+  const sessionDb = flag("session-db") ??
+    nonEmpty(env.CF_HARNESS_KICKOFF_SESSION_DB) ??
+    join(dataDir, "sessions.sqlite");
+  // Pattern-building sessions routinely spend a turn per author/run/fix
+  // round; the interactive default of 8 strands a session mid-build.
+  const maxModelTurns = flag("max-model-turns") ??
+    nonEmpty(env.CF_HARNESS_KICKOFF_MAX_MODEL_TURNS) ?? "32";
+
+  return {
+    port,
+    workspacePath,
+    artifactRoot,
+    cfcResultDir,
+    cfcInvocationContextDir,
+    harnessHome: resolve(
+      nonEmpty(env.CF_HARNESS_HOME) ??
+        join(nonEmpty(env.HOME) ?? cwd, ".cf-harness"),
+    ),
+    model: flag("model") ?? nonEmpty(env.CF_HARNESS_MODEL) ?? DEFAULT_MODEL,
+    fabricSession,
+    ...(patternIndexUrl !== undefined
+      ? {
+        patternIndex: {
+          baseUrl: requiredUrl(patternIndexUrl, "--pattern-index-url"),
+        },
+      }
+      : {}),
+    // `none` turns the durable store off and keeps sessions in memory, which
+    // is what a throwaway run wants and what a machine without the SQLite
+    // native library can still do.
+    ...(sessionDb === "none" ? {} : { sessionDbPath: resolve(cwd, sessionDb) }),
+    ...(maxModelTurns !== undefined
+      ? {
+        maxModelTurns: positiveInteger(maxModelTurns, "--max-model-turns"),
+      }
+      : {}),
+    skillsRoot: skillsRootFlag,
+  };
+};
+
+/**
+ * The policy a kickoff session runs under: see `FABRIC_TOOL_IDS`. The prompt
+ * slot is bound as a direct command because the page's textarea is the user
+ * typing the command themselves — the same standing the batch CLI's prompt
+ * argument has, and what authorizes effectful tools under CFC enforce modes.
+ */
+export const kickoffChatPolicy = (
+  patternIndexConfigured: boolean,
+): HarnessChatPolicy => ({
+  ...DEFAULT_HARNESS_CHAT_POLICY,
+  allowedToolIds: [
+    ...DEFAULT_HARNESS_CHAT_POLICY.allowedToolIds,
+    ...FABRIC_TOOL_IDS,
+    ...(patternIndexConfigured ? PATTERN_INDEX_TOOL_IDS : []),
+  ],
+  allowedSubagentProfiles: [
+    ...DEFAULT_HARNESS_CHAT_POLICY.allowedSubagentProfiles,
+    PATTERN_AUTHOR_SUBAGENT_PROFILE,
+  ],
+  promptSlot: createCliPromptSlotBinding({
+    kernelName: "cf-harness",
+    surface: "kickoff-web",
+    role: "direct-command",
+  }),
+});
+
+/**
+ * The provider binding, resolved the way the local single-user host resolves
+ * it: the persisted preference names the provider, and a Codex provider is
+ * preflighted so an unconnected harness is a startup failure rather than a
+ * turn that fails after the page said it had started.
+ */
+const resolveModelOptions = async (
+  config: KickoffConfig,
+  env: Record<string, string | undefined>,
+): Promise<CreateHarnessPromptLoopOptions> => {
+  const providerSettingsStore = new FileHarnessProviderSettingsStore({
+    path: defaultHarnessProviderSettingsPath(config.harnessHome),
+  });
+  const provider: HarnessModelProviderId =
+    (await resolveHarnessModelProviderPreference({
+      store: providerSettingsStore,
+    })).provider;
+  if (provider === "openai-compatible-gateway") {
+    const apiKey = nonEmpty(env.CF_HARNESS_API_KEY) ??
+      nonEmpty(env.OPENAI_API_KEY);
+    const gatewayAuthMode = nonEmpty(env.CF_HARNESS_GATEWAY_AUTH_MODE) ===
+        "none"
+      ? "none" as const
+      : "bearer" as const;
+    return {
+      modelProvider: provider,
+      modelAuthSource: gatewayAuthMode === "none" ? "none" : "api-key",
+      gatewayAuthMode,
+      ...(nonEmpty(env.CF_HARNESS_GATEWAY_BASE_URL) !== undefined
+        ? { gatewayBaseUrl: env.CF_HARNESS_GATEWAY_BASE_URL! }
+        : {}),
+      ...(apiKey !== undefined ? { apiKey } : {}),
+    };
+  }
+  const credentialStore = new FileHarnessCredentialStore({
+    path: defaultHarnessCredentialStorePath(config.harnessHome),
+  });
+  const status = await new OpenAICodexAuthService(
+    credentialStore,
+    KICKOFF_CREDENTIAL_OWNER.ownerKey,
+  ).status();
+  if (status.status !== "connected") {
+    throw new Error(
+      `cf-harness Codex is ${status.status}; connect it with \`cf-harness auth\` before starting the kickoff server`,
+    );
+  }
+  return {
+    modelProvider: provider,
+    modelAuthSource: "cf-harness-local-store",
+    credentialOwner: KICKOFF_CREDENTIAL_OWNER,
+    credentialOwnerKey: KICKOFF_CREDENTIAL_OWNER.ownerKey,
+    modelClient: new OpenAICodexResponsesClient({
+      credentialResolver: new OpenAICodexCredentialResolver({
+        store: credentialStore,
+        ownerKey: KICKOFF_CREDENTIAL_OWNER.ownerKey,
+        credentialOwner: KICKOFF_CREDENTIAL_OWNER,
+      }),
+      credentialOwner: KICKOFF_CREDENTIAL_OWNER,
+    }),
+  };
+};
+
+const openSessionStore = async (
+  sessionDbPath: string,
+): Promise<HarnessChatSessionStore> => {
+  // The SQLite session store opens its native library as it loads, and only a
+  // durable server needs it.
+  // deno-lint-ignore cf-imports/no-inline-module-import
+  const { openSqliteHarnessChatSessionStore } = await import(
+    "../src/sqlite-session-store.ts"
+  );
+  return await openSqliteHarnessChatSessionStore({
+    url: toFileUrl(sessionDbPath),
+  });
+};
+
+/**
+ * One connected browser. `deliveredSequence` is what it has been written so
+ * far, and `pending` holds envelopes that arrived while its backfill was still
+ * being read — a stream is registered before its backfill is fetched, so no
+ * event can fall between the two, and the sequence check makes the overlap
+ * harmless.
+ */
+interface StreamClient {
+  controller: ReadableStreamDefaultController<Uint8Array>;
+  sessionId?: string;
+  deliveredSequence: number;
+  ready: boolean;
+  pending: HarnessChatEventEnvelope[];
+}
+
+const encoder = new TextEncoder();
+
+/** The live event fan-out, and the routes that read and write through it. */
+export class KickoffServer {
+  readonly #clients = new Set<StreamClient>();
+  readonly #config: KickoffConfig;
+  readonly #service: HarnessInteractiveChatService;
+  readonly #token = crypto.randomUUID();
+  #beats = 0;
+
+  /**
+   * The service is built here rather than handed in because it is built
+   * around this server's own fan-out: `onEvent` is where a turn's events
+   * become the page's feed, and the two have no order to be constructed in
+   * otherwise. This is the seam the NDJSON stdio transport keeps for the same
+   * reason.
+   */
+  constructor(
+    config: KickoffConfig,
+    createService: (
+      onEvent: HarnessInteractiveChatEventListener,
+    ) => HarnessInteractiveChatService,
+  ) {
+    this.#config = config;
+    this.#service = createService((envelope) => this.broadcast(envelope));
+  }
+
+  /** The chat service this server fronts, for startup and shutdown. */
+  get service(): HarnessInteractiveChatService {
+    return this.#service;
+  }
+
+  /** Writes one envelope to every stream that has not already seen it. */
+  broadcast(envelope: HarnessChatEventEnvelope): void {
+    for (const client of this.#clients) {
+      if (
+        client.sessionId !== undefined &&
+        client.sessionId !== envelope.sessionId
+      ) {
+        continue;
+      }
+      if (!client.ready) {
+        client.pending.push(envelope);
+        continue;
+      }
+      this.#write(client, envelope);
+    }
+  }
+
+  /** Publishes a liveness tick so a quiet session still reads as alive. */
+  ping(): void {
+    const frame = encoder.encode(pingFrame(++this.#beats));
+    for (const client of this.#clients) {
+      this.#enqueue(client, frame);
+    }
+  }
+
+  async handle(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    const refusal = this.#refuse(request, url);
+    if (refusal !== undefined) {
+      return refusal;
+    }
+    if (request.method === "GET" && ASSET_PATH.test(url.pathname)) {
+      const response = await this.#asset(url.pathname);
+      response.headers.set(
+        "content-security-policy",
+        CONTENT_SECURITY_POLICY,
+      );
+      response.headers.append(
+        "set-cookie",
+        // No `Secure`: this is plain http on loopback, and a `Secure` cookie
+        // would simply never be stored. `SameSite=Strict` is what a
+        // cross-origin request cannot carry, and `HttpOnly` keeps the token
+        // out of reach of anything scripted into the page.
+        `${TOKEN_COOKIE}=${this.#token}; SameSite=Strict; HttpOnly; Path=/`,
+      );
+      return response;
+    }
+    if (request.method === "POST" && url.pathname === "/api/task") {
+      return await this.#startTask(request);
+    }
+    if (request.method === "POST" && url.pathname === "/api/cancel") {
+      return await this.#cancel(request);
+    }
+    if (request.method === "GET" && url.pathname === "/api/sessions") {
+      return Response.json(await this.#sessions());
+    }
+    if (request.method === "GET" && url.pathname === "/api/status") {
+      return Response.json(
+        this.#service.status(url.searchParams.get("sessionId") ?? undefined),
+      );
+    }
+    if (request.method === "GET" && url.pathname === "/api/events") {
+      return this.#events(url);
+    }
+    if (request.method === "GET" && url.pathname === "/api/runs") {
+      return Response.json({
+        runs: await listKickoffRuns(this.#config.artifactRoot),
+      });
+    }
+    if (request.method === "GET" && url.pathname.startsWith("/api/runs/")) {
+      return await this.#run(url);
+    }
+    return new Response("not found", { status: 404 });
+  }
+
+  /**
+   * What stands between this socket and the rest of the web, or nothing when
+   * the request is one this server's own page made. The `Host` gate comes
+   * first and covers every route, including the page: a request that arrived
+   * under another name was addressed to somewhere else, whatever it asks for.
+   * The token then gates `/api` whole, reads included, because a read here
+   * hands out run artifacts and a write starts an effectful turn under the
+   * local fabric identity.
+   */
+  #refuse(request: Request, url: URL): Response | undefined {
+    const port = this.#config.port;
+    // The `Host` header is what an HTTP/1.1 client addressed; an HTTP/2 client
+    // sends `:authority` instead, which is the authority the request URL was
+    // built from.
+    const host = request.headers.get("host") ?? url.host;
+    if (!allowedHosts(port).includes(host)) {
+      return new Response("forbidden", { status: 403 });
+    }
+    if (!url.pathname.startsWith("/api/")) {
+      return undefined;
+    }
+    const origin = request.headers.get("origin");
+    if (origin !== null && !allowedOrigins(port).includes(origin)) {
+      return new Response("forbidden", { status: 403 });
+    }
+    if (
+      cookieValue(request.headers.get("cookie"), TOKEN_COOKIE) !== this.#token
+    ) {
+      return new Response("forbidden", { status: 403 });
+    }
+    if (
+      request.method === "POST" &&
+      !(request.headers.get("content-type") ?? "").startsWith(
+        "application/json",
+      )
+    ) {
+      return new Response("unsupported media type", { status: 415 });
+    }
+    return undefined;
+  }
+
+  /**
+   * One run's artifacts: the run whole, one named artifact of it, or one tool
+   * output. The path is read rather than pattern-matched because a run id is
+   * a path segment and the store is what decides whether it is a legal one —
+   * a name this cannot resolve is a 404 rather than a read of somewhere else.
+   */
+  async #run(url: URL): Promise<Response> {
+    const [runId, kind, name, ...rest] = url.pathname
+      .slice("/api/runs/".length)
+      .split("/")
+      .map(decodeURIComponent);
+    if (runId === undefined || runId === "" || rest.length > 0) {
+      return new Response("not found", { status: 404 });
+    }
+    const root = this.#config.artifactRoot;
+    if (kind === undefined || kind === "") {
+      const detail = await readKickoffRun(root, runId);
+      return detail === undefined
+        ? new Response("not found", { status: 404 })
+        : Response.json(detail);
+    }
+    if (name === undefined || name === "") {
+      return new Response("not found", { status: 404 });
+    }
+    const text = kind === "artifacts"
+      ? await readKickoffRunArtifact(root, runId, name)
+      : kind === "tool-outputs"
+      ? await readKickoffToolOutput(root, runId, name)
+      : undefined;
+    return text === undefined
+      ? new Response("not found", { status: 404 })
+      : new Response(text, {
+        headers: { "content-type": "application/json; charset=utf-8" },
+      });
+  }
+
+  /**
+   * One file of the built page. The page is a felt build under `dist/`, so a
+   * server started before `deno task kickoff:build` has nothing to serve and
+   * says which command produces it rather than answering an empty 404.
+   */
+  async #asset(pathname: string): Promise<Response> {
+    const relativePath = pathname === "/" ? "index.html" : pathname.slice(1);
+    if (relativePath.split("/").some((segment) => segment === "..")) {
+      return new Response("not found", { status: 404 });
+    }
+    const path = join(moduleDir, "dist", relativePath);
+    try {
+      const body = await Deno.readFile(path);
+      return new Response(body, {
+        headers: { "content-type": contentType(extname(path)) },
+      });
+    } catch {
+      return new Response(
+        pathname === "/"
+          ? "the kickoff page is not built; run `deno task --cwd packages/cf-harness kickoff:build`"
+          : "not found",
+        {
+          status: 404,
+          headers: { "content-type": "text/plain; charset=utf-8" },
+        },
+      );
+    }
+  }
+
+  /**
+   * Every session this server knows, described well enough to choose one from.
+   * The turns are read for replay so a session recovered from the store on
+   * startup is named by the task it was given rather than by its identifier.
+   */
+  async #sessions(): Promise<KickoffSessionListing> {
+    const turns = await this.#service.listTurnsForReplay({});
+    return summarizeKickoffSessions(this.#service.status(), turns.turns);
+  }
+
+  /**
+   * Starts a turn, in the session the request names or in a new one. One
+   * request rather than two because a session with no turn is not a thing
+   * anyone asked for, and the page needs both identifiers before it can
+   * subscribe or cancel. A named session that cannot take another turn — it
+   * was closed, or its transcript did not survive a restart — is the service's
+   * refusal to report, not this server's to anticipate.
+   */
+  async #startTask(request: Request): Promise<Response> {
+    let parsed: unknown;
+    try {
+      parsed = await request.json();
+    } catch {
+      return Response.json({ error: "request body is not JSON" }, {
+        status: 400,
+      });
+    }
+    const body: { text?: unknown; sessionId?: unknown } =
+      typeof parsed === "object" && parsed !== null ? parsed : {};
+    const text = body.text;
+    if (typeof text !== "string" || text.trim() === "") {
+      return Response.json({ error: "text is required" }, { status: 400 });
+    }
+    if (body.sessionId !== undefined && typeof body.sessionId !== "string") {
+      return Response.json({ error: "sessionId must be a string" }, {
+        status: 400,
+      });
+    }
+    let sessionId = body.sessionId;
+    if (sessionId === undefined) {
+      const session = await this.#service.startSession(crypto.randomUUID(), {
+        workspace: { hostPath: this.#config.workspacePath },
+        model: this.#config.model,
+        artifactRoot: this.#config.artifactRoot,
+        policy: kickoffChatPolicy(this.#config.patternIndex !== undefined),
+      });
+      if (!session.ok) {
+        return chatErrorResponse(session);
+      }
+      sessionId = session.result.sessionId;
+    }
+    const turn = await this.#service.startTurn(crypto.randomUUID(), {
+      sessionId,
+      input: { text },
+    });
+    if (!turn.ok) {
+      return chatErrorResponse(turn);
+    }
+    return Response.json({ sessionId, turnId: turn.result.turnId });
+  }
+
+  async #cancel(request: Request): Promise<Response> {
+    let body: { sessionId?: unknown; turnId?: unknown };
+    try {
+      body = await request.json();
+    } catch {
+      return Response.json({ error: "request body is not JSON" }, {
+        status: 400,
+      });
+    }
+    if (typeof body.sessionId !== "string") {
+      return Response.json({ error: "sessionId is required" }, { status: 400 });
+    }
+    const response = await this.#service.cancelTurn(
+      crypto.randomUUID(),
+      body.sessionId,
+      typeof body.turnId === "string" ? body.turnId : undefined,
+      "canceled from the kickoff page",
+    );
+    return response.ok
+      ? Response.json(response.result)
+      : chatErrorResponse(response);
+  }
+
+  /**
+   * Opens one event stream. The backfill is read after the stream is
+   * registered, so an envelope emitted in between is buffered rather than
+   * lost, and written in sequence order once the backfill has been sent.
+   */
+  #events(url: URL): Response {
+    const sessionId = url.searchParams.get("sessionId") ?? undefined;
+    let afterSequence: number | undefined;
+    try {
+      afterSequence = parseAfterSequence(url.searchParams.get("afterSequence"));
+    } catch (error) {
+      return Response.json({
+        error: error instanceof Error ? error.message : String(error),
+      }, { status: 400 });
+    }
+    const resumeFrom = afterSequence ?? 0;
+    let client: StreamClient | undefined;
+    const stream = new ReadableStream<Uint8Array>({
+      start: (controller) => {
+        client = {
+          controller,
+          ...(sessionId !== undefined ? { sessionId } : {}),
+          deliveredSequence: resumeFrom,
+          ready: false,
+          pending: [],
+        };
+        this.#clients.add(client);
+        controller.enqueue(encoder.encode(": connected\n\n"));
+        this.#backfill(client, sessionId, resumeFrom);
+      },
+      cancel: () => {
+        if (client !== undefined) {
+          this.#clients.delete(client);
+        }
+      },
+    });
+    return new Response(stream, {
+      headers: {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+      },
+    });
+  }
+
+  #backfill(
+    client: StreamClient,
+    sessionId: string | undefined,
+    afterSequence: number,
+  ): void {
+    this.#service.listEventsForReplay({
+      ...(sessionId !== undefined ? { sessionId } : {}),
+      afterSequence,
+    }).then((replay) => {
+      for (const envelope of envelopesAfter(replay.events, afterSequence)) {
+        this.#write(client, envelope);
+      }
+      for (const envelope of envelopesAfter(client.pending, afterSequence)) {
+        this.#write(client, envelope);
+      }
+      client.pending.length = 0;
+      client.ready = true;
+    }).catch((error: unknown) => {
+      this.#clients.delete(client);
+      try {
+        client.controller.error(error);
+      } catch {
+        // The browser closed the stream first; nothing left to report to.
+      }
+    });
+  }
+
+  #write(client: StreamClient, envelope: HarnessChatEventEnvelope): void {
+    if (!isUndelivered(envelope, client.deliveredSequence)) {
+      return;
+    }
+    if (this.#enqueue(client, encoder.encode(chatEventFrame(envelope)))) {
+      client.deliveredSequence = envelope.sequence;
+    }
+  }
+
+  #enqueue(client: StreamClient, frame: Uint8Array): boolean {
+    try {
+      client.controller.enqueue(frame);
+      return true;
+    } catch {
+      // A dead controller is dropped rather than retried, so the set of
+      // clients cannot grow without bound.
+      this.#clients.delete(client);
+      return false;
+    }
+  }
+}
+
+const CHAT_ERROR_STATUS: Readonly<Record<HarnessChatError["code"], number>> = {
+  invalid_request: 400,
+  session_exists: 409,
+  session_not_found: 404,
+  turn_exists: 409,
+  turn_not_found: 404,
+  turn_already_running: 409,
+  turn_canceled: 409,
+  session_closed: 409,
+  incomplete_transcript: 409,
+  browser_access_required: 409,
+  policy_denied: 403,
+  "provider-configuration-required": 503,
+  "provider-auth-required": 503,
+  "provider-mismatch": 409,
+  "provider-unavailable": 503,
+  internal_error: 500,
+};
+
+const chatErrorResponse = (response: HarnessChatResponse): Response =>
+  response.ok ? Response.json(response.result) : Response.json(
+    { error: response.error.message, code: response.error.code },
+    { status: CHAT_ERROR_STATUS[response.error.code] },
+  );
+
+/**
+ * Builds the service and starts serving. The fabric session and the pattern
+ * index reach the engine as resolved configuration on the base prompt-loop
+ * options: `CreateHarnessPromptLoopOptions` extends the engine's options,
+ * which extend the config resolver's, and the interactive service spreads this
+ * object into every turn — so what is set here holds for the whole session,
+ * and the engine builds both lazily-cached client factories from it.
+ */
+export const startKickoffServer = async (
+  args: readonly string[] = Deno.args,
+  env: Record<string, string | undefined> = Deno.env.toObject(),
+  cwd: string = Deno.cwd(),
+): Promise<void> => {
+  const config = resolveKickoffConfig(args, env, cwd);
+  for (
+    const directory of [
+      config.workspacePath,
+      config.artifactRoot,
+      config.cfcResultDir,
+      config.cfcInvocationContextDir,
+    ]
+  ) {
+    await Deno.mkdir(directory, { recursive: true });
+  }
+  const modelOptions = await resolveModelOptions(config, env);
+  const sessionStore = config.sessionDbPath === undefined
+    ? undefined
+    : await openSessionStore(config.sessionDbPath);
+
+  const server = new KickoffServer(
+    config,
+    (onEvent) =>
+      createHarnessInteractiveChatService({
+        basePromptLoopOptions: {
+          ...modelOptions,
+          model: config.model,
+          artifactRoot: config.artifactRoot,
+          workspaceHostPath: config.workspacePath,
+          cfcResultDir: config.cfcResultDir,
+          cfcInvocationContextDir: config.cfcInvocationContextDir,
+          fabricSession: config.fabricSession,
+          ...(config.patternIndex !== undefined
+            ? { patternIndex: config.patternIndex }
+            : {}),
+          ...(config.maxModelTurns !== undefined
+            ? { maxModelTurns: config.maxModelTurns }
+            : {}),
+          ...(config.skillsRoot !== undefined
+            ? { skillsRoot: config.skillsRoot }
+            : {}),
+        },
+        ...(modelOptions.credentialOwner !== undefined
+          ? { credentialOwner: modelOptions.credentialOwner }
+          : {}),
+        ...(sessionStore !== undefined ? { sessionStore } : {}),
+        onEvent,
+      }),
+  );
+  await server.service.initializeFromStore();
+
+  const beat = setInterval(() => server.ping(), PING_INTERVAL_MS);
+  Deno.serve({
+    hostname: HOSTNAME,
+    port: config.port,
+    onListen: () => {
+      console.log(`\n  cf-harness kickoff: http://${HOSTNAME}:${config.port}`);
+      console.log(`  space:      ${config.fabricSession.space}`);
+      console.log(`  fabric:     ${config.fabricSession.apiUrl}`);
+      console.log(
+        `  index:      ${config.patternIndex?.baseUrl ?? "(not configured)"}`,
+      );
+      console.log(
+        `  cfc:        ${
+          config.fabricSession.cfcPosture ?? "first-party default"
+        }, flow labels ${
+          config.fabricSession.cfcFlowLabels ??
+            (config.fabricSession.cfcPosture === "max-enforcement"
+              ? "persist"
+              : "off")
+        }, ${config.fabricSession.cfcEnforcementMode ?? "enforce-explicit"}`,
+      );
+      console.log(`  workspace:  ${config.workspacePath}`);
+      console.log(`  artifacts:  ${config.artifactRoot}\n`);
+    },
+    onError: (error) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      return new Response("internal error", { status: 500 });
+    },
+  }, (request) => server.handle(request)).finished.finally(() => {
+    clearInterval(beat);
+  });
+};
+
+// Running the file serves; importing it (the tests do) serves nothing.
+if (import.meta.main) {
+  try {
+    await startKickoffServer();
+  } catch (error) {
+    // A misconfigured server is an operator's problem to fix, and the message
+    // is the whole of what they need; the stack behind it is noise.
+    console.error(error instanceof Error ? error.message : String(error));
+    Deno.exit(1);
+  }
+}

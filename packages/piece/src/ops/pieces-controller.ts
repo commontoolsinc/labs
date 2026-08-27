@@ -268,6 +268,7 @@ export class PiecesController<T = unknown> {
       moduleByteCache,
       patternCoverage,
       navigateCallback,
+      onPatternInstantiated,
       cfcEnforcementMode,
       cfcFlowLabels,
       cfcPosture,
@@ -302,6 +303,13 @@ export class PiecesController<T = unknown> {
       navigateCallback?: Parameters<
         typeof runtimePresets.remoteClient
       >[0]["navigateCallback"];
+      // Optional instantiation observer, passed to the remoteClient preset: a
+      // host that must know which patterns this controller materialized, and
+      // under which pointer, supplies one. Observation only — the runtime runs
+      // the same either way — and unset means the runtime tells nobody.
+      onPatternInstantiated?: Parameters<
+        typeof runtimePresets.remoteClient
+      >[0]["onPatternInstantiated"];
       // Host-controlled CFC rollout dials, passed through to the remoteClient
       // preset; unset means the preset's first-party posture.
       cfcEnforcementMode?: CfcEnforcementMode;
@@ -344,6 +352,7 @@ export class PiecesController<T = unknown> {
       ...(cfcFlowLabels !== undefined ? { cfcFlowLabels } : {}),
       ...(cfcPosture !== undefined ? { cfcPosture } : {}),
       ...(navigateCallback !== undefined ? { navigateCallback } : {}),
+      ...(onPatternInstantiated !== undefined ? { onPatternInstantiated } : {}),
       trustSnapshotProvider: () => ({
         id: `principal:${session.as.did()}`,
         actingPrincipal: session.as.did(),
