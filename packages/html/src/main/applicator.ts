@@ -288,7 +288,9 @@ export class DomApplicator {
     };
   }
 
-  // ============== Operation Implementations ==============
+  //
+  // Operation Implementations
+  //
 
   private createElement(nodeId: number, tagName: string, space?: string): void {
     const element = this.document.createElement(tagName);
