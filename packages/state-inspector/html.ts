@@ -284,6 +284,7 @@ function kindChip(kind){ return el("span",{class:"kind "+kind,style:"background:
 //
 // live shell link
 //
+
 let LIVE = localStorage.getItem("si-live") || B.liveBase || "";
 function liveUrl(id){ if(!LIVE) return null;
   // The shell navigates by the bare id form (fid1:…); the stored "of:" prefix
@@ -296,6 +297,7 @@ function liveAnchor(id){ const u = liveUrl(id); return u
 //
 // selection + history
 //
+
 let cur = null; const hist = [];
 function select(id, push=true){
   if(!byId.has(id)) return;
@@ -311,6 +313,7 @@ function back(){ const id = hist.pop(); if(id){ cur=null; select(id,false); } }
 //
 // value renderer (links become clickable chips)
 //
+
 function valueDom(v, depth=0){
   if(v===null) return el("span",{class:"muted",text:"null"});
   if(typeof v!=="object") return el("span",{text: typeof v==="string" ? JSON.stringify(v) : String(v)});
@@ -358,6 +361,7 @@ function linkChip(ref){
 //
 // detail pane
 //
+
 function section(title, openByDefault, bodyNodes){
   const d = el("details",{class:"sec"}); if(openByDefault) d.setAttribute("open","");
   d.append(el("summary",{text:title}));
@@ -505,6 +509,7 @@ function fmtSession(s){ try{ s=decodeURIComponent(s);}catch{} const m=s.match(/^
 //
 // tree view
 //
+
 function treeRow(d, childInfo){
   const ov = overlayById.get(d.id);
   const cf = conflictById.get(d.id);
@@ -565,6 +570,7 @@ function renderTree(){
 //
 // graph view
 //
+
 function neighborhood(rootId, depth){
   const adj=new Map();
   for(const e of B.graph.edges){ (adj.get(e.from)??adj.set(e.from,[]).get(e.from)).push(e.to);
@@ -610,6 +616,7 @@ function renderGraph(){
 //
 // timeline
 //
+
 function renderTimeline(){
   const t=B.timeline; const host=$("#tl"); host.innerHTML="";
   if(!t.length){host.append(el("p",{class:"muted",text:"(no commits)"}));return;}
@@ -632,6 +639,7 @@ function renderTimeline(){
 //
 // wiring
 //
+
 for(const b of $$("nav button")) b.onclick=()=>{
   $$("nav button").forEach(x=>x.classList.toggle("active",x===b));
   $$(".tabwrap").forEach(s=>s.classList.toggle("active",s.id===b.dataset.tab));

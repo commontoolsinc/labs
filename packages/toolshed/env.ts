@@ -86,6 +86,7 @@ export const EnvSchema = z.object({
   //
   // (/routes/ai/llm) Environment variables for LLM Providers
   //
+
   CFTS_AI_LLM_ANTHROPIC_API_KEY: z.string().default(""),
   CFTS_AI_LLM_GROQ_API_KEY: z.string().default(""),
   CFTS_AI_LLM_OPENAI_API_KEY: z.string().default(""),
@@ -96,18 +97,18 @@ export const EnvSchema = z.object({
   // when the URL is unreachable (see `loadGatewayModels` in routes/ai/llm/models.ts).
   CFTS_AI_GATEWAY_URL: z.string().default("https://llm.stage.commontools.dev"),
 
-  //
-  // FAL AI API Key
-  //   * /routes/ai/img
-  //   * /routes/ai/voice
-  //
+  /**
+   * FAL AI API Key
+   *   * /routes/ai/img
+   *   * /routes/ai/voice
+   */
   FAL_API_KEY: z.string().default(""),
 
-  //
-  // Jina API Key
-  //   * /routes/agent-tools/web-read
-  //   * /routes/link-preview
-  //
+  /**
+   * Jina API Key
+   *   * /routes/agent-tools/web-read
+   *   * /routes/link-preview
+   */
   JINA_API_KEY: z.string().default(""),
 
   //
@@ -118,6 +119,7 @@ export const EnvSchema = z.object({
   //    holding every space (single-file mode - takes precedence over MEMORY_DIR)
   //  - MEMORY_URL is used by toolshed to connect to memory endpoint
   //
+
   MEMORY_DIR: z.string().default(
     new URL(`./cache/memory/`, Path.toFileUrl(`${Deno.cwd()}/`)).href,
   ),
@@ -134,6 +136,7 @@ export const EnvSchema = z.object({
   // Airtable Integration
   //   * /routes/integrations/airtable-oauth
   //
+
   AIRTABLE_CLIENT_ID: z.string().default(""),
   AIRTABLE_CLIENT_SECRET: z.string().default(""),
 
@@ -141,6 +144,7 @@ export const EnvSchema = z.object({
   // GitHub Integration
   //   * /routes/integrations/github-oauth
   //
+
   GITHUB_CLIENT_ID: z.string().default(""),
   GITHUB_CLIENT_SECRET: z.string().default(""),
 
@@ -148,6 +152,7 @@ export const EnvSchema = z.object({
   // Notion Integration
   //   * /routes/integrations/notion-oauth
   //
+
   NOTION_CLIENT_ID: z.string().default(""),
   NOTION_CLIENT_SECRET: z.string().default(""),
 
@@ -155,6 +160,7 @@ export const EnvSchema = z.object({
   // Linear Integration
   //   * /routes/integrations/linear-oauth
   //
+
   LINEAR_CLIENT_ID: z.string().default(""),
   LINEAR_CLIENT_SECRET: z.string().default(""),
 
@@ -162,6 +168,7 @@ export const EnvSchema = z.object({
   // Spotify Integration
   //   * /routes/integrations/spotify-oauth
   //
+
   SPOTIFY_CLIENT_ID: z.string().default(""),
   SPOTIFY_CLIENT_SECRET: z.string().default(""),
 
@@ -169,6 +176,7 @@ export const EnvSchema = z.object({
   // Discord OAuth Integration
   //   * /routes/integrations/discord-oauth
   //
+
   DISCORD_CLIENT_ID: z.string().default(""),
   DISCORD_CLIENT_SECRET: z.string().default(""),
 
@@ -176,6 +184,7 @@ export const EnvSchema = z.object({
   // Strava Integration
   //   * /routes/integrations/strava-oauth
   //
+
   STRAVA_CLIENT_ID: z.string().default(""),
   STRAVA_CLIENT_SECRET: z.string().default(""),
 
@@ -183,6 +192,7 @@ export const EnvSchema = z.object({
   // Plaid Integration
   //   * /routes/integrations/plaid-oauth
   //
+
   PLAID_CLIENT_ID: z.string().default(""),
   PLAID_SECRET: z.string().default(""),
   PLAID_ENV: z.enum(["sandbox", "development", "production"]).default(
@@ -276,6 +286,7 @@ export const EnvSchema = z.object({
   // Sandbox Service
   //   * /routes/sandbox/exec
   //
+
   SANDBOX_SERVICE_URL: z.string().default(
     "https://sandbox.stage.commontools.dev",
   ),

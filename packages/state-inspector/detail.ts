@@ -324,11 +324,9 @@ function detailFromDoc(
   const spec = importSpecifier(value);
   const named = ctx.nameOf.get(id);
 
-  //
   // context-aware label + role
   // Label comes from the shared index (it already folds in import/context/legacy
   // refinements); role is computed here.
-  //
   let label = ctx.labelOf.get(id)?.label ?? c.label;
   let role: string = c.kind;
   if (spec) {
@@ -344,9 +342,7 @@ function detailFromDoc(
     role = roleFor(c.kind, c.owned);
   }
 
-  //
   // lineage, resolved to target labels
-  //
   const lineage: EntityDetail["lineage"] = {};
   if (c.lineage.argument) {
     lineage.argument = refTo(c.lineage.argument, ctx);
@@ -382,9 +378,7 @@ function detailFromDoc(
     lineage.pattern = ref;
   }
 
-  //
   // outgoing links, resolved
-  //
   const outLinks: LinkRef[] = linksWithPaths(value).map(({ link, at }) => {
     const external = !!link.space && link.space !== ctx.ownDid &&
       link.space !== `did:key:${ctx.ownDid}`;
@@ -399,15 +393,11 @@ function detailFromDoc(
     };
   });
 
-  //
   // module source
-  //
   let code: string | undefined;
   if (isModuleValue(value)) code = value.code;
 
-  //
   // schema / ifc / cfc
-  //
   let schema = doc.schema !== undefined ? annotate(doc.schema) : undefined;
   let schemaKeys = isObjectNotArray(doc.schema)
     ? Object.keys(doc.schema)
