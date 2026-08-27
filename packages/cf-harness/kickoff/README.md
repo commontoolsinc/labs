@@ -84,6 +84,9 @@ Start. The feed then shows, in the order the harness produces them:
 - **`calling <tool>`** as each tool call begins, with its input summary.
 - **`<tool> completed` / `failed`** with the result the model read, truncated.
 - **assistant text** between tool calls.
+- **a nested subagent block** under each `delegate_task` entry, headed by the
+  child's profile and the goal it was given, holding the child's own tool and
+  assistant lines as they happen and closing with the child's status.
 - **the final text** of the turn, in a boxed entry, when it completes.
 
 When the run names a piece, the `assign_slug` result carries a `slug` and a

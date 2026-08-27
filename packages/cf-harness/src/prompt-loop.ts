@@ -90,6 +90,7 @@ import type {
   HarnessToolTranscriptMessage,
   HarnessTranscriptEvent,
   HarnessTranscriptMessage,
+  HarnessTranscriptSubagentContext,
 } from "./contracts/transcript.ts";
 import { HarnessControlError } from "./control-errors.ts";
 import {
@@ -2664,6 +2665,7 @@ export class CfHarnessPromptLoop {
             toolActivity.length + 1,
             (activity) => toolActivity.push(activity),
             (usage) => descendantUsage.push(usage),
+            options.onTranscriptEvent,
           );
           const toolMessage = invokedToolCall.toolMessage;
           transcript.push(toolMessage);
@@ -2883,6 +2885,7 @@ export class CfHarnessPromptLoop {
     sequence = 1,
     recordActivity: (activity: HarnessToolActivity) => void = () => {},
     recordDescendantUsage: (usage: HarnessModelUsage) => void = () => {},
+    onTranscriptEvent?: (event: HarnessTranscriptEvent) => void | Promise<void>,
   ): Promise<InvokedToolCallMessages> {
     // The name the model wrote stays out of the complaint: it is model text,
     // and a tool name carries injected instruction as readily as any other
@@ -3274,6 +3277,7 @@ export class CfHarnessPromptLoop {
           signal,
           sequence,
           recordDescendantUsage,
+          ...(onTranscriptEvent !== undefined ? { onTranscriptEvent } : {}),
         })
         : await this.#invokeBuiltinTool(
           toolId,
@@ -3632,6 +3636,13 @@ export class CfHarnessPromptLoop {
     signal?: AbortSignal;
     sequence: number;
     recordDescendantUsage: (usage: HarnessModelUsage) => void;
+
+    /**
+     * The parent run's transcript handler. The child's own messages reach it
+     * tagged with the subagent they came from, so one activity feed carries
+     * both loops in the order they happened.
+     */
+    onTranscriptEvent?: (event: HarnessTranscriptEvent) => void | Promise<void>;
   }): Promise<{
     output: DelegateTaskToolOutput;
     resultRef: ToolResultRef;
@@ -3818,6 +3829,20 @@ export class CfHarnessPromptLoop {
       allowedSubagentProfiles: [],
       nativeModelToolIds: profileConfig.nativeModelToolIds,
     });
+    const subagentContext: HarnessTranscriptSubagentContext = {
+      parentToolCallId: options.toolCall.id,
+      childRunId,
+      profile: delegateInput.profile,
+      goal: delegateInput.goal,
+    };
+    const forwardChildTranscriptEvent = async (
+      event: HarnessTranscriptEvent,
+    ): Promise<void> => {
+      await options.onTranscriptEvent?.({
+        ...event,
+        subagent: subagentContext,
+      });
+    };
     let subagentStatus: HarnessSubagentResult["status"] = "completed";
     let summary = "";
     let childModelTurns = 0;
@@ -3889,6 +3914,9 @@ export class CfHarnessPromptLoop {
         maxModelTurns,
         promptSlotBinding: options.promptSlotBinding,
         signal: options.signal,
+        ...(options.onTranscriptEvent !== undefined
+          ? { onTranscriptEvent: forwardChildTranscriptEvent }
+          : {}),
       });
       // The child speaks in its own tokens; the parent boundary speaks in
       // addresses. Resolving here is what makes a reference the child

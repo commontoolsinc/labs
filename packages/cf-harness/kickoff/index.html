@@ -164,6 +164,31 @@
         border-radius: 8px;
         padding: 0.85rem 1rem;
       }
+
+      .subagent {
+        border-left: 2px solid var(--accent);
+        margin: 0.5rem 0 0.2rem 0.35rem;
+        padding-left: 0.85rem;
+      }
+
+      .subagent .entry:first-child {
+        border-top: 1px solid var(--line);
+      }
+
+      .subagent-header {
+        color: var(--accent);
+        font-size: 0.72rem;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+
+      .subagent-goal {
+        color: var(--muted);
+        font-size: 0.85rem;
+        margin-top: 0.15rem;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
     </style>
   </head>
   <body>
@@ -227,7 +252,7 @@
           } more characters`
           : text;
 
-      const append = (labelHtml, body, className) => {
+      const append = (labelHtml, body, className, container = feed) => {
         const entry = document.createElement("div");
         entry.className = "entry";
         const label = document.createElement("div");
@@ -242,8 +267,44 @@
           text.textContent = body;
           entry.append(text);
         }
-        feed.append(entry);
+        container.append(entry);
         entry.scrollIntoView({ block: "nearest" });
+        return entry;
+      };
+
+      // The entry a tool call opened, so a subagent's activity can be nested
+      // inside the delegate_task entry that started it, and the block that
+      // holds a running subagent's own entries.
+      const toolEntries = new Map();
+      const subagentBlocks = new Map();
+
+      // A tagged event belongs inside its subagent's block; an untagged one,
+      // and a tagged one whose block was pruned by a resumed stream, belong in
+      // the feed.
+      const containerFor = (event) =>
+        event.subagent === undefined
+          ? feed
+          : subagentBlocks.get(event.subagent.parentToolCallId) ?? feed;
+
+      const openSubagent = (subagent) => {
+        const block = document.createElement("div");
+        block.className = "subagent";
+        const header = document.createElement("div");
+        header.className = "subagent-header";
+        header.innerHTML = `subagent <span class="tool">${
+          escape(subagent.profile)
+        }</span>`;
+        block.append(header);
+        if (typeof subagent.goal === "string" && subagent.goal !== "") {
+          const goal = document.createElement("div");
+          goal.className = "subagent-goal";
+          goal.textContent = truncate(subagent.goal);
+          block.append(goal);
+        }
+        const host = toolEntries.get(subagent.parentToolCallId) ?? feed;
+        host.append(block);
+        subagentBlocks.set(subagent.parentToolCallId, block);
+        block.scrollIntoView({ block: "nearest" });
       };
 
       const escape = (value) =>
@@ -285,15 +346,18 @@
             setState("working");
             running(true);
             break;
-          case "tool_started":
-            append(
+          case "tool_started": {
+            const entry = append(
               `calling <span class="tool">${escape(event.tool.toolId)}</span>`,
               event.tool.inputSummary === undefined
                 ? undefined
                 : truncate(JSON.stringify(event.tool.inputSummary, null, 2)),
               "code",
+              containerFor(event),
             );
+            toolEntries.set(event.tool.toolCallId, entry);
             break;
+          }
           case "tool_completed": {
             const good = event.status === "completed";
             append(
@@ -306,14 +370,31 @@
                 ? undefined
                 : truncate(event.resultSummary),
               "code",
+              containerFor(event),
             );
             if (event.tool.toolId === "assign_slug" && good) {
               showPiece(event.resultSummary);
             }
             break;
           }
+          case "subagent_started":
+            openSubagent(event.subagent);
+            break;
+          case "subagent_completed": {
+            const good = event.status === "completed";
+            append(
+              `subagent <span class="${good ? "ok" : "bad"}">${
+                escape(event.status)
+              }</span>`,
+              undefined,
+              undefined,
+              subagentBlocks.get(event.subagent.parentToolCallId) ?? feed,
+            );
+            subagentBlocks.delete(event.subagent.parentToolCallId);
+            break;
+          }
           case "assistant_completed":
-            append("assistant", event.text);
+            append("assistant", event.text, undefined, containerFor(event));
             break;
           case "turn_completed":
             setState("done");
@@ -371,6 +452,8 @@
         running(true);
         setState("starting");
         feed.replaceChildren();
+        toolEntries.clear();
+        subagentBlocks.clear();
         piece.classList.remove("shown");
         lastSequence = 0;
         const response = await fetch("/api/task", {
