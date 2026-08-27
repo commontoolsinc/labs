@@ -6162,11 +6162,11 @@ supply; OW29/OW32/OW34 closed):
     report at `/Users/berni/labs-worktrees/b1-lifts-report.md`.
     **ROOT CAUSE, 2026-08-27 (the r06/r09 member, from a03/a07's own
     stores + logs; full report
-    `/Users/berni/labs-worktrees/keyless-diagnosis-report.md`, branch
+    `../../history/plans/server-execution-v2/optimize/keyless-diagnosis-2026-08-27.md`, branch
     `claude/server-exec-v2-keyless-diagnosis`): the member is a
     WRONG-BRANCH OPTIMISTIC NAVIGATION, not a stranded whole piece.**
     The client's speculative run of the final-"Create" handler
-    (`notebook.tsx:751`: `shouldNavigate = !usedCreateAnotherNote.get()`
+    (`notebook.tsx:763`: `shouldNavigate = !usedCreateAnotherNote.get()`
     → `navigateTo(newNote)`) read the flag false/undefined while the
     durable value was TRUE (a03: derived seq 24 set true 14:27:55; the
     authoritative consequence seq 57 patched true→false, proving the
@@ -6323,12 +6323,14 @@ supply; OW29/OW32/OW34 closed):
     store-verified COMPLETE with the piece context fully live and
     only the read starved, whereas here the store is missing the
     PROGRAM and no piece ever ran, so there is no live context to
-    starve; NOT r06/r09's stranded whole-piece — that member fires
-    one watcher `pattern-load-error` for a keyless identity while the
-    durable store's pointers are all REAL identities (session-side
-    keylessness), whereas here `pattern-load-error` is 0 in every run
-    and the durable store carries NO `patternIdentity` at all, i.e.
-    keylessness that is DURABLE, the opposite. What it IS is this
+    starve; NOT r06/r09's shape — that member fires
+    one watcher `pattern-load-error` for a keyless identity with
+    patternIdentity STAMPS PRESENT in the durable store (real ones
+    beside keyless ones — the keylessness itself is DURABLE, per the
+    2026-08-27 correction; the older "session-side" reading was
+    wrong), whereas here `pattern-load-error` is 0 in every run and
+    the durable store carries NO `patternIdentity` stamp at all —
+    absent stamps, not keyless ones. What it IS is this
     row's opening sentence verbatim, placeholder included —
     reappearing for a piece the SECOND browser creates MID-SESSION,
     and reached by a DIFFERENT route than the row's recorded one
