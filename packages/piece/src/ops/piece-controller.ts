@@ -4101,6 +4101,8 @@ export class PieceController<T = unknown> {
         // The origin offers exactly what the piece runs, so there is no
         // source transition to make. Recording the outcome is the whole
         // result: it is what turns an unexamined origin into a current one.
+        // `origin` is the active one, which the adopt branch above refused to
+        // proceed without.
         await this.#recordReconciliation(expected, origin!, {
           outcome: "followed",
           offered: candidateRef,
@@ -4132,6 +4134,7 @@ export class PieceController<T = unknown> {
       if (hasPieceSourceCompatibilityIssues(review.issues)) {
         prepared.review = review;
         if (action.kind === "adopt") {
+          // Again the active origin, non-null since the adopt branch above.
           await this.#recordReconciliation(expected, origin!, {
             outcome: "refused",
             reason: "incompatible-schema",

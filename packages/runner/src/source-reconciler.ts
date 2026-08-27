@@ -44,6 +44,7 @@ import {
   getPieceSourceSnapshot,
   type PieceReconciliation,
   type PieceReconciliationOutcome,
+  type PieceReconciliationReason,
   type PieceSourceSnapshot,
   type PieceSourceTransition,
   preparePieceSourceTransitionBaseline,
@@ -99,14 +100,18 @@ export type ReconcileOutcome =
  */
 const RECORDED_OUTCOME: Record<
   ReconcileOutcome,
-  PieceReconciliationOutcome | undefined
+  | { outcome: PieceReconciliationOutcome; reason?: PieceReconciliationReason }
+  | undefined
 > = {
-  current: "followed",
-  migrated: "followed",
-  updated: "followed",
-  unavailable: "unreachable",
-  incompatible: "refused",
-  unsupported: "unsupported",
+  current: { outcome: "followed" },
+  migrated: { outcome: "followed" },
+  updated: { outcome: "followed" },
+  unavailable: { outcome: "unreachable" },
+  // The reason travels with the result rather than being inferred from the
+  // outcome, so a second kind of refusal has to say which one it is instead
+  // of inheriting this one.
+  incompatible: { outcome: "refused", reason: "incompatible-schema" },
+  unsupported: { outcome: "unsupported" },
   detached: undefined,
   unusable: undefined,
 };
@@ -119,11 +124,11 @@ function reconciliationFor(
   const recorded = RECORDED_OUTCOME[outcome];
   if (recorded === undefined) return undefined;
   return {
-    outcome: recorded,
+    outcome: recorded.outcome,
     at: Date.now(),
     origin: state.storedSource,
     ...(state.offered === undefined ? {} : { offered: state.offered }),
-    ...(recorded === "refused" ? { reason: "incompatible-schema" } : {}),
+    ...(recorded.reason === undefined ? {} : { reason: recorded.reason }),
     ...(state.detail === undefined ? {} : { detail: state.detail }),
   };
 }
