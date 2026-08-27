@@ -189,8 +189,12 @@ describe("cf-iframe cell bridge", () => {
       },
     };
     const databaseSchema = { $ref: "cid:fid1:sqlite-schema" };
+    let idleCalls = 0;
     const runtime = {
-      idle: () => Promise.resolve(),
+      idle: () => {
+        idleCalls++;
+        return Promise.resolve();
+      },
       [$conn]: () => ({
         request: (request: { type: RequestType; cell: CellRef }) => {
           requests.push(request);
@@ -270,11 +274,12 @@ describe("cf-iframe cell bridge", () => {
     await expect(
       bridge.resources.database.methods!.query({ sql: "SELECT 1" }),
     ).resolves.toEqual({ rows: [] });
+    expect(idleCalls).toBe(0);
     expect(
       requests.filter(({ type }) => type === RequestType.CellPull).map(
         ({ cell }) => cell.path,
       ),
-    ).toEqual([["database"], ["database"]]);
+    ).toEqual([["database"], ["database"], []]);
     expect(
       requests.filter(({ type, cell }) =>
         type === RequestType.CellResolveAsCell && cell.path.length > 0
@@ -285,6 +290,11 @@ describe("cf-iframe cell bridge", () => {
       })),
     ).toEqual([
       { path: ["command"], scope: "space", schema: undefined },
+      {
+        path: ["database"],
+        scope: "space",
+        schema: undefined,
+      },
       {
         path: ["database"],
         scope: "space",
@@ -399,10 +409,18 @@ describe("cf-iframe cell bridge", () => {
     });
     await reachedIdle.promise;
     expect(sqliteQueries).toBe(0);
+    retargeted = true;
     materialized = true;
     idle.resolve();
 
-    await expect(querying).resolves.toEqual({ rows: [] });
+    await expect(querying).rejects.toThrow(
+      "resolved outside its granted capability",
+    );
+    expect(sqliteQueries).toBe(0);
+    retargeted = false;
+    await expect(
+      bridge.resources.database.methods!.query({ sql: "SELECT 1" }),
+    ).resolves.toEqual({ rows: [] });
     expect(materialized).toBe(true);
     expect(demandedSource).toBeUndefined();
     expect(subscriptions.map(({ path }) => path)).toContainEqual(["database"]);

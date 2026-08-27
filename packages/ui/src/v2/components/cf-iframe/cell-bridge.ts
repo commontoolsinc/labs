@@ -98,6 +98,12 @@ function sqliteInput(value: FabricValue | undefined): {
 
 type SqliteOperationRunner = <T>(operation: () => Promise<T>) => Promise<T>;
 
+function isSqliteAuthorityValue(value: unknown): boolean {
+  return value !== null && typeof value === "object" &&
+    !Array.isArray(value) && Object.hasOwn(value, "id") &&
+    typeof (value as { id?: unknown }).id === "string";
+}
+
 async function demandSqliteSource<T>(
   source: CellHandle<unknown>,
   authority: CellHandle<unknown>,
@@ -113,12 +119,24 @@ async function demandSqliteSource<T>(
       );
     }
 
-    // Source pull waits for reactive work, but a scoped factory's handle write
-    // can still be committing. Cross the commit-aware barrier before the
-    // backend operation pulls the fixed authority. Demand stays live for this
-    // entire causal chain, so the lazy producer cannot be collected between
-    // materialization and the backend operation.
-    await source.runtime().idle();
+    const readiness = authority.asSchema<unknown>({
+      type: "object",
+      additionalProperties: true,
+    });
+    if (!isSqliteAuthorityValue(await readiness.pull())) {
+      // Source pull waits for reactive work, but a scoped factory's first
+      // handle write can still be committing. Cross the commit-aware barrier
+      // only for that missing first use; a ready database must not wait for
+      // unrelated worker activity. Demand stays live until the backend
+      // operation completes.
+      await source.runtime().idle();
+    }
+    const latest = await source.resolveAsCell();
+    if (!latest.equals(authority)) {
+      throw new TypeError(
+        "SQLite source resolved outside its granted capability.",
+      );
+    }
     return await operation();
   } finally {
     cancel();
