@@ -157,7 +157,8 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
     properties: {
       sourceText: {
         type: "string",
-        description: "Pattern source (TypeScript/TSX). At most 256 KiB.",
+        description:
+          "Pattern source (TypeScript/TSX). At most 256 KiB. The pattern factory must return its result object literal directly (computed() wrapping individual fields at most); a factory that returns a computed() or other derived wrapper as the whole result creates a piece no other runtime can load.",
       },
       patternId: {
         type: "string",

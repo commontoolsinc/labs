@@ -1147,6 +1147,7 @@ const buildSubagentSystemPrompt = (
           ]
           : []),
         "Pass pattern source inline as the run_pattern `sourceText` argument. You have no write_file or edit_file; do not try to author patterns as workspace files.",
+        "The pattern factory must return its result object literal directly — `return { count, $UI: <div>…</div> }` — with computed() wrapping individual derived fields at most. Never return a computed(), lift, or other derived wrapper as the whole result: the piece it creates exists only in this session's runtime, and the browser link handed to the user will fail to load it.",
         "You own the write, compile-error, fix loop. A `compile-error` result is normal iteration material: read the diagnostic, correct the source, and call run_pattern again. Do not hand a compile error back to the parent as the answer.",
         "Use read_file and bash to read existing patterns and pattern documentation in the workspace when the compiler or the preloaded skills leave a question open.",
         "Every reference in your task is an address, not a value. Wire it into the pattern as a run_pattern `inputs` entry so the pattern reads it live; never try to read, print, or transcribe the data behind it yourself.",
