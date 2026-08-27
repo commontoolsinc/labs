@@ -247,7 +247,7 @@ export const EnvSchema = z.object({
   // background service operator identity).
   MEMORY_SERVICE_DIDS: z.string().default(""),
 
-  // ===========================================================================
+  //
   // State-inspector remote dump endpoint (`cf inspect --remote`).
   // Exposes raw, read-only space SQLite snapshots over HTTP for offline
   // autopsy. This is a STAGING-ONLY debugging tool: it hard-refuses to mount
@@ -256,7 +256,8 @@ export const EnvSchema = z.object({
   // entire contents of a space, so access is gated by CF1 first-party signature
   // auth + a DID allowlist, and every dump is audit-logged. See
   // routes/storage/memory/memory-dump.index.ts.
-  // ===========================================================================
+  //
+
   // Master switch. Unset/"false" => the endpoint 404s as if it did not exist.
   // Mounting ALSO requires ENV to be a recognized non-production value
   // (development | test | staging) — unknown/alias envs fail closed. See
