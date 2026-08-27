@@ -170,11 +170,13 @@ export class CellHandle<T = unknown> {
     // about: optimistic that the write lands, and equally that the value is
     // one the encoding can carry. So a value the encode refuses does become
     // this handle's cached value and does reach every subscriber before the
-    // send fails. Accepted deliberately -- what is left in that set is a value
-    // outside `ClientCellValue`, which `T` is too loose to refuse, or one
-    // forged onto a fabric prototype -- and the failure still reaches
-    // the caller, because `RuntimeConnection.request()` is not `async` and the
-    // encode's throw leaves before the `.catch()` below can absorb it.
+    // send fails. Accepted deliberately: what is left in that set is a value
+    // TypeScript calls a `FabricValue` and the value model does not -- a
+    // unique symbol, an object forged onto a fabric prototype -- and telling
+    // those apart before the write means validating the whole value on every
+    // write. The failure still reaches the caller, because
+    // `RuntimeConnection.request()` is not `async` and the encode's throw
+    // leaves before the `.catch()` below can absorb it.
     //
     // `T` is unconstrained, so this says what the write path requires rather
     // than what the class guarantees. Constraining `T` to `ClientCellValue` is
