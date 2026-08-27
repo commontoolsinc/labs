@@ -40,6 +40,7 @@ import {
   groupDiscoveredSpaces,
   type GroupedSpace,
   hotEntities,
+  inspectOperationFields,
   isCompleteScan,
   isEntityKind,
   listCommits,
@@ -724,6 +725,67 @@ export const inspect = new Command()
               : "table present, empty"
           }`,
         );
+      });
+    } finally {
+      s.close();
+    }
+  })
+  /* inspect operations */
+  .command(
+    "operations <space:string> [entity:string]",
+    "Collaborative field epochs, cursors, histories, and checkpoint health.",
+  )
+  .option("--branch <branch:string>", "Branch (default: '').")
+  .option("--scope <scope:string>", "Exact resolved scope key.")
+  .option("--limit <limit:integer>", "Maximum fields (default 50).")
+  .option(
+    "--history-limit <limit:integer>",
+    "Maximum submissions and integrated operations per field (default 100).",
+  )
+  .option(
+    "--submission-after-seq <seq:integer>",
+    "Return submitted history after this commit sequence.",
+  )
+  .action(async (options, space, entity) => {
+    const s = await openByToken(space, options);
+    try {
+      const report = inspectOperationFields(s, {
+        id: entity,
+        branch: options.branch,
+        scope: options.scope,
+        fieldLimit: options.limit,
+        historyLimit: options.historyLimit,
+        submissionAfterSeq: options.submissionAfterSeq,
+      });
+      out(!!options.json, report, () => {
+        if (!report.available) {
+          console.log("operation tables are absent");
+          return;
+        }
+        if (report.fields.length === 0) {
+          console.log("no collaborative operation fields");
+          return;
+        }
+        for (const field of report.fields) {
+          console.log(
+            `${field.active ? "active" : "inactive"}\t${field.address.id}` +
+              `\t${field.address.scope}\t${field.address.pathPointer}` +
+              `\t${field.codec}` +
+              `\t${field.cursor.epoch}:${field.cursor.version}` +
+              `\tretained=${field.retainedFrom.version}` +
+              `\t${field.consistency.healthy ? "healthy" : "INCONSISTENT"}`,
+          );
+          console.log(
+            `  submissions=${field.submissions.length}` +
+              `${field.pagination.submissionsTruncated ? "+" : ""}` +
+              ` integrated=${field.integrated.length}` +
+              `${field.pagination.integratedTruncated ? "+" : ""}` +
+              ` checkpoints=${field.checkpoints.length}`,
+          );
+        }
+        if (report.fieldsTruncated) {
+          console.log(`field list truncated at ${report.fieldLimit}`);
+        }
       });
     } finally {
       s.close();

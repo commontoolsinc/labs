@@ -225,7 +225,21 @@ The strict-only delta is:
   their audience a person rather than the container and so narrower than the
   set of principals a space grants reader roles to; and the ungrantable
   read-failed marker sits outside every ceiling, the residency clause
-  included, so a poisoned measurement never proves fit. Implementation in
+  included, so a poisoned measurement never proves fit. The reserved policy
+  namespaces are outside the check too: the durable policy manifests
+  (`of:cfc-policy-manifest:<digest>`) and the release grants and single-use
+  consumption receipts (`grant:cfc:<digest>`) hold policy state the runtime
+  persists through its own privileged writers, gated at the transaction write
+  chokepoint, so they are not value-write targets any of the write-side checks
+  measure. The spec settles this rather than leaving it to implementation
+  taste. A grant record is "a content-addressed record at a reserved location
+  in the granting owner's space, written only by a trusted policy writer",
+  whose "stored label never changes" (spec §4.3.5, and §8.12.7 route 2a).
+  Policy manifests live in "a separate immutable store" and are "public
+  artifacts", and a transaction MUST NOT persist a module-policy reference
+  unless that same transaction create-only installs the byte-verified manifest
+  (spec §4.4.2) — which the writer-fit reject would otherwise make impossible
+  at this level. Implementation in
   [prepare.ts](../../packages/runner/src/cfc/prepare.ts) (`prepareBoundaryCommit`
   flow-persist stamping), asserted both ways in
   [cfc-writer-fit.test.ts](../../packages/runner/test/cfc-writer-fit.test.ts).

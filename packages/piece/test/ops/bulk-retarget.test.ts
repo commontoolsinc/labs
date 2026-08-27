@@ -14,7 +14,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { createSession, Identity } from "@commonfabric/identity";
-import { Runtime } from "@commonfabric/runner";
+import { Runtime, setPatternSource } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import {
@@ -227,6 +227,57 @@ describe("bulk-retarget", () => {
     };
   }
 
+  /**
+   * Sessions in which another writer changes `victim`'s ORIGIN — and only
+   * its origin — between the engine's classifying read and the write step's
+   * own. The pattern reference is untouched, so the row still classifies as
+   * outstanding and the write still commits; what moves is the value the
+   * write detaches, which is the reading the report has to take from the
+   * write rather than from the plan.
+   */
+  function changeOriginBeforeWrite(
+    victim: string,
+    origin: string,
+  ): ApplySessions {
+    let sessionIndex = 0;
+    return {
+      open: async () => {
+        sessionIndex += 1;
+        const applySession = sessionIndex >= 2;
+        let reads = 0;
+        const pieces = await sessions.open();
+        return new Proxy(pieces, {
+          get(target, prop, receiver) {
+            if (prop === "get") {
+              return async (id: string, run?: boolean) => {
+                if (id === victim && applySession) {
+                  reads += 1;
+                  // The engine reads once to classify the row, and the write
+                  // step reads again to write it. Landing on the second is
+                  // landing inside the window the write itself closes.
+                  if (reads === 2) {
+                    const piece = await target.get(id, false);
+                    const { error } = await pieces.runtime.editWithRetry(
+                      (tx) => {
+                        setPatternSource(piece.getCell(), tx, origin);
+                      },
+                    );
+                    if (error !== undefined) throw error;
+                    await pieces.synced();
+                  }
+                }
+                return target.get(id, run);
+              };
+            }
+            const value = Reflect.get(target, prop, receiver);
+            return typeof value === "function" ? value.bind(target) : value;
+          },
+        }) as PiecesController;
+      },
+      close: (pieces) => sessions.close(pieces),
+    };
+  }
+
   it("classifies every row from one preflight read on a dry run", async () => {
     const { plan } = await seed(2);
     const before = { opens, closes };
@@ -275,6 +326,119 @@ describe("bulk-retarget", () => {
     expect(pin?.patternIdentity).toBe(
       (plan.rows[0].op as RetargetOp).patternIdentity,
     );
+  });
+
+  it("carries the plan's origin onto every report row, and the write detaches it", async () => {
+    const { plan, ids } = await seed(1);
+    const origin = "https://origins.test/member.tsx";
+    const stamper = await sessions.open();
+    const target = await stamper.get(ids[0], false);
+    const { error } = await stamper.runtime.editWithRetry((tx) => {
+      setPatternSource(target.getCell(), tx, origin);
+    });
+    if (error !== undefined) throw error;
+    await stamper.synced();
+    await sessions.close(stamper);
+    const following: PiecePlan = {
+      header: plan.header,
+      rows: [{
+        ...plan.rows[0],
+        expect: { ...plan.rows[0].expect, origin },
+      }],
+    };
+
+    const dry = await retargetPieces(sessions, { plan: following });
+    const applied = await retargetPieces(sessions, {
+      plan: following,
+      apply: true,
+    });
+
+    // The dry run has no write to report, so it carries the plan's record
+    // and nothing about a detach — that being the only moment the detach is
+    // still a decision.
+    expect(dry.rows[0].verdict).toBe("outstanding");
+    expect(dry.rows[0].origin).toBe(origin);
+    expect(dry.rows[0].detachedOrigin).toBeUndefined();
+    // The applied row carries both, and here they agree: nothing moved the
+    // origin between the survey and the write.
+    expect(applied.rows[0].verdict).toBe("applied");
+    expect(applied.rows[0].origin).toBe(origin);
+    expect(applied.rows[0].detachedOrigin).toBe(origin);
+    // What the report records is a real detach: the piece follows nothing
+    // afterwards, and re-attaching it is by hand from the string the row
+    // carried.
+    expect((await pinOf(ids[0]))?.origin).toBeUndefined();
+  });
+
+  it("reports the origin the write detached, not the one the plan recorded", async () => {
+    const { plan, ids } = await seed(1);
+    const recorded = "https://origins.test/recorded.tsx";
+    const live = "https://origins.test/live.tsx";
+    const stamper = await sessions.open();
+    const target = await stamper.get(ids[0], false);
+    const { error } = await stamper.runtime.editWithRetry((tx) => {
+      setPatternSource(target.getCell(), tx, recorded);
+    });
+    if (error !== undefined) throw error;
+    await stamper.synced();
+    await sessions.close(stamper);
+    const following: PiecePlan = {
+      header: plan.header,
+      rows: [{
+        ...plan.rows[0],
+        expect: { ...plan.rows[0].expect, origin: recorded },
+      }],
+    };
+
+    const report = await retargetPieces(
+      changeOriginBeforeWrite(ids[0], live),
+      { plan: following, apply: true },
+    );
+
+    // Only the reference is a precondition, so moving the origin alone does
+    // not refuse the row — the write lands and detaches what it found.
+    expect(report.rows[0].verdict).toBe("applied");
+    expect(report.rows[0].detachedOrigin).toBe(live);
+    // The plan's reading survives beside it rather than being overwritten:
+    // an operator whose plan said one thing while the run did another is
+    // owed both, the disagreement being what tells them the plan went stale.
+    expect(report.rows[0].origin).toBe(recorded);
+    expect((await pinOf(ids[0]))?.origin).toBeUndefined();
+  });
+
+  it("reports no detached origin when the write found the piece already detached", async () => {
+    const { plan, ids } = await seed(1);
+    const recorded = "https://origins.test/recorded.tsx";
+    const stamper = await sessions.open();
+    const target = await stamper.get(ids[0], false);
+    const { error } = await stamper.runtime.editWithRetry((tx) => {
+      setPatternSource(target.getCell(), tx, recorded);
+    });
+    if (error !== undefined) throw error;
+    await stamper.synced();
+    // Somebody detaches the piece by hand between the survey and the run.
+    await target.changeSource({ kind: "detach" });
+    await stamper.synced();
+    await sessions.close(stamper);
+    const following: PiecePlan = {
+      header: plan.header,
+      rows: [{
+        ...plan.rows[0],
+        expect: { ...plan.rows[0].expect, origin: recorded },
+      }],
+    };
+
+    const report = await retargetPieces(sessions, {
+      plan: following,
+      apply: true,
+    });
+
+    // The row's write detached nothing, and reporting the recorded origin as
+    // detached would send an operator re-attaching an origin this run never
+    // touched. The plan's reading stays, labelled as the plan's.
+    expect(report.rows[0].verdict).toBe("applied");
+    expect(report.rows[0].detachedOrigin).toBeUndefined();
+    expect(report.rows[0].origin).toBe(recorded);
   });
 
   it("resumes as a re-invocation: landed rows are not rewritten", async () => {

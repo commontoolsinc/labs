@@ -151,6 +151,11 @@ is not optional.
   whole-store fingerprint can tell you titles and bodies survived.
 - **`removed` above zero** — durable content was destroyed. Stop and
   investigate before anything else.
+- **`generated N reclassified`** — not a removal, and not an alarm. The
+  baseline hashed cells no pristine manifest listed, and the migrated pieces
+  now call them generated, so they leave the compared set without leaving the
+  store. They are subtracted from `removed` and reported here so the change is
+  visible rather than silent.
 - **`content unchanged`** — nothing moved at all. Correct for a clone that has
   not been migrated yet; suspicious after one that has.
 - **`baseline CORRUPTED`** — the pristine snapshot no longer matches the

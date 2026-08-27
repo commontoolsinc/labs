@@ -114,6 +114,31 @@ describe("Runtime.prepareTxForCommit()", () => {
     expect(() => runtime.prepareTxForCommit(tx)).not.toThrow();
   });
 
+  // The guard at a caller rather than at the chokepoint. `editWithRetry`
+  // prepares outside the block that turns a throwing action into a result, so
+  // a throw out of prepare escapes it synchronously and defeats the `Result`
+  // it promises. The abort cases in the `editWithRetry` suite abort without
+  // reading or writing first, which leaves the probe nothing to walk.
+  it("returns the abort as `editWithRetry`'s result when the action read before aborting", async () => {
+    const runtime = makeRuntime("persist");
+    const seed = runtime.edit();
+    const cell = runtime.getCell<{ note: string }>(
+      space,
+      "prepare-edit-with-retry",
+      undefined,
+      seed,
+    );
+    cell.set({ note: "seeded" });
+    expect((await seed.commit()).ok).toBeDefined();
+
+    const { error } = await runtime.editWithRetry((tx) => {
+      cell.withTx(tx).get();
+      tx.abort("done with this one");
+    }, 0);
+
+    expect(error?.name).toBe("StorageTransactionAborted");
+  });
+
   it("prepares a ready transaction whose write is CFC-relevant", async () => {
     const runtime = makeRuntime("persist");
     const tx = runtime.edit();

@@ -777,6 +777,13 @@ const readOverlapsWrite = (
 
 const touchedWritesForOperation = (operation: Operation): TouchedWrite[] => {
   if (operation.op === "sqlite") return []; // no entity writes
+  if (operation.op === "release-op-field") return [];
+  if (operation.op === "apply-op") {
+    return [{
+      id: operation.id as URI,
+      paths: [["value", ...operation.path]],
+    }];
+  }
   if (operation.op !== "patch") {
     return [{ id: operation.id as URI, paths: [[]] }];
   }
@@ -817,6 +824,11 @@ const applyOperation = (
       isEntityDocumentValue(operation.value)
         ? operation.value.value as RootValue
         : operation.value as RootValue,
+    );
+  }
+  if (operation.op !== "patch") {
+    throw new Error(
+      `local stacked-commit model cannot apply ${operation.op}`,
     );
   }
   const next = applyPatch(

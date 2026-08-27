@@ -467,6 +467,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     opts: {
       policyEvaluation?: "off" | "observe" | "enforce";
       enforcement?: "enforce-explicit" | "observe" | "disabled";
+      flowLabels?: "off" | "observe" | "persist";
       storageManager?: ReturnType<typeof StorageManager.emulate>;
     },
     body: (
@@ -480,6 +481,7 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
       apiUrl: new URL("https://example.com"),
       storageManager,
       cfcEnforcementMode: opts.enforcement ?? "enforce-explicit",
+      cfcFlowLabels: opts.flowLabels ?? "off",
       cfcSinkMaxConfidentiality: { fetchJson: [userBob] },
       cfcPolicyRecords: [{ id: "share-policy", rules: [sinkShareRule] }],
       cfcPolicyEvaluation: opts.policyEvaluation ?? "enforce",
@@ -693,6 +695,56 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
         expect(String((result.error as Error).message).toLowerCase())
           .toContain("cfc");
       });
+    });
+
+    // Under a non-rejecting mode the forged write reaches storage, so the
+    // flow stage must still measure it. The reserved namespaces are held out
+    // of value-write targeting because the runtime persists policy state
+    // through them; a document some transaction forged is not that, and the
+    // label it carries is what ties a later read of the stash back to what
+    // the forging transaction observed.
+    it("labels an unprivileged write to a grant document under observe", async () => {
+      await withRuntime(
+        { enforcement: "observe", flowLabels: "persist" },
+        async (runtime, storageManager) => {
+          await seedLabeledCell(runtime, "forged-stash-source", {
+            confidentiality: ["never-fits"],
+          });
+
+          const tx = runtime.edit();
+          const source = runtime.getCell(
+            signer.did(),
+            "forged-stash-source",
+            SECRET_SCHEMA.schema,
+            tx,
+          );
+          expect(source.key("secret").get()).toBe("rosebud");
+          const forgedId = `${CFC_GRANT_ID_PREFIX}forged-stash`;
+          tx.writeOrThrow({
+            space: signer.did(),
+            id: forgedId as URI,
+            type: "application/json",
+            path: ["value"],
+          }, { stashed: source.key("secret").get() });
+          tx.prepareCfc();
+          expect((await tx.commit()).ok).toBeDefined();
+
+          const replica = storageManager.open(signer.did())
+            .replica as unknown as {
+              getDocument(id: string): {
+                cfc?: { labelMap?: { entries: { label: IFCLabel }[] } };
+              } | undefined;
+            };
+          const entries =
+            replica.getDocument(forgedId)?.cfc?.labelMap?.entries ?? [];
+          expect(entries.length).toBeGreaterThan(0);
+          expect(
+            entries.every((entry) =>
+              (entry.label.confidentiality ?? []).includes("never-fits")
+            ),
+          ).toBe(true);
+        },
+      );
     });
 
     // The mergeable-op path (push/increment/…) cannot bypass the gate: the

@@ -4,13 +4,18 @@ import type {
   SchemaPathSelector,
 } from "@commonfabric/api";
 import type {
+  ApplyOpOperation,
+  ApplyOpResolution,
   ClientCommit,
   CommitClass,
   CommitPrecondition,
   EntityDocument,
   EntityIdListOptions,
   EntityIdListResult,
+  OperationFieldQuery,
+  OperationFieldSnapshot,
   PatchOp,
+  ReleaseOpFieldOperation,
   ScopeKey,
   ScopeKeyIdentity,
   SqliteDbRef,
@@ -20,6 +25,7 @@ import type {
   SqliteRegisterDiskSourceResult,
 } from "@commonfabric/memory/v2";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
+import type { Cancel } from "../cancel.ts";
 import type { EntityId } from "../create-ref.ts";
 import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import {
@@ -410,6 +416,16 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
   loadsSettled?(keys: readonly string[]): Promise<void>;
 
   /**
+   * THE SESSION REMOUNT's trigger: an admitted commit touched `space`'s ACL
+   * document. A space session this manager holds — revoked or denied by an
+   * EARLIER ACL verdict — is dropped so the next load re-opens it, because
+   * the ACL is the only input that decision has. Never widens authority: a
+   * genuine de-authorization is refused again at `session.open`. Implemented
+   * by the v2 StorageManager; the serving loop's host is its only caller.
+   */
+  noteSpaceAclChanged?(space: MemorySpace): void;
+
+  /**
    * Load cell from storage. Will also subscribe to new changes.
    *
    * @returns Promise that resolves when the cell sync is complete.
@@ -559,6 +575,34 @@ export interface IStorageProvider {
     path: string,
   ): Promise<SqliteRegisterDiskSourceResult>;
 }
+
+export interface IOperationStorageCapability {
+  operationCodecs(): Promise<readonly string[]>;
+
+  queryOperationField(
+    query: Omit<OperationFieldQuery, "principal" | "sessionId">,
+  ): Promise<OperationFieldSnapshot>;
+
+  applyOperation(operation: ApplyOpOperation): Promise<ApplyOpResolution>;
+
+  releaseOperationField(operation: ReleaseOpFieldOperation): Promise<void>;
+
+  subscribeOperationField(
+    query: Omit<OperationFieldQuery, "principal" | "sessionId">,
+    callback: (snapshot: OperationFieldSnapshot) => void,
+  ): Promise<Cancel>;
+}
+
+export const hasOperationStorageCapability = (
+  value: unknown,
+): value is IOperationStorageCapability => {
+  const candidate = value as Partial<IOperationStorageCapability>;
+  return typeof candidate.operationCodecs === "function" &&
+    typeof candidate.queryOperationField === "function" &&
+    typeof candidate.applyOperation === "function" &&
+    typeof candidate.releaseOperationField === "function" &&
+    typeof candidate.subscribeOperationField === "function";
+};
 
 /**
  * Extension of {@link IStorageManager} which is supposed to merge into

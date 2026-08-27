@@ -94,6 +94,38 @@ export interface ApplyRow {
    */
   warning?: string;
   /**
+   * The origin the plan recorded for this piece, absent when the plan
+   * recorded none. A survey's reading, carried verbatim: it says what the
+   * piece followed when the plan was made and nothing about this run.
+   * {@link ApplyRow.detachedOrigin} carries what a write actually detached,
+   * and that is the one to re-attach from.
+   *
+   * A field of its own rather than a `warning`, which is a fact about a
+   * write that landed and so cannot reach the dry run — the one moment the
+   * operator can still decide what to do about a detach. See
+   * [docs/features/piece-bulk-operations.md](../../../../docs/features/piece-bulk-operations.md).
+   */
+  origin?: string;
+  /**
+   * The origin this run's write actually detached, present only on a row
+   * this run wrote and only when that write detached one.
+   *
+   * Separate from {@link ApplyRow.origin} because the two can differ and the
+   * difference is the operator's to see. Only the pattern reference is a
+   * precondition of a retarget, so a piece whose origin alone moved since
+   * the survey is still written — and detached off the origin it holds NOW,
+   * not the one the plan recorded. Reporting the recorded one would send an
+   * operator re-attaching by hand to the wrong origin, which is worse than
+   * recording nothing, a wrong record being confidently actionable.
+   *
+   * Substituting it silently would be a smaller lie and still a lie: a plan
+   * that has gone stale is itself worth knowing, so both values ride the
+   * row and the report names both when they disagree. Absent on a row where
+   * the write detached nothing, which — beside a recorded `origin` — is
+   * exactly the case a substitution would have hidden.
+   */
+  detachedOrigin?: string;
+  /**
    * The row's wall-clock cost in milliseconds, present on every row an
    * apply session began work on: a row reclassified as landed, moved, or
    * refused cost the reads and resolution that reclassified it, and reports
@@ -145,6 +177,14 @@ export type ReferenceOp = Extract<PieceOp, { patternIdentity: string }>;
 export interface WorkRow<Op extends ReferenceOp> {
   piece: string;
   phase?: string;
+  /**
+   * The origin the plan recorded for this piece; see {@link ApplyRow.origin}.
+   * Beside `expect` rather than inside it: `expect` is the precondition a
+   * write is proved against, and the origin is neither proved nor enforced —
+   * a piece that left its origin since the survey is not thereby a row to
+   * refuse.
+   */
+  origin?: string;
   expect: { patternIdentity: string; symbol: string };
   op: Op;
 }
@@ -158,6 +198,13 @@ export interface WriteOutcome {
   refused?: string;
   /** What the runtime warned about a write that landed anyway. */
   warning?: string;
+  /**
+   * The origin the write detached, when it detached one. The write step is
+   * the only place this can be observed honestly — the detach happens
+   * there, and a value read anywhere earlier is a value the write may have
+   * moved off. See {@link ApplyRow.detachedOrigin}.
+   */
+  detachedOrigin?: string;
 }
 
 /**
@@ -252,6 +299,27 @@ function classify<Op extends ReferenceOp>(
 }
 
 /**
+ * The fields a report row takes from its plan row whatever its verdict: the
+ * phase label the plan stamped, and the origin the plan recorded. Both
+ * describe the row rather than its outcome, so every report of a row spreads
+ * these rather than assembling its own — a row reported down one path and
+ * not another is how one of them would go missing from a stop.
+ *
+ * What the run OBSERVED does not belong here and is added by the path that
+ * observed it: `detachedOrigin` exists only where a write happened, and
+ * carrying it from the plan row is what made the plan's stale reading
+ * readable as the run's own.
+ */
+function carriedFields<Op extends ReferenceOp>(
+  row: WorkRow<Op>,
+): { phase?: string; origin?: string } {
+  return {
+    ...(row.phase === undefined ? {} : { phase: row.phase }),
+    ...(row.origin === undefined ? {} : { origin: row.origin }),
+  };
+}
+
+/**
  * Release a session, handing back what a failure broke instead of throwing
  * it. Once a run holds outcomes worth reporting, a session boundary that
  * fails must not throw them away — the rows a partial migration produced
@@ -315,6 +383,9 @@ export async function applyPlan<Op extends ReferenceOp>(
       ? [{
         piece: row.piece,
         ...(row.phase === undefined ? {} : { phase: row.phase }),
+        ...(row.expect.origin === undefined
+          ? {}
+          : { origin: row.expect.origin }),
         expect: {
           patternIdentity: row.expect.patternIdentity,
           symbol: row.expect.symbol,
@@ -391,7 +462,7 @@ export async function applyPlan<Op extends ReferenceOp>(
       // pays its retained load once, not once per row.
       const retainedByIdentity = new Map<string, boolean>();
       for (const row of work) {
-        const phase = row.phase === undefined ? {} : { phase: row.phase };
+        const carried = carriedFields(row);
         try {
           const pin = await readPiecePin(pieces, row.piece, retainedByIdentity);
           const standing = classify(pin, row);
@@ -399,7 +470,7 @@ export async function applyPlan<Op extends ReferenceOp>(
             preflight.set(row.piece, {
               blocked: {
                 piece: row.piece,
-                ...phase,
+                ...carried,
                 verdict: "moved-elsewhere",
                 problem: pin === undefined
                   ? "The piece carries no pattern identity to compare."
@@ -416,7 +487,7 @@ export async function applyPlan<Op extends ReferenceOp>(
           preflight.set(row.piece, {
             blocked: {
               piece: row.piece,
-              ...phase,
+              ...carried,
               verdict: "failed",
               problem:
                 (error instanceof Error ? error.message : String(error)) +
@@ -441,13 +512,13 @@ export async function applyPlan<Op extends ReferenceOp>(
   }
   if (startBlocked || options.apply !== true) {
     for (const row of work) {
-      const phase = row.phase === undefined ? {} : { phase: row.phase };
+      const carried = carriedFields(row);
       // Every work row was classified above — the loop writes one of the
       // three outcomes for each, and duplicates cannot collapse two rows
       // onto one key, the codec having refused them.
       const standing = preflight.get(row.piece)!;
       if (standing === "landed" || standing === "outstanding") {
-        report({ piece: row.piece, ...phase, verdict: standing });
+        report({ piece: row.piece, ...carried, verdict: standing });
       } else {
         report(standing.blocked);
       }
@@ -477,8 +548,8 @@ export async function applyPlan<Op extends ReferenceOp>(
     const group = work.slice(start, start + groupSize);
     if (stopped) {
       for (const row of group) {
-        const phase = row.phase === undefined ? {} : { phase: row.phase };
-        report({ piece: row.piece, ...phase, verdict: "unattempted" });
+        const carried = carriedFields(row);
+        report({ piece: row.piece, ...carried, verdict: "unattempted" });
       }
       continue;
     }
@@ -495,8 +566,8 @@ export async function applyPlan<Op extends ReferenceOp>(
         "; this group's session could not be opened, so its pieces were " +
         "not attempted.";
       for (const row of group) {
-        const phase = row.phase === undefined ? {} : { phase: row.phase };
-        report({ piece: row.piece, ...phase, verdict: "unattempted" });
+        const carried = carriedFields(row);
+        report({ piece: row.piece, ...carried, verdict: "unattempted" });
       }
       stopped = true;
       continue;
@@ -511,8 +582,8 @@ export async function applyPlan<Op extends ReferenceOp>(
       stopped = true;
       try {
         for (const row of group) {
-          const phase = row.phase === undefined ? {} : { phase: row.phase };
-          report({ piece: row.piece, ...phase, verdict: "unattempted" });
+          const carried = carriedFields(row);
+          report({ piece: row.piece, ...carried, verdict: "unattempted" });
         }
       } finally {
         // This session opened, so it is released like any other — in a
@@ -532,9 +603,9 @@ export async function applyPlan<Op extends ReferenceOp>(
     const retainedByIdentity = new Map<string, boolean>();
     try {
       for (const row of group) {
-        const phase = row.phase === undefined ? {} : { phase: row.phase };
+        const carried = carriedFields(row);
         if (stopped) {
-          report({ piece: row.piece, ...phase, verdict: "unattempted" });
+          report({ piece: row.piece, ...carried, verdict: "unattempted" });
           continue;
         }
         const startedAt = now();
@@ -551,7 +622,7 @@ export async function applyPlan<Op extends ReferenceOp>(
           if (standing === "landed") {
             report({
               piece: row.piece,
-              ...phase,
+              ...carried,
               verdict: "landed",
               elapsedMs: now() - startedAt,
             });
@@ -560,7 +631,7 @@ export async function applyPlan<Op extends ReferenceOp>(
           if (standing === "moved-elsewhere") {
             report({
               piece: row.piece,
-              ...phase,
+              ...carried,
               verdict: "moved-elsewhere",
               problem: "The piece left its recorded reference after " +
                 "preflight; something other than this plan moved it.",
@@ -573,7 +644,7 @@ export async function applyPlan<Op extends ReferenceOp>(
           if (outcome?.refused !== undefined) {
             report({
               piece: row.piece,
-              ...phase,
+              ...carried,
               verdict: "refused",
               problem: outcome.refused,
               elapsedMs: now() - startedAt,
@@ -584,8 +655,15 @@ export async function applyPlan<Op extends ReferenceOp>(
           applied += 1;
           report({
             piece: row.piece,
-            ...phase,
+            ...carried,
             verdict: "applied",
+            // The write's own observation, beside the plan's record rather
+            // than over it: this row is the only one that has both, and a
+            // disagreement between them is what tells the operator their
+            // plan went stale before the run reached it.
+            ...(outcome?.detachedOrigin === undefined
+              ? {}
+              : { detachedOrigin: outcome.detachedOrigin }),
             ...(outcome?.warning === undefined
               ? {}
               : { warning: outcome.warning }),
@@ -623,7 +701,7 @@ export async function applyPlan<Op extends ReferenceOp>(
           }
           report({
             piece: row.piece,
-            ...phase,
+            ...carried,
             verdict: "failed",
             problem: problem + state,
             elapsedMs: now() - startedAt,

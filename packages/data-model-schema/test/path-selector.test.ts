@@ -4,7 +4,11 @@ import { expect } from "@std/expect";
 import type { JSONSchemaObj, SchemaPathSelector } from "@commonfabric/api";
 
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import { internPathSelector } from "@/path-selector.ts";
+import {
+  DEFAULT_SELECTOR,
+  internPathSelector,
+  REJECTING_SELECTOR,
+} from "@/path-selector.ts";
 import { internSchema, isInternedSchema } from "@/schema-intern.ts";
 
 describe("path-selector", () => {
@@ -265,5 +269,27 @@ describe("path-selector", () => {
       expect(Object.isFrozen(dup.path)).toBe(true);
       expect(dup.schema).toBe(canonical.schema);
     });
+  });
+
+  describe("the canonical selectors", () => {
+    // Each constant is interned when the module loads, so it holds the cache
+    // slot for its content before any caller can build an equivalent. The
+    // assertion is that such an equivalent collapses onto the constant rather
+    // than becoming a second wrapper for the same selector.
+    //
+    // The equivalents are built here rather than reusing the constants,
+    // because handing a constant back to `internPathSelector()` would let it
+    // claim the slot on the spot and pass whether or not the module seeded
+    // anything.
+    for (
+      const [name, constant, path, schema] of [
+        ["REJECTING_SELECTOR", REJECTING_SELECTOR, [], false],
+        ["DEFAULT_SELECTOR", DEFAULT_SELECTOR, ["value"], true],
+      ] as const
+    ) {
+      it(`returns \`${name}\` for an equivalent selector`, () => {
+        expect(internPathSelector({ path: [...path], schema })).toBe(constant);
+      });
+    }
   });
 });

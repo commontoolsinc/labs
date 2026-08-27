@@ -1,0 +1,7 @@
+{
+  "name": "@commonfabric/github-activity-view",
+  "tasks": {
+    "test": "echo 'No tests defined.'"
+  },
+  "exports": "./main.tsx"
+}

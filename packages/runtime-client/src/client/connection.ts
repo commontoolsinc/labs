@@ -22,11 +22,13 @@ import {
   isIPCRemoteNotification,
   isIPCRemoteResponse,
   isNavigateRequestNotification,
+  isOperationUpdateNotification,
   isPendingWritesNotification,
   isTelemetryNotification,
   isVDomBatchNotification,
   NavigateRequestNotification,
   NotificationType,
+  OperationUpdateNotification,
   PendingWritesNotification,
   RequestType,
   SerializedDomEvent,
@@ -152,6 +154,7 @@ export type RuntimeConnectionEvents = {
   telemetry: [TelemetryNotification];
   vdombatch: [VDomBatchNotification];
   pendingwriteschange: [PendingWritesNotification];
+  operationupdate: [OperationUpdateNotification];
 };
 
 export interface InitializedRuntimeConnection extends RuntimeConnection {}
@@ -338,7 +341,38 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
         message.data,
       );
     }
-    this.#transport.send(message);
+    // The bookkeeping above -- the timeout, the abort hook, the pending entry
+    // -- is registered on the promise below being returned to someone who will
+    // hold it until a reply settles it. A synchronous throw from `send()`
+    // means no reply is coming and the promise is never returned, so that
+    // bookkeeping would outlive its only holder and reject it into nobody:
+    // sixty seconds later at the timeout, or sooner at disposal, as an
+    // unhandled rejection. `postMessage()` throws for a value structured
+    // cloning refuses, and `T` is unconstrained, so an ordinary bad value
+    // reaches it.
+    //
+    // `#settle()` clears the three, and deliberately does not settle the
+    // deferred: an unsettled promise nobody holds is collected, where a
+    // rejected one is reported. The caller learns of the failure by the throw
+    // rather than through the promise it never received.
+    try {
+      this.#transport.send(message);
+    } catch (error) {
+      this.#settle(msgId);
+      // The timeline reads a missing `doneAtMs` as still in flight, which is
+      // what a reader mid-diagnosis would take from it -- and this request is
+      // as finished as one gets. It never left, so it is marked done at the
+      // moment it failed, and as an error.
+      const timelineEntry = this.#timelineByMsgId.get(msgId);
+      if (timelineEntry) {
+        timelineEntry.doneAtMs = Math.round(
+          performance.now() - this.#constructedAt,
+        );
+        timelineEntry.error = true;
+        this.#timelineByMsgId.delete(msgId);
+      }
+      throw error;
+    }
 
     return deferred.promise;
   }
@@ -547,6 +581,8 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
         this.emit("vdombatch", message);
       } else if (isPendingWritesNotification(message)) {
         this.emit("pendingwriteschange", message);
+      } else if (isOperationUpdateNotification(message)) {
+        this.emit("operationupdate", message);
       } else {
         console.warn(`Unknown notification: ${JSON.stringify(message)}`);
       }

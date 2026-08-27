@@ -29,6 +29,12 @@ import {
   type RunRecording,
   startRunRecording,
 } from "./test-records.ts";
+import {
+  matchesPatternFilter,
+  normalizePatternPath,
+  PATTERN_TREES,
+  patternRoot,
+} from "./pattern-files.ts";
 
 // Packages with integration tests that need a running server by default.
 const DEFAULT_PACKAGES_WITH_SERVER = [
@@ -209,7 +215,6 @@ function getCfCommand(rootDir: string): string[] {
  */
 async function findPatternTests(
   rootDir: string,
-  patternsDir: string,
   filter?: string,
 ): Promise<string[]> {
   const { chunkStr, totalChunksStr, nameFilter } = (filter ?? "")
@@ -225,17 +230,18 @@ async function findPatternTests(
   const chunk = chunkStr ? parseInt(chunkStr) : undefined;
   const totalChunks = totalChunksStr ? parseInt(totalChunksStr) : undefined;
 
-  // Find all .test.tsx files
   const testFiles: string[] = [];
-  for await (
-    const entry of walk(patternsDir, {
-      includeDirs: false,
-      exts: [".test.tsx"],
-    })
-  ) {
-    const relative = path.relative(rootDir, entry.path);
-    if (!nameFilter || relative.includes(nameFilter)) {
-      testFiles.push(relative);
+  for (const tree of PATTERN_TREES) {
+    for await (
+      const entry of walk(path.join(rootDir, tree.directory), {
+        includeDirs: false,
+        exts: [".test.tsx"],
+      })
+    ) {
+      const relative = normalizePatternPath(path.relative(rootDir, entry.path));
+      if (!nameFilter || matchesPatternFilter(relative, nameFilter)) {
+        testFiles.push(relative);
+      }
     }
   }
 
@@ -290,9 +296,8 @@ async function runPatternTests(
   filter?: string,
   junitDir?: string,
 ): Promise<boolean> {
-  const patternsDir = path.join(rootDir, "packages/patterns");
   const cfCmd = getCfCommand(rootDir);
-  const testFiles = await findPatternTests(rootDir, patternsDir, filter);
+  const testFiles = await findPatternTests(rootDir, filter);
 
   if (testFiles.length === 0) {
     console.log("No pattern test files found.");
@@ -335,7 +340,7 @@ async function runPatternTests(
               "--timeout",
               "180000",
               "--root",
-              patternsDir,
+              path.join(rootDir, patternRoot(testFile)),
               testFile,
             ],
             { cwd: rootDir, env: { CF_TEST_RECORDS_DIR: "" } },

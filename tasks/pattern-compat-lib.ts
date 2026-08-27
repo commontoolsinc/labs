@@ -345,18 +345,14 @@ export async function collectBaselineKeys(
  */
 export async function findRetired(
   baselinesDir: string,
-  patternsDir: string,
+  currentPatterns: ReadonlySet<string>,
 ): Promise<Finding[]> {
   const findings: Finding[] = [];
   for (const key of await collectBaselineKeys(baselinesDir)) {
-    try {
-      Deno.statSync(`${patternsDir}/${key}`);
-    } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) throw error;
-      findings.push(
-        ...checkPattern(key, undefined, await readBaselines(baselinesDir, key)),
-      );
-    }
+    if (currentPatterns.has(key)) continue;
+    findings.push(
+      ...checkPattern(key, undefined, await readBaselines(baselinesDir, key)),
+    );
   }
   return findings;
 }

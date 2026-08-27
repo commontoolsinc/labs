@@ -21,6 +21,7 @@ import {
   type ServerMessage,
   type SessionOpenAuthMetadata,
   setServerExecutionConfig,
+  toValuePath,
   type WatchSetResult,
 } from "../v2.ts";
 import {
@@ -1699,6 +1700,36 @@ Deno.test("Phase 5: a co-hosted serving session's UNNAMED scoped read of a forei
       refused.error?.message.includes("grant-scoped read design"),
       true,
     );
+
+    const refusedOperation = await server.operationFieldQuery({
+      type: "op.query",
+      requestId: nextRequestId("fail-closed-operation"),
+      space: SPACE,
+      sessionId: serviceSession,
+      query: {
+        id: "of:profile",
+        scope: "user",
+        path: toValuePath([]),
+      },
+    });
+    assertEquals(refusedOperation.error?.name, "ProtocolError");
+
+    const refusedOperationWatch = await server.watchSet({
+      type: "session.watch.set",
+      requestId: nextRequestId("fail-closed-operation-watch"),
+      space: SPACE,
+      sessionId: serviceSession,
+      watches: [{
+        id: "operation:profile",
+        kind: "operation",
+        query: {
+          id: "of:profile",
+          scope: "user",
+          path: toValuePath([]),
+        },
+      }],
+    });
+    assertEquals(refusedOperationWatch.error?.name, "ProtocolError");
 
     // The same session's unnamed SPACE-scope read stays free (§2b's
     // free-read row): only scoped roots are the trap.

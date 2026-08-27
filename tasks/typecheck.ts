@@ -19,7 +19,6 @@ import { FragmentWriter } from "@commonfabric/test-support/records";
 
 // Directory paths (no glob expansion needed).
 const DIRS = [
-  "packages/agents-host",
   "packages/api",
   "packages/background-piece-service",
   "packages/cf-harness",
@@ -27,8 +26,12 @@ const DIRS = [
   "packages/cli/lib",
   "packages/cli/support",
   "packages/cli/test",
-  "packages/connectors/agents",
-  "packages/connectors/github",
+  "packages/connectors/agents/connector",
+  "packages/connectors/agents/debug-view",
+  "packages/connectors/agents/host",
+  "packages/connectors/github/activity-view",
+  "packages/connectors/github/connector",
+  "packages/connectors/github/host",
   "packages/content-hash",
   "packages/dashboard",
   "packages/data-model",
@@ -37,7 +40,6 @@ const DIRS = [
   "packages/felt",
   "packages/fuse",
   "packages/generated-patterns",
-  "packages/github-host",
   "packages/home-schemas",
   "packages/html",
   "packages/identity",
@@ -150,7 +152,7 @@ export function scopeOfPath(checkPath: string): string {
   const parts = checkPath.split("/");
   if (parts[0] === "packages") {
     if (parts[1] === "connectors") {
-      return parts.slice(1, 3).join("/");
+      return parts.slice(1, 4).join("/");
     }
     return parts[1] ?? "repo";
   }

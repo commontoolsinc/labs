@@ -960,6 +960,22 @@ describe("piece-survey", () => {
       expect(out).toContain("identity: idA");
       expect(out).toContain("revision: rev-1");
       expect(out).toContain("retained: true");
+      // A detached piece follows nothing, so no origin line is printed for
+      // one — which is where a retarget leaves every piece it writes.
+      expect(out).not.toContain("origin:");
+    });
+
+    it("prints the origin a piece follows under --pattern-identity", async () => {
+      const out = await captureStdout(() =>
+        inspectPieceFromCommand({ ...OPTIONS, patternIdentity: true }, {
+          readSourcePin: () =>
+            Promise.resolve({
+              ...PIN,
+              origin: "https://origins.test/member.tsx",
+            }),
+        })
+      );
+      expect(out).toContain("origin:   https://origins.test/member.tsx");
     });
 
     it("exits 1 under --pattern-identity for a piece with no identity", async () => {

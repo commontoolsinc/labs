@@ -16,8 +16,8 @@ Common Fabric product.
 1. Foundation: api, data-model, data-model-schema, runner, identity, memory
 2. System: schema-generator, iframe-sandbox, ts-transformers, js-compiler
 3. Capabilities: piece, html, llm, navigation
-4. Operation: agents-host, background-piece-service, cli, connectors/agents,
-   fuse, state-inspector, cf-harness
+4. Operation: background-piece-service, cf-harness, cli, connectors, fuse,
+   state-inspector
 5. Deployed Product: toolshed, shell, lib-shell, runtime-client
 6. User Interface: ui
 7. End-User Programs: home-schemas, patterns
@@ -264,6 +264,13 @@ Each of these gates fails CI on its own, and none of them run as part of
   hand-maintained tables, and a slot missing from both is silent: it offers
   nothing, exactly as an unreachable fabric does. Give it candidates, or record
   in the task why it has none
+- `deno task check-command-docs` — a `cf` command no live document names. The
+  obligation to update a document when behavior changes cannot fire for a
+  command no document describes, so a command ships and its prose does not.
+  Describe it in a live document — the README of the package that implements it
+  is the usual home — or record in the task why it needs none. It fails the
+  other way round too, on a recorded reason naming a command the tree no longer
+  accepts: a command removed takes its entry with it
 - `deno task check-local-program` — a program built from local files by hand
   rather than through `resolveLocalProgram`, which silently drops any data files
   the caller attached

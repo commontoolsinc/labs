@@ -5,6 +5,7 @@ import {
   realmFromFabricValue,
 } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { toValuePath } from "@commonfabric/memory/v2";
 import { getLogger } from "@commonfabric/utils/logger";
 import { consoleMessageFrom, RuntimeConnection } from "@/client/connection.ts";
 import { EventEmitter } from "@/client/emitter.ts";
@@ -14,6 +15,7 @@ import {
   type IPCClientMessage,
   type IPCClientNotification,
   NotificationType,
+  type OperationUpdateNotification,
   RequestType,
   RuntimeErrorCode,
 } from "@/protocol/mod.ts";
@@ -64,7 +66,61 @@ async function initializedConnection(
   return connection;
 }
 
+/**
+ * Transport whose `send()` throws, as `postMessage()` does when handed a value
+ * structured cloning refuses.
+ */
+class ThrowingTransport extends EventEmitter<RuntimeTransportEvents>
+  implements RuntimeTransport {
+  constructor(private readonly failOn: RequestType) {
+    super();
+  }
+
+  send(message: IPCClientMessage | IPCClientNotification): void {
+    if (!("msgId" in message)) return;
+    if (message.data.type === this.failOn) {
+      throw new Error("could not be cloned");
+    }
+    // Everything else is acknowledged, so the connection can initialize.
+    queueMicrotask(() => {
+      this.emit("message", { msgId: message.msgId, data: undefined });
+    });
+  }
+
+  dispose(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
 describe("connection", () => {
+  it("routes collaborative operation notifications", async () => {
+    const transport = new FakeTransport();
+    const connection = await initializedConnection(transport);
+    const messages: unknown[] = [];
+    connection.on("operationupdate", (message) => messages.push(message));
+
+    const notification: OperationUpdateNotification = {
+      type: NotificationType.OperationUpdate,
+      subscriptionId: "subscription:1",
+      field: {
+        branch: "",
+        id: "of:connection",
+        scopeKey: "space",
+        path: toValuePath([]),
+        active: false,
+        codec: null,
+        cursor: null,
+        baselineHash: "baseline",
+        materialized: realmFromFabricValue("value"),
+        operations: [],
+      },
+    };
+    transport.emit("message", notification);
+
+    expect(messages).toEqual([notification]);
+    await connection.dispose();
+  });
+
   describe("RuntimeConnection disposal", () => {
     it("settles in-flight requests as cancellation on dispose", async () => {
       const transport = new FakeTransport([RequestType.Idle]);
@@ -192,6 +248,39 @@ describe("connection", () => {
       }
 
       expect(warnings.length).toBe(0);
+    });
+
+    it("leaves nothing pending when the send itself throws", async () => {
+      // The throw reaches the caller, and the promise `request()` would have
+      // returned is never returned at all -- so the timeout and abort hook
+      // registered before the send must not be left holding it. Were they,
+      // disposal would reject a promise nobody holds, which is an unhandled
+      // rejection rather than a caught one.
+      const connection = new RuntimeConnection(
+        new ThrowingTransport(RequestType.CellSet),
+      );
+      await connection.initialize({} as InitializationData);
+
+      expect(() =>
+        connection.request({
+          type: RequestType.CellSet,
+          cell: { id: "of:c", space: "did:key:t", scope: "space", path: [] },
+          value: 1,
+        } as never)
+      ).toThrow("could not be cloned");
+
+      expect(connection.getPendingRequestDiagnostics()).toHaveLength(0);
+
+      // And the timeline says so too: a missing `doneAtMs` reads as still in
+      // flight, which is the one thing this request is not.
+      const entry = connection.getRequestTimelineDiagnostics().find((e) =>
+        e.type === RequestType.CellSet
+      );
+      expect(entry?.doneAtMs).toEqual(expect.any(Number));
+      expect(entry?.error).toBe(true);
+
+      // Would reject the orphan, if the bookkeeping still held one.
+      await connection.dispose();
     });
 
     it("throws when a notification is sent after disposal", async () => {

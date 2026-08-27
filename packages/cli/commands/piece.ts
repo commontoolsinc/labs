@@ -3324,6 +3324,10 @@ export async function inspectPieceFromCommand(
         ...(pin.revisionId === undefined
           ? []
           : [`revision: ${pin.revisionId}`]),
+        // Absent for a detached piece, which is what a retarget leaves
+        // behind: the pin reports the origin the piece follows now, not
+        // one it once did.
+        ...(pin.origin === undefined ? [] : [`origin:   ${pin.origin}`]),
         `retained: ${pin.retained}`,
       ].join("\n"),
     );
@@ -3816,10 +3820,38 @@ export interface RetargetCommandDependencies extends ApplyCommandDependencies {
 }
 
 /**
+ * The origin words on a row's line, which differ by whether this run wrote
+ * the row. A row this run wrote reports what the write detached, since that
+ * is what re-attaching by hand takes; every other row has no write to report
+ * and carries the plan's recorded origin instead, labelled as such. The two
+ * disagree exactly when the plan went stale before the run reached the row,
+ * and the line then names both rather than picking one.
+ */
+function originWords(row: ApplyRow): string[] {
+  if (row.verdict !== "applied") {
+    return row.origin === undefined ? [] : [`origin ${row.origin}`];
+  }
+  if (row.detachedOrigin === undefined && row.origin === undefined) return [];
+  return [
+    `detached ${row.detachedOrigin ?? "nothing"}`,
+    // Silent on the ordinary row where the plan was right, loud on the one
+    // where it was not: a plan that recorded an origin this write did not
+    // detach is a plan an operator must not re-attach from.
+    ...(row.detachedOrigin === row.origin
+      ? []
+      : [`(plan recorded ${row.origin ?? "none"})`]),
+  ];
+}
+
+/**
  * One report row as a line: the verdict, the piece, its phase, what the row
- * cost, and what it broke. The cost is on the line rather than in a summary
- * because a run whose cost per piece is unknown cannot be improved, and the
- * number has to arrive while there is still a run to reason about.
+ * cost, what became of the origin, and what it broke. The cost is on the line
+ * rather than in a summary because a run whose cost per piece is unknown
+ * cannot be improved, and the number has to arrive while there is still a run
+ * to reason about. The origin is on the line for the same reason: a
+ * retarget's write detaches the piece from it, and the string is what
+ * re-attaching by hand takes. See {@link originWords} for which string that
+ * is on which row.
  */
 export function formatApplyRow(row: ApplyRow): string {
   return [
@@ -3827,6 +3859,7 @@ export function formatApplyRow(row: ApplyRow): string {
     row.piece,
     ...(row.phase === undefined ? [] : [row.phase]),
     ...(row.elapsedMs === undefined ? [] : [`${row.elapsedMs}ms`]),
+    ...originWords(row),
     ...(row.warning === undefined ? [] : [`! ${row.warning}`]),
     ...(row.problem === undefined ? [] : [`- ${row.problem}`]),
   ].join(" ");
@@ -3933,6 +3966,54 @@ async function reportApplyRun(
     if (row.warning !== undefined) {
       printHint(`${row.verdict}: ${row.piece} warned: ${row.warning}`);
     }
+  }
+  // What a run detached is counted off what its writes observed, and what an
+  // apply WOULD detach off what the plan recorded — the only value a row
+  // with no write has. The two lines cannot both fire: a run that writes
+  // reports no row as outstanding, and a run that reports one wrote nothing
+  // at all, so each line is the whole claim its report supports. A row that
+  // landed, was refused, or went unattempted supports neither, and gets
+  // neither.
+  //
+  // One line rather than one per piece: an origin-following row is nearly
+  // every row on a board that has one, and a per-row hint would bury the
+  // stop lines the operator has to act on. The report itself names each
+  // origin, and nothing re-attaches, so the line says where the work goes.
+  const detached =
+    report.rows.filter((row) => row.detachedOrigin !== undefined).length;
+  if (detached > 0) {
+    printHint(
+      `detached from an origin: ${detached} of ${report.rows.length} rows; ` +
+        `the report names each origin, and re-attaching is by hand.`,
+    );
+  }
+  // A row whose write detached something other than what the plan recorded —
+  // including nothing at all. The plan is stale for those rows, so an
+  // operator re-attaching from the plan file rather than from this report
+  // would restore an origin this run never touched.
+  const stale =
+    report.rows.filter((row) =>
+      row.verdict === "applied" && row.detachedOrigin !== row.origin
+    ).length;
+  if (stale > 0) {
+    printHint(
+      `the plan's recorded origin was not what the write detached on ` +
+        `${stale} of ${report.rows.length} rows; re-attach from this ` +
+        `report rather than from the plan.`,
+    );
+  }
+  // The dry run is where this matters most: it is the moment the detach is
+  // still a decision, and the only one at which nothing has happened yet.
+  const wouldDetach =
+    report.rows.filter((row) =>
+      row.origin !== undefined && row.verdict === "outstanding"
+    ).length;
+  if (wouldDetach > 0) {
+    printHint(
+      `an apply would detach a recorded origin on ${wouldDetach} of ` +
+        `${report.rows.length} rows; the report names each origin, and ` +
+        `re-attaching is by hand.`,
+    );
   }
   if (!report.complete) {
     const settled = (row: ApplyRow) =>
