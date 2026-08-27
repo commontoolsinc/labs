@@ -551,7 +551,9 @@ jobs:
       # and changing the variable takes a rebuild before it reaches either.
       # Unset omits the define and co-presence stays disabled, which is why
       # this does not fail the way an unset API URL does: a shell with no
-      # presence endpoint is a working shell.
+      # presence endpoint is a working shell. The job then succeeds either way,
+      # so which of the two shells a binary carries would leave no trace in it;
+      # the step says which, and the log is where that answer is.
       - name: 🔎 Validate the embedded shell's presence endpoint
         timeout-minutes: *work-timeout
         env:
@@ -568,6 +570,9 @@ jobs:
               console.log(optionalPresenceUrl(Deno.env.get("PRESENCE_URL"))?.href ?? "");
             ')"
             echo "PRESENCE_URL=$PRESENCE_URL" >> "$GITHUB_ENV"
+            echo "The embedded shell gets presence service $PRESENCE_URL."
+          else
+            echo "SHELL_PRESENCE_URL is unset: the embedded shell gets no presence endpoint, so editor co-presence is off in every deployment of this binary."
           fi
 
       - name: 🏗️ Build toolshed binary

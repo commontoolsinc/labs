@@ -74,15 +74,23 @@ therefore something the `build-toolshed` job does, and a deploy carries
 whatever that build baked in. It needs no API host: it is served from the same
 origin as the API it calls, which is what the shell falls back to.
 
-`SHELL_PRESENCE_URL` optionally names the WebSocket service used for ephemeral
-collaborative-editor presence. The job passes it to the build under the name
-the build reads, `PRESENCE_URL`, and esbuild bakes it into the bundle as a
-define. A value that is not a credential-free WebSocket URL is rejected by
+`SHELL_PRESENCE_URL`, a repository variable of this repository, optionally
+names the WebSocket service used for ephemeral collaborative-editor presence.
+Setting it is the whole of turning co-presence on for these two environments;
+it is configuration rather than code, so it is set once and every later build
+reads it. The job passes it to the build under the name the build reads,
+`PRESENCE_URL`, and esbuild bakes it into the bundle as a define. A value that
+is not a credential-free WebSocket URL is rejected by
 `packages/shell/src/lib/presence-url.ts` and fails the build rather than
 shipping, and the job confirms the URL reached the bundle before the binary is
 uploaded. An unset variable omits the define, and a shell with no presence
 endpoint is a working shell — unlike an absent API host, an absent presence
 endpoint is not a misconfiguration, so nothing fails.
+
+Because nothing fails either way, a green job does not by itself say which of
+the two shells a binary carries. The build log does: the step names the
+endpoint it passed to the build, or says the variable is unset and that
+co-presence will be off wherever the binary runs.
 
 Two consequences follow from the value being baked rather than read at start-up.
 Changing the variable reaches a deployment only through a rebuild and a
