@@ -113,6 +113,7 @@ export const EnvSchema = z.object({
 
   //
   // Memory Store
+  //
   //  - MEMORY_DIR is used by toolshed to access sqlite files for common-memory
   //    (directory mode - default, backwards compatible)
   //  - DB_PATH is an optional absolute path to a single SQLite database file
@@ -148,6 +149,7 @@ export const EnvSchema = z.object({
 
   //
   // Airtable Integration
+  //
   //   * /routes/integrations/airtable-oauth
   //
 
@@ -156,6 +158,7 @@ export const EnvSchema = z.object({
 
   //
   // GitHub Integration
+  //
   //   * /routes/integrations/github-oauth
   //
 
@@ -164,6 +167,7 @@ export const EnvSchema = z.object({
 
   //
   // Notion Integration
+  //
   //   * /routes/integrations/notion-oauth
   //
 
@@ -172,6 +176,7 @@ export const EnvSchema = z.object({
 
   //
   // Linear Integration
+  //
   //   * /routes/integrations/linear-oauth
   //
 
@@ -180,6 +185,7 @@ export const EnvSchema = z.object({
 
   //
   // Spotify Integration
+  //
   //   * /routes/integrations/spotify-oauth
   //
 
@@ -188,6 +194,7 @@ export const EnvSchema = z.object({
 
   //
   // Discord OAuth Integration
+  //
   //   * /routes/integrations/discord-oauth
   //
 
@@ -196,6 +203,7 @@ export const EnvSchema = z.object({
 
   //
   // Strava Integration
+  //
   //   * /routes/integrations/strava-oauth
   //
 
@@ -204,6 +212,7 @@ export const EnvSchema = z.object({
 
   //
   // Plaid Integration
+  //
   //   * /routes/integrations/plaid-oauth
   //
 
@@ -263,6 +272,7 @@ export const EnvSchema = z.object({
 
   //
   // State-inspector remote dump endpoint (`cf inspect --remote`).
+  //
   // Exposes raw, read-only space SQLite snapshots over HTTP for offline
   // autopsy. This is a STAGING-ONLY debugging tool: it hard-refuses to mount
   // under ENV=production with no override (a productionized form is a separate,
@@ -299,6 +309,7 @@ export const EnvSchema = z.object({
 
   //
   // Sandbox Service
+  //
   //   * /routes/sandbox/exec
   //
 

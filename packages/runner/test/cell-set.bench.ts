@@ -55,6 +55,7 @@ async function cleanup(
 
 //
 // DATA SIZE BENCHMARKS
+//
 // Test how data size affects Cell.set() performance
 //
 
@@ -156,6 +157,7 @@ Deno.bench({
 
 //
 // NESTING DEPTH BENCHMARKS
+//
 // Test how nesting depth affects Cell.set() performance
 //
 
@@ -242,6 +244,7 @@ Deno.bench({
 
 //
 // CHANGE PATTERN BENCHMARKS
+//
 // Test how different change patterns affect Cell.set() performance
 //
 
@@ -420,6 +423,7 @@ Deno.bench({
 
 //
 // CT-1123 REPRODUCTION BENCHMARKS
+//
 // Specifically test scenarios similar to the issue
 //
 
@@ -558,6 +562,7 @@ Deno.bench({
 
 //
 // ARRAY SIZE BENCHMARKS
+//
 // Test how array sizes affect performance (relevant to CT-1123 interests/skills arrays)
 //
 
@@ -616,6 +621,7 @@ Deno.bench({
 
 //
 // ARRAY STRUCTURE BENCHMARKS
+//
 // Test path-level array structural edits that were previously missing coverage
 //
 
@@ -676,6 +682,7 @@ Deno.bench({
 
 //
 // WRITE COUNT BENCHMARKS
+//
 // Test the specific scenario of ~226 writes (like CT-1123)
 //
 
@@ -785,6 +792,7 @@ Deno.bench({
 
 //
 // SCHEMA WITH NESTED CELLS (asCell: ["cell"])
+//
 // Test performance impact of asCell which creates sub-cell references
 //
 
@@ -869,6 +877,7 @@ Deno.bench({
 
 //
 // TRANSACTION OVERHEAD BENCHMARKS
+//
 // Test if transaction management adds overhead
 //
 
@@ -917,6 +926,7 @@ Deno.bench({
 
 //
 // CELL.UPDATE() vs CELL.SET() COMPARISON
+//
 // Test if update() is more efficient than set() for partial changes
 //
 

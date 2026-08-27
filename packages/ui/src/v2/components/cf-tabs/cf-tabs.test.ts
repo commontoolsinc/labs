@@ -16,10 +16,8 @@
  * createMockCellHandle util, exactly like cell-controller.test.ts.
  */
 
-//
 // Minimal DOM shim — installed BEFORE importing the component so that Lit's
 // ReactiveElement base class has an HTMLElement to extend.
-//
 
 interface ShadowStub {
   querySelector(): null;

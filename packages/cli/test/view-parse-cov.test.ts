@@ -429,7 +429,7 @@ Deno.test("parse: class methods, constructor and accessors become method nodes",
 });
 
 //
-// --- classify: enum / export assignment / export decl / import equals /
+// classify: enum / export assignment / export decl / import equals /
 // module declaration (lines 1353-1390)
 //
 
@@ -673,6 +673,7 @@ Deno.test("parse: a computed-callee call is labeled by its first source line", (
 
 //
 // safe() catch path (lines 1725-1727)
+//
 // safe() swallows exceptions in metadata extraction. Hard to force a throw from
 // well-formed input; instead, confirm the surrounding metadata still appears
 // for a normal node (the try path), and rely on malformed schema input below to

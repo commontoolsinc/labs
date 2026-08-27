@@ -17,10 +17,8 @@ import {
   isValidSpaceDid,
 } from "@/lib/space-authority.ts";
 
-//
 // The narrow entitlement predicate. Cheap, exhaustive, and the place the
 // wildcard attack is pinned — see the "*" cases.
-//
 
 // Shaped like real ed25519 did:keys, and valid base58btc (no 0, O, I or l).
 const ALICE = "did:key:z6MkaaaabbbbccccddddeeeeffffgggghhhhAAAA";

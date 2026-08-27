@@ -841,7 +841,6 @@ Deno.test("an unbalanced regex in a wire spec returns a reason (no lint crash)",
   assert(typeof reason === "string");
 });
 
-//
 // Ambiguous dual-op nodes: a node carrying TWO recognized op keys must refuse
 // everywhere. The validator, the evaluator, and the static common-alternative
 // analysis each dispatch by their own key precedence, so a hand-crafted
@@ -849,7 +848,6 @@ Deno.test("an unbalanced regex in a wire spec returns a reason (no lint crash)",
 // the principal, and STATICALLY count the owner as a common reader — labeling
 // a COUNT(*) [owner] although the owner is not an alternative in any row's
 // label (CFC spec §8.17.4 violation).
-//
 
 const DUAL_PRINCIPAL_OWNER: RowLabelSpec = {
   version: 1,

@@ -175,7 +175,6 @@ Deno.test("commit class: a pre-class store migrates, backfilling 'authored'", as
   ]);
 });
 
-//
 // commitClassOfSeq (the arrival-witness predicate's server-side read,
 // speculation.md §4): the unknown-seq arm answers undefined, and the memo
 // declines to record inside ANY transaction — `applyCommit` brackets its
@@ -184,7 +183,6 @@ Deno.test("commit class: a pre-class store migrates, backfilling 'authored'", as
 // (`database.inTransaction`), not a caller marker. A rolled-back seq is
 // re-minted by the retry, possibly under another class; a memo entry written
 // mid-transaction would serve that phantom class forever.
-//
 
 Deno.test("commitClassOfSeq: seq 0, negative, and unknown seqs answer undefined (fail-closed substrate of the at-floor witness)", async () => {
   const { engine } = await createEngine();

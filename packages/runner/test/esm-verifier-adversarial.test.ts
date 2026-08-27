@@ -301,6 +301,7 @@ const ATTACKS: Attack[] = [
 
   //
   // `__cfReg` hoist-registration call (CT-1623)
+  //
   // `__cfReg` is supplied to the module wrapper as a parameter (the registrar);
   // it is deliberately NOT a referenceable binding, and only a single top-level
   // `__cfReg({ <shorthand top-level bindings> })` statement is approved. Every
