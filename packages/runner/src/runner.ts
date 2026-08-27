@@ -249,8 +249,9 @@ type ArgumentLinkRoot = {
 // Whether a declared schema hands the run a reference rather than a value to
 // read through: `asCell` on the schema itself, or a union or reference whose
 // every resolved arm is itself reference-only. A union with one readable arm
-// is readable — the walk must cover the arm the run may take. Bounded ref
-// resolution guards against a self-referential declaration.
+// is readable — the walk must cover the arm the run may take. The depth bound
+// terminates a declaration that refers to itself, which resolves to itself
+// however many times it is followed.
 function isReferenceOnlySchema(
   schema: JSONSchema | undefined,
   depth: number = 4,
@@ -258,9 +259,10 @@ function isReferenceOnlySchema(
   if (depth <= 0 || !isObjectOrArray(schema)) return false;
   if (schema.asCell !== undefined) return true;
   if ("$ref" in schema) {
-    const resolved = resolveSchemaRefsCanonical(schema as JSONSchemaObj);
-    if (resolved === schema) return false;
-    return isReferenceOnlySchema(resolved, depth - 1);
+    return isReferenceOnlySchema(
+      resolveSchemaRefsCanonical(schema as JSONSchemaObj),
+      depth - 1,
+    );
   }
   const arms = (schema.anyOf ?? schema.oneOf) as
     | readonly JSONSchema[]
