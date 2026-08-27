@@ -870,6 +870,7 @@ export class CFAutocomplete extends BaseElement {
   // Event handlers
   //
   // PERFORMANCE NOTE (Dec 2025):
+  //
   // We use setTimeout(0) here instead of synchronous state updates. This was extensively
   // investigated and verified:
   //

@@ -99,6 +99,7 @@ function extractGroundingChunks(completion: unknown): GroundingChunk[] {
 
 //
 // SSRF guard
+//
 // This route fetches URLs that come from search results (and follows their
 // redirects), so it must never be coaxed into reaching internal hosts. We
 // validate every hop's host (name + resolved IP) against private/reserved

@@ -123,6 +123,7 @@ Deno.bench({
 
 //
 // 3. Cache-size scaling: K=16, 64, 256.
+//
 // Loop shape is fixed at {write sub0/count; read sub1}. The cache holds K
 // cached sibling reads.
 //
@@ -170,6 +171,7 @@ for (const K of [16, 64, 256]) {
 
 //
 // 4. Deep nested-path write.
+//
 // Writes at depth-7 path `value/a/b/c/d/e/items/0`, with three cached
 // sibling reads at varying depths along the chain. Stresses the per-write
 // walk's depth dependence; a trie walker pays O(D), an O(N) scanner pays

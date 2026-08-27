@@ -2700,12 +2700,10 @@ Deno.test("filepickercov: escape cancels the picker", () => {
   assertEquals(s.view().message, "Cancelled");
 });
 
-//
 // Additional targeted coverage for the remaining branch bodies. Each test
 // drives a specific guard or conditional that the suite above approaches but
 // does not yet execute (the untaken side of an `if (cond) STMT;` one-liner, an
 // off-screen scroll, or a non-editable diff line under a policy gate).
-//
 
 //
 // card reference up-scroll lands a higher target above the scroll (392)
@@ -2780,6 +2778,7 @@ Deno.test("session: a card with many references scrolls down then up across the 
 
 //
 // jumpToTarget via a use reference with no def offset (428, 446, 464-477) -
+//
 // The lift node's card lists both a definition reference (carrying a node
 // offset) and a plain "use" reference (no offset). Revealing the use one takes
 // the offset-less path: findTargetIndex returns -1, jumpToTarget falls back to
@@ -2827,6 +2826,7 @@ Deno.test("session: opening a use reference (no def offset) resolves a node via 
 
 //
 // findTargetIndex falls back to a start-offset-only match (436-439)
+//
 // The pattern's card lists a dependency reference that carries a definition
 // offset but no end offset (no semantic service to pin the exact range), so
 // following it skips the exact (start+end) lookup and matches on start alone.
