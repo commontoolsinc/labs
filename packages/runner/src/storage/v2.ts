@@ -3109,11 +3109,29 @@ class SpaceReplica implements ISpaceReplica {
       (closeError.name !== "SessionRevokedError" &&
         closeError.name !== "AuthorizationError")
     ) {
+      // The latch is deliberately LEFT SET here, and clearing it would be a
+      // race rather than a tidy-up. The notice arrives BEFORE the revocation
+      // (see `noteAclChanged`), so a pull landing in that window sees a still
+      // healthy session; discharging the latch on it would throw away the
+      // remount the revocation is about to make necessary. Leaving it set
+      // costs at most ONE re-open later, on a session some other verdict
+      // terminates — which an ACL change is a legitimate reason to re-evaluate
+      // anyway — and the latch clears when that remount runs.
       return;
     }
     this.#aclChangedSinceMount = false;
     this.#sessionHandle = undefined;
     this.#sessionClient = undefined;
+    // Dropping the terminated session drops the `closeError` half of
+    // `authorizationError()` with it. That is the right direction — keeping it
+    // would report a denial for a space that may have just healed, and a
+    // caller like the CLI would refuse to act on an authorized space — but it
+    // does open a narrow window: for a denial that ONLY the close error
+    // recorded (the reconnect case that never produced a watch result;
+    // see `authorizationError`'s own note), `authorizationError()` reads
+    // undefined between the remount arming and the next pull re-recording it.
+    // No serving-loop caller reads it in that window, and no CLIENT manager is
+    // ever notified at all (the host is the only caller). FLAGGED, not filled.
     this.#sessionSession = undefined;
     // The dead session's views. `terminateSession` already closed the
     // SESSION's own view; these are the replica's references to it, which a
