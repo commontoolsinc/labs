@@ -266,9 +266,19 @@ export const readConsoleRunFlow = async (
   runId: string,
 ): Promise<ConsoleFlow | undefined> => {
   const family = await readConsoleRunFamily(artifactRoot, runId);
-  return family === undefined
-    ? undefined
-    : consoleRunFlow(family.root, family.descendants);
+  if (family === undefined) {
+    return undefined;
+  }
+  const posture = family.runState.fabricSessionCfc;
+  return consoleRunFlow(
+    family.root,
+    family.descendants,
+    posture === undefined ? undefined : {
+      enforcementMode: posture.enforcementMode,
+      flowLabels: posture.flowLabels,
+      ...(posture.posture !== undefined ? { posture: posture.posture } : {}),
+    },
+  );
 };
 
 /**
@@ -280,7 +290,11 @@ const readConsoleRunFamily = async (
   artifactRoot: string,
   runId: string,
 ): Promise<
-  | { root: ConsoleGraphRunInput; descendants: ConsoleGraphRunInput[] }
+  | {
+    root: ConsoleGraphRunInput;
+    descendants: ConsoleGraphRunInput[];
+    runState: HarnessRunState;
+  }
   | undefined
 > => {
   const root = await readConsoleRun(artifactRoot, runId);
@@ -314,6 +328,7 @@ const readConsoleRunFamily = async (
   return {
     root: withNeighbours({ runId, steps: root.steps, handles: root.handles }),
     descendants: descendants.map(withNeighbours),
+    runState: root.runState,
   };
 };
 

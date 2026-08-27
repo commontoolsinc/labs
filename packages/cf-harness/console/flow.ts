@@ -68,6 +68,14 @@ export interface ConsoleFlowNode {
   produces: readonly ConsoleFlowCell[];
 
   /**
+   * Cells that came into scope here without this call making them — a handle
+   * handed to the session, or one a child's result carried back. A cell the
+   * agent can use is worth marking wherever it arrived from, not only where it
+   * was minted.
+   */
+  entersScope: readonly ConsoleFlowCell[];
+
+  /**
    * How far this call let across as a plain value, for a call whose result
    * carried one. A long numeric run is the shape of a channel.
    */
@@ -90,8 +98,22 @@ export interface ConsoleFlowTurn {
   nodes: readonly ConsoleFlowNode[];
 }
 
+/** The CFC regime the run's fabric session ran under. */
+export interface ConsoleFlowCfc {
+  enforcementMode: string;
+  flowLabels: string;
+  posture?: string;
+}
+
 export interface ConsoleFlow {
   turns: readonly ConsoleFlowTurn[];
+
+  /**
+   * The posture the run ran under. Without it a cell carrying no labels reads
+   * as a gap in the page; with it, "no labels recorded" is a fact about the
+   * run — flow labels off record none, and persist records them.
+   */
+  cfc?: ConsoleFlowCfc;
   /** Calls that failed, across the whole family. */
   failures: number;
   /** Calls CFC refused, across the whole family. */
@@ -175,6 +197,7 @@ const runNodes = (
         status: step.status,
         reads: [],
         produces: [],
+        entersScope: [],
         children: [],
         depth,
       });
@@ -197,6 +220,13 @@ const runNodes = (
     const produces = produced === undefined
       ? []
       : [cellOf(byToken.get(produced), produced, byToken.get(produced)?.ref)];
+    // A handle first seen at this step that this call did not mint arrived
+    // from somewhere else — the session was handed it, or a child returned it.
+    const entersScope = step.handlesIntroduced
+      .filter((token) => token !== produced)
+      .map((token) =>
+        cellOf(byToken.get(token), token, byToken.get(token)?.ref)
+      );
     const denial = step.policyEvents.find((event) =>
       event.severity === "denied"
     );
@@ -219,6 +249,7 @@ const runNodes = (
         : {}),
       reads,
       produces,
+      entersScope,
       ...(step.disclosure !== undefined
         ? {
           valueBytes: step.disclosure.valueBytes,
@@ -254,6 +285,7 @@ const countIf = (
 export const consoleRunFlow = (
   root: ConsoleFlowRunInput,
   descendants: readonly ConsoleFlowRunInput[] = [],
+  cfc?: ConsoleFlowCfc,
 ): ConsoleFlow => {
   const byRunId = new Map(descendants.map((run) => [run.runId, run]));
   const nodes = runNodes(root, byRunId, 0, new Set());
@@ -289,6 +321,7 @@ export const consoleRunFlow = (
 
   return {
     turns,
+    ...(cfc !== undefined ? { cfc } : {}),
     failures: countIf(nodes, (node) => node.status === "error"),
     denials: countIf(
       nodes,

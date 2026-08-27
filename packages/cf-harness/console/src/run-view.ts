@@ -5,14 +5,7 @@
  */
 
 import { html, LitElement, nothing, type TemplateResult } from "lit";
-import {
-  type ConsoleFlow,
-  type ConsoleRunDetail,
-  readRun,
-  readRunFile,
-  readRunFlow,
-} from "./api.ts";
-import "./flow-view.ts";
+import { type ConsoleRunDetail, readRun, readRunFile } from "./api.ts";
 import "./steps-view.ts";
 
 /** Which pane of the open run is showing. */
@@ -31,7 +24,6 @@ export class ConsoleRunView extends LitElement {
   static override properties = {
     runId: { attribute: false },
     detail: { attribute: false },
-    flow: { attribute: false },
     pane: { attribute: false },
     focusStep: { attribute: false },
     rawName: { attribute: false },
@@ -41,9 +33,8 @@ export class ConsoleRunView extends LitElement {
 
   declare runId: string | undefined;
   declare detail: ConsoleRunDetail | undefined;
-  declare flow: ConsoleFlow | undefined;
   declare pane: Pane;
-  /** The step the timeline is on, which the flow aside marks. */
+  /** The step the map asked the timeline to show. */
   declare focusStep: number | undefined;
   declare rawName: string | undefined;
   declare rawText: string | undefined;
@@ -56,9 +47,6 @@ export class ConsoleRunView extends LitElement {
    * only the newest one is allowed to say what the pane shows.
    */
   #reads = 0;
-
-  /** The same guard for the map, which is read on its own schedule. */
-  #flowReads = 0;
 
   constructor() {
     super();
@@ -84,7 +72,6 @@ export class ConsoleRunView extends LitElement {
     const runId = this.runId;
     if (runId === undefined) {
       this.detail = undefined;
-      this.flow = undefined;
       return;
     }
     try {
@@ -94,58 +81,11 @@ export class ConsoleRunView extends LitElement {
       }
       this.detail = detail;
       this.error = undefined;
-      // The map reads every descendant's artifacts, so it is fetched only for
-      // a reader who is looking at it — a running turn re-reads the run on
-      // every completed tool call, and the family is the expensive part.
-      if (this.pane === "timeline") {
-        void this.#loadFlow(runId);
-      }
     } catch (error) {
       if (read !== this.#reads) {
         return;
       }
       this.error = error instanceof Error ? error.message : String(error);
-    }
-  }
-
-  /**
-   * Reads the open run's conversation map. Guarded the same way the run read
-   * is: a click can switch runs while a map is still arriving, and only the
-   * map of the run now showing may be drawn.
-   */
-  async #loadFlow(runId: string): Promise<void> {
-    const read = ++this.#flowReads;
-    try {
-      const flow = await readRunFlow(runId);
-      if (read === this.#flowReads && this.runId === runId) {
-        this.flow = flow;
-      }
-    } catch {
-      // A map that cannot be read leaves the rest of the run readable; the
-      // aside says it is empty rather than the run failing to open.
-      if (read === this.#flowReads && this.runId === runId) {
-        this.flow = undefined;
-      }
-    }
-  }
-
-  /**
-   * Follows a click in the map to the step it names. A node of a child run
-   * opens that run, whose own timeline is where its steps are numbered.
-   */
-  #goToStep(target: { runId?: string; step: number }): void {
-    if (target.runId !== undefined && target.runId !== this.runId) {
-      this.dispatchEvent(
-        new CustomEvent("open-run", { detail: target.runId, bubbles: true }),
-      );
-      return;
-    }
-    const steps = this.querySelector("console-steps") as
-      | { selected: number }
-      | null;
-    if (steps !== null) {
-      steps.selected = target.step;
-      this.focusStep = target.step;
     }
   }
 
@@ -323,9 +263,6 @@ export class ConsoleRunView extends LitElement {
             this.pane = pane;
             this.rawName = undefined;
             this.rawText = undefined;
-            if (pane === "timeline" && this.runId !== undefined) {
-              void this.#loadFlow(this.runId);
-            }
           }}
         >
           ${label}
@@ -362,27 +299,12 @@ export class ConsoleRunView extends LitElement {
           ${tab("artifacts", `Artifacts (${detail.artifactNames.length})`)}
         </div>
         ${this.pane === "timeline"
-          // The data flow sits beside the timeline rather than behind a tab of
-          // its own: it is the same run seen from the side, and it answers
-          // where the step you are reading sits in the whole.
           ? html`
-            <div class="timeline-with-flow">
-              <console-steps
-                .steps=${detail.steps}
-                .handles=${detail.handles}
-                @step-selected=${(event: CustomEvent<number>) =>
-                  this.focusStep = event.detail}
-              ></console-steps>
-              <console-flow-view
-                class="flow-aside"
-                .flow=${this.flow}
-                .focusStep=${this.focusStep}
-                .focusRunId=${this.runId}
-                @flow-selected=${(
-                  event: CustomEvent<{ runId?: string; step: number }>,
-                ) => this.#goToStep(event.detail)}
-              ></console-flow-view>
-            </div>
+            <console-steps
+              .steps=${detail.steps}
+              .handles=${detail.handles}
+              .selected=${this.focusStep ?? 0}
+            ></console-steps>
           `
           : this.pane === "patterns"
           ? this.#patterns(detail)

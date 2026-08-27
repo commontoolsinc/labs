@@ -414,7 +414,8 @@ export class ConsoleSteps extends LitElement {
           <span class="badge ${step.status}">${step.status}</span>
         </div>
       </div>
-      ${this.#arguments(step)} ${this.#policy(step)} ${this.#disclosure(step)}
+      ${this.#handles(step)} ${this.#arguments(step)} ${this.#policy(step)}
+      ${this.#disclosure(step)}
       <div class="pane">
         <div class="pane-head">
           <span class="tool">${step.toolName}</span> input
@@ -451,7 +452,6 @@ export class ConsoleSteps extends LitElement {
           </button>
         `}
       </div>
-      ${this.#handles(step)}
     `;
   }
 

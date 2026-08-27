@@ -240,12 +240,22 @@ button[disabled] {
   word-break: break-word;
 }
 
-/* The inspector: the run list beside the run that is open. */
+/*
+ * The three readings of a run, side by side: the runs there are, the run being
+ * read, and the map of how it went. Each column scrolls on its own, so a long
+ * run list cannot push the other two off the top of a very tall page.
+ */
 
 .workbench {
   display: grid;
   gap: 1.5rem;
-  grid-template-columns: 17rem minmax(0, 1fr);
+  grid-template-columns: 17rem minmax(0, 1fr) 26rem;
+  height: calc(100vh - 4rem);
+}
+
+.workbench > * {
+  overflow-y: auto;
+  padding-right: 0.35rem;
 }
 
 /*
@@ -258,9 +268,14 @@ button[disabled] {
   min-width: 0;
 }
 
-@media (max-width: 56rem) {
+@media (max-width: 80rem) {
   .workbench {
     grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+
+  .workbench > * {
+    overflow-y: visible;
   }
 }
 
@@ -855,38 +870,8 @@ button[disabled] {
 
 /* The timeline, with the data flow alongside it. */
 
-.timeline-with-flow {
-  display: grid;
-  gap: 1.25rem;
-  grid-template-columns: minmax(0, 1fr) 25rem;
-}
-
-.timeline-with-flow > * {
+.map-column {
   min-width: 0;
-}
-
-/*
- * The flow follows the reader down the timeline rather than scrolling away
- * from it, since it exists to say where the step being read sits in the whole.
- */
-.flow-aside {
-  align-self: start;
-  position: sticky;
-  top: 1rem;
-}
-
-.flow-aside .gcanvas {
-  max-height: 26rem;
-}
-
-@media (max-width: 72rem) {
-  .timeline-with-flow {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .flow-aside {
-    position: static;
-  }
 }
 
 /* A call's arguments, each read as a reference or as a plain value. */
@@ -1240,7 +1225,13 @@ button[disabled] {
   -webkit-line-clamp: 3;
 }
 
-.flow-aside .flow {
-  max-height: 40rem;
-  overflow-y: auto;
+.flow-arrow.enters {
+  color: #b54708;
+}
+
+.flow-posture {
+  color: var(--muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+  width: 100%;
 }

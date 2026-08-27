@@ -67,7 +67,8 @@ export class ConsoleFlowView extends LitElement {
             : nothing}
           <span class="flow-step">${node.step}</span>
         </button>
-        ${node.reads.length === 0 && node.produces.length === 0
+        ${node.reads.length === 0 && node.produces.length === 0 &&
+            node.entersScope.length === 0
           ? nothing
           : html`
             <div class="flow-cells">
@@ -86,6 +87,14 @@ export class ConsoleFlowView extends LitElement {
                 html`
                   <span class="flow-cell-line">
                     <span class="flow-arrow produces">makes</span>
+                    <console-cell .cell=${cell}></console-cell>
+                  </span>
+                `
+              )}
+              ${node.entersScope.map((cell) =>
+                html`
+                  <span class="flow-cell-line">
+                    <span class="flow-arrow enters">in scope</span>
                     <console-cell .cell=${cell}></console-cell>
                   </span>
                 `
@@ -115,6 +124,12 @@ export class ConsoleFlowView extends LitElement {
     return html`
       <div class="flow">
         <div class="flow-summary">
+          ${flow.cfc === undefined ? nothing : html`
+            <span class="flow-posture" title="the CFC regime this run ran under">
+              ${flow.cfc.posture ?? "first-party"} ·
+              labels ${flow.cfc.flowLabels} · ${flow.cfc.enforcementMode}
+            </span>
+          `}
           ${flow.failures === 0
             ? nothing
             : html`<span class="badge error">${flow.failures} failed</span>`}

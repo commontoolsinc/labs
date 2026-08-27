@@ -12,12 +12,15 @@
 import { html, LitElement, nothing, type TemplateResult } from "lit";
 import {
   cancelTurn,
+  type ConsoleFlow,
   type ConsoleRunSummary,
   type HarnessChatEventEnvelope,
   listRuns,
+  readRunFlow,
   startTask,
 } from "./api.ts";
 import "./index-view.ts";
+import "./flow-view.ts";
 import "./run-view.ts";
 
 /** Which surface the shell is showing: the runs, or the pattern index. */
@@ -72,6 +75,8 @@ export class ConsoleApp extends LitElement {
     turnId: { attribute: false },
     runs: { attribute: false },
     openRunId: { attribute: false },
+    flow: { attribute: false },
+    focusStep: { attribute: false },
     state: { attribute: false },
     running: { attribute: false },
     activity: { attribute: false },
@@ -85,6 +90,10 @@ export class ConsoleApp extends LitElement {
   declare turnId: string | undefined;
   declare runs: readonly ConsoleRunSummary[];
   declare openRunId: string | undefined;
+  /** The open run's conversation map, which the third column draws. */
+  declare flow: ConsoleFlow | undefined;
+  /** The step the middle column is reading, marked in the map. */
+  declare focusStep: number | undefined;
   declare state: string;
   declare running: boolean;
   /** The last thing the live stream reported, shown while a turn runs. */
@@ -97,6 +106,9 @@ export class ConsoleApp extends LitElement {
   #stream: EventSource | undefined;
   /** Run ids known before the running turn started, so its own is spottable. */
   #runIdsBeforeTurn = new Set<string>();
+
+  /** Guards the map read against a second run being opened mid-flight. */
+  #flowReads = 0;
 
   constructor() {
     super();
@@ -129,6 +141,52 @@ export class ConsoleApp extends LitElement {
     this.#stream?.close();
   }
 
+  protected override willUpdate(changed: Map<string, unknown>): void {
+    if (
+      changed.has("openRunId") && this.openRunId !== changed.get("openRunId")
+    ) {
+      this.flow = undefined;
+      this.focusStep = undefined;
+      void this.#loadFlow();
+    }
+  }
+
+  /**
+   * Reads the open run's map. Guarded like every other read here: opening a
+   * second run while the first map is in flight must not draw the first.
+   */
+  async #loadFlow(): Promise<void> {
+    const read = ++this.#flowReads;
+    const runId = this.openRunId;
+    if (runId === undefined) {
+      return;
+    }
+    try {
+      const flow = await readRunFlow(runId);
+      if (read === this.#flowReads && this.openRunId === runId) {
+        this.flow = flow;
+      }
+    } catch {
+      // A map that cannot be read leaves the rest of the run readable.
+      if (read === this.#flowReads && this.openRunId === runId) {
+        this.flow = undefined;
+      }
+    }
+  }
+
+  /**
+   * Follows a click in the map. A node of a child run opens that run, whose own
+   * timeline is where its steps are numbered; anything else moves the middle
+   * column to the step.
+   */
+  #followMap(target: { runId?: string; step: number }): void {
+    if (target.runId !== undefined && target.runId !== this.openRunId) {
+      this.openRunId = target.runId;
+      return;
+    }
+    this.focusStep = target.step;
+  }
+
   async #loadRuns(): Promise<void> {
     try {
       this.runs = await listRuns();
@@ -158,6 +216,7 @@ export class ConsoleApp extends LitElement {
       | { refresh: () => Promise<void> }
       | null;
     await view?.refresh();
+    await this.#loadFlow();
   }
 
   #subscribe(): void {
@@ -466,9 +525,27 @@ export class ConsoleApp extends LitElement {
           </div>
           <console-run-view
             .runId=${this.openRunId}
+            .focusStep=${this.focusStep}
             @open-run=${(event: CustomEvent<string>) =>
               this.openRunId = event.detail}
+            @step-selected=${(event: CustomEvent<number>) =>
+              this.focusStep = event.detail}
           ></console-run-view>
+          <div class="map-column">
+            <div class="run-list-head"><span>Map</span></div>
+            ${this.openRunId === undefined
+              ? html`<p class="empty">Choose a run to see how it went.</p>`
+              : html`
+                <console-flow-view
+                  .flow=${this.flow}
+                  .focusStep=${this.focusStep}
+                  .focusRunId=${this.openRunId}
+                  @flow-selected=${(
+                    event: CustomEvent<{ runId?: string; step: number }>,
+                  ) => this.#followMap(event.detail)}
+                ></console-flow-view>
+              `}
+          </div>
         </div>
       </div>
     `;
