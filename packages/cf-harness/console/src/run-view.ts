@@ -5,11 +5,18 @@
  */
 
 import { html, LitElement, nothing, type TemplateResult } from "lit";
-import { type ConsoleRunDetail, readRun, readRunFile } from "./api.ts";
+import {
+  type ConsoleGraph,
+  type ConsoleRunDetail,
+  readRun,
+  readRunFile,
+  readRunGraph,
+} from "./api.ts";
+import "./graph-view.ts";
 import "./steps-view.ts";
 
 /** Which pane of the open run is showing. */
-type Pane = "timeline" | "patterns" | "tool-outputs" | "artifacts";
+type Pane = "timeline" | "graph" | "patterns" | "tool-outputs" | "artifacts";
 
 const prettyJson = (text: string): string => {
   try {
@@ -24,6 +31,7 @@ export class ConsoleRunView extends LitElement {
   static override properties = {
     runId: { attribute: false },
     detail: { attribute: false },
+    graph: { attribute: false },
     pane: { attribute: false },
     rawName: { attribute: false },
     rawText: { attribute: false },
@@ -32,6 +40,7 @@ export class ConsoleRunView extends LitElement {
 
   declare runId: string | undefined;
   declare detail: ConsoleRunDetail | undefined;
+  declare graph: ConsoleGraph | undefined;
   declare pane: Pane;
   declare rawName: string | undefined;
   declare rawText: string | undefined;
@@ -44,6 +53,9 @@ export class ConsoleRunView extends LitElement {
    * only the newest one is allowed to say what the pane shows.
    */
   #reads = 0;
+
+  /** The same guard for the graph, which is read on its own schedule. */
+  #graphReads = 0;
 
   constructor() {
     super();
@@ -69,6 +81,7 @@ export class ConsoleRunView extends LitElement {
     const runId = this.runId;
     if (runId === undefined) {
       this.detail = undefined;
+      this.graph = undefined;
       return;
     }
     try {
@@ -78,11 +91,38 @@ export class ConsoleRunView extends LitElement {
       }
       this.detail = detail;
       this.error = undefined;
+      // The graph reads every descendant's artifacts, so it is fetched only
+      // for a reader who is looking at it — a running turn re-reads the run on
+      // every completed tool call, and the family is the expensive part.
+      if (this.pane === "graph") {
+        void this.#loadGraph(runId);
+      }
     } catch (error) {
       if (read !== this.#reads) {
         return;
       }
       this.error = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  /**
+   * Reads the open run's data-flow graph. Guarded the same way the run read is:
+   * a click can switch runs while a graph is still arriving, and only the graph
+   * of the run now showing may be drawn.
+   */
+  async #loadGraph(runId: string): Promise<void> {
+    const read = ++this.#graphReads;
+    try {
+      const graph = await readRunGraph(runId);
+      if (read === this.#graphReads && this.runId === runId) {
+        this.graph = graph;
+      }
+    } catch {
+      // A graph that cannot be read leaves the rest of the run readable; the
+      // pane says it is empty rather than the run failing to open.
+      if (read === this.#graphReads && this.runId === runId) {
+        this.graph = undefined;
+      }
     }
   }
 
@@ -260,6 +300,9 @@ export class ConsoleRunView extends LitElement {
             this.pane = pane;
             this.rawName = undefined;
             this.rawText = undefined;
+            if (pane === "graph" && this.runId !== undefined) {
+              void this.#loadGraph(this.runId);
+            }
           }}
         >
           ${label}
@@ -288,6 +331,7 @@ export class ConsoleRunView extends LitElement {
         </div>
         <div class="tabs">
           ${tab("timeline", `Timeline (${detail.steps.length})`)}
+          ${tab("graph", "Data flow")}
           ${tab("patterns", "Patterns")}
           ${tab(
             "tool-outputs",
@@ -301,6 +345,10 @@ export class ConsoleRunView extends LitElement {
               .steps=${detail.steps}
               .handles=${detail.handles}
             ></console-steps>
+          `
+          : this.pane === "graph"
+          ? html`
+            <console-graph-view .graph=${this.graph}></console-graph-view>
           `
           : this.pane === "patterns"
           ? this.#patterns(detail)

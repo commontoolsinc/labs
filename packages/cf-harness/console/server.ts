@@ -95,6 +95,7 @@ import {
   listConsoleRuns,
   readConsoleRun,
   readConsoleRunArtifact,
+  readConsoleRunFamilyGraph,
   readConsoleToolOutput,
 } from "./run-store.ts";
 import {
@@ -814,6 +815,12 @@ export class ConsoleServer {
       return detail === undefined
         ? new Response("not found", { status: 404 })
         : Response.json(detail);
+    }
+    if (kind === "graph") {
+      const graph = await readConsoleRunFamilyGraph(root, runId);
+      return graph === undefined
+        ? new Response("not found", { status: 404 })
+        : Response.json(graph);
     }
     if (name === undefined || name === "") {
       return new Response("not found", { status: 404 });

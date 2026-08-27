@@ -195,6 +195,29 @@ Opening a run gives four panes:
 
   A `delegate_task` step names the child it started; opening that child in the
   rail reads its own timeline.
+- **Data flow** — the run as a graph: the patterns it ran, the cells they
+  produced and read, and the routing between them. A rectangle is a pattern and
+  a rounded one is a cell; a solid edge is a pattern producing a cell, a dashed
+  one is a pattern reading a cell it was wired to, labelled with the input name.
+  Rank runs left to right, so a pattern sits beside what it produced and a cell
+  read by a later pattern pushes that pattern further right — the horizontal
+  axis is the data's path rather than the clock. Clicking a node opens what is
+  known about it: the handle and address behind a cell, the slug it was given,
+  the CFC decision and disclosure of a pattern, and the confidentiality atoms
+  either carries.
+
+  The graph is of the run **and the `delegate_task` children beneath it**,
+  because that is where the routing lives: a parent commonly names a cell its
+  child produced, and a per-run picture shows that cell arriving from nowhere.
+  Cells are keyed by the address they stand for, so the parent's token and the
+  child's token for one cell are one node. A descendant's nodes are dated to the
+  step that delegated into it — a child's own step order is not comparable with
+  its parent's, so open the child to scrub inside it.
+
+  The summary line counts **read edges**. A run whose patterns read no cell
+  built everything from literals rather than composing work over references,
+  which is the opposite of what the handle model is for; the count says so
+  rather than leaving it to be inferred from the picture.
 - **Patterns** — the pattern-shaped work. Every `run_pattern` attempt in order
   with the source it submitted and, for one the compiler refused, the diagnostic
   — so the compile-error and fix rounds are legible rather than lost. Alongside

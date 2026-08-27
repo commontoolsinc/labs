@@ -22,6 +22,11 @@ import {
   consoleRunSteps,
   type ConsoleStep,
 } from "./steps.ts";
+import {
+  type ConsoleGraph,
+  type ConsoleGraphRunInput,
+  consoleRunFamilyGraph,
+} from "./graph.ts";
 
 /**
  * A single path segment of the characters the artifact store itself writes.
@@ -208,6 +213,50 @@ export const readConsoleRun = async (
     artifactNames: await namesPresent(root, RUN_ARTIFACT_NAMES),
     toolOutputNames: await toolOutputNames(root),
   };
+};
+
+/**
+ * The data-flow graph of a run and the `delegate_task` children beneath it.
+ *
+ * The family rather than the run alone, because that is where the routing
+ * lives: a parent commonly names a cell its child produced, and a graph drawn
+ * per run shows that cell arriving from nowhere. A subagent run asked for
+ * directly graphs its own subtree, which is what someone who opened a child
+ * asked to see.
+ *
+ * Descendants are found by name — the harness ids a child `<parent>.subagent.N`
+ * — so this reads one directory listing rather than every run's state.
+ */
+export const readConsoleRunFamilyGraph = async (
+  artifactRoot: string,
+  runId: string,
+): Promise<ConsoleGraph | undefined> => {
+  const root = await readConsoleRun(artifactRoot, runId);
+  if (root === undefined) {
+    return undefined;
+  }
+  const descendants: ConsoleGraphRunInput[] = [];
+  try {
+    for await (const entry of Deno.readDir(artifactRoot)) {
+      if (!entry.isDirectory || !entry.name.startsWith(`${runId}.`)) {
+        continue;
+      }
+      const child = await readConsoleRun(artifactRoot, entry.name);
+      if (child !== undefined) {
+        descendants.push({
+          runId: entry.name,
+          steps: child.steps,
+          handles: child.handles,
+        });
+      }
+    }
+  } catch {
+    // A run with no siblings on disk is a family of one.
+  }
+  return consoleRunFamilyGraph(
+    { runId, steps: root.steps, handles: root.handles },
+    descendants,
+  );
 };
 
 /**

@@ -752,3 +752,102 @@ button[disabled] {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* The data-flow graph. */
+
+.gsummary {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+/*
+ * The picture is as wide as the run is long, so it scrolls inside the pane.
+ * Without the max-width a wide graph would size the grid column and push the
+ * whole page sideways, which is the trap the JSON blocks sit in too.
+ */
+.gcanvas {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  max-width: 100%;
+  overflow: auto;
+}
+
+.gnode {
+  cursor: pointer;
+}
+
+.gnode rect {
+  fill: #fff;
+  stroke: var(--line);
+  stroke-width: 1.5;
+}
+
+.gnode.pattern rect {
+  fill: #fbfcff;
+  stroke: var(--accent);
+}
+
+.gnode.cell rect {
+  fill: #f6fbf8;
+  stroke: var(--ok);
+}
+
+.gnode.error rect,
+.gnode.denied rect {
+  stroke: var(--bad);
+  stroke-dasharray: 4 3;
+}
+
+.gnode.chosen rect {
+  stroke-width: 2.5;
+}
+
+.gnode.leading rect {
+  filter: drop-shadow(0 0 4px rgba(31, 111, 235, 0.45));
+}
+
+.gnode text {
+  fill: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.gnode text.gsub {
+  fill: var(--muted);
+  font-size: 9.5px;
+}
+
+.gatom {
+  fill: #1f4fa8;
+}
+
+.gedge path {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.5;
+}
+
+.gedge.reads path {
+  stroke: var(--accent);
+  stroke-dasharray: 5 3;
+}
+
+.gedge text {
+  fill: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px;
+  text-anchor: middle;
+}
+
+#arrow path {
+  fill: var(--muted);
+  stroke: none;
+}
+
+.gdetail {
+  margin-top: 0.9rem;
+}
