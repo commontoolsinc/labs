@@ -173,6 +173,247 @@ describe("piece schema compatibility", () => {
     ).not.toThrow();
   });
 
+  // A floored path is authored to mint the atom it floors, because the write
+  // floor tests the integrity of the value being written and a mint on the
+  // entries below the path does not reach a floor declared on the path itself.
+  // A pattern that declares a floor and mints nothing has to gain the mint
+  // before any write to it can conform. The mint names the derived per-value
+  // component (CFC §8.12.8), which the monotone constraint behind this
+  // comparison does not govern, so gaining one is not a contract change.
+  const flooredList = (ifc: Record<string, unknown>): JSONSchema => ({
+    type: "object",
+    properties: {
+      admins: { type: "array", items: { type: "string" }, ifc },
+    },
+  });
+  const floorOnly = { requiredIntegrity: ["group-chat-admin"] };
+  const floorAndMint = {
+    requiredIntegrity: ["group-chat-admin"],
+    addIntegrity: ["group-chat-admin"],
+  };
+
+  it("accepts a floored path that gains the mint its own floor names", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(flooredList(floorOnly), { type: "object" }),
+        pattern(flooredList(floorAndMint), { type: "object" }),
+      )
+    ).not.toThrow();
+  });
+
+  it("accepts a floored path that loses its mint", () => {
+    // The derived component is replace-on-overwrite, not a ratchet, so this
+    // comparison has no opinion either way. A pattern whose writes stop
+    // satisfying its own floor fails at the write, where its tests are.
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(flooredList(floorAndMint), { type: "object" }),
+        pattern(flooredList(floorOnly), { type: "object" }),
+      )
+    ).not.toThrow();
+  });
+
+  it("compares a writeAuthorizedBy claim carrying no writer identity whole", () => {
+    // Normalization reaches inside `__ctWriterIdentityOf`. A claim without one
+    // has nothing volatile to remove, so two such claims compare equal.
+    // The two sides differ by a mint, which is dropped, so what is left to
+    // compare is the claim itself. Comparing two schemas that are equal all
+    // the way down would settle before reaching it.
+    const claimWith = (mint: boolean): JSONSchema => ({
+      type: "object",
+      properties: {
+        flag: {
+          type: "boolean",
+          ifc: {
+            writeAuthorizedBy: {},
+            ...(mint ? { addIntegrity: ["reviewed"] } : {}),
+          },
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern({ type: "object" }, claimWith(true)),
+        pattern({ type: "object" }, claimWith(false)),
+      )
+    ).not.toThrow();
+  });
+
+  it("accepts a claim that gains only the volatile identity fields", () => {
+    // Same binding path, same uiContract, and a content hash and file spelling
+    // the runtime re-derives rather than holds fixed. That is a recompile of
+    // one authorization, so it is accepted.
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(
+          { type: "object" },
+          trustedWriteResult({ path: ["setFlag"] }, baselineUiContract),
+        ),
+        pattern(
+          { type: "object" },
+          trustedWriteResult(baselineIdentity, baselineUiContract),
+        ),
+      )
+    ).not.toThrow();
+  });
+
+  it("finds owner evidence nested inside a mint, as the runtime does", () => {
+    // `literalDidSubjectsForPrincipalClaim` walks arrays and object values, so
+    // an atom nested inside another structure still authorizes the write.
+    // Losing it has to read as a change here rather than slip through.
+    const ownerNode = (withEvidence: boolean): JSONSchema => ({
+      type: "object",
+      properties: {
+        bio: {
+          type: "string",
+          ifc: {
+            ownerPrincipal: { __ctCurrentPrincipal: true },
+            addIntegrity: [
+              {
+                kind: "delegated",
+                via: withEvidence
+                  ? {
+                    kind: "represents-principal",
+                    subject: { __ctCurrentPrincipal: true },
+                  }
+                  : { kind: "unrelated" },
+              },
+            ],
+          },
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(ownerNode(true), { type: "object" }),
+        pattern(ownerNode(false), { type: "object" }),
+      )
+    ).toThrow(/ifc changed/);
+  });
+
+  it("reads no owner evidence out of a mint that is not a list of atoms", () => {
+    // A malformed mint carries no represents-principal atom, so there is
+    // nothing for the owner check to match and nothing for this comparison to
+    // hold. It reduces the same as a node that mints nothing at all.
+    const ownerNode = (withMint: boolean): JSONSchema =>
+      JSON.parse(
+        `{"type":"object","properties":{"bio":{"type":"string","ifc":{` +
+          `"ownerPrincipal":{"__ctCurrentPrincipal":true}` +
+          (withMint ? `,"addIntegrity":"not-a-list"` : "") +
+          `}}}}`,
+      );
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(ownerNode(true), { type: "object" }),
+        pattern(ownerNode(false), { type: "object" }),
+      )
+    ).not.toThrow();
+  });
+
+  it("accepts dropping an atom the owner check does not read", () => {
+    // Only `represents-principal` evidence feeds the owner check. An atom
+    // beside it is a label nothing consults, so losing it leaves the write
+    // authorized exactly as before and is not a contract change.
+    const ownerNode = (extra: boolean): JSONSchema => ({
+      type: "object",
+      properties: {
+        bio: {
+          type: "string",
+          ifc: {
+            ownerPrincipal: { __ctCurrentPrincipal: true },
+            addIntegrity: [
+              {
+                kind: "represents-principal",
+                subject: { __ctCurrentPrincipal: true },
+              },
+              ...(extra ? ["profile-reviewed"] : []),
+            ],
+          },
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(ownerNode(true), { type: "object" }),
+        pattern(ownerNode(false), { type: "object" }),
+      )
+    ).not.toThrow();
+  });
+
+  it("accepts losing the last mint into an empty ifc", () => {
+    // The reduction leaves nothing behind on one side and finds an already
+    // empty extension on the other. Both say the same thing, so they compare
+    // equal rather than reading as a change.
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(flooredList({ addIntegrity: ["group-chat-admin"] }), {
+          type: "object",
+        }),
+        pattern(flooredList({}), { type: "object" }),
+      )
+    ).not.toThrow();
+  });
+
+  it("still compares the mint on a node that authorizes by owner principal", () => {
+    // Beside an `ownerPrincipal`, the mint supplies the represents-principal
+    // atom the runtime matches against the owner before authorizing a write.
+    // Losing it there refuses writes that used to be accepted, so the mint is
+    // part of the contract on such a node rather than a derived label.
+    const ownerNode = (mint: boolean): JSONSchema => ({
+      type: "object",
+      properties: {
+        bio: {
+          type: "string",
+          ifc: {
+            ownerPrincipal: { __ctCurrentPrincipal: true },
+            ...(mint
+              ? {
+                addIntegrity: [{
+                  kind: "represents-principal",
+                  subject: { __ctCurrentPrincipal: true },
+                }],
+              }
+              : {}),
+          },
+        },
+      },
+    });
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(ownerNode(true), { type: "object" }),
+        pattern(ownerNode(false), { type: "object" }),
+      )
+    ).toThrow(/ifc changed/);
+  });
+
+  it("still rejects a change to the floor the path requires", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(flooredList(floorAndMint), { type: "object" }),
+        pattern(
+          flooredList({
+            requiredIntegrity: ["group-chat-owner"],
+            addIntegrity: ["group-chat-admin"],
+          }),
+          { type: "object" },
+        ),
+      )
+    ).toThrow(/ifc changed/);
+  });
+
+  it("still rejects a change to the integrity a path declares it holds", () => {
+    expect(() =>
+      assertPatternSchemasBackwardCompatible(
+        pattern(flooredList({ integrity: ["group-chat-admin"] }), {
+          type: "object",
+        }),
+        pattern(flooredList({ integrity: ["group-chat-owner"] }), {
+          type: "object",
+        }),
+      )
+    ).toThrow(/ifc changed/);
+  });
+
   it("still rejects a writeAuthorizedBy binding path change", () => {
     expect(() =>
       assertPatternSchemasBackwardCompatible(
