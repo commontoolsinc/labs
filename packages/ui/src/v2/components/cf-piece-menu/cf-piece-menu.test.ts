@@ -3529,6 +3529,37 @@ describe("describeFollowState", () => {
     expect(refused.at).toBe(at);
   });
 
+  it("has words for every reason a refusal can carry", () => {
+    // The reason a check recorded is shown when there is one; these are what
+    // the panel says when a refusal arrives carrying only its kind.
+    const reasons = [
+      ["incompatible-schema", "inputs or outputs do not match"],
+      ["argument-mismatch", "data this piece holds does not fit"],
+      ["source-invalid", "could not be used"],
+      ["identity-mismatch", "did not match the version"],
+      ["apply-failed", "could not be applied to this piece"],
+    ] as const;
+    for (const [reason, expected] of reasons) {
+      const described = describeFollowState({
+        ...SOURCE,
+        reconciliation: {
+          outcome: "refused",
+          at: 1,
+          origin: SOURCE.origin!.url,
+          reason,
+        },
+      });
+      expect(described.reason).toContain(expected);
+    }
+
+    // A refusal that names no reason at all still says something.
+    const bare = describeFollowState({
+      ...SOURCE,
+      reconciliation: { outcome: "refused", at: 1, origin: SOURCE.origin!.url },
+    });
+    expect(bare.reason).toContain("did not take what the origin offered");
+  });
+
   it("says a refusal nothing can overrule is one, and why", () => {
     const description = describeFollowState({
       ...SOURCE,

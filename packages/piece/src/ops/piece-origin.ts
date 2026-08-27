@@ -465,9 +465,11 @@ export function readPieceSourceMetadata(
     try {
       state.origin = classifyOrigin(runtime, piece.space, recordedOrigin);
     } catch (error) {
+      // Every string it cannot classify leaves `classifyOrigin` as a
+      // PieceOriginError, so there is no other shape to read a reason from.
       state.unusableOrigin = {
         recorded: recordedOrigin,
-        reason: error instanceof Error ? error.message : String(error),
+        reason: (error as PieceOriginError).message,
       };
     }
   }

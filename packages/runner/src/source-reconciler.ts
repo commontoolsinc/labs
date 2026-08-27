@@ -43,6 +43,7 @@ import {
   getPieceReconciliation,
   getPieceSourceSnapshot,
   type PieceReconciliation,
+  type PieceReconciliationOutcome,
   type PieceSourceSnapshot,
   type PieceSourceTransition,
   preparePieceSourceTransitionBaseline,
@@ -96,31 +97,44 @@ export type ReconcileOutcome =
  * this record's. `detached` and `unusable` are read off the recorded origin
  * itself, so a record would only restate what the piece already says.
  */
+/**
+ * What each reconciliation result becomes on the piece, and which leave
+ * nothing behind.
+ *
+ * The three results that end with the piece running what its origin holds are
+ * one state to a reader: how it got there is the revision log's business, not
+ * this record's. `detached` and `unusable` are read off the recorded origin
+ * itself, so a record would only restate what the piece already says.
+ */
+const RECORDED_OUTCOME: Record<
+  ReconcileOutcome,
+  PieceReconciliationOutcome | undefined
+> = {
+  current: "followed",
+  migrated: "followed",
+  updated: "followed",
+  unavailable: "unreachable",
+  incompatible: "refused",
+  unsupported: "unsupported",
+  detached: undefined,
+  unusable: undefined,
+};
+
+/** What a reconciliation's result leaves on the piece it ran for. */
 function reconciliationFor(
   state: PieceState,
   outcome: ReconcileOutcome,
 ): PieceReconciliation | undefined {
-  const base = {
+  const recorded = RECORDED_OUTCOME[outcome];
+  if (recorded === undefined) return undefined;
+  return {
+    outcome: recorded,
     at: Date.now(),
     origin: state.storedSource,
     ...(state.offered === undefined ? {} : { offered: state.offered }),
+    ...(recorded === "refused" ? { reason: "incompatible-schema" } : {}),
     ...(state.detail === undefined ? {} : { detail: state.detail }),
   };
-  switch (outcome) {
-    case "current":
-    case "migrated":
-    case "updated":
-      return { ...base, outcome: "followed" };
-    case "unavailable":
-      return { ...base, outcome: "unreachable" };
-    case "incompatible":
-      return { ...base, outcome: "refused", reason: "incompatible-schema" };
-    case "unsupported":
-      return { ...base, outcome: "unsupported" };
-    case "detached":
-    case "unusable":
-      return undefined;
-  }
 }
 
 async function abortable<T>(
@@ -324,10 +338,6 @@ export class SourceReconciler {
       return;
     }
     await this.#commit(resultCell, state, signal, (tx) => {
-      const candidate = resultCell.withTx(tx);
-      if (
-        samePieceReconciliation(getPieceReconciliation(candidate), recorded)
-      ) return false;
       setPieceReconciliation(resultCell, tx, recorded);
       return true;
     });
