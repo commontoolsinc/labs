@@ -276,8 +276,8 @@ as today.
 
 Reading a reference must produce the schema synchronously wherever schemas
 are consumed today (traversal, narrowing, CFC label derivation). The
-mechanism follows the module-loading precedent (session-lifetime strong
-index, async storage-backed fallback):
+mechanism is a session-lifetime strong index warmed synchronously from the
+local store at the reading seams:
 
 - A **session schema registry**: a strong `Map` from tagged hash to interned
   schema. Populated from both directions: decomposition on the write path
@@ -296,11 +296,14 @@ index, async storage-backed fallback):
   fragment), resolving through the registry. An unresolvable ref keeps the
   existing fail-closed contract: `resolveSchema` returns `false`, and
   traversal treats the value as unmatched.
-- A cold miss (a reference read before its documents arrived) is recovered
-  by an async storage-backed load of the reference closure, after which
-  resolution retries. The sync paths never block: they fail closed and the
-  load triggers re-evaluation, the same shape as any other not-yet-synced
-  document dependency.
+- A cold miss is a REGISTRY miss, never a store miss: closure documents
+  travel with their referrers, so the store backs every reference of a
+  readable document, and the reading seams warm the per-process registry
+  from the store synchronously before walking a schema
+  (`ensureExternalSchemaClosure`; `loadExternalSchemaDocs` in traversal
+  contexts). A reference the store cannot back is corruption or a
+  deliberately malformed declaration — logged, with the declaration
+  selecting nothing (the fail-closed contract above).
 
 Verification happens at registration: a schema document's value is
 re-hashed and must match its id (the `loadSchemaDocument` precedent);
@@ -368,10 +371,10 @@ transitive closure is not fully registered resolves as a miss, exactly
 like an unregistered document. Resolving it partially would let derived
 results — an IFC scan, a path narrowing — be memoized over the hole,
 keyed by the root's stable identity, and the missing child's later
-arrival would never invalidate them. Completeness is monotonic, so the
-gate opens by itself once the closure lands; caches that memoize derived
-results by schema identity populate only for schemas whose external
-closure is complete.
+registration would never invalidate them. Completeness is monotonic, so
+the gate opens by itself once the closure registers; caches that memoize
+derived results by schema identity populate only for schemas whose
+external closure is complete.
 
 ### Space boundaries
 
@@ -614,7 +617,7 @@ playbook:
   reader with a schema of its own reads on under reader precedence.
 - Round trip: a piece written with reference links, resumed in a fresh
   session, resolves schemas through sync alone; the same with a cold
-  registry exercises the async recovery path.
+  registry exercises the store-backed registry warming.
 - Walker agreement: the existing mechanical test extended to
   reference-only schema positions.
 
