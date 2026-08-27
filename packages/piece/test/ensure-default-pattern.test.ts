@@ -133,6 +133,13 @@ describe("PiecesController.ensureDefaultPattern", () => {
     });
     await controller.linkDefaultPattern(mockPieceCell);
 
+    // The reader here is the runtime's own `spaceCellSchema` (the
+    // controller builds its space cell with no explicit schema): its
+    // `defaultPattern` property is a shaped asCell fetch-shape naming only
+    // `spaces`/`defaultAppUrl`/`suggestionHistory`/`recordSuggestion`,
+    // with no `additionalProperties`. That shape wins the crossing, the
+    // pattern doc carries none of those properties ([NAME] is not among
+    // them), so the projection is `{}`.
     const linked = controller.getSpaceCellContents().key("defaultPattern")
       .get();
     expect(linked?.get()).toEqual({});
