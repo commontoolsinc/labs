@@ -689,6 +689,60 @@ describe("piece-retarget", () => {
       expect(process.errors).toEqual([]);
     });
 
+    it("says the report failed, not that the run never returned, when output throws", async () => {
+      // The engine came back with every row; what broke was the writing of
+      // it. Claiming the run was "still in flight" would be false, and it
+      // would be printed beside the real error — two statements, one wrong.
+      const process = guardHarness();
+      await expect(
+        retargetFromCommand({ ...OPTIONS, out: "report.json", apply: true }, {
+          runRetarget: (_config, request) => {
+            for (const row of REPORT.rows) request.onRow?.(row);
+            return Promise.resolve(REPORT);
+          },
+          writeTextFile: () => Promise.reject(new Error("the disk is full")),
+          printHint: () => {},
+          guard: process.deps,
+        }),
+      ).rejects.toThrow("the disk is full");
+      // Nonzero anyway, since the throw is what the CLI exits on; the guard
+      // adds the tally that the failed report never got to print.
+      expect(process.endProcess()).toBe(1);
+      const said = process.errors.join("\n");
+      expect(said).toContain(
+        "Retarget ran to a report, but the process exited before that " +
+          "report finished.",
+      );
+      expect(said).not.toContain("still in flight");
+      expect(said).toContain("2 rows settled — applied: 1 · landed: 1.");
+    });
+
+    it("still guards a report that hangs rather than throws", async () => {
+      // The window a `finally` released at the engine's return would have
+      // reopened: the report never finishes, nothing throws, and the process
+      // drains — the original defect, moved one step later. The guard is
+      // still armed, so the run is still accounted for.
+      const process = guardHarness();
+      const abandoned = retargetFromCommand(
+        { ...OPTIONS, out: "report.json", apply: true },
+        {
+          runRetarget: (_config, request) => {
+            for (const row of REPORT.rows) request.onRow?.(row);
+            return Promise.resolve(REPORT);
+          },
+          writeTextFile: () => new Promise<void>(() => {}),
+          printHint: () => {},
+          guard: process.deps,
+        },
+      );
+      await Promise.resolve();
+      expect(process.endProcess()).toBe(1);
+      const said = process.errors.join("\n");
+      expect(said).toContain("Retarget ran to a report");
+      expect(said).toContain("2 rows settled — applied: 1 · landed: 1.");
+      expect(abandoned).toBeInstanceOf(Promise);
+    });
+
     it("says nothing at process end when the run threw", async () => {
       // The refusal is its own report, and the CLI prints it on the way to
       // a nonzero exit; a second line about an unreported run would be one

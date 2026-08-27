@@ -19,14 +19,21 @@ import {
 } from "../lib/unreported-run.ts";
 import { guardHarness as harness } from "./unreported-run-helpers.ts";
 
-/** A watched run that has settled `verdicts` so far. */
+/** A watched run, still in its engine, that has settled `verdicts` so far. */
 function progressOf(verdicts: [string, number][]): ApplyRunProgress {
-  return { observed: true, verdicts: new Map(verdicts) };
+  return { observed: true, verdicts: new Map(verdicts), phase: "running" };
 }
 
-/** A run whose engine reports its rows only when it returns. */
-function unwatchedProgress(): ApplyRunProgress {
-  return { observed: false, verdicts: new Map() };
+/** A watched run whose engine returned and whose report is being written. */
+function reportingProgress(verdicts: [string, number][]): ApplyRunProgress {
+  return { observed: true, verdicts: new Map(verdicts), phase: "reporting" };
+}
+
+/** A run whose engine counts its rows only in the report it returns. */
+function unwatchedProgress(
+  phase: ApplyRunProgress["phase"] = "running",
+): ApplyRunProgress {
+  return { observed: false, verdicts: new Map(), phase };
 }
 
 const testDir = dirname(fromFileUrl(import.meta.url));
@@ -162,6 +169,54 @@ describe("unreported-run", () => {
           progressOf([["landed", 25], ["applied", 50]]),
         ),
       ).toContain("75 rows settled — landed: 25 · applied: 50.");
+    });
+
+    it("never says a returned run did not return", () => {
+      // The mirror of the count being wrong: a report that failed to print
+      // is not an engine that failed to come back, and claiming so would be
+      // the same lie pointing the other way.
+      const line = describeUnreportedApplyRun(
+        "Retarget",
+        reportingProgress([["applied", 125]]),
+      );
+      expect(line).toContain(
+        "Retarget ran to a report, but the process exited before that " +
+          "report finished.",
+      );
+      expect(line).not.toContain("still in flight");
+      expect(line).toContain("125 rows settled — applied: 125.");
+      expect(line).toContain("What the report would have said beyond this");
+    });
+
+    it("stops hedging the count once the engine has returned", () => {
+      // While the engine runs, rows may follow the ones counted. Once it has
+      // returned, a watched run's count IS its report's row count, and the
+      // hedge would understate what is known.
+      expect(
+        describeUnreportedApplyRun("Rollback", progressOf([["applied", 3]])),
+      ).toContain("Whether anything after them was written is not known here");
+      expect(
+        describeUnreportedApplyRun(
+          "Rollback",
+          reportingProgress([["applied", 3]]),
+        ),
+      ).not.toContain("Whether anything after them");
+    });
+
+    it("gives an unwatched run a reason that holds in either phase", () => {
+      // "It did not return" was true of one phase only. The missing row
+      // callback is the real reason, and it is the reason in both.
+      for (const phase of ["running", "reporting"] as const) {
+        const line = describeUnreportedApplyRun(
+          "Repair",
+          unwatchedProgress(phase),
+        );
+        expect(line).toContain(
+          "this run counts its rows only in the report itself",
+        );
+        expect(line).not.toContain("it did not return");
+        expect(line).not.toContain("No row settled");
+      }
     });
   });
 

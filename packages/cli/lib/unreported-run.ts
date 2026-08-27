@@ -117,6 +117,19 @@ export function guardRunReport(
   };
 }
 
+/**
+ * How far a guarded run had got. `running` is before its engine returned;
+ * `reporting` is after — the report is in hand and is being written out.
+ *
+ * The guard stays armed across both, because both can end the process
+ * without the operator being told anything: the engine can stop settling,
+ * and so can the writing of what it returned. What the two cannot share is
+ * the CLAIM. "It did not return" is false of a run that returned, and a
+ * guard that said it would be lying in the opposite direction from the one
+ * it exists to prevent.
+ */
+export type ApplyRunPhase = "running" | "reporting";
+
 /** What one guarded apply run has settled by the time it is asked. */
 export interface ApplyRunProgress {
   /**
@@ -130,6 +143,13 @@ export interface ApplyRunProgress {
 
   /** Rows the run reported, by verdict, in the order first seen. */
   verdicts: Map<string, number>;
+
+  /**
+   * Where the run stands. Moved to `reporting` by the command the moment its
+   * engine returns, so the line the guard composes describes what actually
+   * happened rather than what was true when the guard was armed.
+   */
+  phase: ApplyRunPhase;
 }
 
 /**
@@ -138,17 +158,23 @@ export interface ApplyRunProgress {
  * the missing summary would have carried, minus the claims only a returned
  * report can support.
  *
- * Three readings, and the distinction between the last two is the whole
- * point of {@link ApplyRunProgress.observed}. A watched run that settled
- * rows names them and their verdicts. A watched run that settled none says
- * so, which is a fact about the run. An UNWATCHED run says the number is not
- * known here — never zero, because zero would be a claim this process is in
- * no position to make, and a wrong number is worse than no number: an
- * operator can act on it.
+ * The opening clause is the run's {@link ApplyRunPhase}: a run whose engine
+ * never returned, or one whose report never finished being written. Both end
+ * the process with the operator uninformed; only the first is the engine's
+ * doing, and saying so of the second would be false.
+ *
+ * The row count has three readings, and the distinction between the last two
+ * is the whole point of {@link ApplyRunProgress.observed}. A watched run that
+ * settled rows names them and their verdicts. A watched run that settled none
+ * says so, which is a fact about the run. An UNWATCHED run says the number is
+ * not known here — never zero, because zero would be a claim this process is
+ * in no position to make, and a wrong number is worse than no number: an
+ * operator can act on it. That reason is about the missing callback rather
+ * than about returning, so it holds in either phase.
  *
  * Nothing here asserts that rows it does not name were left alone either. A
- * run that stopped settling stopped somewhere this process cannot see, so
- * the closing line sends the reader to the one thing that can see it.
+ * run that stopped stopped somewhere this process cannot see, so the closing
+ * line sends the reader to the one thing that can see it.
  */
 export function describeUnreportedApplyRun(
   verb: string,
@@ -161,21 +187,33 @@ export function describeUnreportedApplyRun(
   const tally = [...progress.verdicts.entries()]
     .map(([verdict, count]) => `${verdict}: ${count}`)
     .join(" · ");
+  const reporting = progress.phase === "reporting";
   return [
-    `${verb} ended before it reported: the process exited while the run was ` +
-    `still in flight.`,
+    reporting
+      ? `${verb} ran to a report, but the process exited before that report ` +
+        `finished.`
+      : `${verb} ended before it reported: the process exited while the run ` +
+        `was still in flight.`,
     !progress.observed
-      ? `  How many rows it settled is not known here — this run reports ` +
-        `its rows only when it returns, and it did not return.`
+      ? `  How many rows it settled is not known here: this run counts its ` +
+        `rows only in the report itself.`
       : settled === 0
       ? `  No row settled before it ended.`
-      : `  ${settled} ${settled === 1 ? "row" : "rows"} settled — ${tally}. ` +
-        `Whether anything after them was written is not known here.`,
+      : `  ${settled} ${settled === 1 ? "row" : "rows"} settled — ${tally}.` +
+        // Only the running phase has rows beyond the count to be unsure
+        // about. Once the engine has returned, a watched run's count IS its
+        // report's row count, and hedging it would understate what is known.
+        (reporting
+          ? ``
+          : ` Whether anything after them was written is not known here.`),
     // The same command without `--apply`, rather than a named verification:
     // every verb that arms a guard has a dry mode that classifies each piece
     // where it now stands, and a survey — which reads references — would say
     // nothing about a repair, whose work is in the documents.
-    `  Re-running resumes it, and rows that landed are not redone. The same ` +
+    (reporting
+      ? `  What the report would have said beyond this is lost. `
+      : `  `) +
+    `Re-running resumes it, and rows that landed are not redone. The same ` +
     `command without \`--apply\` says where every piece now stands.`,
   ].join("\n");
 }

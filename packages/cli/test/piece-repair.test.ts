@@ -274,6 +274,34 @@ describe("piece-repair", () => {
       expect(abandoned).toBeInstanceOf(Promise);
     });
 
+    it("says the report failed, not that the run never returned, when output throws", async () => {
+      // The repair counts no rows either way, so what its line must get right
+      // here is the other half: the engine DID return, and the reason its
+      // count is unknown is the missing row callback rather than the return.
+      const process = guardHarness();
+      await expect(
+        repairFromCommand(
+          { ...OPTIONS, path: "topics", apply: true, json: true },
+          {
+            runRepair: () => Promise.resolve(REPORT),
+            render: () => {
+              throw new Error("stdout failed");
+            },
+            printHint: () => {},
+            guard: process.deps,
+          },
+        ),
+      ).rejects.toThrow("stdout failed");
+      expect(process.endProcess()).toBe(1);
+      const said = process.errors.join("\n");
+      expect(said).toContain("Repair ran to a report");
+      expect(said).not.toContain("still in flight");
+      expect(said).not.toContain("it did not return");
+      expect(said).toContain(
+        "this run counts its rows only in the report itself",
+      );
+    });
+
     it("says nothing at process end once the run has reported", async () => {
       const process = guardHarness();
       await captureStdout(() =>

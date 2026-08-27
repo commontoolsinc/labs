@@ -3748,6 +3748,9 @@ export async function repairFromCommand(
     guard.reported();
     throw error;
   }
+  // As the retarget does: the guard stays armed over the writing of what the
+  // engine returned, and says that is where the process ended.
+  progress.phase = "reporting";
   const print = deps.render ?? render;
   const printHint = deps.printHint ?? hint;
   if (options.json) {
@@ -3967,6 +3970,12 @@ export async function retargetFromCommand(
     guard.reported();
     throw error;
   }
+  // The engine returned; everything below is the writing of what it returned,
+  // and that can end the process too — a throw here reaches the operator as
+  // an error, but the tally it was about to print does not. The guard stays
+  // armed over it and changes what it claims, rather than standing down and
+  // leaving this stretch unguarded.
+  progress.phase = "reporting";
   // Every accepted piece by name, through the note so `--quiet` cannot
   // silence it: a piece this move could not be reversed for is the fact the
   // operator most needs in front of them, and it is being recorded at the
@@ -3999,7 +4008,7 @@ export async function retargetFromCommand(
  * say the count is unknown rather than say zero.
  */
 function newApplyRunProgress(observed: boolean): ApplyRunProgress {
-  return { observed, verdicts: new Map<string, number>() };
+  return { observed, verdicts: new Map<string, number>(), phase: "running" };
 }
 
 /** Count one settled row toward what a process-end report would say. */
@@ -4209,6 +4218,9 @@ export async function rollbackFromCommand(
     guard.reported();
     throw error;
   }
+  // As the retarget does, and for the same reason: the writing of what the
+  // engine returned is guarded too, under a claim that fits it.
+  progress.phase = "reporting";
   printHint(`Derived ${plan.rows.length} rollback rows from ${options.plan}`);
   // Every accepted piece by name, on every run that carried one — through
   // the note rather than a hint, so `--quiet` does not silence it. A piece

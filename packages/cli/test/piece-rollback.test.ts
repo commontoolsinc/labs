@@ -401,6 +401,31 @@ describe("piece-rollback", () => {
       expect(out).toBe("");
     });
 
+    it("says the report failed, not that the run never returned, when output throws", async () => {
+      // As the retarget: the engine returned, the writing of it did not, and
+      // the guard's line has to say which.
+      const process = guardHarness();
+      await expect(
+        rollbackFromCommand(
+          { ...ROLLBACK_OPTIONS, out: "report.json", apply: true },
+          {
+            runRollback: (_config, request) => {
+              for (const row of REPORT.rows) request.onRow?.(row);
+              return Promise.resolve({ report: REPORT, plan: DERIVED });
+            },
+            writeTextFile: () => Promise.reject(new Error("the disk is full")),
+            printHint: () => {},
+            guard: process.deps,
+          },
+        ),
+      ).rejects.toThrow("the disk is full");
+      expect(process.endProcess()).toBe(1);
+      const said = process.errors.join("\n");
+      expect(said).toContain("Rollback ran to a report");
+      expect(said).not.toContain("still in flight");
+      expect(said).toContain("2 rows settled — applied: 1 · landed: 1.");
+    });
+
     it("says nothing at process end once the run has reported", async () => {
       const process = guardHarness();
       await captureStdout(() =>

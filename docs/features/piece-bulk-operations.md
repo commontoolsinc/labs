@@ -340,6 +340,15 @@ names the verb, says what had settled, and exits nonzero. The guard runs off
 the process ending rather than a clock, so it costs a run that finishes
 nothing and can never cut one short.
 
+The guard spans the writing of the report as well as the run, because that
+stretch can end the process too — a `--out` write that fails, a stdout that
+will not take the document. Releasing the guard the moment the engine returned
+would leave it unguarded, and the silence would simply move one step later. So
+the guard stays and its CLAIM moves instead: a run whose engine never returned
+is reported as one still in flight, and a run whose report never finished is
+reported as exactly that. The second is the more useful of the two, because the
+tally it carries is the very thing the failed report did not print.
+
 That summary is the operator's only account of such a run, so no reading of it
 may be false. The retarget and the rollback watch their rows in every output
 mode — `--json` and `--out` hand the engine a reporter that observes and never
@@ -350,7 +359,9 @@ counts rows and names their verdicts, and a count of zero is a fact about a run
 that was being watched. The repair's engine reports its rows only in the report
 it returns, so its line says the number is not known rather than saying zero —
 its rows really do settle, and a number an operator can act on must never be
-one this process is in no position to give. Neither line claims that rows it
+one this process is in no position to give. That reason names the missing row
+reporter rather than the missing return, so it stays true of a repair whose
+report was the part that failed. Neither line claims that rows it
 does not name were left alone: whether anything past the settled rows was
 written is a question for a fresh read, and the line sends the operator to the
 same command without `--apply` — every verb that arms a guard has a dry mode
