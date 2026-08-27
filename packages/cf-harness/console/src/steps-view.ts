@@ -258,6 +258,9 @@ export class ConsoleSteps extends LitElement {
                   ${truncate(json(argument.value), 120)}
                 </span>
                 <span class="arg-note">value</span>
+                ${argument.confidentiality.map((name) =>
+                  html`<span class="atom conf">${name}</span>`
+                )}
               </div>
             `
           )}

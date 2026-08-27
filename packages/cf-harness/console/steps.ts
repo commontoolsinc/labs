@@ -219,7 +219,7 @@ const tokensInText = (text: string): string[] =>
  * call as a bare string as often as nested in an object, so the value is read
  * whole rather than only when it is a string.
  */
-const tokensIn = (value: unknown): string[] =>
+export const handleTokensIn = (value: unknown): string[] =>
   tokensInText(
     typeof value === "string" ? value : JSON.stringify(value) ?? "",
   );
@@ -446,7 +446,7 @@ export const consoleRunSteps = (
   const admit = (texts: readonly string[]): string[] => {
     const introduced: string[] = [];
     for (const text of texts) {
-      for (const token of tokensIn(text)) {
+      for (const token of handleTokensIn(text)) {
         if (!inScope.includes(token) && !introduced.includes(token)) {
           introduced.push(token);
         }
@@ -620,18 +620,18 @@ const handleProvenance = (
     const args = asRecord(step.input);
     const output = asRecord(step.output);
     if (step.toolName === "run_pattern") {
-      for (const token of tokensIn(output.resultRef)) {
+      for (const token of handleTokensIn(output.resultRef)) {
         at(token).producedByStep = step.index;
       }
       for (const [key, value] of Object.entries(asRecord(args.inputs))) {
-        for (const token of tokensIn(value)) {
+        for (const token of handleTokensIn(value)) {
           const record = at(token);
           record.uses.push({
             step: step.index,
             toolName: "run_pattern",
             as: key,
           });
-          for (const name of stepAtomNames(step)) {
+          for (const name of argumentAtomNames(step, key)) {
             if (!record.confidentiality.includes(name)) {
               record.confidentiality.push(name);
             }
@@ -643,18 +643,26 @@ const handleProvenance = (
     // Every other tool that takes a handle takes it as a named argument, so
     // the argument's own name is how the handle was spent.
     for (const [key, value] of Object.entries(args)) {
-      for (const token of tokensIn(value)) {
-        at(token).uses.push({
+      for (const token of handleTokensIn(value)) {
+        const record = at(token);
+        record.uses.push({
           step: step.index,
           toolName: step.toolName ?? "tool",
           as: key,
         });
+        // A handle spent on any tool carries whatever the runtime labelled
+        // that argument with, not only one spent on `run_pattern`.
+        for (const name of argumentAtomNames(step, key)) {
+          if (!record.confidentiality.includes(name)) {
+            record.confidentiality.push(name);
+          }
+        }
       }
     }
     if (step.toolName === "assign_slug" && step.status !== "error") {
       const slug = asString(output.slug) ?? asString(args.slug);
       const url = asString(output.url);
-      for (const token of tokensIn(args.token)) {
+      for (const token of handleTokensIn(args.token)) {
         const record = at(token);
         if (slug !== undefined) {
           record.slug = slug;
@@ -691,19 +699,45 @@ const linkTarget = (
     return undefined;
   }
   const text = value.trim();
-  if (!matchLLMFriendlyLink.test(text)) {
+  if (!matchLLMFriendlyLink.test(text) || !parsesAsLink(text)) {
     return undefined;
   }
   let best: ConsoleHandle | undefined;
   for (const handle of handles) {
     if (
-      handle.ref !== undefined && text.startsWith(handle.ref) &&
+      handle.ref !== undefined && continuesAddress(text, handle.ref) &&
       (best?.ref === undefined || handle.ref.length > best.ref.length)
     ) {
       best = handle;
     }
   }
-  return best === undefined ? { ref: text } : { ref: best.ref!, handle: best };
+  return best?.ref === undefined
+    ? { ref: text }
+    : { ref: best.ref, handle: best };
+};
+
+/**
+ * Whether a link continues a held cell's own address rather than merely
+ * starting with its characters. `/of:fid1:abcdef` shares a prefix with
+ * `/of:fid1:abc` and names a different entity, so a prefix test on its own
+ * would attach one cell's handle to another cell's link.
+ */
+const continuesAddress = (link: string, ref: string): boolean =>
+  link === ref || (link.startsWith(ref) && link[ref.length] === "/");
+
+/**
+ * Whether a string is a whole LLM-friendly link rather than something merely
+ * shaped like one. `run_pattern` passes a string it cannot parse through as
+ * plain JSON, so reading one as a reference would draw a flow edge the run
+ * never had.
+ */
+const parsesAsLink = (text: string): boolean => {
+  const body = text.startsWith("/@")
+    ? text.slice(1).split("/").slice(1).join("/")
+    : text.slice(1);
+  const entity = body.split("/")[0] ?? "";
+  const separator = entity.indexOf(":");
+  return separator > 0 && entity.length > separator + 1;
 };
 
 /**
@@ -724,16 +758,22 @@ export const consoleStepArguments = (
   const byToken = new Map(handles.map((handle) => [handle.token, handle]));
   const args = asRecord(step.input);
   const source = step.toolName === "run_pattern" ? asRecord(args.inputs) : args;
-  const atoms = stepAtomNames(step);
-
   return Object.entries(source).map(([key, value]): ConsoleArgumentRef => {
-    const token = tokensIn(value)[0];
+    const token = handleTokensIn(value)[0];
     const link = token === undefined ? linkTarget(value, handles) : undefined;
     const handle = token !== undefined ? byToken.get(token) : link?.handle;
     const ref = handle?.ref ?? link?.ref;
     const named = token ?? handle?.token;
     if (named === undefined && ref === undefined) {
-      return { key, isReference: false, confidentiality: [], value };
+      // A label belongs to the argument the runtime computed it for, whether
+      // or not that argument names a cell — a shell command carries one and
+      // names nothing.
+      return {
+        key,
+        isReference: false,
+        confidentiality: argumentAtomNames(step, key),
+        value,
+      };
     }
     return {
       key,
@@ -745,15 +785,34 @@ export const consoleStepArguments = (
         ? { producedByStep: handle.producedByStep }
         : {}),
       ...(handle?.schema !== undefined ? { schema: handle.schema } : {}),
-      confidentiality: atoms,
+      confidentiality: argumentAtomNames(step, key),
     };
   });
 };
 
-/** The confidentiality atoms a step's own labels carry, by short name. */
-const stepAtomNames = (step: ConsoleStep): string[] => {
+/**
+ * The confidentiality atoms a step's labels put on one argument.
+ *
+ * A label entry names the input path the runtime computed it for, so a call
+ * with labels on two arguments has two entries and neither governs the other.
+ * Attaching every atom to every argument would report confidentiality on cells
+ * that never carried it, which is worse than reporting none. An empty path is
+ * the whole input and governs everything under it.
+ *
+ * Worth knowing while reading a run: an invocation context is recorded for a
+ * sandbox operation, and its label paths are rooted at that operation's own
+ * arguments — `command`, `argv`, `env` and the rest. A `run_pattern` result
+ * carries no invocation context at all, so a cell minted by a pattern shows no
+ * atoms however the run's flow labels are set.
+ */
+const argumentAtomNames = (step: ConsoleStep, key: string): string[] => {
   const names: string[] = [];
   for (const entry of step.invocation?.cfcInputLabels?.entries ?? []) {
+    const path = entry.path.map(String);
+    const governs = path.length === 0 || path[0] === key;
+    if (!governs) {
+      continue;
+    }
     for (const clause of entry.label?.confidentiality ?? []) {
       const type = typeof clause === "object" && clause !== null
         ? (clause as { type?: unknown }).type

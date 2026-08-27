@@ -573,6 +573,90 @@ describe("console/steps provenance", () => {
       expect(args[0].producedByStep).toBe(0);
     });
 
+    it("does not attach a handle to a link that merely shares its prefix", () => {
+      const steps = composed("/of:fid1:abcdef");
+      const handles = consoleRunHandles(steps, table);
+      const args = consoleStepArguments(steps[2], handles);
+      // The held cell is `/of:fid1:abc`; this names a different entity.
+      expect(args[0].isReference).toBe(true);
+      expect(args[0].token).toBeUndefined();
+      expect(args[0].ref).toBe("/of:fid1:abcdef");
+    });
+
+    it("reads a prefix-shaped string that is not a link as a value", () => {
+      const steps = consoleRunSteps([
+        call("c1", "run_pattern", {
+          sourceText: "y",
+          inputs: { source: "/of:" },
+        }),
+        result("c1", "run_pattern", { status: "ok" }),
+      ]);
+      const args = consoleStepArguments(steps[0], []);
+      expect(args[0].isReference).toBe(false);
+    });
+
+    it("puts a label only on the argument its path names", () => {
+      // An invocation context is recorded for a sandbox operation, so its
+      // label paths are rooted at that operation's own arguments.
+      const labelled: HarnessCfcInvocationContext = {
+        type: "cf-harness.cfc-invocation-context",
+        version: 1,
+        sequence: 1,
+        runId: "r",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        toolId: "bash",
+        toolOutputId: createToolOutputId("r", "bash", 1),
+        operation: "shell",
+        cfcEnforcementMode: "enforce-explicit",
+        cwd: "/workspace",
+        runManifest: { present: false },
+        inputs: {},
+        cfcInputLabels: {
+          version: 1,
+          entries: [
+            {
+              path: ["command"],
+              label: {
+                confidentiality: [
+                  {
+                    type:
+                      "https://commonfabric.org/cfc/atom/PromptSlotInfluence",
+                    version: 1,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      };
+      const steps = consoleRunSteps(
+        [
+          call("c1", "bash", { command: "cat x", cwd: "/workspace" }),
+          {
+            role: "tool",
+            toolCallId: "c1",
+            toolName: "bash",
+            content: JSON.stringify({ status: "ok" }),
+            resultRef: {
+              type: "cf-harness.tool-result-ref",
+              outputId: createToolOutputId("r", "bash", 1),
+              toolId: "bash",
+              runId: "r",
+            },
+          },
+        ],
+        [],
+        [],
+        [labelled],
+      );
+      const args = consoleStepArguments(steps[0], []);
+      const command = args.find((argument) => argument.key === "command");
+      const cwd = args.find((argument) => argument.key === "cwd");
+      expect(command?.confidentiality).toEqual(["PromptSlotInfluence"]);
+      // The other argument carried no label, and must not borrow this one.
+      expect(cwd?.confidentiality).toEqual([]);
+    });
+
     it("reads a literal input as a value rather than a reference", () => {
       const steps = consoleRunSteps([
         call("c1", "run_pattern", { sourceText: "x", inputs: { bill: 100 } }),

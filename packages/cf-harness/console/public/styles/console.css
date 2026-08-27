@@ -19,11 +19,19 @@ body {
   font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
+/*
+ * A column running the height of the window: the composer takes what it needs
+ * at the top and the workbench takes the rest, so the three panes below scroll
+ * inside themselves rather than the page scrolling to reach them.
+ */
 main {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
   margin: 0 auto;
   /* Three columns of content — runs, the timeline, the map — need the room. */
   max-width: 112rem;
-  padding: 2.5rem 1.5rem 4rem;
+  padding: 1.75rem 1.5rem 1.5rem;
 }
 
 header {
@@ -250,7 +258,13 @@ button[disabled] {
   display: grid;
   gap: 1.5rem;
   grid-template-columns: 17rem minmax(0, 1fr) 26rem;
-  height: calc(100vh - 4rem);
+  /*
+   * The columns fill whatever is left below the composer rather than a guessed
+   * offset from the top: a fixed `100vh - Nrem` puts the bottom past the fold,
+   * which makes the page scroll to reach a column that then scrolls again.
+   */
+  flex: 1;
+  min-height: 0;
 }
 
 .workbench > * {
@@ -1005,18 +1019,23 @@ button[disabled] {
  * Held out of flow so a chip never resizes the row it sits in, and above the
  * panes below it.
  */
+/*
+ * Fixed rather than absolute: every column is its own scroll container, and an
+ * absolutely-placed card is clipped by the nearest one however high its
+ * `z-index`. Fixed takes it out of that clipping entirely, and the chip places
+ * it from script on hover or focus.
+ */
 .cell-card {
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: 0 6px 20px rgb(16 24 40 / 12%);
   display: none;
-  left: 0;
+  max-width: 28rem;
   min-width: 20rem;
   padding: 0.5rem 0.65rem;
-  position: absolute;
-  top: calc(100% + 0.3rem);
-  z-index: 20;
+  position: fixed;
+  z-index: 40;
 }
 
 .cell:hover .cell-card,
@@ -1234,4 +1253,15 @@ button[disabled] {
   font-size: 0.7rem;
   letter-spacing: 0.03em;
   width: 100%;
+}
+
+/*
+ * The console view is itself the flex column between the header and the
+ * bottom of the window, so the workbench inside it can take what is left.
+ */
+.console-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
 }

@@ -57,6 +57,34 @@ export class ConsoleCell extends LitElement {
     return this;
   }
 
+  /**
+   * Places the card against the chip. It is fixed-position — an absolutely
+   * placed one is clipped by whichever column is scrolling — so its
+   * coordinates are the chip's own, in viewport space, nudged back inside the
+   * window when the chip sits near an edge.
+   */
+  readonly #place = (): void => {
+    const chip = this.querySelector(".cell") as HTMLElement | null;
+    const card = this.querySelector(".cell-card") as HTMLElement | null;
+    if (chip === null || card === null) {
+      return;
+    }
+    const at = chip.getBoundingClientRect();
+    card.style.left = "0";
+    card.style.top = "0";
+    const size = card.getBoundingClientRect();
+    const left = Math.max(
+      8,
+      Math.min(at.left, globalThis.innerWidth - size.width - 8),
+    );
+    const below = at.bottom + 6;
+    const top = below + size.height > globalThis.innerHeight
+      ? Math.max(8, at.top - size.height - 6)
+      : below;
+    card.style.left = `${left}px`;
+    card.style.top = `${top}px`;
+  };
+
   protected override render(): TemplateResult | typeof nothing {
     const cell = this.cell;
     if (cell === undefined) {
@@ -65,7 +93,14 @@ export class ConsoleCell extends LitElement {
     const shape = schemaSummary(cell.schema);
     const atoms = cell.confidentiality ?? [];
     return html`
-      <span class="cell ${atoms.length > 0 ? "labelled" : ""}">
+      <span
+        class="cell ${atoms.length > 0 ? "labelled" : ""}"
+        tabindex="0"
+        role="button"
+        aria-label="cell ${cellName(cell)}"
+        @mouseenter=${this.#place}
+        @focusin=${this.#place}
+      >
         <span class="cell-dot"></span>
         <span class="cell-name">${cellName(cell)}</span>
         ${atoms.length === 0

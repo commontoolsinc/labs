@@ -77,6 +77,7 @@ export class ConsoleApp extends LitElement {
     openRunId: { attribute: false },
     flow: { attribute: false },
     flowError: { attribute: false },
+    flowLoading: { attribute: false },
     focusStep: { attribute: false },
     state: { attribute: false },
     running: { attribute: false },
@@ -99,6 +100,8 @@ export class ConsoleApp extends LitElement {
    * arriving, the other needs asking for again.
    */
   declare flowError: string | undefined;
+  /** Whether a map read is in flight, so a retry cannot start a second. */
+  declare flowLoading: boolean;
   /** The step the middle column is reading, marked in the map. */
   declare focusStep: number | undefined;
   declare state: string;
@@ -169,6 +172,7 @@ export class ConsoleApp extends LitElement {
     if (runId === undefined) {
       return;
     }
+    this.flowLoading = true;
     try {
       const flow = await readRunFlow(runId);
       if (read === this.#flowReads && this.openRunId === runId) {
@@ -181,6 +185,10 @@ export class ConsoleApp extends LitElement {
       if (read === this.#flowReads && this.openRunId === runId) {
         this.flow = undefined;
         this.flowError = error instanceof Error ? error.message : String(error);
+      }
+    } finally {
+      if (read === this.#flowReads) {
+        this.flowLoading = false;
       }
     }
   }
@@ -469,7 +477,7 @@ export class ConsoleApp extends LitElement {
   /** Type a task, watch it run, read what any run did. */
   #consoleView(): TemplateResult {
     return html`
-      <div>
+      <div class="console-view">
         <textarea
           id="task"
           placeholder="Describe what you want built. The harness writes the pattern, runs it in your space, and names the piece."
@@ -552,6 +560,7 @@ export class ConsoleApp extends LitElement {
                 <button
                   class="secondary"
                   type="button"
+                  ?disabled=${this.flowLoading}
                   @click=${() => this.#loadFlow()}
                 >
                   Try again

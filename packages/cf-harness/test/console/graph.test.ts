@@ -188,6 +188,21 @@ describe("console/graph", () => {
         .toHaveLength(1);
     });
 
+    it("visits a run once when a delegation points back at an ancestor", () => {
+      const steps = consoleRunSteps([
+        call("c1", "delegate_task", { goal: "loop" }),
+        result("c1", "delegate_task", {
+          subagent: { childRunId: "r", status: "completed" },
+        }),
+      ]);
+      // A cycle would otherwise recurse until the stack gave out.
+      const graph = consoleRunFamilyGraph(
+        { runId: "r", steps, handles: [] },
+        [{ runId: "r", steps, handles: [] }],
+      );
+      expect(graph.nodes.filter((node) => node.kind === "pattern")).toEqual([]);
+    });
+
     it("dates a child's nodes to the step that delegated into it", () => {
       const parentSteps = consoleRunSteps([
         { role: "user", content: "go" },

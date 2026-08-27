@@ -11,7 +11,7 @@
  */
 
 import type { ConsoleHandle, ConsoleStep, ConsoleStepStatus } from "./steps.ts";
-import { consoleStepArguments } from "./steps.ts";
+import { consoleStepArguments, handleTokensIn } from "./steps.ts";
 
 /** What a node in the map stands for. */
 export type ConsoleFlowKind =
@@ -31,6 +31,8 @@ export interface ConsoleFlowCell {
   slug?: string;
   /** The step whose result minted it. */
   producedByStep?: number;
+  /** The shape the pattern that made it declared, for the chip's card. */
+  schema?: unknown;
   /** Confidentiality atoms riding on it. */
   confidentiality: readonly string[];
   /** The argument name it came in as, for a cell a call read. */
@@ -158,6 +160,7 @@ const cellOf = (
   ...(handle?.producedByStep !== undefined
     ? { producedByStep: handle.producedByStep }
     : {}),
+  ...(handle?.schema !== undefined ? { schema: handle.schema } : {}),
   confidentiality: handle?.confidentiality ?? [],
   ...(as !== undefined ? { as } : {}),
 });
@@ -204,18 +207,43 @@ const runNodes = (
       continue;
     }
 
-    const reads = consoleStepArguments(step, run.handles)
-      .filter((argument) => argument.isReference)
-      .map((argument) =>
-        cellOf(
-          argument.token === undefined
-            ? undefined
-            : byToken.get(argument.token),
-          argument.token,
-          argument.ref,
-          argument.key,
-        )
-      );
+    // An argument may carry more than one handle, and `consoleStepArguments`
+    // reports the argument rather than each token in it — so the tokens are
+    // read again here, and every cell an input names is drawn.
+    const args = asRecord(step.input);
+    const source = step.toolName === "run_pattern"
+      ? asRecord(args.inputs)
+      : args;
+    const reads: ConsoleFlowCell[] = [];
+    for (const argument of consoleStepArguments(step, run.handles)) {
+      if (!argument.isReference) {
+        continue;
+      }
+      const tokens = handleTokensIn(source[argument.key]);
+      if (tokens.length <= 1) {
+        reads.push(
+          cellOf(
+            argument.token === undefined
+              ? undefined
+              : byToken.get(argument.token),
+            argument.token,
+            argument.ref,
+            argument.key,
+          ),
+        );
+        continue;
+      }
+      for (const token of tokens) {
+        reads.push(
+          cellOf(
+            byToken.get(token),
+            token,
+            byToken.get(token)?.ref,
+            argument.key,
+          ),
+        );
+      }
+    }
     const produced = asString(asRecord(step.output).resultRef);
     const produces = produced === undefined
       ? []

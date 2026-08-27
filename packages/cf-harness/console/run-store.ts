@@ -363,12 +363,23 @@ const neighbouringHandles = async (
   } catch {
     return [];
   }
-  // The index is keyed by which runs exist. A run's table is fixed once the
-  // run has ended, and a handle is referenced after the run that minted it
-  // returned, so a new run is the only thing that can add an entry worth
-  // having — and listing names is far cheaper than parsing every run's state
-  // on a timeline that re-reads whenever a tool call completes.
-  const key = `${artifactRoot}\n${names.sort().join("\n")}`;
+  // The index is keyed by which runs exist AND by when each was last written,
+  // because a run mints handles as it goes: keying on the set of names alone
+  // would hold a running turn's first snapshot and report every cell it minted
+  // after that as unresolved. A stat per run is still far cheaper than parsing
+  // every run's state on a timeline that re-reads whenever a tool completes.
+  const stamps: string[] = [];
+  for (const name of names.sort()) {
+    let mtime = 0;
+    try {
+      const info = await Deno.stat(join(artifactRoot, name, "run-state.json"));
+      mtime = info.mtime?.getTime() ?? 0;
+    } catch {
+      // A run whose state cannot be read contributes no entries either way.
+    }
+    stamps.push(`${name}@${mtime}`);
+  }
+  const key = `${artifactRoot}\n${stamps.join("\n")}`;
   const cached = neighbourIndex.get(key);
   if (cached !== undefined) {
     return cached;

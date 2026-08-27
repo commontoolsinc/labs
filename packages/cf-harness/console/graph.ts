@@ -377,17 +377,21 @@ export const consoleRunFamilyGraph = (
     }
   };
 
-  // The root, then each subtree dated to the step that delegated into it.
+  // The root, then each subtree dated to the step that delegated into it. A
+  // run is visited once: a delegation recorded as pointing back at an ancestor
+  // would otherwise recurse until the stack gave out.
+  const seen = new Set<string>([root.runId]);
   absorb(consoleRunGraph(root.steps, root.handles, root.runId));
   const walk = (run: ConsoleGraphRunInput, dateAt?: number): void => {
     for (const step of run.steps) {
-      if (step.childRunId === undefined) {
+      if (step.childRunId === undefined || seen.has(step.childRunId)) {
         continue;
       }
       const child = byRunId.get(step.childRunId);
       if (child === undefined) {
         continue;
       }
+      seen.add(child.runId);
       const at = dateAt ?? step.index;
       absorb(consoleRunGraph(child.steps, child.handles, child.runId), at);
       walk(child, at);
