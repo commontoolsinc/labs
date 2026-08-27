@@ -2382,15 +2382,23 @@ export class Runner {
         identity: durableEntryRef.identity,
         symbol: durableEntryRef.symbol,
       });
-      // Same condition as the durable stamp, deliberately: an observer that
-      // saw instantiations the store does not label would report update
-      // targets that cannot be found again, and one that missed a labeled
-      // root would under-report. That EXCLUDES the keyless case now that the
-      // stamp does: an unstamped keyless root reported here would name an
-      // update target no store labels.
+    }
+    // The instantiation observer is a session-side reporting channel, not a
+    // durable write, so it deliberately does NOT share the durable stamp's
+    // keyless gate: it reports the SESSION pointer, `keyless:` included.
+    // Reporting the session-synthetic identity is exactly how a harness's
+    // stranded-piece guard (cf-harness `run_pattern` via `keylessSince`)
+    // learns that the piece it just materialized is session-bound — under
+    // the never-durable contract such a piece gets the no-pattern-meta
+    // verdict instead of a durable pointer, but it is exactly as unopenable
+    // by any other runtime, and suppressing the report would make that
+    // guard fail open. No consumer uses the reported identity as a load or
+    // update key; the recorders match on the cell hash and treat the
+    // identity as evidence.
+    if (entryRef) {
       this.runtime.onPatternInstantiated?.({
-        identity: durableEntryRef.identity,
-        symbol: durableEntryRef.symbol,
+        identity: entryRef.identity,
+        symbol: entryRef.symbol,
         // The source path stamped at module-index time is the reliable one: a
         // pattern reloaded BY IDENTITY carries no program, so a nested
         // instantiation would otherwise arrive sourceless. Fall back to the

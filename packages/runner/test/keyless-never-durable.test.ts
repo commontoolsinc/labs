@@ -182,9 +182,18 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
       store,
     });
     storageManager = EmulatedStorageManager.connectTo(server, { as: signer });
+    // The SESSION-side instantiation report must keep flowing even though
+    // the durable stamp is skipped: cf-harness's stranded-piece guard
+    // (`run_pattern` via `keylessSince`) exists to see exactly this
+    // evidence, and coupling the observer to the durable write makes it
+    // fail open. Collected here so the same test that proves the store
+    // stays clean proves the report still happens.
+    const reportedIdentities: string[] = [];
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
+      onPatternInstantiated: (instantiation) =>
+        reportedIdentities.push(instantiation.identity),
     });
     try {
       // Writer 1: Runner.setup's durable pattern-pointer stamps for a
@@ -201,6 +210,11 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
         const running = runtime.run(tx, handBuiltPattern() as any, {}, cell);
         await tx.commit();
         await running.pull();
+        expect(
+          reportedIdentities.some((identity) =>
+            identity.startsWith("keyless:")
+          ),
+        ).toBe(true);
       }
 
       // Writer 2: the map builtin's `$patternRef` sentinel for a keyless op
