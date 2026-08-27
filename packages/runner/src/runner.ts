@@ -5059,28 +5059,32 @@ export class Runner {
   /**
    * Runs a pattern and returns the accepted setup transaction's receipt.
    *
-   * A resolved call is proof that storage accepted this transaction. Three
+   * A resolved call is proof that storage accepted this transaction. Four
    * conditions make that so, and each is enforced here rather than inferred
-   * from the caller's options, so narrowing one cannot quietly downgrade the
-   * receipt into a claim nothing checked:
+   * from the caller's options or its runtime, so narrowing one cannot quietly
+   * downgrade the receipt into a claim nothing checked:
    *
    * - the operation owns the transaction, so the receipt reports a storage
    *   verdict and never writes merely staged in a caller-owned transaction;
+   * - the runtime commits to storage rather than sealing into a wave, where
+   *   acceptance means "taken into the wave" and a later withdrawal —
+   *   superseded, requeued, lease lost — can undo it. Such a contribution
+   *   cannot back a receipt that says `committed`, and waiting for the wave to
+   *   settle from inside the action that feeds it can deadlock, so the answer
+   *   is a refusal at the boundary rather than a weaker word for durable. A
+   *   flag-ON client speculating installs no destination and is unaffected;
+   *   its setup is stamped as bookkeeping, which the overlay passes through to
+   *   the real store;
    * - a commit that storage rejects throws, and never falls through to the
    *   post-commit work that a receipt-less run tolerates;
    * - a setup that recorded no pattern pointer throws, because a receipt
    *   naming no pattern is not a receipt.
    *
-   * Two properties of the store are the caller's to respect. A transaction
+   * One property of the store is still the caller's to respect: a transaction
    * whose writes all match what storage already holds is elided before it is
    * sent, so a receipt for a wholly redundant setup reports acceptance of a
-   * commit the server never saw; `setPattern`'s source transition appends a
-   * fresh revision, which is what keeps its commit non-empty. And on a runtime
-   * that seals into a wave rather than committing to storage — a serving
-   * runtime, or a speculation overlay under experimental server execution —
-   * acceptance means "taken into the wave", which a later withdrawal can undo.
-   * The setup transaction is stamped as bookkeeping specifically so it commits
-   * for real rather than diverting into that overlay.
+   * commit the server never saw. `setPattern`'s source transition appends a
+   * fresh revision, which is what keeps its commit non-empty.
    *
    * @throws PatternSetupPostCommitError when the transaction commits and the
    * work that refreshes the running piece then fails. Its `.commit` is the
@@ -5097,6 +5101,12 @@ export class Runner {
     if (resultCell.tx?.status().status === "ready") {
       throw new Error(
         "a committed pattern setup receipt requires an unbound result cell",
+      );
+    }
+    if (this.runtime.sealDestinationInstalled) {
+      throw new Error(
+        "a committed pattern setup receipt is unavailable while sealing " +
+          "into a wave, whose acceptance a later withdrawal can undo",
       );
     }
     const result = await this.#runSynced(

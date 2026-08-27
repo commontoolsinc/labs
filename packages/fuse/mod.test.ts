@@ -13,6 +13,7 @@ import {
   isConnectionWriteFailure,
   parseCfcXattrNamespace,
   rootSpaceLookupNames,
+  sourceRefreshWarning,
   sourceRelPathToTreeSegments,
   writeUnavailableErrno,
 } from "./mod.ts";
@@ -183,6 +184,60 @@ Deno.test("source writeback retains attached data files", async () => {
   assert(
     sourceWriteback.includes("dataFiles: program.dataFiles"),
     "source writeback must pass the recovered data files to setPattern",
+  );
+});
+
+Deno.test("source writeback reports a committed write whose refresh failed", () => {
+  // The write committed, so the flush succeeds and the file is saved — but
+  // the piece is on the new source and not running it, and error.log is the
+  // only place the mount can say so. A clean write clears that file, so a
+  // silent warning here is the mount reporting an unqualified success.
+  assertEquals(
+    sourceRefreshWarning({
+      status: "committed",
+      ref: { identity: "A".repeat(43), symbol: "default" },
+      revisionId: "revision-2",
+      detachedOrigin: null,
+      refresh: { status: "failed", warning: "dependency unavailable" },
+    }),
+    `Source revision revision-2 committed as cf:module/${
+      "A".repeat(43)
+    }#default, but refreshing the running piece failed: dependency unavailable`,
+  );
+});
+
+Deno.test("source writeback says nothing when the refresh completed", () => {
+  assertEquals(
+    sourceRefreshWarning({
+      status: "committed",
+      ref: { identity: "A".repeat(43), symbol: "default" },
+      revisionId: "revision-2",
+      detachedOrigin: null,
+      refresh: { status: "completed" },
+    }),
+    undefined,
+  );
+});
+
+Deno.test("source writeback keeps a refresh warning in error.log", async () => {
+  // The composed text is asserted above; what this adds is that the flush
+  // path writes it into error.log rather than clearing the file. Read from
+  // the source because driving the flush needs a mounted filesystem, in the
+  // same way as the two writeback cases above.
+  const source = await Deno.readTextFile(new URL("./mod.ts", import.meta.url));
+  const sourceWriteback = source.slice(
+    source.indexOf('if (writeTarget?.kind === "source")'),
+  );
+
+  assert(
+    sourceWriteback.includes("const refreshWarning = sourceRefreshWarning("),
+    "source writeback must read the refresh outcome off the receipt",
+  );
+  assert(
+    sourceWriteback.includes(
+      'tree.updateFile(errorLogIno, refreshWarning ?? "")',
+    ),
+    "source writeback must keep the refresh warning in error.log",
   );
 });
 

@@ -1831,6 +1831,60 @@ describe("setup/start", () => {
     }
   });
 
+  it("runSyncedWithCommit refuses to issue a receipt while sealing into a wave", async () => {
+    // A serving runtime seals rather than commits: acceptance means the wave
+    // took the contribution, and a later withdrawal — superseded, requeued,
+    // lease lost — can undo it. A receipt saying `committed` would overstate
+    // that, and waiting for the wave to settle from inside the action feeding
+    // it can deadlock, so the boundary refuses instead of weakening the word.
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    };
+    // A serving runtime of its own: installing a seal destination is the ON
+    // arm's posture, which the suite's shared client runtime does not have.
+    const servingStorage = StorageManager.emulate({ as: signer });
+    const serving = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: servingStorage,
+      servingPosture: true,
+      experimental: { serverExecution: true },
+    });
+    const resultCell = serving.getCell(
+      space,
+      "runSyncedWithCommit while sealing",
+    );
+    const sealed: IExtendedStorageTransaction[] = [];
+    serving.installSealDestination({
+      seal: (tx: IExtendedStorageTransaction) => {
+        sealed.push(tx);
+        return tx.commit();
+      },
+    });
+
+    try {
+      await expect(serving.runSyncedWithCommit(
+        resultCell,
+        trustExecutable(serving, pattern),
+        {},
+        {
+          expectedPatternIdentity: {
+            identity: "of:fid1:expected",
+            symbol: "default",
+          },
+        },
+      )).rejects.toThrow("while sealing into a wave");
+      // Refused at the boundary, so nothing reached the wave to be withdrawn.
+      expect(sealed).toEqual([]);
+    } finally {
+      serving.clearSealDestination();
+      await serving.dispose();
+      await servingStorage.close();
+    }
+  });
+
   it("runSyncedWithCommit refuses a result cell bound to an open transaction", async () => {
     // Writes staged in a transaction the caller still owns have no storage
     // verdict yet — the caller decides their fate — so there is nothing to
