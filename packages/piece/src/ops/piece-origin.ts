@@ -15,16 +15,23 @@ import {
   getPatternIdentityRef,
   getPatternRepository,
   getPatternSource,
+  getPieceReconciliation,
   getPieceSourceRevisions,
   type MemorySpace,
   NAME,
   parseFabricRef,
+  type PieceReconciliation,
   type ReconcileOutcome,
   resolveSystemPatternSource,
   type Runtime,
   type RuntimeProgram,
   spaceHostFromFabricAuthority,
 } from "@commonfabric/runner";
+import {
+  entityKindOfIdString,
+  stripEntityUriScheme,
+  uriSchemeForEntityKind,
+} from "@commonfabric/runner/entity-kind";
 import { nameSchema } from "@commonfabric/runner/schemas";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 
@@ -69,6 +76,19 @@ export interface PieceSourceState {
 
   /** The active origin, absent when the piece is detached. */
   origin?: PieceOrigin;
+
+  /**
+   * A recorded source string no resolver can follow, with why. A piece
+   * carrying one is neither following nor detached: it holds something a
+   * person can read and repair.
+   */
+  unusableOrigin?: { recorded: string; reason: string };
+
+  /**
+   * What following the active origin last did. Absent when nothing has
+   * reconciled this piece against its origin.
+   */
+  reconciliation?: PieceReconciliation;
 
   /** Descriptive repository locator; never followed. */
   repository?: string;
@@ -156,12 +176,18 @@ export function qualifyFabricOrigin(
 /**
  * Resolves an origin now, returning the authored program and selected export a
  * repoint transition should apply.
+ *
+ * `self` names the piece the origin is being resolved for. A mutable fabric
+ * origin naming that piece is rejected: a piece that follows itself supplies
+ * its own next source, and there is no source outside it for either end of
+ * that loop to adopt.
  */
 export async function resolvePieceOriginSource(
   runtime: Runtime,
   destinationSpace: MemorySpace,
   recorded: string,
   historicalSymbol: string,
+  options: { self?: { space: MemorySpace; pieceId: string } } = {},
 ): Promise<ResolvedPieceOriginSource> {
   const origin = classifyOrigin(runtime, destinationSpace, recorded);
   if (origin.kind === "web") {
@@ -225,6 +251,13 @@ export async function resolvePieceOriginSource(
   }
 
   const pinned = pinnedPatternIdentity(stableRef);
+  const self = options.self;
+  if (
+    pinned === undefined && self !== undefined &&
+    sourceSpace === self.space && namesEntity(stableRef, self.pieceId)
+  ) {
+    throw new PieceOriginError("a piece cannot follow itself");
+  }
   const pattern = pinned === undefined
     ? await mutableFabricOriginPattern(runtime, sourceSpace, stableRef)
     : { identity: pinned, symbol: historicalSymbol };
@@ -249,6 +282,17 @@ export async function resolvePieceOriginSource(
     program: { ...program, mainExport: pattern.symbol },
     pattern,
   };
+}
+
+/**
+ * Whether a stable fabric reference names the entity `pieceId` addresses. The
+ * id can arrive as a bare tagged hash or as its schemed URI, so both are
+ * reduced to the kind and hash the reference carries.
+ */
+function namesEntity(ref: StableFabricRef, pieceId: string): boolean {
+  return uriSchemeForEntityKind(entityKindOfIdString(pieceId)) ===
+      ref.ref.scheme &&
+    stripEntityUriScheme(pieceId) === `fid1:${ref.ref.hash}`;
 }
 
 async function mutableFabricOriginPattern(
@@ -349,6 +393,32 @@ function webOrigin(url: URL, recorded: string): PieceOrigin {
 }
 
 /**
+ * Accept a source URL a person typed, returning the string to record as the
+ * active origin.
+ *
+ * Classification decides which kind of origin the string is and rejects one no
+ * resolver can follow. On top of that, an origin may not carry credentials: a
+ * piece's origin is readable by everyone who can read the piece, and an
+ * authenticated fetch supplies its credential through a separately protected
+ * capability.
+ */
+export function acceptEnteredOrigin(
+  runtime: Runtime,
+  space: MemorySpace,
+  entered: string,
+): string {
+  const recorded = entered.trim();
+  const origin = classifyOrigin(runtime, space, recorded);
+  if (origin.kind === "web") {
+    const url = new URL(origin.url);
+    if (url.username !== "" || url.password !== "") {
+      throw new PieceOriginError("a source URL may not carry credentials");
+    }
+  }
+  return recorded;
+}
+
+/**
  * The active origin recorded on `piece`, or undefined when it is detached.
  * A recorded string this runtime cannot classify is reported as detached: it
  * names no place the source can be resolved from.
@@ -385,8 +455,19 @@ export function readPieceSourceMetadata(
   if (isPatternRef(setupPattern)) state.setupPattern = setupPattern;
   const displaced = readDisplacedPattern(piece.getMetaRaw("displacedPattern"));
   if (displaced !== undefined) state.displacedPattern = displaced;
-  const origin = readPieceOrigin(runtime, piece);
-  if (origin !== undefined) state.origin = origin;
+  const recordedOrigin = getPatternSource(piece);
+  if (recordedOrigin !== undefined) {
+    try {
+      state.origin = classifyOrigin(runtime, piece.space, recordedOrigin);
+    } catch (error) {
+      state.unusableOrigin = {
+        recorded: recordedOrigin,
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
+  }
+  const reconciliation = getPieceReconciliation(piece);
+  if (reconciliation !== undefined) state.reconciliation = reconciliation;
   const repository = getPatternRepository(piece);
   if (repository !== undefined) state.repository = repository;
   const revisions = getPieceSourceRevisions(piece);

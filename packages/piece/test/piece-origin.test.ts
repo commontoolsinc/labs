@@ -703,6 +703,71 @@ describe("readPieceSourceState collects every recorded fact", () => {
     expect(state.entry).toBeUndefined();
     expect(state.files).toEqual([]);
   });
+
+  it("separates a string nothing can follow from detachment", async () => {
+    const { piece, runtime } = pieceWith({
+      meta: {
+        patternIdentity: { identity: "abc", symbol: "default" },
+        patternSource: "not a url",
+      },
+    });
+    const state = await readPieceSourceState(runtime, piece);
+    expect(state.origin).toBeUndefined();
+    expect(state.unusableOrigin).toEqual({
+      recorded: "not a url",
+      reason: "not a url is not an absolute URL",
+    });
+
+    const detached = pieceWith({
+      meta: { patternIdentity: { identity: "abc", symbol: "default" } },
+    });
+    const detachedState = await readPieceSourceState(
+      detached.runtime,
+      detached.piece,
+    );
+    expect(detachedState.origin).toBeUndefined();
+    expect(detachedState.unusableOrigin).toBeUndefined();
+  });
+
+  it("reports what following the origin last did", async () => {
+    const { piece, runtime } = pieceWith({
+      meta: {
+        patternIdentity: { identity: "abc", symbol: "default" },
+        patternSource: "https://example.test/recipe.tsx",
+        pieceReconciliation: {
+          outcome: "refused",
+          at: 1_700_000_000_000,
+          origin: "https://example.test/recipe.tsx",
+          offered: { identity: "candidate", symbol: "default" },
+          reason: "incompatible-schema",
+          detail: "the contracts differ",
+        },
+      },
+    });
+    const state = await readPieceSourceState(runtime, piece);
+    expect(state.reconciliation).toEqual({
+      outcome: "refused",
+      at: 1_700_000_000_000,
+      origin: "https://example.test/recipe.tsx",
+      offered: { identity: "candidate", symbol: "default" },
+      reason: "incompatible-schema",
+      detail: "the contracts differ",
+    });
+  });
+
+  it("says nothing about a reconciliation record it cannot read", async () => {
+    const { piece, runtime } = pieceWith({
+      meta: {
+        patternIdentity: { identity: "abc", symbol: "default" },
+        patternSource: "https://example.test/recipe.tsx",
+        pieceReconciliation: { outcome: "invented", at: "recently" },
+      },
+    });
+    const state = await readPieceSourceState(runtime, piece);
+    expect(state.reconciliation).toBeUndefined();
+    // The rest of the piece's source facts still read.
+    expect(state.origin?.url).toBe("https://example.test/recipe.tsx");
+  });
 });
 
 describe("reading a piece's source state", () => {

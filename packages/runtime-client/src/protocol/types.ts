@@ -1933,6 +1933,75 @@ export type PiecePatternRefView = {
   symbol: string;
 };
 
+/** What the last attempt to follow a piece's active origin did. */
+export type PieceReconciliationOutcome =
+  | "followed"
+  | "unreachable"
+  | "refused";
+
+/**
+ * Why a reconciliation did not adopt what its origin offered. Only
+ * `incompatible-schema` can be overruled: `argument-mismatch` says the
+ * piece's own stored data does not satisfy the candidate, so there is nothing
+ * to accept — the piece could not run it.
+ */
+export type PieceReconciliationReason =
+  | "incompatible-schema"
+  | "argument-mismatch"
+  | "source-invalid"
+  | "identity-mismatch"
+  | "apply-failed";
+
+/**
+ * The outcome of the last attempt to follow a piece's active origin. Recording
+ * an origin is not the same as running what it offers, and without this the two
+ * are indistinguishable.
+ */
+export type PieceReconciliationView = {
+  /**
+   * What that attempt did.
+   */
+  outcome: PieceReconciliationOutcome;
+
+  /**
+   * When the piece reached this outcome.
+   */
+  at: number;
+
+  /**
+   * The origin the attempt was following.
+   */
+  origin: string;
+
+  /**
+   * The pattern the origin offered, when one was resolved.
+   */
+  offered?: PiecePatternRefView;
+
+  /**
+   * Why the candidate was refused. Absent unless `outcome` is `refused`.
+   */
+  reason?: PieceReconciliationReason;
+
+  /**
+   * What the attempt reported, in its own words.
+   */
+  detail?: string;
+};
+
+/** A recorded source string no resolver can follow, with why. */
+export type PieceUnusableOriginView = {
+  /**
+   * The string the piece records.
+   */
+  recorded: string;
+
+  /**
+   * Why nothing can follow it.
+   */
+  reason: string;
+};
+
 /** What produced one revision of a piece's source. */
 export type PieceSourceRevisionOperation =
   | "baseline"
@@ -2026,6 +2095,17 @@ export type PieceSourceView = {
   origin?: PieceOriginView;
 
   /**
+   * A recorded source string no resolver can follow. A piece carrying one is
+   * neither following nor detached.
+   */
+  unusableOrigin?: PieceUnusableOriginView;
+
+  /**
+   * What following the active origin last did.
+   */
+  reconciliation?: PieceReconciliationView;
+
+  /**
    * The repository the source is tracked in, where it is.
    */
   repository?: string;
@@ -2089,11 +2169,18 @@ export type PieceSourceRevisionResponse = {
   source: PieceSourceRevisionSourceView;
 };
 
-/** A change to which source a piece follows. */
+/**
+ * A change to which source a piece follows. `repoint` moves the piece to an
+ * origin supplied by its owner, which may be one the piece has never followed;
+ * `adopt` takes what the active origin offers now, which is how a refused
+ * automatic update is overridden without giving up the origin.
+ */
 export type PieceSourceAction =
   | { kind: "detach" }
   | { kind: "restore"; revisionId: string }
-  | { kind: "follow"; revisionId: string };
+  | { kind: "follow"; revisionId: string }
+  | { kind: "repoint"; url: string }
+  | { kind: "adopt" };
 
 /**
  * The {@link RequestType.PieceUpdateSource} request. `confirmationToken` is the
