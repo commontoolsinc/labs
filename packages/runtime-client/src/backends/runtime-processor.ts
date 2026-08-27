@@ -76,6 +76,7 @@ import {
   resetAllCountBaselines,
   resetAllTimingBaselines,
 } from "@commonfabric/utils/logger";
+import { isObjectNotArray } from "@commonfabric/utils/types";
 
 import {
   getMetaLink,
@@ -1207,8 +1208,19 @@ export class RuntimeProcessor {
       throw new Error("Invalid source.");
     }
 
+    // Checked rather than cast. The wire carries a `FabricValue` and so does
+    // the API, but a piece's input is a record: `cc.create()` takes an
+    // `object`, and casting a `bigint` to one would hand the runtime something
+    // it cannot use and say nothing about why.
+    const argument = request.argument;
+    if ((argument !== undefined) && !isObjectNotArray(argument)) {
+      throw new Error(
+        `A piece's argument must be a record, not a ${typeof argument}.`,
+      );
+    }
+
     const piece = await cc.create<NameSchema>(program, {
-      input: request.argument as object | undefined,
+      input: argument,
       origin,
       start: request.run ?? true,
     }, request.cause);

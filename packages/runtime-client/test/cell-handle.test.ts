@@ -1006,10 +1006,11 @@ describe("cell-handle", () => {
     };
 
     /** A connection that encodes, as the real transport does when it sends. */
-    const encodingRuntime = (): RuntimeClient =>
+    const encodingRuntime = (sends: number[] = []): RuntimeClient =>
       ({
         [$conn]: () => ({
           request: (request: unknown) => {
+            sends.push(1);
             realmFromFabricValue(request as never);
             return Promise.resolve({});
           },
@@ -1025,10 +1026,24 @@ describe("cell-handle", () => {
       // can fail a send now that the domain's real members all cross. The
       // caller has to learn that their write never happened; the alternative
       // is a `set()` that resolves over a value the runtime never saw.
-      const cell = new CellHandle<unknown>(encodingRuntime(), ref);
+      //
+      // `set()` alone covers the hazard, which is the `.catch()` that turns a
+      // failed write into a resolved promise: `push()` reaches it through the
+      // same `#applyLocalAndSend()`, and `send()` has no such `.catch()` to
+      // swallow anything. What each path *carries* is pinned separately,
+      // below.
+      const sends: number[] = [];
+      const cell = new CellHandle<unknown>(encodingRuntime(sends), ref);
 
+      // The send is asserted to have happened, not just the rejection: a bare
+      // `rejects` passes for any rejection at all, including one from a later
+      // change that fails this write before it ever reaches the wire. The
+      // encode's own message is not matched -- for a forged prototype it is
+      // the engine's text about an unreadable private field, which is not
+      // this repository's to pin.
       await expect(cell.set(Object.create(FabricBytes.prototype))).rejects
-        .toThrow();
+        .toThrow(Error);
+      expect(sends).toHaveLength(1);
     });
   });
 

@@ -81,17 +81,22 @@ export class WebWorkerRuntimeTransport
     return transport.ready().then(() => transport);
   }
 
+  // What a decode returns is deep-frozen, where structured cloning delivered a
+  // mutable copy: a consumer of a response or a notification reads it rather
+  // than reshaping it in place.
   private _handleMessage = (event: MessageEvent): void => {
     let data: IPCRemotePost;
 
     try {
       data = fabricFromRealmValue(event.data) as IPCRemotePost;
     } catch (error) {
-      // Defense in depth. The worker proves each payload encodable before it
-      // sends, so nothing undecodable should arrive; that is the ideal, and it
-      // may not always hold. When it does not, losing one message loudly beats
-      // an exception leaving this listener, which would take the connection's
-      // whole dispatch with it.
+      // Defense in depth. Everything the worker posts is the result of a
+      // successful encode -- `postToClient()` substitutes a strings-only
+      // stand-in for a message the encoding refused, rather than posting the
+      // refusal -- so nothing undecodable should arrive. That is the ideal,
+      // and it may not always hold. When it does not, losing one message
+      // loudly beats an exception leaving this listener, which would take the
+      // connection's whole dispatch with it.
       //
       // Before the worker has reported ready, though, there is no dispatch to
       // protect and no one listening for the report: what a failure costs

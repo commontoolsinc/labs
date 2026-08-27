@@ -9,6 +9,7 @@ import "core-js/proposals/explicit-resource-management";
 import "core-js/proposals/async-explicit-resource-management";
 
 import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { unrefTimer } from "@commonfabric/utils/sleep";
 import { isObjectNotArray } from "@commonfabric/utils/types";
@@ -146,10 +147,21 @@ function setWorkerConsoleBridge(enabled: boolean): void {
   else uninstallWorkerConsoleBridge();
 }
 
+/**
+ * How much of an unreadable request to render in the report about it. Enough
+ * to recognize which message it was, short enough that a hostile payload
+ * cannot flood the channel it is being reported on.
+ */
+const MAX_INVALID_REQUEST_RENDER = 512;
+
 self.addEventListener("message", async (event: MessageEvent) => {
   // Decoded whole, so what arrives is what was sent rather than whatever
   // structured cloning preserved of it. The encoding end is
   // `WebWorkerRuntimeTransport.send()`.
+  //
+  // What a decode returns is deep-frozen, where structured cloning delivered a
+  // mutable copy. A handler owns what its request carries (see `BaseRequest`)
+  // and may cede it, but may no longer mutate it in place.
   //
   // Typed as a request rather than as the `FabricValue` a decode returns: the
   // guards below are what actually vet it, and every use here is behind one
@@ -187,7 +199,15 @@ self.addEventListener("message", async (event: MessageEvent) => {
 
   try {
     if (!isIPCClientMessage(message)) {
-      throw new Error(`Invalid IPC request: ${JSON.stringify(message)}`);
+      // Rendered by `value-debug` rather than `JSON.stringify`, which is
+      // wrong for exactly what the decode above now admits: it throws on a
+      // `bigint` anywhere in the tree -- replacing this report with one that
+      // names nothing -- and renders a `FabricPrimitive` as `{}`.
+      throw new Error(
+        `Invalid IPC request: ${
+          toCompactDebugString(message, MAX_INVALID_REQUEST_RENDER)
+        }`,
+      );
     }
     const { msgId, data: request } = message;
     ipcLogger.debug(`received/${request.type}`, () => []);
