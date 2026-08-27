@@ -7,6 +7,7 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import {
   type ErrorNotification,
+  type EventAttentionNotice,
   NotificationType,
   RuntimeErrorCode,
 } from "@commonfabric/runtime-client";
@@ -83,6 +84,20 @@ function templateStrings(value: unknown): string {
   return (result?.strings ?? []).join("");
 }
 
+function templateMarkup(value: unknown): string {
+  if (Array.isArray(value)) return value.map(templateMarkup).join("");
+  if (value === null || value === undefined) return "";
+  if (typeof value !== "object") return String(value);
+  const template = value as {
+    strings?: readonly string[];
+    values?: readonly unknown[];
+  };
+  if (template.strings === undefined) return "";
+  return template.strings.map((part, index) =>
+    part + templateMarkup(template.values?.[index])
+  ).join("");
+}
+
 describe("XRootView", () => {
   it("constructs with default app state and renders the app view", async () => {
     const restore = installBrowserGlobals();
@@ -157,7 +172,11 @@ describe("XRootView", () => {
     const originalCreate = RuntimeInternals.create;
     let capturedOnError: ((event: ErrorNotification) => void) | undefined;
     let capturedWorkerUrl: URL | undefined;
-    const fakeRuntime = {};
+    const fakeRuntime = {
+      on: () => {},
+      off: () => {},
+      listEventAttention: () => Promise.resolve([]),
+    };
     RuntimeInternals.create = ((options) => {
       capturedOnError = options.onError;
       capturedWorkerUrl = options.workerUrl;
@@ -336,7 +355,11 @@ describe("XRootView", () => {
     });
     RuntimeInternals.create = (() =>
       Promise.resolve({
-        runtime: () => ({}),
+        runtime: () => ({
+          on: () => {},
+          off: () => {},
+          listEventAttention: () => Promise.resolve([]),
+        }),
         dispose: () => {
           abandoned();
           return Promise.resolve();
@@ -427,6 +450,59 @@ describe("XRootView", () => {
       setRuntime({ hasPendingWrites: () => true });
       handler(event());
       expect(prevented).toBe(1);
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps a complete attention card visible until Retry or Dismiss resolves it", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const view = new XRootView();
+      const resolutions: unknown[] = [];
+      (view as unknown as { runtime: unknown }).runtime = {
+        resolveEventAttention: (
+          notice: EventAttentionNotice,
+          action: "retry" | "dismiss",
+        ) => {
+          resolutions.push({ notice, action });
+          return Promise.resolve({
+            kind: action === "retry" ? "retried" : "dismissed",
+            ...(action === "retry" ? { eventId: "evt-retry" } : {}),
+          });
+        },
+      };
+      const notice: EventAttentionNotice = {
+        space: "did:key:z6Mk-shell-attention" as never,
+        eventId: "evt-original",
+        sidecarId: "of:stream-events:attention",
+        reason: "This event could not be delivered.",
+        attention: {
+          phase: "dispatch-load",
+          failureClass: "session-revoked",
+          code: "permanent-delivery-failure",
+          firstFailureAt: 10,
+          lastFailureAt: 10,
+          accumulatedFailureMs: 0,
+          failureCount: 1,
+          recovery: "explicit-retry",
+        },
+      };
+      view._handleEventNeedsAttention(notice);
+
+      const markup = templateMarkup(view.render());
+      expect(markup).toContain("Events needing attention");
+      expect(markup).toContain("Event needs attention");
+      expect(markup).toContain(notice.reason);
+      expect(markup).toContain("Dismiss");
+      expect(markup).toContain("Retry");
+
+      await view._resolveEventAttention(notice, "retry");
+      expect(resolutions).toEqual([{ notice, action: "retry" }]);
+      expect(templateMarkup(view.render())).not.toContain(
+        "Event needs attention",
+      );
     } finally {
       restore();
     }

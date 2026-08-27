@@ -1,3 +1,11 @@
+---
+status: historical
+created: 2026-08-26
+archived: 2026-08-26
+reason: "Executed plan; bounded terminal cover and explicit event recovery shipped."
+superseded-by: docs/specs/server-side-execution/events.md
+---
+
 # OW54 — terminal cover for a served event that cannot run
 
 **Status: DRAFT FOR OWNER RATIFICATION — design only.** No sentence in this

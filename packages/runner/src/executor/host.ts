@@ -32,7 +32,11 @@ import { selectPendingStreamEventDocs } from "@commonfabric/memory/v2/engine";
 import { getLogger } from "@commonfabric/utils/logger";
 import type { Runtime } from "../runtime.ts";
 import type { MemorySpace } from "../storage/interface.ts";
-import { SpaceServer, type SpaceServerPolicy } from "./space-server.ts";
+import {
+  SpaceServer,
+  type SpaceServerOptions,
+  type SpaceServerPolicy,
+} from "./space-server.ts";
 import {
   emptyServingLoopStats,
   registerServingLoopStatsProvider,
@@ -88,6 +92,9 @@ export type ExecutorHostOptions = {
    * whole-instance switch — per-space discrimination is deferred by
    * the same ruling. */
   ensureSpaceRoots?: boolean;
+
+  /** Forwarded internal deterministic-verification seam. */
+  decorateWaveCommitSink?: SpaceServerOptions["decorateWaveCommitSink"];
 };
 
 export class ExecutorHost {
@@ -180,7 +187,13 @@ export class ExecutorHost {
       // the top-level spread shares its reference (the same reason as
       // NIT-1's settle-series copy below).
       derivedCommitsBySpace: { ...this.#stats.derivedCommitsBySpace },
-      events: { ...this.#stats.events },
+      events: {
+        ...this.#stats.events,
+        needsAttention: {
+          ...this.#stats.events.needsAttention,
+          byPhase: { ...this.#stats.events.needsAttention.byPhase },
+        },
+      },
       demand: { ...this.#stats.demand },
       settle: {
         // NIT-1: deep-copy the entries — a series row stays live after it
@@ -439,6 +452,11 @@ export class ExecutorHost {
         policy: this.#options.policy,
         ...(this.#options.ensureSpaceRoots !== undefined
           ? { ensureSpaceRoots: this.#options.ensureSpaceRoots }
+          : {}),
+        ...(this.#options.decorateWaveCommitSink !== undefined
+          ? {
+            decorateWaveCommitSink: this.#options.decorateWaveCommitSink,
+          }
           : {}),
         onParked: (reason) => {
           // The backoff streak: a `loop-failed` park extends it; an

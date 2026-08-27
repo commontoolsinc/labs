@@ -15,6 +15,7 @@ import {
   ClientNotificationType,
   ConsoleNotification,
   ErrorNotification,
+  EventNeedsAttentionNotification,
   InitializationData,
   IPCClientMessage,
   IPCClientNotification,
@@ -149,7 +150,8 @@ export function isIPCRemoteNotification(
     isConsoleNotification(value) ||
     isNavigateRequestNotification(value) || isErrorNotification(value) ||
     isVDomBatchNotification(value) || isPendingWritesNotification(value) ||
-    isOperationUpdateNotification(value);
+    isOperationUpdateNotification(value) ||
+    isEventNeedsAttentionNotification(value);
 }
 
 /**
@@ -256,6 +258,21 @@ export function isPendingWritesNotification(
     isObjectNotArray(value) &&
     value.type === NotificationType.PendingWritesChanged &&
     typeof value.pending === "boolean"
+  );
+}
+
+/** Is a complete terminal event-delivery notice from the worker. */
+export function isEventNeedsAttentionNotification(
+  value: unknown,
+): value is EventNeedsAttentionNotification {
+  return (
+    isObjectNotArray(value) &&
+    value.type === NotificationType.EventNeedsAttention &&
+    typeof value.space === "string" &&
+    typeof value.eventId === "string" &&
+    typeof value.sidecarId === "string" &&
+    typeof value.reason === "string" &&
+    isObjectNotArray(value.attention)
   );
 }
 

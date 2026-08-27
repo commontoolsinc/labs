@@ -31,6 +31,7 @@ import {
   type EntityDocument,
   type EntityIdListOptions,
   type EntityIdListResult,
+  type EventAttentionResolveResult,
   getCommitPreconditionsConfig,
   getServerExecutionConfig,
   type OperationFieldQuery,
@@ -83,7 +84,7 @@ import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 import type { RuntimeTelemetryMarker } from "../telemetry.ts";
 import { recordCommitLocalSeq } from "./commit-identity.ts";
 import * as Differential from "./differential.ts";
-import type {
+import {
   IMemoryAddress,
   IMergedChanges,
   IOperationStorageCapability,
@@ -99,12 +100,14 @@ import type {
   NativeStorageCommit,
   PullError,
   PushError,
+  ReplicaLoadFailureError,
   Result,
   SealedCommitVerdict,
   SealedNativeCommit,
   State,
   StorageNotification,
   StorageTransactionRejected,
+  toReplicaLoadFailureError,
   TransactionCommitOptions,
   Unit,
 } from "./interface.ts";
@@ -1099,6 +1102,19 @@ export class StorageManager implements IStorageManager {
     await this.open(space).ensureSession?.();
   }
 
+  async resolveEventAttention(
+    space: MemorySpace,
+    eventId: string,
+    sidecarId: string,
+    action: "retry" | "dismiss",
+  ): Promise<EventAttentionResolveResult> {
+    const replica = this.open(space).replica;
+    if (replica.resolveEventAttention === undefined) {
+      throw new Error("storage replica does not support event attention");
+    }
+    return await replica.resolveEventAttention(eventId, sidecarId, action);
+  }
+
   /** IStorageManager (server-execution v2 Phase 4): first-open observer
    * — the flag-ON client effects channel subscribes per space through
    * it. Assigned post-construction by the Runtime; undefined otherwise. */
@@ -1399,6 +1415,7 @@ export class StorageManager implements IStorageManager {
       this.#dataURISyncs.clear();
       this.#sessionId = crypto.randomUUID();
     } finally {
+      this.#failedLoadKeys.clear();
       this.#schemaRegistryLease?.();
       this.#schemaRegistryLease = undefined;
     }
@@ -1422,6 +1439,7 @@ export class StorageManager implements IStorageManager {
       this.#dataURISyncs.clear();
       this.#sessionId = crypto.randomUUID();
     } finally {
+      this.#failedLoadKeys.clear();
       this.#schemaRegistryLease?.();
       this.#schemaRegistryLease = undefined;
     }
@@ -1630,7 +1648,18 @@ export class StorageManager implements IStorageManager {
     failure: unknown;
     waiters: Set<(failure: unknown) => void>;
   }>();
+  // A positive recovery signal is key-specific: a new generation for a doc
+  // whose prior required load failed. Unrelated loads must not wake a failed
+  // event head or pause its failed-state budget.
+  #failedLoadKeys = new Map<string, string>();
   #nextPendingLoadGeneration = 1;
+  readonly #loadRecoveryIdentity = crypto.randomUUID();
+  loadRecoveryObserver:
+    | ((recovery: {
+      failedEpoch: string;
+      recoveryEpoch: string;
+    }) => void)
+    | undefined = undefined;
   // Sync failures already logged, keyed by (space, error identity). A denied
   // space repeats the identical failure for every doc pulled from it; one line
   // per distinct failure keeps the surfacing readable. Bounded: at the cap the
@@ -1650,14 +1679,24 @@ export class StorageManager implements IStorageManager {
     },
   ): (failure?: unknown) => void {
     const key = entityKey(address, this.scopeKeyIdentity());
-    const entry = this.#pendingLoads.get(key) ??
-      {
+    let entry = this.#pendingLoads.get(key);
+    if (entry === undefined) {
+      const failedEpoch = this.#failedLoadKeys.get(key);
+      this.#failedLoadKeys.delete(key);
+      entry = {
         count: 0,
         generation: this.#nextPendingLoadGeneration++,
         address,
         failure: undefined,
         waiters: new Set<(failure: unknown) => void>(),
       };
+      if (failedEpoch !== undefined) {
+        this.loadRecoveryObserver?.({
+          failedEpoch,
+          recoveryEpoch: this.#loadEpoch(entry.generation),
+        });
+      }
+    }
     entry.count++;
     this.#pendingLoads.set(key, entry);
     return (failure?: unknown) => {
@@ -1709,6 +1748,10 @@ export class StorageManager implements IStorageManager {
     return this.#pendingLoads.get(key)?.generation;
   }
 
+  #loadEpoch(generation: number): string {
+    return `load:${this.#loadRecoveryIdentity}:${generation}`;
+  }
+
   loadsSettled(keys: readonly string[]): Promise<void> {
     // Dedupe up front: `remaining` counts entries, but the shared onSettled is
     // added once per entry's waiter Set and fires once. A duplicated key would
@@ -1717,18 +1760,35 @@ export class StorageManager implements IStorageManager {
       this.#pendingLoads.has(key)
     );
     if (pending.length === 0) return Promise.resolve();
+    // `registerPendingLoad()` removes a settled entry before it calls waiters,
+    // so retain the captured generation beside the waiter.  Reading the map in
+    // the callback would collapse every completed failure to generation zero.
+    const capturedGenerations = new Map(
+      pending.map((key) => [key, this.#pendingLoads.get(key)!.generation]),
+    );
     return new Promise<void>((resolve, reject) => {
       let remaining = pending.length;
-      let firstFailure: unknown;
-      const onSettled = (failure: unknown) => {
-        firstFailure ??= failure;
+      let firstFailure: ReplicaLoadFailureError | undefined;
+      const onSettled = (key: string, failure: unknown) => {
+        if (failure !== undefined) {
+          const generation = capturedGenerations.get(key)!;
+          this.#failedLoadKeys.set(key, this.#loadEpoch(generation));
+          if (firstFailure === undefined) {
+            firstFailure = toReplicaLoadFailureError(
+              failure,
+              this.#loadEpoch(generation),
+            );
+          }
+        }
         remaining--;
         if (remaining !== 0) return;
         if (firstFailure !== undefined) reject(firstFailure);
         else resolve();
       };
       for (const key of pending) {
-        this.#pendingLoads.get(key)!.waiters.add(onSettled);
+        this.#pendingLoads.get(key)!.waiters.add((failure) =>
+          onSettled(key, failure)
+        );
       }
     });
   }
@@ -3469,6 +3529,15 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     append: Omit<QueuedEventAppend, "clientSeq"> & { clientSeq?: number },
   ): Promise<EventAppendOutcome> {
     return this.#ensureEventAppendQueue().enqueue(append);
+  }
+
+  async resolveEventAttention(
+    eventId: string,
+    sidecarId: string,
+    action: "retry" | "dismiss",
+  ): Promise<EventAttentionResolveResult> {
+    const { session } = await this.activeSessionHandle();
+    return await session.resolveEventAttention(eventId, sidecarId, action);
   }
 
   /** Pending (undischarged) event intents — the offline queue's live
@@ -7020,21 +7089,41 @@ const toConnectionError = (error: unknown): IConnectionError =>
 // marker) instead of flattening it to a generic ConnectionError, so a caller can
 // tell an authorization denial apart from a transport failure. Everything else
 // remains a ConnectionError.
-const toPullError = (error: unknown): PullError =>
-  error instanceof Error && error.name === "AuthorizationError"
-    ? ({
-      name: "AuthorizationError",
-      message: error.message,
-      ...((error as { retriable?: unknown }).retriable === true
-        ? { retriable: true }
-        : {}),
-    }) as unknown as IAuthorizationError
-    : toConnectionError(error);
+const toPullError = (error: unknown): PullError => {
+  if (!(error instanceof Error) || error.name !== "AuthorizationError") {
+    return toConnectionError(error);
+  }
+  const details = error as unknown as {
+    retriable?: unknown;
+    permanentEvidence?: unknown;
+    aclRevision?: unknown;
+  };
+  return ({
+    name: "AuthorizationError",
+    message: error.message,
+    ...(details.retriable === true ? { retriable: true } : {}),
+    ...(details.permanentEvidence === true ? { permanentEvidence: true } : {}),
+    ...(typeof details.aclRevision === "number"
+      ? { aclRevision: details.aclRevision }
+      : {}),
+  }) as unknown as IAuthorizationError;
+};
 
 // Rebuild a throwable Error from a stored AuthorizationError result so `synced()`
 // rejects with a proper Error instance a caller can match on by name.
-const authorizationErrorToThrow = (error: IAuthorizationError): Error =>
-  Object.assign(new Error(error.message), { name: "AuthorizationError" });
+const authorizationErrorToThrow = (error: IAuthorizationError): Error => {
+  const details = error as unknown as {
+    permanentEvidence?: unknown;
+    aclRevision?: unknown;
+  };
+  return Object.assign(new Error(error.message), {
+    name: "AuthorizationError",
+    ...(details.permanentEvidence === true ? { permanentEvidence: true } : {}),
+    ...(typeof details.aclRevision === "number"
+      ? { aclRevision: details.aclRevision }
+      : {}),
+  });
+};
 
 const toRejectedError = (
   error: unknown,
@@ -7153,10 +7242,15 @@ const toRejectedError = (
     name === "InvalidMessageError"
   ) {
     const retriable = (error as { retriable?: unknown })?.retriable === true;
+    const permanentEvidence =
+      (error as { permanentEvidence?: unknown })?.permanentEvidence === true;
+    const aclRevision = (error as { aclRevision?: unknown })?.aclRevision;
     return {
       name,
       message,
       ...(retriable ? { retriable: true } : {}),
+      ...(permanentEvidence ? { permanentEvidence: true } : {}),
+      ...(typeof aclRevision === "number" ? { aclRevision } : {}),
       cause: { name: "SystemError", message, code: 500 },
       transaction: commit,
     } as unknown as TransactionError;

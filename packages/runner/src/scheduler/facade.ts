@@ -167,12 +167,14 @@ import type {
   ReactivityLog,
   SchedulerObservationIdentity,
   ServedEventDispatch,
+  ServedEventFailureOutcome,
   SettleStats,
   SettleStatsHistoryEntry,
   SpaceScopeAndURI,
   TelemetryAnnotations,
   TriggerTraceEntry,
 } from "./types.ts";
+import { ReplicaLoadFailureError } from "../storage/interface.ts";
 ensureNotRenderThread();
 
 const logger = getLogger("scheduler", {
@@ -2879,6 +2881,11 @@ export class Scheduler {
     this.headEventLoadPark = null;
     this.headEventLoadParkHistory = null;
     const detail = error instanceof Error ? error.message : String(error);
+    const failure = error instanceof ReplicaLoadFailureError ? error.failure : {
+      failureClass: "unknown" as const,
+      recoveryEpoch: "untyped",
+      permanentEvidence: false,
+    };
     if (event.served === undefined) {
       this.dropEvent(
         event,
@@ -2895,7 +2902,16 @@ export class Scheduler {
       `Event deferred: required replica load failed before dispatch ` +
         `(${keys}: ${detail}); the entry stays pending and a later drain ` +
         `re-delivers it`,
-      { servedKind: "deferred", cause: "load-park" },
+      {
+        servedKind: "deferred",
+        quiet: true,
+        servedOutcome: {
+          kind: "deferred",
+          cause: "load-park",
+          role: "failed-head",
+          failure,
+        },
+      },
     );
     for (const later of [...this.eventQueue]) {
       if (later.eventLink.space !== event.eventLink.space) continue;
@@ -2905,7 +2921,15 @@ export class Scheduler {
         `Event deferred: held behind ${event.id}, whose required replica ` +
           `load failed before dispatch (${keys}); later-arrived events wait ` +
           `behind it`,
-        { servedKind: "deferred", cause: "load-park" },
+        {
+          servedKind: "deferred",
+          quiet: true,
+          servedOutcome: {
+            kind: "deferred",
+            cause: "arrival-barrier",
+            blockedBy: event.id,
+          },
+        },
       );
     }
     this.queueExecution();
@@ -2920,7 +2944,7 @@ export class Scheduler {
        * durable entry UNCONSEQUENCED for a later drain (events.md §5);
        * only meaningful for a served event. */
       servedKind?: "dropped" | "deferred";
-      cause?: "load-park";
+      servedOutcome?: ServedEventFailureOutcome;
     } = {},
   ): void {
     if (this.headEventLoadPark?.eventId === event.id) {

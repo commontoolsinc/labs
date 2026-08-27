@@ -66,6 +66,7 @@ import {
   streamEntriesDocId,
   type StreamEventEntry,
   type StreamEventsDocValue,
+  toValuePath,
 } from "../v2.ts";
 
 const SPACE = "did:key:z6Mk-event-append-test-space";
@@ -1467,6 +1468,112 @@ Deno.test("maintainStreamEventWatermarks: a folded sqlite op before the sidecar 
     resetServerExecutionConfig();
     await Deno.remove(path).catch(() => {});
     await Deno.remove(dbPath).catch(() => {});
+  }
+});
+
+Deno.test("event attention retention: unresolved terminal covers survive every server rewrite until resolution", async () => {
+  const { engine, path } = await createEngine();
+  setServerExecutionConfig(true);
+  try {
+    const holder = withLiveLease(engine);
+    applyCommit(engine, {
+      sessionId: SESSION,
+      space: SPACE,
+      principal: ALICE,
+      commit: appendCommit(1, [entryOf("evt-attention")]),
+    });
+    const [stored] = sidecarValue(engine).entries!;
+    const attention = {
+      phase: "dispatch-load" as const,
+      failureClass: "session-revoked" as const,
+      code: "permanent-delivery-failure" as const,
+      firstFailureAt: 10,
+      lastFailureAt: 10,
+      accumulatedFailureMs: 0,
+      failureCount: 1,
+      recovery: "explicit-retry" as const,
+    };
+    waveSetSidecar(engine, holder, 1, {
+      entries: [{
+        ...stored,
+        consequenced: true,
+        status: "needs-attention",
+        reason: "Event delivery needs attention",
+        attention,
+      }],
+    });
+    const terminal = sidecarValue(engine).entries![0];
+
+    assertThrows(
+      () => waveSetSidecar(engine, holder, 2, { entries: [] }),
+      ProtocolError,
+      "cannot alter or compact unresolved",
+    );
+    assertThrows(
+      () =>
+        waveSetSidecar(engine, holder, 3, {
+          entries: [{ ...terminal, status: undefined, attention: undefined }],
+        }),
+      ProtocolError,
+      "cannot alter or compact unresolved",
+    );
+    assertThrows(
+      () =>
+        waveSetSidecar(engine, holder, 4, {
+          entries: [{ ...terminal, payload: { altered: true } }],
+        }),
+      ProtocolError,
+      "cannot alter or compact unresolved",
+    );
+    assertThrows(
+      () =>
+        applyCommit(engine, {
+          sessionId: "server-attention-operation",
+          space: SPACE,
+          principal: ALICE,
+          commitClass: "system",
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "apply-op",
+              id: SIDECAR,
+              path: toValuePath(["entries", "0", "payload"]),
+              codec: "unknown-test-codec",
+              submissionId: "attention:1",
+              base: null,
+              payload: {},
+            }],
+          },
+        }),
+      ProtocolError,
+      "cannot apply or release operation fields",
+    );
+
+    applyCommit(engine, {
+      sessionId: "server-attention-resolution",
+      space: SPACE,
+      principal: ALICE,
+      commitClass: "system",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: SIDECAR,
+          patches: [{
+            op: "replace",
+            path: "/value/entries/0/resolution",
+            value: { kind: "dismissed" },
+          }],
+        }],
+      },
+    });
+    waveSetSidecar(engine, holder, 5, { entries: [] });
+    assertEquals(sidecarValue(engine).entries, []);
+  } finally {
+    resetServerExecutionConfig();
+    await Deno.remove(path).catch(() => {});
   }
 });
 

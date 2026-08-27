@@ -7,7 +7,11 @@ import type { JSONSchema } from "../../runner/src/builder/types.ts";
 import { collectExternalSchemaRefHashes } from "../../runner/src/schema-decompose.ts";
 import { isSubschema } from "../../runner/src/schema-walk.ts";
 import { mapLinkSchemas } from "./schema-table-links.ts";
-import { applySqliteCommitWrite } from "./sqlite/commit-eval.ts";
+import {
+  applySqliteCommitWrite,
+  RowLabelCommitError,
+} from "./sqlite/commit-eval.ts";
+export { RowLabelCommitError } from "./sqlite/commit-eval.ts";
 import {
   applyPatchToDocument,
   emptyEntityDocument,
@@ -127,6 +131,23 @@ const integratedOperationId = (
       version,
     }))
   }`;
+
+const sameEventEntryExceptResolution = (
+  left: StreamEventEntry,
+  right: StreamEventEntry,
+): boolean => {
+  const { resolution: _leftResolution, ...leftRest } = left;
+  const { resolution: _rightResolution, ...rightRest } = right;
+  return valueEqual(leftRest as FabricValue, rightRest as FabricValue);
+};
+
+const isEventAttentionResolution = (
+  value: StreamEventEntry["resolution"],
+): boolean =>
+  value?.kind === "dismissed" ||
+  (value?.kind === "retried" && typeof value.eventId === "string" &&
+    value.eventId !== "");
+
 export const resolveCommitSessionKey = (
   sessionId: SessionId,
   principal?: string,
@@ -1127,6 +1148,15 @@ export type ApplyCommitOptions = {
      *  alongside a present acting identity is a contradiction and is
      *  refused too — the declaration names a chain with NO actor. */
     sessionlessSpaceScope?: boolean;
+  };
+
+  /** Server-owned OW54 Retry admission. The commit retains a distinct
+   *  server transaction identity while the new event is attributed to the
+   *  authenticated user's current session. Only valid on `system` commits,
+   *  and only for declared appends carrying `retryOf`. */
+  systemEventActor?: {
+    principal: string;
+    sessionId: SessionId;
   };
 };
 
@@ -2535,13 +2565,22 @@ const validateEventAppends = (
     principal?: string;
     sessionId: SessionId;
     delegated?: NonNullable<ApplyCommitOptions["delegated"]>;
+    systemEventActor?: NonNullable<ApplyCommitOptions["systemEventActor"]>;
 
     /** Derived-class scoped-op keys (the annotation ADDRESSING), for the
      * dedupe read of scoped sidecars. */
     scopeKeyByOpIndex: ReadonlyMap<number, string>;
   },
 ): Map<number, EventAppendStamp[]> => {
-  const { commit, commitClass, branch, principal, sessionId, delegated } = args;
+  const {
+    commit,
+    commitClass,
+    branch,
+    principal,
+    sessionId,
+    delegated,
+    systemEventActor,
+  } = args;
   const decls = commit.eventAppends ?? [];
   const plan = new Map<number, EventAppendStamp[]>();
   const flagOn = getServerExecutionConfig();
@@ -2585,7 +2624,8 @@ const validateEventAppends = (
 
     // The sidecar-doc write guard (the stamping claim's other half —
     // events.md §1's "a forged actor is UNREPRESENTABLE"): processing
-    // fields (`consequenced`/`error`/`status`/`reason`), the per-stream
+    // fields (`consequenced`/`error`/`status`/`reason` plus OW54's delivery
+    // checkpoint, attention, resolution, and retry provenance), the per-stream
     // `eventWatermark`, and stored entries are SERVER-written state.
     // Authored traffic (delegated included) may reach a sidecar doc ONLY
     // as declared tail appends; anything else — deeper patches, watermark
@@ -2593,8 +2633,8 @@ const validateEventAppends = (
     // refused. Derived commits are exempt from the SHAPE restriction (one
     // trust environment: the SpaceServer writes consequences and the
     // watermark) but their appended entries must still be DECLARED, so
-    // seq stamping cannot be skipped by a plumbing bug. `system` writes
-    // never target sidecars and keep their unchanged posture.
+    // seq stamping cannot be skipped by a plumbing bug. System commits are
+    // likewise trusted for OW54's atomic resolution and Retry append.
     const authoredShape = commitClass === "authored";
 
     // One current-state read per op: the derived REWRITE check and the
@@ -2616,6 +2656,60 @@ const validateEventAppends = (
     const storedEntries = Array.isArray(currentValue?.entries)
       ? currentValue!.entries!
       : [];
+
+    // A terminal notice is the only durable recovery handle on its stream.
+    // A derived compaction or server-owned rewrite may remove it only after a
+    // resolution is already recorded. Judge the final operation value, not
+    // the patch vocabulary, so whole-document, whole-array, splice, and
+    // element-level rewrites all share one retention rule.
+    const unresolvedAttentionEntries = storedEntries.filter((entry) =>
+      entry?.status === "needs-attention" &&
+      entry.attention !== undefined && entry.resolution === undefined
+    );
+    if (commitClass !== "authored" && unresolvedAttentionEntries.length > 0) {
+      if (operation.op === "delete") {
+        throw new ProtocolError(
+          `stream doc "${operation.id}" cannot remove unresolved ` +
+            "needs-attention entries (events.md §4)",
+        );
+      }
+      if (operation.op !== "set" && operation.op !== "patch") {
+        throw new ProtocolError(
+          `stream doc "${operation.id}" cannot apply or release operation ` +
+            "fields while it holds unresolved needs-attention entries " +
+            "(events.md §4)",
+        );
+      }
+      const resultingDocument = operation.op === "set"
+        ? operation.value
+        : applyPatchToDocument(
+          currentState?.document ?? undefined,
+          operation.patches,
+        );
+      const resultingValue = resultingDocument?.value as
+        | StreamEventsDocValue
+        | undefined;
+      const resultingEntries = Array.isArray(resultingValue?.entries)
+        ? resultingValue.entries
+        : [];
+      for (const unresolved of unresolvedAttentionEntries) {
+        const resulting = resultingEntries.find((entry) =>
+          entry?.eventId === unresolved.eventId && entry.seq === unresolved.seq
+        );
+        const retained = resulting !== undefined &&
+          sameEventEntryExceptResolution(unresolved, resulting) &&
+          (resulting.resolution === undefined ||
+            (commitClass === "system" &&
+              isEventAttentionResolution(resulting.resolution)));
+        if (!retained) {
+          throw new ProtocolError(
+            `stream doc "${operation.id}" cannot alter or compact unresolved ` +
+              `needs-attention event ${unresolved.eventId} ` +
+              "(events.md §4)",
+          );
+        }
+      }
+    }
 
     const located: Array<{
       entry: StreamEventEntry;
@@ -2753,9 +2847,12 @@ const validateEventAppends = (
         );
       }
       if (
-        commitClass !== "derived" &&
+        commitClass === "authored" &&
         (entry.consequenced !== undefined || entry.error !== undefined ||
           entry.status !== undefined || entry.reason !== undefined ||
+          entry.deliveryDeferral !== undefined ||
+          entry.attention !== undefined || entry.resolution !== undefined ||
+          entry.retryOf !== undefined ||
           entry.deliveryFailures !== undefined)
       ) {
         throw new ProtocolError(
@@ -2846,6 +2943,33 @@ const validateEventAppends = (
           );
         }
         firedAt = supplied;
+      } else if (systemEventActor !== undefined) {
+        if (entry.retryOf === undefined || entry.retryOf === "") {
+          throw new ProtocolError(
+            `system-attributed event append ${entry.eventId} carries no ` +
+              "retryOf provenance (events.md §5)",
+          );
+        }
+        firedAt = {
+          user: systemEventActor.principal,
+          session: systemEventActor.sessionId,
+        };
+        if (entry.firedAt?.clientSeq !== undefined) {
+          throw new ProtocolError(
+            `system-attributed event append ${entry.eventId} carries a ` +
+              "clientSeq — client-minted only (events.md §2, LT7)",
+          );
+        }
+        if (
+          entry.firedAt !== undefined &&
+          !entryFiredAtMatches(entry.firedAt, firedAt)
+        ) {
+          throw new ProtocolError(
+            `event append ${entry.eventId} supplies a firedAt that ` +
+              "disagrees with the authenticated Retry actor — REJECTED, " +
+              "never corrected (events.md §5)",
+          );
+        }
       } else if (delegated !== undefined) {
         const userless = delegated.actingPrincipal === undefined ||
           delegated.actingPrincipal === "";
@@ -4369,6 +4493,7 @@ const applyCommitTransaction = (
     consequenceOf,
     derivedThrough,
     delegated,
+    systemEventActor,
     allowEmptyOperations,
   }: ApplyCommitOptions,
 ): AppliedCommit => {
@@ -4507,6 +4632,29 @@ const applyCommitTransaction = (
       "write annotations, consequenceOf, and derivedThrough are " +
         "derived-commit carriage only (protocol.md §1, §7)",
     );
+  }
+  if (systemEventActor !== undefined) {
+    if (commitClass !== "system") {
+      throw new ProtocolError(
+        "system event actor carriage is system-commit admission only " +
+          "(events.md §5)",
+      );
+    }
+    if (
+      systemEventActor.principal === "" || systemEventActor.sessionId === "" ||
+      principal !== systemEventActor.principal
+    ) {
+      throw new ProtocolError(
+        "system event actor carriage requires the authenticated principal " +
+          "and current session (events.md §5)",
+      );
+    }
+    if ((commit.eventAppends?.length ?? 0) === 0) {
+      throw new ProtocolError(
+        "system event actor carriage requires a declared Retry append " +
+          "(events.md §5)",
+      );
+    }
   }
   // The delegated row (protocol.md §2, §2b): server-produced AUTHORED
   // commits carry the originating chain actor + capabilityRef, and
@@ -5067,6 +5215,7 @@ const applyCommitTransaction = (
     principal,
     sessionId,
     delegated,
+    systemEventActor,
     scopeKeyByOpIndex,
   });
 
@@ -5133,10 +5282,20 @@ const applyCommitTransaction = (
       // Execute the SQL inside this commit's transaction (atomic with the cell
       // ops). It is NOT an entity revision — do not push to `revisions[]` so the
       // revision/head/snapshot/dirty machinery never sees it.
-      applySqliteOperation(engine, operation, sqliteAttachments, {
-        principal,
-        sessionId,
-      });
+      try {
+        applySqliteOperation(engine, operation, sqliteAttachments, {
+          principal,
+          sessionId,
+        });
+      } catch (error) {
+        if (
+          error instanceof RowLabelCommitError &&
+          error.operationIndex === undefined
+        ) {
+          error.operationIndex = opIndex;
+        }
+        throw error;
+      }
       continue;
     }
     if (operation.op === "apply-op") {

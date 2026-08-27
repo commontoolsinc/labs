@@ -7287,75 +7287,48 @@ supply; OW29/OW32/OW34 closed):
     two-tabs-of-one-user step (one Identity in two harness
     sessions: user-granularity sharing — same cell, same hash —
     green OFF and under the true-ON gate, serving loop live).
-  - **OW54 — a served EVENT whose commit-prep crashes seals NO
-    consequence (adversarial review of PR #6157, F1 —
-    CONFIRMED-by-trace; minted 2026-08-21): CLOSED (2026-08-21, the
-    OW54 follow-on fix — the give-up arm's discriminated
-    `served.onFailure`).** The gap as confirmed: a deterministic CFC
-    pre-storage rejection of a served event's commit (the
-    "CFC enforcement rejected commit" class,
-    `rejectCommitBeforeStorage` — including a prep CRASH, which OW50's
-    totality records as a modeled rejection of this class) classified
-    give-up "non-retryable", and the give-up arm settled the commit
-    callback and reported the dropped write but sealed NO consequence:
-    the durable entry stayed unconsequenced and re-drained every wave
-    ("the wave IS the retry cadence"), and under #6158's settle wait
-    the unretired client intent paid the full bounded quiescence
-    timeout per settle round. Pre-OW50 the same crash THREW from
-    `prepareTxForCommit` and took the ERROR arm, which seals "the
-    error IS the consequence". The fix restores that contract on the
-    modeled path: the give-up arm, when the event is served AND the
-    error is the deterministic CFC pre-storage rejection (the SAME
-    message-prefix discriminator `reportDroppedCfcRejectedWrite` keys
-    on — `isCfcRejectedCommitError`, scheduler/events.ts), calls
-    `served.onFailure({kind: "error", message})` before settling, and
-    the error consequence seals through the drain's existing notice
-    machinery (events.md §5 now states the class). Lift evidence: the
-    red-first pin in `executor-events-down.test.ts` ("the give-up
-    arm's CFC discriminator (OW54)") — RED on the unmodified base
-    (the served copy took the give-up disposition twice for one
-    eventId across two waves, no consequence, and the wait for the
-    seal timed out), GREEN with the fix (exactly ONE completed run,
-    ONE consequence commit naming the event, ONE dropped-write
-    report, the entry's `error` carries the refusal, the watermark
-    advances, and a second poisoned fire seals its own consequence
-    behind it) — plus the scope-boundary pin ("a NON-CFC give-up on a
-    served event keeps the re-drain cadence": a handler `tx.abort()`
-    re-drains unconsequenced with no frontier advance, green on base
-    AND after, so the non-CFC cadence is byte-identical). #6158
-    interaction, recorded: with the consequence sealed, the client
-    intent retires through the normal arrived-terminal-consequence
-    path, so the unretired-intent settle-timeout class for this shape
-    disappears. RULING-5 interaction, resolved: the narrowing had
-    shrunk the exposed class to genuinely ambiguous envelopes; the
-    corner is now closed for the whole pre-storage-rejection message
-    class (genuine ambiguity, unreadable stored envelopes, prepared
-    digest drift). Sub-case honesty (the #6186 review's MINOR-2,
-    recorded as-built): the message class also covers OW50's modeled
-    prep-crash recordings ("commit-prep crashed: …"), so a prep crash
-    caused by TRANSIENT local state seals a terminal error consequence
-    where a re-drain might have succeeded — whether transient
-    prep-crashes deserve the re-drain instead is on the owner's
-    one-liner list; the behavior here is as-built, not ruled. Scope
-    honesty, deliberate and pinned: non-CFC
-    give-ups (transport, authorization, a handler abort, opt-out)
-    still seal nothing and re-drain on the wave cadence; and a
-    storage-time commit-rule refusal (`RowLabelCommitError`) of a
-    served event also seals no consequence today — verified (#6186
-    Cubic round): it never reaches the scheduler's terminal
-    disposition on a served copy (the handler tx sealed and resolved
-    at seal-accept), it refuses the WAVE's store commit instead, and
-    the refused wave reports the event's contributions as requeued
-    (`aborted: "rejected"`, executor/wave.ts) — guard released,
-    unconsequenced entry re-drained, the same durable fate through
-    the wave verdict channel. An adjacent residual of the same shape,
-    FLAGGED (not silently included) in
-    docs/history/plans/server-execution-v2/optimize/
-    ow54-build-report.md. The sealed consequence itself rides the
-    consequence-notice machinery, whose resolved-error guard wedge is
-    the OW58 row below (pre-existing, not introduced by the OW54 fix):
-    a notice whose commit RESOLVES `{error}` pre-destination strands
-    the entry guarded-unconsequenced until park.
+  - **OW54 — bounded terminal cover for proven delivery failure:
+    CLOSED (2026-08-26).** A failed served-event head now records a
+    durable typed delivery checkpoint and accumulates only confirmed
+    failed-state time. Arrival-barrier followers, dirty-input
+    settlement, and the served `RetryImmediately` name-resolution path
+    spend no budget. Positive recovery persists a recovering state and
+    wakes one retry; flapping never erases spent time. An unchanged
+    active failure reaches the explicitly ratified 60-second policy
+    boundary, while a current-ACL or `RowLabelCommitError`
+    proven-no-commit verdict terminalizes immediately. Typed
+    commit-preparation crashes use the same cover; exact
+    `CfcCommitRefusalError` verdicts and explicit handler aborts remain
+    error consequences. Ambiguous storage-time or transport outcomes
+    remain outside explicit replay.
+
+    Terminal cover is one entry-local `{status: "needs-attention",
+    consequenced: true}` notice plus the per-space unresolved-attention
+    discovery index. The entry stays authoritative and uncompactable
+    until resolution. The arrival barrier opens only after the notice's
+    wave confirms the whole terminal contribution committed; failed
+    checkpoint or notice writes fail closed and are counted. Retry and
+    Dismiss resolve the original and remove the index item in one
+    same-space CAS. Retry appends at most one fresh ID with `retryOf`,
+    exact server-copied payload and admission provenance, and the
+    original user's current session; concurrent and replayed requests
+    return the recorded winner. The runtime-client and persistent shell
+    surface carry the complete safe attention object, and reconnect
+    discovery reads the unresolved index back through the authoritative
+    entry.
+
+    Pins cover cumulative flapping and clock skew, typed recovery,
+    failed-head versus barrier-follower routing, immediate permanent
+    evidence, checkpoint and notice commit accounting, terminal
+    ordering, CFC versus preparation-crash classification,
+    `RowLabelCommitError` operation-owner attribution through an actual
+    refused-wave outcome, current-ACL routing, ambiguous-outcome
+    exclusion, exact-provenance Retry, Retry/Dismiss and lost-response
+    races, cross-user/sessionless rejection, unresolved retention,
+    runtime-client forwarding, shell persistence, and the end-to-end
+    transient and persistent load paths. OQ-19's foreign-derived
+    freshness mechanism remains its separate currentness design and is
+    not part of this closure.
   - **OW55 — the serving runtimes' pattern-fetch trust surface
     (adversarial review of PR #6157, F7; the OW48 investigation's
     security-adjacent residual; minted 2026-08-21).** Under ON,

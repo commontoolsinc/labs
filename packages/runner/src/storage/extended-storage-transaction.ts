@@ -311,6 +311,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // place of the commit promise, whose resolution additionally waits for
   // view coverage.
   #postCommitEffects?: Promise<void>;
+  #commitPreparationCrash: string | undefined;
   // The transaction's fate, resolved exactly when the verdict callbacks
   // dispatch — every fate path (commit verdict, rejection receipt, abort,
   // pre-storage rejection, internal commit rejection) funnels through that
@@ -1813,6 +1814,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // scheduler's failed-commit machinery, error surfacing) sees the real
       // cause.
       const message = error instanceof Error ? error.message : String(error);
+      this.#commitPreparationCrash = message;
       // Reported UNCONDITIONALLY, not through this module's opt-in logger
       // (disabled by default — utils/logger.ts early-returns): a crash here
       // is a bug in prep itself, and before this catch existed the class
@@ -2423,6 +2425,17 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         this.#cfcState.enforcementMode !== "observe" &&
         this.#cfcState.prepare.status !== "prepared"
       ) {
+        if (this.#commitPreparationCrash !== undefined) {
+          return this.rejectCommitBeforeStorage({
+            error: {
+              name: "CommitPreparationError",
+              message: `CFC commit preparation crashed: ` +
+                this.#commitPreparationCrash,
+              failureClass: "unknown",
+              permanentEvidence: false,
+            },
+          });
+        }
         const reasons = this.#cfcState.prepare.status === "invalidated"
           ? this.#cfcState.prepare.reasons
           : [];

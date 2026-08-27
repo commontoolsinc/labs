@@ -242,6 +242,81 @@ describe("stage D seal-into-wave", () => {
     runtime.clearSealDestination();
   });
 
+  it("attributes a proven-no-commit row-label refusal to the failed operation's one served event", async () => {
+    const wave = newWave();
+    runtime.installSealDestination(wave);
+    const first = runtime.getCell<{ value: number }>(
+      space,
+      "row-label-owner-first",
+      undefined,
+    );
+    const second = runtime.getCell<{ value: number }>(
+      space,
+      "row-label-owner-second",
+      undefined,
+    );
+    for (
+      const [cell, eventId, index, seq] of [
+        [first, "row-label-event-first", 2, 12],
+        [second, "row-label-event-second", 5, 15],
+      ] as const
+    ) {
+      const tx = runtime.edit();
+      stampWaveRunContext(tx, {
+        actionId: `row-label-owner:${eventId}`,
+        kind: "event-handler",
+        eventId,
+        streamEntry: {
+          sidecarId: "of:stream-events:row-label-owner",
+          index,
+          seq,
+        },
+      });
+      cell.withTx(tx).set({ value: seq });
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    runtime.clearSealDestination();
+
+    const inner = newSink();
+    const sink: WaveCommitSink = {
+      currentHeads: (target, docs) => inner.currentHeads(target, docs),
+      concurrentWritePaths: (target, doc, sinceSeq) =>
+        inner.concurrentWritePaths(target, doc, sinceSeq),
+      commitWave: (batch) => {
+        const failedOperation = batch.operations.findIndex((operation) =>
+          operation.op !== "sqlite" &&
+          operation.id === second.getAsNormalizedFullLink().id
+        );
+        expect(failedOperation).toBeGreaterThanOrEqual(0);
+        return Promise.resolve({
+          error: {
+            name: "RowLabelCommitError",
+            message: "sqlite commit refused: synthetic owner pin",
+            failedOperation,
+          },
+        });
+      },
+    };
+    const outcome = await wave.commitWave(sink);
+    await wave.settled();
+
+    expect(outcome.requeuedEventIds).toEqual([
+      "row-label-event-first",
+      "row-label-event-second",
+    ]);
+    expect(outcome.provenNoCommitDeliveryFailures).toEqual([{
+      eventId: "row-label-event-second",
+      streamEntry: {
+        sidecarId: "of:stream-events:row-label-owner",
+        index: 5,
+        seq: 15,
+      },
+      failureClass: "protocol",
+      recoveryEpoch: "row-label-verdict",
+      permanentEvidence: true,
+    }]);
+  });
+
   it("seals into the wave instead of committing; later txs read the layered view; the wave commits once", async () => {
     const lease = liveLease();
     const leasedWave = newWave({ lease });

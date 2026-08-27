@@ -397,6 +397,79 @@ describe("RuntimeClient", () => {
     });
   });
 
+  describe("event attention", () => {
+    const notice = {
+      space: "did:key:z6Mk-runtime-client-attention" as never,
+      eventId: "evt-original",
+      sidecarId: "of:stream-events:attention",
+      reason: "This event could not be delivered.",
+      attention: {
+        phase: "dispatch-load" as const,
+        failureClass: "session-revoked" as const,
+        code: "permanent-delivery-failure" as const,
+        firstFailureAt: 10,
+        lastFailureAt: 10,
+        accumulatedFailureMs: 0,
+        failureCount: 1,
+        recovery: "explicit-retry" as const,
+      },
+    };
+
+    it("lists and resolves retained notices with the complete recovery handle", async () => {
+      const requests: unknown[] = [];
+      const conn = {
+        on: () => {},
+        request: (message: { type: RequestType }) => {
+          requests.push(message);
+          return Promise.resolve(
+            message.type === RequestType.ListEventAttention
+              ? { notices: [notice] }
+              : { resolution: { kind: "retried", eventId: "evt-retry" } },
+          );
+        },
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, {});
+
+      expect(await client.listEventAttention(notice.space)).toEqual([notice]);
+      expect(await client.resolveEventAttention(notice, "retry")).toEqual({
+        kind: "retried",
+        eventId: "evt-retry",
+      });
+      expect(requests).toEqual([{
+        type: RequestType.ListEventAttention,
+        space: notice.space,
+      }, {
+        type: RequestType.ResolveEventAttention,
+        space: notice.space,
+        eventId: notice.eventId,
+        sidecarId: notice.sidecarId,
+        action: "retry",
+      }]);
+    });
+
+    it("forwards a live worker notice without dropping safe detail", () => {
+      const handlers = new Map<string, (data: unknown) => void>();
+      const conn = {
+        on: (event: string, handler: (data: unknown) => void) => {
+          handlers.set(event, handler);
+        },
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, {});
+      const observed: unknown[] = [];
+      client.on("eventneedsattention", (value) => observed.push(value));
+
+      handlers.get("eventneedsattention")!({
+        type: NotificationType.EventNeedsAttention,
+        ...notice,
+      });
+      expect(observed).toEqual([notice]);
+    });
+  });
+
   describe("getPatternCoverage", () => {
     // Same connection stub as above: the method is a single request whose response
     // `data` it returns verbatim (null included), so a stub that records the

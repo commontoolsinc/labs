@@ -12,6 +12,7 @@ import type {
   EntityDocument,
   EntityIdListOptions,
   EntityIdListResult,
+  EventAttentionResolveResult,
   OperationFieldQuery,
   OperationFieldSnapshot,
   PatchOp,
@@ -24,6 +25,7 @@ import type {
   SqliteQueryResult,
   SqliteRegisterDiskSourceResult,
 } from "@commonfabric/memory/v2";
+import type { DeliveryFailureClass } from "@commonfabric/memory/v2";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
 import type { Cancel } from "../cancel.ts";
 import type { EntityId } from "../create-ref.ts";
@@ -86,6 +88,67 @@ export interface IStorageError {
   readonly name: string;
   readonly message: string;
 }
+
+/** Typed producer evidence for a required replica load that failed before an
+ * at-most-once handler could dispatch. The scheduler carries this value; it
+ * never classifies policy from error text. */
+export type ReplicaLoadFailure = {
+  failureClass: DeliveryFailureClass;
+  recoveryEpoch: string;
+  permanentEvidence: boolean;
+};
+
+export class ReplicaLoadFailureError extends Error {
+  override readonly name = "ReplicaLoadFailureError";
+
+  constructor(
+    readonly failure: ReplicaLoadFailure,
+    cause: unknown,
+  ) {
+    super(
+      cause instanceof Error ? cause.message : String(cause),
+      { cause },
+    );
+  }
+}
+
+export const toReplicaLoadFailureError = (
+  cause: unknown,
+  recoveryEpoch: string,
+): ReplicaLoadFailureError => {
+  if (cause instanceof ReplicaLoadFailureError) return cause;
+  const named = cause as {
+    name?: unknown;
+    message?: unknown;
+    permanentEvidence?: unknown;
+    aclRevision?: unknown;
+  } | undefined;
+  const name = typeof named?.name === "string" ? named.name : "";
+  const message = typeof named?.message === "string" ? named.message : "";
+  const failureClass: DeliveryFailureClass = name === "SessionRevokedError" ||
+      message.startsWith("memory session revoked")
+    ? "session-revoked"
+    : name === "ConnectionError"
+    ? "connection"
+    : name === "AuthorizationError"
+    ? "authorization"
+    : name === "ProtocolError"
+    ? "protocol"
+    : name === "TimeoutError"
+    ? "timeout"
+    : "unknown";
+  const aclRevision = named?.aclRevision;
+  const permanentAclEvidence = failureClass === "authorization" &&
+    named?.permanentEvidence === true && typeof aclRevision === "number";
+  return new ReplicaLoadFailureError({
+    failureClass,
+    recoveryEpoch: permanentAclEvidence ? `acl:${aclRevision}` : recoveryEpoch,
+    // A name is not durable evidence. Authorization becomes permanent only
+    // when the memory server supplies the current ACL revision. Versioned
+    // protocol validators construct ReplicaLoadFailureError directly.
+    permanentEvidence: permanentAclEvidence,
+  }, cause);
+};
 
 /**
  * Metadata that can be attached to read operations
@@ -414,6 +477,25 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * a replica whose required load failed.
    */
   loadsSettled?(keys: readonly string[]): Promise<void>;
+
+  /** The next generation of the SAME required load is a causal recovery
+   * wake. `failedEpoch` names the failed boundary recorded durably on the
+   * event; `recoveryEpoch` names the replacement generation. Carrying both
+   * prevents an unrelated document recovery from authorizing a retry. */
+  loadRecoveryObserver?:
+    | ((recovery: {
+      failedEpoch: string;
+      recoveryEpoch: string;
+    }) => void)
+    | undefined;
+
+  /** Authenticated current-session recovery for one OW54 terminal notice. */
+  resolveEventAttention?(
+    space: MemorySpace,
+    eventId: string,
+    sidecarId: string,
+    action: "retry" | "dismiss",
+  ): Promise<EventAttentionResolveResult>;
 
   /**
    * Load cell from storage. Will also subscribe to new changes.
@@ -2106,6 +2188,15 @@ export interface ICfcCommitRefusalError extends IStorageError {
   readonly reasons: readonly string[];
 }
 
+/** Commit preparation crashed before any storage attempt. This is typed apart
+ * from a deterministic CFC policy verdict so served delivery can apply OW54's
+ * bounded recovery policy without misreporting a handler error. */
+export interface ICommitPreparationError extends IStorageError {
+  readonly name: "CommitPreparationError";
+  readonly failureClass: "unknown";
+  readonly permanentEvidence: false;
+}
+
 /**
  * Error that indicating that no change could be made to a transaction is it is
  * no longer active.
@@ -2124,6 +2215,7 @@ export type StorageTransactionRejected =
   | IConflictError
   | IPreconditionFailedError
   | ICfcCommitRefusalError
+  | ICommitPreparationError
   | IStoreError
   | TransactionError
   | IConnectionError
@@ -2438,6 +2530,12 @@ export interface ISpaceReplica extends ISpace {
     append: EventAppendRequest,
   ): Promise<EventAppendDeliveryOutcome>;
 
+  resolveEventAttention?(
+    eventId: string,
+    sidecarId: string,
+    action: "retry" | "dismiss",
+  ): Promise<EventAttentionResolveResult>;
+
   /** Pending (undischarged) event intents — the offline event queue's
    * live content (speculation.md §5), bounded by pending-intent count. */
   pendingEventAppends?(): readonly EventAppendRequest[];
@@ -2597,6 +2695,7 @@ export type PushError =
   | IConflictError
   | IPreconditionFailedError
   | ICfcCommitRefusalError
+  | ICommitPreparationError
   | TransactionError
   | IAuthorizationError;
 

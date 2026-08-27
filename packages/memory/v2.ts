@@ -321,6 +321,25 @@ export const SERVER_EXECUTION_WATERMARK_DOC_ID =
  * space — not per doc, not per piece, never vectorized. */
 export type WatermarkDocValue = { seq: number };
 
+/** The well-known SPACE-scoped discovery index for unresolved event delivery
+ * attention. Entries are safe summaries only; the referenced stream entry is
+ * authoritative and must be resolved before presenting recovery actions. */
+export const SERVER_EXECUTION_ATTENTION_DOC_ID =
+  "of:server-execution-attention";
+
+export type UnresolvedEventAttention = {
+  eventId: string;
+  sidecarId: string;
+  phase: DeliveryFailurePhase;
+  failureClass: DeliveryFailureClass;
+  code: DeliveryAttention["code"];
+  firstFailureAt: number;
+};
+
+export type EventAttentionIndexValue = {
+  entries?: Record<string, UnresolvedEventAttention>;
+};
+
 // ---------------------------------------------------------------------------
 // Events-down (server-execution v2 Phase 3, D-v2-1;
 // docs/specs/server-side-execution/events.md). The event is an AUTHORED
@@ -383,13 +402,61 @@ export type StreamEventFiredAt = {
   clientSeq?: number;
 };
 
+export type DeliveryFailurePhase =
+  | "dispatch-load"
+  | "commit-preparation"
+  | "commit-finalization";
+
+export type DeliveryFailureClass =
+  | "session-revoked"
+  | "connection"
+  | "authorization"
+  | "protocol"
+  | "timeout"
+  | "unknown";
+
+/** Durable processing state for an event whose runnable handler has not yet
+ * reached a provably safe consequence commit. Failed time is cumulative across
+ * recovery attempts; `recovering` time is settlement and is not charged. */
+export type DeliveryDeferral = {
+  phase: DeliveryFailurePhase;
+  failureClass: DeliveryFailureClass;
+  firstFailureAt: number;
+  lastFailureAt: number;
+  accumulatedFailureMs: number;
+  failureCount: number;
+  activeFailureStartedAt?: number;
+  state: "failed" | "recovering";
+  recoveryEpoch?: string;
+  /** Positive versioned producer evidence that this failure is permanent. */
+  permanentEvidence?: true;
+};
+
+export type DeliveryAttention = {
+  phase: DeliveryFailurePhase;
+  failureClass: DeliveryFailureClass;
+  code:
+    | "delivery-failure-budget-exhausted"
+    | "permanent-delivery-failure";
+  firstFailureAt: number;
+  lastFailureAt: number;
+  accumulatedFailureMs: number;
+  failureCount: number;
+  recovery: "explicit-retry";
+};
+
+export type EventAttentionResolution =
+  | { kind: "retried"; eventId: string }
+  | { kind: "dismissed" };
+
 /**
  * One durable event entry on a stream's sidecar doc (`value.entries[i]`).
  * `payload` is the only client-authored content field (events.md §1);
  * `seq` is ENGINE-STAMPED at apply time with the appending commit's seq —
  * the stream seq the idempotency rule keys on (events.md §4) — and
  * `firedAt` is server-stamped per the class of the admitting commit.
- * `consequenced`/`error`/`status`/`reason` are PROCESSING-side fields
+ * `consequenced`/`error`/`status`/`reason` and the OW54 delivery fields are
+ * PROCESSING-side fields
  * written only by the space's SpaceServer as the event's consequence
  * (events.md §5: an error/drop IS the consequence); admission REFUSES an
  * incoming append that pre-supplies any of them.
@@ -436,8 +503,22 @@ export type StreamEventEntry = {
 
   /** Processing-side: the dropped-event notice (events.md §5 T7) —
    * `{ status: "dropped", reason }` on the entry itself. */
-  status?: "dropped";
+  status?: "dropped" | "needs-attention";
   reason?: string;
+
+  /** Processing-side checkpoint. It is not a consequence and advances no
+   * watermark. Only the SpaceServer may write it. */
+  deliveryDeferral?: DeliveryDeferral;
+
+  /** Authoritative client-safe terminal detail for `needs-attention`. */
+  attention?: DeliveryAttention;
+
+  /** Server-owned resolution of an attention notice. */
+  resolution?: EventAttentionResolution;
+
+  /** Server-derived audit link on the one retry appended for an original
+   * attention notice. Authored clients cannot supply it. */
+  retryOf?: string;
 
   /** Processing-side (OW14, protocol.md §2b's LT4 ruling): failure
    * notices for CROSS-SPACE appends this event's handler emitted whose
@@ -1459,6 +1540,21 @@ export type SessionAckRequest = {
   seenSeq: number;
 };
 
+export type EventAttentionResolveRequest = {
+  type: "event.attention.resolve";
+  requestId: string;
+  space: string;
+  sessionId: SessionId;
+  eventId: string;
+  sidecarId: string;
+  action: "retry" | "dismiss";
+};
+
+export type EventAttentionResolveResult = {
+  serverSeq: number;
+  resolution: EventAttentionResolution;
+};
+
 export type ResponseMessage<Result> = {
   type: "response";
   requestId: string;
@@ -1496,6 +1592,12 @@ export type V2Error = {
    * client stops reopening the session and surfaces the error instead of looping.
    */
   retriable?: boolean;
+
+  /** Positive evidence that the server made a durable, no-commit verdict. */
+  permanentEvidence?: true;
+
+  /** Engine revision whose ACL state produced an authorization denial. */
+  aclRevision?: number;
 };
 
 export type V2Result<Value> = { ok: Value } | { error: V2Error };
@@ -1512,7 +1614,8 @@ export type ClientMessage =
   | SqliteRegisterDiskSourceRequest
   | WatchSetRequest
   | WatchAddRequest
-  | SessionAckRequest;
+  | SessionAckRequest
+  | EventAttentionResolveRequest;
 export type ServerMessage =
   | HelloOkMessage
   | ResponseMessage<FabricValue>

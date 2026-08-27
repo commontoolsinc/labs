@@ -20,6 +20,7 @@ import {
   type ClientCommit,
   type ClientMessage,
   type CommitClass,
+  commitPreconditionValueHash,
   dbNeedsColumnProvenance,
   decodeMemoryBoundary,
   encodeMemoryBoundary,
@@ -30,6 +31,9 @@ import {
   type EntityIdLookupResult,
   type EntitySnapshot,
   EventAppendDuplicateError,
+  type EventAttentionIndexValue,
+  type EventAttentionResolveRequest,
+  type EventAttentionResolveResult,
   getMemoryProtocolFlags,
   getOwnWriteEchoConfig,
   getServerExecutionConfig,
@@ -50,6 +54,7 @@ import {
   type ScopeKey,
   scopeKeyApplicableTo,
   type ScopeKeyIdentity,
+  SERVER_EXECUTION_ATTENTION_DOC_ID,
   type ServerMessage,
   type SessionAckRequest,
   type SessionAckResult,
@@ -281,9 +286,14 @@ const randomHex = (bytes: number): string => {
 const isNonNegativeInteger = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 
-const toError = (name: string, message: string): V2Error => ({
+const toError = (
+  name: string,
+  message: string,
+  details: Pick<V2Error, "permanentEvidence" | "aclRevision"> = {},
+): V2Error => ({
   name,
   message,
+  ...details,
 });
 
 const toPreconditionFailedError = (
@@ -442,7 +452,12 @@ export type AdmittedCommitNotice = {
    * handler processing" classification input. Ids only (the sidecar
    * doc instance + the eventId); the SpaceServer's drain reads the
    * stamped entries from the store, never from this record. */
-  eventAppends?: Array<{ id: string; scopeKey: ScopeKey; eventId: string }>;
+  eventAppends?: Array<{
+    id: string;
+    scopeKey: ScopeKey;
+    eventId: string;
+    retryOf?: string;
+  }>;
 
   /** The EXPLICIT WARM REQUEST (serving-loop.md §1's third activation
    * trigger; RULED 2026-08-21): set only by the serving-side
@@ -1051,6 +1066,26 @@ class Connection {
           );
         }
         return;
+      case "event.attention.resolve":
+        if (
+          !this.requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
+        ) {
+          return;
+        }
+        {
+          const response = await this.server.resolveEventAttention(parsed);
+          this.sendSessionResponse(
+            parsed.space,
+            parsed.sessionId,
+            parsed.requestId,
+            response,
+          );
+        }
+        return;
     }
   }
 
@@ -1573,6 +1608,7 @@ export class Server {
       return toError(
         "AuthorizationError",
         `Space ${space} has a malformed, ownerless, or retracted ACL`,
+        { permanentEvidence: true, aclRevision: Engine.serverSeq(engine) },
       );
     }
     if (this.#aclMode() === "observe") {
@@ -1587,6 +1623,7 @@ export class Server {
     return toError(
       "AuthorizationError",
       `Principal ${principalLabel} lacks ${requirement} on space ${space}`,
+      { permanentEvidence: true, aclRevision: Engine.serverSeq(engine) },
     );
   }
 
@@ -2930,6 +2967,228 @@ export class Server {
         throw verdictError.value;
       }
       return decision.response;
+    });
+  }
+
+  /** Resolve one authoritative OW54 notice. The publication lock, exact-value
+   * precondition, original-entry resolution, optional append, and index removal
+   * form one same-space atomic decision. */
+  async resolveEventAttention(
+    message: EventAttentionResolveRequest,
+  ): Promise<ResponseMessage<EventAttentionResolveResult>> {
+    return await this.withSpacePublicationLock(message.space, async () => {
+      try {
+        const session = this.#sessions.get(message.space, message.sessionId);
+        if (session === null) {
+          return respondTypedError<EventAttentionResolveResult>(
+            message.requestId,
+            toError("SessionError", "Unknown session for space"),
+          );
+        }
+        const engine = await this.openEngine(message.space);
+        if (this.#sessions.get(message.space, message.sessionId) !== session) {
+          return respondTypedError<EventAttentionResolveResult>(
+            message.requestId,
+            toError("SessionError", "Unknown or replaced session for space"),
+          );
+        }
+        const deny = this.#authorizeMessageWithEngine(
+          engine,
+          message.space,
+          session.principal,
+          "WRITE",
+        );
+        if (deny !== null) {
+          return respondTypedError<EventAttentionResolveResult>(
+            message.requestId,
+            deny,
+          );
+        }
+        const sidecarDocument = Engine.read(engine, {
+          id: message.sidecarId as never,
+        });
+        const sidecarValue = sidecarDocument?.value as
+          | StreamEventsDocValue
+          | undefined;
+        const entryIndex = sidecarValue?.entries?.findIndex((entry) =>
+          entry?.eventId === message.eventId
+        ) ?? -1;
+        const original = entryIndex < 0
+          ? undefined
+          : sidecarValue!.entries![entryIndex];
+        if (
+          original?.status !== "needs-attention" ||
+          original.attention === undefined ||
+          original.consequenced !== true
+        ) {
+          throw new Engine.ProtocolError(
+            `event ${message.eventId} has no authoritative attention cover`,
+          );
+        }
+        if (
+          original.firedAt?.user === undefined ||
+          session.principal === undefined ||
+          original.firedAt.user !== session.principal
+        ) {
+          return respondTypedError<EventAttentionResolveResult>(
+            message.requestId,
+            toError(
+              "AuthorizationError",
+              "Only the original acting user may resolve this event",
+            ),
+          );
+        }
+        if (original.resolution !== undefined) {
+          return {
+            type: "response",
+            requestId: message.requestId,
+            ok: {
+              serverSeq: Engine.serverSeq(engine),
+              resolution: original.resolution,
+            },
+          };
+        }
+        const indexDocument = Engine.read(engine, {
+          id: SERVER_EXECUTION_ATTENTION_DOC_ID as never,
+        });
+        const indexValue = indexDocument?.value as
+          | EventAttentionIndexValue
+          | undefined;
+        const summary = indexValue?.entries?.[message.eventId];
+        if (
+          summary === undefined || summary.sidecarId !== message.sidecarId
+        ) {
+          throw new Engine.ProtocolError(
+            `event ${message.eventId} has no unresolved attention notice`,
+          );
+        }
+        const retryEventId = message.action === "retry"
+          ? crypto.randomUUID()
+          : undefined;
+        const resolution = retryEventId === undefined
+          ? { kind: "dismissed" as const }
+          : { kind: "retried" as const, eventId: retryEventId };
+        const escapePointer = (value: string) =>
+          value.replace(/~/g, "~0").replace(/\//g, "~1");
+        const sidecarPatches: Array<
+          | { op: "replace"; path: string; value: unknown }
+          | { op: "append"; path: string; values: unknown[] }
+        > = [{
+          op: "replace",
+          path: `/value/entries/${entryIndex}/resolution`,
+          value: resolution,
+        }];
+        if (retryEventId !== undefined) {
+          sidecarPatches.push({
+            op: "append",
+            path: "/value/entries",
+            values: [{
+              eventId: retryEventId,
+              stream: original.stream,
+              ...(original.payload === undefined
+                ? {}
+                : { payload: original.payload }),
+              firedAt: {
+                user: session.principal,
+                session: message.sessionId,
+              },
+              ...(original.rendererTrusted === true
+                ? { rendererTrusted: true as const }
+                : {}),
+              ...(original.runtimeInjectedEventKeys === undefined ? {} : {
+                runtimeInjectedEventKeys: original.runtimeInjectedEventKeys,
+              }),
+              retryOf: message.eventId,
+            }],
+          });
+        }
+        const commit = Engine.applyCommit(engine, {
+          // Server-owned transaction identity: the requesting user's session
+          // has its own localSeq namespace, so borrowing it here would collide
+          // with ordinary client commits. The copied retry entry separately
+          // records the requesting current session in `firedAt`.
+          sessionId: this.#directSessionId,
+          space: message.space,
+          principal: session.principal,
+          commitClass: "system",
+          ...(retryEventId === undefined ? {} : {
+            systemEventActor: {
+              principal: session.principal,
+              sessionId: message.sessionId,
+            },
+          }),
+          commit: {
+            localSeq: ++this.#directLocalSeq,
+            reads: { confirmed: [], pending: [] },
+            preconditions: [{
+              kind: "entity-value-hash",
+              id: summary.sidecarId as never,
+              valueHash: commitPreconditionValueHash(sidecarValue as never),
+            }],
+            operations: [{
+              op: "patch",
+              id: summary.sidecarId as never,
+              patches: sidecarPatches as never,
+            }, {
+              op: "patch",
+              id: SERVER_EXECUTION_ATTENTION_DOC_ID as never,
+              patches: [{
+                op: "remove",
+                path: `/value/entries/${escapePointer(message.eventId)}`,
+              }],
+            }],
+            ...(retryEventId === undefined ? {} : {
+              eventAppends: [{
+                id: summary.sidecarId as never,
+                scope: "space" as const,
+                eventId: retryEventId,
+              }],
+            }),
+          },
+        });
+        this.markSpaceDirty(message.space, [
+          toDirtyKey(summary.sidecarId, "space"),
+          toDirtyKey(SERVER_EXECUTION_ATTENTION_DOC_ID, "space"),
+        ]);
+        this.#notifyCommitAdmitted({
+          space: message.space,
+          seq: commit.seq,
+          class: "system",
+          sessionId: this.#directSessionId,
+          writes: [
+            { id: summary.sidecarId, scopeKey: "space" },
+            { id: SERVER_EXECUTION_ATTENTION_DOC_ID, scopeKey: "space" },
+          ],
+          ...(retryEventId === undefined ? {} : {
+            eventAppends: [{
+              id: summary.sidecarId,
+              scopeKey: "space" as const,
+              eventId: retryEventId,
+              retryOf: message.eventId,
+            }],
+          }),
+        });
+        return {
+          type: "response",
+          requestId: message.requestId,
+          ok: { serverSeq: commit.seq, resolution },
+        };
+      } catch (error) {
+        const messageText = error instanceof Error
+          ? error.message
+          : String(error);
+        return respondTypedError<EventAttentionResolveResult>(
+          message.requestId,
+          toError(
+            error instanceof Engine.ConflictError
+              ? "ConflictError"
+              : error instanceof Engine.ProtocolError
+              ? "ProtocolError"
+              : "TransactionError",
+            messageText,
+          ),
+        );
+      }
     });
   }
 
@@ -6233,6 +6492,26 @@ export const parseClientMessage = (
       space: parsed.space,
       sessionId: parsed.sessionId,
       watches: parsed.watches as WatchSpec[],
+    };
+  }
+
+  if (
+    parsed.type === "event.attention.resolve" &&
+    typeof parsed.requestId === "string" &&
+    typeof parsed.space === "string" &&
+    typeof parsed.sessionId === "string" &&
+    typeof parsed.eventId === "string" && parsed.eventId.length > 0 &&
+    typeof parsed.sidecarId === "string" && parsed.sidecarId.length > 0 &&
+    (parsed.action === "retry" || parsed.action === "dismiss")
+  ) {
+    return {
+      type: "event.attention.resolve",
+      requestId: parsed.requestId,
+      space: parsed.space,
+      sessionId: parsed.sessionId,
+      eventId: parsed.eventId,
+      sidecarId: parsed.sidecarId,
+      action: parsed.action,
     };
   }
 

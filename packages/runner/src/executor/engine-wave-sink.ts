@@ -40,6 +40,7 @@ import {
   applyCommit,
   applyWaveCommit,
   readState,
+  RowLabelCommitError,
   selectDocHead,
   selectWritePathsSince,
   serverSeq,
@@ -361,6 +362,18 @@ export class EngineWaveCommitSink implements WaveCommitSink {
             name: "WaveCommitRejected",
             message: error.message,
             failedPreconditions: error.failedPreconditions,
+          },
+        });
+      }
+      if (
+        error instanceof RowLabelCommitError &&
+        error.operationIndex !== undefined
+      ) {
+        return Promise.resolve({
+          error: {
+            name: "RowLabelCommitError",
+            message: error.message,
+            failedOperation: error.operationIndex,
           },
         });
       }

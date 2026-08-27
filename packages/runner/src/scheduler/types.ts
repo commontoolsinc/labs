@@ -7,6 +7,7 @@ import type {
   IMemorySpaceAddress,
   MediaType,
 } from "../storage/interface.ts";
+import type { ReplicaLoadFailure } from "../storage/interface.ts";
 import type {
   SchedulerEventPreflightActionSummary,
   SchedulerEventPreflightStats,
@@ -230,6 +231,34 @@ export type TriggerTraceEntry = {
  * durable entry is the truth and the drain delivers it. */
 export const LT1_LATE_SEAL_REFUSED = "lt1-late-seal-refused";
 
+export type ServedEventFailureOutcome =
+  | {
+    kind: "error" | "dropped";
+    message: string;
+  }
+  | {
+    kind: "deferred";
+    message: string;
+  }
+  | {
+    kind: "deferred";
+    cause: "load-park";
+    role: "failed-head";
+    failure: ReplicaLoadFailure;
+  }
+  | {
+    kind: "deferred";
+    cause: "arrival-barrier";
+    blockedBy: string;
+  }
+  | {
+    kind: "deferred";
+    cause: "delivery-failure";
+    role: "failed-head";
+    phase: "commit-preparation" | "commit-finalization";
+    failure: ReplicaLoadFailure;
+  };
+
 /** The serving drain's per-event carriage (see QueuedEvent.served). */
 export type ServedEventDispatch = {
   firedAt?: { user?: string; session?: string };
@@ -258,47 +287,9 @@ export type ServedEventDispatch = {
    * `streamEntry`-less served copy); absent on the drain's copies and
    * everywhere client-side. */
   lt1?: { emitterTx: IExtendedStorageTransaction };
-  onFailure?: (
-    outcome: {
-      /** `error`: the handler THREW, or its commit was refused
-       * PRE-STORAGE by deterministic CFC enforcement (the served
-       * give-up arm's discriminated call, scheduler/events.ts) —
-       * either way the error is the consequence (events.md §5).
-       * `dropped`: no runnable handler exists — §5's
-       * drop predicate, the notice is the consequence. `deferred`: the
-       * handler could not be REACHED yet (a cold-view piece load — the
-       * creation-race shape OW19 warns about): no consequence is
-       * written, the entry stays pending, and a later wave re-drains
-       * it. Deferral is NOT the drop predicate — "the test is 'no
-       * runnable handler', never 'the run raced'". */
-      kind: "error" | "dropped" | "deferred";
-      message: string;
-      /** Which deferral this is, when the drain needs to tell them
-       * apart. `load-park`: the dispatch preflight parked the head on
-       * an in-flight replica load its closure reads and that load
-       * FAILED (verification-coverage.md's OW45 residue member — the
-       * live shape is a serving session revoked by a genesis ACL
-       * landing after activation, healing on the next mount). Its
-       * retry budget is the drain's, not the queued class's bounded
-       * creation-race window: the input is a doc that durably EXISTS
-       * and only the read path failed, so hardening it into §5's drop
-       * would be the same at-least-once discharge this arm exists to
-       * prevent. Absent on the cold-view piece-load deferral, which
-       * keeps its bounded budget (a piece that never materializes has
-       * no runnable handler and must eventually harden).
-       *
-       * ONLY meaningful when `kind` is `deferred`; the terminal arms
-       * never set it (independent review, Cubic P3). Deliberately NOT
-       * modelled as a discriminated union: the producer builds `kind`
-       * dynamically — `notifyEventDropped` takes it as
-       * `"dropped" | "deferred"` and cannot narrow to a branch — so a
-       * union would only relocate the looseness into a cast at the one
-       * call site. The producer-side guarantee is exact instead:
-       * `cause` is forwarded solely from `failHeadEventLoadPark`, which
-       * always pairs it with `servedKind: "deferred"`. */
-      cause?: "load-park";
-    },
-  ) => void;
+  /** The outcome is discriminated so an arrival-barrier follower can never
+   * inherit the failing head's checkpoint or typed failure evidence. */
+  onFailure?: (outcome: ServedEventFailureOutcome) => void;
 };
 
 export type QueuedEvent = {

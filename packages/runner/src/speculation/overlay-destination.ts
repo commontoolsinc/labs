@@ -78,6 +78,7 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import {
   type CellScope,
+  type DeliveryAttention,
   SERVER_EXECUTION_WATERMARK_DOC_ID,
   type StreamEventEntry,
   type StreamEventsDocValue,
@@ -138,8 +139,10 @@ const SPECULATION_ENACTABLE_EFFECT_KINDS = new Set(["navigateTo"]);
 export type EventIntentOutcome = {
   space: MemorySpace;
   eventId: string;
-  kind: "dropped" | "errored" | "refused";
+  sidecarId?: string;
+  kind: "dropped" | "errored" | "refused" | "needs-attention";
   reason: string;
+  attention?: DeliveryAttention;
 };
 
 /** A fired intent's terminal consequence, as awaited by the send
@@ -150,8 +153,15 @@ export type EventIntentOutcome = {
  * three mirror EventIntentOutcome. `unsettled` reports a teardown
  * before any signal (runtime dispose). */
 export type IntentConsequence = {
-  kind: "consequenced" | "errored" | "dropped" | "refused" | "unsettled";
+  kind:
+    | "consequenced"
+    | "errored"
+    | "dropped"
+    | "refused"
+    | "needs-attention"
+    | "unsettled";
   reason?: string;
+  attention?: DeliveryAttention;
 };
 
 type OverlayEntry = {
@@ -1413,7 +1423,24 @@ export class SpeculationOverlayDestination
     sidecarId: string,
     entry: StreamEventEntry,
   ): void {
-    if (entry.status === "dropped") {
+    if (entry.status === "needs-attention" && entry.attention !== undefined) {
+      const reason = entry.reason ?? "needs attention";
+      this.#untrackIntent(space, sidecarId, entry.eventId);
+      this.retireIntent(space, entry.eventId);
+      this.#settleIntentConsequence(space, entry.eventId, {
+        kind: "needs-attention",
+        reason,
+        attention: entry.attention,
+      });
+      this.#notifyIntentOutcome({
+        space,
+        eventId: entry.eventId,
+        sidecarId,
+        kind: "needs-attention",
+        reason,
+        attention: entry.attention,
+      });
+    } else if (entry.status === "dropped") {
       // The conflicting-discharge notice (events.md §5, LT4/T7): the
       // echo un-renders instead of lingering as false state, and the
       // UI is signaled.

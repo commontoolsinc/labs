@@ -31,8 +31,11 @@ import { setLLMUrl } from "@commonfabric/llm";
 import { type ACL, isACLUser, isCapability } from "@commonfabric/memory/acl";
 import {
   type ApplyOpResolution,
+  type EventAttentionIndexValue,
   type OperationFieldAddress,
   type OperationFieldSnapshot,
+  SERVER_EXECUTION_ATTENTION_DOC_ID,
+  type StreamEventsDocValue,
   toValuePath,
 } from "@commonfabric/memory/v2";
 import {
@@ -119,6 +122,8 @@ import {
   type DetectNonIdempotentRequest,
   type DetectNonIdempotentResponse,
   type EnsureHomePatternRunningRequest,
+  type EventAttentionListResponse,
+  type EventAttentionResolveResponse,
   type GetActionRunTraceRequest,
   type GetCellRequest,
   GetGraphSnapshotRequest,
@@ -134,6 +139,7 @@ import {
   type InitializationData,
   type IPCClientNotification,
   IPCClientRequest,
+  type ListEventAttentionRequest,
   type LoggerCountsResponse,
   type LoggerMetadata,
   type LogLevel,
@@ -170,6 +176,7 @@ import {
   type RecreateSpaceRootPatternRequest,
   type RegisterSpaceHostRequest,
   RequestType,
+  type ResolveEventAttentionRequest,
   type ResolveSpaceNameRequest,
   type SetActionRunTraceEnabledRequest,
   type SetBreakpointsRequest,
@@ -578,6 +585,7 @@ export class RuntimeProcessor {
   >();
   private telemetry: RuntimeTelemetry;
   #telemetryEnabled = false;
+  #intentOutcomeCancel: Cancel | undefined;
 
   // VDOM mounts: mountId -> { reconciler, cancel }
   private vdomMounts = new Map<
@@ -760,6 +768,23 @@ export class RuntimeProcessor {
       space,
       processor.renderMembershipProvider,
     );
+    processor.#intentOutcomeCancel = runtime.subscribeEventIntentOutcomes(
+      (outcome) => {
+        if (
+          outcome.kind !== "needs-attention" ||
+          outcome.sidecarId === undefined ||
+          outcome.attention === undefined
+        ) return;
+        postToClient({
+          type: NotificationType.EventNeedsAttention,
+          space: outcome.space,
+          eventId: outcome.eventId,
+          sidecarId: outcome.sidecarId,
+          reason: outcome.reason,
+          attention: outcome.attention,
+        });
+      },
+    );
     // Site-table v0: the home space carries space-to-host hints; the
     // runtime reads them as its live host lookup (2026-06-09 federation
     // session — "move the lookup into the runtime itself"). A seeded route or
@@ -890,6 +915,8 @@ export class RuntimeProcessor {
     this.disposingPromise = (async () => {
       this.telemetry.removeEventListener("telemetry", this.#onTelemetry);
       try {
+        this.#intentOutcomeCancel?.();
+        this.#intentOutcomeCancel = undefined;
         this.#siteTableCancel?.();
         this.#siteTableCancel = undefined;
         for (const cancel of this.subscriptions.values()) {
@@ -1495,6 +1522,72 @@ export class RuntimeProcessor {
     // and reactive write-backs alike). Internal callers that only need
     // reactive quiescence use runtime.idle() and are unaffected.
     await this.runtime.scheduler.idleWithPendingCommits();
+  }
+
+  async handleListEventAttention(
+    request: ListEventAttentionRequest,
+  ): Promise<EventAttentionListResponse> {
+    const provider = this.runtime.storageManager.open(request.space);
+    const indexSync = await provider.sync(
+      SERVER_EXECUTION_ATTENTION_DOC_ID as never,
+      undefined,
+      "space",
+    );
+    if (indexSync.error !== undefined) throw indexSync.error;
+    if (provider.replica === undefined) {
+      throw new Error("storage provider does not expose an attention replica");
+    }
+    const index = provider.replica.getDocument(
+      SERVER_EXECUTION_ATTENTION_DOC_ID as never,
+      "space",
+    )?.value as EventAttentionIndexValue | undefined;
+    const notices: EventAttentionListResponse["notices"] = [];
+    for (const summary of Object.values(index?.entries ?? {})) {
+      const sidecarSync = await provider.sync(
+        summary.sidecarId as never,
+        undefined,
+        "space",
+      );
+      if (sidecarSync.error !== undefined) throw sidecarSync.error;
+      const sidecar = provider.replica.getDocument(
+        summary.sidecarId as never,
+        "space",
+      )?.value as StreamEventsDocValue | undefined;
+      const entry = sidecar?.entries?.find((candidate) =>
+        candidate.eventId === summary.eventId
+      );
+      if (
+        entry?.status !== "needs-attention" ||
+        entry.attention === undefined ||
+        entry.resolution !== undefined ||
+        entry.firedAt?.user !== this.identity.did()
+      ) continue;
+      notices.push({
+        space: request.space,
+        eventId: entry.eventId,
+        sidecarId: summary.sidecarId,
+        reason: entry.reason ?? "Event delivery needs attention",
+        attention: entry.attention,
+      });
+    }
+    return { notices };
+  }
+
+  async handleResolveEventAttention(
+    request: ResolveEventAttentionRequest,
+  ): Promise<EventAttentionResolveResponse> {
+    const resolve = this.runtime.storageManager.resolveEventAttention;
+    if (resolve === undefined) {
+      throw new Error("storage manager does not support event attention");
+    }
+    const result = await resolve.call(
+      this.runtime.storageManager,
+      request.space,
+      request.eventId,
+      request.sidecarId,
+      request.action,
+    );
+    return { resolution: result.resolution };
   }
 
   // Persistence durability, distinct from handleIdle's reactive quiescence:
@@ -2126,6 +2219,10 @@ export class RuntimeProcessor {
         return await this.handleEnsureHomePatternRunning(request);
       case RequestType.Idle:
         return await this.handleIdle();
+      case RequestType.ListEventAttention:
+        return await this.handleListEventAttention(request);
+      case RequestType.ResolveEventAttention:
+        return await this.handleResolveEventAttention(request);
       case RequestType.FlushCompileCacheWrites:
         return await this.handleFlushCompileCacheWrites();
       case RequestType.PageCreate:

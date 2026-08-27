@@ -8,6 +8,8 @@ import type { DID } from "@commonfabric/identity";
 import { type Program } from "@commonfabric/js-compiler/interface";
 import type {
   ApplyOpResolution,
+  DeliveryAttention,
+  EventAttentionResolution,
   IntegratedOperation,
   OpCursor,
   OperationFieldSnapshot,
@@ -180,6 +182,12 @@ export enum RequestType {
    * is safe, so quiescence alone is a weaker condition than this reports.
    */
   Idle = "runtime:idle",
+
+  /** Lists unresolved terminal event-delivery notices for a space. */
+  ListEventAttention = "runtime:listEventAttention",
+
+  /** Retries or dismisses one terminal event-delivery notice. */
+  ResolveEventAttention = "runtime:resolveEventAttention",
 
   /**
    * Waits for every opened space to finish syncing. {@link PageSynced} is the
@@ -449,6 +457,8 @@ export enum NotificationType {
 
   /** Reports a new operation-backed snapshot for a subscription. */
   OperationUpdate = "operation:update",
+  /** Reports one authoritative terminal event-delivery notice. */
+  EventNeedsAttention = "callback:event-needs-attention",
 }
 
 /**
@@ -1041,6 +1051,21 @@ export type EnsureHomePatternRunningRequest = BaseRequest & {
 /** The {@link RequestType.Idle} request, which carries no payload. */
 export type IdleRequest = BaseRequest & {
   type: RequestType.Idle;
+};
+
+/** Reads unresolved attention notices for one open or reconnecting space. */
+export type ListEventAttentionRequest = BaseRequest & {
+  type: RequestType.ListEventAttention;
+  space: DID;
+};
+
+/** Resolves one notice through the authenticated memory-v2 CAS endpoint. */
+export type ResolveEventAttentionRequest = BaseRequest & {
+  type: RequestType.ResolveEventAttention;
+  space: DID;
+  eventId: string;
+  sidecarId: string;
+  action: "retry" | "dismiss";
 };
 
 /**
@@ -2417,6 +2442,8 @@ export type IPCClientRequest =
   | GetCellRequest
   | GetHomeSpaceCellRequest
   | EnsureHomePatternRunningRequest
+  | ListEventAttentionRequest
+  | ResolveEventAttentionRequest
   | GetGraphSnapshotRequest
   | GetLoggerCountsRequest
   | GetPatternCoverageRequest
@@ -2765,6 +2792,28 @@ export type PendingWritesNotification = {
   pending: boolean;
 };
 
+/** The authoritative safe recovery handle presented by the runtime client. */
+export type EventAttentionNotice = {
+  space: DID;
+  eventId: string;
+  sidecarId: string;
+  reason: string;
+  attention: DeliveryAttention;
+};
+
+/** Worker-to-page signal for a newly observed terminal delivery notice. */
+export type EventNeedsAttentionNotification = EventAttentionNotice & {
+  type: NotificationType.EventNeedsAttention;
+};
+
+export type EventAttentionListResponse = {
+  notices: EventAttentionNotice[];
+};
+
+export type EventAttentionResolveResponse = {
+  resolution: EventAttentionResolution;
+};
+
 /**
  * The worker's first post, announcing that its entry module has run and its
  * message listener is installed. The transport's `ready()` settles on it.
@@ -2875,7 +2924,9 @@ export type RemoteResponse =
   | UploadBlobResponse
   | OperationCapabilitiesResponse
   | OperationFieldResponse
-  | OperationApplyResponse;
+  | OperationApplyResponse
+  | EventAttentionListResponse
+  | EventAttentionResolveResponse;
 
 /**
  * Everything the worker reports without being asked. Each arm is recognized
@@ -2889,7 +2940,8 @@ export type IPCRemoteNotification =
   | TelemetryNotification
   | VDomBatchNotification
   | PendingWritesNotification
-  | OperationUpdateNotification;
+  | OperationUpdateNotification
+  | EventNeedsAttentionNotification;
 
 /**
  * The request-and-response pairing for every {@link RequestType}. This is what
@@ -2921,6 +2973,14 @@ export type Commands = {
   [RequestType.Idle]: {
     request: IdleRequest;
     response: EmptyResponse;
+  };
+  [RequestType.ListEventAttention]: {
+    request: ListEventAttentionRequest;
+    response: EventAttentionListResponse;
+  };
+  [RequestType.ResolveEventAttention]: {
+    request: ResolveEventAttentionRequest;
+    response: EventAttentionResolveResponse;
   };
   [RequestType.FlushCompileCacheWrites]: {
     request: FlushCompileCacheWritesRequest;
