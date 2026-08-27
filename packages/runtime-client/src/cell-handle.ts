@@ -159,13 +159,17 @@ export class CellHandle<T = unknown> {
     value: T,
     type: RequestType.CellSet | RequestType.CellPush,
   ): Promise<void> {
-    // Serialized first, though nothing here now depends on the order:
-    // `serialize()` no longer refuses anything, so the local update below is
-    // optimistic about the value being sendable as well as about the write
-    // landing. A value the encode cannot carry therefore does become this
-    // handle's cached value and does reach every subscriber before the send
-    // fails. Accepted deliberately -- the values that refusal protected are
-    // the ones this connection now carries -- and the failure still reaches
+    // Serialized first, which is what keeps a `FabricInstance` out of the
+    // cached value: `serialize()` refuses one, and refuses it here, before the
+    // local update below.
+    //
+    // Everything `serialize()` does accept, the local update is optimistic
+    // about: optimistic that the write lands, and equally that the value is
+    // one the encoding can carry. So a value the encode refuses does become
+    // this handle's cached value and does reach every subscriber before the
+    // send fails. Accepted deliberately -- what is left in that set is a value
+    // outside `ClientCellValue`, which `T` is too loose to refuse, or one
+    // forged onto a fabric prototype -- and the failure still reaches
     // the caller, because `RuntimeConnection.request()` is not `async` and the
     // encode's throw leaves before the `.catch()` below can absorb it.
     //

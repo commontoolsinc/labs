@@ -6,7 +6,10 @@
  */
 
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type {
+  FabricPlainObject,
+  FabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import type { DID, Identity } from "@commonfabric/identity";
 import { Program } from "@commonfabric/js-compiler/interface";
 import type {
@@ -353,10 +356,17 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     });
   }
 
+  /**
+   * Creates a piece in the given space, from a URL, a program, or the source
+   * of a single-file one.
+   *
+   * `options.argument` is the piece's input, which is a record: a piece is
+   * created with named inputs or with none.
+   */
   async createPage<T = unknown>(
     input: string | URL | Program,
     space: DID,
-    options?: { argument?: FabricValue; run?: boolean },
+    options?: { argument?: FabricPlainObject; run?: boolean },
   ): Promise<PageHandle<T>> {
     const source = input instanceof URL
       ? { url: input.href }

@@ -1,7 +1,10 @@
 import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { toStructuredDebugValue } from "@commonfabric/data-model/value-debug";
+import {
+  toCompactDebugString,
+  toStructuredDebugValue,
+} from "@commonfabric/data-model/value-debug";
 import {
   type SiteTable,
   siteTableCause,
@@ -1471,8 +1474,13 @@ export class RuntimeProcessor {
     // it cannot use and say nothing about why.
     const argument = request.argument;
     if ((argument !== undefined) && !isObjectNotArray(argument)) {
+      // The rejected value is named rather than its `typeof`, which calls both
+      // an array and `null` an `object` and so says nothing about either. It
+      // is bounded because the argument is a caller's data.
       throw new Error(
-        `A piece's argument must be a record, not a ${typeof argument}.`,
+        `A piece's argument must be a record, not: ${
+          toCompactDebugString(argument, 120)
+        }`,
       );
     }
 

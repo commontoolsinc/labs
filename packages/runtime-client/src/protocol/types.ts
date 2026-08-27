@@ -1585,11 +1585,12 @@ export type PageCreateRequest = BaseRequest & {
    * The argument the piece is created with. The wire carries a `FabricValue`,
    * which is what the envelope's encoding makes true of it.
    *
-   * A piece's input is a record, which is narrower: `cc.create()` takes an
-   * `object`, and `handleCreatePage()` refuses anything else rather than
-   * casting. So the arms this admits and that does not -- a `bigint`, a
-   * `FabricBytes`, a bare string -- cross the wire and are turned away at the
-   * far end, with a message saying why.
+   * A piece's input is a record, which is narrower, and that is what the
+   * client API asks for: `cc.create()` takes an `object`, and
+   * `handlePieceCreate()` refuses anything else rather than casting. So the
+   * arms this admits and that does not -- a `bigint`, a `FabricBytes`, a bare
+   * string -- reach the far end only from a sender that did not go through
+   * that API, and are turned away there with a message saying why.
    */
   argument?: FabricValue;
 

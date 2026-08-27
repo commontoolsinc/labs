@@ -1045,6 +1045,54 @@ describe("cell-handle", () => {
         .toThrow(Error);
       expect(sends).toHaveLength(1);
     });
+
+    it("has already cached the value and told its subscribers", async () => {
+      // The accepted half of the same behavior, and the reason the rejection
+      // above has to reach the caller: the local update is optimistic about
+      // the value being sendable as well as about the write landing, so by the
+      // time the send fails this handle reads as though it succeeded. Pinned
+      // because it is a deliberate trade rather than an oversight -- a reader
+      // who tightened `#applyLocalAndSend()` to serialize-then-send-then-apply
+      // would be changing what a subscriber sees, not just where a throw comes
+      // from.
+      const cell = new CellHandle<unknown>(encodingRuntime(), ref);
+      const seen: unknown[] = [];
+      cell.subscribe((value) => {
+        seen.push(value);
+      });
+
+      // `subscribe()` calls back immediately with the current value, which is
+      // the `undefined` this handle starts at.
+      expect(seen).toEqual([undefined]);
+
+      const uncrossable = Object.create(FabricBytes.prototype);
+      await expect(cell.set(uncrossable)).rejects.toThrow(Error);
+
+      expect(cell.get()).toBe(uncrossable);
+      expect(seen).toHaveLength(2);
+      expect(seen[1]).toBe(uncrossable);
+    });
+
+    it("has already cached the appended array after a failed `push()`", () => {
+      // `push()` reaches the same `#applyLocalAndSend()`, so it makes the same
+      // trade -- over the array it computed, which is what a subscriber is
+      // left holding. It differs in how the caller hears about the failure:
+      // `push()` returns `void`, so the encode's throw arrives synchronously
+      // rather than as a rejection.
+      const cell = new CellHandle<unknown[]>(encodingRuntime(), ref);
+      cell[$onCellUpdate]([1]);
+      const seen: unknown[] = [];
+      cell.subscribe((value) => {
+        seen.push(value);
+      });
+
+      const uncrossable = Object.create(FabricBytes.prototype);
+      expect(() => cell.push(uncrossable)).toThrow(Error);
+
+      expect(cell.get()).toEqual([1, uncrossable]);
+      expect(seen).toHaveLength(2);
+      expect(seen[1]).toEqual([1, uncrossable]);
+    });
   });
 
   describe("CellHandle carries a value on every write path", () => {

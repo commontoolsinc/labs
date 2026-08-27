@@ -9,8 +9,13 @@ import { WebWorkerRuntimeTransport } from "@/client/transports/web-worker/transp
 // without a real worker: a fake Worker class lets us construct the transport,
 // then we drive its private message handler directly.
 class FakeWorker extends EventTarget {
+  static instances: FakeWorker[] = [];
   posted: unknown[] = [];
   terminated = false;
+  constructor() {
+    super();
+    FakeWorker.instances.push(this);
+  }
   postMessage(message: unknown): void {
     this.posted.push(message);
   }
@@ -31,10 +36,40 @@ function makeTransport(): WebWorkerRuntimeTransport {
   }
 }
 
-/** A `MessageEvent` carrying `data` as the worker would actually post it. */
+/**
+ * Calls `connect()` with the fake worker in place, handing back both the
+ * pending connection and the fake the call constructed. Unlike the tests that
+ * drive a transport they already hold, one of `connect()` has to reach the
+ * worker through the transport it is not given.
+ */
+function connectWithFakeWorker(): {
+  connection: Promise<WebWorkerRuntimeTransport>;
+  worker: FakeWorker;
+} {
+  const OriginalWorker = (globalThis as { Worker: unknown }).Worker;
+  (globalThis as { Worker: unknown }).Worker = FakeWorker;
+  FakeWorker.instances.length = 0;
+  try {
+    // `connect()` constructs the transport before its first `await`, so the
+    // swap only has to cover the call itself, not the promise it returns.
+    const connection = WebWorkerRuntimeTransport.connect({
+      workerUrl: new URL("http://localhost/worker.js"),
+    });
+    return { connection, worker: FakeWorker.instances[0] };
+  } finally {
+    (globalThis as { Worker: unknown }).Worker = OriginalWorker;
+  }
+}
+
+/**
+ * A `MessageEvent` carrying `data` as the worker would actually post it. The
+ * clone is what a real `postMessage()` inserts between the encode and the
+ * decode, and it matters here: the decode cedes and freezes what it is given,
+ * so without one a test would be watching a tree it still holds a reference to.
+ */
 function posted(data: unknown): MessageEvent {
   return new MessageEvent("message", {
-    data: realmFromFabricValue(data as never),
+    data: structuredClone(realmFromFabricValue(data as never)),
   });
 }
 
@@ -70,6 +105,38 @@ describe("WebWorkerRuntimeTransport", () => {
       expect(settled).toBe(true);
 
       await transport.dispose();
+    });
+  });
+
+  describe("connect()", () => {
+    // A failed `connect()` never hands the caller a transport, so there is
+    // nothing left to call `dispose()` on and the worker would run for as long
+    // as the page did. Both ways readiness can fail are covered, the terminate
+    // being the transport's only one.
+
+    it("terminates the worker when a pre-ready worker error rejects it", async () => {
+      const { connection, worker } = connectWithFakeWorker();
+
+      worker.dispatchEvent(
+        new ErrorEvent("error", {
+          message: "worker failed to load",
+          cancelable: true,
+        }),
+      );
+
+      await expect(connection).rejects.toThrow("worker failed to load");
+      expect(worker.terminated).toBe(true);
+    });
+
+    it("terminates the worker when a pre-ready decode failure rejects it", async () => {
+      const { connection, worker } = connectWithFakeWorker();
+
+      worker.dispatchEvent(
+        new MessageEvent("message", { data: { not: "an encoding" } }),
+      );
+
+      await expect(connection).rejects.toThrow("Undecodable message");
+      expect(worker.terminated).toBe(true);
     });
   });
 

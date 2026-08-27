@@ -3147,8 +3147,8 @@ export class WorkerReconciler {
   }
 
   /**
-   * Transform a prop value for sending over IPC.
-   * Ensures the value can be cloned via postMessage.
+   * Transforms a prop value into the form the connection carries, a `style`
+   * given as an object becoming a CSS string on the way.
    */
   // deno-lint-ignore no-explicit-any
   private transformPropValue(key: string, value: unknown): any {
