@@ -102,7 +102,7 @@ export class XRootView extends BaseView implements ShellApp {
       width: min(24rem, calc(100vw - 2rem));
       max-height: calc(100dvh - 2rem);
       overflow-y: auto;
-      pointer-events: auto;
+      pointer-events: none;
     }
 
     .attention-card {

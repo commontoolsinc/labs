@@ -517,7 +517,12 @@ describe("XRootView", () => {
       expect(styles).not.toContain("var(--background, #fff)");
       expect(styles).toContain("max-height: calc(100dvh - 2rem)");
       expect(styles).toContain("overflow-y: auto");
-      expect(styles).toContain("pointer-events: auto");
+      expect(styles).toMatch(
+        /#event-attention\s*\{[^}]*pointer-events:\s*none/s,
+      );
+      expect(styles).toMatch(
+        /\.attention-card\s*\{[^}]*pointer-events:\s*auto/s,
+      );
 
       await view._resolveEventAttention(notice, "retry");
       expect(resolutions).toEqual([{ notice, action: "retry" }]);
