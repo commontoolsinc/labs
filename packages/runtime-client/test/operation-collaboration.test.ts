@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
+import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
@@ -427,14 +428,22 @@ describe("RuntimeClient operation collaboration", () => {
     try {
       subscribed!(field);
       await Promise.resolve();
-      expect(notifications).toEqual([{
-        type: NotificationType.OperationUpdate,
-        subscriptionId: "subscription:1",
-        field: {
-          ...field,
-          materialized: field.materialized,
-        },
-      }]);
+      // Decoded rather than read raw: what the worker posts is an envelope
+      // encoding, and the client refuses anything that is not one. Comparing
+      // the decode is what says this notification can actually be received,
+      // where comparing the posted value would pass for a message that never
+      // crossed.
+      expect(
+        notifications.map((posted) => fabricFromRealmValue(posted as never)),
+      )
+        .toEqual([{
+          type: NotificationType.OperationUpdate,
+          subscriptionId: "subscription:1",
+          field: {
+            ...field,
+            materialized: field.materialized,
+          },
+        }]);
     } finally {
       (globalThis as { postMessage?: unknown }).postMessage = postMessage;
     }

@@ -1143,7 +1143,7 @@ export class RuntimeProcessor {
             subscription
         ) return;
         queueMicrotask(() =>
-          self.postMessage({
+          postToClient({
             type: NotificationType.OperationUpdate,
             subscriptionId: request.subscriptionId,
             field: field,
