@@ -35,9 +35,14 @@ import { setLLMUrl } from "@commonfabric/llm";
 import { type ACL, isACLUser, isCapability } from "@commonfabric/memory/acl";
 import {
   type ApplyOpResolution,
+  eventAttentionEntryKey,
+  type EventAttentionIndexValue,
   type OperationFieldAddress,
   type OperationFieldSnapshot,
+  SERVER_EXECUTION_ATTENTION_DOC_ID,
+  type StreamEventsDocValue,
   toValuePath,
+  type UnresolvedEventAttention,
 } from "@commonfabric/memory/v2";
 import {
   PieceController,
@@ -54,6 +59,7 @@ import {
   type Cell,
   convertCellsToLinks,
   entityIdFrom,
+  type EventIntentOutcome,
   getCellOrThrow,
   getPatternIdentityRef,
   hasOperationStorageCapability,
@@ -123,6 +129,9 @@ import {
   type DetectNonIdempotentRequest,
   type DetectNonIdempotentResponse,
   type EnsureHomePatternRunningRequest,
+  type EventAttentionListResponse,
+  type EventAttentionResolveResponse,
+  type EventNeedsAttentionNotification,
   type GetActionRunTraceRequest,
   type GetCellRequest,
   GetGraphSnapshotRequest,
@@ -138,6 +147,7 @@ import {
   type InitializationData,
   type IPCClientNotification,
   IPCClientRequest,
+  type ListEventAttentionRequest,
   type LoggerCountsResponse,
   type LoggerMetadata,
   type LogLevel,
@@ -175,6 +185,7 @@ import {
   type RecreateSpaceRootPatternRequest,
   type RegisterSpaceHostRequest,
   RequestType,
+  type ResolveEventAttentionRequest,
   type ResolveSpaceNameRequest,
   type SetActionRunTraceEnabledRequest,
   type SetBreakpointsRequest,
@@ -239,6 +250,33 @@ import {
   getCell,
   mapCellRefsToSigilLinks,
 } from "./utils.ts";
+
+/** Subscribe the worker bridge to complete terminal-attention outcomes. Keeping
+ * the filter and wire projection here makes the host boundary independently
+ * testable without booting a worker runtime. */
+export function subscribeEventAttentionNotifications(
+  runtime: Pick<Runtime, "subscribeEventIntentOutcomes">,
+  post: (notification: EventNeedsAttentionNotification) => void = postToClient,
+): Cancel {
+  return runtime.subscribeEventIntentOutcomes((outcome: EventIntentOutcome) => {
+    if (
+      outcome.kind !== "needs-attention" ||
+      outcome.sidecarId === undefined ||
+      typeof outcome.seq !== "number" ||
+      outcome.attention === undefined
+    ) return;
+    post({
+      type: NotificationType.EventNeedsAttention,
+      space: outcome.space,
+      eventId: outcome.eventId,
+      seq: outcome.seq,
+      sidecarId: outcome.sidecarId,
+      retryable: outcome.retryable,
+      reason: outcome.reason,
+      attention: outcome.attention,
+    });
+  });
+}
 
 /**
  * Maximum nesting depth of a console argument's debug rendering. The bound is
@@ -583,6 +621,7 @@ export class RuntimeProcessor {
   >();
   private telemetry: RuntimeTelemetry;
   #telemetryEnabled = false;
+  #intentOutcomeCancel: Cancel | undefined;
 
   // VDOM mounts: mountId -> { reconciler, cancel }
   private vdomMounts = new Map<
@@ -765,6 +804,9 @@ export class RuntimeProcessor {
       space,
       processor.renderMembershipProvider,
     );
+    processor.#intentOutcomeCancel = subscribeEventAttentionNotifications(
+      runtime,
+    );
     // Site-table v0: the home space carries space-to-host hints; the
     // runtime reads them as its live host lookup (2026-06-09 federation
     // session — "move the lookup into the runtime itself"). A seeded route or
@@ -895,6 +937,8 @@ export class RuntimeProcessor {
     this.disposingPromise = (async () => {
       this.telemetry.removeEventListener("telemetry", this.#onTelemetry);
       try {
+        this.#intentOutcomeCancel?.();
+        this.#intentOutcomeCancel = undefined;
         this.#siteTableCancel?.();
         this.#siteTableCancel = undefined;
         for (const cancel of this.subscriptions.values()) {
@@ -1500,6 +1544,91 @@ export class RuntimeProcessor {
     // and reactive write-backs alike). Internal callers that only need
     // reactive quiescence use runtime.idle() and are unaffected.
     await this.runtime.scheduler.idleWithPendingCommits();
+  }
+
+  async handleListEventAttention(
+    request: ListEventAttentionRequest,
+  ): Promise<EventAttentionListResponse> {
+    const provider = this.runtime.storageManager.open(request.space);
+    const indexSync = await provider.sync(
+      SERVER_EXECUTION_ATTENTION_DOC_ID as never,
+      undefined,
+      "space",
+    );
+    if (indexSync.error !== undefined) throw indexSync.error;
+    if (provider.replica === undefined) {
+      throw new Error("storage provider does not expose an attention replica");
+    }
+    const index = provider.replica.getDocument(
+      SERVER_EXECUTION_ATTENTION_DOC_ID as never,
+      "space",
+    )?.value as EventAttentionIndexValue | undefined;
+    const notices: EventAttentionListResponse["notices"] = [];
+    const summariesBySidecar = new Map<string, UnresolvedEventAttention[]>();
+    for (const sidecarSummaries of Object.values(index?.entries ?? {})) {
+      for (const summary of Object.values(sidecarSummaries)) {
+        const summaries = summariesBySidecar.get(summary.sidecarId) ?? [];
+        summaries.push(summary);
+        summariesBySidecar.set(summary.sidecarId, summaries);
+      }
+    }
+    for (const [sidecarId, summaries] of summariesBySidecar) {
+      const sidecarSync = await provider.sync(
+        sidecarId as never,
+        undefined,
+        "space",
+      );
+      if (sidecarSync.error !== undefined) throw sidecarSync.error;
+      const sidecar = provider.replica.getDocument(
+        sidecarId as never,
+        "space",
+      )?.value as StreamEventsDocValue | undefined;
+      const entries = new Map(
+        sidecar?.entries?.map((entry) =>
+          [eventAttentionEntryKey(entry.eventId, entry.seq), entry] as const
+        ),
+      );
+      for (const summary of summaries) {
+        const entry = entries.get(
+          eventAttentionEntryKey(summary.eventId, summary.seq),
+        );
+        const actingUser = entry?.firedAt?.user;
+        if (
+          entry?.status !== "needs-attention" ||
+          entry.attention === undefined ||
+          entry.resolution !== undefined ||
+          (actingUser !== undefined && actingUser !== this.identity.did())
+        ) continue;
+        notices.push({
+          space: request.space,
+          eventId: entry.eventId,
+          seq: summary.seq,
+          sidecarId,
+          retryable: actingUser !== undefined,
+          reason: entry.reason ?? "Event delivery needs attention",
+          attention: entry.attention,
+        });
+      }
+    }
+    return { notices };
+  }
+
+  async handleResolveEventAttention(
+    request: ResolveEventAttentionRequest,
+  ): Promise<EventAttentionResolveResponse> {
+    const resolve = this.runtime.storageManager.resolveEventAttention;
+    if (resolve === undefined) {
+      throw new Error("storage manager does not support event attention");
+    }
+    const result = await resolve.call(
+      this.runtime.storageManager,
+      request.space,
+      request.eventId,
+      request.seq,
+      request.sidecarId,
+      request.action,
+    );
+    return { resolution: result.resolution };
   }
 
   // Persistence durability, distinct from handleIdle's reactive quiescence:
@@ -2147,6 +2276,10 @@ export class RuntimeProcessor {
         return await this.handleEnsureHomePatternRunning(request);
       case RequestType.Idle:
         return await this.handleIdle();
+      case RequestType.ListEventAttention:
+        return await this.handleListEventAttention(request);
+      case RequestType.ResolveEventAttention:
+        return await this.handleResolveEventAttention(request);
       case RequestType.FlushCompileCacheWrites:
         return await this.handleFlushCompileCacheWrites();
       case RequestType.PageCreate:

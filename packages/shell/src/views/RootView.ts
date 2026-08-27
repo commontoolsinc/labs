@@ -7,6 +7,7 @@ import {
 } from "@commonfabric/navigation";
 import {
   type ErrorNotification,
+  type EventAttentionNotice,
   type RuntimeClient,
   RuntimeErrorCode,
 } from "@commonfabric/runtime-client";
@@ -66,6 +67,11 @@ function getCommonfabricGlobal(): typeof globalThis & {
   };
 }
 
+const eventAttentionNoticeKey = (
+  notice: Pick<EventAttentionNotice, "space" | "sidecarId" | "eventId" | "seq">,
+): string =>
+  JSON.stringify([notice.space, notice.sidecarId, notice.eventId, notice.seq]);
+
 // The root element for the shell application.
 //
 // Derives `RuntimeInternals` for the application from its `AppState`, and owns
@@ -85,6 +91,46 @@ export class XRootView extends BaseView implements ShellApp {
       height: 100%;
       width: 100%;
     }
+
+    #event-attention {
+      position: fixed;
+      z-index: 1000;
+      right: 1rem;
+      bottom: 1rem;
+      display: grid;
+      gap: 0.75rem;
+      width: min(24rem, calc(100vw - 2rem));
+      max-height: calc(100dvh - 2rem);
+      overflow-y: auto;
+      pointer-events: none;
+    }
+
+    .attention-card {
+      pointer-events: auto;
+      padding: 1rem;
+      border: 1px solid
+        var(--shell-divider, var(--cf-theme-color-border, #111));
+      border-radius: 0.75rem;
+      color: var(--font-color, var(--cf-theme-color-text, #111));
+      background: var(--shell-surface, var(--cf-theme-color-surface, #fff));
+      box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 18%);
+    }
+
+    .attention-card h2 {
+      margin: 0 0 0.375rem;
+      font-size: 1rem;
+    }
+
+    .attention-card p {
+      margin: 0 0 0.75rem;
+      line-height: 1.35;
+    }
+
+    .attention-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.5rem;
+    }
   `;
 
   @state()
@@ -98,6 +144,19 @@ export class XRootView extends BaseView implements ShellApp {
 
   @state()
   private accessor _runtimeLoadErrors: readonly ErrorNotification[] = [];
+
+  @state()
+  private accessor _eventAttention: readonly EventAttentionNotice[] = [];
+
+  @state()
+  private accessor _resolvingAttention = new Map<string, symbol>();
+
+  private _eventAttentionMutation = 0;
+  private _eventAttentionMutationVersions = new Map<
+    DID,
+    Map<string, number>
+  >();
+  private _eventAttentionRefreshOwners = new Map<DID, symbol>();
 
   // Invalidates callbacks from replaced workers. A coded compiler-load error
   // can arrive through either a request reply or an asynchronous runtime error;
@@ -176,8 +235,15 @@ export class XRootView extends BaseView implements ShellApp {
         this._runtimeLoadErrors = [];
         const previous = this._rt.value;
         if (previous) {
+          this.runtime?.off(
+            "eventneedsattention",
+            this._handleEventNeedsAttention,
+          );
           previous.dispose().catch(console.error);
         }
+        this._eventAttention = [];
+        this._eventAttentionMutationVersions.clear();
+        this._eventAttentionRefreshOwners.clear();
 
         if (!app || !app.identity) {
           // Clear the runtime when no app state. The space belongs to the
@@ -241,6 +307,13 @@ export class XRootView extends BaseView implements ShellApp {
         // Update the provided runtime; `space` is view state, resolved
         // from app.view in willUpdate() independent of the runtime's life.
         this.runtime = rt.runtime();
+        this.runtime.on(
+          "eventneedsattention",
+          this._handleEventNeedsAttention,
+        );
+        if (this.space !== undefined) {
+          void this.#refreshEventAttention(this.space, generation);
+        }
 
         // Expose the runtime and cell debug utilities for console use
         // (e.g. commonfabric.rt.setLoggerLevel("debug")).
@@ -258,6 +331,11 @@ export class XRootView extends BaseView implements ShellApp {
 
   override connectedCallback(): void {
     super.connectedCallback();
+    // A Lit element can be detached and reattached without rebuilding its
+    // worker runtime. Reinstall the live notice listener that disconnect
+    // removes; off-first keeps repeated connects idempotent.
+    this.runtime?.off("eventneedsattention", this._handleEventNeedsAttention);
+    this.runtime?.on("eventneedsattention", this._handleEventNeedsAttention);
     this.addEventListener(SHELL_COMMAND, this.onCommand);
     document.addEventListener(
       "theme-preference-changed",
@@ -267,6 +345,7 @@ export class XRootView extends BaseView implements ShellApp {
   }
 
   override disconnectedCallback(): void {
+    this.runtime?.off("eventneedsattention", this._handleEventNeedsAttention);
     this.removeEventListener(SHELL_COMMAND, this.onCommand);
     document.removeEventListener(
       "theme-preference-changed",
@@ -397,11 +476,123 @@ export class XRootView extends BaseView implements ShellApp {
 
   #setSpace(space: DID | undefined, token: number): void {
     if (token !== this.#resolveSpaceToken || space === this.space) return;
+    const previousSpace = this.space;
     this.space = space;
+    this._eventAttention = [];
+    if (previousSpace !== undefined) {
+      this._eventAttentionMutationVersions.delete(previousSpace);
+      this._eventAttentionRefreshOwners.delete(previousSpace);
+    }
     // Keep browser OTel span attribution in sync with the resolved space —
     // the telemetry sink lives across navigations.
     this.#telemetry?.setSpace(space);
+    if (space !== undefined) {
+      void this.#refreshEventAttention(space, this._runtimeGeneration);
+    }
   }
+
+  readonly _handleEventNeedsAttention = (
+    notice: EventAttentionNotice,
+  ): void => {
+    if (notice.space !== this.space) return;
+    const key = eventAttentionNoticeKey(notice);
+    this.#noteEventAttentionMutation(notice.space, key);
+    this._eventAttention = [
+      ...this._eventAttention.filter((candidate) =>
+        eventAttentionNoticeKey(candidate) !== key
+      ),
+      notice,
+    ];
+  };
+
+  #noteEventAttentionMutation(space: DID, key: string): void {
+    const versions = this._eventAttentionMutationVersions.get(space) ??
+      new Map<string, number>();
+    versions.set(key, ++this._eventAttentionMutation);
+    this._eventAttentionMutationVersions.set(space, versions);
+  }
+
+  async #refreshEventAttention(space: DID, generation: number): Promise<void> {
+    const runtime = this.runtime;
+    if (runtime === undefined) return;
+    const owner = Symbol(space);
+    const startedAt = this._eventAttentionMutation;
+    this._eventAttentionRefreshOwners.set(space, owner);
+    try {
+      const notices = await runtime.listEventAttention(space);
+      if (
+        generation !== this._runtimeGeneration || runtime !== this.runtime ||
+        space !== this.space ||
+        this._eventAttentionRefreshOwners.get(space) !== owner
+      ) return;
+      const currentByKey = new Map(
+        this._eventAttention.filter((notice) => notice.space === space).map(
+          (notice) => [eventAttentionNoticeKey(notice), notice] as const,
+        ),
+      );
+      const reconciled = new Map(
+        notices.map((notice) =>
+          [eventAttentionNoticeKey(notice), notice] as const
+        ),
+      );
+      for (
+        const [key, version]
+          of this._eventAttentionMutationVersions.get(space) ?? []
+      ) {
+        if (version <= startedAt) continue;
+        const current = currentByKey.get(key);
+        if (current === undefined) reconciled.delete(key);
+        else reconciled.set(key, current);
+      }
+      this._eventAttention = [
+        ...this._eventAttention.filter((notice) => notice.space !== space),
+        ...reconciled.values(),
+      ];
+    } catch (error) {
+      if (
+        generation === this._runtimeGeneration && runtime === this.runtime &&
+        space === this.space &&
+        this._eventAttentionRefreshOwners.get(space) === owner
+      ) {
+        console.error("[RootView] Failed to load event attention:", error);
+      }
+    } finally {
+      if (this._eventAttentionRefreshOwners.get(space) === owner) {
+        this._eventAttentionRefreshOwners.delete(space);
+        this._eventAttentionMutationVersions.delete(space);
+      }
+    }
+  }
+
+  readonly _resolveEventAttention = async (
+    notice: EventAttentionNotice,
+    action: "retry" | "dismiss",
+  ): Promise<void> => {
+    const runtime = this.runtime;
+    if (runtime === undefined) return;
+    const key = eventAttentionNoticeKey(notice);
+    if (this._resolvingAttention.has(key)) return;
+    const request = Symbol(key);
+    this._resolvingAttention = new Map(this._resolvingAttention).set(
+      key,
+      request,
+    );
+    try {
+      await runtime.resolveEventAttention(notice, action);
+      this._eventAttention = this._eventAttention.filter((candidate) =>
+        eventAttentionNoticeKey(candidate) !== key
+      );
+      this.#noteEventAttentionMutation(notice.space, key);
+    } catch (error) {
+      console.error(`[RootView] Failed to ${action} event:`, error);
+    } finally {
+      if (this._resolvingAttention.get(key) === request) {
+        const resolving = new Map(this._resolvingAttention);
+        resolving.delete(key);
+        this._resolvingAttention = resolving;
+      }
+    }
+  };
 
   private _onThemeChanged = (e: Event) => {
     this._themePreference = (e as CustomEvent).detail;
@@ -497,6 +688,43 @@ export class XRootView extends BaseView implements ShellApp {
           .preserveRuntimeErrorsForNextViewChange="${this
             .preserveRuntimeErrorsForNextViewChange}"
         ></x-app-view>
+        ${this._eventAttention.length === 0 ? undefined : html`
+          <aside
+            id="event-attention"
+            role="status"
+            aria-live="polite"
+            aria-relevant="additions"
+            aria-label="Events needing attention"
+          >
+            ${this._eventAttention.map((notice) => {
+              const key = eventAttentionNoticeKey(notice);
+              const resolving = this._resolvingAttention.has(key);
+              return html`
+                <section class="attention-card">
+                  <h2>Event needs attention</h2>
+                  <p>${notice.reason}</p>
+                  <div class="attention-actions">
+                    <cf-button
+                      variant="outline"
+                      ?disabled="${resolving}"
+                      @click="${() =>
+                        this._resolveEventAttention(notice, "dismiss")}"
+                    >Dismiss</cf-button>
+                    ${notice.retryable !== false
+                      ? html`
+                        <cf-button
+                          ?disabled="${resolving}"
+                          @click="${() =>
+                            this._resolveEventAttention(notice, "retry")}"
+                        >Retry</cf-button>
+                      `
+                      : undefined}
+                  </div>
+                </section>
+              `;
+            })}
+          </aside>
+        `}
       </cf-theme>
     `;
   }

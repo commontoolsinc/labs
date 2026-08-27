@@ -25,6 +25,7 @@ export type {
   RuntimeOptions,
   SpaceCellContents,
 } from "./runtime.ts";
+export type { EventIntentOutcome } from "./speculation/overlay-destination.ts";
 export {
   ADOPT_SERVER_FLAGS_ENV,
   type BrowserWorkerPresetParams,

@@ -23,6 +23,11 @@ import type {
 } from "./scheduler-test-utils.ts";
 import type { RuntimeTelemetryMarker } from "../src/telemetry.ts";
 import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
+import {
+  isExplicitTransactionAbort,
+  reportServedEventFailure,
+} from "../src/scheduler/events.ts";
+import { TransactionAborted } from "../src/storage/transaction-errors.ts";
 
 async function waitForSchedulerCondition(
   runtime: Runtime,
@@ -74,6 +79,31 @@ describe("event handling", () => {
     ({ storageManager, runtime, tx } = createSchedulerTestRuntime(
       import.meta.url,
     ));
+  });
+
+  it("isolates served failure observers from scheduler control flow", () => {
+    const outcomes: unknown[] = [];
+    reportServedEventFailure({
+      onFailure: (outcome) => outcomes.push(outcome),
+    }, { kind: "dropped", message: "terminal" });
+    expect(outcomes).toEqual([{ kind: "dropped", message: "terminal" }]);
+
+    expect(() =>
+      reportServedEventFailure({
+        onFailure: () => {
+          throw new Error("observer failed");
+        },
+      }, { kind: "error", message: "handler failed" })
+    ).not.toThrow();
+  });
+
+  it("recognizes explicit aborts from typed producer evidence only", () => {
+    expect(isExplicitTransactionAbort(TransactionAborted("custom reason")))
+      .toBe(true);
+    expect(isExplicitTransactionAbort({
+      name: "StorageTransactionAborted",
+      message: "Transaction was aborted",
+    })).toBe(false);
   });
 
   afterEach(async () => {
@@ -838,6 +868,45 @@ describe("event handling", () => {
     ]);
     expect(status).toBe("error");
     expect(errors).toBe(1);
+  });
+
+  it("stringifies non-Error handler failures for served observers", async () => {
+    const eventCell = runtime.getCell<number>(
+      space,
+      "stringifies non-Error handler failures",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    await tx.commit();
+
+    runtime.scheduler.onError(() => undefined);
+    runtime.scheduler.addEventHandler(
+      () => Promise.reject("primitive failure"),
+      eventCell.getAsNormalizedFullLink(),
+    );
+
+    const outcomes: unknown[] = [];
+    runtime.scheduler.queueEvent(
+      eventCell.getAsNormalizedFullLink(),
+      1,
+      false,
+      undefined,
+      false,
+      {
+        eventId: "served-non-error-handler-failure",
+        served: {
+          onFailure: (outcome) => outcomes.push(outcome),
+        },
+      },
+    );
+
+    await runtime.idle();
+
+    expect(outcomes).toEqual([{
+      kind: "error",
+      message: "primitive failure",
+    }]);
   });
 
   it("settles the commit callback when populateDependencies throws", async () => {

@@ -52,6 +52,10 @@ import {
   type CellRef,
   ConsoleMessage,
   ErrorNotification,
+  type EventAttentionListResponse,
+  type EventAttentionNotice,
+  type EventAttentionResolveResponse,
+  EventNeedsAttentionNotification,
   InitializationData,
   JSONObject,
   type LoggerCountsData,
@@ -110,6 +114,7 @@ export type RuntimeClientEvents = {
   error: [ErrorNotification];
   telemetry: [RuntimeTelemetryMarkerResult];
   pendingwriteschange: [{ pending: boolean }];
+  eventneedsattention: [EventAttentionNotice];
 };
 
 export const $conn = Symbol("$request");
@@ -137,6 +142,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     this.#conn.on("telemetry", this._onTelemetry);
     this.#conn.on("pendingwriteschange", this._onPendingWritesChange);
     this.#conn.on("operationupdate", this._onOperationUpdate);
+    this.#conn.on("eventneedsattention", this._onEventNeedsAttention);
   }
 
   /**
@@ -372,6 +378,37 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    */
   async idle(): Promise<void> {
     await this.#conn.request<RequestType.Idle>({ type: RequestType.Idle });
+  }
+
+  /** Discover retained terminal delivery notices after navigation or a fresh
+   * worker, resolving each index hint against its authoritative stream entry. */
+  async listEventAttention(space: DID): Promise<EventAttentionNotice[]> {
+    const response = await this.#conn.request<RequestType.ListEventAttention>({
+      type: RequestType.ListEventAttention,
+      space,
+    }) as EventAttentionListResponse;
+    return response.notices;
+  }
+
+  /** Retry or dismiss one notice under this runtime's authenticated session. */
+  async resolveEventAttention(
+    notice: Pick<
+      EventAttentionNotice,
+      "space" | "eventId" | "seq" | "sidecarId"
+    >,
+    action: "retry" | "dismiss",
+  ): Promise<EventAttentionResolveResponse["resolution"]> {
+    const response = await this.#conn.request<
+      RequestType.ResolveEventAttention
+    >({
+      type: RequestType.ResolveEventAttention,
+      space: notice.space,
+      eventId: notice.eventId,
+      seq: notice.seq,
+      sidecarId: notice.sidecarId,
+      action,
+    }) as EventAttentionResolveResponse;
+    return response.resolution;
   }
 
   /**
@@ -971,5 +1008,12 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     this.#operationSubscriptions.get(data.subscriptionId)?.(
       operationFieldFromWire(data.field),
     );
+  };
+
+  private _onEventNeedsAttention = (
+    data: EventNeedsAttentionNotification,
+  ): void => {
+    const { type: _type, ...notice } = data;
+    this.emit("eventneedsattention", notice);
   };
 }

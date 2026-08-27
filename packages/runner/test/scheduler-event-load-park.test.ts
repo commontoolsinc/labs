@@ -2,10 +2,12 @@ import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import type { Action, EventHandler } from "../src/scheduler.ts";
+import type { ServedEventFailureOutcome } from "../src/scheduler/types.ts";
 import type {
   IExtendedStorageTransaction,
   MemorySpace,
 } from "../src/storage/interface.ts";
+import { ReplicaLoadFailureError } from "../src/storage/interface.ts";
 import { toMemorySpaceAddress } from "../src/link-utils.ts";
 import {
   createSchedulerTestRuntime,
@@ -13,6 +15,48 @@ import {
   type SchedulerTestRuntime,
   space,
 } from "./scheduler-test-utils.ts";
+
+type TransactError = {
+  name: string;
+  message: string;
+  permanentEvidence?: true;
+  aclRevision?: number;
+};
+
+function rejectNextTransact(
+  runtime: SchedulerTestRuntime["runtime"],
+  error: TransactError,
+): () => void {
+  type Response = {
+    type: "response";
+    requestId: string;
+    error: TransactError;
+  };
+  const server = (runtime.storageManager as unknown as {
+    server(): {
+      transact(
+        message: { requestId: string },
+        publish?: (response: Response) => void,
+      ): Promise<Response>;
+    };
+  }).server();
+  const original = server.transact.bind(server);
+  let armed = true;
+  server.transact = (message, publish) => {
+    if (!armed) return original(message, publish);
+    armed = false;
+    const response: Response = {
+      type: "response",
+      requestId: message.requestId,
+      error,
+    };
+    publish?.(response);
+    return Promise.resolve(response);
+  };
+  return () => {
+    server.transact = original;
+  };
+}
 
 // CT-1795: a handler must not dispatch against a provisional snapshot while a
 // replica load for an address in its read closure is still in flight.
@@ -331,7 +375,7 @@ describe("event dispatch parks on in-flight closure loads", () => {
       return load.promise;
     };
 
-    const outcomes: { kind: string; cause?: string }[] = [];
+    const outcomes: unknown[] = [];
     runtime.scheduler.queueEvent(
       eventCell.getAsNormalizedFullLink(),
       1,
@@ -341,22 +385,36 @@ describe("event dispatch parks on in-flight closure loads", () => {
       {
         served: {
           streamEntry: { sidecarId: "of:stream-events:pin", index: 0, seq: 1 },
-          onFailure: (outcome) =>
-            outcomes.push({ kind: outcome.kind, cause: outcome.cause }),
+          onFailure: (outcome) => outcomes.push(outcome),
         },
       },
     );
     await parkObserved.promise;
     expect(handlerRuns).toBe(0);
 
-    load.reject(new Error("memory session revoked: unauthorized"));
+    load.reject(
+      new ReplicaLoadFailureError({
+        failureClass: "session-revoked",
+        permanentEvidence: false,
+        recoveryEpoch: "load:1",
+      }, new Error("memory session revoked: unauthorized")),
+    );
     await runtime.idle();
     expect(handlerRuns).toBe(0);
     // The pin: `deferred` (the entry stays pending for a later drain),
     // carrying the cause that keeps it off the queued class's bounded
     // creation-race budget. Pre-fix this read [{ kind: "dropped" }] and
     // the drain sealed the entry.
-    expect(outcomes).toEqual([{ kind: "deferred", cause: "load-park" }]);
+    expect(outcomes).toEqual([{
+      kind: "deferred",
+      cause: "load-park",
+      role: "failed-head",
+      failure: {
+        failureClass: "session-revoked",
+        permanentEvidence: false,
+        recoveryEpoch: "load:1",
+      },
+    }]);
     await runtime.idle();
     expect(outcomes.length, "settled exactly once").toBe(1);
   });
@@ -455,14 +513,10 @@ describe("event dispatch parks on in-flight closure loads", () => {
       return load.promise;
     };
 
-    const outcomes = new Map<string, { kind: string; cause?: string }[]>();
-    const record = (who: string) =>
-    (outcome: {
-      kind: string;
-      cause?: string;
-    }) => {
+    const outcomes = new Map<string, unknown[]>();
+    const record = (who: string) => (outcome: unknown) => {
       const seen = outcomes.get(who) ?? [];
-      seen.push({ kind: outcome.kind, cause: outcome.cause });
+      seen.push(outcome);
       outcomes.set(who, seen);
     };
     const servedEntry = { sidecarId: "of:stream-events:pin", index: 0, seq: 1 };
@@ -475,7 +529,10 @@ describe("event dispatch parks on in-flight closure loads", () => {
       true,
       undefined,
       false,
-      { served: { streamEntry: servedEntry, onFailure: record("head") } },
+      {
+        eventId: "barrier-exclusions-head",
+        served: { streamEntry: servedEntry, onFailure: record("head") },
+      },
     );
     await parkObserved.promise;
 
@@ -490,18 +547,34 @@ describe("event dispatch parks on in-flight closure loads", () => {
       served: { onFailure: record("lt1") },
     });
 
-    load.reject(new Error("memory session revoked: unauthorized"));
+    load.reject(
+      new ReplicaLoadFailureError({
+        failureClass: "session-revoked",
+        permanentEvidence: false,
+        recoveryEpoch: "load:1",
+      }, new Error("memory session revoked: unauthorized")),
+    );
     await runtime.idle();
 
     // Swept: the head and its same-space durable sibling.
     expect(outcomes.get("head")).toEqual([{
       kind: "deferred",
       cause: "load-park",
+      role: "failed-head",
+      failure: {
+        failureClass: "session-revoked",
+        permanentEvidence: false,
+        recoveryEpoch: "load:1",
+      },
     }]);
     expect(
       outcomes.get("sibling"),
       "a later-arrived same-space durable entry defers with the head",
-    ).toEqual([{ kind: "deferred", cause: "load-park" }]);
+    ).toEqual([{
+      kind: "deferred",
+      cause: "arrival-barrier",
+      blockedBy: "barrier-exclusions-head",
+    }]);
     // Left alone: another space's entry (§2 is per-space) and the LT1 copy
     // (no durable entry to re-drain — deferring it would lose it).
     expect(
@@ -616,6 +689,104 @@ describe("event dispatch parks on in-flight closure loads", () => {
     runtime.scheduler.queueEvent(eventCell.getAsNormalizedFullLink(), 1);
     await runtime.idle();
     expect(handlerRuns).toBe(1);
+  });
+
+  it("routes only proven-no-commit finalization failures through terminal cover", async () => {
+    const { runtime, tx } = env;
+    const result = runtime.getCell<number>(
+      space,
+      "served-finalization-result",
+      undefined,
+    );
+    const eventCell = runtime.getCell<number>(
+      space,
+      "served-finalization-event",
+      undefined,
+    );
+    await tx.commit();
+    env.tx = runtime.edit();
+
+    runtime.scheduler.addEventHandler(
+      (actionTx, value) => result.withTx(actionTx).send(value as number),
+      eventCell.getAsNormalizedFullLink(),
+    );
+
+    const dispatch = async (
+      eventId: string,
+      error: TransactError,
+    ): Promise<ServedEventFailureOutcome[]> => {
+      const outcomes: ServedEventFailureOutcome[] = [];
+      const restore = rejectNextTransact(runtime, error);
+      try {
+        runtime.scheduler.queueEvent(
+          eventCell.getAsNormalizedFullLink(),
+          1,
+          true,
+          undefined,
+          false,
+          {
+            eventId,
+            served: {
+              streamEntry: {
+                sidecarId: "of:stream-events:finalization",
+                index: 0,
+                seq: 1,
+              },
+              onFailure: (outcome) => outcomes.push(outcome),
+            },
+          },
+        );
+        await runtime.scheduler.idleWithPendingCommits();
+        await runtime.idle();
+        return outcomes;
+      } finally {
+        restore();
+      }
+    };
+
+    expect(
+      await dispatch("row-label", {
+        name: "RowLabelCommitError",
+        message: "sqlite commit refused: row label verdict",
+      }),
+    ).toEqual([{
+      kind: "deferred",
+      cause: "delivery-failure",
+      role: "failed-head",
+      phase: "commit-finalization",
+      failure: {
+        failureClass: "protocol",
+        recoveryEpoch: "row-label-verdict",
+        permanentEvidence: true,
+      },
+    }]);
+
+    expect(
+      await dispatch("current-acl", {
+        name: "AuthorizationError",
+        message: "write authorization denied",
+        permanentEvidence: true,
+        aclRevision: 9,
+      }),
+    ).toEqual([{
+      kind: "deferred",
+      cause: "delivery-failure",
+      role: "failed-head",
+      phase: "commit-finalization",
+      failure: {
+        failureClass: "authorization",
+        recoveryEpoch: "acl:9",
+        permanentEvidence: true,
+      },
+    }]);
+
+    expect(
+      await dispatch("ambiguous-authorization", {
+        name: "AuthorizationError",
+        message: "authorization outcome has no current ACL evidence",
+      }),
+      "an ambiguous finalization outcome must remain outside explicit replay",
+    ).toEqual([]);
   });
 
   // F4d: loadsSettled counts remaining by keys.length but adds a single shared

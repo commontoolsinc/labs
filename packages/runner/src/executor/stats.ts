@@ -416,9 +416,32 @@ export type ServingLoopStats = {
      * reads as a growing count rather than a single event. Nonzero is
      * not by itself a fault (a revoked-then-remounted session heals in
      * a cycle or two); a count that grows without `processed` moving
-     * names a load that never heals, and the WARN beside each deferral
-     * carries the failing doc key and the error. */
+     * names a load that never heals. The head's debug record carries the
+     * failing doc key and error; its durable checkpoint carries the state. */
     loadParkDeferrals: number;
+
+    /** Typed failures observed for the arrival-order head itself. Barrier
+     * followers remain work counted by `loadParkDeferrals` only. */
+    loadParkFailures: number;
+
+    /** Durable pending delivery checkpoints, split by whether confirmed
+     * failed-state time is currently accruing. */
+    deliveryDeferralsActive: number;
+    deliveryFailuresActive: number;
+    maxAccumulatedDeliveryFailureMs: number;
+
+    /** Durable terminal covers, counted only after the carrying wave commits. */
+    needsAttention: {
+      total: number;
+      byPhase: {
+        "dispatch-load": number;
+        "commit-preparation": number;
+        "commit-finalization": number;
+      };
+    };
+    needsAttentionSealFailures: number;
+    deliveryCheckpointWriteFailures: number;
+    explicitRetries: number;
     /** Terminal drop/error notices SEALED onto a durable entry
      * (events.md §5: the notice IS the consequence and the frontier
      * advances past it). DROPS ONLY — a handler that THREW seals an
@@ -544,6 +567,21 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     lt1LateSealsRefused: 0,
     orphanDeliveriesRefused: 0,
     loadParkDeferrals: 0,
+    loadParkFailures: 0,
+    deliveryDeferralsActive: 0,
+    deliveryFailuresActive: 0,
+    maxAccumulatedDeliveryFailureMs: 0,
+    needsAttention: {
+      total: 0,
+      byPhase: {
+        "dispatch-load": 0,
+        "commit-preparation": 0,
+        "commit-finalization": 0,
+      },
+    },
+    needsAttentionSealFailures: 0,
+    deliveryCheckpointWriteFailures: 0,
+    explicitRetries: 0,
     dropped: 0,
   },
   memo: { hits: 0, misses: 0, inflight: 0 },
@@ -557,6 +595,50 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     failures: 0,
   },
 });
+
+type ActiveDeliveryCheckpointStat = {
+  state: "failed" | "recovering";
+  readSpentMs: () => number;
+};
+
+const activeDeliveryCheckpoints = new WeakMap<
+  ServingLoopStats,
+  Map<string, ActiveDeliveryCheckpointStat>
+>();
+
+/** Refreshes delivery gauges from the active durable checkpoints. Failed-state
+ * time is read now rather than frozen at the checkpoint's last transition. */
+export const refreshDeliveryCheckpointStats = (
+  stats: ServingLoopStats,
+): void => {
+  const rows = activeDeliveryCheckpoints.get(stats);
+  if (rows === undefined) return;
+  stats.events.deliveryDeferralsActive = rows.size;
+  stats.events.deliveryFailuresActive =
+    [...rows.values()].filter((row) => row.state === "failed").length;
+  stats.events.maxAccumulatedDeliveryFailureMs = [...rows.values()].reduce(
+    (max, row) => Math.max(max, row.readSpentMs()),
+    0,
+  );
+};
+
+/** Maintain the process-wide delivery gauges from the per-space servers that
+ * own the underlying durable checkpoints. The rows stay out of the serialized
+ * health shape; only the recomputed gauges above are exposed. */
+export const updateDeliveryCheckpointStats = (
+  stats: ServingLoopStats,
+  key: string,
+  checkpoint?: ActiveDeliveryCheckpointStat,
+): void => {
+  let rows = activeDeliveryCheckpoints.get(stats);
+  if (rows === undefined) {
+    rows = new Map();
+    activeDeliveryCheckpoints.set(stats, rows);
+  }
+  if (checkpoint === undefined) rows.delete(key);
+  else rows.set(key, checkpoint);
+  refreshDeliveryCheckpointStats(stats);
+};
 
 /** The `derivedCommitsBySpace` cap (the settle.series bounding
  * discipline, applied to a keyed map: oldest-inserted row evicted). A

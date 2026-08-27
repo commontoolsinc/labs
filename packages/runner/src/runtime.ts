@@ -63,6 +63,7 @@ import {
 } from "./cell.ts";
 import { createRef, EntityId } from "./create-ref.ts";
 import {
+  type EventIntentOutcome,
   SpeculationOverlayDestination,
   stampSpeculationRunContext,
 } from "./speculation/overlay-destination.ts";
@@ -2070,6 +2071,18 @@ export class Runtime {
    * runtime has one. */
   get speculationOverlay(): SpeculationOverlayDestination | undefined {
     return this.#speculationOverlay;
+  }
+
+  /** Observe terminal client event-intent outcomes. Subscribing eagerly
+   * installs the flag-ON client overlay so the production IPC bridge cannot
+   * miss the first outcome while waiting for the first speculative edit. */
+  subscribeEventIntentOutcomes(
+    subscriber: (outcome: EventIntentOutcome) => void,
+  ): () => void {
+    return this.#speculationDestination()?.subscribeIntentOutcomes(
+      subscriber,
+    ) ??
+      (() => undefined);
   }
 
   /** The client-effect channel of a flag-ON non-serving runtime

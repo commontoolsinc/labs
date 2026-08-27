@@ -15,6 +15,7 @@ import {
   ClientNotificationType,
   ConsoleNotification,
   ErrorNotification,
+  EventNeedsAttentionNotification,
   InitializationData,
   IPCClientMessage,
   IPCClientNotification,
@@ -138,9 +139,9 @@ export function isIPCRemoteResponse(
 }
 
 /**
- * Is `value` an {@link IPCRemoteNotification}? The disjunction of the eight
- * per-notification guards below, so this admits exactly what one of them
- * admits and adds nothing of its own.
+ * Is `value` an {@link IPCRemoteNotification}? The disjunction of the
+ * per-notification guards below admits exactly what one of them admits and
+ * adds nothing of its own.
  */
 export function isIPCRemoteNotification(
   value: unknown,
@@ -149,7 +150,8 @@ export function isIPCRemoteNotification(
     isConsoleNotification(value) ||
     isNavigateRequestNotification(value) || isErrorNotification(value) ||
     isVDomBatchNotification(value) || isPendingWritesNotification(value) ||
-    isOperationUpdateNotification(value);
+    isOperationUpdateNotification(value) ||
+    isEventNeedsAttentionNotification(value);
 }
 
 /**
@@ -256,6 +258,22 @@ export function isPendingWritesNotification(
     isObjectNotArray(value) &&
     value.type === NotificationType.PendingWritesChanged &&
     typeof value.pending === "boolean"
+  );
+}
+
+/** Is a complete terminal event-delivery notice from the worker. */
+export function isEventNeedsAttentionNotification(
+  value: unknown,
+): value is EventNeedsAttentionNotification {
+  return (
+    isObjectNotArray(value) &&
+    value.type === NotificationType.EventNeedsAttention &&
+    typeof value.space === "string" &&
+    typeof value.eventId === "string" &&
+    typeof value.seq === "number" &&
+    typeof value.sidecarId === "string" &&
+    typeof value.reason === "string" &&
+    isObjectNotArray(value.attention)
   );
 }
 

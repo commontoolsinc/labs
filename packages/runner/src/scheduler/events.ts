@@ -48,6 +48,7 @@ import {
   LT1_LATE_SEAL_REFUSED,
   type QueuedEvent,
   type ReactivityLog,
+  type ServedEventFailureOutcome,
 } from "./types.ts";
 
 const logger = getLogger("scheduler", {
@@ -96,9 +97,10 @@ function normalizeEventCommitRejection(reason: unknown): EventCommitError {
  * sealed error consequence and the loss report cover exactly the same class.
  */
 export function isCfcRejectedCommitError(
-  error: { message?: string } | undefined,
-): error is { message: string } {
-  return error?.message?.startsWith("CFC enforcement rejected commit") === true;
+  error: { name?: string; message?: string } | undefined,
+): error is { name: "CfcCommitRefusalError"; message: string } {
+  return error?.name === "CfcCommitRefusalError" &&
+    typeof error.message === "string";
 }
 
 /**
@@ -109,7 +111,7 @@ export function isCfcRejectedCommitError(
  * alongside still carries the full disposition detail.
  */
 export function reportDroppedCfcRejectedWrite(
-  error: { message?: string } | undefined,
+  error: { name?: string; message?: string } | undefined,
   handlerId: unknown,
 ): void {
   if (!isCfcRejectedCommitError(error)) {
@@ -120,6 +122,41 @@ export function reportDroppedCfcRejectedWrite(
       "commit and re-running cannot resolve it.",
     { error: error.message, handlerId },
   );
+}
+
+/** Report a served event's durable outcome without letting an observer failure
+ * escape into scheduler control flow. The callback is notification-only: a
+ * broken observer must neither change the event disposition nor skip later
+ * settlement work. */
+export function reportServedEventFailure(
+  served: Pick<NonNullable<QueuedEvent["served"]>, "onFailure"> | undefined,
+  outcome: ServedEventFailureOutcome,
+): void {
+  try {
+    served?.onFailure?.(outcome);
+  } catch (callbackError) {
+    logger.error(
+      "schedule-error",
+      "Error in served event failure callback:",
+      callbackError,
+    );
+  }
+}
+
+/** Whether a failed event transaction carries positive producer evidence that
+ * an explicit local abort discarded it before storage. Other errors in the
+ * same family can describe ambiguous commit failures and are not terminal
+ * evidence. */
+export function isExplicitTransactionAbort(
+  error:
+    | { name?: string; message?: string; abortedBeforeStorage?: unknown }
+    | undefined,
+): error is {
+  name: "StorageTransactionAborted";
+  abortedBeforeStorage: true;
+} {
+  return error?.name === "StorageTransactionAborted" &&
+    error.abortedBeforeStorage === true;
 }
 
 export function isHeadEventParked(
@@ -184,7 +221,10 @@ function notifyEventDropped(
   },
   reason: string,
   servedKind: "dropped" | "deferred" = "dropped",
-  options: { quiet?: boolean; cause?: "load-park" } = {},
+  options: {
+    quiet?: boolean;
+    servedOutcome?: ServedEventFailureOutcome;
+  } = {},
 ): void {
   if (options.quiet === true) {
     // A routine, counted pre-dispatch removal (the serving loop's LT1
@@ -201,19 +241,11 @@ function notifyEventDropped(
   // park), no consequence is written and a later wave re-drains the
   // entry. `cause` tells the two deferrals apart for the drain's retry
   // budget (see ServedEventDispatch.onFailure).
-  try {
-    args.served?.onFailure?.({
-      kind: servedKind,
-      message: reason,
-      ...(options.cause !== undefined ? { cause: options.cause } : {}),
-    });
-  } catch (callbackError) {
-    logger.error(
-      "schedule-error",
-      "Error in served event drop callback:",
-      callbackError,
-    );
-  }
+  const outcome: ServedEventFailureOutcome = options.servedOutcome ??
+    (servedKind === "dropped"
+      ? { kind: "dropped", message: reason }
+      : { kind: "deferred", message: reason });
+  reportServedEventFailure(args.served, outcome);
   if (!args.onCommit) return;
   const tx = state.runtime.edit();
   tx.abort(new Error(reason));
@@ -241,7 +273,10 @@ export function dropQueuedEvent(
   event: QueuedEvent,
   reason: string,
   servedKind: "dropped" | "deferred" = "dropped",
-  options: { quiet?: boolean; cause?: "load-park" } = {},
+  options: {
+    quiet?: boolean;
+    servedOutcome?: ServedEventFailureOutcome;
+  } = {},
 ): void {
   const index = state.eventQueue.indexOf(event);
   if (index >= 0) state.eventQueue.splice(index, 1);
@@ -1468,28 +1503,23 @@ export async function dispatchQueuedEvent(state: {
     }
 
     if (error) {
+      const handlerError = error instanceof Error
+        ? error
+        : new Error(String(error));
       try {
-        state.handleError(error as Error, action);
+        state.handleError(handlerError, action);
       } finally {
         if (tx.status().status === "ready") {
-          tx.abort(error);
+          tx.abort(handlerError);
         }
         // The serving drain's ERROR arm (events.md §5): the handler
         // threw server-side — the error IS the consequence. The
         // handler tx (with its consequenced mark) aborted above; the
         // drain seals the error consequence in its own transaction.
-        try {
-          served?.onFailure?.({
-            kind: "error",
-            message: error instanceof Error ? error.message : String(error),
-          });
-        } catch (callbackError) {
-          logger.error(
-            "schedule-error",
-            "Error in served event failure callback:",
-            callbackError,
-          );
-        }
+        reportServedEventFailure(served, {
+          kind: "error",
+          message: handlerError.message,
+        });
         // A throwing handler is a final outcome for this event — settle the
         // commit callback (with the aborted tx) instead of leaving callers
         // that await it hanging.
@@ -1595,22 +1625,64 @@ export async function dispatchQueuedEvent(state: {
       // durable entry stays unconsequenced and every wave re-drains it into
       // the identical refusal. Scoped to exactly the class
       // `reportDroppedCfcRejectedWrite` reports: every other non-retried
-      // outcome (transport, authorization, a handler abort, opt-out) leaves
-      // the entry pending for the wave cadence to re-drain. Called before the
-      // commit callback on both paths that carry a refusal, so the drain's
-      // in-flight guard sees the staged notice ("marked") rather than
-      // releasing the still-"queued" copy.
+      // outcome has its own explicit routing below: typed delivery failures
+      // checkpoint, proven-no-commit failures terminalize, and a handler abort
+      // seals a safe error consequence. Called before the commit callback on
+      // both paths that carry a refusal, so the drain's in-flight guard sees
+      // the staged notice ("marked") rather than releasing the still-"queued"
+      // copy.
       const sealCfcRefusalConsequence = (): void => {
         if (served === undefined || !isCfcRejectedCommitError(error)) return;
-        try {
-          served.onFailure?.({ kind: "error", message: error.message });
-        } catch (callbackError) {
-          logger.error(
-            "schedule-error",
-            "Error in served event failure callback:",
-            callbackError,
-          );
+        reportServedEventFailure(served, {
+          kind: "error",
+          message: error.message,
+        });
+      };
+      const deferCommitPreparationFailure = (): void => {
+        if (served === undefined || error?.name !== "CommitPreparationError") {
+          return;
         }
+        reportServedEventFailure(served, {
+          kind: "deferred",
+          cause: "delivery-failure",
+          role: "failed-head",
+          phase: "commit-preparation",
+          failure: {
+            failureClass: "unknown",
+            recoveryEpoch: "commit-preparation",
+            permanentEvidence: false,
+          },
+        });
+      };
+      const routeProvenNoCommitFailure = (): void => {
+        if (served === undefined || error === undefined) return;
+        const rowLabelRefusal = error.name === "RowLabelCommitError";
+        const aclRevision = (error as { aclRevision?: unknown }).aclRevision;
+        const authorizationRefusal = error.name === "AuthorizationError" &&
+          (error as { permanentEvidence?: unknown }).permanentEvidence ===
+            true &&
+          typeof aclRevision === "number";
+        if (!rowLabelRefusal && !authorizationRefusal) return;
+        reportServedEventFailure(served, {
+          kind: "deferred",
+          cause: "delivery-failure",
+          role: "failed-head",
+          phase: "commit-finalization",
+          failure: {
+            failureClass: rowLabelRefusal ? "protocol" : "authorization",
+            recoveryEpoch: rowLabelRefusal
+              ? "row-label-verdict"
+              : `acl:${aclRevision}`,
+            permanentEvidence: true,
+          },
+        });
+      };
+      const sealExplicitHandlerAbort = (): void => {
+        if (served === undefined || !isExplicitTransactionAbort(error)) return;
+        reportServedEventFailure(served, {
+          kind: "error",
+          message: "Event handler aborted its transaction",
+        });
       };
 
       switch (disposition.kind) {
@@ -1618,6 +1690,9 @@ export async function dispatchQueuedEvent(state: {
           runFinalCommitCallback();
           break;
         case "give-up":
+          deferCommitPreparationFailure();
+          routeProvenNoCommitFailure();
+          sealExplicitHandlerAbort();
           sealCfcRefusalConsequence();
           runFinalCommitCallback();
           reportDroppedCfcRejectedWrite(error, handlerId);
@@ -1658,6 +1733,8 @@ export async function dispatchQueuedEvent(state: {
           // `sealCfcRefusalConsequence` for what an unconsequenced entry
           // costs, and `reportDroppedCfcRejectedWrite` for why the
           // `logger.warn` below is not enough on its own.
+          deferCommitPreparationFailure();
+          routeProvenNoCommitFailure();
           sealCfcRefusalConsequence();
           runFinalCommitCallback();
           reportDroppedCfcRejectedWrite(error, handlerId);
