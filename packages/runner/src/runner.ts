@@ -3726,7 +3726,13 @@ export class Runner {
     // observe the last persisted result but miss subsequent input updates.
     const expectedPatternKey = patternIdentityKey(identityRef);
     const patternIdentityStillCurrent = (): boolean => {
-      const current = getPatternIdentityRef(rootCell);
+      // A keyless piece's pointer is session-side (never stamped durably),
+      // so the currency re-check must read the same source the walk's step 4
+      // resolved from — a durable-only read would report a keyless piece
+      // "no longer current" forever and restart the resolution cascade in an
+      // unbounded loop.
+      const current = getPatternIdentityRef(rootCell) ??
+        this.sessionPatternPointers.get(this.getDocKey(rootCell));
       return current !== undefined &&
         patternIdentityKey(current) === expectedPatternKey;
     };

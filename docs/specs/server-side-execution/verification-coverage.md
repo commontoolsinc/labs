@@ -6292,7 +6292,28 @@ supply; OW29/OW32/OW34 closed):
     byte scan across all three writer paths; producer convergence;
     start-walk tolerance; tripwire — 4 of 5 red at base, the
     legacy-heal pin being a regression guard for the pre-existing
-    roll-forward arm). **a04 RECLASSIFIED — a DIFFERENT member, the
+    roll-forward arm).
+    **FLAGGED OPEN SEMANTIC (found by the close-out build, owed an
+    owner ruling — flagged, not filled): rejected-consequence
+    re-derivation for computation-produced children.** The
+    `child-pattern-start-ownership.test.ts` convergence pin's
+    mechanism WAS the ruled-out churn: pre-guard every re-derivation
+    of a lift-produced child durably re-stamped a fresh per-source
+    `keyless:` pointer in its own setup tx, a rejected handing commit
+    cascaded narrowly, and the child's meta watcher converged the
+    graph to whichever stamp stood. Post-guard the handing run's
+    durable footprint is its piece-instantiate tx, so a rejected
+    handing commit cascades through every subsequent run
+    ("pending dependency not resolved"), durable and local state roll
+    back COHERENTLY to the pre-bump child, the error callbacks
+    release the child and clear the materialization memo — and then
+    nothing re-derives it (the producing lift's inputs are
+    unchanged; the trigger that used to exist was the stamped-pointer
+    watch). Needed: a re-run trigger for a computation whose
+    consequence commit was rejected — the client-side cousin of the
+    §3d mark-vs-effects question above. The end-to-end pin is
+    `it.ignore`d with this flag inline; it lifts on the ruling, not
+    on a build. **a04 RECLASSIFIED — a DIFFERENT member, the
     WRITE-side loss family (lunch third-member kin), not r06/r09:**
     all 7 create events durably appended and marked
     `consequenced: true`, but clientSeq 10 and 11's consequences are
