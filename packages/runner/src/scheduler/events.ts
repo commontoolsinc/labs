@@ -937,8 +937,13 @@ export function preflightQueuedEventDependencies(state: {
   // no instance of that node — the node is node-level CLEAN (it ran for
   // the watchers), so the invalid-upstream pass above found nothing, and
   // the handler would read the actor's MISSING instance (its argument
-  // fails the schema, the run is silently skipped, the entry marked
-  // consequenced with no error — silent event loss). B7 made cleanliness
+  // fails the schema and the run is skipped — which, until the
+  // mark/effects-atomicity fix below in `finalize`, sealed the entry
+  // consequenced with no error: silent event loss. The finalize now
+  // withdraws a skipped served dispatch, so the residual cost of a miss
+  // here is a deferral-and-re-drain cycle, not a lost event — this
+  // preflight remains what makes the FIRST delivery succeed). B7 made
+  // cleanliness
   // per instance: re-arm the fanned-out nodes in the handler's closure
   // whose instance for THIS actor is not current, materializing her own
   // instance (as her transient demand) before the handler runs. The
