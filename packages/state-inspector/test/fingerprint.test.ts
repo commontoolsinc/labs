@@ -15,6 +15,7 @@ import { openSpace, type SpaceDb } from "../db.ts";
 import {
   contentFingerprint,
   diffFingerprints,
+  entityAddressKey,
   generatedInternalCellIds,
   hashEntityValue,
 } from "../fingerprint.ts";
@@ -196,6 +197,27 @@ Deno.test("the same id in two scopes is fingerprinted separately", () => {
     assertEquals(rows.length, 2);
     assert(rows[0].hash !== rows[1].hash, "distinct scopes, distinct content");
   });
+});
+
+Deno.test("an entity address key never aliases a different address", () => {
+  // The key decides which entity is which: `diffFingerprints` pairs rows by it,
+  // and `verifyClone` subtracts generated exclusions by it — where an alias
+  // clears a removal that really happened rather than merely misattributing a
+  // count. Nothing the runtime mints carries a separator byte (ids are
+  // `of:fid1:<base64url>` or DIDs; scope keys percent-encode their segments,
+  // and the admission predicate refuses one that does not), so this pins the
+  // key itself rather than a store shape: the tool reads stores it did not
+  // write, where both columns are opaque TEXT.
+  assert(
+    entityAddressKey({ id: "of:a", scope: "b c" }) !==
+      entityAddressKey({ id: "of:a b", scope: "c" }),
+    "a printable separator would run these two addresses together",
+  );
+  assertEquals(
+    entityAddressKey({ id: "of:a", scope: "space" }),
+    entityAddressKey({ id: "of:a", scope: "space" }),
+    "and one address always keys the same",
+  );
 });
 
 Deno.test("the fingerprint is deterministic and order-independent", () => {

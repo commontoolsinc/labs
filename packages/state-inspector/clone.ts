@@ -39,6 +39,7 @@ import { openSpace } from "./db.ts";
 import {
   contentFingerprint,
   diffFingerprints,
+  entityAddressKey,
   type FingerprintReport,
   type ScopedEntity,
 } from "./fingerprint.ts";
@@ -534,13 +535,14 @@ export async function verifyClone(dir: string): Promise<VerifyResult> {
   }
 
   const d = diffFingerprints(before, fingerprint);
-  // Keyed by id AND scope throughout: one id can hold a shared space value plus
-  // per-user/per-session overrides that are genuinely different entities, and a
-  // by-id lookup would let the last scope win — misclassifying the tally, and
-  // clearing a removal below because some OTHER scope of the same id is
-  // generated. `diffFingerprints` reports the address it compared by, so there
-  // is nothing left to guess at here.
-  const addressKey = (at: ScopedEntity) => `${at.id} ${at.scope}`;
+  // Keyed by id AND scope throughout, through the shared `entityAddressKey`:
+  // one id can hold a shared space value plus per-user/per-session overrides
+  // that are genuinely different entities, and a by-id lookup would let the
+  // last scope win — misclassifying the tally, and clearing a removal below
+  // because some OTHER scope of the same id is generated. `diffFingerprints`
+  // reports the address it compared by and keys it the same way, so there is
+  // nothing left to guess at here and no second spelling to drift from.
+  //
   // A removal is an entity gone from the store, never one this store's own
   // manifests reclassified. The two sides compute their exclusions
   // independently — the baseline from the pristine pieces, this from the
@@ -552,15 +554,18 @@ export async function verifyClone(dir: string): Promise<VerifyResult> {
   // holds it: only the addresses this store actually enumerated are subtracted,
   // and a scope whose rows are gone is not among them.
   const excludedNow = new Set(
-    fingerprint.excludedGeneratedAddresses.map(addressKey),
+    fingerprint.excludedGeneratedAddresses.map(entityAddressKey),
   );
   const reclassifiedGenerated = d.removed.filter((at) =>
-    excludedNow.has(addressKey(at))
+    excludedNow.has(entityAddressKey(at))
   );
-  const removed = d.removed.filter((at) => !excludedNow.has(addressKey(at)));
+  const removed = d.removed.filter((at) =>
+    !excludedNow.has(entityAddressKey(at))
+  );
   const kindIndex = (rows: FingerprintReport["perEntity"]) => {
-    const byAddress = new Map(rows.map((e) => [addressKey(e), e.kind]));
-    return (at: ScopedEntity) => byAddress.get(addressKey(at)) ?? "unknown";
+    const byAddress = new Map(rows.map((e) => [entityAddressKey(e), e.kind]));
+    return (at: ScopedEntity) =>
+      byAddress.get(entityAddressKey(at)) ?? "unknown";
   };
   const kindOf = kindIndex(fingerprint.perEntity);
   const kindWas = kindIndex(before.perEntity);

@@ -102,6 +102,25 @@ function allEntities(
  */
 export type ScopedEntity = EntityAddress & { scope: string };
 
+/**
+ * The composite key an entity address indexes by — one spelling, exported, so
+ * two sides of a comparison cannot key differently and quietly disagree about
+ * which entity is which.
+ *
+ * The separator is NUL because it has to be a byte neither field can hold. A
+ * minted id is `of:fid1:<base64url>`, `computed:fid1:<…>` or a DID, and a scope
+ * key is `space` or `user:`/`session:` over percent-encoded segments, so no
+ * value the runtime writes contains a control byte. A printable separator has
+ * no such floor under it: this tool reads stores it did not write, where both
+ * columns are opaque TEXT, and `("of:a", "b c")` and `("of:a b", "c")` would
+ * then share a key. That is not a cosmetic collision — `verifyClone` subtracts
+ * generated exclusions by this key, so an alias could clear a removal that
+ * really happened, which is the one verdict this module must never soften.
+ */
+export function entityAddressKey(at: ScopedEntity): string {
+  return `${at.id}\x00${at.scope}`;
+}
+
 /** One entity's content hash at head. */
 export interface EntityFingerprint {
   id: string;
@@ -318,9 +337,8 @@ export function diffFingerprints(
   before: FingerprintReport,
   after: FingerprintReport,
 ): FingerprintDiff {
-  const key = (e: EntityFingerprint) => `${e.id}\x00${e.scope}`;
-  const a = new Map(before.perEntity.map((e) => [key(e), e]));
-  const b = new Map(after.perEntity.map((e) => [key(e), e]));
+  const a = new Map(before.perEntity.map((e) => [entityAddressKey(e), e]));
+  const b = new Map(after.perEntity.map((e) => [entityAddressKey(e), e]));
 
   const added: ScopedEntity[] = [];
   const removed: ScopedEntity[] = [];
