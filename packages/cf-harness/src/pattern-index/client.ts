@@ -37,6 +37,14 @@ export interface PatternIndexSearchResult {
   createdAt: string;
   dependencies: readonly string[];
   signals?: PatternIndexSignals;
+
+  /**
+   * With a text query: how many of its terms this hit carries, out of
+   * `queryTerms`. Text matching is disjunctive and ranked, so a hit is not a
+   * claim that everything matched — the ratio is what says how close.
+   */
+  matchedTerms?: number;
+  queryTerms?: number;
 }
 
 export interface PatternIndexSearchRequest {

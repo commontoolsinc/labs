@@ -41,6 +41,14 @@ export interface SearchPatternsToolResult {
   signals?: PatternIndexSignals;
 
   /**
+   * With a text query: how many of its terms this hit carries, out of
+   * `queryTerms`. Matching is disjunctive and ranked — a hit with a low
+   * ratio is a distant cousin, not an answer.
+   */
+  matchedTerms?: number;
+  queryTerms?: number;
+
+  /**
    * The import specifier this pattern is composed through, written out so it
    * can be copied into pattern source as it stands.
    */
@@ -87,7 +95,7 @@ export const searchPatternsToolDescriptor: HarnessToolDescriptor = {
       text: {
         type: "string",
         description:
-          "Free text matched against pattern descriptions. Omit to search on tags alone.",
+          "Free text matched against pattern descriptions, keywords, and tags. Matching is disjunctive and ranked: results carry matchedTerms out of queryTerms, so more words widen the net rather than narrowing it. Omit to search on tags alone.",
       },
     },
     additionalProperties: false,
@@ -115,6 +123,8 @@ export const searchPatternsToolDescriptor: HarnessToolDescriptor = {
                 required: ["uses", "score"],
                 additionalProperties: false,
               },
+              matchedTerms: { type: "number" },
+              queryTerms: { type: "number" },
               importHint: { type: "string" },
               argumentType: { type: "string" },
               resultType: { type: "string" },
@@ -232,6 +242,9 @@ export const searchPatternsTool: HarnessToolDefinition<
         description: hit.description,
         hashtags: hit.hashtags,
         ...(hit.signals !== undefined ? { signals: hit.signals } : {}),
+        ...(hit.matchedTerms !== undefined && hit.queryTerms !== undefined
+          ? { matchedTerms: hit.matchedTerms, queryTerms: hit.queryTerms }
+          : {}),
         importHint: patternIndexImportHint(hit.patternId),
         ...(argumentType !== undefined ? { argumentType } : {}),
         ...(resultType !== undefined ? { resultType } : {}),
