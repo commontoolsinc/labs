@@ -4029,19 +4029,28 @@ export class Server {
     for (const cache of this.#queryEvaluationCaches.values()) {
       total += cache.weight;
     }
-    while (total > budget) {
-      const oldestSpace = this.#queryEvaluationCaches.keys().next().value;
-      if (oldestSpace === undefined) return;
-      const cache = this.#queryEvaluationCaches.get(oldestSpace)!;
-      const oldestEntry = cache.entries.keys().next().value;
-      if (oldestEntry === undefined) {
-        this.#queryEvaluationCaches.delete(oldestSpace);
-        continue;
+    if (total <= budget) return;
+    // Entry-less leftovers (drained by an earlier pass, or rotation-
+    // cleared and idle since) drop before eviction: an empty cache holds
+    // no weight, only a stale LRU slot. The rebuild preserves order.
+    this.#queryEvaluationCaches = new Map(
+      [...this.#queryEvaluationCaches].filter(
+        ([, cache]) => cache.entries.size > 0,
+      ),
+    );
+    // Least-recently-evaluated spaces first (map insertion order IS the
+    // LRU order), oldest entry first within each. A space drained by THIS
+    // pass keeps its cache — its counters and LRU position belong to a
+    // live space — and is swept as a leftover by the next enforcement.
+    for (const cache of [...this.#queryEvaluationCaches.values()]) {
+      while (total > budget && cache.entries.size > 0) {
+        const oldestEntry = cache.entries.keys().next().value!;
+        const entry = cache.entries.get(oldestEntry)!;
+        cache.entries.delete(oldestEntry);
+        cache.weight -= entry.weight;
+        total -= entry.weight;
       }
-      const entry = cache.entries.get(oldestEntry)!;
-      cache.entries.delete(oldestEntry);
-      cache.weight -= entry.weight;
-      total -= entry.weight;
+      if (total <= budget) return;
     }
   }
 

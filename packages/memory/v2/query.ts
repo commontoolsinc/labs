@@ -1234,15 +1234,12 @@ export const trackGraph = (
     const weight = state.entities.size;
     const key = share.kind === "tainted" ? cacheKeys.identity : cacheKeys.pure;
     const previous = cache.entries.get(key);
-    if (previous !== undefined) {
-      cache.weight -= previous.weight;
-    }
     cache.entries.set(key, {
       state: cloneTrackedGraphState(engine, state),
       share,
       weight,
     });
-    cache.weight += weight;
+    cache.weight += weight - (previous?.weight ?? 0);
   }
   return {
     serverSeq: Engine.serverSeq(engine),
