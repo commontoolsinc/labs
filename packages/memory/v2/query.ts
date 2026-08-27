@@ -332,9 +332,29 @@ export type QueryEvaluationCacheDiagnostics = {
   seq: number;
   entries: number;
   weight: number;
+  /** Total serves: the sum of the three per-class hit counters. */
   hits: number;
   misses: number;
   rotations: number;
+  /** Serves of a scope-pure entry (identical for every identity). */
+  hitsPure: number;
+  /** Serves of an absent-residue entry — the recording identity's own
+   * re-ask included (its keys need no rewrite, but the entry is the
+   * same class). */
+  hitsAbsentResidue: number;
+  /** Serves of a tainted entry to the identity it is keyed to. */
+  hitsIdentity: number;
+  /** Absent-residue shares refused because a residue doc is PRESENT
+   * for the requester. A refusal is not a miss by itself: the call
+   * then serves from the identity entry (an identity hit) or
+   * evaluates in full (a miss). */
+  residueRefusals: number;
+  /** Live entries by share class. Together with the hit split, this
+   * is the production measure of how often scoped reach actually
+   * forecloses cross-identity sharing. */
+  entriesPure: number;
+  entriesAbsentResidue: number;
+  entriesTainted: number;
 };
 
 /**
@@ -362,6 +382,18 @@ export type QueryEvaluationCacheDiagnostics = {
  * rule `assertSchemaMemoIdentity` enforces for the inner schema memos).
  * ACL changes are themselves commits, so a grant or revocation rotates the
  * cache before any post-change evaluation could be served from it.
+ *
+ * Cross-identity sharing rests on evaluation being recipient-blind: the
+ * walk consults the requesting identity only to resolve scope instances,
+ * never to shape what a document contributes, so scope classification
+ * alone decides who an entry may serve. CFC enforcement lives outside
+ * this path (the runtime's flow-label and sink-ceiling dials; the
+ * server's sqlite read labeling annotates results rather than filtering
+ * them). A per-recipient filter inside evaluation would invalidate
+ * shared entries invisibly — clearance differs between identities at
+ * one seq, so rotation cannot fence it and scope keys cannot classify
+ * it — and must therefore key this cache by its filtering context or
+ * bypass it (key-vocabulary.md §5, the identity-bound inventory).
  */
 export type QueryEvaluationCache = {
   /** The engine the entries were evaluated against. A sequence number
@@ -378,7 +410,12 @@ export type QueryEvaluationCache = {
    * parsed documents an entry keeps alive). The server enforces its
    * cross-space budget against this. */
   weight: number;
-  hits: number;
+  /** Per-class serve counters ({@link QueryEvaluationCacheDiagnostics}
+   * defines each class); diagnostics report their sum as `hits`. */
+  hitsPure: number;
+  hitsAbsentResidue: number;
+  hitsIdentity: number;
+  residueRefusals: number;
   misses: number;
   rotations: number;
 };
@@ -388,21 +425,37 @@ export const createQueryEvaluationCache = (): QueryEvaluationCache => ({
   seq: -1,
   entries: new Map(),
   weight: 0,
-  hits: 0,
+  hitsPure: 0,
+  hitsAbsentResidue: 0,
+  hitsIdentity: 0,
+  residueRefusals: 0,
   misses: 0,
   rotations: 0,
 });
 
 export const queryEvaluationCacheDiagnostics = (
   cache: QueryEvaluationCache,
-): QueryEvaluationCacheDiagnostics => ({
-  seq: cache.seq,
-  entries: cache.entries.size,
-  weight: cache.weight,
-  hits: cache.hits,
-  misses: cache.misses,
-  rotations: cache.rotations,
-});
+): QueryEvaluationCacheDiagnostics => {
+  const entriesByClass = { "pure": 0, "absent-residue": 0, "tainted": 0 };
+  for (const { share } of cache.entries.values()) {
+    entriesByClass[share.kind]++;
+  }
+  return {
+    seq: cache.seq,
+    entries: cache.entries.size,
+    weight: cache.weight,
+    hits: cache.hitsPure + cache.hitsAbsentResidue + cache.hitsIdentity,
+    misses: cache.misses,
+    rotations: cache.rotations,
+    hitsPure: cache.hitsPure,
+    hitsAbsentResidue: cache.hitsAbsentResidue,
+    hitsIdentity: cache.hitsIdentity,
+    residueRefusals: cache.residueRefusals,
+    entriesPure: entriesByClass["pure"],
+    entriesAbsentResidue: entriesByClass["absent-residue"],
+    entriesTainted: entriesByClass["tainted"],
+  };
+};
 
 /**
  * How an evaluation's reach constrains who may share its cache entry.
@@ -1092,12 +1145,18 @@ export const trackGraph = (
         );
         served = rewritten.state;
         probeReads = rewritten.probeReads;
+        if (served === null) {
+          cache.residueRefusals++;
+        } else {
+          cache.hitsAbsentResidue++;
+        }
       } else {
         served = cloneTrackedGraphStateForIdentity(
           engine,
           pureEntry.state,
           options,
         );
+        cache.hitsPure++;
       }
     }
     if (served === null) {
@@ -1113,10 +1172,10 @@ export const trackGraph = (
           identityEntry.state,
           options,
         );
+        cache.hitsIdentity++;
       }
     }
     if (served !== null) {
-      cache.hits++;
       // A hit ran no traversal, and its stats say so — but the residue
       // absence probes ARE engine reads, and they report as such.
       return {
