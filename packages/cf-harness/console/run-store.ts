@@ -8,6 +8,7 @@
 
 import { join } from "@std/path";
 import type { HarnessRunState } from "../src/run-state.ts";
+import type { HarnessHandleTable } from "../src/contracts/handle-table.ts";
 import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
 import {
   type ConsoleRunLens,
@@ -203,13 +204,34 @@ export const readConsoleRun = async (
     runState.policyEvents,
     runState.cfcInvocationContexts ?? [],
   );
+  // A token minted in an earlier turn resolves to nothing in this run's own
+  // table, and an argument naming that cell by link would then read as coming
+  // from nowhere. The neighbours' tables are what give it an address, and so a
+  // name and an origin.
+  const neighbours = await neighbouringHandles(artifactRoot);
+  const table: HarnessHandleTable = {
+    type: "cf-harness.handle-table",
+    version: 1,
+    salt: runState.handleTable?.salt ?? runId,
+    entries: [
+      ...neighbours.flatMap((handle) =>
+        handle.ref === undefined || handle.addressKey === undefined ? [] : [{
+          token: handle.token,
+          kind: "address" as const,
+          ref: handle.ref,
+          addressKey: handle.addressKey,
+        }]
+      ),
+      ...(runState.handleTable?.entries ?? []),
+    ],
+  };
   return {
     summary: summarizeConsoleRun(runState, transcript),
     runState,
     transcript,
     lens: consoleRunLens(transcript),
     steps,
-    handles: consoleRunHandles(steps, runState.handleTable),
+    handles: consoleRunHandles(steps, table),
     artifactNames: await namesPresent(root, RUN_ARTIFACT_NAMES),
     toolOutputNames: await toolOutputNames(root),
   };
@@ -281,12 +303,47 @@ export const readConsoleRunFamilyGraph = async (
 const neighbouringHandles = async (
   artifactRoot: string,
 ): Promise<ConsoleHandle[]> => {
-  const handles: ConsoleHandle[] = [];
+  const names: string[] = [];
   try {
     for await (const entry of Deno.readDir(artifactRoot)) {
-      if (!entry.isDirectory || !isSafeSegment(entry.name)) {
-        continue;
+      if (entry.isDirectory && isSafeSegment(entry.name)) {
+        names.push(entry.name);
       }
+    }
+  } catch {
+    return [];
+  }
+  // The index is keyed by which runs exist. A run's table is fixed once the
+  // run has ended, and a handle is referenced after the run that minted it
+  // returned, so a new run is the only thing that can add an entry worth
+  // having — and listing names is far cheaper than parsing every run's state
+  // on a timeline that re-reads whenever a tool call completes.
+  const key = `${artifactRoot}\n${names.sort().join("\n")}`;
+  const cached = neighbourIndex.get(key);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const handles = await readNeighbouringHandles(artifactRoot, names);
+  neighbourIndex.clear();
+  neighbourIndex.set(key, handles);
+  return handles;
+};
+
+/**
+ * The last neighbour index built, by the set of runs it was built from. One
+ * entry: an index built from a different set is one this server will not ask
+ * for again.
+ */
+const neighbourIndex = new Map<string, ConsoleHandle[]>();
+
+const readNeighbouringHandles = async (
+  artifactRoot: string,
+  names: readonly string[],
+): Promise<ConsoleHandle[]> => {
+  const handles: ConsoleHandle[] = [];
+  try {
+    for (const name of names) {
+      const entry = { name };
       const runState = await readJson<HarnessRunState>(
         join(artifactRoot, entry.name, "run-state.json"),
       );
@@ -296,6 +353,10 @@ const neighbouringHandles = async (
           ref: entryHandle.ref,
           addressKey: entryHandle.addressKey,
           introducedAtStep: 0,
+          // A neighbour's entry resolves an address and nothing more; what the
+          // handle was used for belongs to the run that used it.
+          uses: [],
+          confidentiality: [],
         });
       }
     }

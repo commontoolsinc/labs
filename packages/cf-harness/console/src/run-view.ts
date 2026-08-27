@@ -16,7 +16,7 @@ import "./graph-view.ts";
 import "./steps-view.ts";
 
 /** Which pane of the open run is showing. */
-type Pane = "timeline" | "graph" | "patterns" | "tool-outputs" | "artifacts";
+type Pane = "timeline" | "patterns" | "tool-outputs" | "artifacts";
 
 const prettyJson = (text: string): string => {
   try {
@@ -33,6 +33,7 @@ export class ConsoleRunView extends LitElement {
     detail: { attribute: false },
     graph: { attribute: false },
     pane: { attribute: false },
+    focusStep: { attribute: false },
     rawName: { attribute: false },
     rawText: { attribute: false },
     error: { attribute: false },
@@ -42,6 +43,8 @@ export class ConsoleRunView extends LitElement {
   declare detail: ConsoleRunDetail | undefined;
   declare graph: ConsoleGraph | undefined;
   declare pane: Pane;
+  /** The step the timeline is on, which the flow aside marks. */
+  declare focusStep: number | undefined;
   declare rawName: string | undefined;
   declare rawText: string | undefined;
   declare error: string | undefined;
@@ -94,7 +97,7 @@ export class ConsoleRunView extends LitElement {
       // The graph reads every descendant's artifacts, so it is fetched only
       // for a reader who is looking at it — a running turn re-reads the run on
       // every completed tool call, and the family is the expensive part.
-      if (this.pane === "graph") {
+      if (this.pane === "timeline") {
         void this.#loadGraph(runId);
       }
     } catch (error) {
@@ -300,7 +303,7 @@ export class ConsoleRunView extends LitElement {
             this.pane = pane;
             this.rawName = undefined;
             this.rawText = undefined;
-            if (pane === "graph" && this.runId !== undefined) {
+            if (pane === "timeline" && this.runId !== undefined) {
               void this.#loadGraph(this.runId);
             }
           }}
@@ -331,7 +334,6 @@ export class ConsoleRunView extends LitElement {
         </div>
         <div class="tabs">
           ${tab("timeline", `Timeline (${detail.steps.length})`)}
-          ${tab("graph", "Data flow")}
           ${tab("patterns", "Patterns")}
           ${tab(
             "tool-outputs",
@@ -340,15 +342,23 @@ export class ConsoleRunView extends LitElement {
           ${tab("artifacts", `Artifacts (${detail.artifactNames.length})`)}
         </div>
         ${this.pane === "timeline"
+          // The data flow sits beside the timeline rather than behind a tab of
+          // its own: it is the same run seen from the side, and it answers
+          // where the step you are reading sits in the whole.
           ? html`
-            <console-steps
-              .steps=${detail.steps}
-              .handles=${detail.handles}
-            ></console-steps>
-          `
-          : this.pane === "graph"
-          ? html`
-            <console-graph-view .graph=${this.graph}></console-graph-view>
+            <div class="timeline-with-flow">
+              <console-steps
+                .steps=${detail.steps}
+                .handles=${detail.handles}
+                @step-selected=${(event: CustomEvent<number>) =>
+                  this.focusStep = event.detail}
+              ></console-steps>
+              <console-graph-view
+                class="flow-aside"
+                .graph=${this.graph}
+                .focusStep=${this.focusStep}
+              ></console-graph-view>
+            </div>
           `
           : this.pane === "patterns"
           ? this.#patterns(detail)

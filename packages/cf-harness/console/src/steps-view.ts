@@ -6,7 +6,12 @@
  */
 
 import { html, LitElement, nothing, type TemplateResult } from "lit";
-import type { ConsoleHandle, ConsoleStep } from "../steps.ts";
+import {
+  type ConsoleArgumentRef,
+  type ConsoleHandle,
+  type ConsoleStep,
+  consoleStepArguments,
+} from "../steps.ts";
 
 const json = (value: unknown): string => {
   try {
@@ -16,6 +21,22 @@ const json = (value: unknown): string => {
     // something beats an empty pane.
     return String(value);
   }
+};
+
+/**
+ * A schema in a few words — the keys an object declares, or the type name for
+ * anything else. The whole schema rides on the chip's title for a reader who
+ * wants it; the chip itself only has to say what shape this is.
+ */
+const schemaSummary = (schema: unknown): string => {
+  const record = typeof schema === "object" && schema !== null
+    ? schema as { type?: unknown; properties?: Record<string, unknown> }
+    : undefined;
+  if (record?.properties !== undefined) {
+    const keys = Object.keys(record.properties);
+    return `{ ${keys.slice(0, 4).join(", ")}${keys.length > 4 ? ", …" : ""} }`;
+  }
+  return typeof record?.type === "string" ? record.type : "shape";
 };
 
 /**
@@ -52,6 +73,10 @@ const atomNames = (clauses: readonly unknown[] = []): string[] =>
  */
 export const clampSelection = (selected: number, count: number): number =>
   Math.min(Math.max(selected, 0), Math.max(count - 1, 0));
+
+/** Elides a value's rendering so one long literal cannot fill the pane. */
+const truncate = (text: string, limit: number): string =>
+  text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
 
 /** A step's one-line label in the rail. */
 const stepLabel = (step: ConsoleStep): string =>
@@ -120,6 +145,14 @@ export class ConsoleSteps extends LitElement {
       return;
     }
     this.selected = clampSelection(index, this.steps.length);
+    // The flow aside marks where the reader is, so it is told rather than
+    // left to guess from a property it does not own.
+    this.dispatchEvent(
+      new CustomEvent("step-selected", {
+        detail: this.selected,
+        bubbles: true,
+      }),
+    );
   }
 
   /** The handles in scope at a step, the ones it introduced first. */
@@ -201,6 +234,83 @@ export class ConsoleSteps extends LitElement {
             )}
           </tbody>
         </table>
+      </div>
+    `;
+  }
+
+  /**
+   * What this call was given, argument by argument. A reference is a chip
+   * rather than a string: it carries the name the cell has, the handle behind
+   * it, the shape it declared and the labels riding on it, and it leads back
+   * to the step that produced it — which is the whole of tracing a value
+   * through a run.
+   */
+  #arguments(step: ConsoleStep): TemplateResult | typeof nothing {
+    const args = consoleStepArguments(step, this.handles);
+    if (args.length === 0) {
+      return nothing;
+    }
+    const references = args.filter((argument) => argument.isReference);
+    return html`
+      <div class="pane">
+        <div class="pane-head">
+          arguments
+          <span class="badge ${references.length === 0 ? "none" : "ok"}">
+            ${references.length}
+            ${references.length === 1 ? "reference" : "references"}
+          </span>
+        </div>
+        <div class="args">
+          ${args.map((argument) =>
+            argument.isReference ? this.#reference(argument) : html`
+              <div class="arg literal">
+                <span class="arg-key">${argument.key}</span>
+                <span class="arg-value">
+                  ${truncate(json(argument.value), 120)}
+                </span>
+                <span class="arg-note">value</span>
+              </div>
+            `
+          )}
+        </div>
+      </div>
+    `;
+  }
+
+  #reference(argument: ConsoleArgumentRef): TemplateResult {
+    const origin = argument.producedByStep;
+    return html`
+      <div class="arg reference">
+        <span class="arg-key">${argument.key}</span>
+        <span class="arg-ref">
+          ${argument.slug ?? argument.token ?? argument.ref}
+        </span>
+        ${argument.token === undefined || argument.slug === undefined
+          ? nothing
+          : html`<span class="arg-token">${argument.token}</span>`}
+        ${origin === undefined
+          ? html`<span class="arg-note">from an earlier turn</span>`
+          : html`
+            <button
+              class="arg-origin"
+              type="button"
+              title="go to the step that produced this"
+              @click=${() => this.#select(origin)}
+            >
+              ← step ${origin}
+            </button>
+          `}
+        ${argument.confidentiality.map((name) =>
+          html`<span class="atom conf">${name}</span>`
+        )}
+        ${argument.schema === undefined ? nothing : html`
+          <span class="arg-shape" title=${json(argument.schema)}>
+            ${schemaSummary(argument.schema)}
+          </span>
+        `}
+        ${argument.ref === undefined
+          ? nothing
+          : html`<span class="arg-address">${argument.ref}</span>`}
       </div>
     `;
   }
@@ -331,7 +441,7 @@ export class ConsoleSteps extends LitElement {
           <span class="badge ${step.status}">${step.status}</span>
         </div>
       </div>
-      ${this.#policy(step)} ${this.#disclosure(step)}
+      ${this.#arguments(step)} ${this.#policy(step)} ${this.#disclosure(step)}
       <div class="pane">
         <div class="pane-head">
           <span class="tool">${step.toolName}</span> input

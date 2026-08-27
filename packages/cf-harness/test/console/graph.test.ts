@@ -5,7 +5,7 @@ import {
   consoleRunFamilyGraph,
   consoleRunGraph,
 } from "../../console/graph.ts";
-import { consoleRunSteps } from "../../console/steps.ts";
+import { type ConsoleHandle, consoleRunSteps } from "../../console/steps.ts";
 import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
 
 const call = (
@@ -35,11 +35,13 @@ const result = (
   content: JSON.stringify(content),
 });
 
-const handle = (token: string, ref: string) => ({
+const handle = (token: string, ref: string): ConsoleHandle => ({
   token,
   ref,
   addressKey: `[null,"${ref}","space",[]]`,
   introducedAtStep: 0,
+  uses: [],
+  confidentiality: [],
 });
 
 describe("console/graph", () => {

@@ -24,7 +24,24 @@ import type { HarnessPolicyEvent } from "../src/contracts/policy.ts";
 import type { HarnessPolicyDecisionRecord } from "../src/contracts/policy-trace.ts";
 import type { HarnessCfcInvocationContext } from "../src/contracts/cfc-invocation-context.ts";
 
-/** One handle, as the timeline reports it. */
+/** One place a handle was passed into a call. */
+export interface ConsoleHandleUse {
+  /** The step that passed it. */
+  step: number;
+  /** The tool it was passed to. */
+  toolName: string;
+  /**
+   * How it was passed: the `inputs` key that carried it into a pattern, or the
+   * argument name for a tool that takes a handle directly.
+   */
+  as: string;
+}
+
+/**
+ * A handle, and everything the run knows about what it stands for. This is
+ * what answers the questions asked of a reference in a call: what is it, where
+ * did it come from, what rides on it, and where else was it used.
+ */
 export interface ConsoleHandle {
   token: string;
   /** The address the handle stands for, when the run's table still holds it. */
@@ -32,6 +49,69 @@ export interface ConsoleHandle {
   addressKey?: string;
   /** The step whose text first carried this token. */
   introducedAtStep: number;
+
+  /**
+   * The step whose `run_pattern` result minted this handle — where the value
+   * came from. Absent for a handle that arrived from an earlier turn or from
+   * a child's result rather than being made here.
+   */
+  producedByStep?: number;
+
+  /** The name `assign_slug` gave it, once it has one. */
+  slug?: string;
+
+  /** The address a person can open, once the handle has been named. */
+  url?: string;
+
+  /**
+   * The shape of the value behind it, as the pattern that made it declared.
+   * Absent means no mint knew the shape, not that the referent has none.
+   */
+  schema?: unknown;
+
+  /** Every call this handle was passed into. */
+  uses: readonly ConsoleHandleUse[];
+
+  /** Confidentiality atoms the run's labels attached where it was used. */
+  confidentiality: readonly string[];
+}
+
+/**
+ * One argument of a call, read as what it actually is: a reference to a cell,
+ * or a plain value.
+ *
+ * A reference reaches a call written either way — as a `cfh:a:` handle token,
+ * or as the whole LLM-friendly link the token stands for — and both name the
+ * same cell. Reading them as one is what lets an input be traced back to the
+ * call that produced it whichever spelling the model used.
+ */
+export interface ConsoleArgumentRef {
+  /** The argument name that carried it. */
+  key: string;
+
+  /** Whether this argument names a cell at all. */
+  isReference: boolean;
+
+  /** The handle token, when the argument was written as one. */
+  token?: string;
+
+  /** The address it stands for, from the token or from the link itself. */
+  ref?: string;
+
+  /** The name the cell carries, once something has named it. */
+  slug?: string;
+
+  /** The step whose result minted it — where this value came from. */
+  producedByStep?: number;
+
+  /** The shape the pattern that made it declared. */
+  schema?: unknown;
+
+  /** Confidentiality atoms the run's labels put on this argument. */
+  confidentiality: readonly string[];
+
+  /** The argument as written, for one that names nothing. */
+  value?: unknown;
 }
 
 /** What kind of step this is, which decides what the detail pane shows. */
@@ -130,8 +210,26 @@ const parseJson = (text: string): { value?: unknown; ok: boolean } => {
 };
 
 /** Every handle token in a piece of text, in the order it carries them. */
-const tokensIn = (text: string): string[] =>
+const tokensInText = (text: string): string[] =>
   text.match(new RegExp(HANDLE_TOKEN_PATTERN)) ?? [];
+
+/**
+ * Every handle token in a value, wherever it sits inside it. A token reaches a
+ * call as a bare string as often as nested in an object, so the value is read
+ * whole rather than only when it is a string.
+ */
+const tokensIn = (value: unknown): string[] =>
+  tokensInText(
+    typeof value === "string" ? value : JSON.stringify(value) ?? "",
+  );
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+
+const asString = (value: unknown): string | undefined =>
+  typeof value === "string" && value !== "" ? value : undefined;
 
 /** The tool calls an assistant made, by call id. */
 const toolCallsById = (
@@ -457,10 +555,12 @@ export const consoleRunHandles = (
   const entries = new Map<string, HarnessHandleEntry>(
     (handleTable?.entries ?? []).map((entry) => [entry.token, entry]),
   );
+  const provenance = handleProvenance(steps);
   const handles: ConsoleHandle[] = [];
   for (const step of steps) {
     for (const token of step.handlesIntroduced) {
       const entry = entries.get(token);
+      const known = provenance.get(token);
       handles.push({
         token,
         ...(entry?.ref !== undefined ? { ref: entry.ref } : {}),
@@ -468,8 +568,186 @@ export const consoleRunHandles = (
           ? { addressKey: entry.addressKey }
           : {}),
         introducedAtStep: step.index,
+        ...(known?.producedByStep !== undefined
+          ? { producedByStep: known.producedByStep }
+          : {}),
+        ...(known?.slug !== undefined ? { slug: known.slug } : {}),
+        ...(known?.url !== undefined ? { url: known.url } : {}),
+        ...(entry?.schema !== undefined ? { schema: entry.schema } : {}),
+        uses: known?.uses ?? [],
+        confidentiality: known?.confidentiality ?? [],
       });
     }
   }
   return handles;
+};
+
+/** What each token is answerable for, read off the steps that touched it. */
+interface HandleProvenance {
+  producedByStep?: number;
+  slug?: string;
+  url?: string;
+  uses: ConsoleHandleUse[];
+  confidentiality: string[];
+}
+
+/**
+ * Where each handle came from, where it went, and what rode on it.
+ *
+ * A `run_pattern` result mints one; `assign_slug` names one; an `inputs` entry
+ * or a handle-taking argument spends one. Reading those three off the steps is
+ * what lets a reference in a call be traced back to the call that made it.
+ */
+const handleProvenance = (
+  steps: readonly ConsoleStep[],
+): Map<string, HandleProvenance> => {
+  const known = new Map<string, HandleProvenance>();
+  const at = (token: string): HandleProvenance => {
+    const held = known.get(token);
+    if (held !== undefined) {
+      return held;
+    }
+    const fresh: HandleProvenance = { uses: [], confidentiality: [] };
+    known.set(token, fresh);
+    return fresh;
+  };
+
+  for (const step of steps) {
+    if (step.kind !== "tool") {
+      continue;
+    }
+    const args = asRecord(step.input);
+    const output = asRecord(step.output);
+    if (step.toolName === "run_pattern") {
+      for (const token of tokensIn(output.resultRef)) {
+        at(token).producedByStep = step.index;
+      }
+      for (const [key, value] of Object.entries(asRecord(args.inputs))) {
+        for (const token of tokensIn(value)) {
+          const record = at(token);
+          record.uses.push({
+            step: step.index,
+            toolName: "run_pattern",
+            as: key,
+          });
+          for (const name of stepAtomNames(step)) {
+            if (!record.confidentiality.includes(name)) {
+              record.confidentiality.push(name);
+            }
+          }
+        }
+      }
+      continue;
+    }
+    // Every other tool that takes a handle takes it as a named argument, so
+    // the argument's own name is how the handle was spent.
+    for (const [key, value] of Object.entries(args)) {
+      for (const token of tokensIn(value)) {
+        at(token).uses.push({
+          step: step.index,
+          toolName: step.toolName ?? "tool",
+          as: key,
+        });
+      }
+    }
+    if (step.toolName === "assign_slug" && step.status !== "error") {
+      const slug = asString(output.slug) ?? asString(args.slug);
+      const url = asString(output.url);
+      for (const token of tokensIn(args.token)) {
+        const record = at(token);
+        if (slug !== undefined) {
+          record.slug = slug;
+        }
+        if (url !== undefined) {
+          record.url = url;
+        }
+      }
+    }
+  }
+  return known;
+};
+
+/**
+ * The document an LLM-friendly link addresses. The cell a run holds a handle
+ * to is the document, so a link naming a path inside one resolves to the same
+ * cell rather than to a second one.
+ */
+const linkDocument = (value: unknown): string | undefined => {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const match = value.trim().match(/^(\/of:[A-Za-z0-9]+:[A-Za-z0-9_-]+)/);
+  return match?.[1];
+};
+
+/**
+ * A call's arguments, each read as a reference to a cell or as a plain value.
+ *
+ * `run_pattern` carries its references under `inputs`, and every other tool
+ * that takes one takes it as a named argument, so both are read here. A
+ * reference resolves against the run's handles whichever way it was written:
+ * by token directly, and by link through the address the token stands for.
+ */
+export const consoleStepArguments = (
+  step: ConsoleStep,
+  handles: readonly ConsoleHandle[] = [],
+): readonly ConsoleArgumentRef[] => {
+  if (step.kind !== "tool") {
+    return [];
+  }
+  const byToken = new Map(handles.map((handle) => [handle.token, handle]));
+  const byRef = new Map(
+    handles.flatMap((handle) =>
+      handle.ref === undefined ? [] : [[handle.ref, handle] as const]
+    ),
+  );
+  const args = asRecord(step.input);
+  const source = step.toolName === "run_pattern" ? asRecord(args.inputs) : args;
+  const atoms = stepAtomNames(step);
+
+  return Object.entries(source).map(([key, value]): ConsoleArgumentRef => {
+    const token = tokensIn(value)[0];
+    const document = linkDocument(value);
+    const handle = token !== undefined
+      ? byToken.get(token)
+      : document !== undefined
+      ? byRef.get(document)
+      : undefined;
+    const ref = handle?.ref ?? document;
+    const named = token ?? handle?.token;
+    if (named === undefined && ref === undefined) {
+      return { key, isReference: false, confidentiality: [], value };
+    }
+    return {
+      key,
+      isReference: true,
+      ...(named !== undefined ? { token: named } : {}),
+      ...(ref !== undefined ? { ref } : {}),
+      ...(handle?.slug !== undefined ? { slug: handle.slug } : {}),
+      ...(handle?.producedByStep !== undefined
+        ? { producedByStep: handle.producedByStep }
+        : {}),
+      ...(handle?.schema !== undefined ? { schema: handle.schema } : {}),
+      confidentiality: atoms,
+    };
+  });
+};
+
+/** The confidentiality atoms a step's own labels carry, by short name. */
+const stepAtomNames = (step: ConsoleStep): string[] => {
+  const names: string[] = [];
+  for (const entry of step.invocation?.cfcInputLabels?.entries ?? []) {
+    for (const clause of entry.label?.confidentiality ?? []) {
+      const type = typeof clause === "object" && clause !== null
+        ? (clause as { type?: unknown }).type
+        : undefined;
+      if (typeof type === "string") {
+        const name = type.split("/").pop() ?? type;
+        if (!names.includes(name)) {
+          names.push(name);
+        }
+      }
+    }
+  }
+  return names;
 };

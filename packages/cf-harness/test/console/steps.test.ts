@@ -1,6 +1,11 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { consoleRunHandles, consoleRunSteps } from "../../console/steps.ts";
+import {
+  consoleRunHandles,
+  consoleRunSteps,
+  type ConsoleStep,
+  consoleStepArguments,
+} from "../../console/steps.ts";
 import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
 import type { HarnessHandleTable } from "../../src/contracts/handle-table.ts";
 import type { HarnessCfcInvocationContext } from "../../src/contracts/cfc-invocation-context.ts";
@@ -164,6 +169,9 @@ describe("console/steps", () => {
           ref: "/of:fid1:aaa",
           addressKey: '[null,"of:fid1:aaa","space",[]]',
           introducedAtStep: 0,
+          producedByStep: 0,
+          uses: [],
+          confidentiality: [],
         },
       ]);
     });
@@ -435,5 +443,136 @@ describe("console/steps CFC and disclosure", () => {
       result("c1", "assign_slug", { status: "ok", slug: "x" }),
     ]);
     expect(steps[0].disclosure).toBeUndefined();
+  });
+});
+
+describe("console/steps provenance", () => {
+  const call = (
+    id: string,
+    name: string,
+    args: unknown,
+  ): HarnessTranscriptMessage => ({
+    role: "assistant",
+    content: "",
+    toolCalls: [
+      {
+        id,
+        type: "function",
+        function: { name, arguments: JSON.stringify(args) },
+      },
+    ],
+  });
+
+  const result = (
+    toolCallId: string,
+    toolName: string,
+    content: unknown,
+  ): HarnessTranscriptMessage => ({
+    role: "tool",
+    toolCallId,
+    toolName,
+    content: JSON.stringify(content),
+  });
+
+  const table: HarnessHandleTable = {
+    type: "cf-harness.handle-table",
+    version: 1,
+    salt: "run",
+    entries: [
+      {
+        token: "cfh:a:aaaaa",
+        kind: "address",
+        ref: "/of:fid1:abc",
+        addressKey: '[null,"of:fid1:abc","space",[]]',
+        schema: { type: "object", properties: { numbers: { type: "array" } } },
+      },
+    ],
+  };
+
+  /** A run that makes a cell, names it, then wires a pattern to read it. */
+  const composed = (wiredAs: string): readonly ConsoleStep[] =>
+    consoleRunSteps([
+      call("c1", "run_pattern", { sourceText: "x" }),
+      result("c1", "run_pattern", { status: "ok", resultRef: "cfh:a:aaaaa" }),
+      call("c2", "assign_slug", { token: "cfh:a:aaaaa", slug: "numbers" }),
+      result("c2", "assign_slug", {
+        status: "ok",
+        slug: "numbers",
+        url: "http://localhost:8000/space/numbers",
+      }),
+      call("c3", "run_pattern", {
+        sourceText: "y",
+        inputs: { source: wiredAs },
+      }),
+      result("c3", "run_pattern", { status: "ok", resultRef: "cfh:a:bbbbb" }),
+    ]);
+
+  it("names the step whose result minted a handle", () => {
+    const handles = consoleRunHandles(composed("cfh:a:aaaaa"), table);
+    const minted = handles.find((handle) => handle.token === "cfh:a:aaaaa");
+    expect(minted?.producedByStep).toBe(0);
+    expect(minted?.slug).toBe("numbers");
+    expect(minted?.url).toBe("http://localhost:8000/space/numbers");
+  });
+
+  it("records every call a handle was passed into", () => {
+    const handles = consoleRunHandles(composed("cfh:a:aaaaa"), table);
+    const minted = handles.find((handle) => handle.token === "cfh:a:aaaaa");
+    expect(minted?.uses).toEqual([
+      { step: 1, toolName: "assign_slug", as: "token" },
+      { step: 2, toolName: "run_pattern", as: "source" },
+    ]);
+  });
+
+  describe("consoleStepArguments()", () => {
+    it("reads an input written as a handle token as a reference", () => {
+      const steps = composed("cfh:a:aaaaa");
+      const handles = consoleRunHandles(steps, table);
+      const args = consoleStepArguments(steps[2], handles);
+      expect(args).toHaveLength(1);
+      expect(args[0].key).toBe("source");
+      expect(args[0].isReference).toBe(true);
+      expect(args[0].token).toBe("cfh:a:aaaaa");
+      expect(args[0].slug).toBe("numbers");
+      expect(args[0].producedByStep).toBe(0);
+    });
+
+    it("reads an input written as a whole link as the same reference", () => {
+      const steps = composed("/of:fid1:abc");
+      const handles = consoleRunHandles(steps, table);
+      const args = consoleStepArguments(steps[2], handles);
+      expect(args[0].isReference).toBe(true);
+      // The link and the token name one cell, so the link resolves to the
+      // handle's slug and origin rather than reading as an unknown address.
+      expect(args[0].token).toBe("cfh:a:aaaaa");
+      expect(args[0].slug).toBe("numbers");
+      expect(args[0].producedByStep).toBe(0);
+    });
+
+    it("reads a literal input as a value rather than a reference", () => {
+      const steps = consoleRunSteps([
+        call("c1", "run_pattern", { sourceText: "x", inputs: { bill: 100 } }),
+        result("c1", "run_pattern", { status: "ok" }),
+      ]);
+      const args = consoleStepArguments(steps[0], []);
+      expect(args[0].isReference).toBe(false);
+      expect(args[0].value).toBe(100);
+    });
+
+    it("reads a handle-taking tool's own argument as a reference", () => {
+      const steps = composed("cfh:a:aaaaa");
+      const handles = consoleRunHandles(steps, table);
+      const args = consoleStepArguments(steps[1], handles);
+      const token = args.find((argument) => argument.key === "token");
+      expect(token?.isReference).toBe(true);
+      expect(token?.producedByStep).toBe(0);
+    });
+
+    it("carries the shape the pattern that made the cell declared", () => {
+      const steps = composed("cfh:a:aaaaa");
+      const handles = consoleRunHandles(steps, table);
+      const args = consoleStepArguments(steps[2], handles);
+      expect(args[0].schema).toEqual(table.entries[0].schema);
+    });
   });
 });

@@ -851,3 +851,121 @@ button[disabled] {
 .gdetail {
   margin-top: 0.9rem;
 }
+
+/* The timeline, with the data flow alongside it. */
+
+.timeline-with-flow {
+  display: grid;
+  gap: 1.25rem;
+  grid-template-columns: minmax(0, 1fr) 21rem;
+}
+
+.timeline-with-flow > * {
+  min-width: 0;
+}
+
+/*
+ * The flow follows the reader down the timeline rather than scrolling away
+ * from it, since it exists to say where the step being read sits in the whole.
+ */
+.flow-aside {
+  align-self: start;
+  position: sticky;
+  top: 1rem;
+}
+
+.flow-aside .gcanvas {
+  max-height: 26rem;
+}
+
+@media (max-width: 72rem) {
+  .timeline-with-flow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .flow-aside {
+    position: static;
+  }
+}
+
+/* A call's arguments, each read as a reference or as a plain value. */
+
+.args {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.arg {
+  align-items: baseline;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  min-width: 0;
+  padding: 0.35rem 0.6rem;
+}
+
+.arg.reference {
+  border-color: var(--accent);
+}
+
+.arg-key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.arg-key::after {
+  color: var(--muted);
+  content: ":";
+}
+
+.arg-ref {
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.arg-token,
+.arg-address {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+
+.arg-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.arg-note {
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.arg-shape {
+  color: var(--ok);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+}
+
+.arg-origin {
+  background: #fff;
+  border-color: var(--accent);
+  color: var(--accent);
+  font-size: 0.72rem;
+  padding: 0.05rem 0.45rem;
+}
+
+.arg-origin:hover {
+  background: var(--accent);
+  color: #fff;
+}
