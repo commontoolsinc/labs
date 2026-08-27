@@ -6390,7 +6390,10 @@ supply; OW29/OW32/OW34 closed):
     `deferred-start-catchup`, `session-remount`, `piece-start-commit-failed`
     — the neighbouring occurrences in that job's log fall outside the
     window), and **CI does not publish the toolshed log**, so no server-side
-    member can be excluded from it. n=1 in CI, against 0/8 locally.
+    member can be excluded from it. **The OFF lane's shard 7 PASSED on that
+    same run** (`Pattern Integration Tests (7/10)`, same commit, same runner
+    pool), so the red is ON-specific rather than a general flake in this
+    file. n=1 in CI, against 0/8 locally.
     **DISPOSITION: NO LIFT.** The entry stays, its reason extended with this
     probe (and the skip-list test pinned to it) so the 8/8 cannot be read as
     a clean bar by the next seat. What the split says on its own terms: a

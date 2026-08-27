@@ -314,6 +314,8 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "piece-start-commit-failed between the file's start and its " +
         "failure — and CI does not publish the toolshed log, so the " +
         "server-side members cannot be excluded from that artifact. " +
+        "The OFF lane's shard 7 PASSED on that same run, so the red " +
+        "is ON-specific rather than a general flake in this file. " +
         "Local 0/8 against CI 1/1 is itself the observation. This " +
         "FILE entry remains explicit until the phase-7 coordinator " +
         "lifts it.",
