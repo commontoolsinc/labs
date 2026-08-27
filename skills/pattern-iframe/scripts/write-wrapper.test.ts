@@ -86,6 +86,37 @@ export const IFRAME_PATTERN = { name: "SymlinkSafe" } as const;
     }
   });
 
+  it("replaces a forced output hardlink without overwriting its source", async () => {
+    const directory = await Deno.makeTempDir({
+      prefix: "pattern-iframe-hardlink-",
+    });
+    try {
+      const contract = resolve(directory, "contract.ts");
+      const guest = resolve(directory, "guest.ts");
+      const out = resolve(directory, "main.tsx");
+      const guestSource = 'document.body.textContent = "guest";\n';
+      await Deno.writeTextFile(
+        contract,
+        `${contractPrefix}
+export const IFRAME_PATTERN = { name: "HardlinkSafe" } as const;
+`,
+      );
+      await Deno.writeTextFile(guest, guestSource);
+      await Deno.link(guest, out);
+
+      const result = await generate(contract, guest, out, "--force");
+
+      expect(result.code).toBe(0);
+      expect(await Deno.readTextFile(guest)).toBe(guestSource);
+      expect(await Deno.readTextFile(out)).toContain(
+        "export default pattern<HardlinkSafeInput, HardlinkSafeOutput>",
+      );
+      expect((await Deno.stat(guest)).ino).not.toBe((await Deno.stat(out)).ino);
+    } finally {
+      await removeDirectory(directory);
+    }
+  });
+
   it("keeps public SQLite names separate from generated bindings", async () => {
     const directory = await Deno.makeTempDir({
       prefix: "pattern-iframe-names-",
