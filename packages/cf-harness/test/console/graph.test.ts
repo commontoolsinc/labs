@@ -105,6 +105,42 @@ describe("console/graph", () => {
       expect(cells[0].slug).toBe("books");
     });
 
+    it("draws a read edge for an input written as a whole link", () => {
+      const steps = consoleRunSteps([
+        call("c1", "run_pattern", {
+          sourceText: "x",
+          inputs: { source: "/of:fid1:abc" },
+        }),
+        result("c1", "run_pattern", { status: "ok", resultRef: "cfh:a:aaaaa" }),
+      ]);
+      const graph = consoleRunGraph(steps, [handle("cfh:a:aaaaa", "/of:b")]);
+      const reads = graph.edges.filter((edge) => edge.kind === "reads");
+      expect(reads).toHaveLength(1);
+      expect(reads[0].label).toBe("source");
+      expect(reads[0].from).toBe("cell:/of:fid1:abc");
+    });
+
+    it("is one cell when a link addresses a path inside a handled document", () => {
+      const steps = consoleRunSteps([
+        call("c1", "run_pattern", { sourceText: "x" }),
+        result("c1", "run_pattern", { status: "ok", resultRef: "cfh:a:aaaaa" }),
+        call("c2", "run_pattern", {
+          sourceText: "y",
+          inputs: { source: "/of:fid1:abc/numbers" },
+        }),
+        result("c2", "run_pattern", { status: "ok", resultRef: "cfh:a:bbbbb" }),
+      ]);
+      const graph = consoleRunGraph(steps, [
+        handle("cfh:a:aaaaa", "/of:fid1:abc"),
+        handle("cfh:a:bbbbb", "/of:fid1:def"),
+      ]);
+      const cells = graph.nodes.filter((node) => node.kind === "cell");
+      // The produced cell, and the one the second pattern read — not a third
+      // for the path inside the first.
+      expect(cells).toHaveLength(2);
+      expect(graph.unwiredPatterns).toBe(1);
+    });
+
     it("leaves a cell unnamed when assign_slug refused it", () => {
       const steps = consoleRunSteps([
         call("c1", "assign_slug", { token: "cfh:a:aaaaa", slug: "books" }),

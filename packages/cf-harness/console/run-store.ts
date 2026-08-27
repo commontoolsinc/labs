@@ -253,10 +253,56 @@ export const readConsoleRunFamilyGraph = async (
   } catch {
     // A run with no siblings on disk is a family of one.
   }
+  const neighbours = await neighbouringHandles(artifactRoot);
+  // A run's own table wins, so it is appended last.
+  const withNeighbours = (run: ConsoleGraphRunInput): ConsoleGraphRunInput => ({
+    ...run,
+    handles: [...neighbours, ...run.handles],
+  });
   return consoleRunFamilyGraph(
-    { runId, steps: root.steps, handles: root.handles },
-    descendants,
+    withNeighbours({ runId, steps: root.steps, handles: root.handles }),
+    descendants.map(withNeighbours),
   );
+};
+
+/**
+ * Every handle any run on disk minted, by token.
+ *
+ * A handle table is salted per run, so a token minted in one turn resolves to
+ * nothing in the next turn's table — and a later turn that wires the earlier
+ * turn's cell by link would draw two nodes for the one cell. Reading the
+ * neighbours' tables lets the token resolve to the address it always stood
+ * for, which is what merges them.
+ *
+ * The salt makes a token effectively unique to the run that minted it, so a
+ * token meaning two addresses across runs would be a coincidence rather than
+ * the ordinary case; a run's own table is consulted first regardless.
+ */
+const neighbouringHandles = async (
+  artifactRoot: string,
+): Promise<ConsoleHandle[]> => {
+  const handles: ConsoleHandle[] = [];
+  try {
+    for await (const entry of Deno.readDir(artifactRoot)) {
+      if (!entry.isDirectory || !isSafeSegment(entry.name)) {
+        continue;
+      }
+      const runState = await readJson<HarnessRunState>(
+        join(artifactRoot, entry.name, "run-state.json"),
+      );
+      for (const entryHandle of runState?.handleTable?.entries ?? []) {
+        handles.push({
+          token: entryHandle.token,
+          ref: entryHandle.ref,
+          addressKey: entryHandle.addressKey,
+          introducedAtStep: 0,
+        });
+      }
+    }
+  } catch {
+    // No neighbours to read is simply no extra resolution.
+  }
+  return handles;
 };
 
 /**

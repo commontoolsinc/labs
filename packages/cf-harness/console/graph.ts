@@ -92,6 +92,24 @@ const tokensIn = (value: unknown): string[] => {
   return text.match(new RegExp(HANDLE_TOKEN_PATTERN)) ?? [];
 };
 
+/**
+ * The document an LLM-friendly link addresses, for an input written as a link
+ * rather than as a handle token. `run_pattern` takes either — a whole-string
+ * link is passed as a live cell reference just as a token is — so a graph that
+ * read only tokens would miss half the ways a pattern can be wired.
+ *
+ * The document rather than the whole link: a link may address a path inside a
+ * document, and the cell the run holds a handle to is the document, so keying
+ * on the path would draw two nodes for one cell.
+ */
+const linkDocument = (value: unknown): string | undefined => {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const match = value.trim().match(/^(\/of:[A-Za-z0-9]+:[A-Za-z0-9_-]+)/);
+  return match?.[1];
+};
+
 /** The short name of a CFC atom, which is the last segment of its type URL. */
 const atomNames = (clauses: readonly unknown[] = []): string[] =>
   clauses.flatMap((clause) => {
@@ -209,19 +227,37 @@ export const consoleRunGraph = (
         };
         nodes.set(id, node);
 
-        // Read edges: an input whose value carries a handle wires this pattern
-        // to the cell that handle names.
+        // Read edges: an input naming a cell — by handle token or by whole
+        // link — wires this pattern to that cell.
         for (const [key, value] of Object.entries(asRecord(args.inputs))) {
-          for (const token of tokensIn(value)) {
-            cellNode(token, step.index);
+          const read = (from: string): void => {
             edges.push({
-              from: cellId(token),
+              from,
               to: id,
               kind: "reads",
               label: key,
               atStep: step.index,
               confidentiality: atomsAtPath(step, key),
             });
+          };
+          for (const token of tokensIn(value)) {
+            cellNode(token, step.index);
+            read(cellId(token));
+          }
+          const document = linkDocument(value);
+          if (document !== undefined) {
+            const linkId = `cell:${document}`;
+            if (!nodes.has(linkId)) {
+              nodes.set(linkId, {
+                id: linkId,
+                kind: "cell",
+                label: document,
+                atStep: step.index,
+                address: document,
+                confidentiality: [],
+              });
+            }
+            read(linkId);
           }
         }
 
