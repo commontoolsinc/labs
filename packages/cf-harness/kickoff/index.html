@@ -115,6 +115,36 @@
         font-size: 0.85rem;
       }
 
+      #sessions:not(:empty) {
+        margin-bottom: 1.75rem;
+      }
+
+      .session {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: inherit;
+        display: block;
+        margin-bottom: 0.5rem;
+        padding: 0.6rem 0.85rem;
+        text-decoration: none;
+      }
+
+      .session:hover {
+        border-color: var(--accent);
+      }
+
+      .session-task {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .session-meta {
+        color: var(--muted);
+        font-size: 0.8rem;
+      }
+
       .entry {
         border-top: 1px solid var(--line);
         padding: 0.7rem 0;
@@ -204,8 +234,13 @@
         <button id="cancel" class="secondary" type="button" disabled>
           Cancel
         </button>
+        <button id="new-session" class="secondary" type="button" hidden>
+          New session
+        </button>
         <span id="state">idle</span>
       </div>
+
+      <div id="sessions"></div>
 
       <div id="piece">
         <a id="piece-link" href="#" rel="noopener" target="_blank">
@@ -221,8 +256,10 @@
       const task = document.querySelector("#task");
       const startButton = document.querySelector("#start");
       const cancelButton = document.querySelector("#cancel");
+      const newSessionButton = document.querySelector("#new-session");
       const state = document.querySelector("#state");
       const feed = document.querySelector("#feed");
+      const sessions = document.querySelector("#sessions");
       const piece = document.querySelector("#piece");
       const pieceLink = document.querySelector("#piece-link");
       const pieceSlug = document.querySelector("#piece-slug");
@@ -343,6 +380,10 @@
             append("session started");
             break;
           case "turn_started":
+            // The turn is read back off the stream rather than only from the
+            // response that started it, so a page opened on a session it did
+            // not start can still cancel the turn that session is running.
+            turn = event.turn.turnId;
             setState("working");
             running(true);
             break;
@@ -444,6 +485,47 @@
         });
       };
 
+      // The session in the address bar is the whole of the page's state: a link
+      // to one is a link to its transcript, and the stream replayed from the
+      // sequence already rendered is what draws it.
+      const openSession = (sessionId) => {
+        session = sessionId;
+        history.replaceState(
+          null,
+          "",
+          `?sessionId=${encodeURIComponent(sessionId)}`,
+        );
+        sessions.replaceChildren();
+        startButton.textContent = "Send";
+        newSessionButton.hidden = false;
+        subscribe();
+      };
+
+      const sessionRow = (summary) => {
+        const row = document.createElement("a");
+        row.className = "session";
+        row.href = `?sessionId=${encodeURIComponent(summary.sessionId)}`;
+        const title = document.createElement("div");
+        title.className = "session-task";
+        title.textContent = summary.firstTaskText ?? summary.sessionId;
+        const meta = document.createElement("div");
+        meta.className = "session-meta";
+        meta.textContent = `${summary.status} · ${summary.turnCount} turn${
+          summary.turnCount === 1 ? "" : "s"
+        } · ${new Date(summary.updatedAt).toLocaleString()}`;
+        row.append(title, meta);
+        return row;
+      };
+
+      const listSessions = async () => {
+        const response = await fetch("/api/sessions");
+        if (!response.ok) {
+          return;
+        }
+        const body = await response.json();
+        sessions.replaceChildren(...body.sessions.map(sessionRow));
+      };
+
       startButton.addEventListener("click", async () => {
         const text = task.value.trim();
         if (text === "") {
@@ -451,15 +533,21 @@
         }
         running(true);
         setState("starting");
-        feed.replaceChildren();
-        toolEntries.clear();
-        subagentBlocks.clear();
-        piece.classList.remove("shown");
-        lastSequence = 0;
+        // A follow-up turn continues the feed it is answering into; a new
+        // session starts from an empty one.
+        if (session === null) {
+          feed.replaceChildren();
+          toolEntries.clear();
+          subagentBlocks.clear();
+          piece.classList.remove("shown");
+          lastSequence = 0;
+        }
         const response = await fetch("/api/task", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ text }),
+          body: JSON.stringify(
+            session === null ? { text } : { text, sessionId: session },
+          ),
         });
         const body = await response.json();
         if (!response.ok) {
@@ -468,9 +556,15 @@
           append("could not start", body.error ?? response.statusText);
           return;
         }
-        session = body.sessionId;
+        task.value = "";
         turn = body.turnId;
-        subscribe();
+        if (session === null) {
+          openSession(body.sessionId);
+        }
+      });
+
+      newSessionButton.addEventListener("click", () => {
+        location.href = location.pathname;
       });
 
       cancelButton.addEventListener("click", async () => {
@@ -484,6 +578,17 @@
           body: JSON.stringify({ sessionId: session, turnId: turn }),
         });
       });
+
+      // A session named in the address is replayed from the start, so a reload
+      // and a shared link both draw the same transcript a live run drew; with
+      // no session named, the page offers the ones it already has.
+      const named = new URLSearchParams(location.search).get("sessionId");
+      if (named !== null && named !== "") {
+        setState("loading");
+        openSession(named);
+      } else {
+        listSessions();
+      }
     </script>
   </body>
 </html>

@@ -71,6 +71,10 @@ import {
 import type { CreateHarnessPromptLoopOptions } from "../src/prompt-loop.ts";
 import type { HarnessChatSessionStore } from "../src/session-store.ts";
 import {
+  type KickoffSessionListing,
+  summarizeKickoffSessions,
+} from "./sessions.ts";
+import {
   chatEventFrame,
   envelopesAfter,
   isUndelivered,
@@ -472,6 +476,9 @@ export class KickoffServer {
     if (request.method === "POST" && url.pathname === "/api/cancel") {
       return await this.#cancel(request);
     }
+    if (request.method === "GET" && url.pathname === "/api/sessions") {
+      return Response.json(await this.#sessions());
+    }
     if (request.method === "GET" && url.pathname === "/api/status") {
       return Response.json(
         this.#service.status(url.searchParams.get("sessionId") ?? undefined),
@@ -493,45 +500,64 @@ export class KickoffServer {
   }
 
   /**
-   * Creates a session and starts its first turn. One request rather than two
-   * because a session with no turn is not a thing anyone asked for, and the
-   * page needs both identifiers before it can subscribe or cancel.
+   * Every session this server knows, described well enough to choose one from.
+   * The turns are read for replay so a session recovered from the store on
+   * startup is named by the task it was given rather than by its identifier.
+   */
+  async #sessions(): Promise<KickoffSessionListing> {
+    const turns = await this.#service.listTurnsForReplay({});
+    return summarizeKickoffSessions(this.#service.status(), turns.turns);
+  }
+
+  /**
+   * Starts a turn, in the session the request names or in a new one. One
+   * request rather than two because a session with no turn is not a thing
+   * anyone asked for, and the page needs both identifiers before it can
+   * subscribe or cancel. A named session that cannot take another turn — it
+   * was closed, or its transcript did not survive a restart — is the service's
+   * refusal to report, not this server's to anticipate.
    */
   async #startTask(request: Request): Promise<Response> {
-    let text: unknown;
+    let parsed: unknown;
     try {
-      const body: unknown = await request.json();
-      text = typeof body === "object" && body !== null && "text" in body
-        ? (body as { text: unknown }).text
-        : undefined;
+      parsed = await request.json();
     } catch {
       return Response.json({ error: "request body is not JSON" }, {
         status: 400,
       });
     }
+    const body: { text?: unknown; sessionId?: unknown } =
+      typeof parsed === "object" && parsed !== null ? parsed : {};
+    const text = body.text;
     if (typeof text !== "string" || text.trim() === "") {
       return Response.json({ error: "text is required" }, { status: 400 });
     }
-    const session = await this.#service.startSession(crypto.randomUUID(), {
-      workspace: { hostPath: this.#config.workspacePath },
-      model: this.#config.model,
-      artifactRoot: this.#config.artifactRoot,
-      policy: kickoffChatPolicy(this.#config.patternIndex !== undefined),
-    });
-    if (!session.ok) {
-      return chatErrorResponse(session);
+    if (body.sessionId !== undefined && typeof body.sessionId !== "string") {
+      return Response.json({ error: "sessionId must be a string" }, {
+        status: 400,
+      });
+    }
+    let sessionId = body.sessionId;
+    if (sessionId === undefined) {
+      const session = await this.#service.startSession(crypto.randomUUID(), {
+        workspace: { hostPath: this.#config.workspacePath },
+        model: this.#config.model,
+        artifactRoot: this.#config.artifactRoot,
+        policy: kickoffChatPolicy(this.#config.patternIndex !== undefined),
+      });
+      if (!session.ok) {
+        return chatErrorResponse(session);
+      }
+      sessionId = session.result.sessionId;
     }
     const turn = await this.#service.startTurn(crypto.randomUUID(), {
-      sessionId: session.result.sessionId,
+      sessionId,
       input: { text },
     });
     if (!turn.ok) {
       return chatErrorResponse(turn);
     }
-    return Response.json({
-      sessionId: session.result.sessionId,
-      turnId: turn.result.turnId,
-    });
+    return Response.json({ sessionId, turnId: turn.result.turnId });
   }
 
   async #cancel(request: Request): Promise<Response> {

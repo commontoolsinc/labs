@@ -100,6 +100,24 @@ Cancel stops the running turn. The session survives a cancel and a page reload
 both — the stream resumes from the last event the page rendered rather than
 replaying the feed.
 
+## Sessions
+
+The session a page is showing is named in its address, as `?sessionId=<id>`. A
+started task puts it there, so the address bar always holds a link back to the
+run: open it later, or on another tab, and the page replays that session's whole
+event log from the start and draws the same feed the live run drew, nested
+subagent blocks and piece link included.
+
+With no session named, the page lists the sessions this server knows — the most
+recently touched first, each named by the task it was given — and following one
+opens it.
+
+An open session takes another turn: the box sends a follow-up into the session
+being shown rather than starting a new one, and the feed continues rather than
+clearing. **New session** goes back to an empty page and the list. A session
+that cannot take another turn — closed, or left with a transcript that did not
+survive a restart — says so in the feed when the follow-up is refused.
+
 ## How the configuration reaches the run
 
 `CreateHarnessPromptLoopOptions` extends the engine's options, which extend the
