@@ -185,6 +185,31 @@ Deno.test("postCoverageComment reports an overridden metric rather than improved
   );
 });
 
+Deno.test("postCoverageComment keeps the file attribution when it overwrites a regression", async () => {
+  // The regression body it replaces is the only place the files were named, so
+  // the payload carries them through rather than letting the rewrite lose them.
+  const existing =
+    `${COVERAGE_SUGGESTION_MARKER}\n<details open>\nregression\n</details>`;
+
+  const requests = await runWithPayload(
+    {
+      prNumber: 4211,
+      state: "resolved",
+      improvedLines: 0,
+      groups: [{ group: "tasks", baseline: 1846, current: 1857 }],
+      overridden: true,
+      files: [
+        { relativePath: "tasks/one.ts", group: "tasks", uncoveredCount: 11 },
+      ],
+    },
+    [existing],
+  );
+
+  assertEquals(requests.length, 1);
+  assertStringIncludes(requests[0].body, "### Files with new uncovered lines");
+  assertStringIncludes(requests[0].body, "- `tasks/one.ts` — 11 lines");
+});
+
 Deno.test("postCoverageComment does nothing to resolve when no comment exists", async () => {
   const requests = await runWithPayload(
     { prNumber: 4211, state: "resolved", improvedLines: 5 },
