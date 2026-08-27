@@ -144,6 +144,85 @@ describe("setsrc over an unloadable current pattern", () => {
     ).toBe(RETIRED_BUNDLE_IDENTITY);
   });
 
+  it("keeps refusing under the escape hatch when recorded history cannot restore the current source", async () => {
+    // The flag's boundary: it waives the compatibility proofs, not the
+    // source-history guarantee. A piece that RECORDED how it got its pattern
+    // is entitled to a restorable current source before that source is
+    // replaced, and re-pointing the identity out from under the history (the
+    // clears skipped here are what strand the fleet) breaks that guarantee —
+    // so the transition baseline refuses, flag or no flag.
+    const piece = await pieces.create(markerProgram("v1"), { input: {} });
+    await runtime.idle();
+    await pieces.stopPiece(piece.getCell());
+    const { error } = await runtime.editWithRetry((tx) => {
+      piece.getCell().withTx(tx).setMetaRaw("patternIdentity", {
+        identity: RETIRED_BUNDLE_IDENTITY,
+        symbol: "default",
+      });
+    });
+    expect(error?.message).toBeUndefined();
+    await runtime.idle();
+    expect(
+      piece.getCell().getMetaRaw("pieceSourceHistory"),
+      "the piece lost its source history, so this is the fleet's " +
+        "history-less state and the baseline would allow the swap",
+    ).not.toBeUndefined();
+
+    await expect(
+      piece.setPattern(markerProgram("v2"), {
+        dangerouslyAllowIncompatibleSchema: true,
+      }),
+    ).rejects.toThrow("the piece's current source is not available");
+
+    expect(
+      getPatternIdentityRef(piece.getCell())?.identity,
+      "the pointer moved despite the refusal, so the flag reached past the " +
+        "compatibility proofs into the source-history guarantee",
+    ).toBe(RETIRED_BUNDLE_IDENTITY);
+  });
+
+  it("swaps a retained-source piece whose artifact fails to load, under the escape hatch", async () => {
+    // The second rescued population: nothing was re-pointed and the source
+    // closure is fully retained, but loading the artifact itself throws — a
+    // compile or evaluation failure under this runtime. The transition keeps
+    // its retained baseline; the stored ref only names the predecessor, so
+    // the swap needs no working load of it.
+    const piece = await pieces.create(markerProgram("v1"), { input: {} });
+    await runtime.idle();
+    await pieces.stopPiece(piece.getCell());
+    const before = getPatternIdentityRef(piece.getCell());
+    expect(before, "the fixture piece has no pattern pointer").toBeDefined();
+
+    const manager = runtime.patternManager;
+    const load = manager.loadPatternByIdentity.bind(manager);
+    manager.loadPatternByIdentity = (
+      ...args: Parameters<typeof load>
+    ) =>
+      args[0] === before!.identity
+        ? Promise.reject(new Error("simulated artifact evaluation failure"))
+        : load(...args);
+    try {
+      await piece.setPattern(markerProgram("v2"), {
+        dangerouslyAllowIncompatibleSchema: true,
+      });
+    } finally {
+      manager.loadPatternByIdentity = load;
+    }
+    await runtime.idle();
+
+    expect(
+      getPatternIdentityRef(piece.getCell())?.identity,
+      "the pattern pointer still names the identity whose artifact fails " +
+        "to load, so the escape hatch did not rescue the piece",
+    ).not.toBe(before!.identity);
+
+    await pieces.startPiece(piece.getCell());
+    await runtime.idle();
+    expect(
+      (piece.getCell().getAsQueryResult() as { marker?: string }).marker,
+    ).toBe("v2");
+  });
+
   it("swaps under the escape hatch and leaves the piece runnable", async () => {
     const piece = await strandedPiece();
 
