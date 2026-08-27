@@ -190,6 +190,7 @@ describe("cf-iframe cell bridge", () => {
     };
     const databaseSchema = { $ref: "cid:fid1:sqlite-schema" };
     const runtime = {
+      idle: () => Promise.resolve(),
       [$conn]: () => ({
         request: (request: { type: RequestType; cell: CellRef }) => {
           requests.push(request);
@@ -299,6 +300,8 @@ describe("cf-iframe cell bridge", () => {
 
   it("holds lazy scoped SQLite demand through backend readiness", async () => {
     const subscriptions: CellRef[] = [];
+    const idle = Promise.withResolvers<void>();
+    const reachedIdle = Promise.withResolvers<void>();
     const databaseValue = {
       id: "fid1:user-database",
       scope: "user",
@@ -310,13 +313,21 @@ describe("cf-iframe cell bridge", () => {
     let sqliteQueries = 0;
     let demandedSource: CellHandle<unknown> | undefined;
     const runtime = {
+      idle: () => {
+        reachedIdle.resolve();
+        return idle.promise;
+      },
       [$conn]: () => ({
         request: (request: { type: RequestType; cell: CellRef }) => {
           if (request.type === RequestType.CellGet) {
             return Promise.resolve({ value: { database: undefined } });
           }
           if (request.type === RequestType.CellPull) {
-            return Promise.resolve({ value: undefined });
+            return Promise.resolve({
+              value: request.cell.id === "of:user-database" && materialized
+                ? databaseValue
+                : undefined,
+            });
           }
           if (request.type === RequestType.CellResolveAsCell) {
             return Promise.resolve({
@@ -349,8 +360,13 @@ describe("cf-iframe cell bridge", () => {
                 new TypeError("SQLite source demand ended before the query."),
               );
             }
-            materialized = true;
-            demandedSource[$onCellUpdate](databaseValue);
+            if (!materialized) {
+              return Promise.reject(
+                new TypeError(
+                  "SQLite query ran before its authority was ready.",
+                ),
+              );
+            }
             return Promise.resolve({ rows: [] });
           }
           return Promise.resolve({});
@@ -378,9 +394,15 @@ describe("cf-iframe cell bridge", () => {
       database: "sqlite",
     });
 
-    await expect(
-      bridge.resources.database.methods!.query({ sql: "SELECT 1" }),
-    ).resolves.toEqual({ rows: [] });
+    const querying = bridge.resources.database.methods!.query({
+      sql: "SELECT 1",
+    });
+    await reachedIdle.promise;
+    expect(sqliteQueries).toBe(0);
+    materialized = true;
+    idle.resolve();
+
+    await expect(querying).resolves.toEqual({ rows: [] });
     expect(materialized).toBe(true);
     expect(demandedSource).toBeUndefined();
     expect(subscriptions.map(({ path }) => path)).toContainEqual(["database"]);

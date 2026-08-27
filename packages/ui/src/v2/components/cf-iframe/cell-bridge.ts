@@ -112,9 +112,13 @@ async function demandSqliteSource<T>(
         "SQLite source resolved outside its granted capability.",
       );
     }
-    // The runtime processor owns the commit-aware readiness barrier for the
-    // fixed authority. Keep demand on the lazy source until that backend
-    // operation has crossed the barrier and completed.
+
+    // Source pull waits for reactive work, but a scoped factory's handle write
+    // can still be committing. Cross the commit-aware barrier before the
+    // backend operation pulls the fixed authority. Demand stays live for this
+    // entire causal chain, so the lazy producer cannot be collected between
+    // materialization and the backend operation.
+    await source.runtime().idle();
     return await operation();
   } finally {
     cancel();
