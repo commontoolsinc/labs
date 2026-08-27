@@ -1,0 +1,149 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "IframeInputData": {
+        "properties": {
+          "boardName": {
+            "type": "string"
+          },
+          "columns": {
+            "items": {
+              "$ref": "#/$defs/KanbanColumn"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "boardName",
+          "columns"
+        ],
+        "type": "object"
+      },
+      "IframeOutputData": {
+        "properties": {
+          "selectedCardId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "selectedCardId"
+        ],
+        "type": "object"
+      },
+      "KanbanColumn": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "input": {
+        "$ref": "#/$defs/IframeInputData"
+      },
+      "output": {
+        "$ref": "#/$defs/IframeOutputData",
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "user"
+          }
+        ]
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "iframe-shared-kanban/main.tsx",
+  "resultSchema": {
+    "$defs": {
+      "IframeOutputData": {
+        "properties": {
+          "selectedCardId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "selectedCardId"
+        ],
+        "type": "object"
+      },
+      "IframeStateData": {
+        "properties": {
+          "cards": {
+            "items": {
+              "$ref": "#/$defs/KanbanCard"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "cards"
+        ],
+        "type": "object"
+      },
+      "KanbanCard": {
+        "properties": {
+          "column": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "column"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "output": {
+        "$ref": "#/$defs/IframeOutputData"
+      },
+      "state": {
+        "$ref": "#/$defs/IframeStateData"
+      }
+    },
+    "required": [
+      "state",
+      "output",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

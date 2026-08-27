@@ -1,0 +1,148 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "IframeInputData": {
+        "properties": {
+          "moods": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "question": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "moods"
+        ],
+        "type": "object"
+      },
+      "IframeStateData": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "mood": {
+            "type": "string"
+          },
+          "pendingSubmissionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "mood",
+          "message"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "input": {
+        "$ref": "#/$defs/IframeInputData"
+      },
+      "state": {
+        "$ref": "#/$defs/IframeStateData",
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "session"
+          }
+        ]
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "iframe-session-checkin/main.tsx",
+  "resultSchema": {
+    "$defs": {
+      "CheckinSubmission": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "mood": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "mood",
+          "message"
+        ],
+        "type": "object"
+      },
+      "IframeOutputData": {
+        "properties": {
+          "submissions": {
+            "items": {
+              "$ref": "#/$defs/CheckinSubmission"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "submissions"
+        ],
+        "type": "object"
+      },
+      "IframeStateData": {
+        "properties": {
+          "message": {
+            "type": "string"
+          },
+          "mood": {
+            "type": "string"
+          },
+          "pendingSubmissionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "mood",
+          "message"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "output": {
+        "$ref": "#/$defs/IframeOutputData"
+      },
+      "state": {
+        "$ref": "#/$defs/IframeStateData"
+      }
+    },
+    "required": [
+      "state",
+      "output",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

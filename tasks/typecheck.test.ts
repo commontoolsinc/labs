@@ -45,6 +45,9 @@ describe("typecheck", () => {
       expect(byScope.get("test-support")).toContain("packages/test-support");
       // Glob entries expand to repository-relative files.
       expect(byScope.get("tasks")).toContain("tasks/typecheck.ts");
+      expect(byScope.get("patterns")).toContain(
+        "packages/patterns/iframe-shared-kanban/guest.ts",
+      );
       // The ui component walk contributes files, none from the outliner.
       const ui = byScope.get("ui") ?? [];
       expect(ui.length).toBeGreaterThan(0);

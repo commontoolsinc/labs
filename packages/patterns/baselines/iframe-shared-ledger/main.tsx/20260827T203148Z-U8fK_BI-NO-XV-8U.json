@@ -1,0 +1,154 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "IframeInputData": {
+        "properties": {
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "categories"
+        ],
+        "type": "object"
+      },
+      "IframeOutputData": {
+        "properties": {
+          "lastInsertedMemo": {
+            "type": "string"
+          },
+          "selectedEntryId": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "selectedEntryId",
+          "lastInsertedMemo"
+        ],
+        "type": "object"
+      },
+      "IframeStateData": {
+        "properties": {
+          "categoryFilter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "categoryFilter"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "input": {
+        "$ref": "#/$defs/IframeInputData"
+      },
+      "output": {
+        "$ref": "#/$defs/IframeOutputData",
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "session"
+          }
+        ]
+      },
+      "state": {
+        "$ref": "#/$defs/IframeStateData",
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "user"
+          }
+        ]
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "iframe-shared-ledger/main.tsx",
+  "resultSchema": {
+    "$defs": {
+      "IframeOutputData": {
+        "properties": {
+          "lastInsertedMemo": {
+            "type": "string"
+          },
+          "selectedEntryId": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "selectedEntryId",
+          "lastInsertedMemo"
+        ],
+        "type": "object"
+      },
+      "IframeStateData": {
+        "properties": {
+          "categoryFilter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "categoryFilter"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "output": {
+        "$ref": "#/$defs/IframeOutputData"
+      },
+      "state": {
+        "$ref": "#/$defs/IframeStateData"
+      }
+    },
+    "required": [
+      "state",
+      "output",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

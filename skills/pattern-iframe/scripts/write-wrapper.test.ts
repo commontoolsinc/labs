@@ -1,5 +1,5 @@
 import { expect } from "@std/expect";
-import { resolve } from "@std/path";
+import { relative, resolve } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 
@@ -92,6 +92,117 @@ export const IFRAME_PATTERN = {
     } finally {
       await removeDirectory(directory);
     }
+  });
+
+  it("reproduces the checked-in multi-user iframe use cases", async () => {
+    const directory = await Deno.makeTempDir({
+      prefix: "pattern-iframe-use-cases-",
+    });
+    const patterns = [
+      "iframe-shared-kanban",
+      "iframe-team-poll",
+      "iframe-highlights-exchange",
+      "iframe-session-checkin",
+      "iframe-shared-ledger",
+    ];
+    try {
+      for (const pattern of patterns) {
+        const source = resolve(ROOT, "packages", "patterns", pattern);
+        const guestSource = await Deno.readTextFile(
+          resolve(source, "guest.ts"),
+        );
+        expect(guestSource).not.toContain('createElement("form")');
+        expect(guestSource).not.toContain('type = "submit"');
+        const generated = resolve(directory, `${pattern}.tsx`);
+        const result = await generate(
+          resolve(source, "contract.ts"),
+          resolve(source, "guest.ts"),
+          generated,
+        );
+        expect(result.code, decoder.decode(result.stderr)).toBe(0);
+        const format = await runDeno(() => ["fmt", generated]);
+        expect(format.code, decoder.decode(format.stderr)).toBe(0);
+        const contract = resolve(source, "contract.ts");
+        const contractImport = relative(directory, contract).replaceAll(
+          "\\",
+          "/",
+        );
+        const normalized = (await Deno.readTextFile(generated)).replace(
+          `from ${JSON.stringify(contractImport)};`,
+          'from "./contract.ts";',
+        );
+        expect(normalized).toBe(
+          await Deno.readTextFile(resolve(source, "main.tsx")),
+        );
+        expect(normalized).not.toMatch(
+          /(^|[^.]|\.\.\.)\bimport(\s*(?:\(|\/[/*]))/,
+        );
+      }
+    } finally {
+      await removeDirectory(directory);
+    }
+  });
+
+  it("initializes a private notebook without replacing existing notes", async () => {
+    const guest = await Deno.readTextFile(
+      resolve(
+        ROOT,
+        "packages",
+        "patterns",
+        "iframe-highlights-exchange",
+        "guest.ts",
+      ),
+    );
+
+    expect(guest).toContain("const current = await state.pull();");
+    expect(guest).toContain(
+      "if (current === undefined) await state.set(DEFAULT_STATE);",
+    );
+    expect(guest).toContain('await state.key("notes").push(');
+    expect(guest).not.toContain(
+      "state.update((current) => current ?? DEFAULT_STATE)",
+    );
+  });
+
+  it("hydrates session drafts before enabling edits", async () => {
+    const guest = await Deno.readTextFile(
+      resolve(
+        ROOT,
+        "packages",
+        "patterns",
+        "iframe-session-checkin",
+        "guest.ts",
+      ),
+    );
+
+    expect(guest).toContain("async function hydrateDrafts()");
+    expect(guest).toContain("mood.disabled = !draftHydrated");
+    expect(guest).toContain("message.disabled = !draftHydrated");
+    expect(guest).toContain("submit.disabled = !draftHydrated");
+    expect(guest).toContain("run(hydrateDrafts());");
+  });
+
+  it("hydrates ledger inputs before adopting user filter updates", async () => {
+    const guest = await Deno.readTextFile(
+      resolve(
+        ROOT,
+        "packages",
+        "patterns",
+        "iframe-shared-ledger",
+        "guest.ts",
+      ),
+    );
+
+    expect(guest).toContain("async function hydrateLedger()");
+    expect(guest).toContain("hydrated = true;");
+    expect(guest).toContain("if (!hydrated) return;");
+    expect(guest).toContain("filter.disabled = !hydrated");
+    expect(guest).toContain("function adoptStoredFilter()");
+    expect(guest).toContain("if (pendingFilter !== undefined) return;");
+    expect(guest).toContain("filterDraft = stored.categoryFilter;");
+    expect(guest).toContain("input.sink(refreshSource)");
+    expect(guest).toContain("state.sink(refreshPreference)");
+    expect(guest).toContain("runRefresh(hydrateLedger());");
   });
 
   it("hides embedded guest tokens from the host module scanner", async () => {
