@@ -177,3 +177,88 @@ describe("link-ifc-read-relevance", () => {
     expect(schemaIfcReadReasons()).toEqual([]);
   });
 });
+
+describe("link-ifc-read-relevance at resolution and handle hops", () => {
+  let storageManager: ReturnType<typeof StorageManager.emulate>;
+  let runtime: Runtime;
+  let tx: IExtendedStorageTransaction;
+  let seq = 0;
+
+  beforeEach(() => {
+    storageManager = StorageManager.emulate({ as: signer });
+    runtime = new Runtime({ apiUrl: new URL(import.meta.url), storageManager });
+    tx = runtime.edit();
+    seq++;
+  });
+
+  afterEach(async () => {
+    await tx.commit();
+    await runtime?.dispose();
+    await storageManager?.close();
+  });
+
+  const linkTo = (cell: Cell<unknown>, schema?: JSONSchema) => {
+    const link = cell.getAsNormalizedFullLink();
+    return linkRefFrom<CellLinkRefPayload>({
+      id: link.id,
+      space: link.space,
+      scope: link.scope,
+      path: [...link.path],
+      ...(schema !== undefined && { schema }),
+    });
+  };
+
+  const hopReasons = () =>
+    tx.getCfcState().diagnostics.filter((reason) =>
+      reason.startsWith("schema-ifc-hop:")
+    );
+
+  it("marks a labeled intermediate link followed by a plain link", () => {
+    const target = runtime.getCell(space, `target-${seq}-chain`, undefined, tx);
+    target.setRaw({ name: "Ada" });
+    const middle = runtime.getCell(space, `middle-${seq}-chain`, undefined, tx);
+    middle.setRaw(linkTo(target));
+    const holder = runtime.getCell<Holder>(
+      space,
+      `holder-${seq}-chain`,
+      readerSchema,
+      tx,
+    );
+    holder.setRaw({ item: linkTo(middle, labeledLinkSchema) } as never);
+
+    expect(holder.key("item").get()).toEqual({ name: "Ada" });
+    expect(tx.getCfcState().relevant).toBe(true);
+    expect(hopReasons().length).toBeGreaterThan(0);
+  });
+
+  it("marks the extra handle hop of a nested asCell crossing", () => {
+    const target = runtime.getCell(
+      space,
+      `target-${seq}-handle`,
+      undefined,
+      tx,
+    );
+    target.setRaw({ name: "Ada" });
+    const holder = runtime.getCell(
+      space,
+      `holder-${seq}-handle`,
+      {
+        type: "object",
+        properties: {
+          item: {
+            type: "object",
+            properties: { name: { type: "string" } },
+            asCell: ["cell"],
+          },
+        },
+      } as const satisfies JSONSchema,
+      tx,
+    );
+    holder.setRaw({ item: linkTo(target, labeledLinkSchema) } as never);
+
+    const value = holder.get() as { item: Cell<{ name: string }> };
+    expect(value.item.get()).toEqual({ name: "Ada" });
+    expect(tx.getCfcState().relevant).toBe(true);
+    expect(hopReasons().length).toBeGreaterThan(0);
+  });
+});

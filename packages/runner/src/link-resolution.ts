@@ -1,4 +1,5 @@
 import { getLogger } from "@commonfabric/utils/logger";
+import { markIfcBearingLinkCrossing } from "./schema-ifc.ts";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import { internSchema } from "@commonfabric/data-model/schema-hash";
 import { isNontrivialSchema } from "@commonfabric/data-model/schema-utils";
@@ -249,6 +250,16 @@ type LinkResolutionRecord = {
   readonly traces: readonly CfcDereferenceTrace[];
 
   /**
+   * The schema-bearing links this walk crossed, so a memoized resolution
+   * can replay the crossing seam's cfc-relevance marking for callers that
+   * opt in (`markIfcCrossings`). Pure data: whether a schema carries `ifc`
+   * is evaluated at mark time (the predicate is memoized), so a cold
+   * external closure neither bakes a stale verdict into this record nor
+   * costs the walk its memoizability.
+   */
+  readonly schemaHops: readonly { id: string; schema: JSONSchema }[];
+
+  /**
    * Hop targets in another space. Their sync kick is unreserved, so it fires on
    * every resolution and a memoized one has to fire it too. A same-space kick
    * is taken against a reservation and fires once whatever happens, so it is
@@ -384,7 +395,17 @@ export function resolveLink(
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   lastNode: LastNode = "value",
-  options: { preserveOverwrite?: boolean; onScopeBlocked?: () => void } = {},
+  options: {
+    preserveOverwrite?: boolean;
+    onScopeBlocked?: () => void;
+    /**
+     * Mark the transaction cfc-relevant for every crossed link whose
+     * stored schema carries `ifc` (the crossing seam,
+     * `markIfcBearingLinkCrossing`). Read entry points opt in; write-path
+     * resolutions leave relevance to the write-policy gate.
+     */
+    markIfcCrossings?: boolean;
+  } = {},
 ): ResolvedFullLink {
   return resolveLinkTracingDereferences(runtime, tx, link, lastNode, options)
     .link;
@@ -413,7 +434,17 @@ export function resolveLinkTracingDereferences(
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   lastNode: LastNode = "value",
-  options: { preserveOverwrite?: boolean; onScopeBlocked?: () => void } = {},
+  options: {
+    preserveOverwrite?: boolean;
+    onScopeBlocked?: () => void;
+    /**
+     * Mark the transaction cfc-relevant for every crossed link whose
+     * stored schema carries `ifc` (the crossing seam,
+     * `markIfcBearingLinkCrossing`). Read entry points opt in; write-path
+     * resolutions leave relevance to the write-policy gate.
+     */
+    markIfcCrossings?: boolean;
+  } = {},
 ): {
   link: ResolvedFullLink;
   traces: readonly CfcDereferenceTrace[];
@@ -430,6 +461,11 @@ export function resolveLinkTracingDereferences(
   const cached = memo?.get(memoKey) as LinkResolutionRecord | undefined;
   if (cached !== undefined) {
     for (const trace of cached.traces) tx.recordCfcDereferenceTrace(trace);
+    if (options.markIfcCrossings === true) {
+      for (const hop of cached.schemaHops) {
+        markIfcBearingLinkCrossing(tx, hop.schema, hop.id);
+      }
+    }
     for (const target of cached.crossSpaceTargets) {
       kickDocPull(runtime, target, false);
     }
@@ -444,6 +480,7 @@ export function resolveLinkTracingDereferences(
 
   const seen = new Set<string>();
   const traces: CfcDereferenceTrace[] = [];
+  const schemaHops: { id: string; schema: JSONSchema }[] = [];
   const crossSpaceTargets: NormalizedFullLink[] = [];
   // A resolution is memoized only when replaying `traces` and
   // `crossSpaceTargets` reproduces everything it left behind. A blocked follow
@@ -631,6 +668,12 @@ export function resolveLinkTracingDereferences(
       }
       traces.push(recordDereferenceHop(tx, nextHop));
       followedHop = true;
+      // The crossing seam's data: schema-bearing hops are collected as-is
+      // and evaluated at mark time below (and on memo hits), for callers
+      // that opt in.
+      if (nextHop.link.schema !== undefined) {
+        schemaHops.push({ id: nextHop.link.id, schema: nextHop.link.schema });
+      }
       const nextLink = nextHop.link;
       const crossSpace = nextLink.space !== link.space;
       // The hop consumed `nextHop.depth` of our path and re-rooted the rest
@@ -737,9 +780,16 @@ export function resolveLinkTracingDereferences(
       {
         result: { ...result },
         traces,
+        schemaHops,
         crossSpaceTargets,
       } satisfies LinkResolutionRecord,
     );
+  }
+
+  if (options.markIfcCrossings === true) {
+    for (const hop of schemaHops) {
+      markIfcBearingLinkCrossing(tx, hop.schema, hop.id);
+    }
   }
 
   // The casting is a workaround for the branding, we don't actually want to add

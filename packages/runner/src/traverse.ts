@@ -59,7 +59,7 @@ import {
   registerSchemaDocument,
 } from "./schema-registry.ts";
 import { getReaderSchemaPrecedenceConfig } from "./reader-schema-precedence-config.ts";
-import { schemaHasIfc } from "./schema-ifc.ts";
+import { markIfcBearingLinkCrossing, schemaHasIfc } from "./schema-ifc.ts";
 import type {
   CellScope,
   JSONObject,
@@ -2356,14 +2356,6 @@ function followPointer(
   // doc.address's path doesn't have the same value nesting semantics as
   // link path, but we don't use the path field from that argument.
   let link = parseLink(doc.value, doc.address)!;
-  // A crossing's stored schema can carry flow-control marking that the
-  // combined selector will not (reader precedence keeps a shaped reader's
-  // schema free of it), so cfc relevance is marked at the hop itself. The
-  // predicate is memoized; unlabeled links (the common case) cost one
-  // cached lookup.
-  if (link.schema !== undefined && schemaHasIfc(link.schema)) {
-    tx.markCfcRelevant(`schema-ifc-hop:${link.id}`);
-  }
   // We may access portions of the doc outside what we have in our doc
   // attestation, so set the target to the top level doc from the manager.
   const target: IMemorySpaceValueAddress = {
@@ -2395,6 +2387,9 @@ function followPointer(
       link = { ...link, schema: false };
     }
   }
+  // The crossing's own marking runs after the registration above, so a
+  // cold external closure is resolvable when the predicate walks it.
+  markIfcBearingLinkCrossing(tx, link.schema, link.id);
   const schemaScope = schemaScopeForSelector(selector);
   if (!canFollowScopedLink(schemaScope, link.scope)) {
     // A broader-scoped read context cannot follow a link into a narrower scope
@@ -4873,7 +4868,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         const isLink = isSigilLink(curDoc.value);
         if (isLink) this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
         const cellLink = isLink
-          ? getNextCellLink(curDoc, curSelector.schema!)
+          ? getNextCellLink(this.tx, curDoc, curSelector.schema!)
           : getNormalizedLink(curDoc.address, curSelector.schema);
         const val = this.objectCreator.createObject(cellLink, undefined);
         arrayObj[index] = val;
@@ -5108,7 +5103,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     // This means we don't follow any redirects
     const asCellValues = ContextualFlowControl.getAsCellValues(schema);
     if (ContextualFlowControl.getAsCellKind(asCellValues.at(0)) === "opaque") {
-      const cellLink = getNextCellLink(doc, schema);
+      const cellLink = getNextCellLink(this.tx, doc, schema);
       return { ok: this.objectCreator.createObject(cellLink, undefined) };
     }
 
@@ -5190,7 +5185,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       if (isSigilLink(redirDoc.value)) {
         this.tx.read(redirDoc.address, READ_FOR_SCHEDULING);
       }
-      const cellLink = getNextCellLink(redirDoc, combinedSchema);
+      const cellLink = getNextCellLink(this.tx, redirDoc, combinedSchema);
       logger.debug(
         "traverse",
         () => ["Next cell link:", {
@@ -5613,6 +5608,7 @@ function _mergeAnyOfBranchSchemasUncached(
  *   information that we should use for the cell.
  */
 function getNextCellLink(
+  tx: IExtendedStorageTransaction,
   doc: IMemorySpaceValueAttestation,
   schema: JSONSchema,
 ): NormalizedFullLink {
@@ -5621,6 +5617,9 @@ function getNextCellLink(
   // that location, so we effectively follow one more link if available.
   const lastLink = parseLink(doc.value, doc.address);
   if (lastLink !== undefined) {
+    // This extra hop bypasses followPointer, so it carries the crossing
+    // seam itself.
+    markIfcBearingLinkCrossing(tx, lastLink.schema, lastLink.id);
     // The link may not have the asCell flags, so pull that from itemSchema.
     // Reader precedence, like every other crossing: the handle must not
     // carry the link's wider schema past the reader's.

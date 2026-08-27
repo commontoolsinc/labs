@@ -126,3 +126,26 @@ function _schemaHasIfcUncached(
       _schemaHasIfcUncached(child, childFullSchema, context),
   );
 }
+
+/**
+ * The shared "actual link crossing" seam: marks `tx` cfc-relevant when the
+ * link being crossed carries flow-control marking in its stored schema.
+ * Reader precedence keeps a shaped reader's combined schema free of the
+ * link's `ifc`, so the marking lives at the crossing rather than on the
+ * combination's output. Call AFTER any external schema-document
+ * registration for the schema (`loadExternalSchemaDocs` in traverse.ts),
+ * so a cold `cid:` closure is resolvable when the walk consults it; a
+ * closure still absent reads as unlabeled this pass, stays uncached (the
+ * resolution-miss guard), and marks on the re-triggered pass that follows
+ * the documents' arrival. The predicate is memoized; unlabeled links (the
+ * common case) cost one cached lookup.
+ */
+export function markIfcBearingLinkCrossing(
+  tx: { markCfcRelevant(reason?: string): void },
+  linkSchema: JSONSchema | undefined,
+  linkId: string,
+): void {
+  if (linkSchema !== undefined && schemaHasIfc(linkSchema)) {
+    tx.markCfcRelevant(`schema-ifc-hop:${linkId}`);
+  }
+}

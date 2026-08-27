@@ -1090,7 +1090,12 @@ export function validateAndTransform(
   // When we generate cells below, we want them to be based off this value, as that
   // is what a setter would change when they update a value or reference.
   const writeRedirectTraceStart = tx.getCfcState().dereferenceTraces.length;
-  const resolvedLink = resolveLink(runtime, tx, link, "writeRedirect");
+  // Read entry: opt into the crossing seam, so every labeled hop this
+  // resolution crosses marks the transaction cfc-relevant (write-path
+  // resolutions leave relevance to the write-policy gate).
+  const resolvedLink = resolveLink(runtime, tx, link, "writeRedirect", {
+    markIfcCrossings: true,
+  });
   cfcLabelView = mergeCfcLabelViews([
     cfcLabelView,
     deriveDereferenceLabelView(
@@ -1155,7 +1160,9 @@ export function validateAndTransform(
   // We'll use this for the value, and potentially merge the schema
   // This gets me the result of following all the links, so I can get the value
   const valueTraceStart = tx.getCfcState().dereferenceTraces.length;
-  const resolvedValueLink = resolveLink(runtime, tx, link);
+  const resolvedValueLink = resolveLink(runtime, tx, link, "value", {
+    markIfcCrossings: true,
+  });
   cfcLabelView = mergeCfcLabelViews([
     cfcLabelView,
     deriveDereferenceLabelView(

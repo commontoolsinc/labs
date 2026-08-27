@@ -612,6 +612,12 @@ export type InitializationData = {
     // materialized in the carrying transaction (content-addressed schemas
     // Phase 1). Default on; an explicit false is the rollback override.
     contentAddressedSchemas?: boolean;
+    // Link crossings resolve schemas by reader precedence
+    // (combineSchemaForLink). Server-authoritative: the host declares the
+    // deployment's posture so the worker resolves hops under the same
+    // combine rule as the server that ships its subscriptions. Default on;
+    // an explicit false is the rollback override.
+    readerSchemaPrecedence?: boolean;
   };
   // Commit-boundary CFC mode for the worker runtime.
   cfcEnforcementMode?:

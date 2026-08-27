@@ -557,8 +557,12 @@ Still unbuilt, and recorded in the plan: handlers materialize eagerly.
 
 - **Toggle via.** `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` environment variable
   (through the canonical env registry) or
-  `RuntimeOptions.experimental.readerSchemaPrecedence`. The ambient control
-  point is
+  `RuntimeOptions.experimental.readerSchemaPrecedence`; browser-side via the
+  shell build define of the same name
+  ([`packages/shell/felt.config.ts`](../../packages/shell/felt.config.ts) /
+  [`packages/shell/src/lib/env.ts`](../../packages/shell/src/lib/env.ts)),
+  declared to the worker through the typed initialization posture so the two
+  realms cannot diverge. The ambient control point is
   [`packages/runner/src/reader-schema-precedence-config.ts`](../../packages/runner/src/reader-schema-precedence-config.ts).
   Server-authoritative in `EXPERIMENTAL_FLAG_AUTHORITY`: a server publishes
   its resolved posture at `/api/meta` and a deployed client adopts it (an

@@ -9,6 +9,7 @@ declare global {
   var $EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE: string | undefined;
   var $EXPERIMENTAL_SERVER_EXECUTION: string | undefined;
   var $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS: string | undefined;
+  var $EXPERIMENTAL_READER_SCHEMA_PRECEDENCE: string | undefined;
 }
 
 const ENVIRONMENT_DEFINE = typeof $ENVIRONMENT === "string"
@@ -38,6 +39,11 @@ const EXPERIMENTAL_SERVER_EXECUTION_DEFINE =
 const EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS_DEFINE =
   typeof $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS === "string"
     ? $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS
+    : undefined;
+
+const EXPERIMENTAL_READER_SCHEMA_PRECEDENCE_DEFINE =
+  typeof $EXPERIMENTAL_READER_SCHEMA_PRECEDENCE === "string"
+    ? $EXPERIMENTAL_READER_SCHEMA_PRECEDENCE
     : undefined;
 
 export const ENVIRONMENT: "development" | "production" =
@@ -82,5 +88,14 @@ export const EXPERIMENTAL = {
   // a shell that emits inline schemas again).
   contentAddressedSchemas: flagValue(
     EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS_DEFINE,
+  ),
+  // Reader precedence at link crossings. On by default in the runner; the
+  // define is the rollback override
+  // (`EXPERIMENTAL_READER_SCHEMA_PRECEDENCE=false` bakes a shell whose
+  // worker runs the strict combine, matching a server deployed with the
+  // same env — the flag is server-authoritative and both sides must
+  // resolve hops under one rule).
+  readerSchemaPrecedence: flagValue(
+    EXPERIMENTAL_READER_SCHEMA_PRECEDENCE_DEFINE,
   ),
 };
