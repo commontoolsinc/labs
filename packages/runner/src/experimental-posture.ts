@@ -194,6 +194,12 @@ export const ADOPT_SERVER_FLAGS_ENV = "CF_ADOPT_SERVER_FLAGS";
  * coerced. Neither is grounds for refusing to run — a client that cannot read
  * the posture keeps its built-in defaults, which is what it did before the
  * server published anything at all.
+ *
+ * The one asymmetry is `readerSchemaPrecedence`: a pre-flag document shape —
+ * a posture record without the field, or a meta document with no
+ * `experimental` field at all — reads as the legacy declared `false`, since
+ * such a server necessarily runs the strict combine (the in-function comment
+ * draws the full line, `experimental: null` included).
  */
 export function parseServerExperimentalOptions(
   declared: unknown,
@@ -238,8 +244,11 @@ export function parseServerExperimentalOptions(
  *    it would leave neither mechanism working;
  * 2. otherwise a `"server"` flag takes the published value;
  * 3. otherwise the flag stays unset and the built-in default governs, which
- *    is exactly what an old server, an unreachable one, or a `"client"` flag
- *    leaves behind.
+ *    is exactly what an unreachable server or a `"client"` flag leaves
+ *    behind. An OLD server is not that case for `readerSchemaPrecedence`:
+ *    {@link parseServerExperimentalOptions} reads a pre-flag posture's
+ *    silence on it as the legacy declared `false`, so rule 2 adopts it as a
+ *    published value.
  */
 export function adoptServerExperimentalOptions(
   server: ExperimentalOptions,

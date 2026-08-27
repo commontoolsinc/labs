@@ -395,11 +395,16 @@ content-addressed — a hash registered from any space serves every space's
 check without a read, which is sound because equal hashes name equal bytes.
 Only a document the registry does not hold is read in the referrer space:
 that read is tracked, and when the document is also locally absent the
-delivery channel is asked for it, so its arrival re-runs the reader. Link
-resolution loads the same closure before narrowing a stored schema across
-an ancestor hop; a closure it cannot complete fails soft — the hop carries
-no narrowed schema that pass and the resolution is not memoized, so the
-arrival re-narrows. A resolution that reads marks even on a write path:
+delivery channel is asked for it, so its arrival re-runs the reader. A
+closure that cannot be completed fails the crossing CLOSED: the absent
+document may carry flow-control labels this replica cannot see yet, so
+the crossing reads as not found — the traversal returns not-found at the
+pointer, an asCell boundary mints no handle, and a content-reading link
+resolution resolves to undefined data, unmemoized — until the documents
+arrive and the re-run resolves for real. Link resolution loads the same
+closure before narrowing a stored schema across an ancestor hop, skipping
+the narrowing (rather than throwing on the dangling ref) when it is
+incomplete; the fail-closed rule then decides the result. A resolution that reads marks even on a write path:
 `set()`'s pre-write resolution reads the resolved terminal value (the
 stream check), so it opts in, and a transaction it marks relevant must be
 prepared before commit, as every runtime-owned commit path already does.

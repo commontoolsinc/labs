@@ -379,6 +379,99 @@ describe("link-ifc-read-relevance closure, narrowing, and raw readers", () => {
     expect(hopReasons().length).toBeGreaterThan(0);
   });
 
+  const labeledCidSchema = () => {
+    const labeled = {
+      type: "object",
+      properties: { name: { type: "string" } },
+      ifc: { confidentiality: ["confidential"] },
+    } as const satisfies JSONSchema;
+    return decomposeSchema(labeled as JSONSchemaObj);
+  };
+
+  const writeClosureDocs = (
+    decomposed: ReturnType<typeof decomposeSchema>,
+  ) => {
+    for (const [hash, doc] of decomposed.documents) {
+      tx.writeValueOrThrow(
+        {
+          space,
+          id: `cid:${hash}`,
+          scope: "space",
+          path: [],
+        } as unknown as Parameters<typeof tx.writeValueOrThrow>[0],
+        doc,
+      );
+    }
+  };
+
+  it("resolves an eager read as not found until a cold schema closure arrives", () => {
+    const decomposed = labeledCidSchema();
+    // The closure documents are NOT local yet: the stored schema may carry
+    // labels this replica cannot see, so the crossing fails closed — no
+    // content, no relevance, until the documents arrive.
+    const holder = holderOver({ $ref: decomposed.rootRef });
+
+    expect(holder.get()?.item?.name).toBeUndefined();
+    expect(tx.getCfcState().relevant).toBe(false);
+
+    writeClosureDocs(decomposed);
+    expect(holder.get()).toEqual({ item: { name: "Ada" } });
+    expect(tx.getCfcState().relevant).toBe(true);
+    expect(hopReasons().length).toBeGreaterThan(0);
+  });
+
+  it("resolves a descendant read as not found until a cold schema closure arrives", () => {
+    const decomposed = labeledCidSchema();
+    const holder = holderOver({ $ref: decomposed.rootRef });
+
+    expect(holder.key("item").key("name").get()).toBeUndefined();
+    expect(tx.getCfcState().relevant).toBe(false);
+
+    writeClosureDocs(decomposed);
+    expect(holder.key("item").key("name").get()).toEqual("Ada");
+    expect(tx.getCfcState().relevant).toBe(true);
+    expect(hopReasons().length).toBeGreaterThan(0);
+  });
+
+  it("resolves a raw read as not found until a cold schema closure arrives", () => {
+    const decomposed = labeledCidSchema();
+    const holder = holderOver({ $ref: decomposed.rootRef });
+
+    expect(holder.key("item").key("name").getRaw()).toBeUndefined();
+    expect(tx.getCfcState().relevant).toBe(false);
+
+    writeClosureDocs(decomposed);
+    expect(holder.key("item").key("name").getRaw()).toEqual("Ada");
+    expect(tx.getCfcState().relevant).toBe(true);
+    expect(hopReasons().length).toBeGreaterThan(0);
+  });
+
+  it("mints no asCell handle over a crossing whose schema closure is cold", () => {
+    const decomposed = labeledCidSchema();
+    const holder = holderOver({ $ref: decomposed.rootRef });
+    const asCellReader = holder.asSchema<{ item?: Cell<{ name: string }> }>({
+      type: "object",
+      properties: {
+        item: {
+          type: "object",
+          properties: { name: { type: "string" } },
+          asCell: ["cell"],
+        },
+      },
+    });
+
+    // The handle hop consumed the crossing, so a handle minted here would
+    // hand its reads out from under the schema's labels: none is minted.
+    expect(asCellReader.get()?.item).toBeUndefined();
+    expect(tx.getCfcState().relevant).toBe(false);
+
+    writeClosureDocs(decomposed);
+    const handle = asCellReader.get()?.item;
+    expect(handle?.get()).toEqual({ name: "Ada" });
+    expect(tx.getCfcState().relevant).toBe(true);
+    expect(hopReasons().length).toBeGreaterThan(0);
+  });
+
   it("marks a root-level ifc declaration narrowed away by an ancestor hop", () => {
     const rootLabeled = {
       type: "object",

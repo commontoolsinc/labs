@@ -676,6 +676,12 @@ describe("combineSchemaForLink reader precedence", () => {
       });
   });
 
+  it("interns the default-carrying adoption so repeated crossings share one schema", () => {
+    const reader = { default: { name: "seed" } } as const satisfies JSONSchema;
+    const first = combineSchemaForLink(reader, linkContactSchema);
+    expect(combineSchemaForLink(reader, linkContactSchema)).toBe(first);
+  });
+
   it("takes the later link's default across two hops", () => {
     const firstLink = {
       ...linkContactSchema,

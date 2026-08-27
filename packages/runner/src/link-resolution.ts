@@ -487,24 +487,38 @@ export function resolveLinkTracingDereferences(
   ) + addressKey;
   const cached = memo?.get(memoKey) as LinkResolutionRecord | undefined;
   if (cached !== undefined) {
-    for (const trace of cached.traces) tx.recordCfcDereferenceTrace(trace);
+    // The marking replay doubles as the policy-knowability check: a hop
+    // whose stored schema closure is not locally complete may carry
+    // flow-control labels this replica cannot see yet, so the cached
+    // result must not be served (an unmarked caller memoized this walk,
+    // or the registry lost the documents since). Fall through to a fresh
+    // walk, which fails the same crossing closed; the entry stays for
+    // when the documents arrive.
+    let policyKnown = true;
     if (options.markIfcCrossings === true) {
       for (const hop of cached.schemaHops) {
-        markIfcBearingLinkCrossing(tx, hop.space, hop.schema, hop.id, {
-          onMissingDocument: kickMissingSchemaDoc,
-        });
+        policyKnown = markIfcBearingLinkCrossing(
+          tx,
+          hop.space,
+          hop.schema,
+          hop.id,
+          { onMissingDocument: kickMissingSchemaDoc },
+        ) && policyKnown;
       }
     }
-    for (const target of cached.crossSpaceTargets) {
-      kickDocPull(runtime, target, false);
+    if (policyKnown) {
+      for (const trace of cached.traces) tx.recordCfcDereferenceTrace(trace);
+      for (const target of cached.crossSpaceTargets) {
+        kickDocPull(runtime, target, false);
+      }
+      return {
+        // A copy, so a caller that mutates what it got back cannot reach
+        // into the entry the next resolution will serve.
+        link: { ...cached.result } as unknown as ResolvedFullLink,
+        traces: cached.traces,
+        memoKey,
+      };
     }
-    return {
-      // A copy, so a caller that mutates what it got back cannot reach into
-      // the entry the next resolution will serve.
-      link: { ...cached.result } as unknown as ResolvedFullLink,
-      traces: cached.traces,
-      memoKey,
-    };
   }
 
   const seen = new Set<string>();
@@ -805,6 +819,32 @@ export function resolveLinkTracingDereferences(
     }
   }
 
+  // The crossing seam, and with it the fail-closed rule: a content-reading
+  // resolution (the callers that opt in) whose crossed stored schema has an
+  // incomplete external closure resolves as undefined data — the schema may
+  // carry flow-control labels this replica cannot see yet, so no content is
+  // served under an unknowable policy. Unmemoized: the closure loader's
+  // tracked reads and the delivery kick re-run the reader when the
+  // documents arrive, and that pass resolves for real.
+  if (options.markIfcCrossings === true) {
+    for (const hop of schemaHops) {
+      const known = markIfcBearingLinkCrossing(
+        tx,
+        hop.space,
+        hop.schema,
+        hop.id,
+        {
+          onMissingDocument: kickMissingSchemaDoc,
+        },
+      );
+      if (!known) {
+        memoizable = false;
+        link = undefinedDataLink(link);
+        break;
+      }
+    }
+  }
+
   const result = { ...link } satisfies NormalizedFullLink;
   // Clear the input's stale `pendingHopDoc` before deciding this walk's own
   // (Finding 2): a successful walk that followed no hop spreads the input's
@@ -844,14 +884,6 @@ export function resolveLinkTracingDereferences(
         crossSpaceTargets,
       } satisfies LinkResolutionRecord,
     );
-  }
-
-  if (options.markIfcCrossings === true) {
-    for (const hop of schemaHops) {
-      markIfcBearingLinkCrossing(tx, hop.space, hop.schema, hop.id, {
-        onMissingDocument: kickMissingSchemaDoc,
-      });
-    }
   }
 
   // The casting is a workaround for the branding, we don't actually want to add

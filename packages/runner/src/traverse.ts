@@ -1862,8 +1862,10 @@ export abstract class BaseObjectTraverser {
         const [valueDoc, _] = this.getDocAtPath(redirDoc, [], DEFAULT_SELECTOR);
         this.tx.read(valueDoc.address, READ_FOR_SCHEDULING);
         // Same entry gate as followPointer: a link schema whose document
-        // closure this space does not hold selects nothing (the delivery
-        // guarantee) — the loader's tracked reads re-run this on arrival.
+        // closure this space does not hold may carry flow-control labels
+        // this replica cannot see yet, so the crossing fails closed — the
+        // target reads as not found until the documents arrive. The
+        // loader's tracked reads re-run this on arrival.
         const linkSchemaCollected = link?.schema === undefined ||
           loadExternalSchemaDocs(
             this.tx,
@@ -1871,9 +1873,10 @@ export abstract class BaseObjectTraverser {
             link.schema,
             this.context,
           );
+        if (!linkSchemaCollected) return null;
         return this.traverseLinkedDoc(
           valueDoc,
-          linkSchemaCollected ? link?.schema : false,
+          link?.schema,
           defaultValue,
           itemLink,
         );
@@ -2366,9 +2369,12 @@ function followPointer(
   };
   // A link schema carrying external refs needs its schema documents loaded
   // before the narrowing below consults it — and a schema whose closure
-  // this space does not hold must not select data here (the delivery
-  // guarantee): narrow with a false schema instead, which selects nothing.
-  // The loader's reads are tracked, so the documents' arrival re-runs this.
+  // this space does not hold may carry flow-control labels this replica
+  // cannot see yet, so the crossing fails CLOSED: the target reads as not
+  // found until the documents arrive. (A lower-precedence stand-in schema
+  // would not do it — under reader precedence a shaped reader ignores the
+  // link schema entirely.) The loader's reads are tracked, so the
+  // documents' arrival re-runs this.
   if (link.schema !== undefined) {
     const collected = loadExternalSchemaDocs(
       tx,
@@ -2379,10 +2385,10 @@ function followPointer(
     if (!collected) {
       logger.warn("traverse", () => [
         "Link schema references documents this space does not hold; " +
-        "selecting nothing until they arrive:",
+        "resolving as not found until they arrive:",
         doc.address,
       ]);
-      link = { ...link, schema: false };
+      return [notFound(target), selector];
     }
   }
   // The crossing's own marking runs after the registration above, so a
@@ -4894,8 +4900,25 @@ export class SchemaObjectTraverser<V extends FabricValue>
               ),
           )
           : getNormalizedLink(curDoc.address, curSelector.schema);
-        const val = this.objectCreator.createObject(cellLink, undefined);
-        arrayObj[index] = val;
+        if (cellLink === undefined) {
+          // The element's crossing has an unknowable policy (cold schema
+          // closure): the whole array reads as not found until the
+          // documents arrive, matching the mismatch arm below.
+          logger.info(
+            "traverse",
+            () => [
+              "Array element's link schema closure is not local — voiding the whole array read until it arrives",
+              `index=${index}`,
+              curDoc.address,
+            ],
+          );
+          valid = false;
+        } else {
+          arrayObj[index] = this.objectCreator.createObject(
+            cellLink,
+            undefined,
+          );
+        }
       } else {
         // We want those links to point directly at the linked cells, instead
         // of using our path (e.g. ["items", "0"]), so don't pass in a
@@ -5134,6 +5157,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
         (docLink) =>
           this.context.onMissingLinkTarget?.(docLink, doc.address.space),
       );
+      // Unknowable crossing policy (cold schema closure): not found until
+      // the documents arrive.
+      if (cellLink === undefined) {
+        return fail(TRAVERSE_FAILURES.schemaRefResolution);
+      }
       return { ok: this.objectCreator.createObject(cellLink, undefined) };
     }
 
@@ -5222,6 +5250,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
         (docLink) =>
           this.context.onMissingLinkTarget?.(docLink, redirDoc.address.space),
       );
+      // Unknowable crossing policy (cold schema closure): not found until
+      // the documents arrive.
+      if (cellLink === undefined) {
+        return fail(TRAVERSE_FAILURES.schemaRefResolution);
+      }
       logger.debug(
         "traverse",
         () => ["Next cell link:", {
@@ -5648,21 +5681,26 @@ function getNextCellLink(
   doc: IMemorySpaceValueAttestation,
   schema: JSONSchema,
   onMissingDocument?: (link: NormalizedFullLink) => void,
-): NormalizedFullLink {
+): NormalizedFullLink | undefined {
   // For my cell link, itemLink currently points to the last redirect
   // target, but we want cell properties to be based on the link value at
   // that location, so we effectively follow one more link if available.
   const lastLink = parseLink(doc.value, doc.address);
   if (lastLink !== undefined) {
     // This extra hop bypasses followPointer, so it carries the crossing
-    // seam itself.
-    markIfcBearingLinkCrossing(
+    // seam itself. An unknowable policy — the stored schema's closure is
+    // not locally complete — fails the crossing closed: no handle is
+    // minted (`undefined`), since this hop consumed the crossing and a
+    // handle would hand its reads out from under the schema's labels. The
+    // seam's tracked reads re-run the caller when the documents arrive.
+    const policyKnown = markIfcBearingLinkCrossing(
       tx,
       doc.address.space,
       lastLink.schema,
       lastLink.id,
       { onMissingDocument },
     );
+    if (!policyKnown) return undefined;
     // The link may not have the asCell flags, so pull that from itemSchema.
     // Reader precedence, like every other crossing: the handle must not
     // carry the link's wider schema past the reader's.

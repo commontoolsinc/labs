@@ -252,6 +252,14 @@ export function ensureExternalSchemaClosure(
  * reader, which marks on that pass (the predicate's resolution-miss guard
  * keeps the cold verdict uncached). The predicate is memoized; unlabeled
  * links (the common case) cost one cached lookup.
+ *
+ * Returns whether the crossing's policy is KNOWABLE: `true` when the
+ * schema's closure is locally complete (or it has none), `false` when a
+ * closure document is absent — the schema may carry flow-control labels
+ * this replica cannot see yet, so the caller MUST fail the crossing
+ * closed (resolve or traverse it as not found) rather than serve content
+ * whose policy is not yet known. What is visible of a partial schema
+ * still marks, conservatively.
  */
 export function markIfcBearingLinkCrossing(
   tx: IExtendedStorageTransaction,
@@ -262,10 +270,11 @@ export function markIfcBearingLinkCrossing(
     /** See {@link ensureExternalSchemaClosure}. */
     onMissingDocument?: (link: NormalizedFullLink) => void;
   } = {},
-): void {
-  if (linkSchema === undefined) return;
-  ensureExternalSchemaClosure(tx, space, linkSchema, options);
+): boolean {
+  if (linkSchema === undefined) return true;
+  const complete = ensureExternalSchemaClosure(tx, space, linkSchema, options);
   if (schemaHasIfc(linkSchema)) {
     tx.markCfcRelevant(`schema-ifc-hop:${linkId}`);
   }
+  return complete;
 }

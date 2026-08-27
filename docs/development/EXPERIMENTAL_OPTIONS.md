@@ -68,8 +68,8 @@ These flags make up the `ExperimentalOptions` interface in
 [`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts). They
 are passed as `new Runtime({ experimental: { ... } })`. Each flag defaults to
 `undefined`, which means "take the built-in default". `commitPreconditions`,
-`plainResultReceipts`, `computedCellIds`, `lazyMaterialization` and
-`readerSchemaPrecedence` default on;
+`contentAddressedSchemas`, `plainResultReceipts`, `computedCellIds`,
+`lazyMaterialization` and `readerSchemaPrecedence` default on;
 `serverExecution` resolves an unset flag to the ONE first-party default
 `SERVER_EXECUTION_DEFAULT_ENABLED` in the deployed-topology presets — `false`
 today, Phase 7 having landed flip-ready DARK (its section); the other flags in
@@ -1550,11 +1550,13 @@ design docs).
 
 The Category 1 flags are declared as the `ExperimentalOptions` interface in
 [`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts). The
-`Runtime` constructor merges the provided flags with the built-in defaults
-(`commitPreconditions`, `plainResultReceipts`, and `computedCellIds` true, the
-other Category 1 flags false), propagates each one to its ambient control point,
-and then reads the effective state back so that `runtime.experimental.*`
-reflects what is actually in effect.
+`Runtime` constructor merges the provided flags with the built-in defaults —
+the per-flag defaults live in the summary table above and each flag's
+section, not in a second list here — propagates each one to its ambient
+control point, and then reads the effective state back so that
+`runtime.experimental.*` reflects what is actually in effect
+(`readerSchemaPrecedence`'s read-back is a live getter over the ambient
+claim state).
 
 First-party construction config is centralized in
 [`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts),
@@ -1584,8 +1586,14 @@ server](#clients-that-are-not-built-alongside-their-server).
 - Only one set of experimental flags is active per JavaScript context at a time.
 - In the browser the web worker is a separate JavaScript context, so its flags
   are independent of the main thread.
-- Creating a new `Runtime` overwrites the ambient config; disposing it resets to
-  the defaults.
+- For most flags, creating a new `Runtime` overwrites the ambient config and
+  disposing it resets to the defaults. The exceptions are the OWNED claims:
+  `serverExecution`'s enabler and `readerSchemaPrecedence`'s rollback
+  disabler are refcounted per Runtime — acquired at construction, released
+  by that runtime's dispose (or its throwing construction) — so a co-hosted
+  runtime's dispose cannot lift another's live claim, and a construction
+  that conflicts with a live claim loses to it with a warning rather than
+  overwriting it.
 
 ---
 

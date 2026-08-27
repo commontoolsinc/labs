@@ -1,0 +1,112 @@
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+
+import type { MemorySpace } from "@commonfabric/memory/interface";
+
+import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
+import { decomposeSchema } from "../src/schema-decompose.ts";
+import { ensureExternalSchemaClosure } from "../src/schema-ifc.ts";
+import type { NormalizedFullLink } from "../src/link-utils.ts";
+import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+
+const space = "did:key:zSchemaIfcClosureUnit" as MemorySpace;
+
+// Each test decomposes a schema of its own, keyed by a property name unique
+// to the test: the schema-document registry is realm-global, so a hash
+// another test already registered would short-circuit the read arm under
+// test.
+const uniqueExternal = (tag: string) => {
+  const decomposed = decomposeSchema(
+    {
+      type: "object",
+      properties: { [tag]: { type: "string" } },
+    } as unknown as JSONSchemaObj,
+  );
+  return {
+    ref: { $ref: decomposed.rootRef } as JSONSchema,
+    documents: decomposed.documents,
+  };
+};
+
+const txReading = (
+  read: () => unknown,
+): IExtendedStorageTransaction => ({
+  read,
+} as unknown as IExtendedStorageTransaction);
+
+describe("schema-ifc", () => {
+  describe("ensureExternalSchemaClosure", () => {
+    it("reports a closure with no external refs complete without reading", () => {
+      const tx = txReading(() => {
+        throw new Error("no read expected");
+      });
+      expect(
+        ensureExternalSchemaClosure(tx, space, {
+          type: "object",
+          properties: { name: { type: "string" } },
+        }),
+      ).toBe(true);
+    });
+
+    it("requests a not-found closure document and reports the closure incomplete", () => {
+      const { ref } = uniqueExternal("closure-unit-not-found");
+      const misses: string[] = [];
+      const tx = txReading(() => ({ error: { name: "NotFoundError" } }));
+
+      const complete = ensureExternalSchemaClosure(tx, space, ref, {
+        onMissingDocument: (link: NormalizedFullLink) => misses.push(link.id),
+      });
+
+      expect(complete).toBe(false);
+      expect(misses).toHaveLength(1);
+      expect(misses[0].startsWith("cid:")).toBe(true);
+    });
+
+    it("reports a read error incomplete without requesting delivery", () => {
+      const { ref } = uniqueExternal("closure-unit-read-error");
+      const misses: string[] = [];
+      const tx = txReading(() => ({ error: { name: "ConnectionError" } }));
+
+      const complete = ensureExternalSchemaClosure(tx, space, ref, {
+        onMissingDocument: (link: NormalizedFullLink) => misses.push(link.id),
+      });
+
+      expect(complete).toBe(false);
+      expect(misses).toHaveLength(0);
+    });
+
+    it("reports a document that is not a schema document incomplete", () => {
+      const { ref } = uniqueExternal("closure-unit-not-a-doc");
+      const tx = txReading(() => ({ ok: { value: "not a schema document" } }));
+
+      expect(ensureExternalSchemaClosure(tx, space, ref)).toBe(false);
+    });
+
+    it("registers nothing for a forged document and reports it incomplete", () => {
+      const { ref } = uniqueExternal("closure-unit-forged");
+      // A document whose content does not hash to its id: the register step
+      // throws and the loader neither registers nor recurses into it.
+      const tx = txReading(() => ({
+        ok: { value: { value: { type: "number" } } },
+      }));
+
+      expect(ensureExternalSchemaClosure(tx, space, ref)).toBe(false);
+    });
+
+    it("completes over documents the transaction serves", () => {
+      const { ref, documents } = uniqueExternal("closure-unit-served");
+      const byId = new Map(
+        [...documents].map(([hash, doc]) => [`cid:${hash}`, doc]),
+      );
+      // Stored closure documents read back as `{ value: <document> }`, the
+      // shape a path-[] write leaves behind.
+      const tx = {
+        read: (address: { id: string }) => ({
+          ok: { value: { value: byId.get(address.id) } },
+        }),
+      } as unknown as IExtendedStorageTransaction;
+
+      expect(ensureExternalSchemaClosure(tx, space, ref)).toBe(true);
+    });
+  });
+});
