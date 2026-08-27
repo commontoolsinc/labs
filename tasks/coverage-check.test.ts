@@ -566,6 +566,38 @@ Deno.test("writeCoverageResolved names the files an accepted debt stands in for"
   ]);
 });
 
+Deno.test("writeCoverageResolved preserves an accepted unchanged-file attribution", async () => {
+  await withFlakyLineCheckout(async ({ rootDir, lcov, baselineLcov }) => {
+    const rows: Row[] = [{ ...unattributedFailure(), status: "ovrd" }];
+    const payload = await payloadFrom(() =>
+      writeCoverageResolved(
+        4211,
+        rows,
+        // The PR changed this coverage group, but not the file whose coverage
+        // moved between otherwise comparable runs.
+        [{ filename: "packages/example/src/changed.ts" }],
+        lcov,
+        {
+          rootDir,
+          readBaselineLcov: (runId) => {
+            assertEquals(runId, 900);
+            return Promise.resolve(baselineLcov);
+          },
+        },
+      )
+    );
+
+    assertEquals(payload?.overridden, true);
+    // The resolved payload replaces the detailed failing comment, so it must
+    // carry the unchanged-file diagnosis forward rather than erase it.
+    assertEquals(payload?.files, [{
+      relativePath: "packages/example/src/racy.ts",
+      group: "packages/example",
+      uncoveredCount: 1,
+    }]);
+  });
+});
+
 Deno.test("writeCoverageResolved leaves the file list empty when nothing was overridden", async () => {
   const rows = [
     coverageRow("coverage-debt: tasks uncovered lines", 4, 9),

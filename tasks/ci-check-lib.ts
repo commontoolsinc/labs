@@ -878,7 +878,11 @@ export interface CoverageSuggestionGroup {
   current: number;
 }
 
-/** Count of lines a PR added that no test executes, for one file. */
+/**
+ * Count of newly uncovered lines attributed to one file. Usually these are
+ * lines the PR added; an accepted unattributed regression can instead name
+ * lines in an unchanged file that the baseline run covered.
+ */
 export interface CoverageSuggestionFileLines {
   relativePath: string;
   group: string;
