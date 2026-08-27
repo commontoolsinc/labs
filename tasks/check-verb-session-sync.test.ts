@@ -1,10 +1,12 @@
 /**
- * These pin the walkthrough↔demo sync check to the three drift classes it
+ * These pin the walkthrough↔demo sync check to the four drift classes it
  * exists to catch, each of which shipped at least once: a composed command
  * the demo never runs (one was wrong from the day it was written and
  * survived four editing passes), an act reference gone stale under
- * renumbering (twice), and a shape-table row pairing a verb with an act that
- * no longer shows it.
+ * renumbering (twice), a shape-table row pairing a verb with an act that
+ * no longer shows it, and a write quoted with a value other than the one the
+ * demo pipes — invisible for as long as the payload was dropped, and the
+ * substance of every act a tour about writing narrates.
  *
  * The real files are checked too, so the gate's green on this repository is
  * itself a pinned fact — and so is the check's grip: each class is asserted
@@ -41,10 +43,18 @@ describe("check-verb-session-sync", () => {
   let sh = "";
   let md = "";
   let tour = "";
+  let readWriteDemo = "";
+  let readWriteTour = "";
   beforeAll(async () => {
     sh = await Deno.readTextFile(join(REPO_ROOT, DEMO_PATH));
     md = await Deno.readTextFile(join(REPO_ROOT, WALKTHROUGH_PATH));
     tour = await Deno.readTextFile(join(REPO_ROOT, TOUR_PATH));
+    readWriteDemo = await Deno.readTextFile(
+      join(REPO_ROOT, READ_WRITE_DEMO_PATH),
+    );
+    readWriteTour = await Deno.readTextFile(
+      join(REPO_ROOT, READ_WRITE_TOUR_PATH),
+    );
   });
 
   describe("tokenize", () => {
@@ -84,9 +94,19 @@ describe("check-verb-session-sync", () => {
     it("reads past a helper's own leading arguments", () => {
       // `run_stdin` carries the piped value ahead of the argv, so a rule that
       // read the second token would take the payload for the command and
-      // report every write in a tour as invented.
+      // report every write in a tour as invented. The payload comes back in
+      // the document's own spelling for it, which is what holds the two to
+      // each other.
       expect(demoCommands(`run_stdin '25' cf set --piece a target`))
-        .toEqual([["cf", "set", "--piece", "a", "target"]]);
+        .toEqual([["echo", "25", "|", "cf", "set", "--piece", "a", "target"]]);
+    });
+
+    it("leaves a command piping its own output onward with no payload", () => {
+      // Only a leading `echo <value> |` is a stdin payload. A pipe after the
+      // command belongs to the shell around it, and reading one as a payload
+      // would put a phantom token on every substitution the demos capture.
+      expect(demoCommands(`X=$(cf piece get --piece a title | jq -r .)`))
+        .toEqual([["cf", "piece", "get", "--piece", "a", "title"]]);
     });
 
     it("ignores a helper it does not know", () => {
@@ -307,6 +327,41 @@ describe("check-verb-session-sync", () => {
       await expect(main({ mdPath: "docs/nowhere.md" })).rejects.toThrow(
         /No demo is paired with/,
       );
+    });
+
+    it("catches a write the document shows a different value for", () => {
+      // The drift class this pairing exists to catch, and the one a rule
+      // that dropped the payload missed: a tour ABOUT writing can narrate
+      // setting 250 beside the answer the session got for 25, and every
+      // claim around it still reads as verified.
+      const demo = `run_stdin '25' cf set --piece a target\n`;
+      const quoted = "```bash\necho '25' | cf set --piece a target\n```";
+      const drifted = "```bash\necho '250' | cf set --piece a target\n```";
+      expect(findViolations(demo, quoted)).toEqual([]);
+      expect(findViolations(demo, drifted).length).toBe(1);
+    });
+
+    it("catches a write the document quotes without its value", () => {
+      // The other half: a document that quotes only the command half leaves
+      // a reader with a `cf set` that hangs waiting on stdin.
+      const demo = `run_stdin '25' cf set --piece a target\n`;
+      const halved = "```bash\ncf set --piece a target\n```";
+      expect(findViolations(demo, halved).length).toBe(1);
+    });
+
+    it("keeps every write in the read/write tour matched to its demo", () => {
+      // Against the real files: each of the four writes must be quoted with
+      // the value the demo pipes, and changing any one of them is caught.
+      const values = ["25", "100", "15", "30"];
+      for (const value of values) {
+        const drifted = readWriteTour.replace(
+          `echo '${value}' |`,
+          `echo '${value}0' |`,
+        );
+        expect(drifted).not.toBe(readWriteTour);
+        expect(findViolations(readWriteDemo, drifted, READ_WRITE_TOUR_PATH))
+          .toHaveLength(1);
+      }
     });
 
     it("does not let a reasonless marker exempt anything", () => {

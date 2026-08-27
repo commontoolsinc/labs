@@ -20,9 +20,11 @@
  * Three checks, run over every document in `DOC_PATHS`:
  * - Every `cf` command matches a demo command, token for token, after
  *   normalization: an `-s <space>` pair is dropped from both sides, quotes
- *   are stripped, and a token holding a `$variable` or a `<placeholder>`
- *   matches anything. An address a transcript shortened for width needs no
- *   rule of its own: the demo holds every address in a variable.
+ *   are stripped, a value read from stdin is folded in ahead of the command
+ *   as `echo <value> |`, and a token holding a `$variable` or a
+ *   `<placeholder>` matches anything. An address a transcript shortened for
+ *   width needs no rule of its own: the demo holds every address in a
+ *   variable.
  * - Every "act N" reference, in any case, names an act the demo has.
  * - Every row of a verb shape table pairs its verbs with acts whose demo
  *   text actually mentions them.
@@ -182,14 +184,47 @@ function extractCf(line: string): string | null {
   return span.trim();
 }
 
+/**
+ * The value a command reads from stdin, folded into its token list.
+ *
+ * A demo spells it `run_stdin '25' cf set …` and a document spells it
+ * `echo '25' | cf set …`; both normalize to the document's form, so
+ * {@link commandMatches} compares the value like any other word and a
+ * `$variable` payload still wildcards. Dropping it instead would leave the
+ * value a write act is ABOUT unchecked — a tour could narrate setting 250
+ * beside the answer a demo got for 25, and every claim around it would still
+ * read as verified.
+ */
+function withStdin(payload: string | undefined, tokens: string[]): string[] {
+  return payload === undefined ? tokens : ["echo", payload, "|", ...tokens];
+}
+
+/**
+ * The payload of a leading `echo <value> |` on a command line, if it has one.
+ *
+ * Only that exact shape counts: everything before the first pipe has to be
+ * `echo` and one word. A command piping its own output onward — `cf … | jq`,
+ * a `$(cf …)` substitution — has something else there and reads as no
+ * payload, which is what keeps this off every line the other demos quote.
+ */
+function extractStdin(line: string): string | undefined {
+  const bar = line.indexOf("|");
+  if (bar === -1) return undefined;
+  const before = tokenize(line.slice(0, bar));
+  if (before.length !== 2 || before[0] !== "echo") return undefined;
+  return before[1];
+}
+
 /** Every command a demo runs, as normalized token lists: `run`, `run_loud`,
  * `run_stdin`, `refused` and `broken` lines execute theirs, and a `pending`
  * line's first argument is the command it promises. `run_loud` differs from
  * `run` only in how much of the output it shows, and `run_stdin` only in the
  * value it pipes in ahead of the same argv, so all three are commands the
  * demo ran. Slicing from the `cf` token is what lets a helper carry its own
- * leading arguments — `run_stdin`'s payload, `refused`'s claim — without a
- * rule per helper. */
+ * leading arguments — `refused`'s claim and grep signature among them —
+ * without a rule per helper. A `run_stdin` payload is the one such argument
+ * that is part of the command rather than part of the act's bookkeeping, so
+ * it rides back in through {@link withStdin} rather than being dropped. */
 export function demoCommands(shText: string): string[][] {
   const commands: string[][] = [];
   for (const line of joinContinuations(shText)) {
@@ -202,7 +237,12 @@ export function demoCommands(shText: string): string[][] {
       head === "refused" || head === "broken"
     ) {
       const at = tokens.indexOf("cf");
-      if (at !== -1) commands.push(dropSpaceFlag(tokens.slice(at)));
+      if (at !== -1) {
+        // The payload is the helper's first argument, and only `run_stdin`
+        // has one that reaches the command line.
+        const payload = head === "run_stdin" && at >= 2 ? tokens[1] : undefined;
+        commands.push(withStdin(payload, dropSpaceFlag(tokens.slice(at))));
+      }
       continue;
     }
     if (head === "pending" && tokens.length > 1) {
@@ -255,7 +295,13 @@ export function walkthroughCommands(
       exempt = false;
       continue;
     }
-    out.push({ tokens: dropSpaceFlag(tokenize(span)), line: i + 1 });
+    out.push({
+      tokens: withStdin(
+        extractStdin(logical),
+        dropSpaceFlag(tokenize(span)),
+      ),
+      line: i + 1,
+    });
   }
   return out;
 }
