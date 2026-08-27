@@ -8,6 +8,7 @@ import {
   getPatternIdentityRef,
   getPatternSetupIdentityRef,
   getPatternSource,
+  getPieceReconciliation,
   getPieceSourceRevisions,
   resolveEntryIdentity,
   Runtime,
@@ -559,6 +560,110 @@ describe("piece source reconciliation", () => {
       expect(await reconcile(piece)).toBe("unavailable");
       expect(getPatternIdentityRef(piece)).toEqual(originalRef);
       expect(getPieceSourceRevisions(piece)).toEqual([]);
+    });
+  });
+
+  describe("what a reconciliation leaves behind", () => {
+    it("records reaching an origin that offers what the piece runs", async () => {
+      const v1Identity = await identityFor(source("v1"));
+      const piece = await preparePiece(
+        servingFetch(() => v1Identity, () => source("v1")),
+      );
+      await stampSource(piece, PARENT_SOURCE);
+
+      expect(await reconcile(piece)).toBe("current");
+
+      expect(getPieceReconciliation(piece)).toMatchObject({
+        outcome: "followed",
+        origin: PARENT_SOURCE,
+        offered: { identity: v1Identity, symbol: SYMBOL },
+      });
+    });
+
+    it("reaching the same conclusion again rewrites nothing", async () => {
+      const v1Identity = await identityFor(source("v1"));
+      const piece = await preparePiece(
+        servingFetch(() => v1Identity, () => source("v1")),
+      );
+      await stampSource(piece, PARENT_SOURCE);
+      expect(await reconcile(piece)).toBe("current");
+      const first = getPieceReconciliation(piece);
+
+      expect(await reconcile(piece)).toBe("current");
+
+      // Opening a piece that is up to date stays a read.
+      expect(getPieceReconciliation(piece)).toEqual(first);
+    });
+
+    it("records an origin it could not reach, and what it answered", async () => {
+      const piece = await preparePiece(() =>
+        Promise.resolve(new Response("nope", { status: 503 }))
+      );
+      await stampSource(piece, PARENT_SOURCE);
+
+      expect(await reconcile(piece)).toBe("unavailable");
+
+      expect(getPieceReconciliation(piece)).toMatchObject({
+        outcome: "unreachable",
+        origin: PARENT_SOURCE,
+        detail: "the origin answered 503",
+      });
+    });
+
+    it("records a refusal, its reason, and what was offered", async () => {
+      const piece = await preparePiece(refuseEveryFetch);
+      const changed = await runtime.patternManager.compilePattern(
+        parentProgram(sourceWithChangedContract("v2")),
+        { space: piece.space },
+      );
+      const changedRef = runtime.patternManager.getArtifactEntryRef(changed)!;
+      const origin = `cf:pattern:${changedRef.identity}`;
+      await stampSource(piece, origin);
+
+      expect(await reconcile(piece)).toBe("incompatible");
+
+      // A refusal leaves no revision, so without this record it would look
+      // exactly like a piece running what its origin offers.
+      expect(getPieceReconciliation(piece)).toMatchObject({
+        outcome: "refused",
+        reason: "incompatible-schema",
+        origin,
+        offered: changedRef,
+      });
+      expect(getPieceReconciliation(piece)?.detail).toContain("schema differs");
+    });
+
+    it("records an origin whose kind nothing follows yet", async () => {
+      const piece = await preparePiece(refuseEveryFetch);
+      const origin = `https://programs.test${PARENT_PATH}`;
+      await stampSource(piece, origin);
+
+      expect(await reconcile(piece)).toBe("unsupported");
+
+      // Not a fault, and not a piece nobody has looked at: its owner can ask
+      // this origin by hand, and nothing else will.
+      expect(getPieceReconciliation(piece)).toMatchObject({
+        outcome: "unsupported",
+        origin,
+      });
+    });
+
+    it("says nothing about a piece that records no origin", async () => {
+      const piece = await preparePiece(refuseEveryFetch);
+
+      expect(await reconcile(piece)).toBe("detached");
+
+      // The absent origin already says it; a record would only restate it.
+      expect(getPieceReconciliation(piece)).toBeUndefined();
+    });
+
+    it("says nothing about an origin nothing can follow", async () => {
+      const piece = await preparePiece(refuseEveryFetch);
+      await stampSource(piece, "not a url");
+
+      expect(await reconcile(piece)).toBe("unusable");
+
+      expect(getPieceReconciliation(piece)).toBeUndefined();
     });
   });
 

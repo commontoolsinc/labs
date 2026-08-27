@@ -227,6 +227,17 @@ function eventHandler(
   return handler;
 }
 
+/**
+ * Let a source action run to completion.
+ *
+ * Every stub in this file resolves immediately, so an action settles once the
+ * microtask queue drains. Draining it is what this waits for -- a count of
+ * `await`s would have to be recounted whenever an action gains a step.
+ */
+async function settled(): Promise<void> {
+  for (let drained = 0; drained < 16; drained++) await Promise.resolve();
+}
+
 const SPACE = "did:key:z6Mk-piece-menu" as const;
 const OWNER = "did:key:z6Mk-piece-menu-owner" as const;
 const VIEWER = "did:key:z6Mk-piece-menu-viewer" as const;
@@ -1636,8 +1647,7 @@ describe("the origin and history panel", () => {
     await menu.showPanel("origin");
 
     clickTestId(menu, "piece-origin-update-now");
-    await Promise.resolve();
-    await Promise.resolve();
+    await settled();
 
     expect(actions).toEqual([{ kind: "adopt" }]);
   });
@@ -1674,10 +1684,7 @@ describe("the origin and history panel", () => {
     await menu.showPanel("origin");
 
     clickTestId(menu, "piece-origin-force-update");
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    await settled();
 
     expect(calls).toEqual([
       { action: { kind: "adopt" }, options: {} },
@@ -1709,6 +1716,39 @@ describe("the origin and history panel", () => {
     const rendered = shows(menu);
     expect(rendered).toContain("piece-origin-update-now");
     expect(rendered).not.toContain("piece-origin-force-update");
+  });
+
+  it("shows what a failed update concluded about the origin", async () => {
+    // A failed attempt still records a state of the piece, so the panel reads
+    // the piece again rather than going on showing what it knew before.
+    let reads = 0;
+    const menu = openMenu(pieceCell(
+      () => {
+        reads++;
+        return Promise.resolve(
+          reads === 1 ? SOURCE : {
+            ...SOURCE,
+            reconciliation: {
+              outcome: "unreachable" as const,
+              at: 1,
+              origin: SOURCE.origin!.url,
+              detail: "the origin answered 503",
+            },
+          },
+        );
+      },
+      { update: () => Promise.reject(new Error("nothing answers there")) },
+    ));
+    await menu.showPanel("origin");
+    expect(shows(menu)).toContain("Unknown");
+
+    clickTestId(menu, "piece-origin-update-now");
+    await settled();
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("Could not reach the origin");
+    expect(rendered).toContain("the origin answered 503");
+    expect(rendered).toContain("nothing answers there");
   });
 
   it("says a piece carrying an unfollowable origin is not detached", async () => {
@@ -1762,8 +1802,7 @@ describe("the origin and history panel", () => {
         prevented = true;
       },
     } as unknown as Event);
-    await Promise.resolve();
-    await Promise.resolve();
+    await settled();
 
     expect(prevented).toBe(true);
     expect(actions).toEqual([
@@ -1784,8 +1823,7 @@ describe("the origin and history panel", () => {
     eventHandler(menu, 'test-id="piece-origin-entry"', "submit")({
       preventDefault: () => {},
     } as unknown as Event);
-    await Promise.resolve();
-    await Promise.resolve();
+    await settled();
 
     const rendered = shows(menu);
     expect(rendered).toContain("Could not follow that source");
@@ -1840,8 +1878,7 @@ describe("the origin and history panel", () => {
         preventDefault: () => {},
       } as unknown as Event);
     submit();
-    await Promise.resolve();
-    await Promise.resolve();
+    await settled();
 
     // The question was asked here, so it is answered here: the dialog stays
     // up, states the objection, and its submit becomes the override.
@@ -1853,8 +1890,7 @@ describe("the origin and history panel", () => {
     expect(warned).not.toContain("piece-source-warning");
 
     submit();
-    await Promise.resolve();
-    await Promise.resolve();
+    await settled();
 
     expect(calls).toEqual([
       {
@@ -1881,8 +1917,7 @@ describe("the origin and history panel", () => {
     eventHandler(menu, 'test-id="piece-origin-entry"', "submit")({
       preventDefault: () => {},
     } as unknown as Event);
-    await Promise.resolve();
-    await Promise.resolve();
+    await settled();
     expect(shows(menu)).toContain("nothing answers there");
 
     clickTestId(menu, "piece-origin-entry-cancel");
@@ -1908,8 +1943,7 @@ describe("the origin and history panel", () => {
     eventHandler(menu, 'test-id="piece-origin-entry"', "submit")({
       preventDefault: () => {},
     } as unknown as Event);
-    await Promise.resolve();
-    await Promise.resolve();
+    await settled();
 
     type("https://example.test/another.tsx");
 
@@ -3537,6 +3571,25 @@ describe("describeFollowState", () => {
     expect(refusal("argument-mismatch").canForce).toBe(false);
   });
 
+  it("separates an origin nothing follows from one nothing has looked at", () => {
+    const unsupported = describeFollowState({
+      ...SOURCE,
+      reconciliation: {
+        outcome: "unsupported",
+        at: 1,
+        origin: SOURCE.origin!.url,
+      },
+    });
+    expect(unsupported.state).toBe("unsupported");
+    expect(unsupported.summary).toContain("Nothing follows this kind");
+    // Asking by hand is the only thing that resolves such an origin, so it
+    // is offered; there is no check that failed for an override to ignore.
+    expect(unsupported.canUpdate).toBe(true);
+    expect(unsupported.canForce).toBe(false);
+
+    expect(describeFollowState(SOURCE).state).toBe("unknown");
+  });
+
   it("tells a piece carrying an unfollowable string from a detached one", () => {
     const unusable = describeFollowState({
       ...SOURCE,
@@ -3571,6 +3624,14 @@ describe("what the source-updates box offers", () => {
       },
     }, { box: false, update: false, force: false }],
     ["unknown", SOURCE, { box: true, update: true, force: false }],
+    ["an origin whose kind nothing follows", {
+      ...SOURCE,
+      reconciliation: {
+        outcome: "unsupported",
+        at: 1,
+        origin: SOURCE.origin!.url,
+      },
+    }, { box: true, update: true, force: false }],
     ["unreachable", {
       ...SOURCE,
       reconciliation: {

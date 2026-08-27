@@ -1929,6 +1929,11 @@ export class CFPieceMenu extends BaseElement {
         ? error.message
         : String(error);
       this.panel = "origin";
+      // A failed attempt still records what it concluded — an origin that
+      // could not be reached is a state of the piece, not just of this
+      // request — so the panel reads the piece again rather than going on
+      // showing what it knew before the attempt.
+      await this.#rereadSource(cell, actionToken);
     } finally {
       if (actionToken === this.sourceActionToken) {
         this.sourceActionPending = false;
@@ -1951,6 +1956,25 @@ export class CFPieceMenu extends BaseElement {
     const warning = this.compatibilityWarning;
     if (warning === undefined) return;
     await this.changeSource(warning.action, warning.confirmationToken);
+  }
+
+  /**
+   * Read the piece's source state again, leaving the panel as it was if the
+   * read fails or another action has since started. A refresh that cannot
+   * happen is not worth reporting: the caller is already reporting why the
+   * action did not.
+   */
+  async #rereadSource(cell: CellHandle, actionToken: number): Promise<void> {
+    try {
+      const source = await cell.runtime().getPieceSource(
+        cell.id(),
+        cell.space(),
+      );
+      if (actionToken === this.sourceActionToken) this.source = source;
+    } catch {
+      // Keeping the previous view is the fallback, and the action's own
+      // failure is what the panel is showing.
+    }
   }
 
   /** Open the clone dialog and begin the selected clone operation. */

@@ -3753,19 +3753,6 @@ export class PieceController<T = unknown> {
   }
 
   /**
-   * Detach from the current origin, restore an exact retained source revision,
-   * or follow an origin recorded by an earlier revision.
-   *
-   * `expectedPattern` pins the reference this change may run over. The
-   * snapshot read below becomes the transition's precondition, checked
-   * again inside the write transaction by `applyPieceSourceTransition`, so
-   * a change that gets that far is already conditional on the piece not
-   * moving. What the pin adds is the other half of the window: without it
-   * this call adopts whatever it finds as its own expectation, so a writer
-   * landing between a caller's proof and this read would have its change
-   * silently written over. With it, such a piece is refused by name.
-   */
-  /**
    * Record what asking the origin just concluded.
    *
    * An explicit update is a reconciliation like any other, and the source
@@ -3777,16 +3764,31 @@ export class PieceController<T = unknown> {
    * not the attempt's result, and losing it changes nothing the piece runs.
    */
   async #recordReconciliation(
+    expected: PieceSourceSnapshot,
     origin: string,
     reconciliation: Omit<PieceReconciliation, "at" | "origin">,
   ): Promise<void> {
     try {
       await this.#pieces.runtime.editWithRetry((tx) => {
+        // An outcome describes the piece the attempt reasoned about. A
+        // concurrent detach, edit, or repoint has moved it somewhere this
+        // conclusion does not describe, so the write is dropped rather than
+        // landing on the piece that replaced it.
+        const candidate = this.#cell.withTx(tx);
+        const current = getPieceSourceSnapshot(candidate);
+        if (
+          current === undefined ||
+          current.pattern.identity !== expected.pattern.identity ||
+          current.pattern.symbol !== expected.pattern.symbol ||
+          current.origin !== expected.origin ||
+          current.revisionId !== expected.revisionId
+        ) return false;
         setPieceReconciliation(this.#cell, tx, {
           ...reconciliation,
           origin,
           at: Date.now(),
         });
+        return true;
       });
     } catch {
       // Reported by the source state the caller reads back, which simply
@@ -3806,6 +3808,7 @@ export class PieceController<T = unknown> {
    */
   async #refuseUnusableArgument(
     review: NonNullable<PreparedPieceSourceChange["review"]>,
+    expected: PieceSourceSnapshot,
     origin: string | null,
     candidate: { identity: string; symbol: string },
     active: boolean,
@@ -3817,7 +3820,7 @@ export class PieceController<T = unknown> {
     if (active && origin !== null) {
       // The panel already says the data does not fit; what it needs from the
       // message is which part of it, so the classifying prefix comes off.
-      await this.#recordReconciliation(origin, {
+      await this.#recordReconciliation(expected, origin, {
         outcome: "refused",
         reason: "argument-mismatch",
         offered: candidate,
@@ -3827,6 +3830,26 @@ export class PieceController<T = unknown> {
     throw new Error(issue);
   }
 
+  /**
+   * Change which source a piece follows.
+   *
+   * Five operations share this path because they share a shape: detach from
+   * the current origin, restore an exact retained source revision, follow an
+   * origin recorded by an earlier revision, take what the active origin
+   * offers now, or move to an origin its owner supplied. The last three all
+   * resolve an origin and adopt what it holds, differing only in which origin
+   * that is, which export it selects, and what the revision calls the
+   * transition.
+   *
+   * `expectedPattern` pins the reference this change may run over. The
+   * snapshot read below becomes the transition's precondition, checked
+   * again inside the write transaction by `applyPieceSourceTransition`, so
+   * a change that gets that far is already conditional on the piece not
+   * moving. What the pin adds is the other half of the window: without it
+   * this call adopts whatever it finds as its own expectation, so a writer
+   * landing between a caller's proof and this read would have its change
+   * silently written over. With it, such a piece is refused by name.
+   */
   async changeSource(
     action: PieceSourceAction,
     options: {
@@ -3929,6 +3952,7 @@ export class PieceController<T = unknown> {
       }
       await this.#refuseUnusableArgument(
         confirmed.review,
+        expected,
         confirmed.origin,
         confirmed.candidate,
         action.kind === "adopt",
@@ -3952,6 +3976,7 @@ export class PieceController<T = unknown> {
       );
       await this.#refuseUnusableArgument(
         currentReview,
+        expected,
         confirmed.origin,
         confirmed.candidate,
         action.kind === "adopt",
@@ -4049,7 +4074,7 @@ export class PieceController<T = unknown> {
           // piece does not follow yet, and an outcome recorded against one
           // would describe a relationship it does not have.
           if (action.kind === "adopt") {
-            await this.#recordReconciliation(origin, {
+            await this.#recordReconciliation(expected, origin, {
               outcome: "unreachable",
               detail: pieceSourceErrorMessage(error),
             });
@@ -4074,7 +4099,7 @@ export class PieceController<T = unknown> {
         // The origin offers exactly what the piece runs, so there is no
         // source transition to make. Recording the outcome is the whole
         // result: it is what turns an unexamined origin into a current one.
-        await this.#recordReconciliation(origin!, {
+        await this.#recordReconciliation(expected, origin!, {
           outcome: "followed",
           offered: candidateRef,
         });
@@ -4097,6 +4122,7 @@ export class PieceController<T = unknown> {
       );
       await this.#refuseUnusableArgument(
         review,
+        expected,
         origin,
         candidateRef,
         action.kind === "adopt",
@@ -4104,7 +4130,7 @@ export class PieceController<T = unknown> {
       if (hasPieceSourceCompatibilityIssues(review.issues)) {
         prepared.review = review;
         if (action.kind === "adopt") {
-          await this.#recordReconciliation(origin!, {
+          await this.#recordReconciliation(expected, origin!, {
             outcome: "refused",
             reason: "incompatible-schema",
             offered: candidateRef,
@@ -4170,11 +4196,14 @@ export class PieceController<T = unknown> {
           },
         ) as Cell<T>;
       });
-      if (prepared.origin !== null) {
-        // The transition clears whatever the last reconciliation concluded,
-        // and this is the fresh answer: the piece now runs what this origin
-        // offered a moment ago.
-        await this.#recordReconciliation(prepared.origin, {
+      // The transition cleared whatever the last reconciliation concluded,
+      // and this is the fresh answer: the piece now runs what this origin
+      // offered a moment ago. The guard is the state the transition left, read
+      // back rather than reconstructed, because recording an origin normalizes
+      // it and this has to match what the piece now stores.
+      const settled = getPieceSourceSnapshot(this.#cell);
+      if (prepared.origin !== null && settled !== null) {
+        await this.#recordReconciliation(settled!, settled!.origin!, {
           outcome: "followed",
           offered: prepared.candidate,
         });
@@ -4182,6 +4211,11 @@ export class PieceController<T = unknown> {
       return { status: "applied" };
     } catch (error) {
       if (await this.#sourceTransitionCommitted(transition.revisionId)) {
+        // The transition committed and running its source then failed, so
+        // neither outcome is true: the piece did not decline this source, and
+        // it is not demonstrably running it either. The warning below says
+        // what happened, and the next reconciliation settles what the piece
+        // is doing rather than this guessing now.
         return {
           status: "applied",
           executionWarning: pieceSourceErrorMessage(error),
@@ -4196,6 +4230,7 @@ export class PieceController<T = unknown> {
         );
         await this.#refuseUnusableArgument(
           review,
+          expected,
           prepared.origin,
           prepared.candidate,
           action.kind === "adopt",

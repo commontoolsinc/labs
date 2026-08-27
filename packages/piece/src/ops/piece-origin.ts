@@ -225,6 +225,19 @@ export async function resolvePieceOriginSource(
   const sourceSpace = ref.space === undefined
     ? destinationSpace
     : ref.space as MemorySpace;
+
+  // Before the host below is registered, because registering it changes the
+  // route the space resolves through: a reference this call is going to
+  // refuse must not leave that behind.
+  const pinned = pinnedPatternIdentity(stableRef);
+  const self = options.self;
+  if (
+    pinned === undefined && self !== undefined &&
+    sourceSpace === self.space && namesEntity(stableRef, self.pieceId)
+  ) {
+    throw new PieceOriginError("a piece cannot follow itself");
+  }
+
   if (ref.host !== undefined) {
     const routedUrl = new URL(
       runtime.mappedHostFor(sourceSpace) ??
@@ -250,14 +263,6 @@ export async function resolvePieceOriginSource(
     }
   }
 
-  const pinned = pinnedPatternIdentity(stableRef);
-  const self = options.self;
-  if (
-    pinned === undefined && self !== undefined &&
-    sourceSpace === self.space && namesEntity(stableRef, self.pieceId)
-  ) {
-    throw new PieceOriginError("a piece cannot follow itself");
-  }
   const pattern = pinned === undefined
     ? await mutableFabricOriginPattern(runtime, sourceSpace, stableRef)
     : { identity: pinned, symbol: historicalSymbol };

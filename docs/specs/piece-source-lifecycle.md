@@ -320,7 +320,7 @@ storage schema to use these exact TypeScript field names.
 | Active origin | No origin, an external `https://` URL with an entry export, a stable mutable fabric-entity URL, or a content-addressed fabric pattern URL with an export symbol | **Partial**: `patternSource` stores the active origin string. `RuntimeClient.createPage(URL)` initializes a canonical HTTP or HTTPS origin atomically with creation. Explicit history actions can clear it or restore an earlier web or fabric origin. Fabric creation, the remaining web creation paths, and reconciliation do not yet use the complete origin policy |
 | Revision head | The stable identifier of the latest accepted source and origin state | **Partial**: the last valid `pieceSourceHistory` entry is the guarded head. It is not yet mirrored in the complete source-state schema |
 | Source revision log | Ordered records of every accepted source and origin state, with a durable reference to each immutable authored-program manifest | **Partial**: source-backed direct Piece API creation, URL-backed Runtime Client creation, lifecycle-aware edits, detach, revert, repoint, provenance repair, and specialized updates append guarded records. Each record links to an existing source-document closure that is verified in the lifecycle write transaction. Programmatically constructed patterns without retained source, other creation paths, and immutable authored-program manifests remain required |
-| Last reconciliation | What following the active origin last did — followed, could not reach it, or refused what it offered — with when, why, and the identity the origin offered | **Partial**: reconciliation records the outcome, its time, the offered identity, and a refusal's reason on the piece, and an accepted transition clears it. Nothing records an outcome for the origin kinds reconciliation does not follow |
+| Last reconciliation | What following the active origin last did — followed, could not reach it, or refused what it offered — with when, why, and the identity the origin offered | **Partial**: reconciliation records the outcome, its time, the offered identity, and a refusal's reason on the piece, and an accepted transition clears it. An origin of a kind nothing follows yet records that, which is a state of its own rather than an absence. Reaching the same conclusion twice rewrites nothing |
 | Descriptive repository | Optional locator shown by tooling; never followed | Implemented as `patternRepository` metadata |
 
 The runtime-neutral program digest is
@@ -622,7 +622,7 @@ of a schema warning does not waive this root-interface contract.
 | Manual incompatible replacement | Warn about an incompatible pattern contract or retained link and require explicit confirmation or a command-line flag. Reject a candidate that cannot use the actual retained input | **Partial**: source-history actions return a one-use confirmation bound to the reviewed candidate and guarded state. `setPattern` rejects unless `dangerouslyAllowIncompatibleSchema` is supplied, and the command line exposes that flag without a first-class warning and confirmation flow |
 | Automatic update from a gated origin | Adopt a `system:` candidate as it stands; the release that produced it was gated by golden replays over representative state | **Implemented** |
 | Automatic update from an ungated origin | Compare the candidate with the accepted source in both directions, and adopt only an acceptable replacement | **Partial**: a candidate from an ungated origin must leave the piece's argument and result schemas exactly as they are, which refuses changes the piece could take. `PieceController.setPattern` already applies the relation this asks for |
-| Overriding a refused automatic update | Name the refusal and its reason on the source panel, and offer to adopt that exact candidate anyway, keeping the active origin | **Partial**: reconciliation records each refusal and its reason as durable state, the source panel names both, and its override resolves the active origin again and adopts what it offers through the one-use confirmation, keeping the origin. The override is offered only where a contract mismatch caused the refusal. It re-resolves rather than applying the exact candidate the refusal reviewed, so an origin that moved between the two supplies the later one; the confirmation is still bound to the candidate the override's own check reviewed |
+| Overriding a refused automatic update | Name the refusal and its reason on the source panel, and offer to adopt that exact candidate anyway, keeping the active origin | **Partial**: reconciliation records each refusal and its reason as durable state, the source panel names both, and its override resolves the active origin again and adopts what it offers through the one-use confirmation, keeping the origin. The override is offered only where a contract mismatch caused the refusal. Asking to override resolves the origin again, so an origin that moved since the refusal supplies the later candidate, and the confirmation binds to the one that override's own check reviewed |
 | Migrating a piece's data across a contract change | Migrate rather than refuse, so a contract change does not stop a piece following its origin | **Migration required**: an unaccepted refusal leaves the piece on its last accepted state |
 | Downstream result contract | Keep a piece's readers from silently receiving values outside the contract they were built against | **Reader-side check required**: exact schema equality holds an ungated candidate to the accepted result contract, and a `system:` candidate to nothing. Only a reader's own check can catch outputs it was not built for, because the piece being updated cannot see who reads it |
 | Semantic state continuity | Verify intended stable-key, stable-cause, migration, and behavior contracts in CI | **Broader CI coverage required**: synthetic home-shaped and default-app-shaped golden replays exist, but general version-to-version fixtures remain |
@@ -987,6 +987,10 @@ own.
   the source it last accepted, which may or may not be what the origin offers
   now. Without this state a piece nothing follows reads exactly like one that
   is up to date.
+- **Not followed automatically.** The origin is well formed and nothing
+  follows origins of its kind yet, so what it holds is unexamined. This is
+  neither a fault nor a piece nobody has looked at, and it is the state where
+  asking by hand is the only thing that will ever resolve the origin.
 - **Could not reach the origin.** Resolution failed. The piece runs its last
   accepted source. This one may resolve itself on the next open, and the panel
   says so.
@@ -1022,8 +1026,12 @@ so editing that field drops them and dismissing the dialog discards them; left
 on the panel behind, they would read as a fresh problem with the piece rather
 than the answer to a question that is no longer being asked.
 
-Overriding runs the same check and applies its exact reviewed candidate through
-the one-use confirmation, so consent is recorded against the source that lands.
+Overriding is two steps, and each answers a different question. Asking to
+override resolves the active origin again, so what is weighed is what the
+origin holds now rather than what it held when the refusal was recorded. That
+fresh candidate is checked, and confirming applies that exact candidate through
+the one-use confirmation, so consent is recorded against the source that lands
+rather than against whatever a later resolution might have found.
 It is not offered against a refusal an override cannot fix — source that did
 not compile, that did not produce the identity it claimed, or that the piece's
 own stored data cannot satisfy. That last one is a refusal in its own right and
@@ -1416,18 +1424,15 @@ The implementation evidence for this table is concentrated in:
    in separately protected capabilities.
 6. Add command-line URL creation and explicit detach, detach-and-rebuild,
    follow, revert, and repoint operations. Add matching UI affordances,
-   including the LLM-backed create and edit flows. The piece menu's override
-   for a refused candidate must apply that exact reviewed candidate rather than
-   resolving the origin again, so an origin that moves between the refusal and
-   the override cannot supply a different one. Before a manual source
+   including the LLM-backed create and edit flows. Before a manual source
    replacement, show incompatible pattern contracts and retained links. Require
    explicit confirmation or a command-line flag to continue. Reject a candidate
    that cannot use the piece's actual retained input. An accepted incompatible
    direct replacement must detach. Root role validation remains mandatory after
    an override.
-7. Reach every origin kind with the reconciliation outcome an unattended check
-   records, so that a piece following an external web origin stops reading as
-   one nothing has looked at until its owner asks. Distinguish runtime rebuilds from authored
+7. Follow an external web origin, so that a piece recording one stops reading
+   as one whose kind nothing follows, and its owner stops being the only thing
+   that ever resolves it. Distinguish runtime rebuilds from authored
    source changes. Show whether revert can reuse the historical executable
    identity or must rebuild the exact retained authored program and pins under
    the current runtime. Do not infer history from source-cache contents.

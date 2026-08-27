@@ -1933,11 +1933,17 @@ export type PiecePatternRefView = {
   symbol: string;
 };
 
-/** What the last attempt to follow a piece's active origin did. */
+/**
+ * What the last attempt to follow a piece's active origin did. `unsupported`
+ * says the origin is well formed and this runtime does not follow origins of
+ * that kind yet, so what it holds is unexamined — neither a fault nor a piece
+ * nobody has checked.
+ */
 export type PieceReconciliationOutcome =
   | "followed"
   | "unreachable"
-  | "refused";
+  | "refused"
+  | "unsupported";
 
 /**
  * Why a reconciliation did not adopt what its origin offered. Only

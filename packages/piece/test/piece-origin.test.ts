@@ -320,6 +320,29 @@ describe("resolvePieceOriginSource", () => {
     expect(reads).toEqual([`piece:${otherSpace}`, `source:${otherSpace}`]);
   });
 
+  it("refuses a self-reference before it registers the host it names", async () => {
+    const registrations: unknown[] = [];
+    const runtime = {
+      mappedHostFor: () => undefined,
+      hostForSpace: () => new URL("https://toolshed.test"),
+      registerSpaceHost: (...args: unknown[]) => {
+        registrations.push(args);
+        return true;
+      },
+    } as unknown as Runtime;
+
+    await expect(resolvePieceOriginSource(
+      runtime,
+      SPACE,
+      `cf://other.test/${SPACE}/of:fid1:${HASH}`,
+      "default",
+      { self: { space: SPACE, pieceId: `of:fid1:${HASH}` } },
+    )).rejects.toThrow("a piece cannot follow itself");
+    // Registering a host changes the route the space resolves through, and a
+    // reference this call refuses must not leave that behind.
+    expect(registrations).toEqual([]);
+  });
+
   it("does not register an unaccepted host while resolving another space", async () => {
     const otherSpace = "did:key:z6MkspaceBBBB" as MemorySpace;
     const registrations: unknown[] = [];

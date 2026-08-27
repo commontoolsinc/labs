@@ -20,12 +20,10 @@
  * `docs/specs/piece-source-lifecycle.md` is the design of record.
  * `piece-origin-kind.ts` enumerates the origins this dispatches on.
  *
- * TODO(hixie): record what a reconciliation did as durable state on the piece,
- * so the source panel can tell a piece that is following its origin from one
- * that could not reach it and one that refused what it offered. Every outcome
- * here is a warn-level log, so all three render identically today, and a piece
- * permanently stuck on old source reads as current. See "Saying when a piece
- * has stopped following its origin" in the lifecycle spec.
+ * What each reconciliation concluded is recorded on the piece it ran for, so
+ * that a reader who opens it later can tell one that is following its origin
+ * from one that could not reach it and one that refused what it offered. See
+ * "Saying when a piece has stopped following its origin" in the lifecycle spec.
  */
 
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
@@ -42,10 +40,14 @@ import {
   applyPieceSourceTransition,
   getPatternIdentityRef,
   getPatternSource,
+  getPieceReconciliation,
   getPieceSourceSnapshot,
+  type PieceReconciliation,
   type PieceSourceSnapshot,
   type PieceSourceTransition,
   preparePieceSourceTransitionBaseline,
+  samePieceReconciliation,
+  setPieceReconciliation,
 } from "./runner.ts";
 import type { Runtime } from "./runtime.ts";
 import { fabricAuthorityMatchesSpaceHost } from "./space-host.ts";
@@ -85,6 +87,42 @@ export type ReconcileOutcome =
   | "incompatible"
   | "unavailable";
 
+/**
+ * What a reconciliation's outcome leaves on the piece, or nothing when the
+ * outcome is not about following an origin.
+ *
+ * The three outcomes that end with the piece running what its origin holds are
+ * one state to a reader: how it got there is the revision log's business, not
+ * this record's. `detached` and `unusable` are read off the recorded origin
+ * itself, so a record would only restate what the piece already says.
+ */
+function reconciliationFor(
+  state: PieceState,
+  outcome: ReconcileOutcome,
+): PieceReconciliation | undefined {
+  const base = {
+    at: Date.now(),
+    origin: state.storedSource,
+    ...(state.offered === undefined ? {} : { offered: state.offered }),
+    ...(state.detail === undefined ? {} : { detail: state.detail }),
+  };
+  switch (outcome) {
+    case "current":
+    case "migrated":
+    case "updated":
+      return { ...base, outcome: "followed" };
+    case "unavailable":
+      return { ...base, outcome: "unreachable" };
+    case "incompatible":
+      return { ...base, outcome: "refused", reason: "incompatible-schema" };
+    case "unsupported":
+      return { ...base, outcome: "unsupported" };
+    case "detached":
+    case "unusable":
+      return undefined;
+  }
+}
+
 async function abortable<T>(
   operation: () => Promise<T>,
   signal: AbortSignal,
@@ -117,6 +155,17 @@ type PieceState = {
   running: { identity: string; symbol: string };
   storedSource: string;
   snapshot: PieceSourceSnapshot;
+
+  /**
+   * What the origin turned out to be offering, once something has resolved it.
+   * Filled in as a reconciliation learns it, and read only by the record it
+   * leaves behind: the outcome alone says whether the piece moved, and this
+   * says what it moved to, or what it declined.
+   */
+  offered?: { identity: string; symbol: string };
+
+  /** Why this reconciliation ended as it did, where it can say. */
+  detail?: string;
 };
 
 export class SourceReconciler {
@@ -229,6 +278,9 @@ export class SourceReconciler {
     const storedSource = getPatternSource(resultCell);
     if (running === undefined || storedSource === undefined) {
       this.#unwatchFabricSource(resultCell);
+      // Nothing supplies code for this piece, which the panel reads off the
+      // absent origin. An outcome would describe a relationship it does not
+      // have.
       return "detached";
     }
     const state: PieceState = {
@@ -237,9 +289,58 @@ export class SourceReconciler {
       storedSource,
       snapshot: getPieceSourceSnapshot(resultCell)!,
     };
+    const outcome = await this.#dispatch(resultCell, state, signal);
+    await this.#record(resultCell, state, outcome, signal);
+    return outcome;
+  }
 
+  /**
+   * Record what this reconciliation concluded, so that it outlives the
+   * reconciliation.
+   *
+   * A piece that refused its origin's source, or could not reach it, is
+   * running source its origin has already replaced, and looks from the outside
+   * exactly like one that is current. The record is what tells them apart. It
+   * is not a revision: a refused candidate was never accepted, and the
+   * revision log holds only what the piece adopted.
+   *
+   * Reaching the same conclusion again writes nothing, so opening a piece that
+   * is up to date stays a read. An accepted transition has already cleared
+   * whatever the last one concluded, so an update records its fresh outcome
+   * over an empty field rather than over a stale one.
+   *
+   * Losing the record is not losing the reconciliation: the outcome describes
+   * what happened, and the piece runs what it runs either way.
+   */
+  async #record(
+    resultCell: Cell<unknown>,
+    state: PieceState,
+    outcome: ReconcileOutcome,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const recorded = reconciliationFor(state, outcome);
+    if (recorded === undefined || signal.aborted || this.#disposed) return;
+    if (samePieceReconciliation(getPieceReconciliation(resultCell), recorded)) {
+      return;
+    }
+    await this.#commit(resultCell, state, signal, (tx) => {
+      const candidate = resultCell.withTx(tx);
+      if (
+        samePieceReconciliation(getPieceReconciliation(candidate), recorded)
+      ) return false;
+      setPieceReconciliation(resultCell, tx, recorded);
+      return true;
+    });
+  }
+
+  /** Follow the origin the piece records, whichever kind it turns out to be. */
+  async #dispatch(
+    resultCell: Cell<unknown>,
+    state: PieceState,
+    signal: AbortSignal,
+  ): Promise<ReconcileOutcome> {
     const host = this.#runtime.hostForSpace(state.space).href;
-    let origin = classifyPieceOriginString(storedSource, host);
+    let origin = classifyPieceOriginString(state.storedSource, host);
 
     if (origin.kind === "legacy-path") {
       // A rooted path predates the `system:` scheme. Rewrite it to the ref
@@ -325,9 +426,16 @@ export class SourceReconciler {
     const identityUrl = new URL(target);
     identityUrl.searchParams.set("identity", "");
     const response = await fetch(identityUrl);
-    if (!response.ok) return "unavailable";
+    if (!response.ok) {
+      state.detail = `the origin answered ${response.status}`;
+      return "unavailable";
+    }
     const advertised = (await abortable(() => response.text(), signal)).trim();
-    if (advertised.length === 0) return "unavailable";
+    if (advertised.length === 0) {
+      state.detail = "the origin did not say which version it is offering";
+      return "unavailable";
+    }
+    state.offered = { identity: advertised, symbol: state.running.symbol };
     // The identity route settles whether the source moved. It says nothing
     // about whether this space still holds the compiled artifact for it, and a
     // piece whose artifact is gone cannot start however current its identity
@@ -507,8 +615,11 @@ export class SourceReconciler {
         advertisedIdentity,
         candidateRef,
       ]);
+      state.detail =
+        "the source did not match the version its origin advertised";
       return "unavailable";
     }
+    state.offered = candidateRef;
     if (
       candidateRef.identity === state.running.identity &&
       candidateRef.symbol === state.running.symbol
@@ -525,6 +636,7 @@ export class SourceReconciler {
         candidateRef,
         refusal,
       ]);
+      state.detail = refusal;
       return "incompatible";
     }
 
