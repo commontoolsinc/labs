@@ -55,6 +55,7 @@ import {
   renderInspectorHtml,
   type RequestSigner,
   resolveSpace,
+  rowLimit,
   type ScanExtent,
   type Scope,
   scopeOverlay,
@@ -151,6 +152,29 @@ function validatedLimit(limit: number): number {
     );
   }
   return limit;
+}
+
+/**
+ * The row limit a listing will apply, refusing what its SQL used to refuse.
+ *
+ * Distinct from `validatedLimit`, which governs a reconstruction cap and takes
+ * no negative: these listings were `LIMIT ?` clauses, where SQLite reads a
+ * negative as UNLIMITED and answers a fractional or non-finite one with a
+ * datatype mismatch. Any integer passes; everything else is the typo it looks
+ * like, and rounding it silently is how a listing under-reports.
+ */
+function validatedRowLimit(limit: number): number {
+  try {
+    // `rowLimit` owns the RULE — which limits a row listing accepts, and why.
+    // This owns only how a CLI user hears it: a ValidationError before the
+    // space is opened, rather than the library's stack trace after.
+    rowLimit(limit);
+    return limit;
+  } catch {
+    throw new ValidationError(
+      `\`--limit\` must be a whole number of rows, not ${limit}.`,
+    );
+  }
 }
 
 /** The flag that turns a capped result into a failure. Shared by every scan. */
@@ -899,15 +923,15 @@ export const inspect = new Command()
     "hot <space:string>",
     "Entities ranked by write count (contention proxy).",
   )
-  .option("--limit <n:number>", "Max rows.", { default: 20 })
+  .option("--limit <n:number>", "Max rows; a negative returns every row.", {
+    default: 20,
+  })
   .option("--branch <branch:string>", "Branch (default: '').")
   .action(async (options, space) => {
+    const limit = validatedRowLimit(options.limit);
     const s = await openByToken(space, options);
     try {
-      const rows = hotEntities(s, {
-        limit: options.limit,
-        branch: options.branch,
-      });
+      const rows = hotEntities(s, { limit, branch: options.branch });
       out(!!options.json, rows, () => {
         for (const r of rows) {
           console.log(
@@ -1007,8 +1031,13 @@ export const inspect = new Command()
   )
   .option("--branch <branch:string>", "Branch (default: '').")
   .option("--scope <scope:string>", "Scope key (default: space).")
-  .option("--limit <n:number>", "Max contested entities.", { default: 100 })
+  .option(
+    "--limit <n:number>",
+    "Max contested entities; a negative returns every one.",
+    { default: 100 },
+  )
   .action(async (options, space, entity) => {
+    const limit = validatedRowLimit(options.limit);
     const s = await openByToken(space, options);
     try {
       if (entity) {
@@ -1063,7 +1092,7 @@ export const inspect = new Command()
       const rows = contendedEntities(s, {
         branch: options.branch,
         scope: options.scope,
-        limit: options.limit,
+        limit,
       });
       out(!!options.json, rows, () => {
         if (rows.length === 0) {

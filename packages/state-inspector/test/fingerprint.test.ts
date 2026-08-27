@@ -12,6 +12,7 @@ import { assert, assertEquals, assertThrows } from "@std/assert";
 import { Database } from "@db/sqlite";
 
 import { openSpace, type SpaceDb } from "../db.ts";
+import { listEntityModels } from "../model.ts";
 import {
   contentFingerprint,
   diffFingerprints,
@@ -305,6 +306,31 @@ Deno.test("a possibly truncated enumeration is refused, not fingerprinted", () =
       Error,
       "truncated enumeration",
     );
+  });
+});
+
+Deno.test("a scope holding exactly the cap is complete, and is fingerprinted", () => {
+  // The refusal boundary is EXCLUSIVE, which `FingerprintOptions.enumerationCap`
+  // states and nothing pinned: a scope of exactly `cap` entities was enumerated
+  // whole, so refusing it would withhold a hash over a complete reading. One
+  // below the count refuses; at it and above, the same hash comes back.
+  withSpace([], (space) => {
+    // The cap is compared against what the scan ENUMERATES, which is not
+    // `report.entities` — that is the post-exclusion count, smaller by the
+    // generated internal cells the fingerprint drops. Take the number the
+    // refusal actually reads.
+    const enumerated = listEntityModels(space).extent.total;
+    assert(enumerated > 1, "the fixture must hold enough to have a boundary");
+
+    assertThrows(
+      () => contentFingerprint(space, { enumerationCap: enumerated - 1 }),
+      Error,
+      "truncated enumeration",
+    );
+
+    const atCap = contentFingerprint(space, { enumerationCap: enumerated });
+    assertEquals(atCap.hash, contentFingerprint(space).hash);
+    assertEquals(atCap.entities, contentFingerprint(space).entities);
   });
 });
 

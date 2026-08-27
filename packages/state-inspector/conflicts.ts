@@ -30,7 +30,16 @@ import {
   patchOverlapsNonRecursiveRead,
   patchOverlapsRead,
 } from "@commonfabric/memory/v2/engine";
+import { utf8Compare } from "@commonfabric/utils/utf8";
+
+import { rowLimit } from "./model.ts";
+
 import type { SpaceDb } from "./db.ts";
+import {
+  branchReadChain,
+  type BranchReadLink,
+  owningLink,
+} from "./reconstruct.ts";
 import { decodeStored } from "./decode.ts";
 import { parseScope } from "./scopes.ts";
 
@@ -99,26 +108,46 @@ export function contendedEntities(
 ): ContendedEntity[] {
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
-  const limit = opts.limit ?? 100;
+  // Resolved at ENTRY — see `hotEntities`: the refusal belongs before the scan,
+  // where the SQL this replaced put it.
+  const end = rowLimit(opts.limit ?? 100);
 
-  const ids = space.db
-    .prepare(
-      `SELECT r.id, count(DISTINCT c.session_id) sessions, count(*) writes
-       FROM revision r JOIN "commit" c ON c.seq = r.commit_seq
-       WHERE r.branch = ? AND r.scope_key = ?
-       GROUP BY r.id HAVING sessions >= 2
-       ORDER BY sessions DESC, writes DESC LIMIT ?`,
+  // Counted on the branch that OWNS each entity's visible row: a child branch
+  // inherits its parent's entities, and reading local rows only would report no
+  // contention at all on a branch whose visible entities are contended.
+  const perBranch = space.db.prepare(
+    `SELECT r.id, count(DISTINCT c.session_id) sessions, count(*) writes
+     FROM revision r JOIN "commit" c ON c.seq = r.commit_seq
+     WHERE r.branch = ? AND r.scope_key = ? AND r.seq <= ?
+     GROUP BY r.id`,
+  );
+  const owners = new Map<string, BranchReadLink>();
+  const counted: { id: string; sessions: number; writes: number }[] = [];
+  for (const link of branchReadChain(space, branch)) {
+    for (
+      const r of perBranch.all<
+        { id: string; sessions: number; writes: number }
+      >(
+        link.branch,
+        scope,
+        link.atSeq,
+      )
+    ) {
+      if (owners.has(r.id)) continue;
+      owners.set(r.id, link);
+      if (r.sessions >= 2) counted.push(r);
+    }
+  }
+  const ids = counted
+    .sort((a, b) =>
+      b.sessions - a.sessions || b.writes - a.writes || utf8Compare(a.id, b.id)
     )
-    .all<{ id: string; sessions: number; writes: number }>(
-      branch,
-      scope,
-      limit,
-    );
+    .slice(0, end);
 
   const writersStmt = space.db.prepare(
     `SELECT r.seq, r.commit_seq, r.op, c.session_id, c.created_at
      FROM revision r JOIN "commit" c ON c.seq = r.commit_seq
-     WHERE r.branch = ? AND r.id = ? AND r.scope_key = ?
+     WHERE r.branch = ? AND r.id = ? AND r.scope_key = ? AND r.seq <= ?
      ORDER BY r.seq ASC, r.op_index ASC`,
   );
 
@@ -130,7 +159,7 @@ export function contendedEntities(
         op: string;
         session_id: string;
         created_at: string;
-      }>(branch, e.id, scope)
+      }>(owners.get(e.id)!.branch, e.id, scope, owners.get(e.id)!.atSeq)
       .map((w) => ({
         seq: w.seq,
         commitSeq: w.commit_seq,
@@ -236,11 +265,18 @@ export function entityConflicts(
   const branch = opts.branch ?? "";
   const scope = opts.scope ?? "space";
 
-  const writers: Writer[] = space.db
+  // Who wrote this entity, from the branch that OWNS its visible row — a child
+  // branch inherits its parent's entities, and local rows only would report no
+  // writers for one it reads fine. The stale-read scan below is a different
+  // question and keeps its own branch resolution: it replicates the engine's
+  // `validateConfirmedReads`, where an unqualified read defaults to the READER
+  // COMMIT's branch.
+  const owner = owningLink(space, { branch, scope, id });
+  const writers: Writer[] = (owner === undefined ? [] : space.db
     .prepare(
       `SELECT r.seq, r.commit_seq, r.op, c.session_id, c.created_at
        FROM revision r JOIN "commit" c ON c.seq = r.commit_seq
-       WHERE r.branch = ? AND r.id = ? AND r.scope_key = ?
+       WHERE r.branch = ? AND r.id = ? AND r.scope_key = ? AND r.seq <= ?
        ORDER BY r.seq ASC, r.op_index ASC`,
     )
     .all<{
@@ -249,7 +285,7 @@ export function entityConflicts(
       op: string;
       session_id: string;
       created_at: string;
-    }>(branch, id, scope)
+    }>(owner.branch, id, scope, owner.atSeq))
     .map((w) => ({
       seq: w.seq,
       commitSeq: w.commit_seq,
