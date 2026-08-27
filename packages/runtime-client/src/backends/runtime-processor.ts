@@ -159,6 +159,7 @@ import {
   type PageStopRequest,
   type PageSyncedRequest,
   type PatternCoverageResponse,
+  type PatternSourceInfo,
   type PatternSourcesResponse,
   type PieceCloneRequest,
   type PieceGetSourceRequest,
@@ -1919,7 +1920,7 @@ export class RuntimeProcessor {
   ): PatternSourcesResponse {
     const snapshot = this.runtime.scheduler.getGraphSnapshot();
     const seen = new Set<string>();
-    const patterns: PatternSourcesResponse["patterns"] = [];
+    const patterns: PatternSourceInfo[] = [];
 
     for (const node of snapshot.nodes) {
       const ref = node.patternIdentity;

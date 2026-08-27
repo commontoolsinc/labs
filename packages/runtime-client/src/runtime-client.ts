@@ -807,7 +807,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * Return recent settle stats history captured from worker execute() calls.
    * Entries are ordered oldest first.
    */
-  async getSettleStatsHistory(): Promise<SettleStatsHistoryEntry[]> {
+  async getSettleStatsHistory(): Promise<readonly SettleStatsHistoryEntry[]> {
     const res = await this.#conn.request<RequestType.GetSettleStatsHistory>({
       type: RequestType.GetSettleStatsHistory,
     });
@@ -818,7 +818,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * Return recent exact action-run history captured from worker scheduler runs.
    * Entries are ordered oldest first.
    */
-  async getActionRunTrace(): Promise<ActionRunTraceEntry[]> {
+  async getActionRunTrace(): Promise<readonly ActionRunTraceEntry[]> {
     const res = await this.#conn.request<RequestType.GetActionRunTrace>({
       type: RequestType.GetActionRunTrace,
     });
@@ -851,7 +851,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * Return recent structured trigger-trace entries captured from worker storage changes.
    * Entries are ordered oldest first.
    */
-  async getTriggerTrace(): Promise<TriggerTraceEntry[]> {
+  async getTriggerTrace(): Promise<readonly TriggerTraceEntry[]> {
     const res = await this.#conn.request<RequestType.GetTriggerTrace>({
       type: RequestType.GetTriggerTrace,
     });
@@ -875,7 +875,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
    * Return recent transaction-level write stack trace entries from the worker.
    * Entries are ordered oldest first.
    */
-  async getWriteStackTrace(): Promise<WriteStackTraceEntry[]> {
+  async getWriteStackTrace(): Promise<readonly WriteStackTraceEntry[]> {
     const res = await this.#conn.request<RequestType.GetWriteStackTrace>({
       type: RequestType.GetWriteStackTrace,
     });

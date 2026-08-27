@@ -367,7 +367,9 @@ describe("web-worker-console-bridge", () => {
         }]);
 
         // A failed response post: the success counter must NOT tick (the reply
-        // never left), the catch posts an error reply and counts that instead.
+        // never left). `postToClient()` substitutes an error reply naming what
+        // could not go, and says so by returning `false`, which is what the
+        // ledger counts instead.
         const respondedIdleBefore = ledgerCount(
           `responded/${RequestType.Idle}`,
         );
@@ -383,7 +385,12 @@ describe("web-worker-console-bridge", () => {
         };
         posted.length = 0;
         await dispatch({ msgId: 106, data: { type: RequestType.Idle } });
-        expect(posted).toEqual([{ msgId: 106, error: "post failed" }]);
+        expect(posted).toHaveLength(1);
+        expect(posted[0].msgId).toBe(106);
+        // Carries the reason and the message that could not go, rather than
+        // the reason alone -- the rendering itself is not pinned here.
+        expect(posted[0].error).toContain("Undeliverable message");
+        expect(posted[0].error).toContain("post failed");
         expect(ledgerCount(`responded/${RequestType.Idle}`)).toBe(
           respondedIdleBefore,
         );

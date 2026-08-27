@@ -8,6 +8,7 @@
 import "core-js/proposals/explicit-resource-management";
 import "core-js/proposals/async-explicit-resource-management";
 
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { unrefTimer } from "@commonfabric/utils/sleep";
 import { isObjectNotArray } from "@commonfabric/utils/types";
@@ -144,6 +145,13 @@ function setWorkerConsoleBridge(enabled: boolean): void {
   else uninstallWorkerConsoleBridge();
 }
 
+/**
+ * How much of an unreadable request to render in the report about it. Enough
+ * to recognize which message it was, short enough that a hostile payload
+ * cannot flood the channel it is being reported on.
+ */
+const MAX_INVALID_REQUEST_RENDER = 512;
+
 self.addEventListener("message", async (event: MessageEvent) => {
   // TODO(danfuzz): what arrives here is whatever structured cloning preserved,
   // which is less than the payload type describes; decoding with `codec-realm`
@@ -169,7 +177,14 @@ self.addEventListener("message", async (event: MessageEvent) => {
 
   try {
     if (!isIPCClientMessage(message)) {
-      throw new Error(`Invalid IPC request: ${JSON.stringify(message)}`);
+      // Rendered by `value-debug` rather than `JSON.stringify`, which throws
+      // on a `bigint` -- a value structured cloning delivers here intact --
+      // replacing this report with one that names nothing.
+      throw new Error(
+        `Invalid IPC request: ${
+          toCompactDebugString(message, MAX_INVALID_REQUEST_RENDER)
+        }`,
+      );
     }
     const { msgId, data: request } = message;
     ipcLogger.debug(`received/${request.type}`, () => []);
@@ -239,8 +254,14 @@ self.addEventListener("message", async (event: MessageEvent) => {
     const payload: IPCRemoteResponse = response !== undefined
       ? { msgId, data: response }
       : { msgId };
-    postToClient(payload);
-    ipcLogger.debug(`responded/${request.type}`, () => []);
+    // Counted by what went, not by what was asked for: a refused post
+    // substitutes an error reply, and recording that as a response would say
+    // the request succeeded.
+    const delivered = postToClient(payload);
+    ipcLogger.debug(
+      `${delivered ? "responded" : "responded-error"}/${request.type}`,
+      () => [],
+    );
   } catch (error) {
     console.error("[RuntimeWorker] Error:", error);
     const type = isIPCClientMessage(message) ? message.data.type : "invalid";

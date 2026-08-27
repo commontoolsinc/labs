@@ -1,6 +1,7 @@
 import type { MetaField } from "@commonfabric/api";
 import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
 import type {
+  FabricArray,
   FabricPlainObject,
   FabricValue,
 } from "@commonfabric/data-model/fabric-value";
@@ -970,7 +971,7 @@ export type OperationFieldResponse = {
 
 /** A response naming the operation codecs available for a cell. */
 export type OperationCapabilitiesResponse = {
-  codecs: string[];
+  codecs: readonly string[];
 };
 
 /** A response carrying the authoritative resolution of an operation. */
@@ -1264,7 +1265,7 @@ export type SetWriteStackTraceMatchersRequest = BaseRequest & {
    * The writes whose stack to record. Replaces the current set rather than
    * adding to it.
    */
-  matchers: WriteStackTraceMatcher[];
+  matchers: readonly WriteStackTraceMatcher[];
 };
 
 /**
@@ -1294,7 +1295,7 @@ export type SettleStatsHistoryResponse = {
   /**
    * One entry per recorded pass, oldest first.
    */
-  history: SettleStatsHistoryEntry[];
+  history: readonly SettleStatsHistoryEntry[];
 };
 
 /** The recorded action runs, in the order they ran. */
@@ -1302,7 +1303,7 @@ export type ActionRunTraceResponse = {
   /**
    * The recorded runs, in the order they ran.
    */
-  trace: ActionRunTraceEntry[];
+  trace: readonly ActionRunTraceEntry[];
 };
 
 /** The recorded triggers, in the order they fired. */
@@ -1310,7 +1311,7 @@ export type TriggerTraceResponse = {
   /**
    * The recorded triggers, in the order they fired.
    */
-  trace: TriggerTraceEntry[];
+  trace: readonly TriggerTraceEntry[];
 };
 
 /**
@@ -1321,7 +1322,7 @@ export type WriteStackTraceResponse = {
   /**
    * The recorded writes, in the order they happened.
    */
-  trace: WriteStackTraceEntry[];
+  trace: readonly WriteStackTraceEntry[];
 };
 
 /** What the scheduler's non-idempotency diagnosis found. */
@@ -1363,10 +1364,10 @@ export type PatternSourceInfo = {
   /**
    * Every file of the pattern, code and data alike.
    */
-  files: PatternSourceFile[];
+  files: readonly PatternSourceFile[];
 
   /** Names among `files` that carry data rather than code. */
-  dataFiles?: string[];
+  dataFiles?: readonly string[];
 };
 
 /** One entry per distinct pattern in the graph, not per graph node. */
@@ -1374,7 +1375,7 @@ export type PatternSourcesResponse = {
   /**
    * One entry per distinct pattern.
    */
-  patterns: PatternSourceInfo[];
+  patterns: readonly PatternSourceInfo[];
 };
 
 /**
@@ -1387,7 +1388,7 @@ export type SetBreakpointsRequest = BaseRequest & {
   /**
    * The actions to break on. Replaces the current set.
    */
-  actionIds: string[];
+  actionIds: readonly string[];
 };
 
 /**
@@ -1581,7 +1582,7 @@ export type TimingStats = {
   /**
    * The distribution over every sample since the worker started.
    */
-  cdf: CDFPoint[];
+  cdf: readonly CDFPoint[];
 
   /**
    * The distribution over samples since the last baseline reset, `null`
@@ -1982,15 +1983,15 @@ export type PieceSourceView = {
   /**
    * Every file of the source, code and data alike.
    */
-  files: PatternSourceFile[];
+  files: readonly PatternSourceFile[];
 
   /** Names among `files` that carry data rather than code. */
-  dataFiles?: string[];
+  dataFiles?: readonly string[];
 
   /**
    * Every revision, which is what the current one is chosen from.
    */
-  history: PieceSourceRevisionView[];
+  history: readonly PieceSourceRevisionView[];
 
   /**
    * Which of `history` the piece is on.
@@ -2019,10 +2020,10 @@ export type PieceSourceRevisionSourceView = {
   /**
    * The files as of that revision.
    */
-  files: PatternSourceFile[];
+  files: readonly PatternSourceFile[];
 
   /** Names among `files` that carry data rather than code. */
-  dataFiles?: string[];
+  dataFiles?: readonly string[];
 };
 
 /** One named revision of a piece's source, without the history around it. */
@@ -2216,7 +2217,7 @@ export type SerializedDomEvent = {
     trusted?: boolean;
     ui?: {
       pattern?: string;
-      eventIntegrity?: string[];
+      eventIntegrity?: readonly string[];
       uiContractDataset?: Record<string, string>;
     };
   };
@@ -2679,7 +2680,7 @@ export type ConsoleMessage = Omit<ConsoleNotification, "args"> & {
   /**
    * The arguments, decoded back into the values the pattern logged.
    */
-  args: FabricValue[];
+  args: FabricArray;
 };
 
 /**
@@ -2822,7 +2823,7 @@ export type VDomBatchNotification = {
   batchId: number;
 
   /** The operations to apply, in order */
-  ops: VDomOp[];
+  ops: readonly VDomOp[];
 
   /**
    * The root node ID for this render tree; `null` while the tree has no root
