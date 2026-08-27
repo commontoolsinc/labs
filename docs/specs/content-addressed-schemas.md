@@ -344,12 +344,15 @@ content verifies against its id, transitively through the closure. A
 commit that references what it does not supply, or supplies content
 that does not hash to its id, is rejected. The commit API therefore
 cannot create a missing or forged closure for any reference this
-collection sees; readers treat a broken closure that exists anyway as
-the patch shape below, out-of-band tampering, or a store that predates
-this validation, and fail loudly on it. The
-writer's obligation to install the closure atomically with the referrer
-remains normative — the boundary is its enforcement, not a substitute
-for it.
+collection sees; a broken closure that exists anyway — the patch shape
+below, out-of-band tampering, or a store that predates this validation
+— is a corrupt or deliberately malformed declaration. A reader logs it
+and ignores it: the declaration selects nothing, which voids only a
+reader that adopted it, while a reader with a schema of its own reads
+on under reader precedence
+([link-schema-precedence.md](link-schema-precedence.md)). The writer's
+obligation to install the closure atomically with the referrer remains
+normative — the boundary is its enforcement, not a substitute for it.
 
 One patch shape escapes the collection: an edit INSIDE an existing
 link's schema (replacing a `$ref` string at a sub-path) introduces a
@@ -602,7 +605,9 @@ playbook:
   session, not once per frame.
 - Fail closed: a forged schema document (content not matching id) never
   enters the registry; a query with an unresolvable selector reference
-  errors loudly; a link with an unresolvable reference reads as unmatched.
+  errors loudly; a link with an unresolvable reference is logged and its
+  declaration selects nothing — voiding a reader that adopted it, while a
+  reader with a schema of its own reads on under reader precedence.
 - Round trip: a piece written with reference links, resumed in a fresh
   session, resolves schemas through sync alone; the same with a cold
   registry exercises the async recovery path.

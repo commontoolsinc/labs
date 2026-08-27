@@ -447,11 +447,14 @@ describe("link-ifc-read-relevance closure, narrowing, and raw readers", () => {
       },
     });
 
+    // The relevance assertions come BEFORE any read through a minted
+    // handle: a child read marks through the entry gates too, and would
+    // mask a mint that skipped the seam.
     const items = reader.get()?.items;
-    expect(items).toHaveLength(2);
-    expect(items?.[1]?.get()).toEqual({ name: "Second" });
     expect(tx.getCfcState().relevant).toBe(true);
     expect(hopReasons().length).toBeGreaterThan(0);
+    expect(items).toHaveLength(2);
+    expect(items?.[1]?.get()).toEqual({ name: "Second" });
   });
 
   it("marks the one-step hop of a root asCell mint", () => {
@@ -465,9 +468,13 @@ describe("link-ifc-read-relevance closure, narrowing, and raw readers", () => {
       asCell: ["cell"],
     });
 
-    expect(reader.get()?.get()).toEqual({ name: "Ada" });
+    // Assert relevance off the mint alone, before reading through the
+    // handle — a read through it marks via the entry gates too, and would
+    // mask a mint that skipped the seam.
+    const handle = reader.get();
     expect(tx.getCfcState().relevant).toBe(true);
     expect(hopReasons().length).toBeGreaterThan(0);
+    expect(handle?.get()).toEqual({ name: "Ada" });
   });
 
   it("mints an asCell handle across a link whose stored schema is unresolvable", () => {
