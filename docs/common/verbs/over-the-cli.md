@@ -210,10 +210,17 @@ Where they go depends on whether a callable's own vocabulary stands between the
 command and them. `cf get` and `cf wish` have none, so the three flags sit on
 the line like any others. `cf call` and `cf exec` do, so the flags precede the
 name that opens it — the callable name on `call`, the mounted file on `exec` —
-and everything after that name belongs to the callable. `--` is what ends the
-callable's section, which is why it is written on those two and refused on
-`cf get`, `cf set` and `cf wish`: there is no section for it to close, and a
-marker on one of those would set aside words nothing reads.
+and everything after that name belongs to the callable.
+
+The two spell that boundary differently today. `cf exec` takes the callable's
+arguments straight after the mounted file with nothing between them, while
+`cf call` wants `--` before the same words in the same position. A caller who
+learns one has not learned the other, and closing that gap is what step 10 of
+[CLI surface shape](../../plans/cli-surface-shape.md) is for.
+
+Where a command has no callable section at all, `--` closes nothing: it is
+refused on `cf get`, `cf set` and `cf wish` rather than silently setting aside
+words that nothing reads.
 
 ```bash
 cf call --piece <topic> --select comment.writtenAt addComment \
