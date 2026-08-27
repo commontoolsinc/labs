@@ -400,11 +400,12 @@ describe("Phase 3 events-down (serving side)", () => {
     | ((batch: WaveSpaceCommit) => WaveCommitRejection | undefined)
     | undefined;
   let rejectedWaveCommits = 0;
-  let failNextServingCommit:
+  type ServingCommitFailure =
     | "result-error"
     | "rejection"
-    | "synchronous-throw"
-    | undefined;
+    | "synchronous-throw";
+  let failNextServingCommit: ServingCommitFailure | undefined;
+  let failServingCommitSequence: ServingCommitFailure[];
   let failServingCommitActionPrefix: string | undefined;
 
   const decorateWaveCommitSink = (sink: WaveCommitSink): WaveCommitSink => ({
@@ -457,7 +458,8 @@ describe("Phase 3 events-down (serving side)", () => {
           const tx = edit(options);
           const commit = tx.commit.bind(tx);
           tx.commit = () => {
-            const failure = failNextServingCommit;
+            const sequenceFailure = failServingCommitSequence[0];
+            const failure = sequenceFailure ?? failNextServingCommit;
             const actionId = waveRunContextOf(tx)?.actionId;
             if (
               failure === undefined ||
@@ -466,8 +468,15 @@ describe("Phase 3 events-down (serving side)", () => {
             ) {
               return commit();
             }
-            failNextServingCommit = undefined;
-            failServingCommitActionPrefix = undefined;
+            if (sequenceFailure === undefined) {
+              failNextServingCommit = undefined;
+              failServingCommitActionPrefix = undefined;
+            } else {
+              failServingCommitSequence.shift();
+              if (failServingCommitSequence.length === 0) {
+                failServingCommitActionPrefix = undefined;
+              }
+            }
             const error = new Error(`forced serving commit ${failure}`);
             if (failure === "result-error") {
               return Promise.resolve({
@@ -508,6 +517,7 @@ describe("Phase 3 events-down (serving side)", () => {
     rejectWaveCommitWith = undefined;
     rejectedWaveCommits = 0;
     failNextServingCommit = undefined;
+    failServingCommitSequence = [];
     failServingCommitActionPrefix = undefined;
   });
 
@@ -3556,8 +3566,20 @@ describe("Phase 3 events-down (serving side)", () => {
       await host!.spaceServer(space)!.park("idle");
       servingRuntime = undefined;
       servingManager = undefined;
-      rejectWaveCommitWhen = (batch) =>
-        JSON.stringify(batch.operations).includes('"deliveryDeferral"');
+      rejectWaveCommitWhen = (batch) => {
+        const rejects = JSON.stringify(batch.operations).includes(
+          '"deliveryDeferral"',
+        );
+        if (rejects) {
+          // Arm both following commit attempts before this rejection returns.
+          // The host may start its next drain immediately, so arming either
+          // failure after observing the counter races that automatic retry.
+          failServingCommitSequence = ["rejection", "synchronous-throw"];
+          failServingCommitActionPrefix =
+            "server-execution/event-delivery-checkpoint:";
+        }
+        return rejects;
+      };
       send("b");
       await clientRuntime.idle();
       await clientRuntime.storageManager.synced();
@@ -3583,20 +3605,14 @@ describe("Phase 3 events-down (serving side)", () => {
         wake.withTx(tx).set({ value });
         expect((await tx.commit()).error).toBeUndefined();
       };
-      failNextServingCommit = "rejection";
-      failServingCommitActionPrefix =
-        "server-execution/event-delivery-checkpoint:";
       await wakeCheckpointRetry("rejection", 1);
       await waitUntil(
-        () => host!.stats().events.deliveryCheckpointWriteFailures === 3,
+        () => host!.stats().events.deliveryCheckpointWriteFailures >= 3,
         "the rejected checkpoint promise to be counted",
       );
-      failNextServingCommit = "synchronous-throw";
-      failServingCommitActionPrefix =
-        "server-execution/event-delivery-checkpoint:";
       await wakeCheckpointRetry("throw", 2);
       await waitUntil(
-        () => host!.stats().events.deliveryCheckpointWriteFailures === 4,
+        () => host!.stats().events.deliveryCheckpointWriteFailures >= 4,
         "the synchronously failed checkpoint staging to be counted",
       );
       await wakeCheckpointRetry("success", 3);
@@ -3688,6 +3704,7 @@ describe("Phase 3 events-down (serving side)", () => {
       expect(host!.stats().events.dropped).toBe(0);
     } finally {
       rejectWaveCommitWhen = undefined;
+      failServingCommitSequence = [];
       GatedStorageManager.loadParkFailDocId = undefined;
       GatedStorageManager.loadParkFailAddress = undefined;
       cancelDemand();
