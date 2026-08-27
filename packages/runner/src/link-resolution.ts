@@ -173,6 +173,23 @@ const schemaScopeForLinkAtDepth = (
 };
 
 /**
+ * The delivery kick for a missing schema-closure document, bound to a
+ * runtime: it asks through the doc-pull reservation, so a memo replay
+ * (which re-marks and re-ensures per call) cannot repeat a sync the
+ * reservation already covers. The crossing seams outside this module —
+ * the asCell handle mint in schema.ts among them — share it.
+ */
+export const missingSchemaDocKicker =
+  (runtime: Runtime) => (docLink: NormalizedFullLink): void => {
+    const mgr = runtime.storageManager;
+    if (
+      mgr.shouldPullDoc?.(docLink.space, docLink.id, docLink.scope) === true
+    ) {
+      kickDocPull(runtime, docLink, true);
+    }
+  };
+
+/**
  * The link a blocked or dead-ended chain resolves to: undefined-data in place.
  * Exported so every site that decides a link may not be followed produces the
  * same shape — notably the asCell boundaries, which build a handle instead of
@@ -468,17 +485,7 @@ export function resolveLinkTracingDereferences(
 } {
   // The walk needs this to detect cycles; the memo needs it to name the entry.
   let addressKey = linkAddressKey(link);
-  // Missing schema-closure documents kick through the same reservation
-  // path as doc pulls, so a memo replay (which re-marks and re-ensures per
-  // call) cannot repeat a sync the reservation already covers.
-  const kickMissingSchemaDoc = (docLink: NormalizedFullLink): void => {
-    const mgr = runtime.storageManager;
-    if (
-      mgr.shouldPullDoc?.(docLink.space, docLink.id, docLink.scope) === true
-    ) {
-      kickDocPull(runtime, docLink, true);
-    }
-  };
+  const kickMissingSchemaDoc = missingSchemaDocKicker(runtime);
   const memo = tx.getSnapshotMemo?.();
   const memoKey = memo === undefined ? "" : resolutionMemoVariant(
     link,

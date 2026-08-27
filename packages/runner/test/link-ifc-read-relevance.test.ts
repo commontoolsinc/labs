@@ -515,6 +515,46 @@ describe("link-ifc-read-relevance closure, narrowing, and raw readers", () => {
     expect(tx.getCfcState().relevant).toBe(true);
   });
 
+  it("mints no root asCell handle over a crossing whose schema closure is cold", () => {
+    const decomposed = labeledCidSchema();
+    const holder = holderOver({ $ref: decomposed.rootRef });
+    const reader = holder.key("item").asSchema<Cell<{ name: string }>>({
+      type: "object",
+      properties: { name: { type: "string" } },
+      asCell: ["cell"],
+    });
+
+    expect(reader.get()).toBeUndefined();
+    expect(tx.getCfcState().relevant).toBe(false);
+
+    writeClosureDocs(decomposed);
+    const handle = reader.get();
+    expect(handle?.get()).toEqual({ name: "Ada" });
+    expect(tx.getCfcState().relevant).toBe(true);
+    expect(hopReasons().length).toBeGreaterThan(0);
+  });
+
+  it("keeps a root opaque handle's reads closed while the schema closure is cold", () => {
+    const decomposed = labeledCidSchema();
+    const holder = holderOver({ $ref: decomposed.rootRef });
+    const reader = holder.key("item").asSchema<Cell<{ name: string }>>({
+      asCell: ["opaque"],
+    });
+
+    // The opaque mint addresses the POSITION without following the link —
+    // no crossing is consumed, so the handle itself discloses nothing. The
+    // reads THROUGH it cross the link, and those fail closed until the
+    // documents arrive.
+    const handle = reader.get();
+    expect(handle).toBeDefined();
+    expect(handle?.get()).toBeUndefined();
+    expect(tx.getCfcState().relevant).toBe(false);
+
+    writeClosureDocs(decomposed);
+    expect(reader.get()?.get()).toBeDefined();
+    expect(tx.getCfcState().relevant).toBe(true);
+  });
+
   it("mints no asCell handle over a crossing whose schema closure is cold", () => {
     const decomposed = labeledCidSchema();
     const holder = holderOver({ $ref: decomposed.rootRef });

@@ -109,7 +109,10 @@ which side won the combination.
   under "Closure loading at the seam").
 - The traversal marks each pointer it follows (`followPointer`, after
   external schema-document registration) and the extra handle hop of an
-  `asCell` crossing (`getNextCellLink`).
+  `asCell` crossing — `getNextCellLink`, its schema.ts twin at the root
+  `asCell` mint in `validateAndTransform`, and the array walk's own
+  element hop, each of which dereferences a link without going through
+  `followPointer`.
 - Content-reading resolvers opt in (`markIfcCrossings`): the entry
   resolutions, schema-less query-result proxy accesses,
   `getRaw`/`getRawUntyped` (which resolve links on the way to the
@@ -144,10 +147,13 @@ schema entirely. Instead the crossing resolves as not found: the traversal
 returns not-found at the pointer (`followPointer`), an array's element
 hop — which the array walk dereferences itself, fast paths included —
 voids the whole array read (a partial array would disclose which
-positions were readable), an asCell boundary mints no handle (the hop
-consumed the crossing, so a handle would hand its reads out from under
-the labels), and a content-reading link resolution resolves to undefined
-data, unmemoized. Marking runs before each fail-closed return, so what is
+positions were readable), an asCell boundary that follows the link mints
+no handle (the hop consumed the crossing, so a handle would hand its
+reads out from under the labels), and a content-reading link resolution
+resolves to undefined data, unmemoized. The one asCell mint that is not
+a crossing is the root OPAQUE handle, which addresses the position
+without following the link: the handle may exist, and every read through
+it crosses the link and fails closed like any other. Marking runs before each fail-closed return, so what is
 visible of a partial schema still marks, conservatively — a crossing can
 be relevant and still unreadable. The tracked reads and the delivery kick
 re-run the reader when the documents arrive, and that pass resolves,
