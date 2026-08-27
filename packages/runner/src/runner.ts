@@ -2604,6 +2604,26 @@ export class Runner {
           this.locallyPreparedResults.delete(key);
         }
       });
+      // ALREADY-RUNNING piece, full setup staged, KEYLESS pattern: the
+      // durable stamp used to carry this exact moment to the piece's meta
+      // watcher, whose swap replaced the running graph with the new version
+      // (bare setup(), run(), and the deferred-start arm all funnel through
+      // here — the reuse paths returned earlier). A keyless identity never
+      // lands durably (L3(a), RULED 2026-08-27), so request the swap through
+      // the session channel once the setup commit lands — the watcher's own
+      // ordering, with the watcher's own guards deciding whether anything
+      // changed. Real patterns keep the durable-stamp path.
+      if (PatternManager.isKeylessPatternIdentity(entryRef.identity)) {
+        const sessionSwap = this.sessionPatternSwaps.get(key);
+        if (sessionSwap !== undefined) {
+          const swapPattern = pattern;
+          const swapRef = entryRef;
+          tx.addCommitCallback((_tx, result) => {
+            if (result.error) return;
+            sessionSwap(swapPattern, swapRef);
+          });
+        }
+      }
     }
 
     return { resultCell, pattern, needsStart: true };
@@ -3922,25 +3942,6 @@ export class Runner {
           startTx.abort("Deferred runner start was cancelled");
           return;
         }
-        // ALREADY-RUNNING piece + KEYLESS pattern on the deferred arm: the
-        // same stamp-carried swap the synchronous arm requests through the
-        // session channel (see runWithStartOwnership) — the setup that
-        // staged the new derivation committed with the outer transaction,
-        // so the swap request fires here directly.
-        if (installedRegistration === undefined && givenPattern !== undefined) {
-          const sessionSwap = this.sessionPatternSwaps.get(
-            this.getDocKey(committedResultCell),
-          );
-          const sessionRef = this.runtime.patternManager.getArtifactEntryRef(
-            givenPattern,
-          );
-          if (
-            sessionSwap !== undefined && sessionRef !== undefined &&
-            PatternManager.isKeylessPatternIdentity(sessionRef.identity)
-          ) {
-            sessionSwap(givenPattern, sessionRef);
-          }
-        }
         this.runtime.prepareTxForCommit(startTx);
         startTx.commit().then(({ error }) => {
           if (error) {
@@ -4537,33 +4538,6 @@ export class Runner {
         );
         if (pullOnceAfterStart) {
           this.pullCellOnceAfterSuccessfulCommit(tx, resultCell);
-        }
-      }
-      // ALREADY-RUNNING piece, full setup staged, KEYLESS pattern: the
-      // durable stamp used to carry this exact moment to the piece's meta
-      // watcher, whose swap replaced the running graph with the new
-      // version (the derive-returning-pattern re-derivation path). A
-      // keyless identity never lands durably (L3(a), RULED 2026-08-27),
-      // so request the swap through the session channel instead — after
-      // the setup commit lands, mirroring the watcher's own ordering, and
-      // with the watcher's own guards deciding whether anything changed.
-      // Real patterns keep the durable-stamp path.
-      if (installedCancel === undefined && cancelDeferredStart === undefined) {
-        const swapKey = this.getDocKey(resultCell);
-        const sessionSwap = this.sessionPatternSwaps.get(swapKey);
-        const sessionRef = pattern !== undefined
-          ? this.runtime.patternManager.getArtifactEntryRef(pattern)
-          : undefined;
-        if (
-          sessionSwap !== undefined &&
-          pattern !== undefined &&
-          sessionRef !== undefined &&
-          PatternManager.isKeylessPatternIdentity(sessionRef.identity)
-        ) {
-          tx.addCommitCallback((_tx, result) => {
-            if (result.error) return;
-            sessionSwap(pattern, sessionRef);
-          });
         }
       }
     }
