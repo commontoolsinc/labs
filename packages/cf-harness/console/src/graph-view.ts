@@ -8,7 +8,14 @@
  * cell, a dashed one is a pattern reading it.
  */
 
-import { html, LitElement, nothing, type TemplateResult } from "lit";
+import {
+  html,
+  LitElement,
+  nothing,
+  svg,
+  type SVGTemplateResult,
+  type TemplateResult,
+} from "lit";
 import type { ConsoleGraph, ConsoleGraphNode } from "./api.ts";
 
 const NODE_WIDTH = 156;
@@ -123,7 +130,7 @@ export class ConsoleGraphView extends LitElement {
     return this;
   }
 
-  #node(placed: Placed, leading: boolean): TemplateResult {
+  #node(placed: Placed, leading: boolean): SVGTemplateResult {
     const node = placed.node;
     const isCell = node.kind === "cell";
     const classes = [
@@ -133,7 +140,7 @@ export class ConsoleGraphView extends LitElement {
       node.id === this.selected ? "chosen" : "",
       leading ? "leading" : "",
     ].filter(Boolean).join(" ");
-    return html`
+    return svg`
       <g
         class=${classes}
         transform="translate(${placed.x}, ${placed.y})"
@@ -153,7 +160,7 @@ export class ConsoleGraphView extends LitElement {
               node.status === undefined ? "" : ` · ${node.status}`
             }`}
         </text>
-        ${node.confidentiality.length === 0 ? nothing : html`
+        ${node.confidentiality.length === 0 ? nothing : svg`
           <circle class="gatom" cx=${NODE_WIDTH - 12} cy="12" r="4"></circle>
         `}
       </g>
@@ -291,13 +298,13 @@ export class ConsoleGraphView extends LitElement {
             const x2 = to.x;
             const y2 = to.y + NODE_HEIGHT / 2;
             const mid = (x1 + x2) / 2;
-            return html`
+            return svg`
               <g class="gedge ${edge.kind}">
                 <path
                   d="M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}"
                   marker-end="url(#arrow)"
                 ></path>
-                ${edge.label === undefined ? nothing : html`
+                ${edge.label === undefined ? nothing : svg`
                   <text x=${mid} y=${(y1 + y2) / 2 - 4}>${edge.label}</text>
                 `}
               </g>
