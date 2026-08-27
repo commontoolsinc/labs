@@ -365,8 +365,8 @@ describe("CFCodeEditor collaboration", () => {
       configurable: true,
       value: MockPresenceWebSocket,
     });
+    const element = new CFCodeEditor();
     try {
-      const element = new CFCodeEditor();
       const presence = (element as any)._presenceComp as Compartment;
       (element as any)._editorView = statefulView([presence.of([])]);
       const collaboration = {
@@ -383,7 +383,7 @@ describe("CFCodeEditor collaboration", () => {
       element.participantName = "Ada";
       element.contextPresenceUrl = "wss://default-presence.example";
 
-      (element as any)._setupPresence();
+      (element as any)._takePresenceOwnership();
       expect(MockPresenceWebSocket.instances[0].url).toBe(
         "wss://default-presence.example/v1/rooms/abcdefghijklmnopqrstuv",
       );
@@ -423,6 +423,7 @@ describe("CFCodeEditor collaboration", () => {
       );
       expect(MockPresenceWebSocket.instances[3].closes).toEqual([1000]);
     } finally {
+      (element as any)._releasePresenceOwnership();
       Object.defineProperty(globalThis, "WebSocket", {
         configurable: true,
         value: originalWebSocket,
@@ -437,8 +438,8 @@ describe("CFCodeEditor collaboration", () => {
       configurable: true,
       value: MockPresenceWebSocket,
     });
+    const element = new CFCodeEditor();
     try {
-      const element = new CFCodeEditor();
       const presence = (element as any)._presenceComp as Compartment;
       (element as any)._editorView = statefulView([presence.of([])]);
       (element as any)._collaboration = {
@@ -465,13 +466,84 @@ describe("CFCodeEditor collaboration", () => {
       element.participantName = "Ada";
       element.contextPresenceUrl = "wss://default-presence.example";
 
-      (element as any)._setupPresence();
+      (element as any)._takePresenceOwnership();
 
       expect(MockPresenceWebSocket.instances).toHaveLength(1);
       expect(MockPresenceWebSocket.instances[0].url).toMatch(
         /^wss:\/\/default-presence\.example\/v1\/rooms\/[A-Za-z0-9_-]{43}$/,
       );
     } finally {
+      (element as any)._releasePresenceOwnership();
+      Object.defineProperty(globalThis, "WebSocket", {
+        configurable: true,
+        value: originalWebSocket,
+      });
+    }
+  });
+
+  it("moves the page presence session between focused editors", () => {
+    const originalWebSocket = globalThis.WebSocket;
+    MockPresenceWebSocket.instances = [];
+    Object.defineProperty(globalThis, "WebSocket", {
+      configurable: true,
+      value: MockPresenceWebSocket,
+    });
+    const createEditor = (room: string) => {
+      const element = new CFCodeEditor();
+      const presence = (element as any)._presenceComp as Compartment;
+      (element as any)._editorView = statefulView([presence.of([])]);
+      (element as any)._collaboration = {
+        active: true,
+        synchronizationSnapshot: {
+          confirmedCursor: { epoch: 2, version: 4 },
+          pendingChanges: [],
+          field: synchronizedField,
+        },
+      };
+      element.collaborative = true;
+      element.presenceRoom = room;
+      element.participantName = "Ada";
+      element.presenceUrl = "wss://presence.example";
+      return element;
+    };
+    const first = createEditor("aaaaaaaaaaaaaaaaaaaaaa");
+    const second = createEditor("bbbbbbbbbbbbbbbbbbbbbb");
+    try {
+      (first as any)._setupPresence();
+      (second as any)._setupPresence();
+      expect(MockPresenceWebSocket.instances).toHaveLength(0);
+
+      ((first as any)._editorView as { hasFocus: boolean }).hasFocus = true;
+      (first as any)._handlePresenceFocus();
+      expect(MockPresenceWebSocket.instances).toHaveLength(1);
+      expect(MockPresenceWebSocket.instances[0].url).toContain(
+        "/rooms/aaaaaaaaaaaaaaaaaaaaaa",
+      );
+
+      (first as any)._publishPresence();
+      expect(MockPresenceWebSocket.instances[0].closes).toEqual([]);
+
+      ((first as any)._editorView as { hasFocus: boolean }).hasFocus = false;
+      ((second as any)._editorView as { hasFocus: boolean }).hasFocus = true;
+      (second as any)._handlePresenceFocus();
+      expect(MockPresenceWebSocket.instances[0].closes).toEqual([1000]);
+      expect(MockPresenceWebSocket.instances).toHaveLength(2);
+      expect(MockPresenceWebSocket.instances[1].url).toContain(
+        "/rooms/bbbbbbbbbbbbbbbbbbbbbb",
+      );
+
+      (first as any)._setupPresence();
+      expect(MockPresenceWebSocket.instances).toHaveLength(2);
+
+      (second as any)._releasePresenceOwnership();
+      expect(MockPresenceWebSocket.instances[1].closes).toEqual([1000]);
+      (first as any)._setupPresence();
+      expect(MockPresenceWebSocket.instances).toHaveLength(2);
+    } finally {
+      (first as any)._releasePresenceOwnership?.();
+      (second as any)._releasePresenceOwnership?.();
+      (first as any)._cleanupPresence();
+      (second as any)._cleanupPresence();
       Object.defineProperty(globalThis, "WebSocket", {
         configurable: true,
         value: originalWebSocket,
@@ -500,8 +572,8 @@ describe("CFCodeEditor collaboration", () => {
       configurable: true,
       value: () => {},
     });
+    const element = new CFCodeEditor();
     try {
-      const element = new CFCodeEditor();
       const presence = (element as any)._presenceComp as Compartment;
       const view = statefulView([presence.of([])]);
       view.hasFocus = false;
@@ -520,7 +592,7 @@ describe("CFCodeEditor collaboration", () => {
       element.participantName = "Ada";
       element.presenceUrl = "wss://presence.example";
 
-      (element as any)._setupPresence();
+      (element as any)._takePresenceOwnership();
       const socket = MockPresenceWebSocket.instances[0];
       socket.readyState = 1;
       socket.emit("open");
@@ -558,6 +630,7 @@ describe("CFCodeEditor collaboration", () => {
         },
       });
     } finally {
+      (element as any)._releasePresenceOwnership();
       Object.defineProperty(globalThis, "WebSocket", {
         configurable: true,
         value: originalWebSocket,
@@ -604,8 +677,8 @@ describe("CFCodeEditor collaboration", () => {
       value: MockPresenceWebSocket,
     });
     const events: Array<[string, unknown]> = [];
+    const element = new CFCodeEditor();
     try {
-      const element = new CFCodeEditor();
       const presence = (element as any)._presenceComp as Compartment;
       (element as any)._editorView = statefulView([presence.of([])]);
       (element as any)._collaboration = {
@@ -623,7 +696,7 @@ describe("CFCodeEditor collaboration", () => {
       element.participantName = "Ada";
       element.contextPresenceUrl = "https://presence.example";
 
-      (element as any)._setupPresence();
+      (element as any)._takePresenceOwnership();
       (element as any)._setupPresence();
       (element as any)._retryPresenceFromSignal();
 
@@ -637,6 +710,7 @@ describe("CFCodeEditor collaboration", () => {
       (element as any)._setupPresence();
       expect(MockPresenceWebSocket.instances).toHaveLength(1);
     } finally {
+      (element as any)._releasePresenceOwnership();
       Object.defineProperty(globalThis, "WebSocket", {
         configurable: true,
         value: originalWebSocket,
@@ -651,8 +725,8 @@ describe("CFCodeEditor collaboration", () => {
       configurable: true,
       value: MockPresenceWebSocket,
     });
+    const element = new CFCodeEditor();
     try {
-      const element = new CFCodeEditor();
       const presence = (element as any)._presenceComp as Compartment;
       (element as any)._editorView = statefulView([presence.of([])]);
       const synchronizationSnapshot = {
@@ -669,7 +743,7 @@ describe("CFCodeEditor collaboration", () => {
       element.participantName = "Ada";
       element.presenceUrl = "wss://presence.example";
 
-      (element as any)._setupPresence();
+      (element as any)._takePresenceOwnership();
       const failedSocket = MockPresenceWebSocket.instances[0];
       failedSocket.emit("error");
       expect(failedSocket.closes).toEqual([1002]);
@@ -689,6 +763,7 @@ describe("CFCodeEditor collaboration", () => {
         "11111111-1111-4111-8111-111111111111",
       );
     } finally {
+      (element as any)._releasePresenceOwnership();
       Object.defineProperty(globalThis, "WebSocket", {
         configurable: true,
         value: originalWebSocket,
@@ -944,8 +1019,8 @@ describe("CFCodeEditor collaboration", () => {
       configurable: true,
       value: MockPresenceWebSocket,
     });
+    const element = new CFCodeEditor();
     try {
-      const element = new CFCodeEditor();
       const readonly = (element as any)._readonly as Compartment;
       const collaborationComp = (element as any)
         ._collaborationComp as Compartment;
@@ -980,7 +1055,7 @@ describe("CFCodeEditor collaboration", () => {
       element.presenceRoom = "abcdefghijklmnopqrstuv";
       element.participantName = "Ada";
       element.presenceUrl = "wss://presence.example";
-      (element as any)._setupPresence();
+      (element as any)._takePresenceOwnership();
 
       let failure: unknown;
       try {
@@ -996,8 +1071,8 @@ describe("CFCodeEditor collaboration", () => {
       expect((element as any)._presence).toBeDefined();
       expect(view.state.facet(EditorState.readOnly)).toBe(false);
       expect((element as any)._collaboration).toBe(collaboration);
-      (element as any)._cleanupPresence();
     } finally {
+      (element as any)._releasePresenceOwnership();
       Object.defineProperty(globalThis, "WebSocket", {
         configurable: true,
         value: originalWebSocket,
@@ -1082,6 +1157,7 @@ describe("CFCodeEditor collaboration", () => {
       element.presenceRoom = "abcdefghijklmnopqrstuv";
       element.participantName = "Ada";
       element.presenceUrl = "wss://presence.example";
+      (element as any)._takePresenceOwnership();
       (element as any)._observeCollaboration(controller);
       expect(codeMirrorPresenceState(view.state)).toBeDefined();
 
@@ -1097,7 +1173,7 @@ describe("CFCodeEditor collaboration", () => {
       expect((element as any)._presenceEpoch).toBe(2);
     } finally {
       (element as any)._collaborationSyncUnsub?.();
-      (element as any)._cleanupPresence();
+      (element as any)._releasePresenceOwnership();
       controller.dispose();
       Object.defineProperty(globalThis, "WebSocket", {
         configurable: true,

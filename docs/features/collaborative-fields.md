@@ -26,14 +26,19 @@ it receives no document contents or changes and retains no state after a socket
 disconnects. Presence is optional and cannot delay, alter, or disable a Memory
 operation.
 
-`cf-code-editor` joins only while collaborative editing is active, a
-`participantName` is set, and a service endpoint is available. By default it
-derives an opaque room from the resolved, pinned Memory field: the space DID,
-branch, full schemed document id, resolved scope instance, and complete field
-path are domain-separated and hashed. An explicit `presenceRoom` overrides
-that derived room. The address hash is a pseudonymous rendezvous key, not
-authentication; a human space name is display state and does not participate
-in Cell identity.
+`cf-code-editor` can join only while collaborative editing is active, a
+`participantName` is set, and a service endpoint is available. A browser tab
+advertises presence in at most one editor room: no room is joined before the
+first eligible editor focus, ordinary blur retains that room and selection, and
+focusing another editor closes the previous room socket before joining the new
+one.
+Unmounting the owning editor closes its socket without promoting another
+editor. By default each editor derives its opaque document room from the
+resolved, pinned Memory field: the space DID, branch, full schemed document id,
+resolved scope instance, and complete field path are domain-separated and
+hashed. An explicit `presenceRoom` overrides that derived room. The address hash
+is a pseudonymous rendezvous key, not authentication; a human space name is
+display state and does not participate in Cell identity.
 
 A host supplies the service endpoint through the exported
 `presenceUrlContext`; Labs Shell provides it from the optional build-time

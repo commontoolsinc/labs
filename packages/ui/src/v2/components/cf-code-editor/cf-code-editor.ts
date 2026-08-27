@@ -148,6 +148,10 @@ function escapeMarkdownImageAltText(text: string): string {
     .replace(/\r?\n/g, " ");
 }
 
+// A browser tab advertises one editor room at a time. Blur retains ownership;
+// focus in another instance transfers it.
+let activePresenceEditor: CFCodeEditor | undefined;
+
 /**
  * Supported MIME types for syntax highlighting
  */
@@ -222,7 +226,8 @@ const getLangExtFromMimeType = (mime: MimeType) => {
  * @attr {boolean} collaborative - Use Memory's operation protocol for concurrent editing.
  * @attr {string} presenceRoom - Optional opaque room override for ephemeral
  *   co-presence. The bound text Cell address supplies the default.
- * @attr {string} participantName - Plain-text co-presence display name.
+ * @attr {string} participantName - Plain-text display name which enables
+ *   co-presence when this editor is focused.
  * @attr {string} presenceUrl - Optional WebSocket co-presence service
  *   override. Hosts can instead provide `presenceUrlContext`.
  *
@@ -1239,6 +1244,7 @@ export class CFCodeEditor extends BaseElement {
   override disconnectedCallback() {
     super.disconnectedCallback();
     this._cleanupPresenceReconnectListeners();
+    this._releasePresenceOwnership();
     this._cleanup();
   }
 
@@ -1544,6 +1550,10 @@ export class CFCodeEditor extends BaseElement {
     synchronization = this._collaboration?.synchronizationSnapshot,
     retryFailedConnection = false,
   ): void {
+    if (activePresenceEditor !== this) {
+      this._cleanupPresence();
+      return;
+    }
     const view = this._editorView;
     const serviceUrl = this.presenceUrl || this.contextPresenceUrl || "";
     const room = this.presenceRoom ||
@@ -1607,6 +1617,26 @@ export class CFCodeEditor extends BaseElement {
     } catch {
       this._failPresence("configuration");
     }
+  }
+
+  private _takePresenceOwnership(): void {
+    if (activePresenceEditor !== this) {
+      const previous = activePresenceEditor;
+      activePresenceEditor = this;
+      previous?._cleanupPresence();
+    }
+    this._setupPresence();
+  }
+
+  private _handlePresenceFocus(): void {
+    this._takePresenceOwnership();
+    this._publishPresence();
+  }
+
+  private _releasePresenceOwnership(): void {
+    if (activePresenceEditor !== this) return;
+    activePresenceEditor = undefined;
+    this._cleanupPresence();
   }
 
   private _cleanupPresence(): void {
@@ -2346,7 +2376,7 @@ export class CFCodeEditor extends BaseElement {
         focus: () => {
           this._cellController.onFocus();
           this.emit("cf-focus");
-          this._publishPresence();
+          this._handlePresenceFocus();
           return false;
         },
         blur: () => {

@@ -983,11 +983,14 @@ describe("cf-code-editor collaboration", () => {
         enablePresence(bobPage, "Bob", presenceRelay.url),
       ]);
       await Promise.all([
+        selectEditorText(alicePage, 0, 4),
+        selectEditorText(bobPage, 0, 0),
+      ]);
+      await Promise.all([
         waitForCondition(alicePage, presenceConnected),
         waitForCondition(bobPage, presenceConnected),
       ]);
 
-      await selectEditorText(alicePage, 0, 4);
       await waitForCondition(bobPage, remoteSelectionVisible, {
         args: ["Alice"],
       });

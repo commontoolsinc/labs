@@ -114,16 +114,21 @@ Add these optional properties to `cf-code-editor`:
 | `participantName` | Plain-text display name. Its absence disables presence. |
 | `presenceUrl` | Optional WebSocket service override. A host-provided `presenceUrlContext` is the default; tests and local development may set the override directly. |
 
-Setting `participantName` while `collaborative` is active opens the socket when
-either the context or override supplies an endpoint. The default room hashes a
-domain-separated, versioned tuple containing the resolved space DID, branch,
-full schemed document id, resolved scope key, and complete operation field
-path. This keeps aliases and direct handles to the same field together while
-separating different user and session instances. The hash is not
-authentication. Changing the room, endpoint, bound Cell, or collaborative mode
-closes the old socket, removes all remote decorations, and starts a new session
-only after the new Memory operation session is ready. Changing the participant
-name in the same room publishes a replacement record without reconnecting.
+Setting `participantName` while `collaborative` is active makes the editor
+eligible for presence when either the context or override supplies an endpoint.
+A browser tab owns at most one editor room session. Before the first eligible
+editor focus it owns none; ordinary blur retains the current room and selection;
+focusing another editor closes the previous socket before joining the new room.
+Unmounting the owning editor closes its socket without promoting another
+editor. The default room hashes a domain-separated, versioned tuple containing
+the resolved space DID, branch, full schemed document id, resolved scope key,
+and complete operation field path. This keeps aliases and direct handles to the
+same field together while separating different user and session instances. The
+hash is not authentication. Changing the room, endpoint, bound Cell, or
+collaborative mode on the owning editor closes the old socket, removes all
+remote decorations, and starts a new session only after the new Memory
+operation session is ready. Changing the participant name in the same room
+publishes a replacement record without reconnecting.
 
 The room creates and owns an unpredictable participant id for each socket
 session and ignores any client attempt to update another participant. Names
@@ -244,7 +249,8 @@ shown. At no point does presence hold back the Memory transaction.
 ## Lifecycle and failure behavior
 
 - Open presence only after CodeMirror collaboration has installed its initial
-  Memory snapshot and operation cursor.
+  Memory snapshot and operation cursor, and only for the editor room most
+  recently focused in the browser tab.
 - Clear presence on editor disposal, Cell rebinding, collaborative-mode change,
   explicit release, reconciliation failure, operation-session failure, and
   Memory epoch change.
@@ -396,8 +402,9 @@ Purpose: expose opt-in co-presence without changing existing editor modes.
       component documentation.
 - [x] Add a small presence session controller that owns the WebSocket,
       connection participant id, revision counter, and CodeMirror effects.
-- [x] Open only after collaboration readiness; publish focus/name/selection;
-      and close on every lifecycle boundary listed above.
+- [x] Open only after collaboration readiness and editor focus; keep one active
+      room per browser tab; publish focus/name/selection; and close on every
+      lifecycle boundary listed above.
 - [ ] Provide a deployed production endpoint through the exported host context;
       retain the explicit override for tests and local development. Labs Shell
       remains unconfigured until deployment.
@@ -407,8 +414,8 @@ Purpose: expose opt-in co-presence without changing existing editor modes.
 Required tests:
 
 - [ ] Component tests cover opt-in, incomplete properties, name change, blur,
-      Cell rebind, toggle, disposal, release, socket failure, collaboration
-      failure, and epoch reset.
+      page-level room transfer, Cell rebind, toggle, disposal, release, socket
+      failure, collaboration failure, and epoch reset.
 - [x] Existing ordinary and collaborative editor tests remain unchanged and
       green with presence absent.
 
