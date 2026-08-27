@@ -273,10 +273,12 @@ function fmtSession(s: string): string {
   return decoded.length > 22 ? `${decoded.slice(0, 21)}…` : decoded;
 }
 
-// ── Remote acquisition (`cf inspect --remote`) ──────────────────────────────
+//
+// Remote acquisition (`cf inspect --remote`)
 // The autopsy stays 100% offline; --remote only changes where the SQLite file
 // comes from: instead of the local on-disk store, fetch a read-only snapshot
 // from a toolshed dump endpoint into the local cache, then open it as usual.
+//
 
 interface RemoteOpts {
   remote?: string | boolean;

@@ -255,7 +255,9 @@ function displayHidden(src: readonly SourcePoint[]): DisplayCell[] {
   return cells;
 }
 
-// --- non-printable classification & glyphs -----------------------------------
+//
+// non-printable classification & glyphs
+//
 
 /** A control code (C0 or DEL/C1) with no ordinary glyph of its own. */
 function isNonPrintable(cp: string): boolean {
@@ -285,7 +287,9 @@ export function glyphFor(cp: string): string {
   return "␦";
 }
 
-// --- ANSI (CSI) recognition --------------------------------------------------
+//
+// ANSI (CSI) recognition
+//
 
 interface CsiMatch {
   /** Number of source code points the whole sequence spans. */

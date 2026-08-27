@@ -799,7 +799,9 @@ function lineEq(a: Line, b: Line): boolean {
   return true;
 }
 
-// --- Tokenisation ------------------------------------------------------------
+//
+// Tokenisation
+//
 
 function collectLeafTokens(sf: ts.SourceFile): RawToken[] {
   const tokens: RawToken[] = [];
@@ -1176,7 +1178,9 @@ function isFunctionLike(node: ts.Node): boolean {
     ts.isSetAccessorDeclaration(node);
 }
 
-// --- Structure tree ----------------------------------------------------------
+//
+// Structure tree
+//
 
 interface BuildCtx {
   sf: ts.SourceFile;
@@ -1918,7 +1922,9 @@ function calleeName(call: ts.CallExpression, sf: ts.SourceFile): string {
   return nodeFirstLine(e, sf, 16);
 }
 
-// --- Metadata extraction (best-effort; never throws) -------------------------
+//
+// Metadata extraction (best-effort; never throws)
+//
 
 type FnLike =
   | ts.ArrowFunction
@@ -2411,7 +2417,9 @@ function nodeFirstLine(node: ts.Node, sf: ts.SourceFile, max: number): string {
   return firstLine(text.slice(start, stop), max);
 }
 
-// --- Sections ----------------------------------------------------------------
+//
+// Sections
+//
 
 interface SectionMark {
   name: string;
@@ -2472,7 +2480,9 @@ function attachSections(
   return sectionNodes;
 }
 
-// --- Lines -------------------------------------------------------------------
+//
+// Lines
+//
 
 function spansToLines(
   text: string,

@@ -47,9 +47,10 @@ function focusLastTarget(s: Session): number {
   return steps;
 }
 
-// ---------------------------------------------------------------------------
+//
 // findTargetIndex start-offset-only fallback (436, 437, 439).
-// ---------------------------------------------------------------------------
+//
+
 // The pattern's card lists a dependency on `__cfLift_1` whose target carries a
 // definition start offset but no end offset (the dependency is found
 // syntactically, with no semantic service to pin the exact range). Following it
@@ -120,9 +121,10 @@ Deno.test("gate: Enter on the dependency reference opens the start-matched node'
   );
 });
 
-// ---------------------------------------------------------------------------
+//
 // jumpToTarget nodeAtLine fallback (446).
-// ---------------------------------------------------------------------------
+//
+
 // The lift's card ends with a plain "use" reference that carries a destination
 // line but no definition offset at all. `findTargetIndex` returns -1 for it, so
 // `jumpToTarget` falls back to `nodeAtLine` on the destination line to pick the

@@ -464,7 +464,9 @@ export class Session {
     }
   }
 
-  // --- file folding ----------------------------------------------------------
+  //
+  // file folding
+  //
 
   /** The diff's files (with collapsed summaries), or [] for a non-diff view.
    * Cached against the current document. */
@@ -1140,7 +1142,9 @@ export class Session {
     this.handleNormalKey(key);
   }
 
-  // --- internals -------------------------------------------------------------
+  //
+  // internals
+  //
 
   private contentRows(): number {
     return Math.max(1, this.height - 1);
@@ -2021,7 +2025,9 @@ export class Session {
     this.message = `Line wrapping: ${this.wrapMode}`;
   }
 
-  // --- file-fold commands ----------------------------------------------------
+  //
+  // file-fold commands
+  //
 
   private ensureDiffForFolding(): boolean {
     if (this.foldFiles().length === 0) {
@@ -2159,7 +2165,9 @@ export class Session {
     }.`;
   }
 
-  // --- editing ---------------------------------------------------------------
+  //
+  // editing
+  //
 
   private scrollOrPan(name: string): void {
     const lastTop = this.lastTop();
@@ -4208,7 +4216,9 @@ export class Session {
     return { blocked: edge.room.atFileBottom ? "bottom" : "hunk" };
   }
 
-  // --- file picker (C-x C-f) -------------------------------------------------
+  //
+  // file picker (C-x C-f)
+  //
 
   private openFilePicker(): void {
     if (!this.files) {
@@ -4425,7 +4435,9 @@ export class Session {
     };
   }
 
-  // --- jump list (i) ---------------------------------------------------------
+  //
+  // jump list (i)
+  //
 
   /** Open the list of the diff's files and commit messages, so Enter jumps the
    * view to the one chosen. Only a diff has this list; a plain source view says

@@ -6,7 +6,9 @@ function at(b: EditBuffer): [number, number] {
   return [b.row, b.col];
 }
 
-// --- motion -----------------------------------------------------------------
+//
+// motion
+//
 
 Deno.test("editbuffer: left/right cross line boundaries", () => {
   const b = new EditBuffer("ab\ncd");
@@ -42,7 +44,9 @@ Deno.test("editbuffer: line and word motion", () => {
   assertEquals(b.col, 6, "back to start of `bar`");
 });
 
-// --- insertion / deletion ---------------------------------------------------
+//
+// insertion / deletion
+//
 
 Deno.test("editbuffer: insert characters and a newline", () => {
   const b = new EditBuffer("ac");
@@ -145,7 +149,9 @@ Deno.test("editbuffer: commitSaved makes the current text clean", () => {
   assert(b.dirty(), "a later edit is measured against the saved text");
 });
 
-// --- kill / yank ------------------------------------------------------------
+//
+// kill / yank
+//
 
 Deno.test("editbuffer: kill-line then yank round-trips", () => {
   const b = new EditBuffer("hello world");
@@ -256,7 +262,9 @@ Deno.test("editbuffer: yank-pop cycles through the ring", () => {
   assertEquals(b.text(), "A", "wraps around the ring");
 });
 
-// --- case ops ---------------------------------------------------------------
+//
+// case ops
+//
 
 Deno.test("editbuffer: case operations transform the next word, advancing", () => {
   const b = new EditBuffer("foo BAR baz");
@@ -273,7 +281,9 @@ Deno.test("editbuffer: case operations transform the next word, advancing", () =
   assertEquals(b.text(), "foo BAR Baz");
 });
 
-// --- non-BMP ----------------------------------------------------------------
+//
+// non-BMP
+//
 
 Deno.test("editbuffer: cursor steps whole code points past an emoji", () => {
   const b = new EditBuffer("a😀b");
@@ -290,7 +300,9 @@ Deno.test("editbuffer: cursor steps whole code points past an emoji", () => {
   assertEquals(b.text(), "ab");
 });
 
-// --- key decoding -----------------------------------------------------------
+//
+// key decoding
+//
 
 function decode1(bytes: number[]) {
   const { keys } = decodeKeys(new Uint8Array(bytes));

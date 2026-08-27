@@ -131,7 +131,8 @@ export function nextMatchIndex(
   return matches.length - 1; // wrap
 }
 
-// --- Structure-tree navigation (over the flattened pre-order list) -----------
+//
+// Structure-tree navigation (over the flattened pre-order list)
 //
 // WASD walk the AST outline by family relationship:
 //   w -> previous sibling   s -> next sibling   a -> parent   d -> first child
@@ -140,6 +141,7 @@ export function nextMatchIndex(
 // so it never gets stuck. At the first sibling, `w` steps up to the parent node
 // itself. Tab/Shift-Tab navigate the same nodes by depth-first (pre-order)
 // traversal instead, descending into children.
+//
 
 /**
  * Next sibling at the same depth; if none, exit the parent and take the

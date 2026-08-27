@@ -85,7 +85,9 @@ export function visibleWidth(text: string): number {
   return cpLen(stripAnsi(text));
 }
 
-// --- Terminal control --------------------------------------------------------
+//
+// Terminal control
+//
 
 export const term = {
   enterAltScreen: `${CSI}?1049h`,

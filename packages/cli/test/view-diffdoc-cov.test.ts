@@ -28,7 +28,9 @@ function stubWs(root: string): DiffWorkspace {
 
 const NO_WS: DiffWorkspace = { resolve: () => null, read: () => null };
 
-// --- realWorkspace: read() error branch -------------------------------------
+//
+// realWorkspace: read() error branch
+//
 
 Deno.test("realWorkspace: read of a bounded directory returns null (catch branch)", () => {
   const root = Deno.makeTempDirSync();
@@ -197,7 +199,9 @@ Deno.test("realWorkspace: resolve of a bounded directory falls through to null",
   }
 });
 
-// --- findRepoRoot: no .git ancestor walks to the filesystem root ------------
+//
+// findRepoRoot: no .git ancestor walks to the filesystem root
+//
 
 Deno.test("realWorkspace: a cwd with no .git ancestor leaves only the cwd base", () => {
   // A temp dir with no `.git` anywhere up to `/` exercises the walk that ends
@@ -216,7 +220,9 @@ Deno.test("realWorkspace: a cwd with no .git ancestor leaves only the cwd base",
   }
 });
 
-// --- loadFile: cache hit short-circuits -------------------------------------
+//
+// loadFile: cache hit short-circuits
+//
 
 Deno.test("buildDiffDocument: a shared cache is reused across builds (cache hit)", () => {
   const root = Deno.makeTempDirSync();
@@ -264,7 +270,9 @@ Deno.test("buildDiffDocument: a shared cache is reused across builds (cache hit)
   }
 });
 
-// --- file header lines: an empty meta header line is skipped ----------------
+//
+// file header lines: an empty meta header line is skipped
+//
 
 Deno.test("buildDiffDocument: an empty header line is left untouched", () => {
   // A blank line sits among the file's header lines (between `index` and `---`).
@@ -294,7 +302,9 @@ index 1111111..2222222 100644
   );
 });
 
-// --- hunk body: meta line inside the hunk gets diffMeta spans ----------------
+//
+// hunk body: meta line inside the hunk gets diffMeta spans
+//
 
 Deno.test("buildDiffDocument: a `\\ No newline` line in the hunk body is diffMeta", () => {
   // The `\ No newline at end of file` marker lands inside the hunk body range,
@@ -325,7 +335,9 @@ Deno.test("buildDiffDocument: a `\\ No newline` line in the hunk body is diffMet
   );
 });
 
-// --- hunk body: an empty trailing line is left without spans -----------------
+//
+// hunk body: an empty trailing line is left without spans
+//
 
 Deno.test("buildDiffDocument: a trailing empty line outside the hunk gets no spans", () => {
   // The text ends with a newline, so the split yields a final empty entry. It
@@ -346,7 +358,9 @@ Deno.test("buildDiffDocument: a trailing empty line outside the hunk gets no spa
   );
 });
 
-// --- Markdown hunk with a workspace file: shown headings drive the tree ------
+//
+// Markdown hunk with a workspace file: shown headings drive the tree
+//
 
 Deno.test("buildDiffDocument: a Markdown hunk shows its heading as a section", () => {
   const root = Deno.makeTempDirSync();
@@ -386,7 +400,9 @@ Deno.test("buildDiffDocument: a Markdown hunk shows its heading as a section", (
   }
 });
 
-// --- Markdown hunk where no heading line is shown -> empty heading tree ------
+//
+// Markdown hunk where no heading line is shown -> empty heading tree
+//
 
 Deno.test("buildDiffDocument: a Markdown hunk showing only body has no sections", () => {
   const root = Deno.makeTempDirSync();
@@ -427,7 +443,9 @@ Deno.test("buildDiffDocument: a Markdown hunk showing only body has no sections"
   }
 });
 
-// --- Markdown hunk with NO workspace file: fragment heading tree -------------
+//
+// Markdown hunk with NO workspace file: fragment heading tree
+//
 
 Deno.test("buildDiffDocument: a Markdown hunk with no workspace file builds heading sections from the fragment", () => {
   // No workspace file: ctx.fileDoc is null, so the heading tree comes from the
@@ -496,7 +514,9 @@ Deno.test("buildDiffDocument: a hunk naming new-side lines past the workspace EO
   }
 });
 
-// --- buildMaps.fromFile: a file offset on a hidden line maps to nothing ------
+//
+// buildMaps.fromFile: a file offset on a hidden line maps to nothing
+//
 
 Deno.test("buildDiffDocument: fromFile returns null for a file line the diff hides", () => {
   const root = Deno.makeTempDirSync();
@@ -535,7 +555,9 @@ Deno.test("buildDiffDocument: fromFile returns null for a file line the diff hid
   }
 });
 
-// --- lineEndOffset: a file section whose last line is the final text line ----
+//
+// lineEndOffset: a file section whose last line is the final text line
+//
 
 Deno.test("buildDiffDocument: the file section end offset reaches the end of the text", () => {
   // The diff has no trailing newline, so the file's endLine IS the last line of
@@ -552,7 +574,9 @@ Deno.test("buildDiffDocument: the file section end offset reaches the end of the
   );
 });
 
-// --- findRepoRoot: the 64-deep walk cap -------------------------------------
+//
+// findRepoRoot: the 64-deep walk cap
+//
 
 Deno.test("realWorkspace: a path nested past the walk depth cap finds no repo root", () => {
   // findRepoRoot walks up at most 64 ancestors. A path nested deeper than that,
@@ -573,7 +597,9 @@ Deno.test("realWorkspace: a path nested past the walk depth cap finds no repo ro
   }
 });
 
-// --- crafted DiffModel: synthetic/defensive body and header branches ---------
+//
+// crafted DiffModel: synthetic/defensive body and header branches
+//
 
 /**
  * Build a one-file, one-hunk {@link DiffModel} from a caller-supplied per-line

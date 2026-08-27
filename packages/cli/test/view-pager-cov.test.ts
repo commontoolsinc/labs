@@ -371,7 +371,9 @@ Deno.test("realPagerDeps: the wrappers reach the real primitives", () => {
   } catch { /* no controlling terminal in this environment */ }
 });
 
-// --- Ctrl-L reveal frames ---------------------------------------------------
+//
+// Ctrl-L reveal frames
+//
 
 /** A one-file diff whose hunk has room to reveal ten lines above it. */
 function revealFixture() {
