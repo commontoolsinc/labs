@@ -15,7 +15,7 @@ import {
 } from "../src/transformers/type-shrinking.ts";
 import { collect, parseModule } from "./transformed-ast.ts";
 
-// ---------------------------------------------------------------------------
+//
 // Structural inspection of printed type nodes.
 //
 // `printTypeNode` renders a `ts.TypeNode` to text. Asserting on that text with
@@ -24,7 +24,7 @@ import { collect, parseModule } from "./transformed-ast.ts";
 // helpers reparse the printed type node and expose its members as real AST
 // nodes so tests can assert on property names, optional flags, exact member
 // types, and the shape of the root node.
-// ---------------------------------------------------------------------------
+//
 
 /** Reparse a printed type node into a `ts.TypeNode`. */
 function parseType(printed: string): ts.TypeNode {
