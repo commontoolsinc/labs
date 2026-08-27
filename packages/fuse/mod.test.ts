@@ -221,9 +221,13 @@ Deno.test("source writeback says nothing when the refresh completed", () => {
 
 Deno.test("source writeback keeps a refresh warning in error.log", async () => {
   // The composed text is asserted above; what this adds is that the flush
-  // path writes it into error.log rather than clearing the file. Read from
-  // the source because driving the flush needs a mounted filesystem, in the
-  // same way as the two writeback cases above.
+  // path reports it, and reports it late enough to survive. Finalizing a
+  // source write rebuilds `.src` and mints a fresh empty `error.log`, so a
+  // warning written before that call is discarded along with the inode it
+  // went to — the report has to land after the rebuild, through the bridge,
+  // which resolves the directory the rebuild just made. Read from the source
+  // because driving the flush needs a mounted filesystem, in the same way as
+  // the two writeback cases above.
   const source = await Deno.readTextFile(new URL("./mod.ts", import.meta.url));
   const sourceWriteback = source.slice(
     source.indexOf('if (writeTarget?.kind === "source")'),
@@ -235,9 +239,15 @@ Deno.test("source writeback keeps a refresh warning in error.log", async () => {
   );
   assert(
     sourceWriteback.includes(
-      'tree.updateFile(errorLogIno, refreshWarning ?? "")',
+      "bridge.writeSourceErrorLog(writeTarget.target, refreshWarning)",
     ),
-    "source writeback must keep the refresh warning in error.log",
+    "source writeback must report the refresh warning through the bridge",
+  );
+  assertAppearsBefore(
+    sourceWriteback,
+    "await bridge.finalizeSourceWritePath(writeTarget.target)",
+    "bridge.writeSourceErrorLog(writeTarget.target, refreshWarning)",
+    "the refresh warning must be written after the source tree is rebuilt",
   );
 });
 

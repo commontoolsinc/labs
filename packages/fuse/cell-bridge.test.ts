@@ -5309,3 +5309,40 @@ Deno.test("CellBridge.invalidateWritePath does not spawn concurrent hydrations f
   assertEquals(resultIno !== undefined, true);
   assertEquals(getFileContent(tree, resultIno!, "content"), "fresh");
 });
+
+Deno.test("CellBridge.writeSourceErrorLog reports into the current .src directory", () => {
+  // A source write that committed but did not refresh has to leave a report a
+  // reader can find, and the flush path can only write it AFTER finalizing —
+  // rebuilding `.src` replaces the directory and mints a fresh empty
+  // `error.log`. So this resolves the directory from the state the rebuild
+  // updated, never from an inode a caller captured earlier.
+  const bridge = new CellBridge(new FsTree(), "/tmp/cf-exec");
+  const state = buildTestSpace(bridge, "space", []);
+  const tree = bridge.tree;
+  const pieceIno = tree.addDir(state.piecesIno, "notes");
+  const staleSrcIno = tree.addDir(pieceIno, ".src-stale");
+  tree.addFile(staleSrcIno, "error.log", "", "string");
+
+  // What a rebuild leaves behind: a new directory, a new empty error.log, and
+  // the piece's entry in `srcInos` pointing at it.
+  const rebuiltSrcIno = tree.addDir(pieceIno, ".src");
+  tree.addFile(rebuiltSrcIno, "error.log", "", "string");
+  state.srcInos.set("notes", rebuiltSrcIno);
+
+  bridge.writeSourceErrorLog(
+    {
+      spaceName: "space",
+      pieceName: "notes",
+      relPath: "main.tsx",
+      piece: {} as never,
+      srcIno: staleSrcIno,
+    },
+    "committed, but the refresh failed",
+  );
+
+  assertEquals(
+    getFileContent(tree, rebuiltSrcIno, "error.log"),
+    "committed, but the refresh failed",
+  );
+  assertEquals(getFileContent(tree, staleSrcIno, "error.log"), "");
+});

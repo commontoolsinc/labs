@@ -2301,6 +2301,25 @@ export class CellBridge {
     );
   }
 
+  /**
+   * Write `.src/error.log` for a piece's source directory as it stands now.
+   *
+   * The directory a caller was handed is not the one to write into after a
+   * finalize: `buildSourceTree` replaces `.src` wholesale and mints a fresh
+   * empty `error.log` inside it, so both the text written before that and the
+   * inode it was written to are gone. Resolving the directory here, from the
+   * state the rebuild updated, is what lets a report outlive the rebuild that
+   * a successful write performs.
+   */
+  writeSourceErrorLog(writePath: SourceWritePath, text: string): void {
+    const state = this.spaces.get(writePath.spaceName);
+    const srcIno = state?.srcInos.get(writePath.pieceName);
+    if (srcIno === undefined) return;
+    const errorLogIno = this.tree.lookup(srcIno, "error.log");
+    if (errorLogIno === undefined) return;
+    this.tree.updateFile(errorLogIno, text);
+  }
+
   invalidateHandlerTarget(target: HandlerTarget): void {
     this.#invalidatePieceIdPropCache(target.piece.id, target.cellProp);
   }

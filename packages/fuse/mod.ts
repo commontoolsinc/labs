@@ -1857,18 +1857,23 @@ export async function main(argv: string[] = Deno.args) {
           // and its bookkeeping proceeds either way. Refreshing the running
           // piece is the part that can fail on its own, and it leaves a piece
           // that is on the new source and not running it — a state error.log
-          // has to keep, because clearing it here is the whole file saying
-          // the write was clean.
+          // has to keep, because an empty file here is the mount saying the
+          // write was clean.
           const refreshWarning = sourceRefreshWarning(receipt);
           const errorLogIno = tree.lookup(srcIno, "error.log");
           if (errorLogIno !== undefined) {
-            tree.updateFile(errorLogIno, refreshWarning ?? "");
-          }
-          if (refreshWarning !== undefined) {
-            console.error(`[source] ${refreshWarning}`);
+            tree.updateFile(errorLogIno, "");
           }
           markExistingReady();
           await bridge.finalizeSourceWritePath(writeTarget.target);
+          // After the finalize, never before it: rebuilding the source tree
+          // replaces `.src` and the synthetic `error.log` inside it, so a
+          // report written above would be discarded along with the inode it
+          // went to. The bridge resolves the directory the rebuild just made.
+          if (refreshWarning !== undefined) {
+            bridge.writeSourceErrorLog(writeTarget.target, refreshWarning);
+            console.error(`[source] ${refreshWarning}`);
+          }
           reconcileCfcWritebacks("source flush post-finalize");
           markExistingFinalized();
           if (handle.version === flushVersion) {
