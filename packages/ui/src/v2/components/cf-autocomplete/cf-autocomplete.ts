@@ -982,7 +982,10 @@ export class CFAutocomplete extends BaseElement {
     }
   };
 
+  //
   // Selection methods
+  //
+
   private _selectItem(item: AutocompleteItem) {
     // Always emit cf-select for side effects
     // Include data field if present (allows passing arbitrary objects through selection)
@@ -1158,7 +1161,10 @@ export class CFAutocomplete extends BaseElement {
     this._dropdownStyle = `top: ${top}px; left: ${left}px; width: ${width}px`;
   }
 
+  //
   // Public API
+  //
+
   override focus(): void {
     this._input?.focus();
   }

@@ -87,7 +87,10 @@ export class CFChart extends BaseElement {
   declare padding: number | [number, number, number, number] | undefined;
   declare crosshair: boolean;
 
+  //
   // Internal state
+  //
+
   private _width = 0;
   private _childMarks: MarkElement[] = [];
   private _resizeObserver: ResizeObserver | null = null;

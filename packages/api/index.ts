@@ -1857,7 +1857,10 @@ export type BuiltInLLMMessage = {
   content: BuiltInLLMContent;
 };
 
+//
 // Image types from UI components
+//
+
 export interface ImageData {
   id: string;
   name: string;
@@ -1915,7 +1918,10 @@ export interface BuiltInLLMGroundingSource {
   snippet?: string;
 }
 
+//
 // Built-in types
+//
+
 export interface BuiltInLLMParams {
   messages?: BuiltInLLMMessage[];
   model?: string;
@@ -3234,7 +3240,10 @@ export type ToSchemaFunction = <T>(options?: Partial<JSONSchema>) => JSONSchema;
 /** Internal compiler-emitted helper for top-level data materialization. */
 export type CfDataFunction = <T>(value: T) => T;
 
+//
 // Pattern environment types
+//
+
 export interface PatternEnvironment {
   readonly apiUrl: URL;
 }

@@ -209,7 +209,10 @@ export type GetModelsRouteQueryParams = z.infer<
   typeof GetModelsRouteQueryParams
 >;
 
+//
 // Route definitions
+//
+
 export const getModels = createRoute({
   path: "/api/ai/llm/models",
   method: "get",
