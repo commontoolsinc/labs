@@ -122,8 +122,6 @@ const isLinkReference = (atom: unknown): atom is {
   (atom as { type?: unknown }).type ===
     "https://commonfabric.org/cfc/atom/LinkReference";
 
-// ===========================================================================
-
 describe("CFC cross-space integrity", () => {
   // -------------------------------------------------------------------------
   // Primitive: a value gets integrity. Declared `ifc.integrity` with a

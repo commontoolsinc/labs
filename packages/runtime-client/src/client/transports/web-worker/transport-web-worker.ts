@@ -89,8 +89,10 @@ export class WebWorkerRuntimeTransport
       await transport.ready();
     } catch (error) {
       // The caller never receives a transport on this path, so the disposal is
-      // this method's to do. Both ways readiness can fail land here: a worker
-      // error before ready, and a message the decode refuses before ready.
+      // this method's to do -- `terminate()` lives only in `dispose()`, and
+      // nothing else is left holding the worker. Both ways readiness can fail
+      // land here: a worker error before ready, and a message the decode
+      // refuses before ready.
       await transport.dispose();
       throw error;
     }

@@ -81,7 +81,6 @@ export const EnvSchema = z.object({
   // See docs/features/active-user-counting.md.
   OTEL_TRACES_SAMPLER: z.string().default("always_on"),
   OTEL_TRACES_SAMPLER_ARG: z.string().default("1.0"),
-  // ===========================================================================
 
   // ===========================================================================
   // (/routes/ai/llm) Environment variables for LLM Providers
@@ -95,7 +94,6 @@ export const EnvSchema = z.object({
   // The gateway is reachable only on Tailscale; toolshed falls back cleanly
   // when the URL is unreachable (see `loadGatewayModels` in routes/ai/llm/models.ts).
   CFTS_AI_GATEWAY_URL: z.string().default("https://llm.stage.commontools.dev"),
-  // ===========================================================================
 
   // ===========================================================================
   // FAL AI API Key
@@ -103,7 +101,6 @@ export const EnvSchema = z.object({
   //   * /routes/ai/voice
   // ===========================================================================
   FAL_API_KEY: z.string().default(""),
-  // ===========================================================================
 
   // ===========================================================================
   // Jina API Key
@@ -111,7 +108,6 @@ export const EnvSchema = z.object({
   //   * /routes/link-preview
   // ===========================================================================
   JINA_API_KEY: z.string().default(""),
-  // ===========================================================================
 
   // ===========================================================================
   // Memory Store
@@ -196,7 +192,6 @@ export const EnvSchema = z.object({
   PLAID_REDIRECT_URI: z.string().optional(),
   // Strict parse (see boolFlag); previously z.coerce.boolean() turned "false" into true.
   PLAID_SYNC_ALL_TRANSACTIONS: boolFlag(),
-  // ===========================================================================
 
   // URL of the toolshed API, for self-referring requests
   API_URL: z.string().default("http://localhost:8000"),

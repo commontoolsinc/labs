@@ -110,9 +110,9 @@ describe("WebWorkerRuntimeTransport", () => {
 
   describe("connect()", () => {
     // A failed `connect()` never hands the caller a transport, so there is
-    // nothing left to call `dispose()` on and the worker would run for as long
-    // as the page did. Both ways readiness can fail are covered, the terminate
-    // being the transport's only one.
+    // nothing left to call `dispose()` on -- and `dispose()` holds the only
+    // `terminate()`. The worker would run for as long as the page did. Both
+    // ways readiness can fail are covered below.
 
     it("terminates the worker when a pre-ready worker error rejects it", async () => {
       const { connection, worker } = connectWithFakeWorker();
