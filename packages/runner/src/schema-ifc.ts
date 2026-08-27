@@ -147,6 +147,12 @@ function _schemaHasIfcUncached(
  * (`loadExternalSchemaDocs` in traverse.ts) also feeds the schema tracker
  * and availability bookkeeping; this one exists for the crossing seams
  * that have no traversal context (link resolution, handle hops).
+ *
+ * Returns whether the closure is complete: every reachable `cid:` ref
+ * resolved to a registered document. A caller about to walk the schema
+ * (narrowing among them) uses `false` to fail soft instead of letting the
+ * walk throw on the dangling ref — the tracked reads above re-run the
+ * reader when the missing documents arrive.
  */
 export function ensureExternalSchemaClosure(
   tx: IExtendedStorageTransaction,
@@ -160,8 +166,9 @@ export function ensureExternalSchemaClosure(
      */
     onMissingDocument?: (link: NormalizedFullLink) => void;
   } = {},
-): void {
-  if (schema === undefined || !containsExternalSchemaRef(schema)) return;
+): boolean {
+  if (schema === undefined || !containsExternalSchemaRef(schema)) return true;
+  let complete = true;
   const pending = [...collectExternalSchemaRefHashes(schema)];
   const seen = new Set<string>();
   while (pending.length > 0) {
@@ -187,6 +194,7 @@ export function ensureExternalSchemaClosure(
             } as NormalizedFullLink,
           );
         }
+        complete = false;
         continue;
       }
       const doc = result.ok.value;
@@ -202,9 +210,13 @@ export function ensureExternalSchemaClosure(
             scope: address.scope,
           } as NormalizedFullLink,
         );
+        complete = false;
         continue;
       }
-      if (!isObjectNotArray(doc) || !("value" in doc)) continue;
+      if (!isObjectNotArray(doc) || !("value" in doc)) {
+        complete = false;
+        continue;
+      }
       try {
         registerSchemaDocument(
           hash,
@@ -213,6 +225,7 @@ export function ensureExternalSchemaClosure(
       } catch {
         // A document whose content does not hash to its id is forged:
         // neither registered nor recursed into.
+        complete = false;
         continue;
       }
     }
@@ -221,6 +234,7 @@ export function ensureExternalSchemaClosure(
       pending.push(...collectExternalSchemaRefHashes(document));
     }
   }
+  return complete;
 }
 
 /**

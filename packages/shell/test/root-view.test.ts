@@ -328,22 +328,42 @@ describe("XRootView", () => {
       "@commonfabric/lib-shell"
     );
     const originalCreate = RuntimeInternals.create;
-    // The abandoned creation disposes the runtime it built. Resolving off that
-    // call lands after the whole abandonment block has run.
+    // The superseded creation has to be inside RuntimeInternals.create when
+    // its replacement starts — a run cancelled earlier (during posture
+    // adoption) unwinds without ever building a runtime, which is the other
+    // test below. The stub parks the second creation until the test has
+    // issued the superseding run, and the abandonment is observed off that
+    // creation's own dispose: resolving there lands after the whole
+    // abandonment block has run.
+    let enteredCreate!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      enteredCreate = resolve;
+    });
+    let releaseCreate!: () => void;
+    const released = new Promise<void>((resolve) => {
+      releaseCreate = resolve;
+    });
     let abandoned!: () => void;
     const disposed = new Promise<void>((resolve) => {
       abandoned = resolve;
     });
-    RuntimeInternals.create = (() =>
-      Promise.resolve({
+    let createCount = 0;
+    RuntimeInternals.create = (async () => {
+      const index = ++createCount;
+      if (index === 1) {
+        enteredCreate();
+        await released;
+      }
+      return {
         runtime: () => ({}),
         dispose: () => {
-          abandoned();
+          if (index === 1) abandoned();
           return Promise.resolve();
         },
       } as unknown as Awaited<
         ReturnType<typeof RuntimeInternals.create>
-      >)) as typeof RuntimeInternals.create;
+      >;
+    }) as typeof RuntimeInternals.create;
 
     try {
       const { XRootView } = await import("../src/views/RootView.ts");
@@ -365,6 +385,9 @@ describe("XRootView", () => {
       await view.spaceResolved();
       expect(view.getRuntimeSpaceDID()).toBe(atlas);
 
+      // The Lit update cycle is shimmed away, so nothing auto-runs the
+      // task; every creation below is driven by hand and the first manual
+      // run's creation is the one the stub parks.
       const task = (view as unknown as {
         _rt: {
           run(args: [typeof view.app]): void;
@@ -372,16 +395,81 @@ describe("XRootView", () => {
         };
       })._rt;
 
-      // One runtime creation starts and a second supersedes it, which is what
-      // a compiler stack reload does to a creation already under way.
+      // One runtime creation reaches RuntimeInternals.create and a second
+      // supersedes it there, which is what a compiler stack reload does to a
+      // creation already under way.
       task.run([view.app]);
+      await entered;
       task.run([view.app]);
+      releaseCreate();
       await task.taskComplete;
       await disposed;
 
       // The abandoned creation says nothing about which space the view
       // addresses, so the space it resolved has to survive. Nothing would
       // restore it: the view still names atlas, so no lookup runs again.
+      expect(view.getRuntimeSpaceDID()).toBe(atlas);
+    } finally {
+      RuntimeInternals.create = originalCreate;
+      console.error = originalError;
+      delete (globalThis as { commonfabric?: unknown }).commonfabric;
+      restore();
+    }
+  });
+
+  it("keeps the view's space when a superseded creation cancels before it builds", async () => {
+    const restore = installBrowserGlobals();
+    const originalError = console.error;
+    console.error = () => {};
+    const { RuntimeInternals, resolveSpaceDid } = await import(
+      "@commonfabric/lib-shell"
+    );
+    const originalCreate = RuntimeInternals.create;
+    let createCount = 0;
+    RuntimeInternals.create = (() => {
+      createCount++;
+      return Promise.resolve({
+        runtime: () => ({}),
+        dispose: () => Promise.resolve(),
+      } as unknown as Awaited<
+        ReturnType<typeof RuntimeInternals.create>
+      >);
+    }) as typeof RuntimeInternals.create;
+
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const view = new XRootView();
+      const identity = await Identity.fromPassphrase(
+        "root-view-superseded-runtime-test",
+      );
+      const atlas = await resolveSpaceDid(identity, "atlas");
+      const lifecycle = view as unknown as {
+        willUpdate(changed: Map<string, unknown>): void;
+      };
+
+      view.app = {
+        ...view.app,
+        identity,
+        view: { spaceName: "atlas" } as typeof view.app.view,
+      };
+      lifecycle.willUpdate(new Map([["app", undefined]]));
+      await view.spaceResolved();
+      const task = (view as unknown as {
+        _rt: {
+          run(args: [typeof view.app]): void;
+          taskComplete: Promise<unknown>;
+        };
+      })._rt;
+
+      // Two back-to-back runs: the first's signal is already aborted when its
+      // body reaches the posture adoption, which throws the abort before any
+      // runtime exists. The cancelled run has nothing to dispose and must
+      // leave the view's space alone.
+      task.run([view.app]);
+      task.run([view.app]);
+      await task.taskComplete;
+
+      expect(createCount).toBe(1);
       expect(view.getRuntimeSpaceDID()).toBe(atlas);
     } finally {
       RuntimeInternals.create = originalCreate;

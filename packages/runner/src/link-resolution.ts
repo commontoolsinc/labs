@@ -1,5 +1,8 @@
 import { getLogger } from "@commonfabric/utils/logger";
-import { markIfcBearingLinkCrossing } from "./schema-ifc.ts";
+import {
+  ensureExternalSchemaClosure,
+  markIfcBearingLinkCrossing,
+} from "./schema-ifc.ts";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 import {
   internSchema,
@@ -638,10 +641,27 @@ export function resolveLinkTracingDereferences(
           let { schema, ...restLink } = nextHop.link;
           const storedSchema = schema;
           if (schema !== undefined && remainingPath.length > 0) {
-            schema = ContextualFlowControl.getSchemaAtPath(
+            // The stored schema's external cid: refs must be registered
+            // before the narrowing walks them; the documents live in the
+            // referrer's space. An incomplete closure fails soft: the hop
+            // carries no narrowed schema this pass and the result is not
+            // memoized, so the tracked reads' arrival re-runs the reader
+            // and the next pass narrows for real.
+            const closureComplete = ensureExternalSchemaClosure(
+              tx,
+              nextHop.source.space,
               schema,
-              remainingPath,
+              { onMissingDocument: kickMissingSchemaDoc },
             );
+            if (closureComplete) {
+              schema = ContextualFlowControl.getSchemaAtPath(
+                schema,
+                remainingPath,
+              );
+            } else {
+              schema = undefined;
+              memoizable = false;
+            }
           }
           nextHop = {
             ...nextHop,

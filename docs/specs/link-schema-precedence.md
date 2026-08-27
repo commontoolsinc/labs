@@ -113,17 +113,18 @@ which side won the combination.
   `getRaw`/`getRawUntyped` (which resolve links on the way to the
   target), `resolveAsCell`, the read halves of the mergeable-op mutators,
   and the candidate comparisons of `addUnique`/`removeByValue`.
-- `set()`'s pre-write resolution deliberately does not opt in: a
-  whole-value set re-stores link values verbatim, and a transaction made
-  relevant by that read fails prepare's link-source-metadata audit for
-  exactly those rewritten links. Relevance for writes belongs to the
-  write-policy gate (`recordRelevantSchemaWritePolicyInput`); the
-  crossings that resolution skips are marked whenever the same data is
-  read.
+- `set()`'s pre-write resolution opts in too: the stream check reads the
+  resolved terminal value, which makes that resolution a content read
+  like any other. A transaction the crossing marks relevant must then be
+  prepared before commit (`prepareTxForCommit`) — every runtime-owned
+  commit path already does, and a hand-rolled `edit()`/`commit()` that
+  sets through an ifc-bearing crossing owes the same call. Relevance for
+  the write itself still belongs to the write-policy gate
+  (`recordRelevantSchemaWritePolicyInput`).
 
 ### Closure loading at the seam
 
-A stored schema's external `cid:` refs are resolvable before the predicate
+A stored schema's external `cid:` refs are resolvable before anything
 walks them: `ensureExternalSchemaClosure` loads and registers the closure
 transaction-level. The schema-document registry is realm-global and
 content-addressed — a hash registered from any space serves every space's
@@ -134,6 +135,15 @@ asks the caller's delivery channel for the document — through the doc-pull
 reservation, so memoized replays cannot repeat a sync. The predicate's
 resolution-miss guard keeps a verdict computed over an absent closure
 uncached, and the arrival re-runs the reader, which marks on that pass.
+
+The predicate is not the only walker: link resolution narrows a stored
+schema across an ancestor hop (a read that descends past the link's
+position), and that walk resolves `$ref`s too. It loads the same closure
+first, from the hop's source space, and reports completeness — an
+incomplete closure fails soft rather than throwing on the dangling ref:
+the hop carries no narrowed schema that pass, the resolution is not
+memoized, and the tracked reads' arrival re-runs the reader, which
+narrows for real.
 
 ## The flag
 
@@ -158,7 +168,8 @@ is the authority on the lifecycle and the removal path.
 the strict-union contrast, the default-inheritance arms, and the rollback
 arm. `packages/runner/test/link-ifc-read-relevance.test.ts` pins the
 crossing seam: entry, nested, resolution-chain, handle-hop, cold-closure,
-narrowed-away-ancestor, proxy, and raw-read marking.
+cold-closure narrowing, narrowed-away-ancestor, proxy, raw-read, and
+`set()`-resolution marking.
 `packages/runner/test/stored-link-schema-precedence.test.ts` pins the
 cell-level reads, including the asCell handle regression and the inherited
 default. `packages/runner/test/reader-schema-precedence-config.test.ts`

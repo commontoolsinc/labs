@@ -1135,7 +1135,11 @@ export class CellImpl<T extends FabricValue>
     const tx = this.runtime.readTx(this.tx);
 
     if (!resolvedToValueLink) {
-      resolvedToValueLink = resolveLink(this.runtime, tx, this.link);
+      // A content read: the terminal-value read below is what decides, so
+      // the resolution's crossings mark like any other read's.
+      resolvedToValueLink = resolveLink(this.runtime, tx, this.link, "value", {
+        markIfcCrossings: true,
+      });
     }
 
     // The link's schema may ride as a content-addressed reference; the
@@ -1519,17 +1523,18 @@ export class CellImpl<T extends FabricValue>
      */
     sendOptions?: StreamSendOptions,
   ): Cell<T> {
-    // Deliberately NOT opted into the ifc crossing seam: a whole-value
-    // set() re-stores link values verbatim, and a transaction the pre-write
-    // resolution marks relevant then fails prepare's link-source-metadata
-    // audit for exactly those rewritten links (the owner-protected write
-    // flow pins this). Relevance for the write belongs to the write-policy
-    // gate below; the crossings this resolution makes are marked when the
-    // same data is READ (get/getRaw/proxies all opt in).
+    // This resolution is a read — isStream() below reads the resolved
+    // terminal value — so it opts into the ifc crossing seam like every
+    // other content read. A transaction it marks relevant must then be
+    // prepared before commit (prepareTxForCommit), which every
+    // runtime-owned commit path already does; a hand-rolled edit()/commit()
+    // that sets through an ifc-bearing crossing owes the same call.
     const resolvedToValueLink = resolveLink(
       this.runtime,
       this.runtime.readTx(this.tx),
       this.link,
+      "value",
+      { markIfcCrossings: true },
     );
 
     // Check if we're dealing with a stream

@@ -171,6 +171,16 @@ describe("link-ifc-read-relevance", () => {
     expect(schemaIfcReadReasons().length).toBeGreaterThan(0);
   });
 
+  it("marks a set() resolving through an ifc-carrying link cfc-relevant", () => {
+    // set()'s pre-write resolution reads the resolved terminal value (the
+    // stream check), so a crossing it makes marks like any other read.
+    const holder = holderOverLinkCarrying(labeledLinkSchema);
+
+    holder.key("item").set({ name: "Grace" });
+    expect(tx.getCfcState().relevant).toBe(true);
+    expect(schemaIfcHopReasons().length).toBeGreaterThan(0);
+  });
+
   it("leaves a read through an unlabeled link without the schema-ifc marking", () => {
     const holder = holderOverLinkCarrying(plainLinkSchema);
 
@@ -336,6 +346,35 @@ describe("link-ifc-read-relevance closure, narrowing, and raw readers", () => {
     const holder = holderOver({ $ref: decomposed.rootRef });
 
     expect(holder.key("item").get()).toEqual({ name: "Ada" });
+    expect(tx.getCfcState().relevant).toBe(true);
+    expect(hopReasons().length).toBeGreaterThan(0);
+  });
+
+  it("narrows a descendant read through a cold cid-backed stored schema", () => {
+    const labeled = {
+      type: "object",
+      properties: { name: { type: "string" } },
+      ifc: { confidentiality: ["confidential"] },
+    } as const satisfies JSONSchema;
+    const decomposed = decomposeSchema(labeled as JSONSchemaObj);
+    for (const [hash, doc] of decomposed.documents) {
+      tx.writeValueOrThrow(
+        {
+          space,
+          id: `cid:${hash}`,
+          scope: "space",
+          path: [],
+        } as unknown as Parameters<typeof tx.writeValueOrThrow>[0],
+        doc,
+      );
+    }
+
+    const holder = holderOver({ $ref: decomposed.rootRef });
+
+    // The read descends past the link position, so the ancestor hop narrows
+    // the stored schema across the crossing — the external closure loads
+    // before the narrowing walks the ref.
+    expect(holder.key("item").key("name").get()).toEqual("Ada");
     expect(tx.getCfcState().relevant).toBe(true);
     expect(hopReasons().length).toBeGreaterThan(0);
   });

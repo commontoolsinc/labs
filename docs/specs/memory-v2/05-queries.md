@@ -395,9 +395,17 @@ content-addressed — a hash registered from any space serves every space's
 check without a read, which is sound because equal hashes name equal bytes.
 Only a document the registry does not hold is read in the referrer space:
 that read is tracked, and when the document is also locally absent the
-delivery channel is asked for it, so its arrival re-runs the reader. Write-path resolutions leave
-relevance to the write-policy gate, and enforcement reads stored cfc
-metadata and label views rather than combined schemas.
+delivery channel is asked for it, so its arrival re-runs the reader. Link
+resolution loads the same closure before narrowing a stored schema across
+an ancestor hop; a closure it cannot complete fails soft — the hop carries
+no narrowed schema that pass and the resolution is not memoized, so the
+arrival re-narrows. A resolution that reads marks even on a write path:
+`set()`'s pre-write resolution reads the resolved terminal value (the
+stream check), so it opts in, and a transaction it marks relevant must be
+prepared before commit, as every runtime-owned commit path already does.
+Relevance for the write itself belongs to the write-policy gate, and
+enforcement reads stored cfc metadata and label views rather than combined
+schemas.
 
 The sibling `combineSchema` is the strict best-effort pseudo-intersection,
 used to merge a compound schema's base keywords with its own `anyOf`/`oneOf`

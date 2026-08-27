@@ -1404,11 +1404,18 @@ built-in defaults and preset resolution included, not a second reading of its
 own environment that could disagree with the first — flattened at read time,
 so a live read-back (`readerSchemaPrecedence`'s claim state) is advertised as
 it stands now. A flag the server left unresolved is omitted, and a server
-that has no `Runtime` yet publishes `null`; with one exception a client reads
-either as "this deployment said nothing" and keeps its
-own default. The exception is `readerSchemaPrecedence`: a posture that was fetched but declares nothing for it is a pre-flag server necessarily running the strict combine, and adoption reads the absence as the legacy `false` (its section has the detail). Absence of a declaration is never a declaration of `false`, which
-is what lets a client of an older server behave exactly as it did before the
-server published anything.
+that has no `Runtime` yet publishes `experimental: null`; a client reads
+either as "this deployment said nothing" and keeps its own default. The one
+exception rides on the pre-flag document shapes specifically: a fetched
+posture RECORD that declares no `readerSchemaPrecedence`, or a meta document
+with no `experimental` field at all, is a pre-flag server necessarily
+running the strict combine, and adoption reads that absence as the legacy
+`false` (its section has the detail) — while `experimental: null` is a
+current server with no posture yet, so it stays with the built-in default
+(`parseServerExperimentalOptions` draws the line). With that one exception,
+absence of a declaration is never a declaration of `false`, which is what
+lets a client of an older server behave exactly as it did before the server
+published anything.
 
 A serving toolshed runs two kinds of runtime, and what it publishes is the
 posture it SERVES at. The generic runtime it constructs for webhook pattern

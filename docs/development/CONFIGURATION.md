@@ -254,14 +254,30 @@ default, its planned end state, and its removal path, plus the propagation paths
 (server / shell / bg-piece / CLI) and verification steps. Briefly:
 
 - Server-side toggles take effect on restart.
-- Shell-side toggles are baked at build time — toggling requires a rebuild.
-- The same env var must be set everywhere the flag is read.
+- Server-authoritative flags propagate on their own: the server publishes its
+  resolved posture on `/api/meta`, and deployed shells and clients not built
+  alongside the server (cf among them) adopt it at boot — no rebuild, no
+  per-machine env. An explicit `EXPERIMENTAL_*` still wins per flag, and
+  `CF_ADOPT_SERVER_FLAGS=false` turns adoption off wholesale.
+- For everything else, the same env var must be set everywhere the flag is
+  read; shell-side that means a build-time define, so toggling requires a
+  rebuild.
 
-The environment-backed flags (the only ones settable without editing code) are:
+The environment-backed flags (the only ones settable without editing code) are
+declared once in `EXPERIMENTAL_ENV_VARS`
+(`packages/runner/src/experimental-posture.ts`), which is the authority; today
+that is:
 
 | Flag | Env var |
 |---|---|
 | `modernCellRep` | `EXPERIMENTAL_MODERN_CELL_REP` |
+| `contentAddressedSchemas` | `EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS` |
+| `plainResultReceipts` | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` |
+| `systemPatternAutoUpdate` | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` |
+| `computedCellIds` | `EXPERIMENTAL_COMPUTED_CELL_IDS` |
+| `lazyMaterialization` | `EXPERIMENTAL_LAZY_MATERIALIZATION` |
+| `readerSchemaPrecedence` | `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` |
+| `serverExecution` | `EXPERIMENTAL_SERVER_EXECUTION` |
 
 The runtime-only flags (`commitPreconditions`, the CFC enforcement dials) and the
 storage, memory-protocol, and shell flags are documented in the registry. See it
@@ -281,7 +297,7 @@ Most shell config is **build-time**: esbuild injects defines in
 | `API_URL` | `$API_URL` | falls back to `location.origin` | Backend the shell calls. |
 | `PRESENCE_URL` | `$PRESENCE_URL` | _(unset)_ | WebSocket endpoint provided to collaborative editors for ephemeral co-presence. When unset, editor co-presence stays disabled unless a component supplies its own endpoint. |
 | `COMMIT_SHA` | `$COMMIT_SHA` | _(unset)_ | Surfaced for diagnostics and used by deployed shells to select the immutable `/builds/<sha>` worker asset graph. In development the explicit worker URL remains `/scripts/worker-runtime.js`. It does not authorize system-pattern updates. |
-| `EXPERIMENTAL_MODERN_CELL_REP` | `EXPERIMENTAL.modernCellRep` | _(unset)_ | See experimental flags. |
+| `EXPERIMENTAL_*` (`MODERN_CELL_REP`, `COMPUTED_CELL_IDS`, `SYSTEM_PATTERN_AUTOUPDATE`, `SERVER_EXECUTION`, `CONTENT_ADDRESSED_SCHEMAS`, `READER_SCHEMA_PRECEDENCE`) | `EXPERIMENTAL.<flag>` | _(unset)_ | Explicit per-flag overrides. The shell adopts the deployment's published posture from `/api/meta` at runtime creation, so server-authoritative flags reach it without a rebuild; a define set here wins over the adopted value. See experimental flags. |
 | `SHELL_PORT` | _(server-only)_ | `5173` (from `ports.json`) | Dev server port. |
 
 ---

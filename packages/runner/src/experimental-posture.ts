@@ -201,14 +201,14 @@ export function parseServerExperimentalOptions(
   // Field presence decides the legacy arm. A server that published a
   // posture RECORD but declares no readerSchemaPrecedence in it predates
   // the flag and necessarily runs the strict combine: that absence adopts
-  // as the legacy `false` until the compatibility window closes. An
-  // explicit `experimental: null` is different — toolshed publishes null
-  // until a Runtime exists — and adopts nothing, as does a malformed
-  // declaration; a client that could not reach the server never calls
-  // this at all and keeps its built-in defaults. The one field-absent
-  // case left adopting nothing is a meta document with NO experimental
-  // field, which the caller hands in as `undefined`: that document shape
-  // also predates the flag, so it takes the legacy arm too.
+  // as the legacy `false` until the compatibility window closes. A meta
+  // document with NO experimental field at all — handed in as `undefined`
+  // — is the same pre-flag document shape and takes the legacy arm too.
+  // An explicit `experimental: null` is different: toolshed publishes
+  // null until a Runtime exists, so the server is not pre-flag, it just
+  // has no posture yet — that adopts nothing, as does a malformed
+  // declaration. A client that could not reach the server never calls
+  // this at all and keeps its built-in defaults.
   if (declared === null) return {};
   if (typeof declared !== "object") {
     return declared === undefined ? { readerSchemaPrecedence: false } : {};
