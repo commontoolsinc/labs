@@ -106,6 +106,11 @@ describe("piece slugs", () => {
     // The name is not listed, because the transaction carrying it never
     // committed.
     expect(await listSlugs(pieces)).not.toContain("rejected");
+    // The slug document was not written either: resolving the name still
+    // reports it missing.
+    await expect(resolvePieceAddress(pieces, "rejected")).rejects.toThrow(
+      /Slug "rejected" not found/,
+    );
   });
 
   it("lists every assigned slug, once, however many times a name is set", async () => {

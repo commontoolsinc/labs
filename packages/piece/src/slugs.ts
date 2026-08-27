@@ -109,7 +109,7 @@ export async function setSlugLink(
   });
   if (error) {
     throw new Error(
-      `Setting slug "${validSlug}" failed with ${error.name}: ${error.message}`,
+      `Linking the slug "${validSlug}" failed because storage returned ${error.name}: ${error.message}`,
       { cause: error },
     );
   }
