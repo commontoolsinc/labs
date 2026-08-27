@@ -85,11 +85,15 @@ import * as Engine from "./engine.ts";
 import { respondToHello } from "./handshake.ts";
 import {
   cloneTrackedGraphState,
+  createQueryEvaluationCache,
   extendTrackedGraph,
   fromDirtyKey,
   fromDocKey,
   isGraphQueryCoveredByState,
   type QueryDocKey,
+  type QueryEvaluationCache,
+  type QueryEvaluationCacheDiagnostics,
+  queryEvaluationCacheDiagnostics,
   queryGraph,
   type QueryGraphReuseContext,
   refreshTrackedGraph,
@@ -1180,6 +1184,10 @@ class Connection {
 export class Server {
   #sessions: SessionRegistry;
   #connections = new Map<string, Connection>();
+
+  /** Whole-evaluation caches, one per space (see QueryEvaluationCache in
+   * query.ts for the sharing, purity, and seq-rotation rules). */
+  #queryEvaluationCaches = new Map<string, QueryEvaluationCache>();
   #engines = new Map<string, Promise<Engine.Engine>>();
   // The resolved-engine index for the SYNC cross-engine lease lookup
   // (server-execution v2 Phase 5; see openEngine / #liveCoHostedLeaseSpaceFor).
@@ -3858,6 +3866,7 @@ export class Server {
             {
               principal: session.principal,
               sessionId: message.sessionId,
+              evaluationCache: this.#evaluationCacheFor(message.space),
             },
           );
           graphs.set(branch, tracked.state);
@@ -3969,6 +3978,22 @@ export class Server {
     }
   }
 
+  #evaluationCacheFor(space: string): QueryEvaluationCache {
+    let cache = this.#queryEvaluationCaches.get(space);
+    if (cache === undefined) {
+      cache = createQueryEvaluationCache();
+      this.#queryEvaluationCaches.set(space, cache);
+    }
+    return cache;
+  }
+
+  /** The space's evaluation-cache counters, for diagnostics and tests. */
+  evaluationCacheDiagnostics(
+    space: string,
+  ): QueryEvaluationCacheDiagnostics {
+    return queryEvaluationCacheDiagnostics(this.#evaluationCacheFor(space));
+  }
+
   async evaluateGraphQuery(
     space: string,
     query: GraphQuery,
@@ -3986,7 +4011,10 @@ export class Server {
       engine ?? await this.openEngine(space),
       query,
       reuse,
-      scopeContext,
+      {
+        ...scopeContext,
+        evaluationCache: this.#evaluationCacheFor(space),
+      },
     );
     recordSlowQueryDuration("graph.query", space, startedAt, {
       roots: query.roots.length,
@@ -4019,7 +4047,10 @@ export class Server {
         resolvedEngine,
         query,
         reuse,
-        scopeContext,
+        {
+          ...scopeContext,
+          evaluationCache: this.#evaluationCacheFor(space),
+        },
       );
       serverSeq = result.serverSeq;
       graphs.set(branch, result.state);

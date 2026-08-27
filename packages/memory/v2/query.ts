@@ -283,10 +283,166 @@ export type QueryGraphReuseContext = {
   managers?: Map<string, EngineObjectManager>;
 };
 
+/**
+ * Canonical selector identity for evaluation-cache keys. Interning gives
+ * structurally equal selectors one canonical instance
+ * (`internPathSelector`), so reference identity is structural equality and
+ * the id is exact. Canonical instances are weakly held, so an id can lapse
+ * with its selector and a re-interned equal reappears under a fresh id —
+ * that costs a cache miss, never a wrong hit.
+ */
+let nextCanonicalSelectorId = 0;
+const canonicalSelectorIds = new WeakMap<SchemaPathSelector, number>();
+const canonicalSelectorId = (selector: SchemaPathSelector): number => {
+  const interned = internPathSelector(selector);
+  let id = canonicalSelectorIds.get(interned);
+  if (id === undefined) {
+    id = nextCanonicalSelectorId++;
+    canonicalSelectorIds.set(interned, id);
+  }
+  return id;
+};
+
+const evaluationQueryKey = (query: GraphQuery): string =>
+  JSON.stringify([
+    query.branch ?? "",
+    query.roots
+      .map((root) => [
+        root.id,
+        root.scope ?? DEFAULT_SCOPE,
+        root.entityScopeKey ?? "",
+        canonicalSelectorId(toDocumentSelector(root.selector)),
+      ])
+      .map((parts) => JSON.stringify(parts))
+      .toSorted(),
+  ]);
+
+const evaluationIdentityKey = (options: TrackGraphOptions): string =>
+  JSON.stringify([options.principal ?? null, options.sessionId ?? null]);
+
+/**
+ * Bounds an evaluation cache's entry count. Distinct query shapes per space
+ * are few (a session class shares its watch corpus), so the bound exists
+ * for the adversarial case, not the expected one; an insert past it is
+ * skipped rather than evicting, since within one generation every entry is
+ * equally live.
+ */
+const EVALUATION_CACHE_MAX_ENTRIES = 64;
+
+export type QueryEvaluationCacheDiagnostics = {
+  seq: number;
+  entries: number;
+  hits: number;
+  misses: number;
+  rotations: number;
+};
+
+/**
+ * Caches whole tracked-graph evaluations per (query shape, engine seq).
+ *
+ * The WHOLE evaluation is the smallest soundly shareable unit: within one
+ * walk, an already-covered (doc, selector) skips its subtree — including
+ * the tracker registrations that subtree would record — so any per-document
+ * slice of a walk's effects depends on what its siblings covered first, and
+ * replaying one standalone under-registers coverage. A complete evaluation
+ * carries no such context.
+ *
+ * Entries are valid only at the engine seq they were evaluated at; a seq
+ * advance rotates the whole cache. Staleness is therefore structural — no
+ * write hooks, no dependency tracking — and the sharing this buys is
+ * exactly where the cost multiplies: many sessions establishing the same
+ * watch corpus between two commits (a reconnect stampede after a process
+ * death is this, at its worst).
+ *
+ * Scope purity decides who may share an entry. An evaluation whose whole
+ * reach — tracked, missed, and loaded — resolved under the `space` scope is
+ * identical for every identity and is shared across them; one that touched
+ * a session- or user-scoped instance is keyed to the evaluating identity
+ * (key-vocabulary.md §5's identity-bound invariant — the same value-bleed
+ * rule `assertSchemaMemoIdentity` enforces for the inner schema memos).
+ * ACL changes are themselves commits, so a grant or revocation rotates the
+ * cache before any post-change evaluation could be served from it.
+ */
+export type QueryEvaluationCache = {
+  seq: number;
+  entries: Map<string, { state: TrackedGraphState; scopePure: boolean }>;
+  hits: number;
+  misses: number;
+  rotations: number;
+};
+
+export const createQueryEvaluationCache = (): QueryEvaluationCache => ({
+  seq: -1,
+  entries: new Map(),
+  hits: 0,
+  misses: 0,
+  rotations: 0,
+});
+
+export const queryEvaluationCacheDiagnostics = (
+  cache: QueryEvaluationCache,
+): QueryEvaluationCacheDiagnostics => ({
+  seq: cache.seq,
+  entries: cache.entries.size,
+  hits: cache.hits,
+  misses: cache.misses,
+  rotations: cache.rotations,
+});
+
+const stateIsScopePure = (state: TrackedGraphState): boolean => {
+  for (const [key] of state.tracker) {
+    if (fromDocKey(key as QueryDocKey).scopeKey !== "space") return false;
+  }
+  for (const [key] of state.missed) {
+    if (fromDocKey(key as QueryDocKey).scopeKey !== "space") return false;
+  }
+  for (const address of state.manager.loadedAddresses()) {
+    if (address.scopeKey !== "space") return false;
+  }
+  return true;
+};
+
+/**
+ * Clone for a cache hit: `cloneTrackedGraphState` rebound to the
+ * requesting identity. Only scope-pure entries are ever cloned across
+ * identities, so every key, entity, memo entry, and manager cache line in
+ * the source resolved identically to what this identity's own evaluation
+ * would have produced; the rebind exists so the clone's LATER operations —
+ * refreshes, extensions — resolve scoped reach against the session that
+ * owns it. The cloned memo is a fresh Map, so the identity binding the
+ * schema-memo tripwire tracks starts unbound and binds to the new owner.
+ */
+const cloneTrackedGraphStateForIdentity = (
+  engine: Engine.Engine,
+  state: TrackedGraphState,
+  options: TrackGraphOptions,
+): TrackedGraphState => {
+  const clone = cloneTrackedGraphState(engine, state);
+  if (
+    clone.manager.principal === options.principal &&
+    clone.manager.sessionId === options.sessionId
+  ) {
+    return clone;
+  }
+  const manager = new EngineObjectManager(
+    engine,
+    state.branch,
+    options.principal,
+    options.sessionId,
+  );
+  manager.mergeFrom(state.manager);
+  return { ...clone, manager };
+};
+
 export type TrackGraphOptions = {
   readSeq?: number;
   principal?: string;
   sessionId?: string;
+
+  /** Serve/record whole evaluations through this cache (current-seq reads
+   * only; a `readSeq` read bypasses it). See {@link QueryEvaluationCache}
+   * for the sharing and rotation rules. */
+  evaluationCache?: QueryEvaluationCache;
 
   /**
    * `queryGraph` only (server-execution v2 stage A, OW17's wire leg):
@@ -765,6 +921,41 @@ export const trackGraph = (
   stats: QueryTraversalStats;
 } => {
   const branch = query.branch ?? "";
+  // Historical reads bypass the cache (entries are current-seq only), and
+  // so does the lease-holder exemption class: an exempt evaluation judges
+  // the CURRENT live lease, which is host state that can move without a
+  // commit — seq rotation cannot fence it, so those evaluations are never
+  // cached or served.
+  const cache = options.readSeq === undefined && options.keyedSnapshots !== true
+    ? options.evaluationCache
+    : undefined;
+  let cacheKeys: { pure: string; identity: string } | undefined;
+  if (cache !== undefined) {
+    const currentSeq = Engine.serverSeq(engine);
+    if (cache.seq !== currentSeq) {
+      cache.seq = currentSeq;
+      cache.entries.clear();
+      cache.rotations++;
+    }
+    const queryKey = evaluationQueryKey(query);
+    cacheKeys = {
+      pure: `P${queryKey}`,
+      identity: `I${evaluationIdentityKey(options)}${queryKey}`,
+    };
+    const entry = cache.entries.get(cacheKeys.pure) ??
+      cache.entries.get(cacheKeys.identity);
+    if (entry !== undefined) {
+      cache.hits++;
+      // A hit ran no traversal, and its stats say so: zero walk counters
+      // are the truth of what THIS call cost, not an accounting gap.
+      return {
+        serverSeq: currentSeq,
+        state: cloneTrackedGraphStateForIdentity(engine, entry.state, options),
+        stats: createQueryTraversalStats(),
+      };
+    }
+    cache.misses++;
+  }
   const managerKey = options.readSeq === undefined
     ? `${branch}\0${options.principal ?? ""}\0${options.sessionId ?? ""}`
     : `${branch}\0${options.readSeq}\0${options.principal ?? ""}\0${
@@ -850,16 +1041,29 @@ export const trackGraph = (
 
   stats.managerReads = manager.readCount - readCountBefore;
 
+  const state: TrackedGraphState = {
+    branch,
+    tracker: schemaTracker,
+    ...missState,
+    entities,
+    memo: sharedMemo,
+    manager,
+  };
+  if (
+    cache !== undefined && cacheKeys !== undefined &&
+    cache.entries.size < EVALUATION_CACHE_MAX_ENTRIES
+  ) {
+    // The cache keeps its own clone: the state returned below belongs to
+    // the caller's session, whose refreshes and extensions mutate it.
+    const scopePure = stateIsScopePure(state);
+    cache.entries.set(scopePure ? cacheKeys.pure : cacheKeys.identity, {
+      state: cloneTrackedGraphState(engine, state),
+      scopePure,
+    });
+  }
   return {
     serverSeq: Engine.serverSeq(engine),
-    state: {
-      branch,
-      tracker: schemaTracker,
-      ...missState,
-      entities,
-      memo: sharedMemo,
-      manager,
-    },
+    state,
     stats,
   };
 };
