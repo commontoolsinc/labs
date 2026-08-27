@@ -1,7 +1,10 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import { FabricLink } from "@commonfabric/data-model/fabric-instances";
+import {
+  FabricError,
+  FabricLink,
+} from "@commonfabric/data-model/fabric-instances";
 import {
   FabricBytes,
   FabricEpochNsec,
@@ -901,6 +904,21 @@ describe("cell-handle", () => {
           "Cannot yet handle `FabricBytes` (a `FabricSpecialObject`) on this " +
             "connection.",
         );
+    });
+
+    it("refuses a `FabricInstance` for its own reason, as `deserialize()` does", () => {
+      // The two arms are refused for different reasons -- a primitive because
+      // the wire has no representation for it, an instance because this walk
+      // cannot descend one to find a handle inside -- and only the second
+      // reason outlives a wire that carries the class. The instance arm says
+      // so through the shared helper, which is what every other refusal site
+      // in the tree uses, `deserialize()` below included.
+      expect(() =>
+        CellHandle.serialize(FabricError.fromNativeError(new Error("boom")))
+      ).toThrow(
+        "Cannot yet handle `FabricError` (a `FabricInstance`) when sending a " +
+          "value over this connection.",
+      );
     });
 
     it("serializes an ordinary record unchanged", () => {

@@ -7,7 +7,7 @@ import { NameSchema } from "@commonfabric/runner/schemas";
 import {
   CellHandle,
   FavoritesManager,
-  JSONValue,
+  JSONObject,
   PageHandle,
   type PieceSourceView,
   Program,
@@ -348,7 +348,7 @@ export class RuntimeInternals extends EventTarget {
   async createPiece<T>(
     space: DID,
     source: URL | Program | string,
-    options?: { argument?: JSONValue; run?: boolean },
+    options?: { argument?: JSONObject; run?: boolean },
   ): Promise<PageHandle<T>> {
     this.#check();
     const page = await this.#client.createPage<T>(source, space, options);

@@ -6,7 +6,11 @@ import {
 import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { toStructuredDebugValue } from "@commonfabric/data-model/value-debug";
+import {
+  toCompactDebugString,
+  toStructuredDebugValue,
+} from "@commonfabric/data-model/value-debug";
+import { isPlainObject } from "@commonfabric/utils/types";
 import {
   type SiteTable,
   siteTableCause,
@@ -1526,8 +1530,24 @@ export class RuntimeProcessor {
       throw new Error("Invalid source.");
     }
 
+    // Checked rather than cast. A piece's input is a record of named inputs,
+    // which is the question `isPlainObject()` asks; casting a bare string or
+    // an array to `object` would hand the runtime something it cannot use and
+    // say nothing about why.
+    const argument = request.argument;
+    if ((argument !== undefined) && !isPlainObject(argument)) {
+      // The rejected value is named rather than its `typeof`, which calls both
+      // an array and `null` an `object` and so says nothing about either. It
+      // is bounded because the argument is a caller's data.
+      throw new Error(
+        `A piece's argument must be a record, not: ${
+          toCompactDebugString(argument, 120)
+        }`,
+      );
+    }
+
     const piece = await cc.create<NameSchema>(program, {
-      input: request.argument as object | undefined,
+      input: argument,
       origin,
       start: request.run ?? true,
     }, request.cause);

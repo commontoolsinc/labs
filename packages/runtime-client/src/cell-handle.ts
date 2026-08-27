@@ -5,7 +5,6 @@
 import {
   FabricInstance,
   FabricPrimitive,
-  FabricSpecialObject,
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
@@ -550,7 +549,9 @@ export class CellHandle<T = unknown> {
    * Converts a value the client holds into the one the connection carries,
    * which is the same data with a `CellRef` wherever a `CellHandle` sat.
    *
-   * Refuses a `FabricSpecialObject`, which the connection cannot carry.
+   * Refuses a `FabricPrimitive`, which the connection cannot carry, and a
+   * `FabricInstance`, which is a container this walk cannot descend to find a
+   * handle inside.
    *
    * `CellHandle.deserialize()` is the inverse.
    */
@@ -561,7 +562,7 @@ export class CellHandle<T = unknown> {
       return value.map((element) => CellHandle.serialize(element));
     }
 
-    // A `FabricSpecialObject` is a `ClientCellValue` -- a cell holds one like
+    // A `FabricPrimitive` is a `ClientCellValue` -- a cell holds one like
     // any other value -- but `WireCellValue` has no representation for it, so
     // this refuses rather than converting. It goes _before_ the record test:
     // such a value is also a record, and that branch would otherwise rebuild
@@ -579,11 +580,20 @@ export class CellHandle<T = unknown> {
     // connection, at which point this becomes a conversion rather than a
     // refusal. `codec-realm` is the mechanism, and the gap it closes is the
     // one marked on `WireCellValue` in `protocol/types.ts`.
-    if (value instanceof FabricSpecialObject) {
+    if (value instanceof FabricPrimitive) {
       throw new Error(
         `Cannot yet handle \`${value.constructor.name}\` (a ` +
           "`FabricSpecialObject`) on this connection.",
       );
+    }
+
+    // An instance is refused for a second reason, which outlives the first: it
+    // is a container whose contents this walk cannot reach, so a `CellHandle`
+    // inside one would cross unconverted even on a connection that carried the
+    // class. Refused through the shared helper, as `deserialize()` above
+    // already does, so the two walks say the same thing about the same value.
+    if (value instanceof FabricInstance) {
+      refuseFabricInstance(value, "when sending a value over this connection");
     }
 
     if (isObjectOrArray(value)) {

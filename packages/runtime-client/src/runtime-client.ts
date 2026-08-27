@@ -53,7 +53,7 @@ import {
   ConsoleMessage,
   ErrorNotification,
   InitializationData,
-  JSONValue,
+  JSONObject,
   type LoggerCountsData,
   type LoggerFlagsData,
   type LoggerMetadata,
@@ -389,7 +389,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   async createPage<T = unknown>(
     input: string | URL | Program,
     space: DID,
-    options?: { argument?: JSONValue; run?: boolean },
+    options?: { argument?: JSONObject; run?: boolean },
   ): Promise<PageHandle<T>> {
     const source = input instanceof URL
       ? { url: input.href }
