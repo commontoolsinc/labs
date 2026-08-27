@@ -366,19 +366,26 @@ export function classifyOrigin(
   }
 
   if (source.startsWith("/")) {
-    // A rooted path names a file on the host serving this space. A
-    // protocol-relative string only looks like one: resolving `//elsewhere/x`
-    // against the host yields a URL on `elsewhere`, so a piece would record
-    // something that reads as local and points somewhere else. Nothing
-    // follows one either, which is the shape a piece must never be left in —
-    // an origin reported as fine that no reconciliation will ever resolve.
-    if (source.startsWith("//")) {
+    const host = new URL(runtime.hostForSpace(space));
+    const resolved = new URL(source, host);
+    // A rooted path names a file on the host serving this space, and several
+    // strings that begin with a slash do not. `//elsewhere/x` is one;
+    // `/\elsewhere/x` is another, because the URL parser reads a backslash as
+    // a separator. Both read as local and resolve somewhere else, and nothing
+    // follows either, so a piece that accepted one would be left in the state
+    // this lifecycle exists to prevent: an origin reported as fine that no
+    // reconciliation will ever reach.
+    //
+    // What settles it is where the string actually resolved, not how it was
+    // spelled. A guard written against the spellings would have to grow one
+    // arm per trick the parser knows.
+    if (resolved.origin !== host.origin) {
       throw new PieceOriginError(
-        `${source} names another host without saying so; write the URL out`,
+        `${source} resolves to ${resolved.origin}, not the host serving ` +
+          `this space; write the URL out if that is what you meant`,
       );
     }
-    const host = runtime.hostForSpace(space);
-    return webOrigin(new URL(source, host), source);
+    return webOrigin(resolved, source);
   }
 
   let url: URL;

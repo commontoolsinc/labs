@@ -638,7 +638,7 @@ describe("the two classifiers a recorded origin meets", () => {
     const host = "https://toolshed.test";
     const runtime = { hostForSpace: () => new URL(host) } as unknown as Runtime;
     const hash = "b".repeat(43);
-    const strings = [
+    const strings: string[] = [
       "system:system/home.tsx",
       "/api/patterns/system/home.tsx",
       `${host}/api/patterns/system/home.tsx`,
@@ -661,11 +661,30 @@ describe("the two classifiers a recorded origin meets", () => {
       // resolved against the host it names a different authority entirely.
       "//evil.example/x",
       "//evil.example",
+      "/\\evil.example/x",
+      "\\\\evil.example\\x",
     ];
 
+    // Rooted paths on this host that name nothing under the patterns route.
+    // Reconciliation reports them unusable; this side still reads them as
+    // ordinary web origins. `docs/specs/piece-source-lifecycle.md` says such
+    // a string is not an origin at all, so the two are not yet saying the
+    // same thing about them — listed here rather than left out of the strings
+    // above, because a case a test omits is a case it does not check.
+    const knownAsymmetric = new Set([
+      "/",
+      "/nope.tsx",
+      "/api/patterns/../../etc/passwd",
+    ]);
+    for (const recorded of knownAsymmetric) strings.push(recorded);
+
     for (const recorded of strings) {
-      const followable =
-        classifyPieceOriginString(recorded, host).kind !== "unusable";
+      const kind = classifyPieceOriginString(recorded, host);
+      // A rooted path carrying no ref names nothing under the patterns route,
+      // and reconciliation reports it unusable rather than following it, so
+      // that is what "followable" has to mean here.
+      const followable = kind.kind !== "unusable" &&
+        !(kind.kind === "legacy-path" && kind.ref === undefined);
       let usable: boolean;
       try {
         classifyOrigin(runtime, SPACE, recorded);
@@ -673,8 +692,27 @@ describe("the two classifiers a recorded origin meets", () => {
       } catch {
         usable = false;
       }
-      expect({ recorded, usable }).toEqual({ recorded, usable: followable });
+      const expected = knownAsymmetric.has(recorded) ? true : followable;
+      expect({ recorded, usable }).toEqual({ recorded, usable: expected });
     }
+  });
+
+  it("refuses a rooted path that resolves to another host", () => {
+    const host = "https://toolshed.test";
+    const runtime = { hostForSpace: () => new URL(host) } as unknown as Runtime;
+    // Both begin with a slash and neither names this host: the URL parser
+    // reads `//` as an authority and a backslash as a separator. A guard
+    // written against the spellings would need one arm per such trick, so
+    // what decides it is where the string actually resolved.
+    for (const recorded of ["//evil.example/x", "/\\evil.example/x"]) {
+      expect(() => classifyOrigin(runtime, SPACE, recorded)).toThrow(
+        "resolves to https://evil.example",
+      );
+    }
+    // A rooted path on this host is still an ordinary origin.
+    expect(classifyOrigin(runtime, SPACE, "/api/patterns/x.tsx").url).toBe(
+      "https://toolshed.test/api/patterns/x.tsx",
+    );
   });
 });
 

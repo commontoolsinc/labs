@@ -369,7 +369,12 @@ describe("piece source lifecycle", () => {
     // would report an origin as fine that no reconciliation can ever reach.
     await expect(
       piece.changeSource({ kind: "repoint", url: "//evil.example/p.tsx" }),
-    ).rejects.toThrow("names another host without saying so");
+    ).rejects.toThrow("resolves to http://evil.example");
+    // A backslash is a separator to the URL parser, so this one swaps hosts
+    // too while looking even more like a local path.
+    await expect(
+      piece.changeSource({ kind: "repoint", url: "/\\evil.example/p.tsx" }),
+    ).rejects.toThrow("resolves to http://evil.example");
     expect(getPatternSource(piece.getCell())).toBeUndefined();
     const state = await readPieceSourceState(runtime, piece.getCell());
     expect(state.history.map((revision) => revision.operation)).toEqual([
