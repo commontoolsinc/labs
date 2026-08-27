@@ -273,9 +273,14 @@ function isReferenceOnlySchema(
       depth - 1,
     );
   }
-  const arms = (schema.anyOf ?? schema.oneOf) as
-    | readonly JSONSchema[]
-    | undefined;
+  // Both keywords together describe one set of alternatives the run may
+  // take, so they combine rather than one shadowing the other — the same
+  // reading `schemaAtPath` gives them when it narrows through a union.
+  const anyOf = schema.anyOf as readonly JSONSchema[] | undefined;
+  const oneOf = schema.oneOf as readonly JSONSchema[] | undefined;
+  const arms = anyOf !== undefined && oneOf !== undefined
+    ? [...anyOf, ...oneOf]
+    : anyOf ?? oneOf;
   if (arms !== undefined && arms.length > 0) {
     return arms.every((arm) => isReferenceOnlySchema(arm, depth - 1));
   }

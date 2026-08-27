@@ -19,6 +19,11 @@ describe("syncArgumentLinkTargets", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let syncedIds: string[];
+  // One entry per raw value read the walk performs, which is one per subtree
+  // it descends into — the observable that separates walking a subtree twice
+  // from walking it once. Sync counts cannot show it: documents dedupe
+  // separately, so a doubled walk syncs the same documents.
+  let walkedIds: string[];
 
   beforeEach(() => {
     storageManager = StorageManager.emulate({ as: signer });
@@ -27,6 +32,7 @@ describe("syncArgumentLinkTargets", () => {
       storageManager,
     });
     syncedIds = [];
+    walkedIds = [];
     const original = runtime.storageManager.syncCell.bind(
       runtime.storageManager,
     );
@@ -35,6 +41,27 @@ describe("syncArgumentLinkTargets", () => {
     }).syncCell = (cell) => {
       syncedIds.push(cell.getAsNormalizedFullLink().id);
       return original(cell);
+    };
+    const originalFromLink = runtime.getCellFromLink.bind(runtime);
+    const counted = new WeakSet<object>();
+    (runtime as unknown as {
+      getCellFromLink: (...args: unknown[]) => Cell<unknown>;
+    }).getCellFromLink = (...args: unknown[]) => {
+      const cell = originalFromLink(
+        ...args as Parameters<typeof originalFromLink>,
+      );
+      if (!counted.has(cell)) {
+        counted.add(cell);
+        const originalGetRaw = cell.getRawUntyped.bind(cell);
+        Object.defineProperty(cell, "getRawUntyped", {
+          configurable: true,
+          value: () => {
+            walkedIds.push(cell.getAsNormalizedFullLink().id);
+            return originalGetRaw();
+          },
+        });
+      }
+      return cell;
     };
   });
 
@@ -265,7 +292,7 @@ describe("syncArgumentLinkTargets", () => {
     expect(syncedIds).toContain(id(behindMissing));
   });
 
-  it("walks a subtree once when two declared paths link to it", async () => {
+  it("descends a subtree once when two declared paths link to it", async () => {
     const { make, commit } = docBuilder("diamond");
     const leaf = make("leaf", { n: 1 });
     const shared = make("shared", { child: leaf });
@@ -279,11 +306,37 @@ describe("syncArgumentLinkTargets", () => {
       type: "object",
       properties: { left: childSchema, right: childSchema },
     } as JSONSchema);
-    // Both arms of the diamond reach the same document at the same path, so
-    // the second walk is dropped; the subtree below it is still synced.
+    // Both arms of the diamond reach the same document at the same path.
+    // Without the walk ledger the frontier carries that subtree twice and
+    // descends it twice, which only the read count shows — the documents
+    // themselves dedupe either way.
+    expect(walkedIds.filter((each) => each === id(shared))).toHaveLength(1);
     expect(syncedIds).toContain(id(shared));
     expect(syncedIds).toContain(id(leaf));
-    expect(syncedIds.filter((each) => each === id(leaf))).toHaveLength(1);
+  });
+
+  it("reads a union whose `oneOf` arm is readable beside a reference-only `anyOf`", async () => {
+    const { make, commit } = docBuilder("both keywords");
+    const behind = make("behind", { n: 1 });
+    const target = make("target", { child: behind });
+    const root = make("root", { both: target });
+    await commit();
+    await run(root, {
+      type: "object",
+      properties: {
+        both: {
+          anyOf: [{ type: "object", asCell: ["cell"] }],
+          oneOf: [{
+            type: "object",
+            properties: { child: { type: "object" } },
+          }],
+        },
+      },
+    } as JSONSchema);
+    // The `oneOf` arm is an alternative the run may take, so the link is not
+    // reference-only and the document behind it is pre-synced.
+    expect(syncedIds).toContain(id(target));
+    expect(syncedIds).toContain(id(behind));
   });
 
   it("gives an undeclared subtree below a declared root the two-hop budget", async () => {
