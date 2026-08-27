@@ -651,6 +651,7 @@ describe("delivery shaping (scheduler integration)", () => {
       }
       let settledOriginal = 0;
       let settledRetry = 0;
+      let settledSecondRetry = 0;
       runtime.scheduler.queueEvent(
         linkRef,
         { marker: "original" },
@@ -667,13 +668,25 @@ describe("delivery shaping (scheduler integration)", () => {
         false,
         { eventId: "inv-coalesced" },
       );
+      runtime.scheduler.queueEvent(
+        linkRef,
+        { marker: "second-retry" },
+        true,
+        () => settledSecondRetry++,
+        false,
+        { eventId: "inv-coalesced" },
+      );
       await runtime.idle();
-      // One delivery, carrying the FIRST payload; both callbacks settled on it.
+      // One delivery carries the FIRST payload. Every retry callback settles
+      // on that outcome, including a callback appended to the existing flat
+      // callback chain.
       expect(received).toContainEqual({ marker: "original" });
       expect(received).not.toContainEqual({ marker: "retry" });
+      expect(received).not.toContainEqual({ marker: "second-retry" });
       expect(received.length).toBe(MAX_EVENT_BACKLOG_PER_STREAM);
       expect(settledOriginal).toBe(1);
       expect(settledRetry).toBe(1);
+      expect(settledSecondRetry).toBe(1);
     } finally {
       await runtime.dispose();
     }
