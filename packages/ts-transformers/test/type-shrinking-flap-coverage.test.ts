@@ -164,15 +164,12 @@ function createContext(sourceFile: ts.SourceFile): {
   return { context, diagnostics };
 }
 
-//
-// Type-driven shrink descending into an `unknown`/`any` property drops that
-// property rather than widening it (buildShrunkTypeNodeFromType
-// `!hasDirectAccess && isAnyOrUnknownType(propType)` continue, lines 964-967).
-// A synthetic base node forces the type-driven path; a deep path into an
-// `unknown`-typed member reaches the guard.
-//
-
 Deno.test("applyShrinkAndWrap drops a deep read into an unknown-typed property under type-driven shrinking", () => {
+  // Type-driven shrink descending into an `unknown`/`any` property drops that
+  // property rather than widening it (buildShrunkTypeNodeFromType
+  // `!hasDirectAccess && isAnyOrUnknownType(propType)` continue, lines
+  // 964-967). A synthetic base node forces the type-driven path; a deep path
+  // into an `unknown`-typed member reaches the guard.
   const { sourceFile, checker } = createProgram(`
     type Input = { blob: unknown; kept: string };
   `);
@@ -202,15 +199,13 @@ Deno.test("applyShrinkAndWrap drops a deep read into an unknown-typed property u
   assertEquals(members.get("kept")?.type, "string");
 });
 
-//
-// getArrayElementTypeNode fallback: a base node that is a plain type-alias
-// reference (not `T[]`, `Array<T>`, readonly array, union, or type literal)
-// resolves to an array only through the checker, so the element node is built
-// from the resolved element type (lines 1685-1688, 1694, 1699-1709). Validating
-// an item path on such a base runs the fallback and finds the item field.
-//
-
 Deno.test("validateShrinkCoverage resolves array element node from an array type-alias reference", () => {
+  // getArrayElementTypeNode fallback: a base node that is a plain type-alias
+  // reference (not `T[]`, `Array<T>`, readonly array, union, or type literal)
+  // resolves to an array only through the checker, so the element node is built
+  // from the resolved element type (lines 1685-1688, 1694, 1699-1709).
+  // Validating an item path on such a base runs the fallback and finds the item
+  // field.
   const { sourceFile, checker } = createProgram(`
     interface Array<T> { length: number; [n: number]: T; }
     interface Row { id: string; title: string; }
@@ -247,15 +242,12 @@ Deno.test("validateShrinkCoverage resolves array element node from an array type
   assertEquals(diagnostics[0]!.message.includes("'.id'"), false);
 });
 
-//
-// validateShrinkCoverage over an array base where the shrunk node is NOT
-// array-shaped: array-root paths (`length`) survive and re-drive validation
-// against the array base (line 1832-1833 `paths = arrayRootPaths`), and the
-// array-root head is checked via typeNodeHasHead's array-shape arm (line 1545).
-// A bogus non-array head keeps the top-1763 fast path from firing.
-//
-
 Deno.test("validateShrinkCoverage validates array-root paths against the array base when the shrunk node is not array-shaped", () => {
+  // validateShrinkCoverage over an array base where the shrunk node is NOT
+  // array-shaped: array-root paths (`length`) survive and re-drive validation
+  // against the array base (line 1832-1833 `paths = arrayRootPaths`), and the
+  // array-root head is checked via typeNodeHasHead's array-shape arm (line
+  // 1545). A bogus non-array head keeps the top-1763 fast path from firing.
   const { sourceFile, checker } = createProgram(`
     interface Array<T> { length: number; [n: number]: T; }
     interface Row { id: string; }
