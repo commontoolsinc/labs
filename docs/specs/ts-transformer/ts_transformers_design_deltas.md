@@ -128,36 +128,33 @@ therefore has to stay on the uninterpreted render path rather than become an
 operand of a later call or a stored intermediate, and each unsupported map
 call reports one `pattern-context:computation` diagnostic, anchored on the
 call. The escape test is applied at the map call itself over the callback's
-own returns, so it reaches the implicit spellings the same way — a
-computation or a bare read of a reactive or lowered local. One return shape
-is deliberate and not claimed: a reactive artifact the author constructed on
-purpose — a `computed(...)` cell, an `action(...)` or `handler(...)` handle,
-an applied lift, a `generateObject(...)` result, a `cell(...)`, a fetch or
-query resource — returned directly, through a `const` local whose initializer is one,
-or as a field read off one (weekly-calendar collects per-color action handles
-through a local; gmail-extractor collects per-email records that project
-`analysis.result`, `.pending`, and `.error` out of the `generateObject(...)`
-it just built). The value-like reactive helpers are excluded from that
-exemption: `ifElse`, `when`, and `unless` stand for a value rather than a
-handle, so a collected one is the same hazard as a bare read — an object that
-is truthy whichever branch it represents.
+own returns, so it reaches every reactive spelling the same way: a
+computation, a bare read of a reactive or lowered local, an explicit reactive
+construction, or a projection from one. Local aliases are followed through
+their initializers and assignments regardless of `const`/`let`; this is a
+may-escape check, so mutability adds possible values rather than proving a
+binding safe. There is no syntax-based artifact exemption. Resource-producing
+maps instead make their collection ownership explicit with a reactive receiver
+(and therefore `mapWithPattern`), while handler-producing render loops attach
+the handler directly to the JSX node that owns it.
 
 An object or array literal is not exempt as a whole either. Its own
 truthiness is never in question, but an ordinary consumer reads through it —
 `map((v) => ({ v, flag })).filter(({ flag }) => flag)` interprets the member,
 not the record — so every member is classified the way the whole return is.
-A rejected-flow map whose returns are all plain or deliberate shapes collects
-what the author meant it to; a reactive computation inside one is a standard
+Computed property names are included because native record construction must
+interpret them too. A rejected-flow map whose returns are all plain collects
+ordinary data; a reactive computation inside one is a standard
 non-escaping site and keeps the standard "wrap it in `computed()`"
 classification instead. A
 render-collecting callback has no such exposure — its collected view nodes
 are ordinary data — so no flow restriction applies to it. Conditional and
 logical return roots are value-collecting even when their branches are JSX
 or nullish, because expression-site lowering rewrites the selection itself
-to a reactive helper cell. Async
-callbacks are excluded because their reactive work resumes after the
-construction frame, and generator callbacks because `map` never executes
-their bodies.
+to a reactive helper cell. Async callbacks containing reactive work are
+excluded because that work resumes after the construction frame, and generator
+callbacks containing reactive work because `map` never executes their bodies;
+those checks are independent of the value the callback returns.
 The restriction is about pattern-owned wrapper sites: a map in a standalone or
 explicit compute-owned helper remains ordinary JavaScript, even when its result
 is stored or consumed.

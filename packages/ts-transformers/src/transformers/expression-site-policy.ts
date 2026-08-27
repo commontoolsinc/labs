@@ -1495,74 +1495,19 @@ export function findPreferredNestedLowerableExpressionSite(
 }
 
 /**
- * Reactive-origin calls whose result stands for a value rather than for a
- * durable artifact. Collecting one is the same mistake as collecting a bare
- * read: the result is an object, so `map(() => ifElse(flag, true, false))`
- * hands `filter(Boolean)` something truthy whichever branch it represents.
+ * True when the callback can hand `map` a reactive value. Plain `Array.map`
+ * stores that value as-is, so an ordinary downstream consumer observes the
+ * wrapper object rather than the value it represents.
  *
- * Every other reactive origin constructs an artifact an author holds and
- * passes around on purpose — a `computed(...)` cell, an `action(...)` or
- * `handler(...)` handle, an applied lift, a `generateObject(...)` result, a
- * `cell(...)`, a fetch or query resource — and collecting those is ordinary
- * authoring. `str` needs no entry here: its tagged-template spelling is not a
- * call expression, so it never reaches this test.
- */
-const VALUE_LIKE_REACTIVE_CALL_KINDS = new Set(["ifElse", "when", "unless"]);
-
-function isCollectedReactiveArtifact(
-  expression: ts.Expression,
-  checker: ts.TypeChecker,
-): boolean {
-  let current = unwrapExpression(expression);
-
-  // Reading a field off an artifact is as deliberate as holding the artifact:
-  // gmail-extractor projects `analysis.result`, `.pending`, and `.error` out
-  // of the `generateObject(...)` it just constructed. Walk to the root the
-  // projection reads from, then judge that.
-  while (
-    ts.isPropertyAccessExpression(current) ||
-    ts.isElementAccessExpression(current)
-  ) {
-    current = unwrapExpression(current.expression);
-  }
-
-  if (ts.isIdentifier(current)) {
-    const initializer = getSoleLocalInitializer(current, checker);
-    if (!initializer) {
-      return false;
-    }
-    current = unwrapExpression(initializer);
-  }
-
-  if (!ts.isCallExpression(current)) {
-    return false;
-  }
-  const callKind = detectCallKind(current, checker);
-  if (callKind && VALUE_LIKE_REACTIVE_CALL_KINDS.has(callKind.kind)) {
-    return false;
-  }
-  return isReactiveOriginExpression(current, checker);
-}
-
-/**
- * True when the callback can hand `map` a reactive value the author did not
- * explicitly construct. One return shape is deliberate and does not count: a
- * reactive artifact from `isCollectedReactiveArtifact`, returned directly or
- * through a local whose initializer is one (weekly-calendar collects
- * per-color action handles this way, gmail-extractor a `generateObject(...)`
- * per email).
- *
- * An object or array literal is not exempt as a whole. Its own truthiness is
- * never in question, but an ordinary consumer reads through it —
+ * Object and array literals are classified member by member. Their own
+ * truthiness is not in question, but an ordinary consumer reads through them:
  * `map((v) => ({ v, flag })).filter(({ flag }) => flag)` interprets the
- * member, not the record — so each member is classified the same way the
- * whole return is. That keeps author-structured aggregates of deliberate
- * artifacts (gmail-extractor collects per-email records) while still
- * diagnosing a bare reactive leaf inside one.
+ * member, not the record. Computed property names are evaluated while the
+ * record is created and must be plain for the same reason.
  *
- * What this owns is the implicit spelling: a bare read, a lowered local, or
- * a computation whose runtime value is a wrapper object the author believes
- * is plain.
+ * Identifiers are followed to their local initializers and assignments. This
+ * deliberately does not distinguish `const` from `let`: mutability changes
+ * how many possible values a binding has, not whether any of them can escape.
  */
 function plainArrayMapCollectsEscapingReactiveValues(
   callback: ts.ArrowFunction | ts.FunctionExpression,
@@ -1570,27 +1515,65 @@ function plainArrayMapCollectsEscapingReactiveValues(
   analyze: AnalyzeFn,
 ): boolean {
   return getOwnReturnExpressions(callback).some((returnExpression) =>
-    collectedValueEscapes(returnExpression, context, analyze)
+    collectedValueEscapes(
+      returnExpression,
+      callback,
+      context,
+      analyze,
+      new Set(),
+    )
   );
 }
 
 function collectedValueEscapes(
   expression: ts.Expression,
+  callback: ts.ArrowFunction | ts.FunctionExpression,
   context: TransformationContext,
   analyze: AnalyzeFn,
+  seenBindings: ReadonlySet<ts.Symbol>,
 ): boolean {
   const value = unwrapExpression(expression);
 
   if (ts.isObjectLiteralExpression(value)) {
     return value.properties.some((property) => {
+      if (
+        property.name && ts.isComputedPropertyName(property.name) &&
+        collectedValueEscapes(
+          property.name.expression,
+          callback,
+          context,
+          analyze,
+          seenBindings,
+        )
+      ) {
+        return true;
+      }
       if (ts.isPropertyAssignment(property)) {
-        return collectedValueEscapes(property.initializer, context, analyze);
+        return collectedValueEscapes(
+          property.initializer,
+          callback,
+          context,
+          analyze,
+          seenBindings,
+        );
       }
       if (ts.isShorthandPropertyAssignment(property)) {
-        return collectedValueEscapes(property.name, context, analyze);
+        return collectedValueEscapes(
+          property.name,
+          callback,
+          context,
+          analyze,
+          seenBindings,
+        );
       }
       if (ts.isSpreadAssignment(property)) {
-        return collectedValueEscapes(property.expression, context, analyze);
+        return collectedValueEscapes(
+          property.expression,
+          callback,
+          context,
+          analyze,
+          seenBindings,
+        );
       }
       // A method or accessor is a function, not a collected value.
       return false;
@@ -1604,46 +1587,161 @@ function collectedValueEscapes(
       }
       return collectedValueEscapes(
         ts.isSpreadElement(element) ? element.expression : element,
+        callback,
         context,
         analyze,
+        seenBindings,
       );
     });
   }
 
-  if (isCollectedReactiveArtifact(value, context.checker)) {
+  if (
+    ts.isTaggedTemplateExpression(value) &&
+    isReactiveOriginTaggedTemplate(value, context.checker)
+  ) {
+    return true;
+  }
+
+  if (isReactiveOriginExpression(value, context.checker)) {
+    return true;
+  }
+
+  if (
+    ts.isIdentifier(value) &&
+    localBindingCanCarryReactiveValue(
+      value,
+      callback,
+      context,
+      analyze,
+      seenBindings,
+    )
+  ) {
+    return true;
+  }
+
+  return analyze(value).containsReactive;
+}
+
+function localBindingCanCarryReactiveValue(
+  identifier: ts.Identifier,
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+  seenBindings: ReadonlySet<ts.Symbol>,
+): boolean {
+  const symbol = context.checker.getSymbolAtLocation(identifier);
+  if (!symbol || seenBindings.has(symbol)) {
     return false;
   }
 
-  return analyze(expression).containsReactive;
+  const nextSeenBindings = new Set(seenBindings);
+  nextSeenBindings.add(symbol);
+
+  for (const declaration of symbol.declarations ?? []) {
+    if (
+      ts.isVariableDeclaration(declaration) && declaration.initializer &&
+      collectedValueEscapes(
+        declaration.initializer,
+        callback,
+        context,
+        analyze,
+        nextSeenBindings,
+      )
+    ) {
+      return true;
+    }
+  }
+
+  let reactiveAssignment = false;
+  const visit = (node: ts.Node): void => {
+    if (reactiveAssignment || ts.isFunctionLike(node)) {
+      return;
+    }
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+      node.operatorToken.kind <= ts.SyntaxKind.LastAssignment &&
+      expressionReferencesSymbol(node.left, symbol, context.checker) &&
+      collectedValueEscapes(
+        node.right,
+        callback,
+        context,
+        analyze,
+        nextSeenBindings,
+      )
+    ) {
+      reactiveAssignment = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(callback.body, visit);
+  return reactiveAssignment;
 }
 
-/**
- * The initializer of a `const` binding, which is the only binding form whose
- * initializer is also its value. A `let` or `var` can be reassigned between
- * its declaration and the return, so its initializer says nothing about what
- * the callback actually hands to `map` — reading one here would exempt a
- * binding on the strength of an artifact it no longer holds.
- */
-function getSoleLocalInitializer(
-  identifier: ts.Identifier,
+function expressionReferencesSymbol(
+  expression: ts.Expression,
+  symbol: ts.Symbol,
   checker: ts.TypeChecker,
-): ts.Expression | undefined {
-  const declarations = checker.getSymbolAtLocation(identifier)?.declarations;
-  if (!declarations || declarations.length !== 1) {
-    return undefined;
+): boolean {
+  let referencesSymbol = false;
+  const visit = (node: ts.Node): void => {
+    if (
+      !referencesSymbol && ts.isIdentifier(node) &&
+      checker.getSymbolAtLocation(node) === symbol
+    ) {
+      referencesSymbol = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(expression);
+  return referencesSymbol;
+}
+
+function plainArrayMapDecisionNeedsDiagnostic(
+  decision: Exclude<
+    ReturnType<typeof classifyPlainArrayMapWrapperSite>,
+    undefined | "supported"
+  >,
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  if (decision === "async-callback" || decision === "generator-callback") {
+    return callbackContainsReactiveValue(callback, context, analyze);
   }
-  const [declaration] = declarations;
-  if (!ts.isVariableDeclaration(declaration)) {
-    return undefined;
-  }
-  const declarationList = declaration.parent;
-  if (
-    !ts.isVariableDeclarationList(declarationList) ||
-    (declarationList.flags & ts.NodeFlags.Const) === 0
-  ) {
-    return undefined;
-  }
-  return declaration.initializer;
+  return plainArrayMapCollectsEscapingReactiveValues(
+    callback,
+    context,
+    analyze,
+  );
+}
+
+function callbackContainsReactiveValue(
+  callback: ts.ArrowFunction | ts.FunctionExpression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  let containsReactiveValue = false;
+  const visit = (node: ts.Node): void => {
+    if (containsReactiveValue || ts.isFunctionLike(node)) {
+      return;
+    }
+    if (
+      ts.isExpression(node) &&
+      (isReactiveOriginExpression(node, context.checker) ||
+        (ts.isTaggedTemplateExpression(node) &&
+          isReactiveOriginTaggedTemplate(node, context.checker)) ||
+        analyze(node).containsReactive)
+    ) {
+      containsReactiveValue = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(callback.body);
+  return containsReactiveValue;
 }
 
 /**
@@ -1656,8 +1754,8 @@ function getSoleLocalInitializer(
  * collected array still holds reactive values that an ordinary consumer would
  * interpret as objects. This call-level check asks the flow question once for
  * the map itself: an unsupported wrapper-site decision, a pattern-owned
- * context, and any own return whose analysis carries escaping reactive
- * content.
+ * context, and either an own return carrying escaping reactive content or
+ * reactive work inside an async/generator callback.
  */
 export function classifyUnsupportedPlainArrayMapCall(
   call: ts.CallExpression,
@@ -1690,9 +1788,17 @@ export function classifyUnsupportedPlainArrayMapCall(
     return undefined;
   }
 
-  return plainArrayMapCollectsEscapingReactiveValues(callback, context, analyze)
-    ? { kind: "unsupported-plain-array-map", reason: decision, call }
-    : undefined;
+  if (
+    !plainArrayMapDecisionNeedsDiagnostic(
+      decision,
+      callback,
+      context,
+      analyze,
+    )
+  ) {
+    return undefined;
+  }
+  return { kind: "unsupported-plain-array-map", reason: decision, call };
 }
 
 export function classifyRestrictedReactiveComputation(
@@ -1712,19 +1818,12 @@ export function classifyRestrictedReactiveComputation(
       mapSiteDecision !== undefined && mapSiteDecision !== "supported" &&
       reactiveContext.kind === "pattern" &&
       !hasEnclosingComputeLikeCallback(expression, context) &&
-      // The flow restriction is about reactive values escaping through the
-      // collected result. A rejected-flow map whose returns are all plain
-      // or explicit reactive constructions collects what the author meant
-      // it to, so a reactive computation inside it is a standard
-      // non-escaping site and falls through to the classification below.
-      // Async and generator callbacks violate the construction-time premise
-      // independent of what they return.
-      (mapSiteDecision !== "result-not-direct-jsx" ||
-        plainArrayMapCollectsEscapingReactiveValues(
-          callbackContext.callback,
-          context,
-          analyze,
-        ))
+      plainArrayMapDecisionNeedsDiagnostic(
+        mapSiteDecision,
+        callbackContext.callback,
+        context,
+        analyze,
+      )
     ) {
       const analysis = analyze(expression);
       return analysis.containsReactive && analysis.requiresRewrite

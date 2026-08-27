@@ -3728,7 +3728,7 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
-    "allows a collected record projecting a deliberate reactive artifact",
+    "errors on a collected record containing an artifact projection",
     async () => {
       const source =
         `      import { computed, pattern, Writable } from "commonfabric";
@@ -3747,12 +3747,8 @@ Deno.test("Reactive .get() Validation", async (t) => {
         types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertEquals(
-        errors.length,
-        0,
-        "an artifact the callback constructed, and a field read off it, are " +
-          "deliberate: the author holds the handle on purpose",
-      );
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
     },
   );
 
@@ -3781,6 +3777,215 @@ Deno.test("Reactive .get() Validation", async (t) => {
       const errors = getErrors(diagnostics);
       assertGreater(errors.length, 0, "Expected at least one error");
       assertHasErrorType(errors, "pattern-context:computation");
+    },
+  );
+
+  await t.step(
+    "errors on a bare reactive value through a mutable callback local",
+    async () => {
+      const source = `      import { pattern } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ active: boolean }>(({ active }) => {
+        const kept = VALUES.map(() => {
+          let flag = active;
+          return flag;
+        }).filter(Boolean);
+        return { kept };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
+    },
+  );
+
+  await t.step(
+    "errors when a mutable callback local is assigned a reactive value",
+    async () => {
+      const source = `      import { pattern } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ active: boolean }>(({ active }) => {
+        const kept = VALUES.map(() => {
+          let flag = false;
+          flag = active;
+          return flag;
+        }).filter(Boolean);
+        return { kept };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
+      assertStringIncludes(
+        errors.map((error) => error.message).join("\n"),
+        "returns a reactive value",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on a collected object alias with a reactive member",
+    async () => {
+      const source = `      import { pattern } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ active: boolean }>(({ active }) => {
+        const kept = VALUES.map((value) => {
+          const record = { value, flag: active };
+          return record;
+        }).filter(({ flag }) => flag);
+        return { kept };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
+    },
+  );
+
+  await t.step(
+    "errors on a reactive computed key in a collected object",
+    async () => {
+      const source = `      import { pattern } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ key: string }>(({ key }) => {
+        const kept = VALUES.map((value) => ({ [key]: value }))
+          .filter((row) => "yes" in row);
+        return { kept };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
+    },
+  );
+
+  await t.step(
+    "errors when an artifact projection reaches an ordinary consumer",
+    async () => {
+      const source =
+        `      import { computed, pattern, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ active: Writable<boolean> }>(({ active }) => {
+        const kept = VALUES.map((value) => {
+          const analysis = computed(() => active.get() ? value : "");
+          return analysis.length;
+        }).filter(Boolean);
+        return { kept };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
+    },
+  );
+
+  await t.step(
+    "errors on value-like runtime origins consumed as plain values",
+    async () => {
+      const source =
+        `      import { navigateTo, pattern, str, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ target: Writable<string> }>(({ target }) => {
+        const navigated = VALUES.map(() => navigateTo(target)).filter(Boolean);
+        const labels = VALUES.map(() => str\`\`).filter(Boolean);
+        return { navigated, labels };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(
+        errors.length,
+        1,
+        "both runtime calls return reactive values to ordinary consumers",
+      );
+      assertHasErrorType(errors, "pattern-context:computation");
+    },
+  );
+
+  await t.step(
+    "errors on async and generator maps even when they return artifacts",
+    async () => {
+      const source =
+        `      import { computed, pattern, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ active: Writable<boolean> }>(({ active }) => {
+        const promised = VALUES.map(async () => computed(() => active.get()));
+        const iterators = VALUES.map(function* () {
+          return computed(() => active.get());
+        });
+        return { promised, iterators };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      const messages = errors.map((error) => error.message).join("\n");
+      assertGreater(errors.length, 1, "Expected both callback kinds to error");
+      assertHasErrorType(errors, "pattern-context:computation");
+      assertStringIncludes(messages, "async plain-array map callback resumes");
+      assertStringIncludes(messages, "does not execute a generator callback");
+    },
+  );
+
+  await t.step(
+    "does not claim non-reactive async and generator map callbacks",
+    async () => {
+      const source = `      import { pattern } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern(() => {
+        const promised = VALUES.map(async (value) => value.toUpperCase());
+        const iterators = VALUES.map(function* (value) {
+          yield value.toUpperCase();
+        });
+        return { promised, iterators };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const computationErrors = getErrors(diagnostics).filter(
+        (error) => error.type === "pattern-context:computation",
+      );
+      assertEquals(
+        computationErrors.length,
+        0,
+        "callback execution kind matters here only when reactive work needs " +
+          "a construction-time owner",
+      );
     },
   );
 
@@ -4127,7 +4332,7 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
-    "allows explicit reactive constructions collected by a plain map",
+    "errors on explicit reactive constructions collected by a plain map",
     async () => {
       const source =
         `      import { action, computed, pattern, Writable } from "commonfabric";
@@ -4152,18 +4357,17 @@ Deno.test("Reactive .get() Validation", async (t) => {
         types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertEquals(
+      assertGreater(
         errors.length,
-        0,
-        "an action handle or computed cell in a return is a deliberate " +
-          "artifact with its own collection semantics, returned directly " +
-          "or through a local, so the escape check does not claim it",
+        1,
+        "both maps collect reactive wrappers for ordinary consumers",
       );
+      assertHasErrorType(errors, "pattern-context:computation");
     },
   );
 
   await t.step(
-    "allows literal aggregates collected by a plain map",
+    "errors on reactive constructions inside collected aggregates",
     async () => {
       const source =
         `      import { computed, pattern, Writable } from "commonfabric";
@@ -4184,13 +4388,8 @@ Deno.test("Reactive .get() Validation", async (t) => {
         types: COMMONFABRIC_TYPES,
       });
       const errors = getErrors(diagnostics);
-      assertEquals(
-        errors.length,
-        0,
-        "an object-literal return is an author-structured aggregate, and a " +
-          "literal is never the falsy primitive native interpretation " +
-          "mistakes, so the escape check does not claim it",
-      );
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
     },
   );
 

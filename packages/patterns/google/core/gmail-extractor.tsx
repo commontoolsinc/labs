@@ -453,7 +453,11 @@ const GmailExtractor = pattern<GmailExtractorInput, GmailExtractorOutput>(
     // Reactive LLM analysis - analyze each email (only if extraction is provided)
     // Note: consumers can access result via item.analysis.result or item.result
     // Result type is inferred from extraction.schema by the runtime
-    const rawAnalyses = emails.map((email: Email) => {
+    // Resource-producing maps need reactive collection semantics: each email
+    // owns a persistent generateObject node rather than a wrapper stored by
+    // native Array.map.
+    const emailsToAnalyze = computed(() => emails ?? []);
+    const rawAnalyses = emailsToAnalyze.map((email: Email) => {
       const analysis = generateObject({
         prompt: computed(() => {
           if (!shouldRunAnalysis) return undefined;

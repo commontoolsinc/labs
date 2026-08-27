@@ -2,6 +2,7 @@ import {
   action,
   cellFromUrl,
   type ComparableCell,
+  computed,
   Default,
   equals,
   handler,
@@ -1533,8 +1534,10 @@ export default pattern<TopicInput, TopicOutput>(
 
     // A link's URL, asked of `cellFromUrl` once per link. Most answer with no
     // cell — they are web pages — and those simply are not mentions.
-    const linkUrls = links.get().map((link) => link.url ?? "");
-    const linkTargets = linkUrls.map((url) => cellFromUrl({ url }));
+    const linksToResolve = computed(() => links.get());
+    const linkTargets = linksToResolve.map((link) =>
+      cellFromUrl({ url: link.url ?? "" })
+    );
     // Outbound: what this topic points at. Only this half depends on the
     // topic's own content, which is what keeps the board's join reading one
     // small list per topic.

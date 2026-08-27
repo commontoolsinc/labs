@@ -612,18 +612,20 @@ Diagnostics emitted in all modes:
       child, move conditional/logical selection inside a concrete returned
       JSX node, or move the whole consuming computation into
       `computed(() => ...)`). Detected at the map call over
-      the callback's own returns, so a bare reactive read trips it the same
-      as a computation, while a deliberately constructed reactive artifact
-      (a computed cell, an action or handler handle, an applied lift, a
-      `generateObject(...)` result, a `cell(...)`, a fetch or query resource
-      — directly, through a local, or as a field read off one) does not. The
-      value-like helpers `ifElse`, `when`, and `unless` are not artifacts and
-      do trip it, and a collected object or array literal is classified
-      member by member; the per-read `pattern-context:get-call` and
+      the callback's own returns, so a bare reactive read and an explicitly
+      constructed reactive value both trip it. Local bindings are followed
+      through their initializers and assignments, regardless of `const`/`let`;
+      collected object and array literals are classified member by member,
+      including computed property names. Resource- or handler-producing
+      collections must instead use a reactive receiver (which lowers to a
+      reactive collection operator) or embed the handle in its direct JSX
+      owner. The per-read `pattern-context:get-call` and
       `pattern-context:optional-chaining` diagnostics inside the reported
       callback defer to this single report
-    - an async callback ("resumes outside pattern construction…")
-    - a generator callback ("does not execute a generator callback body…")
+    - an async callback containing reactive work ("resumes outside pattern
+      construction…"), regardless of what the callback returns
+    - a generator callback containing reactive work ("does not execute a
+      generator callback body…"), regardless of what the callback returns
   - validation first checks the shared lowerable-expression-site policy; only
     non-lowerable computation sites still report this error (so `items[0].name`,
     `name.toUpperCase()` at lowerable top-level sites, and dynamic keys inside
@@ -754,23 +756,22 @@ What the callback returns then decides how far its result may travel:
   logical return roots count as value-collecting even when every branch is JSX
   or nullish: expression-site lowering rewrites the selection itself to a
   reactive helper cell. The escape test runs at the map call over the
-  callback's own returns, so the implicit reactive spellings are caught the
-  same way — a computation or a bare read of a reactive or lowered local. One
-  return shape is deliberate and not claimed: a reactive artifact the author
-  constructed on purpose — a `computed(...)` cell, an `action(...)` or
-  `handler(...)` handle, an applied lift, a `generateObject(...)` result, a
-  `cell(...)`, a fetch or query resource — returned directly, through a
-  `const` local whose initializer is one, or as a field read off one. Only
-  `const` is followed: a `let` or `var` can be reassigned between its
-  declaration and the return, so its initializer says nothing about what the
-  callback hands to `map`. `ifElse`, `when`, and
-  `unless` are excluded: they stand for a value rather than a handle, so a
-  collected one is an object that is truthy whichever branch it represents.
-  A collected object or array literal is classified member by member rather
-  than exempted whole, because an ordinary consumer reads through the record
-  to the member. A rejected-flow map whose returns are all plain or
-  deliberate shapes stays ordinary JavaScript and keeps the standard
-  non-escaping diagnostics for anything reactive inside it.
+  callback's own returns, so all reactive spellings are caught the same way:
+  computations, bare reads of reactive or lowered locals, explicit reactive
+  constructions (`computed`, actions/handlers, applied lifts, resource calls,
+  and reactive tagged templates), and projections from those constructions.
+  Identifiers are followed through local initializers and assignments,
+  regardless of `const`/`let`. A collected object or array literal is
+  classified member by member rather than exempted whole, because an ordinary
+  consumer reads through the record to the member; computed property names are
+  included because record creation evaluates them as ordinary JavaScript.
+  Resource- or handler-producing collections use an explicitly reactive
+  receiver so the collection lowers to reactive `mapWithPattern`, or attach a
+  handler directly to the JSX node that owns it. A rejected-flow map whose
+  returns are all plain stays ordinary JavaScript and keeps the standard
+  non-escaping diagnostics for anything reactive inside it. Async and
+  generator callbacks containing reactive work are rejected independently of
+  their return shape.
 
 This restriction applies when the callback inherits a pattern context. A
 plain-array map in a standalone or explicit compute-owned helper keeps

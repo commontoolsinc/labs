@@ -27,13 +27,33 @@ export default pattern<QueueTestInput>(({ title }) => {
     "What is 5+5? Reply in one word.",
   ];
 
-  const responses = prompts.map((prompt) =>
+  const responses = [
     generateText({
-      prompt,
+      prompt: prompts[0],
       model: "anthropic:claude-haiku-4-5",
       queue: "test-queue",
-    })
-  );
+    }),
+    generateText({
+      prompt: prompts[1],
+      model: "anthropic:claude-haiku-4-5",
+      queue: "test-queue",
+    }),
+    generateText({
+      prompt: prompts[2],
+      model: "anthropic:claude-haiku-4-5",
+      queue: "test-queue",
+    }),
+    generateText({
+      prompt: prompts[3],
+      model: "anthropic:claude-haiku-4-5",
+      queue: "test-queue",
+    }),
+    generateText({
+      prompt: prompts[4],
+      model: "anthropic:claude-haiku-4-5",
+      queue: "test-queue",
+    }),
+  ];
 
   const completedCount = computed(() =>
     responses.filter((r) => !r.pending && r.result).length

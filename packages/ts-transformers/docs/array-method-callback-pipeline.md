@@ -72,10 +72,15 @@ so its result may flow anywhere. A value-collecting callback can return a
 lowered value — including a conditional or logical helper cell — so its map call
 must be the JSX child itself or the direct return of a synchronous JSX-local
 IIFE, and a result stored or consumed by ordinary JavaScript carries no sites.
-The result-interpreting methods such as `filter`, `find`, `sort`, `flatMap`, and
-`reduce` remain excluded too. This restriction applies to pattern-owned wrapper
-sites; maps inside standalone or explicit compute-owned helpers remain ordinary
-JavaScript.
+That escape classification includes explicit reactive constructions and their
+property projections, follows local initializers and assignments regardless of
+`const`/`let`, and walks collected aggregate members plus computed property
+names. Resource-producing maps use an explicitly reactive receiver so they lower
+to a reactive collection operator; render loops attach per-element handlers
+directly to the JSX node that owns them. The result-interpreting methods such as
+`filter`, `find`, `sort`, `flatMap`, and `reduce` remain excluded too. This
+restriction applies to pattern-owned wrapper sites; maps inside standalone or
+explicit compute-owned helpers remain ordinary JavaScript.
 
 ## What `ClosureTransformer` does for `.map`s
 
