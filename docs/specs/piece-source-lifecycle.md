@@ -895,7 +895,12 @@ replicated-host failover remain open design work.
 ## Reconciliation when a piece loads
 
 Loading a piece with an active origin performs these steps before starting its
-pattern:
+pattern. This is the only lane that moves a piece on its own, and it moves one
+piece at a time, when a user opens it, to whatever source its origin serves. A
+set of pieces that has to move together, at a chosen moment, onto a source a
+person picked — and any piece recording no origin, which nothing here moves —
+is the batch lane's,
+[`docs/features/piece-bulk-operations.md`](../features/piece-bulk-operations.md).
 
 1. Read the current `patternIdentity`, retained-program digest, active source
    URL, accepted origin revision, and stable revision head.
