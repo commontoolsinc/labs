@@ -6695,17 +6695,29 @@ supply; OW29/OW32/OW34 closed):
     chooses); the ownership re-bind; NO CHURN (a live session survives
     an ACL commit with zero new `session.open`s); and host glue (a real
     ExecutorHost whose own admission observer carries the genesis —
-    nothing hand-fed). Mutations, all red: no-op the consume → all 5;
+    nothing hand-fed); and the SILENT-STALE-READ pin (the Cubic-P1
+    class: post-remount reads for tracker-covered selectors returned
+    SUCCESS carrying the pre-revocation value — reproduced at the
+    pre-fix commit, fixed by dropping the dead mount's selectors from
+    the watch tracker at both consume sites, pinned both ways).
+    Mutations, all red, each reddening its own pin alone: no-op the
+    consume → pins 1-4 and the stale-read pin (no-churn stays green);
     remove the host fan-out → host glue only; remove the ACL-verdict
-    guard → no-churn only; eager instead of latched → host glue only.
+    guard → no-churn only; eager instead of latched → host glue only
+    (the measured ordering-independence proof); remove the tracker
+    drop → stale-read only; remove `pull()`'s consume → stale-read
+    only.
     **Residual, FLAGGED not filled:** watches installed on the DEAD
     session are not replayed on remount. The revocation had already
     stopped their pushes (the server drops the session from its
-    registry and `terminateSession` clears `#watchSpecs`), and a
-    failed pull removes its own selectors from the watch tracker so
-    each address re-installs on its next pull — but a general "replay
-    the watch set on remount" belongs with the reconnect path's
-    replay. **Also unchanged:** CLIENT runtimes get no host
+    registry and `terminateSession` clears `#watchSpecs`), and the
+    remount now DROPS the dead mount's selectors from the watch
+    tracker (the Cubic-P1 fix — the earlier claim that "each address
+    re-installs on its next pull" was FALSE for tracker-covered
+    selectors and is retracted), so post-remount reads re-install
+    coverage fresh instead of silently serving pre-revocation state —
+    but a general "replay the watch set on remount" still belongs
+    with the reconnect path's replay. **Also unchanged:** CLIENT runtimes get no host
     notification, so a browser session revoked this way still stays
     revoked; out of this seat's scope.
     **The persistent-failure posture is UNCHANGED and still OWED to
