@@ -4,6 +4,7 @@ import {
   markIfcBearingLinkCrossing,
 } from "./schema-ifc.ts";
 import { internSchema } from "@commonfabric/data-model-schema";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
   linkPayloadAtProbe,
@@ -731,9 +732,25 @@ export function resolveLinkTracingDereferences(
       if (
         schemaConstrainsNothing(nextLink.schema) && link.schema !== undefined
       ) {
+        // `default` still inherits from the last declaration even when the
+        // stored schema is otherwise unconstrained — a top-level `default`
+        // is trivially true, and narrowing can reduce a stored schema to
+        // one. A false carried schema stays false: the reader selected
+        // nothing, so no default stands in.
+        const storedDefault = isObjectOrArray(nextLink.schema)
+          ? nextLink.schema.default
+          : undefined;
+        const carriedSchema = storedDefault !== undefined &&
+            !ContextualFlowControl.isFalseSchema(link.schema)
+          ? internSchema(
+            isObjectOrArray(link.schema)
+              ? { ...link.schema, default: storedDefault }
+              : { default: storedDefault },
+          )
+          : link.schema;
         link = {
           ...nextLink,
-          schema: link.schema,
+          schema: carriedSchema,
           ...(carriedCaps !== undefined && { scopeCaps: carriedCaps }),
         };
       } else {

@@ -69,9 +69,13 @@ hop's stored schema describes that hop's target, so the nearest
 declaration is the aptest — a link's top-level `default` overrides earlier
 links' and the reader's own, and where no link declares one the reader's
 stands (a default-only reader's included, though `{ "default": … }` is
-otherwise a true schema). Path narrowing surfaces a link's nested property
-defaults as top-level at the positions where deeper reads combine, so the
-rule composes per position across a chain.
+otherwise a true schema). A default-only STORED schema contributes the
+same way: trivially true for shape, its default is still the nearest
+declaration, and the resolution carry inherits it onto the traveling
+schema rather than discarding it with the shape it does not have. Path
+narrowing surfaces a link's nested property defaults as top-level at the
+positions where deeper reads combine, so the rule composes per position
+across a chain.
 
 The rule changes what the combined schema carries; where defaults are
 *applied* is unchanged (the cell read path applies them, the raw query

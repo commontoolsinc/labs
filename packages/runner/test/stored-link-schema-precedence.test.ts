@@ -229,6 +229,60 @@ describe("stored-link-schema-precedence", () => {
       expect(projectionOf(handle.get())).toEqual({ title: "cruller" });
     });
 
+    // A stored schema can be NOTHING BUT a default — a top-level `default`
+    // is otherwise a true schema, and narrowing can reduce a stored schema
+    // to one. The resolution carry must not treat that as saying nothing:
+    // the default is the nearest declaration and stands in for the absent
+    // value.
+    it("inherits a default-only stored schema's default across the crossing", () => {
+      const target = runtime.getCell(space, `row-${seq}-seed`, undefined, tx);
+      // Deliberately never written: the stored default is all a read has.
+      const holder = runtime.getCell<Holder>(
+        space,
+        `holder-${seq}-seed`,
+        holderSchema,
+        tx,
+      );
+      holder.setRaw(
+        {
+          rows: [linkCarrying(target, { default: { title: "seeded" } })],
+        } as never,
+      );
+
+      expect(projectionOf(elementByPath(holder))).toEqual({ title: "seeded" });
+    });
+
+    it("inherits a default the narrowing reduced the stored schema to", () => {
+      const storedSchema = {
+        type: "object",
+        properties: { glaze: { default: "seed" } },
+      } as const satisfies JSONSchema;
+      const row = runtime.getCell(
+        space,
+        `row-${seq}-narrow-seed`,
+        undefined,
+        tx,
+      );
+      row.setRaw({ title: "cruller" });
+      const holder = runtime.getCell<Holder>(
+        space,
+        `holder-${seq}-narrow-seed`,
+        holderSchema,
+        tx,
+      );
+      holder.setRaw({ rows: [linkCarrying(row, storedSchema)] } as never);
+
+      const glaze = holder.key("rows").key(0)
+        .asSchema(
+          {
+            type: "object",
+            properties: { glaze: { type: "string" } },
+          } as const satisfies JSONSchema,
+        )
+        .key("glaze").get();
+      expect(glaze).toEqual("seed");
+    });
+
     // `default` crosses the precedence line: narrowed to the read path, the
     // stored schema's default is inherited onto the reader's schema and
     // stands in for the absent value.
