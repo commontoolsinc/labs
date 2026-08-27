@@ -65,6 +65,7 @@ function installBrowserGlobals(): () => void {
     hostname: "localhost",
     href: "http://localhost:8000/common-knowledge",
   });
+  setGlobal("$PRESENCE_URL", "wss://presence.test");
 
   return () => {
     for (const [name, descriptor] of originals) {
@@ -95,6 +96,9 @@ describe("XRootView", () => {
       const state = view.state();
       expect(state).toBeDefined();
       expect(state).not.toBe(view.app);
+      expect((view as unknown as { presenceUrl?: string }).presenceUrl).toBe(
+        "wss://presence.test/",
+      );
 
       // render() builds the themed app-view template without a live DOM.
       const markup = templateStrings(view.render());

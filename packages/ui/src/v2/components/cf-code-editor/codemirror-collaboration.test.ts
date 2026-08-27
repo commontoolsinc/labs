@@ -27,6 +27,7 @@ import {
   CodeMirrorReconciliationError,
   codeMirrorRewriteDedupeEffect,
   codeMirrorSubmission,
+  type CodeMirrorSynchronizationSnapshot,
 } from "./codemirror-collaboration.ts";
 
 const path = [] as unknown as OperationFieldSnapshot["path"];
@@ -567,6 +568,8 @@ describe("CodeMirror operation collaboration", () => {
       subscribe: (callback) => subscriber = callback,
     });
     await controller.start();
+    const observed: Array<CodeMirrorSynchronizationSnapshot | null> = [];
+    controller.observeSynchronization((snapshot) => observed.push(snapshot));
     subscriber?.({
       ...inactiveSnapshot("abc"),
       active: true,
@@ -576,6 +579,20 @@ describe("CodeMirror operation collaboration", () => {
 
     expect(errors).toEqual([]);
     expect(controller.active).toBe(true);
+    expect(observed).toEqual([
+      null,
+      {
+        confirmedCursor: { epoch: 1, version: 0 },
+        pendingChanges: [],
+        field: {
+          space: "did:key:test-space",
+          branch: "",
+          id: "of:editor",
+          scopeKey: "space",
+          path: [],
+        },
+      },
+    ]);
   });
 
   it("starts a clean operation baseline after an inactive ordinary replacement", async () => {
@@ -608,6 +625,27 @@ describe("CodeMirror operation collaboration", () => {
     expect(errors).toEqual([]);
     expect(view.state.doc.toString()).toBe("random string!");
     expect(sendableUpdates(view.state)).toEqual([]);
+  });
+
+  it("rejects operation-field identity drift within a pinned session", async () => {
+    let subscriber: ((snapshot: OperationFieldSnapshot) => void) | undefined;
+    const initial = activeSnapshot(
+      "abc",
+      acceptedResolution("abc", 1, ""),
+    );
+    const { controller, errors } = controllerHarness({
+      initial,
+      followup: initial,
+      apply: () => acceptedResolution("abc", 1, "X"),
+      subscribe: (callback) => subscriber = callback,
+    });
+    await controller.start();
+
+    subscriber?.({ ...initial, scopeKey: "user:another-participant" });
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain("field identity changed");
+    expect(controller.active).toBe(false);
   });
 
   it("reinstalls reset and epoch snapshots only without pending edits", async () => {
@@ -882,6 +920,26 @@ describe("CodeMirror operation collaboration", () => {
     expect(sendableUpdates(view.state)).toHaveLength(0);
     await controller.stop();
   });
+
+  it("isolates synchronization observers from the Memory operation path", async () => {
+    const accepted = acceptedResolution("abc", 1, "X");
+    const { controller, view, errors } = controllerHarness({
+      initial: inactiveSnapshot("abc"),
+      followup: activeSnapshot("aXbc", accepted),
+      apply: () => accepted,
+    });
+
+    await controller.start();
+    controller.observeSynchronization(() => {
+      throw new Error("presence failed");
+    });
+    view.dispatch({ changes: { from: 1, insert: "X" } });
+    await controller.localDocChanged();
+
+    expect(errors).toEqual([]);
+    expect(view.state.doc.toString()).toBe("aXbc");
+    expect(sendableUpdates(view.state)).toHaveLength(0);
+  });
 });
 
 function inactiveSnapshot(materialized: string): OperationFieldSnapshot {
@@ -1023,9 +1081,12 @@ function controllerHarness(options: {
     },
   } as unknown as RuntimeClient;
   const errors: Error[] = [];
+  const cell = {
+    space: () => "did:key:test-space",
+  } as unknown as CellHandle<string>;
   const controller = new CodeMirrorCollaborationController({
     runtime,
-    cell: {} as CellHandle<string>,
+    cell,
     view,
     compartment,
     clientId: "alice",

@@ -6,6 +6,7 @@ import {
   type Update,
 } from "@codemirror/collab";
 import {
+  type ChangeDesc,
   ChangeSet,
   type Compartment,
   type EditorState,
@@ -35,6 +36,22 @@ export type CodeMirrorOperationPayload = {
 export type CodeMirrorSubmission = {
   baseVersion: number;
   payload: CodeMirrorOperationPayload;
+};
+
+/** Canonical identity of the resolved Memory field synchronized by CodeMirror. */
+export type CodeMirrorCollaborationFieldIdentity = {
+  space: string;
+  branch: string;
+  id: string;
+  scopeKey: string;
+  path: readonly string[];
+};
+
+/** Read-only document synchronization state exposed to ephemeral consumers. */
+export type CodeMirrorSynchronizationSnapshot = {
+  confirmedCursor: OpCursor;
+  pendingChanges: readonly ChangeDesc[];
+  field: CodeMirrorCollaborationFieldIdentity;
 };
 
 /** Preserves both values when a new epoch cannot absorb unconfirmed edits. */
@@ -238,7 +255,11 @@ export class CodeMirrorCollaborationController {
   readonly #clientId: string;
   readonly #operationSessionId = crypto.randomUUID();
   readonly #onError: (error: Error) => void;
+  readonly #synchronizationObservers = new Set<
+    (snapshot: CodeMirrorSynchronizationSnapshot | null) => void
+  >();
   #cursor: OpCursor | null = null;
+  #field: CodeMirrorCollaborationFieldIdentity | null = null;
   #baselineHash = "";
   #unsubscribe: (() => void) | undefined;
   #flushPromise: Promise<void> | undefined;
@@ -260,6 +281,28 @@ export class CodeMirrorCollaborationController {
 
   get active(): boolean {
     return this.#canProcess() && !this.#closing;
+  }
+
+  get synchronizationSnapshot(): CodeMirrorSynchronizationSnapshot | null {
+    if (!this.active || this.#cursor === null || this.#field === null) {
+      return null;
+    }
+    return {
+      confirmedCursor: { ...this.#cursor },
+      pendingChanges: sendableUpdates(this.#view.state).map((update) =>
+        update.changes
+      ),
+      field: { ...this.#field, path: [...this.#field.path] },
+    };
+  }
+
+  /** Observes canonical cursor advancement without granting operation control. */
+  observeSynchronization(
+    observer: (snapshot: CodeMirrorSynchronizationSnapshot | null) => void,
+  ): () => void {
+    this.#synchronizationObservers.add(observer);
+    this.#notifySynchronizationObserver(observer, this.synchronizationSnapshot);
+    return () => this.#synchronizationObservers.delete(observer);
   }
 
   #canProcess(): boolean {
@@ -315,6 +358,7 @@ export class CodeMirrorCollaborationController {
 
   async localDocChanged(): Promise<void> {
     if (!this.active || this.#failed) return;
+    this.#notifySynchronization();
     await this.#flush();
   }
 
@@ -332,6 +376,8 @@ export class CodeMirrorCollaborationController {
     this.#unsubscribe?.();
     this.#unsubscribe = undefined;
     this.#closeOperationSession();
+    this.#notifySynchronization();
+    this.#synchronizationObservers.clear();
   }
 
   #closeOperationSession(): void {
@@ -408,8 +454,12 @@ export class CodeMirrorCollaborationController {
         `CodeMirror cannot open operation codec ${snapshot.codec}`,
       );
     }
+    this.#assertFieldIdentity(snapshot);
     const version = snapshot.cursor?.version ?? 0;
     this.#ready = false;
+    // Invalidate observer state before any transaction can map ephemeral
+    // coordinates through a replacement from another operation epoch.
+    this.#notifySynchronization();
     // A document-changing transaction that installs the collab extension is
     // observed by CodeMirror as a local update before the new client ID facet
     // is available. Clear the old epoch and synchronize the document first,
@@ -432,11 +482,13 @@ export class CodeMirrorCollaborationController {
     this.#cursor = snapshot.cursor;
     this.#baselineHash = snapshot.baselineHash;
     this.#ready = true;
+    this.#notifySynchronization();
   }
 
   #receive(snapshot: OperationFieldSnapshot): void {
     if (!this.#canProcess() || this.#failed) return;
     try {
+      this.#assertFieldIdentity(snapshot);
       if (typeof snapshot.materialized !== "string") {
         throw new Error("CodeMirror collaboration requires a string field");
       }
@@ -502,9 +554,11 @@ export class CodeMirrorCollaborationController {
         return;
       }
 
-      if (this.#cursor === null) {
+      const previousCursor = this.#cursor;
+      const becameActive = previousCursor === null;
+      if (becameActive) {
         this.#cursor = { epoch: snapshot.cursor.epoch, version: 0 };
-      } else if (this.#cursor.epoch !== snapshot.cursor.epoch) {
+      } else if (previousCursor.epoch !== snapshot.cursor.epoch) {
         if (sendableUpdates(this.#view.state).length !== 0) {
           throw new CodeMirrorReconciliationError(
             this.#view.state.doc.toString(),
@@ -517,8 +571,12 @@ export class CodeMirrorCollaborationController {
         return;
       }
 
+      const activeCursor = this.#cursor;
+      if (activeCursor === null) {
+        throw new Error("Active CodeMirror snapshot has no operation cursor");
+      }
       const current = {
-        epoch: this.#cursor.epoch,
+        epoch: activeCursor.epoch,
         version: getSyncedVersion(this.#view.state),
       };
       if (snapshot.cursor.version < current.version) return;
@@ -532,6 +590,7 @@ export class CodeMirrorCollaborationController {
             "CodeMirror snapshot disagrees at the current operation cursor",
           );
         }
+        if (becameActive) this.#notifySynchronization();
         return;
       }
       const updates = codeMirrorIntegratedUpdates(snapshot, current);
@@ -550,6 +609,7 @@ export class CodeMirrorCollaborationController {
         version: getSyncedVersion(this.#view.state),
       };
       this.#baselineHash = snapshot.baselineHash;
+      this.#notifySynchronization();
       if (
         sendableUpdates(this.#view.state).length === 0 &&
         this.#view.state.doc.toString() !== snapshot.materialized
@@ -631,6 +691,7 @@ export class CodeMirrorCollaborationController {
           CODEMIRROR_CHANGESET_CODEC,
       );
     }
+    this.#assertFieldIdentity(resolution.address);
     const syncedVersion = getSyncedVersion(this.#view.state);
     const current = this.#cursor ?? {
       epoch: resolution.from.epoch,
@@ -641,6 +702,7 @@ export class CodeMirrorCollaborationController {
       syncedVersion === resolution.to.version
     ) {
       this.#cursor = resolution.to;
+      this.#notifySynchronization();
       return;
     }
     if (
@@ -675,6 +737,7 @@ export class CodeMirrorCollaborationController {
       epoch: resolution.to.epoch,
       version: getSyncedVersion(this.#view.state),
     };
+    this.#notifySynchronization();
   }
 
   #fail(cause: unknown): void {
@@ -682,7 +745,54 @@ export class CodeMirrorCollaborationController {
     this.#failed = true;
     this.#unsubscribe?.();
     this.#unsubscribe = undefined;
+    this.#notifySynchronization();
     const error = cause instanceof Error ? cause : new Error(String(cause));
     this.#onError(error);
+  }
+
+  #notifySynchronization(): void {
+    const snapshot = this.synchronizationSnapshot;
+    for (const observer of this.#synchronizationObservers) {
+      this.#notifySynchronizationObserver(observer, snapshot);
+    }
+  }
+
+  #assertFieldIdentity(
+    address: Pick<
+      OperationFieldSnapshot,
+      "branch" | "id" | "scopeKey" | "path"
+    >,
+  ): void {
+    const next: CodeMirrorCollaborationFieldIdentity = {
+      space: String(this.#cell.space()),
+      branch: address.branch,
+      id: address.id,
+      scopeKey: address.scopeKey,
+      path: [...address.path],
+    };
+    const current = this.#field;
+    if (current === null) {
+      this.#field = next;
+      return;
+    }
+    if (
+      current.space !== next.space || current.branch !== next.branch ||
+      current.id !== next.id || current.scopeKey !== next.scopeKey ||
+      current.path.length !== next.path.length ||
+      current.path.some((part, index) => part !== next.path[index])
+    ) {
+      throw new Error("CodeMirror operation field identity changed");
+    }
+  }
+
+  #notifySynchronizationObserver(
+    observer: (snapshot: CodeMirrorSynchronizationSnapshot | null) => void,
+    snapshot: CodeMirrorSynchronizationSnapshot | null,
+  ): void {
+    try {
+      observer(snapshot);
+    } catch {
+      // Ephemeral observers cannot become part of Memory's operation path.
+    }
   }
 }

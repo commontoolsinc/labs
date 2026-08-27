@@ -86,7 +86,11 @@ import {
   MentionableArraySchema,
   MentionableSchema,
 } from "../../core/mentionable.ts";
-import { runtimeContext, spaceContext } from "../../runtime-context.ts";
+import {
+  presenceUrlContext,
+  runtimeContext,
+  spaceContext,
+} from "../../runtime-context.ts";
 import { type StoredFile, uploadFile } from "../../utils/file-cell-storage.ts";
 import { mentionIdFromCellId } from "../../utils/mention-id.ts";
 import {
@@ -112,7 +116,23 @@ import {
   CodeMirrorCollaborationController,
   CodeMirrorReconciliationError,
   codeMirrorRewriteDedupeEffect,
+  type CodeMirrorSynchronizationSnapshot,
 } from "./codemirror-collaboration.ts";
+import {
+  codeMirrorPresence,
+  codeMirrorPresenceClearEffect,
+  codeMirrorPresenceCursorEffect,
+  codeMirrorPresenceRemoveEffect,
+  codeMirrorPresenceUpsertEffect,
+  mapSelectionToConfirmed,
+  presenceSelectionToJSON,
+} from "./codemirror-presence.ts";
+import {
+  copresenceRoomForField,
+  CopresenceSession,
+  type PresenceFailureCategory,
+  type PresenceServerMessage,
+} from "./copresence-client.ts";
 
 /** A unique noteId, so notes created from a mention do not collide. */
 function generateNoteId(): string {
@@ -127,6 +147,10 @@ function escapeMarkdownImageAltText(text: string): string {
     .replace(/\]/g, "\\]")
     .replace(/\r?\n/g, " ");
 }
+
+// A browser tab advertises one editor room at a time. Blur retains ownership;
+// focus in another instance transfers it.
+let activePresenceEditor: CFCodeEditor | undefined;
 
 /**
  * Supported MIME types for syntax highlighting
@@ -200,12 +224,20 @@ const getLangExtFromMimeType = (mime: MimeType) => {
  * @attr {"code"|"prose"} mode - Editor mode; "prose" enables markdown prose editing.
  * @attr {CellHandle<string>} pattern - Optional pattern piece used for backlink context.
  * @attr {boolean} collaborative - Use Memory's operation protocol for concurrent editing.
+ * @attr {string} presenceRoom - Optional opaque room override for ephemeral
+ *   co-presence. The bound text Cell address supplies the default.
+ * @attr {string} participantName - Plain-text display name which enables
+ *   co-presence when this editor is focused.
+ * @attr {string} presenceUrl - Optional WebSocket co-presence service
+ *   override. Hosts can instead provide `presenceUrlContext`.
  *
  * @fires cf-change - Fired when content changes with detail: { value, oldValue, language }
  * @fires cf-focus - Fired on focus
  * @fires cf-blur - Fired on blur
  * @fires cf-collaboration-reconcile - Fired when an epoch changes while local
  *   edits are pending. Detail preserves localValue, canonicalValue, and cursors.
+ * @fires cf-presence-error - Fired when ephemeral presence fails independently
+ *   of document collaboration. Detail contains a safe failure category.
  * @fires backlink-click - Fired when a backlink is clicked with Cmd/Ctrl+Enter with detail: { text, piece }
  * @fires backlink-create - Fired when a novel backlink is activated (Cmd/Ctrl+Click)
  *   or confirmed with Enter during autocomplete with no matches. Detail:
@@ -254,6 +286,9 @@ export class CFCodeEditor extends BaseElement {
     autofocus: { type: Boolean },
     cursorPosition: { type: String },
     collaborative: { type: Boolean },
+    presenceRoom: { type: String },
+    participantName: { type: String },
+    presenceUrl: { type: String },
   };
 
   declare value: CellHandle<string> | string;
@@ -293,6 +328,13 @@ export class CFCodeEditor extends BaseElement {
   declare autofocus: boolean;
   declare cursorPosition: "start" | "end";
   declare collaborative: boolean;
+  declare presenceRoom: string;
+  declare participantName: string;
+  declare presenceUrl: string;
+
+  @consume({ context: presenceUrlContext, subscribe: true })
+  @property({ attribute: false })
+  accessor contextPresenceUrl: string | undefined = undefined;
 
   @consume({ context: runtimeContext, subscribe: true })
   @property({ attribute: false })
@@ -316,7 +358,22 @@ export class CFCodeEditor extends BaseElement {
   private _modeComp = new Compartment();
   private _proseMarkdownComp = new Compartment();
   private _collaborationComp = new Compartment();
+  private _presenceComp = new Compartment();
   private _collaboration: CodeMirrorCollaborationController | undefined;
+  private _collaborationSyncUnsub: (() => void) | undefined;
+  private _presence: CopresenceSession | undefined;
+  private _presenceParticipantId: string | undefined;
+  private _presenceHasSelection = false;
+  private _presenceEpoch: number | undefined;
+  private _presenceServiceUrl: string | undefined;
+  private _presenceRoom: string | undefined;
+  private _presenceFailure:
+    | {
+      category: PresenceFailureCategory;
+      configurationKey: string;
+    }
+    | undefined;
+  private _presenceReconnectListenersInstalled = false;
   private _collaborationTransition: Promise<void> | undefined;
   private _collaborationGeneration = 0;
   private _collaborationFailed = false;
@@ -402,6 +459,9 @@ export class CFCodeEditor extends BaseElement {
     this.autofocus = false;
     this.cursorPosition = "start";
     this.collaborative = false;
+    this.presenceRoom = "";
+    this.participantName = "";
+    this.presenceUrl = "";
     this.mentionable = null;
     this.references = null;
     this.fabricHosts = [];
@@ -1175,6 +1235,7 @@ export class CFCodeEditor extends BaseElement {
 
   override connectedCallback() {
     super.connectedCallback();
+    this._setupPresenceReconnectListeners();
     if (this.autofocus && this._editorView) {
       this._queueAutofocus();
     }
@@ -1182,6 +1243,8 @@ export class CFCodeEditor extends BaseElement {
 
   override disconnectedCallback() {
     super.disconnectedCallback();
+    this._cleanupPresenceReconnectListeners();
+    this._releasePresenceOwnership();
     this._cleanup();
   }
 
@@ -1236,15 +1299,19 @@ export class CFCodeEditor extends BaseElement {
     const isCellSync = update.transactions.some(
       (transaction) => transaction.annotation(CFCodeEditor._cellSyncAnnotation),
     );
-    if (!update.docChanged || isCellSync) return;
-
-    const value = update.state.doc.toString();
     const isRemote = update.transactions.some((transaction) =>
       transaction.annotation(Transaction.remote)
     );
+    if (update.selectionSet && !isCellSync && !isRemote) {
+      this._publishPresence();
+    }
+    if (!update.docChanged || isCellSync) return;
+
+    const value = update.state.doc.toString();
     if (!this.readonly && !isRemote) {
       if (this._collaboration?.active) {
         this._collaboration.localDocChanged();
+        this._publishPresence();
         this.emit("cf-change", {
           value,
           oldValue: update.startState.doc.toString(),
@@ -1297,6 +1364,9 @@ export class CFCodeEditor extends BaseElement {
 
   private _cleanupCollaboration(): void {
     this._collaborationGeneration++;
+    this._collaborationSyncUnsub?.();
+    this._collaborationSyncUnsub = undefined;
+    this._cleanupPresence();
     const collaboration = this._collaboration;
     this._collaboration = undefined;
     void collaboration?.stop().catch(() => {
@@ -1306,11 +1376,23 @@ export class CFCodeEditor extends BaseElement {
     });
   }
 
+  private _observeCollaboration(
+    controller: CodeMirrorCollaborationController,
+  ): void {
+    this._collaborationSyncUnsub?.();
+    this._collaborationSyncUnsub = controller.observeSynchronization(
+      (snapshot) => this._handleCollaborationSynchronization(snapshot),
+    );
+  }
+
   private async _setupCollaboration(): Promise<void> {
     const view = this._editorView;
     if (!view) return;
 
     const generation = ++this._collaborationGeneration;
+    this._collaborationSyncUnsub?.();
+    this._collaborationSyncUnsub = undefined;
+    this._cleanupPresence();
     const previous = this._collaboration;
     this._collaborationFailed = false;
 
@@ -1361,13 +1443,24 @@ export class CFCodeEditor extends BaseElement {
       this.emit("cf-error", { error, message: error.message });
       return;
     }
-    const cell = this.value as CellHandle<string>;
+    const sourceCell = this.value as CellHandle<string>;
 
     // Do not accept edits between the initial Memory query and installation of
     // CodeMirror's versioned collaboration state.
     view.dispatch({
       effects: this._readonly.reconfigure(EditorState.readOnly.of(true)),
     });
+    let cell: CellHandle<string>;
+    try {
+      cell = await sourceCell.resolveAsCell();
+    } catch (cause) {
+      if (generation !== this._collaborationGeneration) return;
+      const error = cause instanceof Error ? cause : new Error(String(cause));
+      this._collaborationFailed = true;
+      this.emit("cf-error", { error, message: error.message });
+      return;
+    }
+    if (generation !== this._collaborationGeneration) return;
     const controller = new CodeMirrorCollaborationController({
       runtime: cell.runtime(),
       cell,
@@ -1379,6 +1472,7 @@ export class CFCodeEditor extends BaseElement {
           this._collaboration !== controller
         ) return;
         this._collaborationFailed = true;
+        this._cleanupPresence();
         view.dispatch({
           effects: this._readonly.reconfigure(EditorState.readOnly.of(true)),
         });
@@ -1404,6 +1498,7 @@ export class CFCodeEditor extends BaseElement {
         controller.dispose();
         return;
       }
+      this._observeCollaboration(controller);
       view.dispatch({
         effects: this._readonly.reconfigure(
           EditorState.readOnly.of(
@@ -1419,10 +1514,277 @@ export class CFCodeEditor extends BaseElement {
       controller.dispose();
       const error = cause instanceof Error ? cause : new Error(String(cause));
       this._collaborationFailed = true;
+      this._cleanupPresence();
       view.dispatch({
         effects: this._readonly.reconfigure(EditorState.readOnly.of(true)),
       });
       this.emit("cf-error", { error, message: error.message });
+    }
+  }
+
+  private _handleCollaborationSynchronization(
+    snapshot: CodeMirrorSynchronizationSnapshot | null,
+  ): void {
+    if (snapshot === null) {
+      this._cleanupPresence();
+      return;
+    }
+    if (
+      this._presenceEpoch !== undefined &&
+      this._presenceEpoch !== snapshot.confirmedCursor.epoch
+    ) {
+      this._cleanupPresence();
+    }
+    this._setupPresence(snapshot);
+    if (!this._presence || !this._editorView) return;
+    this._editorView.dispatch({
+      effects: codeMirrorPresenceCursorEffect.of({
+        cursor: snapshot.confirmedCursor,
+        pendingChanges: snapshot.pendingChanges,
+      }),
+    });
+    this._publishPresence();
+  }
+
+  private _setupPresence(
+    synchronization = this._collaboration?.synchronizationSnapshot,
+    retryFailedConnection = false,
+  ): void {
+    if (activePresenceEditor !== this) {
+      this._cleanupPresence();
+      return;
+    }
+    const view = this._editorView;
+    const serviceUrl = this.presenceUrl || this.contextPresenceUrl || "";
+    const room = this.presenceRoom ||
+      (synchronization === null || synchronization === undefined
+        ? ""
+        : copresenceRoomForField(synchronization.field));
+    const configurationKey = JSON.stringify([
+      serviceUrl,
+      room,
+      this.participantName,
+    ]);
+    if (
+      this._presenceFailure !== undefined &&
+      this._presenceFailure.configurationKey !== configurationKey
+    ) {
+      this._presenceFailure = undefined;
+    }
+    if (
+      !view || !this.collaborative || !this._collaboration?.active ||
+      synchronization === null || synchronization === undefined ||
+      !room || !this.participantName || !serviceUrl
+    ) {
+      this._cleanupPresence();
+      return;
+    }
+    if (
+      this._presenceFailure?.configurationKey === configurationKey &&
+      (this._presenceFailure.category === "configuration" ||
+        !retryFailedConnection)
+    ) {
+      return;
+    }
+    if (
+      this._presence !== undefined &&
+      this._presenceEpoch === synchronization.confirmedCursor.epoch &&
+      this._presenceRoom === room &&
+      this._presenceServiceUrl === serviceUrl
+    ) {
+      this._publishPresence();
+      return;
+    }
+
+    this._presenceFailure = undefined;
+    this._cleanupPresence();
+    view.dispatch({
+      effects: this._presenceComp.reconfigure(
+        codeMirrorPresence(synchronization.confirmedCursor),
+      ),
+    });
+    this._presenceEpoch = synchronization.confirmedCursor.epoch;
+    this._presenceRoom = room;
+    this._presenceServiceUrl = serviceUrl;
+    try {
+      this._presence = new CopresenceSession({
+        serviceUrl,
+        room,
+        onMessage: (message) => this._handlePresenceMessage(message),
+        onFailure: (category) => this._failPresence(category),
+      });
+      this._publishPresence();
+    } catch {
+      this._failPresence("configuration");
+    }
+  }
+
+  private _takePresenceOwnership(): void {
+    if (activePresenceEditor !== this) {
+      const previous = activePresenceEditor;
+      activePresenceEditor = this;
+      previous?._cleanupPresence();
+    }
+    this._setupPresence();
+  }
+
+  private _handlePresenceFocus(): void {
+    this._takePresenceOwnership();
+    this._publishPresence();
+  }
+
+  private _releasePresenceOwnership(): void {
+    if (activePresenceEditor !== this) return;
+    activePresenceEditor = undefined;
+    this._cleanupPresence();
+  }
+
+  private _cleanupPresence(): void {
+    const presence = this._presence;
+    this._presence = undefined;
+    presence?.dispose();
+    this._presenceParticipantId = undefined;
+    this._presenceHasSelection = false;
+    this._presenceEpoch = undefined;
+    this._presenceRoom = undefined;
+    this._presenceServiceUrl = undefined;
+    this._editorView?.dispatch({
+      effects: [
+        codeMirrorPresenceClearEffect.of(null),
+        this._presenceComp.reconfigure([]),
+      ],
+    });
+  }
+
+  private _failPresence(category: PresenceFailureCategory): void {
+    const synchronization = this._collaboration?.synchronizationSnapshot;
+    const room = this.presenceRoom ||
+      (synchronization === null || synchronization === undefined
+        ? ""
+        : copresenceRoomForField(synchronization.field));
+    const configurationKey = JSON.stringify([
+      this.presenceUrl || this.contextPresenceUrl || "",
+      room,
+      this.participantName,
+    ]);
+    if (
+      this._presenceFailure?.category === category &&
+      this._presenceFailure.configurationKey === configurationKey
+    ) {
+      return;
+    }
+    this._presenceFailure = { category, configurationKey };
+    this._cleanupPresence();
+    this.emit("cf-presence-error", { category });
+  }
+
+  private _retryPresenceFromSignal(): void {
+    if (!this._presenceFailure) return;
+    this._setupPresence(undefined, true);
+  }
+
+  private readonly _handlePresenceOnline = (): void => {
+    this._retryPresenceFromSignal();
+  };
+
+  private readonly _handlePresenceVisibilityChange = (): void => {
+    if (
+      typeof document !== "undefined" && document.visibilityState === "visible"
+    ) {
+      this._retryPresenceFromSignal();
+    }
+  };
+
+  private _setupPresenceReconnectListeners(): void {
+    if (this._presenceReconnectListenersInstalled) return;
+    this._presenceReconnectListenersInstalled = true;
+    globalThis.addEventListener("online", this._handlePresenceOnline);
+    if (typeof document !== "undefined") {
+      document.addEventListener(
+        "visibilitychange",
+        this._handlePresenceVisibilityChange,
+      );
+    }
+  }
+
+  private _cleanupPresenceReconnectListeners(): void {
+    if (!this._presenceReconnectListenersInstalled) return;
+    this._presenceReconnectListenersInstalled = false;
+    globalThis.removeEventListener("online", this._handlePresenceOnline);
+    if (typeof document !== "undefined") {
+      document.removeEventListener(
+        "visibilitychange",
+        this._handlePresenceVisibilityChange,
+      );
+    }
+  }
+
+  private _handlePresenceMessage(message: PresenceServerMessage): void {
+    const view = this._editorView;
+    const synchronization = this._collaboration?.synchronizationSnapshot;
+    if (!view || !this._presence || !synchronization) return;
+    if (message.type === "room.snapshot") {
+      this._presenceParticipantId = message.snapshot.selfParticipantId;
+      view.dispatch({
+        effects: [
+          codeMirrorPresenceClearEffect.of(null),
+          ...message.snapshot.participants
+            .filter((participant) =>
+              participant.participantId !== this._presenceParticipantId
+            )
+            .map((participant) =>
+              codeMirrorPresenceUpsertEffect.of({
+                participant,
+                pendingChanges: synchronization.pendingChanges,
+              })
+            ),
+        ],
+      });
+      return;
+    }
+    if (message.type === "participant.upsert") {
+      if (message.participant.participantId === this._presenceParticipantId) {
+        return;
+      }
+      view.dispatch({
+        effects: codeMirrorPresenceUpsertEffect.of({
+          participant: message.participant,
+          pendingChanges: synchronization.pendingChanges,
+        }),
+      });
+    } else {
+      if (message.participantId === this._presenceParticipantId) return;
+      view.dispatch({
+        effects: codeMirrorPresenceRemoveEffect.of(message.participantId),
+      });
+    }
+  }
+
+  private _publishPresence(): void {
+    const presence = this._presence;
+    const view = this._editorView;
+    const synchronization = this._collaboration?.synchronizationSnapshot;
+    if (!presence || !view || synchronization === null || !synchronization) {
+      return;
+    }
+    const focused = view.hasFocus;
+    if (focused) this._presenceHasSelection = true;
+    const provisional = synchronization.pendingChanges.length !== 0;
+    try {
+      presence.publish({
+        name: this.participantName,
+        focused,
+        cursor: synchronization.confirmedCursor,
+        selection: this._presenceHasSelection
+          ? presenceSelectionToJSON(mapSelectionToConfirmed(
+            view.state.selection,
+            synchronization.pendingChanges,
+          ))
+          : null,
+        basis: provisional ? "provisional" : "confirmed",
+      });
+    } catch {
+      this._failPresence("configuration");
     }
   }
 
@@ -1606,6 +1968,15 @@ export class CFCodeEditor extends BaseElement {
         changedProperties.has("collaborative"))
     ) {
       void this._setupCollaboration();
+    }
+
+    if (
+      changedProperties.has("presenceRoom") ||
+      changedProperties.has("presenceUrl") ||
+      changedProperties.has("contextPresenceUrl") ||
+      changedProperties.has("participantName")
+    ) {
+      this._setupPresence();
     }
 
     // Update language
@@ -1996,6 +2367,7 @@ export class CFCodeEditor extends BaseElement {
         this.mode === "prose" ? createProseMarkdownPlugin() : [],
       ),
       this._collaborationComp.of([]),
+      this._presenceComp.of([]),
       EditorView.updateListener.of((update) =>
         this._handleEditorUpdate(update)
       ),
@@ -2004,11 +2376,13 @@ export class CFCodeEditor extends BaseElement {
         focus: () => {
           this._cellController.onFocus();
           this.emit("cf-focus");
+          this._handlePresenceFocus();
           return false;
         },
         blur: () => {
           this._cellController.onBlur();
           this.emit("cf-blur");
+          this._publishPresence();
           return false;
         },
         paste: (event, view) => {
@@ -2255,6 +2629,9 @@ export class CFCodeEditor extends BaseElement {
   async releaseCollaboration(): Promise<void> {
     const collaboration = this._collaboration;
     if (!collaboration?.active) return;
+    this._collaborationSyncUnsub?.();
+    this._collaborationSyncUnsub = undefined;
+    this._cleanupPresence();
     const view = this._editorView;
     view?.dispatch({
       effects: this._readonly.reconfigure(EditorState.readOnly.of(true)),
@@ -2265,6 +2642,9 @@ export class CFCodeEditor extends BaseElement {
       await transition;
     } catch (error) {
       if (this._collaboration === collaboration) {
+        if (collaboration.active) {
+          this._observeCollaboration(collaboration);
+        }
         view?.dispatch({
           effects: this._readonly.reconfigure(
             EditorState.readOnly.of(
