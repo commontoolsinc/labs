@@ -82,8 +82,7 @@ The mapping from environment variable to flag is defined once, canonically, as
 `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and the
 background piece service all go through that one mapping, so their wirings
 cannot drift; the shell reads the same variables from its build-time defines
-through the same canonical parser, then adopts the deployment's published
-posture at boot with the defines as its explicit overrides.
+through the same canonical parser.
 `EXPERIMENTAL_ENV_VARS` itself is the authority on which flags are
 env-reachable — a flag that deliberately is not, `commitPreconditions` today,
 is mapped to `null` there, which records the decision rather than leaving an
@@ -560,20 +559,15 @@ Still unbuilt, and recorded in the plan: handlers materialize eagerly.
 
 - **Toggle via.** `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` environment variable
   (through the canonical env registry) or
-  `RuntimeOptions.experimental.readerSchemaPrecedence`; browser-side the
-  shell ADOPTS the deployment's published posture at boot
-  (`experimentalOptionsForDeployedClient` against `/api/meta`, in
-  [`RootView`](../../packages/shell/src/views/RootView.ts)) and declares the
-  result to the worker through the typed initialization posture, with the
+  `RuntimeOptions.experimental.readerSchemaPrecedence`; browser-side, the
   build define of the same name
   ([`packages/shell/felt.config.ts`](../../packages/shell/felt.config.ts) /
   [`packages/shell/src/lib/env.ts`](../../packages/shell/src/lib/env.ts),
-  parsed by the one canonical parser) as the explicit override — so a
-  runtime rollback applied server-side reaches already-built shells. The
-  ambient control point is
+  parsed by the one canonical parser) — baked at build time, so a browser
+  rollback ships with a redeploy. The ambient control point is
   [`packages/runner/src/reader-schema-precedence-config.ts`](../../packages/runner/src/reader-schema-precedence-config.ts).
   Server-authoritative in `EXPERIMENTAL_FLAG_AUTHORITY`: a server publishes
-  its resolved posture at `/api/meta` and a deployed client adopts it (an
+  its resolved posture at `/api/meta` and a deployed CLI adopts it (an
   explicit `EXPERIMENTAL_*` override still wins), because the server's
   traversal decides what a subscription ships and both sides must resolve
   hops under the same combine rule.
@@ -596,15 +590,11 @@ Still unbuilt, and recorded in the plan: handlers materialize eagerly.
   §5.3.4 for the query-pipeline context.
 - **Current default and planned end state.** On by default; an explicit
   `false` restores the strict pseudo-intersection (`combineSchema`) at link
-  crossings as a rollback override. The rollback is an OWNED process-global
-  claim mirroring the server-execution enabler's lifecycle: each
-  rollback-holding Runtime acquires a disabler released on dispose (or by a
-  throwing construction), a co-hosted default-arm runtime's dispose cannot
-  lift a live claim, and an explicit `true` beside a live claim is a
-  conflict the rollback wins, with a warning. A runtime's
-  `experimental.readerSchemaPrecedence` read-back is LIVE (a getter over the
-  ambient claim state), so the posture `/api/meta` republishes follows a
-  claim released by another runtime's dispose. Compatibility: a server
+  crossings as a rollback override. The rollback is plain ambient state like
+  the other flags' configs: each Runtime construction sets it from its
+  resolved option and dispose resets the default, so successive runtimes in
+  one test process can run different flag states — a real server constructs
+  one posture and never changes it mid-flight. Compatibility: a server
   posture that DECLARES no `readerSchemaPrecedence` predates the flag and
   necessarily runs the strict combine, so adoption treats absence as the
   legacy `false` until the compatibility window closes
@@ -612,15 +602,15 @@ Still unbuilt, and recorded in the plan: handlers materialize eagerly.
   built-in default. The flag gates only the combine rule: the cfc relevance
   marking off link schemas (`schemaHasIfc` at the read entry point and at
   traversal hops) is unconditional in both arms.
-- **Status on 2026-08-26.** Landed on by default in #6338; the rollback arm,
-  the claim lifecycle (co-hosted dispose, throwing construction, conflict),
-  and the default inheritance are covered by unit tests in
+- **Status on 2026-08-27.** Landed on by default in #6338; the rollback arm,
+  the ambient lifecycle (construction set, dispose reset, throwing
+  construction), and the default inheritance are covered by unit tests in
   `packages/runner/test/combine-schema.test.ts` and
   `packages/runner/test/experimental-options.test.ts`.
 - **Path to removal.** Soak the default; then remove the env mapping, the
-  runtime option and its authority entry, the ambient config module and
-  claim lifecycle, the rollback branch in `combineSchemaForLink` and its
-  unit tests, and the combine-mode bit in the link-hop selector memo key.
+  runtime option and its authority entry, the ambient config module, the
+  rollback branch in `combineSchemaForLink` and its unit tests, and the
+  combine-mode bit in the link-hop selector memo key.
 
 ## Category 2: Contextual Flow Control enforcement rollout dials
 
@@ -1341,24 +1331,21 @@ LOCAL modes (`cf test`, `cf dev`) run against emulated storage, have no
 deployment to ask, and do read the environment alone, through this same
 mapping.
 
-### Browser-side (build-time defines, boot-time adoption)
+### Browser-side (build-time defines)
 
-Browser-side defines are injected at build time; at boot the shell adopts the
-deployment's published posture and carries the result to the web worker that
-hosts the runtime.
+Browser-side flags are baked at build time and carried to the web worker
+that hosts the runtime; changing one means rebuilding and redeploying the
+shell.
 
 ```
 Build Time (shell)
   |
   +-- ENV: EXPERIMENTAL_* = <value>
   +-- felt.config.ts   --> esbuild define: $EXPERIMENTAL_*
-  +-- src/lib/env.ts   --> EXPERIMENTAL_DEFINES (raw) + EXPERIMENTAL (parsed
-  |                        fallbacks, canonical parser)
+  +-- src/lib/env.ts   --> EXPERIMENTAL (parsed via the canonical parser)
   |
 Browser (main thread)
-  +-- views/RootView.ts --> experimentalOptionsForDeployedClient(
-  |                           { apiUrl, env: EXPERIMENTAL_DEFINES, fetch })
-  |                         explicit define > /api/meta declaration > baked default
+  +-- views/RootView.ts --> RuntimeInternals.create({ ..., experimental: EXPERIMENTAL })
   +-- RuntimeClient.initialize(transport, { ..., experimental })
         |  postMessage (IPC), InitializationData carries experimental + CFC dials
         v
@@ -1367,18 +1354,15 @@ Browser web worker
         --> new Runtime(runtimePresets.browserWorker({ experimental, cfcEnforcementMode, cfcFlowLabels, ... }))
 ```
 
-A define baked into the bundle is the browser's explicit override and needs a
-rebuild to change; the server-authoritative flags follow the deployment's
-`/api/meta` on the next page load, so a runtime rollback applied server-side
-reaches already-built shells. The browser is also the one place a CFC dial is
-host-controlled at construction: the `browserWorker` preset takes
-`cfcEnforcementMode` and `cfcFlowLabels` from the shell's initialization data.
+The browser is also the one place a CFC dial is host-controlled at
+construction: the `browserWorker` preset takes `cfcEnforcementMode` and
+`cfcFlowLabels` from the shell's initialization data.
 
 ### Clients that are not built alongside their server
 
 The shell disagrees with its server only by explicit define: toolshed bakes
-the defines and serves the bundle, and the page adopts the deployment's
-published posture at boot. Every other client is installed, deployed, or checked out on its own
+the defines and serves the bundle, so the two ship one posture per deploy.
+Every other client is installed, deployed, or checked out on its own
 schedule — the `cf` binary, the pieces controller a FUSE mount opens, the
 agents host, the background-piece admin CLI — and the environment they read
 belongs to whoever launched them, not to the deployment they talk to. Left
@@ -1556,9 +1540,7 @@ The Category 1 flags are declared as the `ExperimentalOptions` interface in
 the per-flag defaults live in the summary table above and each flag's
 section, not in a second list here — propagates each one to its ambient
 control point, and then reads the effective state back so that
-`runtime.experimental.*` reflects what is actually in effect
-(`readerSchemaPrecedence`'s read-back is a live getter over the ambient
-claim state).
+`runtime.experimental.*` reflects what is actually in effect.
 
 First-party construction config is centralized in
 [`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts),
@@ -1589,13 +1571,11 @@ server](#clients-that-are-not-built-alongside-their-server).
 - In the browser the web worker is a separate JavaScript context, so its flags
   are independent of the main thread.
 - For most flags, creating a new `Runtime` overwrites the ambient config and
-  disposing it resets to the defaults. The exceptions are the OWNED claims:
-  `serverExecution`'s enabler and `readerSchemaPrecedence`'s rollback
-  disabler are refcounted per Runtime — acquired at construction, released
-  by that runtime's dispose (or its throwing construction) — so a co-hosted
-  runtime's dispose cannot lift another's live claim, and a construction
-  that conflicts with a live claim loses to it with a warning rather than
-  overwriting it.
+  disposing it resets to the defaults. The exception is the OWNED claim:
+  `serverExecution`'s enabler is refcounted per Runtime — acquired at
+  construction, released by that runtime's dispose (or its throwing
+  construction) — so a co-hosted runtime's dispose cannot lift another's
+  live claim.
 
 ---
 

@@ -154,15 +154,17 @@ space.
 `readerSchemaPrecedence` is server-authoritative: the server's traversal
 decides what a subscription loads, tracks, and ships, so every realm must
 resolve hops under one combine rule. A server publishes its resolved
-posture at `/api/meta` (flattened at read time, so a live claim change is
-advertised as it stands); deployed CLIs and the browser shell adopt it,
-with explicit `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` values — env or
-build define — as the override. A fetched posture that declares nothing
-for the flag predates it and adopts as the legacy strict `false`; an
-explicit `experimental: null` (no Runtime yet) and an unreachable server
-adopt nothing. The rollback is an owned process-global claim (acquired by
-an explicit `false`, released on dispose, exception-safe, epoch-bound
-against test resets). The
+posture at `/api/meta` and deployed CLIs adopt it, with an explicit
+`EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` as the per-process override; the
+browser shell bakes the flag at build time, so a browser rollback ships
+with a redeploy. A fetched posture that declares nothing for the flag
+predates it and adopts as the legacy strict `false`; an explicit
+`experimental: null` (no Runtime yet) and an unreachable server adopt
+nothing. The rollback is plain ambient state like the other flags'
+configs — each Runtime construction sets it, dispose resets the default —
+so successive runtimes in one test process can run different flag states,
+while a real server constructs one posture and never changes it
+mid-flight. The
 [registry section](../development/EXPERIMENTAL_OPTIONS.md#readerschemaprecedence)
 is the authority on the lifecycle and the removal path.
 

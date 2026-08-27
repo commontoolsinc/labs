@@ -37,12 +37,10 @@ import {
   type CommonfabricDebugState,
   exposeCommonfabricGlobals,
 } from "../lib/debug-utils.ts";
-import { experimentalOptionsForDeployedClient } from "@commonfabric/runner/experimental-posture";
 import {
   COMMIT_SHA,
   ENVIRONMENT,
   EXPERIMENTAL,
-  EXPERIMENTAL_DEFINES,
   PRESENCE_URL,
 } from "../lib/env.ts";
 import { runtimeHostFlags } from "../lib/host-toggles.ts";
@@ -205,28 +203,10 @@ export class XRootView extends BaseView implements ShellApp {
         });
         this.#telemetry = telemetry ?? undefined;
 
-        // The deployed posture: fetch what the server publishes at
-        // /api/meta and adopt its server-authoritative flags, exactly as a
-        // deployed CLI does — a build define still wins as the explicit
-        // override, and an unreachable server leaves the baked defaults. A
-        // runtime rollback applied server-side after this shell was built
-        // reaches the worker through this adoption rather than waiting for
-        // a rebuild.
-        const adopted = await experimentalOptionsForDeployedClient({
-          apiUrl: app.apiUrl,
-          env: (name) => EXPERIMENTAL_DEFINES[name],
-          fetch: (input, init) => globalThis.fetch(input, init),
-          // A superseded startup must not stay pending on a stalled meta
-          // response: the task's abort cancels the request.
-          signal,
-        });
-
         const rt = await RuntimeInternals.create({
           identity: app.identity,
           apiUrl: app.apiUrl,
-          // Baked fallbacks first (the per-flag shell defaults), then the
-          // adopted deployment posture for everything it resolved.
-          experimental: { ...EXPERIMENTAL, ...adopted },
+          experimental: EXPERIMENTAL,
           // Select the deployed shell's immutable worker asset graph. Source
           // runs keep the explicit mutable /scripts URL below.
           clientVersion: COMMIT_SHA,

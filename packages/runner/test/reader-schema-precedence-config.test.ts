@@ -2,9 +2,9 @@ import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import {
-  acquireReaderSchemaPrecedenceDisabler,
   getReaderSchemaPrecedenceConfig,
   resetReaderSchemaPrecedenceConfig,
+  setReaderSchemaPrecedenceConfig,
 } from "../src/reader-schema-precedence-config.ts";
 
 describe("reader-schema-precedence-config", () => {
@@ -12,33 +12,24 @@ describe("reader-schema-precedence-config", () => {
     resetReaderSchemaPrecedenceConfig();
   });
 
-  it("returns false while a claim is live and true after its release", () => {
-    const release = acquireReaderSchemaPrecedenceDisabler();
-    expect(getReaderSchemaPrecedenceConfig()).toBe(false);
-    release();
+  it("defaults on", () => {
     expect(getReaderSchemaPrecedenceConfig()).toBe(true);
   });
 
-  it("releases idempotently", () => {
-    const releaseA = acquireReaderSchemaPrecedenceDisabler();
-    const releaseB = acquireReaderSchemaPrecedenceDisabler();
-    releaseA();
-    releaseA();
+  it("takes an explicit false and reads it back", () => {
+    setReaderSchemaPrecedenceConfig(false);
     expect(getReaderSchemaPrecedenceConfig()).toBe(false);
-    releaseB();
+  });
+
+  it("treats an unset value as the default", () => {
+    setReaderSchemaPrecedenceConfig(false);
+    setReaderSchemaPrecedenceConfig(undefined);
     expect(getReaderSchemaPrecedenceConfig()).toBe(true);
   });
 
-  it("keeps an abandoned claim's release from reaching a later epoch", () => {
-    const stale = acquireReaderSchemaPrecedenceDisabler();
+  it("resets to the default", () => {
+    setReaderSchemaPrecedenceConfig(false);
     resetReaderSchemaPrecedenceConfig();
-    // The stale release must not decrement the fresh epoch's count to -1 —
-    // a claim acquired after the reset must still hold the rollback.
-    stale();
-    expect(getReaderSchemaPrecedenceConfig()).toBe(true);
-    const live = acquireReaderSchemaPrecedenceDisabler();
-    expect(getReaderSchemaPrecedenceConfig()).toBe(false);
-    live();
     expect(getReaderSchemaPrecedenceConfig()).toBe(true);
   });
 });

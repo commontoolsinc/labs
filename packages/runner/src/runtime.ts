@@ -26,8 +26,9 @@ import {
   setContentAddressedSchemasConfig,
 } from "./schema-doc-config.ts";
 import {
-  acquireReaderSchemaPrecedenceDisabler,
   getReaderSchemaPrecedenceConfig,
+  resetReaderSchemaPrecedenceConfig,
+  setReaderSchemaPrecedenceConfig,
 } from "./reader-schema-precedence-config.ts";
 import { StaticCache } from "@commonfabric/static";
 import {
@@ -273,11 +274,11 @@ export interface ExperimentalOptions {
    * Resolve the schema at a link crossing by reader precedence
    * (`combineSchemaForLink`): the reader's schema stands as-is, and the
    * link's schema is adopted only where the reader is agnostic (true or
-   * empty; a false reader stays false). Server-authoritative: a deployed
-   * client adopts the posture the server publishes at `/api/meta`, since
-   * both sides must resolve hops under the same rule. On by default; an
-   * explicit `false` is a temporary rollback override held as an owned
-   * process-global claim (released on dispose, exception-safe).
+   * empty; a false reader stays false). Server-authoritative for deployed
+   * CLIs (`EXPERIMENTAL_FLAG_AUTHORITY`); the browser shell bakes it at
+   * build time. On by default; an explicit `false` is a temporary rollback
+   * override, ambient like the other flags (last construction wins,
+   * dispose resets).
    */
   readerSchemaPrecedence?: boolean | undefined;
 
@@ -967,7 +968,6 @@ export class Runtime {
   // `derived` for every other owner's in-flight wave commit (the
   // admission plane reads the ambient value).
   #serverExecutionRelease: (() => void) | undefined;
-  #readerSchemaPrecedenceRelease: (() => void) | undefined;
 
   /** Serving posture (RuntimeOptions.servingPosture): true only for the
    * SpaceServer's own runtime. Gates the Phase-2 speculation-overlay
@@ -1332,36 +1332,11 @@ export class Runtime {
     );
     this.experimental.contentAddressedSchemas =
       getContentAddressedSchemasConfig();
-    // The rollback is an OWNED process-global claim, not a stomped boolean
-    // (mirroring the server-execution enabler): an explicit `false` acquires
-    // a disabler released on dispose — or by a throwing construction — a
-    // default-arm runtime touches nothing, and an explicit `true` beside a
-    // live disabler is a conflict the rollback wins, warned below, because
-    // the combine is process-global and the conservative arm must not be
-    // un-claimed mid-flight. The read-back reflects what is actually in
-    // effect for this process.
-    if (this.experimental.readerSchemaPrecedence === false) {
-      this.#readerSchemaPrecedenceRelease =
-        acquireReaderSchemaPrecedenceDisabler();
-    } else if (
-      this.experimental.readerSchemaPrecedence === true &&
-      !getReaderSchemaPrecedenceConfig()
-    ) {
-      console.warn(
-        "[runtime] readerSchemaPrecedence: true requested while a co-hosted " +
-          "runtime holds the rollback; the strict combine stays in effect " +
-          "process-wide until that claim releases.",
-      );
-    }
-    // A LIVE read-back, not a snapshot: the process-global claim can change
-    // after construction (another runtime's rollback claim releasing on its
-    // dispose), and consumers that republish this posture — /api/meta most
-    // of all — must advertise what traversal actually does now.
-    Object.defineProperty(this.experimental, "readerSchemaPrecedence", {
-      get: getReaderSchemaPrecedenceConfig,
-      enumerable: true,
-      configurable: true,
-    });
+    setReaderSchemaPrecedenceConfig(
+      this.experimental.readerSchemaPrecedence,
+    );
+    this.experimental.readerSchemaPrecedence =
+      getReaderSchemaPrecedenceConfig();
     // The sync schema table stays negotiated under this flag: the two
     // mechanisms dedupe the same link-schema positions and compose (the
     // table encoder skips reference-only positions), and stored links
@@ -1568,7 +1543,7 @@ export class Runtime {
       this.defaultFrame = pushFrame({ runtime: this });
     } catch (error) {
       this.#releaseServerExecutionEnabler();
-      this.#releaseReaderSchemaPrecedenceDisabler();
+      resetReaderSchemaPrecedenceConfig();
       throw error;
     }
   }
@@ -1861,7 +1836,6 @@ export class Runtime {
       // Exception-safe: a rejecting teardown step must not leak the
       // process-global enabler (the reset would then never fire).
       this.#releaseServerExecutionEnabler();
-      this.#releaseReaderSchemaPrecedenceDisabler();
     }
 
     // Clear the current runtime reference
@@ -1985,16 +1959,8 @@ export class Runtime {
       // catch), so a REJECTING async teardown cannot leak the enabler.
       resetModernCellRepConfig();
       resetCommitPreconditionsConfig();
+      resetReaderSchemaPrecedenceConfig();
     }
-  }
-
-  /** Release this runtime's reader-schema-precedence rollback claim
-   * (idempotent — the handle guards re-entry; dispose() may run twice,
-   * and the constructor catch also calls this). */
-  #releaseReaderSchemaPrecedenceDisabler(): void {
-    const release = this.#readerSchemaPrecedenceRelease;
-    this.#readerSchemaPrecedenceRelease = undefined;
-    release?.();
   }
 
   /** Release this runtime's server-execution enabler (idempotent — the
