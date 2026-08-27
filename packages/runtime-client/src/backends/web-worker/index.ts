@@ -159,9 +159,9 @@ self.addEventListener("message", async (event: MessageEvent) => {
   // structured cloning preserved of it. The encoding end is
   // `WebWorkerRuntimeTransport.send()`.
   //
-  // What a decode returns is deep-frozen, where structured cloning delivered a
-  // mutable copy. A handler owns what its request carries (see `BaseRequest`)
-  // and may cede it, but may no longer mutate it in place.
+  // What a decode returns is deep-frozen, so a handler owns what its request
+  // carries and may cede it, but does not edit it -- which is what
+  // `BaseRequest` states as one contract.
   //
   // Typed as a request rather than as the `FabricValue` a decode returns: the
   // guards below are what actually vet it, and every use here is behind one
@@ -277,8 +277,14 @@ self.addEventListener("message", async (event: MessageEvent) => {
     const payload: IPCRemoteResponse = response !== undefined
       ? { msgId, data: response }
       : { msgId };
-    postToClient(payload);
-    ipcLogger.debug(`responded/${request.type}`, () => []);
+    // Counted by what went, not by what was asked for: an encoding failure
+    // substitutes an error reply, and recording that as a response would say
+    // the request succeeded.
+    const delivered = postToClient(payload);
+    ipcLogger.debug(
+      `${delivered ? "responded" : "responded-error"}/${request.type}`,
+      () => [],
+    );
   } catch (error) {
     console.error("[RuntimeWorker] Error:", error);
     const type = isIPCClientMessage(message) ? message.data.type : "invalid";

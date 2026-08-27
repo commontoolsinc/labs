@@ -12,9 +12,13 @@ import { describeFailure } from "@/shared/utils.ts";
 const MAX_UNDELIVERABLE_RENDER = 512;
 
 /**
- * Posts one message from the worker to its client. This is the whole of the
- * worker's outbound side: every response, error, and notification crosses
- * here, and is encoded here.
+ * Posts one message from the worker to its client, reporting whether what was
+ * asked for is what went. This is the whole of the worker's outbound side:
+ * every response, error, and notification crosses here, and is encoded here.
+ *
+ * `false` says a substitute went instead, the encoding having refused the
+ * message. A caller that records what it answered needs to know which, so that
+ * a failure is not counted as the reply it replaced.
  *
  * The message is encoded whole rather than field by field, which is what lets
  * a payload carry the entire `FabricValue` domain -- a `bigint` as itself, a
@@ -28,8 +32,9 @@ const MAX_UNDELIVERABLE_RENDER = 512;
  * before a payload reaches this point, and a throw would say that something
  * does not.
  */
-export function postToClient(message: IPCRemotePost): void {
+export function postToClient(message: IPCRemotePost): boolean {
   let encoded;
+  let delivered = true;
 
   try {
     encoded = realmFromFabricValue(message);
@@ -41,11 +46,14 @@ export function postToClient(message: IPCRemotePost): void {
     // for a console notification is a synchronous `EventTarget` listener,
     // where it becomes an uncaught error and takes the process down.
     encoded = realmFromFabricValue(undeliverableMessageFrom(message, error));
+    delivered = false;
   }
 
   // Read off `self` at call time rather than captured at module load, so that
   // a test driving this without a real worker can substitute its own.
   self.postMessage(encoded);
+
+  return delivered;
 }
 
 /**

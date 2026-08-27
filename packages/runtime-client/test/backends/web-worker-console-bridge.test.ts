@@ -465,10 +465,12 @@ describe("web-worker-console-bridge", () => {
         await import("@/backends/web-worker/index.ts");
         posted.length = 0;
 
+        // Dispatched without a wait: the decode fails and the report is
+        // posted before the listener reaches its first `await`, so there is
+        // nothing to settle.
         globalThis.dispatchEvent(
           new MessageEvent("message", { data: { not: "an encoding" } }),
         );
-        await new Promise((resolve) => setTimeout(resolve, 0));
 
         expect(posted).toHaveLength(1);
         expect(posted[0].type).toBe(NotificationType.ErrorReport);

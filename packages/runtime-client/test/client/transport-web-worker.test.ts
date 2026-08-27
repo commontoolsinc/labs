@@ -73,6 +73,28 @@ describe("WebWorkerRuntimeTransport", () => {
     });
   });
 
+  describe("what a decode delivers", () => {
+    it("emits a message the consumer cannot edit", () => {
+      // `BaseRequest` states this as one contract for both directions: a
+      // receiver owns what it is given and may cede it, but does not edit it,
+      // because every container a decode returns is frozen. Pinned here rather
+      // than only stated -- and at the seam a consumer actually reads from.
+      const transport = makeTransport();
+      const emitted: unknown[] = [];
+      transport.on("message", (m) => emitted.push(m));
+      const handle = handlerOf(transport);
+      handle(posted({ type: TransportNotificationType.WorkerReady }));
+
+      handle(posted({ msgId: 3, data: { nested: { a: [1, 2] } } }));
+
+      expect(emitted).toHaveLength(1);
+      const message = emitted[0] as { data: { nested: { a: number[] } } };
+      expect(Object.isFrozen(message)).toBe(true);
+      expect(Object.isFrozen(message.data.nested)).toBe(true);
+      expect(Object.isFrozen(message.data.nested.a)).toBe(true);
+    });
+  });
+
   describe("an undecodable message", () => {
     it("reports it and leaves the listener standing", () => {
       const transport = makeTransport();

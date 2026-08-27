@@ -81,9 +81,8 @@ export class WebWorkerRuntimeTransport
     return transport.ready().then(() => transport);
   }
 
-  // What a decode returns is deep-frozen, where structured cloning delivered a
-  // mutable copy: a consumer of a response or a notification reads it rather
-  // than reshaping it in place.
+  // What a decode returns is deep-frozen, so a consumer of a response or a
+  // notification reads it rather than reshaping it in place.
   private _handleMessage = (event: MessageEvent): void => {
     let data: IPCRemotePost;
 

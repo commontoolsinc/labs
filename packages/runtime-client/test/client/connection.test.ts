@@ -560,6 +560,12 @@ describe("connection", () => {
       // something no real transport does.
       const transport = new FakeTransport();
       const body = new FabricBytes(new Uint8Array([1, 2, 3]));
+      // A plain nested container alongside it: the codec rebuilds a
+      // `FabricBytes` either way, so that arm alone cannot tell whether the
+      // clone is there. An encode passes a subtree needing no encoding through
+      // by identity, and a decode hands that same object back -- so without the
+      // clone this is the sender's own object, frozen under it.
+      const nested = { note: "unshared" };
       const message: IPCClientMessage = {
         msgId: 1,
         data: {
@@ -567,12 +573,17 @@ describe("connection", () => {
           space: "did:key:test-space",
           contentType: "image/png",
           body,
-        },
+          nested,
+        } as never,
       };
 
       transport.send(message);
 
       const captured = transport.sent[0];
+      expect(
+        (captured as unknown as { data: { nested: unknown } }).data.nested,
+      ).not.toBe(nested);
+      expect(Object.isFrozen(nested)).toBe(false);
       expect(captured).not.toBe(message);
       if (
         !("msgId" in captured) || captured.data.type !== RequestType.UploadBlob

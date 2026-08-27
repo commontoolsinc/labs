@@ -533,7 +533,12 @@ export type IPCRemotePost = IPCRemoteMessage | IPCTransportNotification;
  * **Ownership.** Any value reaching a handler implementation is owned outright
  * by the receiver: it is guaranteed not to be shared elsewhere already, and not
  * to become shared later, except by the receiver's own action. A handler may
- * therefore retain, mutate, or cede what it is given without defending itself.
+ * therefore retain or cede what it is given without defending itself.
+ *
+ * Ownership is about sharing, not about mutability. A request arrives through
+ * a decode, and every container a decode returns is frozen -- see "Decoding"
+ * in `docs/specs/space-model-formal-spec/4-realm-encoding.md`. A handler that
+ * wants a different value builds one; it does not edit this one.
  *
  * That is a requirement on whatever delivers a request, not a property of any
  * particular transport -- see `RuntimeTransport.send()`.

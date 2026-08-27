@@ -1,3 +1,11 @@
+/**
+ * What the worker's outbound side does with a message the encoding refuses.
+ *
+ * `postToClient()` is the whole of that side, so it is also the only place a
+ * failure to encode can be answered. What it answers with differs by whether
+ * anyone is awaiting a reply, and it must not throw either way.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
