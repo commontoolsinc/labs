@@ -171,6 +171,21 @@ export type SlowQuery = {
   space: string;
   roots?: number;
   watches?: number;
+  /** transact only: milliseconds the commit waited for the space
+   * publication lock before evaluation began. Flush passes hold the same
+   * lock, so a large value is head-of-line blocking behind fan-out rather
+   * than the commit's own cost. */
+  lockWaitMs?: number;
+  /** transact only: the commit's operation count. */
+  operations?: number;
+  /** transact only: the commit's confirmed read count. */
+  readsConfirmed?: number;
+  /** transact only: the commit's pending read count. */
+  readsPending?: number;
+  /** transact only: "ok", the response error's name (a rejected commit
+   * that took this long is at least as interesting as an applied one), or
+   * "threw" when evaluation raised instead of responding. */
+  outcome?: string;
 };
 
 const slowQueries: SlowQuery[] = [];
@@ -202,7 +217,7 @@ const recordSlowQueryDuration = (
   });
 };
 
-/** Returns the last N slow query/watch operations (>100ms). */
+/** Returns the last N slow query, watch, and commit operations (>100ms). */
 export const getSlowQueries = (): readonly SlowQuery[] => slowQueries;
 
 /**
@@ -2760,29 +2775,46 @@ export class Server {
     message: TransactRequest,
     publishVerdict?: PublishTransactVerdict,
   ): Promise<ResponseMessage<Engine.AppliedCommit>> {
+    const requestedAt = performance.now();
     return await this.withSpacePublicationLock(message.space, async () => {
-      const decision = await this.decideTransaction(message);
-      let verdictError: { value: unknown } | undefined;
+      const lockWaitMs = performance.now() - requestedAt;
+      let outcome = "threw";
       try {
-        publishVerdict?.(decision.response);
-      } catch (error) {
-        verdictError = { value: error };
-      }
-      try {
-        await decision.postCommit?.();
-      } catch (postCommitError) {
-        if (verdictError !== undefined) {
-          throw new AggregateError(
-            [verdictError.value, postCommitError],
-            "Verdict publication and post-commit bookkeeping both failed",
-          );
+        const decision = await this.decideTransaction(message);
+        outcome = decision.response.error?.name ?? "ok";
+        let verdictError: { value: unknown } | undefined;
+        try {
+          publishVerdict?.(decision.response);
+        } catch (error) {
+          verdictError = { value: error };
         }
-        throw postCommitError;
+        try {
+          await decision.postCommit?.();
+        } catch (postCommitError) {
+          if (verdictError !== undefined) {
+            throw new AggregateError(
+              [verdictError.value, postCommitError],
+              "Verdict publication and post-commit bookkeeping both failed",
+            );
+          }
+          throw postCommitError;
+        }
+        if (verdictError !== undefined) {
+          throw verdictError.value;
+        }
+        return decision.response;
+      } finally {
+        // The elapsed span deliberately starts at the REQUEST, not at lock
+        // acquisition: what a client waits for is both halves, and the
+        // lockWaitMs field is what splits them apart on the dashboard.
+        recordSlowQueryDuration("transact", message.space, requestedAt, {
+          lockWaitMs: Math.round(lockWaitMs),
+          operations: message.commit.operations.length,
+          readsConfirmed: message.commit.reads.confirmed.length,
+          readsPending: message.commit.reads.pending.length,
+          outcome,
+        });
       }
-      if (verdictError !== undefined) {
-        throw verdictError.value;
-      }
-      return decision.response;
     });
   }
 
