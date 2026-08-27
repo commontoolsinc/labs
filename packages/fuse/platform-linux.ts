@@ -92,9 +92,12 @@ function writeStat(buf: ArrayBuffer, opts: StatOpts): void {
   }
 }
 
+//
 // fuse_entry_param
+//
 // Layout: ino(u64) + generation(u64) + stat(144) + attr_timeout(f64) + entry_timeout(f64)
 // = 8 + 8 + 144 + 8 + 8 = 176 bytes (same total as macOS)
+//
 
 const ENTRY_PARAM_SIZE = 176;
 const writeEntryParam = makeWriteEntryParam(

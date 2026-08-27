@@ -22,6 +22,7 @@ const ATTACKS: Attack[] = [
   //
   // ASI / statement-merge desync (splitter only `}`-terminates block keywords)
   //
+
   {
     name: "ASI: const builder call then side-effect require, no semicolons",
     body:
@@ -45,6 +46,7 @@ const ATTACKS: Attack[] = [
   //
   // tokenizer confusion
   //
+
   {
     name: "regex-vs-divide: division parsed as regex to swallow a semicolon",
     body:
@@ -64,6 +66,7 @@ const ATTACKS: Attack[] = [
   //
   // shadowing trusted names
   //
+
   {
     name: "shadow `require` then call it as an arbitrary function",
     body:
@@ -102,6 +105,7 @@ const ATTACKS: Attack[] = [
   //
   // __cf_data / schema opaque-argument boundary
   //
+
   {
     name: "legit __cf_data-wrapped plain object (negative control)",
     body: `${IMPORT}\nexports.config = cf.__cf_data({ a: 1, b: 2 });`,
@@ -132,6 +136,7 @@ const ATTACKS: Attack[] = [
   //
   // reexport getter abuse
   //
+
   {
     name: "reexport getter returning a call expression",
     body:
@@ -141,6 +146,7 @@ const ATTACKS: Attack[] = [
   //
   // default export laundering
   //
+
   {
     name: "default export of comma-sequence with a side effect",
     body:
@@ -154,6 +160,7 @@ const ATTACKS: Attack[] = [
   //
   // trusted-builder callback indirection
   //
+
   {
     name: "builder callback is a member of an import (indirect)",
     body:
@@ -194,6 +201,7 @@ const ATTACKS: Attack[] = [
   //
   // top-level executable / mutable forms
   //
+
   {
     name: "IIFE disguised as a parenthesized arrow",
     body: `exports.x = (() => { globalThis.fetch("//x"); return 1; })();`,
@@ -245,6 +253,7 @@ const ATTACKS: Attack[] = [
   //
   // export form abuse
   //
+
   { name: "module.exports = runtime", body: `${IMPORT}\nmodule.exports = cf;` },
   {
     name: "computed-key export assignment",
@@ -263,6 +272,7 @@ const ATTACKS: Attack[] = [
   //
   // import fast-path / require boundary abuse
   //
+
   {
     name: "side-effect require with quote-escape break-out attempt",
     body: `require("./a.ts\\");globalThis.pwned=(\\"");`,
@@ -297,6 +307,7 @@ const ATTACKS: Attack[] = [
   // other shape must be rejected so an attacker can neither register an arbitrary
   // symbol nor smuggle a second/aliased registrar call.
   //
+
   {
     name: "__cfReg: legitimate single shorthand registration (control)",
     accept: true,

@@ -660,6 +660,7 @@ $("#copy-space").onclick=()=>{ navigator.clipboard?.writeText(B.space); flash("c
 //
 // identities (users of this space)
 //
+
 function renderIdentities(){
   const host=$("#idlist"); const ps=B.participants||[];
   $("#idpanel>summary").textContent="Identities ("+ps.length+")";
@@ -681,6 +682,7 @@ function renderIdentities(){
 //
 // conflicts (contested cells)
 //
+
 function renderConflicts(){
   const host=$("#cflist"); const cs=B.conflicts||[];
   const mu=cs.filter(c=>c.multiUser).length;

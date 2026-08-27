@@ -332,6 +332,7 @@ export class Session {
   //
   // editing
   //
+
   private source?: EditableSource;
   private buffer?: EditBuffer;
 
@@ -364,6 +365,7 @@ export class Session {
   //
   // file picker (C-x C-f)
   //
+
   private readonly files?: FileGateway;
   private pickerDir = "";
   private pickerFilter = "";

@@ -125,6 +125,7 @@ class WishError extends Error {
 // range. Both serve as defense-in-depth against timing side-channel attacks once
 // SES sandboxing removes patterns' direct access to Date.now/performance.now.
 //
+
 const MIN_INTERVAL_SECONDS = 1;
 const MAX_INTERVAL_SECONDS = 24 * 60 * 60;
 const ONE_SHOT_RESOLUTION_MS = 1000;
