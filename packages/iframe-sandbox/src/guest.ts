@@ -133,9 +133,14 @@ export class RemoteCell<T = FabricValue> {
   }
 
   write(value: T): Promise<void> {
-    const snapshot = cloneIfNecessary(value as FabricValue, {
-      frozen: false,
-    }) as T;
+    let snapshot: T;
+    try {
+      snapshot = cloneIfNecessary(value as FabricValue, {
+        frozen: false,
+      }) as T;
+    } catch (error) {
+      return Promise.reject(error);
+    }
     return this.#enqueueWrite(async () => {
       if (this.#activeReads.size > 0) {
         await Promise.all(this.#activeReads);

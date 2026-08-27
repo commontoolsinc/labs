@@ -522,6 +522,54 @@ describe("guest", () => {
       expect(cell.getSnapshot()).toEqual({ status: "ready", value: 2 });
     });
 
+    it("continues a plain write after an active read fails", async () => {
+      const readResponse = Promise.withResolvers<FabricValue | undefined>();
+      const writeResponse = Promise.withResolvers<FabricValue | undefined>();
+      const operations: string[] = [];
+      const client = {
+        request: (operation: string) => {
+          operations.push(operation);
+          return operation === "read"
+            ? readResponse.promise
+            : writeResponse.promise;
+        },
+      } as unknown as FabricClient;
+      const cell = new RemoteCell<number>(client, "count");
+      const failure = new Error("read failed");
+
+      const reading = cell.read();
+      const writing = cell.write(2);
+      readResponse.reject(failure);
+      await expect(reading).rejects.toBe(failure);
+      writeResponse.resolve(undefined);
+      await writing;
+
+      expect(operations).toEqual(["read", "write"]);
+      expect(cell.getSnapshot()).toEqual({ status: "ready", value: 2 });
+    });
+
+    it("reports invocation snapshot failures as rejected writes", async () => {
+      let requests = 0;
+      const client = {
+        request: () => {
+          requests++;
+          return Promise.resolve(undefined);
+        },
+      } as unknown as FabricClient;
+      const cell = new RemoteCell<FabricValue>(client, "record");
+      const cyclic = {} as Record<string, FabricValue>;
+      cyclic.self = cyclic;
+      let writing: Promise<void> | undefined;
+
+      expect(() => {
+        writing = cell.write(cyclic);
+      }).not.toThrow();
+      await expect(writing!).rejects.toThrow(
+        "Cannot deep-clone circular reference",
+      );
+      expect(requests).toBe(0);
+    });
+
     it("cleans up a request when sending it fails synchronously", async () => {
       const fabric = connectFabric();
       try {
