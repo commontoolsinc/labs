@@ -613,9 +613,13 @@ Diagnostics emitted in all modes:
       JSX node, or move the whole consuming computation into
       `computed(() => ...)`). Detected at the map call over
       the callback's own returns, so a bare reactive read trips it the same
-      as a computation, while an explicit reactive construction (an action
-      handle, a computed cell, an applied lift) and an object or array
-      literal aggregate do not; the per-read `pattern-context:get-call` and
+      as a computation, while a deliberately constructed reactive artifact
+      (a computed cell, an action or handler handle, an applied lift, a
+      `generateObject(...)` result, a `cell(...)`, a fetch or query resource
+      — directly, through a local, or as a field read off one) does not. The
+      value-like helpers `ifElse`, `when`, and `unless` are not artifacts and
+      do trip it, and a collected object or array literal is classified
+      member by member; the per-read `pattern-context:get-call` and
       `pattern-context:optional-chaining` diagnostics inside the reported
       callback defer to this single report
     - an async callback ("resumes outside pattern construction…")
@@ -751,14 +755,19 @@ What the callback returns then decides how far its result may travel:
   or nullish: expression-site lowering rewrites the selection itself to a
   reactive helper cell. The escape test runs at the map call over the
   callback's own returns, so the implicit reactive spellings are caught the
-  same way — a computation or a bare read of a reactive or lowered local. Two
-  return shapes are deliberate and not claimed: an explicit reactive
-  construction — an `action(...)` handle, a `computed(...)` cell, an applied
-  lift, directly or through a local whose initializer is one — and an object
-  or array literal, an author-structured aggregate that is never the falsy
-  primitive native interpretation mistakes. A rejected-flow map whose returns
-  are all plain or deliberate shapes stays ordinary JavaScript and keeps the
-  standard non-escaping diagnostics for anything reactive inside it.
+  same way — a computation or a bare read of a reactive or lowered local. One
+  return shape is deliberate and not claimed: a reactive artifact the author
+  constructed on purpose — a `computed(...)` cell, an `action(...)` or
+  `handler(...)` handle, an applied lift, a `generateObject(...)` result, a
+  `cell(...)`, a fetch or query resource — returned directly, through a local
+  whose initializer is one, or as a field read off one. `ifElse`, `when`, and
+  `unless` are excluded: they stand for a value rather than a handle, so a
+  collected one is an object that is truthy whichever branch it represents.
+  A collected object or array literal is classified member by member rather
+  than exempted whole, because an ordinary consumer reads through the record
+  to the member. A rejected-flow map whose returns are all plain or
+  deliberate shapes stays ordinary JavaScript and keeps the standard
+  non-escaping diagnostics for anything reactive inside it.
 
 This restriction applies when the callback inherits a pattern context. A
 plain-array map in a standalone or explicit compute-owned helper keeps

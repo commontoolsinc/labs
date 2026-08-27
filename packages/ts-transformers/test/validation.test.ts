@@ -3653,6 +3653,110 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
+    "errors on a bare reactive member inside a collected object literal",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ active: Writable<boolean> }>(({ active }) => {
+        const kept = VALUES.map((value) => ({ value, flag: active }))
+          .filter(({ flag }) => flag);
+        return { kept };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
+      assertStringIncludes(
+        errors.map((error) => error.message).join("\n"),
+        "returns a reactive value",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on a bare reactive member inside a collected tuple",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ active: Writable<boolean> }>(({ active }) => {
+        const kept = VALUES.map((value) => [value, active])
+          .filter(([, flag]) => flag);
+        return { kept };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
+    },
+  );
+
+  await t.step(
+    "errors on a collected conditional helper result",
+    async () => {
+      const source =
+        `      import { ifElse, pattern, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ active: Writable<boolean> }>(({ active }) => {
+        const kept = VALUES.map(() => ifElse(active, true, false))
+          .filter(Boolean);
+        return { kept };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertHasErrorType(errors, "pattern-context:computation");
+      assertStringIncludes(
+        errors.map((error) => error.message).join("\n"),
+        "returns a reactive value",
+      );
+    },
+  );
+
+  await t.step(
+    "allows a collected record projecting a deliberate reactive artifact",
+    async () => {
+      const source =
+        `      import { computed, pattern, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ active: Writable<boolean> }>(({ active }) => {
+        const records = VALUES.map((value) => {
+          const analysis = computed(() => active.get() ? value : "");
+          return { value, analysis, label: analysis.length };
+        });
+        return { records };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertEquals(
+        errors.length,
+        0,
+        "an artifact the callback constructed, and a field read off it, are " +
+          "deliberate: the author holds the handle on purpose",
+      );
+    },
+  );
+
+  await t.step(
     "allows a render-collecting plain map result through a local",
     async () => {
       const source =

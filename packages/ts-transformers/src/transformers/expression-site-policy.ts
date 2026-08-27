@@ -1495,19 +1495,70 @@ export function findPreferredNestedLowerableExpressionSite(
 }
 
 /**
- * True when the callback can hand `map` a reactive value the author did not
- * explicitly construct or structure. Two return shapes are deliberate and do
- * not count:
+ * Reactive-origin calls whose result stands for a value rather than for a
+ * durable artifact. Collecting one is the same mistake as collecting a bare
+ * read: the result is an object, so `map(() => ifElse(flag, true, false))`
+ * hands `filter(Boolean)` something truthy whichever branch it represents.
  *
- * - an explicit reactive origin — an `action(...)` handle, a `computed(...)`
- *   cell, an applied lift — returned directly or through a local whose
- *   initializer is one (weekly-calendar collects per-color action handles
- *   through a local this way);
- * - an object or array literal, which is an author-structured aggregate
- *   (gmail-extractor collects per-email records around `generateObject`
- *   results). A literal is also never the falsy primitive that native
- *   boolean interpretation mistakes, so the collected entries cannot be
- *   misread as their own values.
+ * Every other reactive origin constructs an artifact an author holds and
+ * passes around on purpose — a `computed(...)` cell, an `action(...)` or
+ * `handler(...)` handle, an applied lift, a `generateObject(...)` result, a
+ * `cell(...)`, a fetch or query resource — and collecting those is ordinary
+ * authoring. `str` needs no entry here: its tagged-template spelling is not a
+ * call expression, so it never reaches this test.
+ */
+const VALUE_LIKE_REACTIVE_CALL_KINDS = new Set(["ifElse", "when", "unless"]);
+
+function isCollectedReactiveArtifact(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+): boolean {
+  let current = unwrapExpression(expression);
+
+  // Reading a field off an artifact is as deliberate as holding the artifact:
+  // gmail-extractor projects `analysis.result`, `.pending`, and `.error` out
+  // of the `generateObject(...)` it just constructed. Walk to the root the
+  // projection reads from, then judge that.
+  while (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current)
+  ) {
+    current = unwrapExpression(current.expression);
+  }
+
+  if (ts.isIdentifier(current)) {
+    const initializer = getSoleLocalInitializer(current, checker);
+    if (!initializer) {
+      return false;
+    }
+    current = unwrapExpression(initializer);
+  }
+
+  if (!ts.isCallExpression(current)) {
+    return false;
+  }
+  const callKind = detectCallKind(current, checker);
+  if (callKind && VALUE_LIKE_REACTIVE_CALL_KINDS.has(callKind.kind)) {
+    return false;
+  }
+  return isReactiveOriginExpression(current, checker);
+}
+
+/**
+ * True when the callback can hand `map` a reactive value the author did not
+ * explicitly construct. One return shape is deliberate and does not count: a
+ * reactive artifact from `isCollectedReactiveArtifact`, returned directly or
+ * through a local whose initializer is one (weekly-calendar collects
+ * per-color action handles this way, gmail-extractor a `generateObject(...)`
+ * per email).
+ *
+ * An object or array literal is not exempt as a whole. Its own truthiness is
+ * never in question, but an ordinary consumer reads through it —
+ * `map((v) => ({ v, flag })).filter(({ flag }) => flag)` interprets the
+ * member, not the record — so each member is classified the same way the
+ * whole return is. That keeps author-structured aggregates of deliberate
+ * artifacts (gmail-extractor collects per-email records) while still
+ * diagnosing a bare reactive leaf inside one.
  *
  * What this owns is the implicit spelling: a bare read, a lowered local, or
  * a computation whose runtime value is a wrapper object the author believes
@@ -1518,30 +1569,52 @@ function plainArrayMapCollectsEscapingReactiveValues(
   context: TransformationContext,
   analyze: AnalyzeFn,
 ): boolean {
-  return getOwnReturnExpressions(callback).some((returnExpression) => {
-    const value = unwrapExpression(returnExpression);
-    if (
-      ts.isObjectLiteralExpression(value) || ts.isArrayLiteralExpression(value)
-    ) {
+  return getOwnReturnExpressions(callback).some((returnExpression) =>
+    collectedValueEscapes(returnExpression, context, analyze)
+  );
+}
+
+function collectedValueEscapes(
+  expression: ts.Expression,
+  context: TransformationContext,
+  analyze: AnalyzeFn,
+): boolean {
+  const value = unwrapExpression(expression);
+
+  if (ts.isObjectLiteralExpression(value)) {
+    return value.properties.some((property) => {
+      if (ts.isPropertyAssignment(property)) {
+        return collectedValueEscapes(property.initializer, context, analyze);
+      }
+      if (ts.isShorthandPropertyAssignment(property)) {
+        return collectedValueEscapes(property.name, context, analyze);
+      }
+      if (ts.isSpreadAssignment(property)) {
+        return collectedValueEscapes(property.expression, context, analyze);
+      }
+      // A method or accessor is a function, not a collected value.
       return false;
-    }
-    if (isReactiveOriginExpression(value, context.checker)) {
-      return false;
-    }
-    if (ts.isIdentifier(value)) {
-      const initializer = getSoleLocalInitializer(value, context.checker);
-      if (
-        initializer &&
-        isReactiveOriginExpression(
-          unwrapExpression(initializer),
-          context.checker,
-        )
-      ) {
+    });
+  }
+
+  if (ts.isArrayLiteralExpression(value)) {
+    return value.elements.some((element) => {
+      if (ts.isOmittedExpression(element)) {
         return false;
       }
-    }
-    return analyze(returnExpression).containsReactive;
-  });
+      return collectedValueEscapes(
+        ts.isSpreadElement(element) ? element.expression : element,
+        context,
+        analyze,
+      );
+    });
+  }
+
+  if (isCollectedReactiveArtifact(value, context.checker)) {
+    return false;
+  }
+
+  return analyze(expression).containsReactive;
 }
 
 function getSoleLocalInitializer(
