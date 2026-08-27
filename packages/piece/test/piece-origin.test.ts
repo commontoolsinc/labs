@@ -6,6 +6,7 @@ import { createSession, Identity } from "@commonfabric/identity";
 import {
   applyPieceSourceTransition,
   type Cell,
+  classifyPieceOriginString,
   getPatternIdentityRef,
   getPieceSourceRevisions,
   getPieceSourceSnapshot,
@@ -624,6 +625,54 @@ function pieceWith(
   } as unknown as Runtime;
   return { piece, runtime };
 }
+
+describe("the two classifiers a recorded origin meets", () => {
+  it("agree on which strings can be followed at all", () => {
+    // `classifyOrigin` decides what the source panel shows and what an
+    // entered origin is allowed to become. `classifyPieceOriginString`
+    // decides what reconciliation will follow. They answer different
+    // questions and use different words for the kinds, but they have to
+    // agree on the boundary: a string one accepts and the other calls
+    // unusable would be stored as an origin that nothing follows, and
+    // reported by the panel as an origin that is fine.
+    const host = "https://toolshed.test";
+    const runtime = { hostForSpace: () => new URL(host) } as unknown as Runtime;
+    const hash = "b".repeat(43);
+    const strings = [
+      "system:system/home.tsx",
+      "/api/patterns/system/home.tsx",
+      `${host}/api/patterns/system/home.tsx`,
+      "https://example.test/p.tsx",
+      "http://example.test/p.tsx",
+      "ftp://example.test/p.tsx",
+      "not a url",
+      "",
+      "   ",
+      `cf:pattern:${hash}`,
+      `cf:/did:key:z6Mkabc/of:fid1:${hash}`,
+      `cf://host.test/did:key:z6Mkabc/of:fid1:${hash}`,
+      "cf:/did:key:z6Mkabc/some-slug",
+      `cf:of:fid1:${hash}`,
+      `cf:/did:key:z6Mkabc/of:fid1:${hash}@${"c".repeat(43)}`,
+      "../relative.tsx",
+      "data:text/plain,x",
+      "cf:!!malformed",
+    ];
+
+    for (const recorded of strings) {
+      const followable =
+        classifyPieceOriginString(recorded, host).kind !== "unusable";
+      let usable: boolean;
+      try {
+        classifyOrigin(runtime, SPACE, recorded);
+        usable = true;
+      } catch {
+        usable = false;
+      }
+      expect({ recorded, usable }).toEqual({ recorded, usable: followable });
+    }
+  });
+});
 
 describe("readPieceOrigin", () => {
   it("reads a piece with no recorded source as detached", () => {
