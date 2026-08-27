@@ -1813,10 +1813,13 @@ export class Runtime {
    * `await using` / `[Symbol.asyncDispose]` always takes the closing path.
    *
    * Either way this resets the PROCESS-GLOBAL experimental config to defaults
-   * (`resetModernCellRepConfig` and friends). Under a non-default flag that is
-   * visible to a second runtime still running against the same store, which is
-   * exactly the caller this option serves — so set the flags per process, not
-   * per runtime, if two of them must agree.
+   * (`resetModernCellRepConfig` and friends) — except
+   * `readerSchemaPrecedence`, which dispose leaves standing: serving
+   * runtimes are per-space and idle-disposed, so a teardown reset would
+   * lift a live rollback from under the survivors. Under a non-default
+   * flag that is visible to a second runtime still running against the
+   * same store, which is exactly the caller this option serves — so set
+   * the flags per process, not per runtime, if two of them must agree.
    */
   async dispose(
     { closeStorage = true }: { closeStorage?: boolean } = {},

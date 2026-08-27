@@ -266,7 +266,7 @@ default, its planned end state, and its removal path, plus the propagation paths
 
 The environment-backed flags (the only ones settable without editing code) are
 declared once in `EXPERIMENTAL_ENV_VARS`
-(`packages/runner/src/experimental-posture.ts`), which is the authority; today
+(`packages/runner/src/runtime-presets.ts`), which is the authority; today
 that is:
 
 | Flag | Env var |

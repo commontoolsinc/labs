@@ -183,8 +183,8 @@ arm. `packages/runner/test/link-ifc-read-relevance.test.ts` pins the
 crossing seam: entry, nested, resolution-chain, handle-hop, cold-closure,
 cold-closure narrowing, narrowed-away-ancestor, proxy, raw-read,
 `set()`-resolution, array-element, and root-asCell-mint marking, plus the
-broken-declaration rule (an unresolvable stored schema is ignored — reads
-proceed, and what it legibly declares still marks).
+broken-declaration rule (an unresolvable stored schema selects nothing —
+a shaped reader reads on, and what it legibly declares still marks).
 `packages/runner/test/schema-ifc.test.ts` pins the closure loader's
 broken-declaration arms.
 `packages/runner/test/stored-link-schema-precedence.test.ts` pins the

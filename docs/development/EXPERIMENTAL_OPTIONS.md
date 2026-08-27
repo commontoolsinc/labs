@@ -76,8 +76,8 @@ this category default off unless their section says otherwise.
 
 The mapping from environment variable to flag is defined once, canonically, as
 `EXPERIMENTAL_ENV_VARS` in
-[`packages/runner/src/experimental-posture.ts`](../../packages/runner/src/experimental-posture.ts)
-(re-exported by `runtime-presets.ts`), and read by
+[`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts),
+and read by
 `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and the
 background piece service all go through that one mapping, so their wirings
 cannot drift; the shell reads the same variables from its build-time defines
@@ -1225,7 +1225,7 @@ preset in
 [`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts),
 and the environment-backed flags reach the runtime through the one canonical
 mapping, `experimentalOptionsFromEnv`, in
-[`packages/runner/src/experimental-posture.ts`](../../packages/runner/src/experimental-posture.ts). That mapping accepts
+[`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts). That mapping accepts
 exactly `"true"` and `"false"`: an unset variable stays `undefined`, which the
 runtime reads as "use the built-in default", and any other value is ignored with
 a warning. (The distinction between unset and an explicit `false` matters,
@@ -1312,9 +1312,8 @@ cf / pieces controller / agents host / cast-admin
 
 What the server publishes is the posture its constructed `Runtime` resolved —
 built-in defaults and preset resolution included, not a second reading of its
-own environment that could disagree with the first — flattened at read time,
-so a live read-back (`readerSchemaPrecedence`'s claim state) is advertised as
-it stands now. A flag the server left unresolved is omitted, and a server
+own environment that could disagree with the first — flattened at
+publish. A flag the server left unresolved is omitted, and a server
 that has no `Runtime` yet publishes `experimental: null`; a client reads
 either as "this deployment said nothing" and keeps its own default. The one
 exception rides on the pre-flag document shapes specifically: a fetched
@@ -1346,7 +1345,7 @@ Three rules govern what a client does with a declaration:
   also how you disagree with a deployment on purpose.
 - **Only a server-authoritative flag is adopted.**
   `EXPERIMENTAL_FLAG_AUTHORITY` in
-  [`packages/runner/src/experimental-posture.ts`](../../packages/runner/src/experimental-posture.ts)
+  [`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts)
   classifies every flag as `"server"` or `"client"`, type-gated the same way as
   the environment mapping, so a new flag does not compile until someone decides
   whether a `cf` binary follows the deployment on it. Every flag is `"server"`
@@ -1472,7 +1471,7 @@ First-party construction config is centralized in
 which is the place to touch when adding or changing a flag that construction
 config reaches:
 
-- `EXPERIMENTAL_ENV_VARS` (in `experimental-posture.ts`, re-exported here) is
+- `EXPERIMENTAL_ENV_VARS` is
   the single environment-variable mapping for `ExperimentalOptions`, typed as
   `Record<keyof ExperimentalOptions, string |
   null>`, so every flag must be
