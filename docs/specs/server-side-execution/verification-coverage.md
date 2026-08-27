@@ -6701,7 +6701,8 @@ supply; OW29/OW32/OW34 closed):
     pre-fix commit, fixed by dropping the dead mount's selectors from
     the watch tracker at both consume sites, pinned both ways).
     Mutations, all red, each reddening its own pin alone: no-op the
-    consume → pins 1-4 and the stale-read pin (no-churn stays green);
+    consume → the reproduction, fail-closed, ownership re-bind,
+    host-glue, and stale-read pins (no-churn stays green);
     remove the host fan-out → host glue only; remove the ACL-verdict
     guard → no-churn only; eager instead of latched → host glue only
     (the measured ordering-independence proof); remove the tracker
