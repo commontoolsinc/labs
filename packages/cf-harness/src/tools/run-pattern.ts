@@ -20,6 +20,7 @@ import {
 import { PieceController } from "@commonfabric/piece/ops";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
+import { keylessInstantiation } from "../fabric-instantiations.ts";
 import {
   comparableEntityHash,
   fabricRuntimeObservations,
@@ -836,6 +837,10 @@ export const runPatternTool: HarnessToolDefinition<
     // so the post-settle read covers exactly this invocation's window.
     const observations = fabricRuntimeObservations(pieces.runtime);
     const observationStart = observations.sequence();
+    // The same window over what the runtime materializes, for the check that
+    // the created piece carries a pointer another runtime can load. A session
+    // built without an instantiation recorder asks nothing.
+    const instantiationStart = session.instantiations?.sequence() ?? 0;
     /**
      * Reports this invocation's outcome to the index, when the pattern came
      * from there. A cancelled run reports nothing: it neither succeeded nor
@@ -897,6 +902,31 @@ export const runPatternTool: HarnessToolDefinition<
       return cancelledOutput();
     }
     const resultCell = await piece.result.getCell();
+    // A piece whose graph was materialized under a session-synthetic pattern
+    // pointer exists for this session and no other: a fresh runtime asked to
+    // open it cannot resolve the pointer at all. This session renders
+    // nothing, so any keyless instantiation in the window is that shape (see
+    // `keylessInstantiation`). The run is reported as a failure rather than
+    // handed back as a piece that dies on the first visit, and the pattern is
+    // not contributed to the index below, since the same shape would strand
+    // every later run that ran it.
+    const strandedInstantiation = session.instantiations === undefined
+      ? undefined
+      : keylessInstantiation(
+        session.instantiations.since(instantiationStart),
+      );
+    if (strandedInstantiation !== undefined) {
+      recordOutcome("run_failed");
+      return {
+        ...errorOutput(
+          "error",
+          `the pattern ran, but the piece it created can only be opened by this session, so the run is reported as a failure. This is the shape a factory takes when it returns a derived wrapper — a computed() or a lift() over the whole result — instead of the result itself: the wrapper becomes the piece's own body, and nothing durable names it. Return the result object literal directly and put computed() on the individual fields that derive from an input`,
+        ),
+        pieceId: piece.id,
+        rawCauseMessage:
+          `pattern materialized under session-only identity ${strandedInstantiation.identity}#${strandedInstantiation.symbol} on entity ${strandedInstantiation.cell}`,
+      };
+    }
     const resultRef = createLLMFriendlyLink(
       resultCell.getAsNormalizedFullLink(),
       space,

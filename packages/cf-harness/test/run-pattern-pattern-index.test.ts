@@ -12,6 +12,8 @@ import {
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessFetch } from "../src/contracts/http-fetch.ts";
+import type { FabricPatternInstantiations } from "../src/fabric-instantiations.ts";
+import { comparableEntityHash } from "../src/fabric-observations.ts";
 import { PatternIndexClient } from "../src/pattern-index/client.ts";
 import {
   MAX_COMPOSED_PATTERNS,
@@ -377,6 +379,7 @@ describe("run-pattern over the pattern index", () => {
       taskText?: string;
       startFailure?: string;
       pieces?: PiecesController;
+      instantiations?: FabricPatternInstantiations;
     } = {},
   ): CfHarnessEngine =>
     new CfHarnessEngine({
@@ -388,6 +391,9 @@ describe("run-pattern over the pattern index", () => {
           pieces: options.startFailure === undefined
             ? options.pieces ?? pieces
             : piecesFailingToStart(options.startFailure),
+          ...(options.instantiations === undefined
+            ? {}
+            : { instantiations: options.instantiations }),
         }),
       ...(options.taskText === undefined ? {} : { taskText: options.taskText }),
       // Opting out is connection configuration rather than an injection
@@ -761,6 +767,58 @@ describe("run-pattern over the pattern index", () => {
       expect(index.calls.filter((call) => call.fn === "recordEvent")).toEqual(
         [],
       );
+    });
+
+    it("publishes nothing when the created piece carries a session-only pattern pointer", async () => {
+      // The index exists so a later run can load what an earlier one wrote.
+      // A pattern that materializes its piece under a pointer only this
+      // session can resolve would strand every one of those runs, so the
+      // failure it is reported as is also a failure to publish.
+      const index = stubIndex({}, { publish: { created: true } });
+      const result = await createEngine(index, {
+        instantiations: {
+          sequence: () => 0,
+          since: () => [{
+            sequence: 1,
+            identity: "keyless:zStranded",
+            symbol: "default",
+            cell: comparableEntityHash(
+              "of:fid1:Lu5lEvAZXeeCOI6SprXO9EG6gDFeZbLWP-MexaaM_qc",
+            )!,
+          }],
+        },
+      }).invokeBuiltinTool("run_pattern", publishInput);
+
+      expect((result.output as RunPatternToolErrorOutput).status).toBe("error");
+      // Source the model wrote names no indexed pattern, so the run reports no
+      // event either: nothing at all reaches the index.
+      expect(index.calls).toEqual([]);
+    });
+
+    it("reports an indexed run whose piece carries a session-only pointer as failed", async () => {
+      const index = stubIndex({ "pat-doubler": INDEXED_PATTERN });
+      await createEngine(index, {
+        instantiations: {
+          sequence: () => 0,
+          since: () => [{
+            sequence: 1,
+            identity: "keyless:zStranded",
+            symbol: "default",
+            cell: comparableEntityHash(
+              "of:fid1:Lu5lEvAZXeeCOI6SprXO9EG6gDFeZbLWP-MexaaM_qc",
+            )!,
+          }],
+        },
+      }).invokeBuiltinTool("run_pattern", {
+        patternId: "pat-doubler",
+        inputs: { n: 21 },
+      });
+
+      await index.settled("recordEvent", 2);
+      expect(
+        index.calls.filter((call) => call.fn === "recordEvent")
+          .map((call) => call.body.eventType),
+      ).toEqual(["instantiated", "run_failed"]);
     });
 
     it("publishes nothing when the run opted out of publishing", async () => {

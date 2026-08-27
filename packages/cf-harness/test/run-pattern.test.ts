@@ -17,6 +17,12 @@ import {
 } from "@commonfabric/runner/storage/cache.deno";
 import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessFabricSession } from "../src/fabric-session.ts";
+import {
+  createFabricInstantiationRecorder,
+  type FabricInstantiationRecorder,
+  type FabricPatternInstantiations,
+} from "../src/fabric-instantiations.ts";
+import { comparableEntityHash } from "../src/fabric-observations.ts";
 import { resolveWellKnownGrantRefs } from "../src/well-known-grants.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import {
@@ -341,12 +347,15 @@ describe("run-pattern", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let pieces: PiecesController;
+  let recorder: FabricInstantiationRecorder;
 
   beforeEach(async () => {
     storageManager = StorageManager.emulate({ as: signer });
+    recorder = createFabricInstantiationRecorder();
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
+      onPatternInstantiated: recorder.observe,
     });
     pieces = new PiecesController(
       await createSession({
@@ -363,12 +372,14 @@ describe("run-pattern", () => {
     await storageManager?.close();
   });
 
-  function createEngine() {
+  function createEngine(
+    instantiations: FabricPatternInstantiations = recorder.instantiations,
+  ) {
     return new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `run-pattern-test-${crypto.randomUUID()}`,
       cfcEnforcementMode: "disabled",
-      fabricSessionFactory: () => Promise.resolve({ pieces }),
+      fabricSessionFactory: () => Promise.resolve({ pieces, instantiations }),
     });
   }
 
@@ -401,6 +412,80 @@ describe("run-pattern", () => {
       expect(output.pieceId.length).toBeGreaterThan(0);
       expect((output.value as { doubled: number }).doubled).toBe(42);
       expect(output.linkedStringCount).toBe(0);
+    });
+
+    it("runs a pattern whose internal state feeds computed result fields, which strands nothing", async () => {
+      // The result is an object literal, so the piece's own root is the
+      // compiled pattern's: every instantiation this run reports is
+      // content-addressed, and the guard has nothing to claim.
+      const engine = createEngine();
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: [
+          "import { cell, computed, pattern } from 'commonfabric';",
+          "interface Input { n: number; }",
+          "interface Output { doubled: number; }",
+          "export default pattern<Input, Output>(({ n }) => {",
+          "  const factor = cell(2);",
+          "  return { doubled: computed(() => n * factor.get()) };",
+          "});",
+          "",
+        ].join("\n"),
+        inputs: { n: 21 },
+        resultSchema: DOUBLED_RESULT_SCHEMA,
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect((output.value as { doubled: number }).doubled).toBe(42);
+      const recorded = recorder.instantiations.since(0);
+      expect(recorded.length).toBeGreaterThan(0);
+      expect(recorded.some((one) => one.identity.startsWith("keyless:"))).toBe(
+        false,
+      );
+    });
+
+    it("fails the run when the invocation materialized a session-only pointer", async () => {
+      // What the runner reports for a root no stored artifact names: a
+      // `keyless:` pointer stamped somewhere in the created piece's graph.
+      const stranded: FabricPatternInstantiations = {
+        sequence: () => 0,
+        since: () => [{
+          sequence: 1,
+          identity: "keyless:zStranded",
+          symbol: "default",
+          cell: comparableEntityHash(
+            "of:fid1:Lu5lEvAZXeeCOI6SprXO9EG6gDFeZbLWP-MexaaM_qc",
+          )!,
+        }],
+      };
+      const result = await createEngine(stranded).invokeBuiltinTool(
+        "run_pattern",
+        { sourceText: DOUBLING_PATTERN_SOURCE, inputs: { n: 21 } },
+      );
+      const output = result.output as RunPatternToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("only be opened by this session");
+      expect(output.message).toContain("computed()");
+      expect(output.message).not.toContain("keyless:zStranded");
+      expect(output.rawCauseMessage).toContain("keyless:zStranded");
+    });
+
+    it("returns a result when the session reports no instantiations at all", async () => {
+      // A session built without an instantiation recorder answers no question
+      // about pattern pointers, and the run proceeds on the rest.
+      const engine = new CfHarnessEngine({
+        sandboxRuntime: new FakeSandboxRuntime(),
+        runId: `run-pattern-test-${crypto.randomUUID()}`,
+        cfcEnforcementMode: "disabled",
+        fabricSessionFactory: () => Promise.resolve({ pieces }),
+      });
+      const result = await engine.invokeBuiltinTool("run_pattern", {
+        sourceText: DOUBLING_PATTERN_SOURCE,
+        inputs: { n: 21 },
+        resultSchema: DOUBLED_RESULT_SCHEMA,
+      });
+      const output = result.output as RunPatternToolSuccessOutput;
+      expect(output.status).toBe("ok");
+      expect((output.value as { doubled: number }).doubled).toBe(42);
     });
 
     it("returns a sealed string position as the address of that position rather than an opaque link", async () => {
