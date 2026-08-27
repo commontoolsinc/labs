@@ -59,7 +59,10 @@ export const EXPERIMENTAL_ENV_VARS = {
 } as const satisfies Record<keyof ExperimentalOptions, string | null>;
 
 /** The canonical parse: exactly `"true"` / `"false"`, anything else ignored. */
-export function parseFlagValue(raw: string, source: string): boolean | undefined {
+export function parseFlagValue(
+  raw: string,
+  source: string,
+): boolean | undefined {
   if (raw === "true" || raw === "false") return raw === "true";
   console.warn(
     `[runtime-presets] Ignoring ${source}="${raw}" — ` +
