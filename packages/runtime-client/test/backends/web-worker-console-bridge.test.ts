@@ -15,6 +15,10 @@ import {
   TransportNotificationType,
 } from "@/protocol/mod.ts";
 import { RuntimeProcessor } from "@/backends/mod.ts";
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 
 // The worker entry (`backends/web-worker/index.ts`) installs a `message`
 // listener on `self` (which is `globalThis` under Deno) and reads
@@ -26,7 +30,11 @@ import { RuntimeProcessor } from "@/backends/mod.ts";
 type Posted = Record<string, unknown>;
 
 function dispatch(data: unknown): Promise<void> {
-  globalThis.dispatchEvent(new MessageEvent("message", { data }));
+  // Encoded as the client's transport sends it: the worker entry decodes the
+  // envelope, so a raw object would arrive as something it cannot read.
+  globalThis.dispatchEvent(
+    new MessageEvent("message", { data: realmFromFabricValue(data as never) }),
+  );
   // The handler is async; let its microtasks settle before asserting.
   return new Promise((resolve) => setTimeout(resolve, 0));
 }
@@ -45,7 +53,7 @@ describe("web-worker-console-bridge", () => {
       (globalThis as { postMessage: (m: Posted) => void }).postMessage = (
         m: Posted,
       ) => {
-        posted.push(m);
+        posted.push(fabricFromRealmValue(m as never) as Posted);
       };
 
       try {
@@ -144,7 +152,7 @@ describe("web-worker-console-bridge", () => {
         (globalThis as { postMessage: (m: Posted) => void }).postMessage = (
           m: Posted,
         ) => {
-          posted.push(m);
+          posted.push(fabricFromRealmValue(m as never) as Posted);
         };
 
         // Disable forwarding: native console is restored, so a subsequent log is
@@ -200,7 +208,7 @@ describe("web-worker-console-bridge", () => {
       (globalThis as { postMessage: (m: Posted) => void }).postMessage = (
         m: Posted,
       ) => {
-        posted.push(m);
+        posted.push(fabricFromRealmValue(m as never) as Posted);
       };
       // The handler logs every caught error; capture to keep output clean and
       // assert the error path ran.
@@ -381,7 +389,7 @@ describe("web-worker-console-bridge", () => {
             threwOnce = true;
             throw new Error("post failed");
           }
-          posted.push(m);
+          posted.push(fabricFromRealmValue(m as never) as Posted);
         };
         posted.length = 0;
         await dispatch({ msgId: 106, data: { type: RequestType.Idle } });
@@ -400,7 +408,7 @@ describe("web-worker-console-bridge", () => {
         (globalThis as { postMessage: (m: Posted) => void }).postMessage = (
           m: Posted,
         ) => {
-          posted.push(m);
+          posted.push(fabricFromRealmValue(m as never) as Posted);
         };
 
         // Notifications reach the live worker; a throwing notification handler
@@ -442,19 +450,64 @@ describe("web-worker-console-bridge", () => {
       }
     });
 
-    it("reports a message that carries no `msgId` to reply under", async () => {
-      // `message` is whatever was posted, and a reply is addressed by
-      // `msgId`. `null` has none: the entry throws `Invalid IPC request` for
-      // it, and reading `msgId` off it inside the `catch` would throw from the
-      // one place a throw has nowhere to go -- out of this async listener it
-      // is an unhandled rejection, and the report never gets posted at all.
+    it("reports a message that does not decode at all", async () => {
+      // Dispatched raw rather than through `dispatch()`, which encodes: what
+      // this needs is a message that is no encoding at all, which is what a
+      // non-conforming or damaged sender would deliver. The companion below
+      // goes the other way -- a well-formed encoding of a value that is no
+      // message -- and the two reach different reports for the same reason,
+      // that there is no `msgId` to answer under.
       const posted: Posted[] = [];
       const originalPostMessage =
         (globalThis as { postMessage?: unknown }).postMessage;
-      (globalThis as { postMessage: (m: Posted) => void }).postMessage = (
-        m: Posted,
+      (globalThis as { postMessage: (m: unknown) => void }).postMessage = (
+        m: unknown,
       ) => {
-        posted.push(m);
+        posted.push(fabricFromRealmValue(m as never) as Posted);
+      };
+      const realConsoleError = console.error;
+      console.error = () => {};
+
+      try {
+        await import("@/backends/web-worker/index.ts");
+        posted.length = 0;
+
+        // Dispatched without a wait: the decode fails and the report is
+        // posted before the listener reaches its first `await`, so there is
+        // nothing to settle.
+        globalThis.dispatchEvent(
+          new MessageEvent("message", { data: { not: "an encoding" } }),
+        );
+
+        expect(posted).toHaveLength(1);
+        expect(posted[0].type).toBe(NotificationType.ErrorReport);
+        expect(posted[0].message).toContain("Undecodable message");
+        // The reason this reports rather than replies, pinned rather than
+        // stated: a reply is addressed by `msgId`, and a message that did not
+        // decode has none to read.
+        expect(Object.hasOwn(posted[0], "msgId")).toBe(false);
+      } finally {
+        console.error = realConsoleError;
+        (globalThis as { postMessage?: unknown }).postMessage =
+          originalPostMessage;
+      }
+    });
+
+    it("reports a message that carries no `msgId` to reply under", async () => {
+      // A reply is addressed by `msgId`, and `null` carries none. It reaches
+      // the guard rather than the decode's `catch`: `null` is a `FabricValue`,
+      // so the envelope decodes it to itself and it fails `isIPCClientMessage`
+      // downstream, which is where `Invalid IPC request` is thrown.
+      //
+      // Decoded as the client's transport decodes it: `postToClient()` encodes
+      // the envelope, so what a raw capture sees is the encoding.
+      const posted: Posted[] = [];
+      const originalPostMessage =
+        (globalThis as { postMessage?: unknown }).postMessage;
+      (globalThis as { postMessage: (m: unknown) => void }).postMessage = (
+        m: unknown,
+      ) => {
+        posted.push(fabricFromRealmValue(m as never) as Posted);
       };
       const realConsoleError = console.error;
       console.error = () => {};

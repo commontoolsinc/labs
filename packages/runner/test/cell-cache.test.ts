@@ -2410,7 +2410,7 @@ describe("cell-cache: two-identity shared-space compile cache (e2e)", () => {
   });
 
   it("runtime B warms from A's cache write and B's cold-compile writeback commits without error", async () => {
-    // --- Session A: cold compile + write-back ---
+    // Session A: cold compile + write-back
     const pmA = rtA.patternManager;
     const txA = rtA.edit();
     await pmA.compilePattern(E2E_PROGRAM, { space: sharedSpace, tx: txA });
@@ -2425,7 +2425,7 @@ describe("cell-cache: two-identity shared-space compile cache (e2e)", () => {
       byIdentityHits: 0,
     });
 
-    // --- Session B: should warm-hit A's committed cache ---
+    // Session B: should warm-hit A's committed cache
     // smB has its own per-space client replicas, so it must fetch from the
     // shared server. compilePattern drives the storage read-through internally.
     const pmB = rtB.patternManager;

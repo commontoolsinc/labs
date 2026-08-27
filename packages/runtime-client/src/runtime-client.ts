@@ -5,17 +5,12 @@
  * for interacting with cells across the worker boundary.
  */
 
-import {
-  fabricFromRealmValue,
-  realmFromFabricValue,
-} from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import {
-  type DID,
-  type Identity,
-  realmValueFromKeyPair,
-} from "@commonfabric/identity";
+import type {
+  FabricPlainObject,
+  FabricValue,
+} from "@commonfabric/data-model/fabric-value";
+import type { DID, Identity } from "@commonfabric/identity";
 import { Program } from "@commonfabric/js-compiler/interface";
 import type {
   ApplyOpResolution,
@@ -57,7 +52,6 @@ import {
   type EventAttentionResolveResponse,
   EventNeedsAttentionNotification,
   InitializationData,
-  JSONObject,
   type LoggerCountsData,
   type LoggerFlagsData,
   type LoggerMetadata,
@@ -76,30 +70,7 @@ import {
   type SpaceAclView,
   TelemetryNotification,
   type UploadBlobResponse,
-  type WireApplyOpResolution,
-  type WireOperationFieldSnapshot,
 } from "./protocol/mod.ts";
-
-const operationFieldFromWire = (
-  field: WireOperationFieldSnapshot,
-): OperationFieldSnapshot => ({
-  ...field,
-  materialized: fabricFromRealmValue(field.materialized),
-  operations: field.operations.map((operation) => ({
-    ...operation,
-    payload: fabricFromRealmValue(operation.payload),
-  })),
-});
-
-const applyOpResolutionFromWire = (
-  resolution: WireApplyOpResolution,
-): ApplyOpResolution => ({
-  ...resolution,
-  operations: resolution.operations.map((operation) => ({
-    ...operation,
-    payload: fabricFromRealmValue(operation.payload),
-  })),
-});
 
 export interface RuntimeClientOptions
   extends Omit<InitializationData, "apiUrl" | "identity" | "spaceIdentity"> {
@@ -181,7 +152,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       ...(operationSessionId === undefined ? {} : { operationSessionId }),
       ...(after === undefined ? {} : { after }),
     });
-    return operationFieldFromWire(response.field);
+    return response.field;
   }
 
   async applyOperation<T>(
@@ -200,9 +171,9 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       cell: cell.ref(),
       ...(operationSessionId === undefined ? {} : { operationSessionId }),
       ...operation,
-      payload: realmFromFabricValue(operation.payload),
+      payload: operation.payload,
     });
-    return applyOpResolutionFromWire(response.resolution);
+    return response.resolution;
   }
 
   async subscribeOperationField<T>(
@@ -306,9 +277,8 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     const initialized = await (new RuntimeConnection(transport)).initialize({
       apiUrl: options.apiUrl.toString(),
       spaceHostMap: options.spaceHostMap,
-      identity: realmValueFromKeyPair(options.identity.keyPair),
-      spaceIdentity: options.spaceIdentity &&
-        realmValueFromKeyPair(options.spaceIdentity.keyPair),
+      identity: options.identity.keyPair,
+      spaceIdentity: options.spaceIdentity?.keyPair,
       spaceDid: options.spaceDid,
       spaceName: options.spaceName,
       experimental: options.experimental,
@@ -423,10 +393,17 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     });
   }
 
+  /**
+   * Creates a piece in the given space, from a URL, a program, or the source
+   * of a single-file one.
+   *
+   * `options.argument` is the piece's input, which is a record: a piece is
+   * created with named inputs or with none.
+   */
   async createPage<T = unknown>(
     input: string | URL | Program,
     space: DID,
-    options?: { argument?: JSONObject; run?: boolean },
+    options?: { argument?: FabricPlainObject; run?: boolean },
   ): Promise<PageHandle<T>> {
     const source = input instanceof URL
       ? { url: input.href }
@@ -951,7 +928,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
       type: RequestType.UploadBlob,
       space: options.space,
       contentType: options.contentType,
-      body: realmFromFabricValue(new FabricBytes(options.body)),
+      body: new FabricBytes(options.body),
       suffix: options.suffix,
     });
   }
@@ -1006,7 +983,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
 
   private _onOperationUpdate = (data: OperationUpdateNotification): void => {
     this.#operationSubscriptions.get(data.subscriptionId)?.(
-      operationFieldFromWire(data.field),
+      data.field,
     );
   };
 

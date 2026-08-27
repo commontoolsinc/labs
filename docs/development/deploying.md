@@ -4,8 +4,13 @@ A commit reaches a server host by way of the bastion. The deploy jobs in CI
 open an SSH connection to the bastion and run one command there,
 `/opt/cf/deploy.sh`, passing the environment to deploy and the commit to deploy
 to it. That script does the rest: it deploys the binaries that CI already built
-and uploaded for that commit. The shell is a static site rather than a server,
-and reaches its bucket another way; "The staging shell" below covers it.
+and uploaded for that commit.
+
+Two browser shells reach users, and they are configured in different places.
+The toolshed binary carries one and serves it from its own origin, so it is
+configured when that binary is built; "The shell inside the binary" below
+covers it. The other is a static site published to its own bucket, and "The
+staging shell" covers that one.
 
 Two jobs do this:
 
@@ -57,6 +62,46 @@ a mismatch fails on the pull request instead.
 Changing the argument list therefore takes a change in each repository, in
 order: land the infra change, apply the bastion playbook so the host has the
 new script, then change the call sites here.
+
+## The shell inside the binary
+
+`toolshed` serves a browser shell from the `shell-frontend` directory beside
+it, so <https://estuary.saga-castor.ts.net/> and
+<https://rapids.saga-castor.ts.net/> each serve the shell that the binary they
+run was built with. `tasks/build-binaries.ts` builds `packages/shell` as part
+of the toolshed build and moves the output there. Configuring this shell is
+therefore something the `build-toolshed` job does, and a deploy carries
+whatever that build baked in. It needs no API host: it is served from the same
+origin as the API it calls, which is what the shell falls back to.
+
+`SHELL_PRESENCE_URL`, a repository variable of this repository, optionally
+names the WebSocket service used for ephemeral collaborative-editor presence.
+Setting it is the whole of turning co-presence on for these two environments;
+it is configuration rather than code, so it is set once and every later build
+reads it. The job passes it to the build under the name the build reads,
+`PRESENCE_URL`, and esbuild bakes it into the bundle as a define. A value that
+is not a credential-free WebSocket URL is rejected by
+`packages/shell/src/lib/presence-url.ts` and fails the build rather than
+shipping, and the job confirms the URL reached the bundle before the binary is
+uploaded. An unset variable omits the define, and a shell with no presence
+endpoint is a working shell — unlike an absent API host, an absent presence
+endpoint is not a misconfiguration, so nothing fails.
+
+Because nothing fails either way, a green job does not by itself say which of
+the two shells a binary carries. The build log does: the step names the
+endpoint it passed to the build, or says the variable is unset and that
+co-presence will be off wherever the binary runs.
+
+Two consequences follow from the value being baked rather than read at start-up.
+Changing the variable reaches a deployment only through a rebuild and a
+redeploy, so a redeploy of an existing commit cannot change it. And one binary
+serves both environments, so both carry the same endpoint — though not at the
+same moment, because `deploy-rapids` ships every push to `main` on its own
+while `deploy-estuary` waits to be dispatched. A variable change therefore
+reaches rapids first and estuary when someone deploys it there.
+
+What a running deployment actually carries is visible from outside it: the URL
+is in the `/scripts/index.js` that deployment serves, or it is not.
 
 ## The staging shell
 

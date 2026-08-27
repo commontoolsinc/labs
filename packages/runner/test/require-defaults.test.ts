@@ -162,6 +162,7 @@ const _mixed: MustBeTrue<
 
 //
 // RequireDefaults<T> — Default<T|undefined, V>
+//
 // The implementation strips `| undefined` via Exclude when making the key
 // required, so the value type becomes just T (not T|undefined).
 //
@@ -186,6 +187,7 @@ const _cellDefaultRequired: MustBeTrue<
 
 //
 // RequireDefaults<T> — Default field in a union with a plain type
+//
 // The presence of a Default-branded member in the union makes the field required.
 //
 

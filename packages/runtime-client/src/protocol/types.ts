@@ -1,5 +1,8 @@
 import type { MetaField } from "@commonfabric/api";
-import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
+import type {
+  FabricBytes,
+  FabricKeyPair,
+} from "@commonfabric/data-model/fabric-primitives";
 import type {
   FabricArray,
   FabricPlainObject,
@@ -11,7 +14,6 @@ import type {
   ApplyOpResolution,
   DeliveryAttention,
   EventAttentionResolution,
-  IntegratedOperation,
   OpCursor,
   OperationFieldSnapshot,
 } from "@commonfabric/memory/v2";
@@ -572,7 +574,12 @@ export type IPCRemotePost = IPCRemoteMessage | IPCTransportNotification;
  * **Ownership.** Any value reaching a handler implementation is owned outright
  * by the receiver: it is guaranteed not to be shared elsewhere already, and not
  * to become shared later, except by the receiver's own action. A handler may
- * therefore retain, mutate, or cede what it is given without defending itself.
+ * therefore retain or cede what it is given without defending itself.
+ *
+ * Ownership is about sharing, not about mutability. A request arrives through
+ * a decode, and every container a decode returns is frozen -- see "Decoding"
+ * in `docs/specs/space-model-formal-spec/4-realm-encoding.md`. A handler that
+ * wants a different value builds one; it does not edit this one.
  *
  * That is a requirement on whatever delivers a request, not a property of any
  * particular transport -- see `RuntimeTransport.send()`.
@@ -607,12 +614,11 @@ export type InitializationData = {
   spaceHostMap?: Record<string, string>;
 
   /**
-   * Signer, as a `codec-realm` encoding of the `FabricKeyPair` it signs with.
-   * Encoded rather than plain because that is the one format which carries
-   * either state of a key pair -- key handles included -- across a realm
-   * boundary whole.
+   * The signer's key pair. It crosses inside the envelope's own encoding,
+   * which is the one format carrying either state of a key pair -- key
+   * handles included -- across a realm boundary whole.
    */
-  identity: RealmEncodedValue;
+  identity: FabricKeyPair;
 
   /**
    * The space this connection opens on.
@@ -624,8 +630,8 @@ export type InitializationData = {
    */
   spaceName?: string;
 
-  /** Temporary identity of space, encoded as `identity` above is. */
-  spaceIdentity?: RealmEncodedValue;
+  /** Temporary key pair for the space, carried as `identity` above is. */
+  spaceIdentity?: FabricKeyPair;
 
   /**
    * How long a request may go unanswered before the client gives up on it.
@@ -639,9 +645,6 @@ export type InitializationData = {
    */
   experimental?: {
     modernCellRep?: boolean;
-    // Roll a space's system root pattern (home included) forward in place
-    // when its toolshed serves a newer identity. Default off.
-    systemPatternAutoUpdate?: boolean;
     // Server-execution v2 (docs/specs/server-side-execution/). The host
     // DECLARES its posture here so the worker runs the same arm — the
     // flag previously rode only as an untyped excess property, and any
@@ -780,36 +783,6 @@ export type CellGetRequest = BaseRequest & {
 };
 
 /**
- * A cell's value as this connection carries it: the data a cell holds, with a
- * `CellRef` wherever a cell sits.
- *
- * Distinct from `JSONValue` in the two ways the traffic actually differs: a
- * present `undefined` is a value a cell can hold, and the containers are
- * readonly.
- *
- * TODO(danfuzz): this still cannot carry the whole `FabricValue` domain. A
- * `FabricSpecialObject` has no representation here, and neither does a
- * `bigint` or a `symbol`, both of which are `FabricValue` arms. The transport
- * is `postMessage` rather than JSON, so that is a gap rather than a limit --
- * though structured clone alone does not close it, a class instance arriving
- * with its prototype and private fields gone. `codec-realm` is the mechanism,
- * being the format written for this crossing: a `bigint` travels as itself, a
- * `symbol` under a tag, and a `FabricBytes` as an `ArrayBuffer` a send can
- * transfer. Until then
- * `CellHandle.serialize()` refuses all three, so what the gap costs is a throw
- * rather than silent loss.
- */
-export type WireCellValue =
-  | null
-  | undefined
-  | boolean
-  | number
-  | string
-  | readonly WireCellValue[]
-  | { readonly [key: string]: WireCellValue }
-  | CellRef;
-
-/**
  * The {@link RequestType.CellSet} request. `value` is the whole
  * already-resolved value rather than a delta.
  */
@@ -824,7 +797,7 @@ export type CellSetRequest = BaseRequest & {
   /**
    * The value to store, whole and already resolved.
    */
-  value: WireCellValue;
+  value: FabricValue;
 };
 
 /**
@@ -845,7 +818,7 @@ export type CellPushRequest = BaseRequest & {
   /**
    * The value to apply, whole and already resolved.
    */
-  value: WireCellValue;
+  value: FabricValue;
 };
 
 /**
@@ -863,7 +836,7 @@ export type CellSendRequest = BaseRequest & {
   /**
    * The event to deliver.
    */
-  event: WireCellValue;
+  event: FabricValue;
 };
 
 /**
@@ -942,7 +915,7 @@ export type OperationApplyRequest = BaseRequest & {
   submissionId: string;
   base: OpCursor | null;
   baselineHash?: string;
-  payload: RealmEncodedValue;
+  payload: FabricValue;
 };
 
 /** The {@link RequestType.OperationSubscribe} request. */
@@ -977,7 +950,7 @@ export type OperationSessionCloseRequest = BaseRequest & {
 
 /** A response carrying one operation-backed field snapshot. */
 export type OperationFieldResponse = {
-  field: WireOperationFieldSnapshot;
+  field: OperationFieldSnapshot;
 };
 
 /** A response naming the operation codecs available for a cell. */
@@ -987,29 +960,8 @@ export type OperationCapabilitiesResponse = {
 
 /** A response carrying the authoritative resolution of an operation. */
 export type OperationApplyResponse = {
-  resolution: WireApplyOpResolution;
+  resolution: ApplyOpResolution;
 };
-
-/** An integrated operation encoded for a structured-clone boundary. */
-export type WireIntegratedOperation = Omit<IntegratedOperation, "payload"> & {
-  payload: RealmEncodedValue;
-};
-
-/** An apply result encoded for a structured-clone boundary. */
-export type WireApplyOpResolution = Omit<ApplyOpResolution, "operations"> & {
-  operations: WireIntegratedOperation[];
-};
-
-/** An operation field encoded for a structured-clone boundary. */
-export type WireOperationFieldSnapshot =
-  & Omit<
-    OperationFieldSnapshot,
-    "materialized" | "operations"
-  >
-  & {
-    materialized: RealmEncodedValue;
-    operations: WireIntegratedOperation[];
-  };
 
 /**
  * The {@link RequestType.GetCell} request. `cause` is what derives the
@@ -1435,13 +1387,12 @@ export type UploadBlobRequest = BaseRequest & {
   contentType: string;
 
   /**
-   * The blob's bytes: a `FabricBytes` in the realm-crossing form, which
-   * carries it as a bare `ArrayBuffer` that structured cloning delivers whole
-   * and a send can transfer. It decodes back into a `FabricBytes`, so the
-   * bytes are an immutable value at both ends rather than a view a sender
-   * still holds.
+   * The blob's bytes. The envelope's encoding carries a `FabricBytes` as a
+   * bare `ArrayBuffer` that structured cloning delivers whole, and decodes it
+   * back into a `FabricBytes`, so the bytes are an immutable value at both
+   * ends rather than a view a sender still holds.
    */
-  body: RealmEncodedValue;
+  body: FabricBytes;
 
   /**
    * The extension the stored blob is served under, defaulting to `bin`.
@@ -1655,17 +1606,23 @@ export type PageCreateRequest = BaseRequest & {
   } | {
     program: Program;
   };
-
   /**
-   * The argument the piece is created with.
+   * The argument the piece is created with. The wire carries a `FabricValue`,
+   * which is what the envelope's encoding makes true of it.
    *
-   * TODO(danfuzz): a piece's argument is a `FabricValue`, and `JSONValue`
-   * narrows it to the JSON-compatible subset with nothing carrying the rest.
-   * The same gap `WireCellValue` is marked with, at the other request that
-   * sends a value into the worker, and closed by the same mechanism
-   * (`codec-realm`).
+   * A piece's input is a record of named inputs, which is narrower, and that
+   * is what the client API asks for. `handlePieceCreate()` holds the same line
+   * at the far end rather than casting, so the arms this admits and
+   * `FabricPlainObject` does not -- a `bigint`, a `FabricBytes`, a bare string
+   * -- reach it only from a sender that went around that API, and are turned
+   * away with a message naming what arrived.
+   *
+   * This value reaches the wire as the caller built it, no conversion walk
+   * standing between, so it is where the encoding's tree shape shows: a cycle
+   * in it is refused, and a subtree needing encoding that the record reaches
+   * twice arrives twice. `RuntimeTransport.send()` states that shape.
    */
-  argument?: JSONValue;
+  argument?: FabricValue;
 
   /**
    * What derives the piece's identity, so that the same cause names the
@@ -2415,14 +2372,12 @@ export type VDomMountResponse = {
 };
 
 /**
- * TODO(danfuzz): This type should be made compatible with `FabricValue`, for
- * transport implemented using `codec-realm`. Note that an `interface` never
- * satisfies `FabricPlainObject` -- TypeScript grants an implicit index
- * signature to an anonymous object type and not to an interface -- so every
- * arm here has to become a type alias. The two ends of the crossing carry the
- * matching markers: `WebWorkerRuntimeTransport.send()` in
- * `../client/transports/web-worker/transport-web-worker.ts`, and the `message`
- * listener in `../backends/web-worker/index.ts`.
+ * Every request a client can send.
+ *
+ * Each arm is a type alias rather than an `interface`, and must stay one: the
+ * envelope is encoded as a `FabricValue`, and TypeScript grants the implicit
+ * index signature that `FabricPlainObject` needs to an anonymous object type
+ * and not to an interface.
  */
 export type IPCClientRequest =
   | InitializeRequest
@@ -2511,18 +2466,10 @@ export type BooleanResponse = {
 };
 
 /**
- * A cell's value on its way _out_ of the worker, which `WireCellValue` is on
- * its way in.
- *
- * A `FabricValue`, because that is what the producer hands over:
- * `convertCellsToLinks()` preserves a `FabricPrimitive` by identity, so
- * `handleCellGet()` in `backends/runtime-processor.ts` can return one.
- *
- * TODO(danfuzz): the crossing does not yet carry what this declares.
- * Structured clone strips a `FabricPrimitive` to `{}` on the way to the main
- * thread, silently, where the inbound direction throws instead (see the marker
- * on `WireCellValue`). `codec-realm` is the mechanism, and closing this gap
- * and `WireCellValue`'s is one change.
+ * A cell's value on its way _out_ of the worker. The two directions carry the
+ * same domain, which they did not before the envelope was encoded: outbound
+ * lost a `FabricPrimitive` to structured clone where inbound refused one
+ * outright.
  */
 export type CellValueResponse = {
   /**
@@ -2656,13 +2603,7 @@ export type CellUpdateNotification = {
    * The cell that changed.
    */
   cell: CellRef;
-
-  /**
-   * Its new value. The push form of the same read `CellValueResponse` carries,
-   * produced by the same conversion, and so the same type.
-   *
-   * TODO(danfuzz): the same gap `CellValueResponse` is marked with.
-   */
+  /** Its new value, as {@link CellValueResponse} carries the pulled form. */
   value: FabricValue;
 
   /**
@@ -2692,25 +2633,19 @@ export type ConsoleNotification = {
   method: string;
 
   /**
-   * The arguments, each encoded on its own. `ConsoleMessage` is this same
-   * notification with them decoded, which is what the client emits.
-   *
-   * TODO(danfuzz): once the envelope itself is encoded, this field holds a
-   * `FabricValue[]` and the encoding at each end goes away with it.
-   */
-  args: RealmEncodedValue[];
-};
-
-/**
- * A console notification as the client emits it, with its arguments decoded
- * back into the values the pattern logged.
- */
-export type ConsoleMessage = Omit<ConsoleNotification, "args"> & {
-  /**
-   * The arguments, decoded back into the values the pattern logged.
+   * The arguments, as the values the pattern logged. They cross inside the
+   * envelope's own encoding, so a `FabricBytes` arrives as bytes and an
+   * instance arrives with its class.
    */
   args: FabricArray;
 };
+
+/**
+ * A console notification as the client emits it: the same shape the worker
+ * sent. The arguments were values on the wire, so there is nothing left for
+ * the client to convert.
+ */
+export type ConsoleMessage = ConsoleNotification;
 
 /**
  * A pattern asking the client to navigate to a cell. A request in name only:
@@ -2895,7 +2830,7 @@ export type VDomBatchNotification = {
 export type OperationUpdateNotification = {
   type: NotificationType.OperationUpdate;
   subscriptionId: string;
-  field: WireOperationFieldSnapshot;
+  field: OperationFieldSnapshot;
 };
 
 /**

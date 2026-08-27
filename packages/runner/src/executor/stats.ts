@@ -474,8 +474,8 @@ export type ServingLoopStats = {
 
   /** OW45 arm-B server-ensure stage 1 (design PR #6209 §10): the
    * SpaceServer's space-root ensure — one lease-guarded owed step per
-   * tenure (existence + freshness, no start). Counting caveat (review
-   * F4, recorded): `created`/`reconciled` count at SEAL-ACCEPT — the
+   * tenure (existence, no start). Counting caveat (review
+   * F4, recorded): `created` counts at SEAL-ACCEPT — the
    * ensure's transactions resolve when the wave admits them, and the
    * engine write rides the wave commit — so a wave later dropped
    * whole (lease-lost abort, replay refusal) leaves a count with no
@@ -492,10 +492,6 @@ export type ServingLoopStats = {
 
     /** Runs whose creation transaction materialized the root. */
     created: number;
-
-    /** Runs whose freshness reconcile moved the root ("updated" or
-     * "repaired-provenance" from the awaited default-root check). */
-    reconciled: number;
 
     /** Fail-closed skips: the space's ACL resolved no concrete owner
      * (missing, invalid, retracted, ANYONE-only). The tenure serves
@@ -590,7 +586,6 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   rootEnsure: {
     runs: 0,
     created: 0,
-    reconciled: 0,
     skippedNoOwner: 0,
     failures: 0,
   },

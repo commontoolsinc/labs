@@ -64,7 +64,7 @@ describe("stale linked read across two clients", () => {
     const B = "cellB";
     const C = "cellC";
 
-    // --- Client 1 seeds cellB = { isAdmin: true } and links cellA.isAdmin to it.
+    // Client 1 seeds cellB = { isAdmin: true } and links cellA.isAdmin to it.
     const cellB1 = rtA.getCell<{ isAdmin: boolean }>(space, B, undefined);
     const cellA1 = rtA.getCell<{ isAdmin: boolean }>(space, A, undefined);
     {
@@ -85,7 +85,7 @@ describe("stale linked read across two clients", () => {
     // Client 1 reads the linked value -> { isAdmin: true }
     expect(cellA1.get()).toEqual({ isAdmin: true });
 
-    // --- Client 2 converges, then flips cellB.isAdmin = false and publishes it.
+    // Client 2 converges, then flips cellB.isAdmin = false and publishes it.
     const cellB2 = rtB.getCell<{ isAdmin: boolean }>(space, B, undefined);
     await cellB2.sync();
     await cellB2.pull();
@@ -98,7 +98,7 @@ describe("stale linked read across two clients", () => {
       expect(res.error, `flip: ${JSON.stringify(res.error)}`).toBeUndefined();
     }
 
-    // --- Client 1, NOT synced, opens ONE transaction that both READS isAdmin
+    // Client 1, NOT synced, opens ONE transaction that both READS isAdmin
     // through the link in cellA and, on the strength of that read, writes the
     // grant to cellC. Because the read happens via `withTx(tx)`, the stale
     // `isAdmin` (the link target cellB) enters this tx's read-set.

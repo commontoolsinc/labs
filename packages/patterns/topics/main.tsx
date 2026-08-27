@@ -7,7 +7,6 @@ import {
   NAME,
   pattern,
   type PerSession,
-  type PerUser,
   type ReadonlyCell,
   Stream,
   UI,
@@ -25,8 +24,8 @@ import Topic, {
   topicAuthorLabel,
   type TopicCrossrefRow,
   type TopicMentionSource,
-  type TopicPiece,
   TOPICS_THEME,
+  type TopicSummary,
   whenLabel,
 } from "./topic.tsx";
 
@@ -53,15 +52,64 @@ export type {
   TopicPiece,
 } from "./topic.tsx";
 
+/**
+ * What the board USES of a stored topic — its demand, not the topic's truth.
+ *
+ * Written by the consumer, which is the point: a holder writes down what it
+ * reads or writes and the verbs it calls, never what the other pattern IS
+ * ([designing verbs so they can change](../../../docs/plans/verb-evolution.md),
+ * "a holder demands only what it uses"). This board calls NO topic verb, so
+ * its demand names none — and once it names none, adding a verb to a topic
+ * stops touching the board's shape at all.
+ *
+ * That is what keeps a verb NON-OPTIONAL. The alternative, and the reason
+ * this type exists, is that a verb reachable through the board's projection
+ * has to be declared optional there — a stream cannot carry a default, so
+ * optional is the only form an older generation tolerates — and every
+ * consumer then pays a maybe at the call site, whose obvious spelling
+ * (`piece.verb?.send(...)`) skips in silence.
+ *
+ * The membership, measured rather than guessed. Seven fields the board
+ * READS: the card list renders `title`, `body`, `commentCount`, `createdBy`
+ * and `lastActivityAt`; `index` publishes `title`,
+ * `createdAt`, `createdBy`, `commentCount`, `lastActivityAt` — the same
+ * array declared through a narrower row schema, which is why a field it
+ * names has to be demanded here to resolve at all; `crossrefTable` joins on
+ * `mentions`; `cardsByActivity` sorts on `lastActivityAt`; `topicCount`
+ * reads only a length.
+ *
+ * Eight members, then, because `[NAME]` is demanded for a reason none of
+ * those readers show: the board hands this same array on as each topic's
+ * mention universe, so the name has to survive the demand to reach the
+ * editor. Counting only what the board reads is what nearly dropped it.
+ * No verbs.
+ *
+ * `createdByName` is deliberately NOT among them, though the card once read
+ * it. It is `topicAuthorLabel`'s fallback for a topic written before
+ * structured authorship, and every one of the deployed board's 113 topics
+ * carries a structured `createdBy.name`, so the fallback is reached by none
+ * of them. Demanding it would write a field this plan retires into the one
+ * schema that cannot drop it later.
+ *
+ * Every field carries a default, and that is load-bearing rather than
+ * stylistic: a demanded path an older topic cannot produce makes the WHOLE
+ * array unreadable, while a default materializes in its place and the read
+ * succeeds. Measured, not inferred.
+ */
+export interface TopicDemand extends TopicSummary {
+  /** The display name, which the board publishes onward as each topic's
+   * `mentionable` entry — and `cf-code-editor` requires it there. Dropping it
+   * costs no type error and silently empties every `@`-mention completion. */
+  [NAME]: string | Default<""> | undefined;
+  body: string | Default<"">;
+  mentions: unknown[] | Default<[]>;
+}
+
 export interface TopicsInput {
   /** The board's durable topic list. `addTopic` appends here; direct writes
    * are legitimate but unattributed, and a whole-array write forfeits the
    * mergeability the verb's append keeps. */
-  topics?: Writable<TopicPiece[] | Default<[]>>;
-
-  /** @deprecated Retained while pre-Profile callers still use the old
-   * `setMyName` + unsigned-event contract. New callers use `agentName`. */
-  myName?: PerUser<Writable<string | Default<"">>>;
+  topics?: Writable<TopicDemand[] | Default<[]>>;
 }
 
 export interface AddTopicEvent {
@@ -76,10 +124,12 @@ export interface AddTopicEvent {
 
   /** The agent making this mutation. The authenticated principal remains the
    * human whose identity key invoked the stream; this is the agent's explicit
-   * content-level signature under that shared principal. Optional only so
-   * callers of the previous deployed schema remain valid; new callers must
-   * provide a non-blank name. */
-  agentName?: string;
+   * content-level signature under that shared principal.
+   *
+   * Required, for the reason given on `AgentAuthoredEvent`: acceptance widens
+   * compatibly and narrows only through a break, so tolerating an unsigned
+   * create is a tolerance that could never be withdrawn. */
+  agentName: string;
 }
 
 export interface AddTopicResult {
@@ -111,8 +161,10 @@ export interface TopicIndexRow {
 
   /** Who filed the topic. A topic written without structured authorship
    * materializes the declared default — the inert legacy sentinel
-   * `{ kind: "person", name: "" }` — so a blank name here means "unsigned";
-   * the display string then comes from the topic's own `createdByName`. */
+   * `{ kind: "person", name: "" }` — so a blank name here means "unsigned",
+   * and there is nothing further to consult: the display-name mirror this
+   * once pointed at is retired, and `topicAuthorLabel` renders the sentinel
+   * as `someone`. */
   createdBy?: TopicAuthor | Default<{ kind: "person"; name: "" }> | undefined;
 
   /** Coalesced to 0 for a cold or older topic whose derived path is absent,
@@ -310,14 +362,16 @@ export interface TopicsOutput {
   [NAME]: string;
   [UI]: VNode;
 
-  /** The board's topics, in filing order, as complete pieces — bodies,
-   * threads, and verbs included. Survey through `index` instead; read this
-   * when you already know which topic you are expanding. */
-  topics: TopicPiece[];
+  /** The board's topics, in filing order, through the shape the board demands
+   * of them: the display scalars and the mention universe, and no verbs. A
+   * caller that means to mutate a topic addresses the topic itself, where its
+   * own schema governs. Survey through `index` instead; read this when you
+   * already know which topic you are expanding. */
+  topics: TopicDemand[];
 
   /** The same list, under the name the topic pattern's editor autocompletes
    * over — what `addTopic` wires into each child as its mention universe. */
-  mentionable: TopicPiece[] | Default<[]>;
+  mentionable: TopicDemand[] | Default<[]>;
 
   /** How many topics the board holds, nulls included. */
   topicCount: number;
@@ -344,12 +398,6 @@ export interface TopicsOutput {
    * reference plus the write-time facts the pattern resolved. */
   addTopic: Stream<AddTopicEvent, AddTopicResult>;
 
-  /** @deprecated Compatibility view for callers of the previous board. */
-  myName: string;
-
-  /** @deprecated Compatibility mutation for callers of the previous board. */
-  setMyName: Stream<{ name: string }>;
-
   /** Submit the footer composer as the current viewer's canonical Profile. */
   submitTopic: Stream<void>;
 }
@@ -358,8 +406,8 @@ export interface TopicsOutput {
  * bound into this handler as plain snapshot values, which keeps the mutation
  * independently testable without weakening the canonical Profile path. */
 export const submitProfileTopic = handler<void, {
-  topics: Writable<TopicPiece[] | Default<[]>>;
-  mentionable: Writable<TopicPiece[] | Default<[]>>;
+  topics: Writable<TopicDemand[] | Default<[]>>;
+  mentionable: Writable<TopicDemand[] | Default<[]>>;
 
   /** `Writable` only because that is what the factory boundary accepts: the
    * input this is handed straight to declares `ReadonlyCell`, and a
@@ -368,7 +416,6 @@ export const submitProfileTopic = handler<void, {
    * here writes a row. */
   boardCrossrefs: Writable<TopicCrossrefRow[] | Default<[]>>;
   newTitle: Writable<string>;
-  myName: Writable<string | Default<"">>;
   profileName: string;
   profileAvatar: string;
 }>((_, {
@@ -376,7 +423,6 @@ export const submitProfileTopic = handler<void, {
   mentionable,
   boardCrossrefs,
   newTitle,
-  myName,
   profileName,
   profileAvatar,
 }) => {
@@ -387,8 +433,6 @@ export const submitProfileTopic = handler<void, {
     title: trimmed,
     createdAt: Date.now(),
     createdBy: author,
-    createdByName: topicAuthorLabel(author),
-    myName,
     // Same wiring `addTopic` gives its children: the board's own list is the
     // mention universe the new topic's editor autocompletes over, and the
     // board's pivot is where it reads its inbound references.
@@ -399,7 +443,7 @@ export const submitProfileTopic = handler<void, {
   newTitle.set("");
 });
 
-export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
+export default pattern<TopicsInput, TopicsOutput>(({ topics }) => {
   const newTitle = new Writable.perSession("");
 
   // `.length` alone is what makes this cheap: the shrunk schema declares
@@ -434,14 +478,9 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     { title, body, agentName },
   ) => {
     const trimmed = (title ?? "").trim();
-    const author = topicAuthorFromAgent(agentName ?? "");
-    if (agentName !== undefined && !author) {
-      rejectMutation("addTopic", "agentName must be non-blank when given");
-    }
+    const author = topicAuthorFromAgent(agentName) ??
+      rejectMutation("addTopic", "agentName must be non-blank");
     if (!trimmed) rejectMutation("addTopic", "title must be non-empty");
-    const legacyName = author
-      ? topicAuthorLabel(author)
-      : myName.get().trim() || "someone";
     const piece = Topic({
       title: trimmed,
       // Body at create is part of the create's atomic unit; created-with is
@@ -451,8 +490,6 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
       body: body ?? "",
       createdAt: Date.now(),
       createdBy: author,
-      createdByName: legacyName,
-      myName,
       // The board's own list, so the editor has a mention universe (backfilled
       // as a one-time link-bind on pieces created before this input existed).
       mentionable: topics,
@@ -467,16 +504,11 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     return { topic: piece };
   });
 
-  const setMyName = action(({ name }: { name: string }) => {
-    myName.set((name ?? "").trim());
-  });
-
   const submitTopic = submitProfileTopic({
     topics,
     mentionable: topics,
     boardCrossrefs: crossrefs,
     newTitle,
-    myName,
     profileName,
     profileAvatar,
   });
@@ -527,7 +559,6 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
                     <cf-text variant="caption" tone="muted">
                       {card.commentCount} comments · by {topicAuthorLabel(
                         card.createdBy,
-                        card.createdByName,
                       )}
                       {" · "}
                       {whenLabel(card.lastActivityAt ?? 0)}
@@ -575,8 +606,6 @@ export default pattern<TopicsInput, TopicsOutput>(({ topics, myName }) => {
     index: topics,
     newTitle,
     addTopic,
-    myName,
-    setMyName,
     submitTopic,
   };
 });

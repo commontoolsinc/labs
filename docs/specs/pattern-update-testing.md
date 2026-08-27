@@ -456,10 +456,10 @@ specification:
   children from today's compiled program. The gate stays green through those
   load failures — it has no eyes on them — so a path that *depends* on such a
   load succeeding is outside what a green run asserts. Two consequences worth
-  naming: the replay runtime leaves `systemPatternAutoUpdate` off (CFC
-  enforcement stays at its `enforce-explicit` default), so the heal above is
-  the parent re-creating children, not the production roll-forward repair —
-  that path has its own flags-on assertion in
+  naming: the replay runtime opens no piece, so nothing follows an origin
+  during it (CFC enforcement stays at its `enforce-explicit` default), and the
+  heal above is the parent re-creating children, not the production
+  roll-forward repair — that path has its own assertion in
   `packages/runner/test/pattern-pointer-unloadable-swap.test.ts`;
   and what an adopted fixture pins is old *source*, not old *storage format* —
   the memory migration chain runs once at adopt time, so the committed file

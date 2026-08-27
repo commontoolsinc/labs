@@ -15,7 +15,7 @@ import {
 import { isValidFabricValue } from "@commonfabric/data-model/fabric-value";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { getLogger } from "@commonfabric/utils/logger";
-import { Identity, realmValueFromKeyPair } from "@commonfabric/identity";
+import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
 import {
   decodeMemoryBoundary,
@@ -57,7 +57,6 @@ import {
   RuntimeProcessor,
   subscribeEventAttentionNotifications,
   toConsoleDebugValue,
-  toConsoleWireValue,
 } from "@/backends/runtime-processor.ts";
 import {
   assertFabricLoggerFlags,
@@ -615,28 +614,31 @@ describe("runtime-processor", () => {
   });
 
   describe("piece creation", () => {
-    const space = "did:key:z6Mk-runtime-processor-create" as const;
-    const source = { program: { main: "/main.tsx", files: [] } };
-
-    const refusalFor = async (argument: unknown) => {
-      try {
-        // deno-lint-ignore no-explicit-any
-        await (RuntimeProcessor.prototype as any).handlePieceCreate.call(
-          { getSpaceCtx: () => ({}) },
-          { type: RequestType.PageCreate, space, source, argument },
-        );
-      } catch (error) {
-        return (error as Error).message;
-      }
-      throw new Error("handlePieceCreate returned instead of refusing");
-    };
-
     it("names the rejected argument rather than its type", async () => {
-      // A piece's input is a record of named inputs, and the guard turns away
-      // everything else. `typeof` is not what says which: it renders an array
-      // and `null` alike, as `object`, and those are two of the kinds that get
-      // here. The message exists to explain the refusal, so it names the
-      // value.
+      // A piece's input is a record, and the guard turns away everything else.
+      // `typeof` is not what says which: it renders an array and `null` alike,
+      // as `object`, and those are two of the three kinds that get here. The
+      // message exists to explain the refusal, so it names the value.
+      const space = "did:key:z6Mk-runtime-processor-create" as const;
+      const processor = { getSpaceCtx: () => ({}) };
+      const refusalFor = async (argument: unknown) => {
+        try {
+          // deno-lint-ignore no-explicit-any
+          await (RuntimeProcessor.prototype as any).handlePieceCreate.call(
+            processor,
+            {
+              type: RequestType.PageCreate,
+              space,
+              source: { program: { main: "/main.tsx", files: [] } },
+              argument,
+            },
+          );
+        } catch (error) {
+          return (error as Error).message;
+        }
+        throw new Error("handlePieceCreate returned instead of refusing");
+      };
+
       expect(await refusalFor([1, 2]))
         .toBe("A piece's argument must be a record, not: [1,2]");
       expect(await refusalFor(null))
@@ -647,17 +649,45 @@ describe("runtime-processor", () => {
 
     it("refuses a fabric class instance as the whole argument", async () => {
       // The arm that separates `isPlainObject()` from the looser
-      // `isObjectNotArray()`, which admits any class instance. A piece's
+      // `isObjectNotArray()`, which admits any class instance. The connection
+      // carries a `FabricBytes` whole, so one reaches this guard as itself
+      // rather than as the `{}` a shape-blind copy would leave -- and a piece's
       // entire input is not one value, whatever that value is.
-      expect(await refusalFor(new FabricBytes(new Uint8Array([1, 2, 3]))))
-        .toContain("A piece's argument must be a record, not:");
-      expect(await refusalFor(FabricError.fromNativeError(new Error("x"))))
-        .toContain("A piece's argument must be a record, not:");
+      const space = "did:key:z6Mk-runtime-processor-create" as const;
+      const processor = { getSpaceCtx: () => ({}) };
+
+      await expect(
+        // deno-lint-ignore no-explicit-any
+        (RuntimeProcessor.prototype as any).handlePieceCreate.call(processor, {
+          type: RequestType.PageCreate,
+          space,
+          source: { program: { main: "/main.tsx", files: [] } },
+          argument: new FabricBytes(new Uint8Array([1, 2, 3])),
+        }),
+      ).rejects.toThrow("A piece's argument must be a record, not:");
+
+      // The other branch of the fabric class hierarchy, which reaches the
+      // guard by the same route.
+      await expect(
+        // deno-lint-ignore no-explicit-any
+        (RuntimeProcessor.prototype as any).handlePieceCreate.call(processor, {
+          type: RequestType.PageCreate,
+          space,
+          source: { program: { main: "/main.tsx", files: [] } },
+          argument: new FabricError({
+            type: "Error",
+            message: "not a set of inputs",
+            stack: undefined,
+            cause: undefined,
+          }),
+        }),
+      ).rejects.toThrow("A piece's argument must be a record, not:");
     });
 
     it("admits a record that holds a fabric class instance", async () => {
       // The other side of the same line, and the case that has to keep
       // working: the guard asks what the argument *is*, not what it holds.
+      const space = "did:key:z6Mk-runtime-processor-create" as const;
       const created: unknown[] = [];
       const processor = {
         getSpaceCtx: () => ({
@@ -674,7 +704,7 @@ describe("runtime-processor", () => {
         (RuntimeProcessor.prototype as any).handlePieceCreate.call(processor, {
           type: RequestType.PageCreate,
           space,
-          source,
+          source: { program: { main: "/main.tsx", files: [] } },
           argument: { image: bytes },
         }),
       ).rejects.toThrow("stop after the guard");
@@ -1289,12 +1319,15 @@ describe("runtime-processor", () => {
 
     describe("what the transport accepts", () => {
       /**
-       * Puts `value` through the two ends the notification actually uses: the
-       * producer's `toConsoleWireValue()`, `postMessage`'s structured clone, and
-       * the `fabricFromRealmValue()` that `client/connection.ts` decodes with.
+       * Puts `value` through the ends the notification actually uses: the
+       * producer's `toConsoleDebugValue()`, the envelope's encode,
+       * `postMessage`'s structured clone, and the decode the transport does on
+       * arrival. There is one encode, the envelope's.
        */
       function acrossTheWire(value: unknown): unknown {
-        return fabricFromRealmValue(structuredClone(toConsoleWireValue(value)));
+        return fabricFromRealmValue(
+          structuredClone(realmFromFabricValue(toConsoleDebugValue(value))),
+        );
       }
 
       it("returns a value the realm encoding carries, for each shape it renders", () => {
@@ -1519,27 +1552,16 @@ describe("runtime-processor", () => {
           .toEqual({ a: Symbol.for("tag") });
       });
 
-      it("returns a forged `FabricPrimitive` as `/unconvertible`, not a throw", () => {
+      it("leaves a forged `FabricPrimitive` for the encode to refuse", () => {
         // An object on a `FabricPrimitive`'s prototype passes every membership
         // check and has no encoding: `isValidFabricValue()` says true and the
-        // encode refuses. The handler must not throw over it, since the throw
-        // would abort the pattern's own `console.log()`. Nothing is said about
-        // what the value was -- it was built to defeat exactly this.
+        // encode refuses. Producing one takes deliberate effort, so it is not
+        // worth a second walk of every console argument to find early; it is
+        // left to fail where the encoding is actually done.
         const forged = Object.create(FabricBytes.prototype);
         expect(isValidFabricValue(toConsoleDebugValue(forged))).toBe(true);
         expect(() => realmFromFabricValue(toConsoleDebugValue(forged)))
           .toThrow();
-        expect(fabricFromRealmValue(toConsoleWireValue(forged)))
-          .toEqual({ "/unconvertible": "no encoding for value" });
-      });
-
-      it("returns `/unconvertible` for the whole argument a forgery is buried in", () => {
-        // The failure is the argument's, not the position's: nothing of the
-        // surrounding value survives, which is the price of not sifting a
-        // hostile graph for the piece that broke.
-        const forged = Object.create(FabricBytes.prototype);
-        expect(fabricFromRealmValue(toConsoleWireValue({ a: 1, forged })))
-          .toEqual({ "/unconvertible": "no encoding for value" });
       });
 
       it("returns a unique symbol as its marker", () => {
@@ -1957,11 +1979,9 @@ describe("runtime-processor", () => {
         },
       } as unknown as RuntimeProcessor;
 
-      // Freshly encoded, as the transport's clone delivers it: the handler owns
+      // The bytes as the transport's decode delivers them: the handler owns
       // its request's payload. Kept here so the test can check what became of it.
-      const payload = realmFromFabricValue(
-        new FabricBytes(new Uint8Array([1, 2, 3])),
-      );
+      const payload = new FabricBytes(new Uint8Array([1, 2, 3]));
 
       try {
         await expect(
@@ -1980,11 +2000,9 @@ describe("runtime-processor", () => {
         globalThis.fetch = originalFetch;
       }
 
-      // The handler CONSUMES its payload -- `BaseRequest` entitles it to, and it
-      // does, which is what makes the transport's ownership guarantee load-
-      // bearing rather than decorative. A spent tree is what a second decode
-      // reports.
-      expect(() => fabricFromRealmValue(payload)).toThrow("detached buffer");
+      // The handler no longer decodes, so the ceding that `BaseRequest`'s
+      // ownership rule turns on happens at the envelope rather than here: the
+      // bytes arrive already decoded and are handed on as they are.
 
       expect(requestedUrl).toBe(
         "http://toolshed.test/did:key:test-space/blobs/upload.png",
@@ -2456,7 +2474,10 @@ describe("runtime-processor", () => {
       const orig = self.postMessage;
       (self as { postMessage: unknown }).postMessage = (
         m: { value?: unknown },
-      ) => posted.push(m);
+      ) =>
+        posted.push(
+          fabricFromRealmValue(m as never) as { value?: unknown },
+        );
       try {
         RuntimeProcessor.prototype.handleCellSubscribe.call(processor, {
           type: RequestType.CellSubscribe,
@@ -3555,7 +3576,7 @@ describe("runtime-processor", () => {
       try {
         const processor = await RuntimeProcessor.initialize({
           apiUrl: "http://worker.test/",
-          identity: realmValueFromKeyPair(cfcSigner.keyPair),
+          identity: cfcSigner.keyPair,
           spaceDid: space,
         });
         expect(subscribed).toBe(true);

@@ -1,8 +1,7 @@
 // The space-root ensure core's pins (OW45 arm-B server-ensure stage 1;
-// design PR #6209 §1/§2): existence + freshness at the runner level —
-// creation with the OCC re-check, provenance stamping, the per-attempt
-// stamp hook, and the aged-root reconcile that replaces an obsolete
-// patternIdentity from the ensure itself. The serving SEAT (owed step,
+// design PR #6209 §1/§2): existence at the runner level — creation with
+// the OCC re-check, provenance stamping, and the per-attempt stamp hook.
+// The serving SEAT (owed step,
 // lease, counters, owner snapshot) is pinned in
 // executor-space-root-ensure.test.ts; these pins hold the core steady for
 // both callers (the serving seat and the client controller's delegated
@@ -79,12 +78,11 @@ describe("space-root ensure core", () => {
     return Promise.resolve(new Response(body));
   };
 
-  const createRuntime = (systemPatternAutoUpdate = false): Runtime => {
+  const createRuntime = (): Runtime => {
     runtime = new Runtime({
       apiUrl: new URL("http://toolshed.test"),
       storageManager,
       fetch: fetchStub,
-      experimental: { systemPatternAutoUpdate },
     });
     return runtime;
   };
@@ -98,7 +96,7 @@ describe("space-root ensure core", () => {
   });
 
   afterEach(async () => {
-    await runtime?.patternUpdater.idle();
+    await runtime?.sourceReconciler.idle();
     await runtime?.idle();
     await runtime?.dispose();
     await storageManager.close();
@@ -179,22 +177,18 @@ describe("space-root ensure core", () => {
     await runtime.idle();
   });
 
-  it("ensure creates a fresh root (reconcile skipped), then resolves it on the next run", async () => {
-    createRuntime(true);
+  it("ensure creates a fresh root, then resolves it on the next run", async () => {
+    createRuntime();
     const first = await ensureSpaceRootPattern(runtime, space, {
       isHomeSpace: true,
     });
     expect(first.outcome).toBe("created");
-    expect(first.reconcile).toBe("skipped-fresh");
     await runtime.idle();
 
     const second = await ensureSpaceRootPattern(runtime, space, {
       isHomeSpace: true,
     });
     expect(second.outcome).toBe("resolved-existing");
-    // Identity matches the served source, so the awaited reconcile
-    // reports the root current.
-    expect(second.reconcile).toBe("current");
   });
 
   it("non-home ensure uses the system default-app source (the unruled custom-URL fork's interim)", async () => {
@@ -211,8 +205,8 @@ describe("space-root ensure core", () => {
     );
   });
 
-  it("the in-tx fast arm returns early on a live re-check, and a thrown reconcile degrades to 'current' (the best-effort catch)", async () => {
-    createRuntime(true);
+  it("the in-tx fast arm returns early on a live re-check", async () => {
+    createRuntime();
     // Fast arm (the OCC re-check seeing a LIVE root): read through the
     // caller-supplied spaceCell hook — the same seam the delegated
     // client passes and the piece suite's creation-race test stubs.
@@ -237,30 +231,6 @@ describe("space-root ensure core", () => {
     );
     expect(raced.createdByThisCall).toBe(false);
     expect(raced.error).toBeUndefined();
-
-    // The reconcile catch: a real root, then the updater made to THROW
-    // — the freshness half is best-effort and must degrade to
-    // "current", never fail the ensure.
-    const first = await ensureSpaceRootPattern(runtime, space, {
-      isHomeSpace: true,
-    });
-    expect(first.outcome).toBe("created");
-    await runtime.idle();
-    const originalCheck = runtime.patternUpdater.checkDefaultPattern.bind(
-      runtime.patternUpdater,
-    );
-    runtime.patternUpdater.checkDefaultPattern = (() => {
-      throw new Error("reconcile blows up (coverage pin)");
-    }) as typeof runtime.patternUpdater.checkDefaultPattern;
-    try {
-      const second = await ensureSpaceRootPattern(runtime, space, {
-        isHomeSpace: true,
-      });
-      expect(second.outcome).toBe("resolved-existing");
-      expect(second.reconcile).toBe("current");
-    } finally {
-      runtime.patternUpdater.checkDefaultPattern = originalCheck;
-    }
     await runtime.idle();
   });
 
@@ -278,31 +248,28 @@ describe("space-root ensure core", () => {
     await runtime.idle();
   });
 
-  it("an aged root's ensure reconciles the obsolete patternIdentity (the updater-ordering pin)", async () => {
-    createRuntime(true);
-    const created = await ensureSpaceRootPattern(runtime, space, {
-      isHomeSpace: true,
-    });
-    expect(created.outcome).toBe("created");
+  it("leaves a persisted root's source alone (following it belongs to whoever opens it)", async () => {
+    createRuntime();
+    expect(
+      (await ensureSpaceRootPattern(runtime, space, { isHomeSpace: true }))
+        .outcome,
+    ).toBe("created");
     await runtime.idle();
-    const agedIdentity = await identityFor(HOME_PATH);
+    const bornIdentity = await identityFor(HOME_PATH);
 
-    // The served source moves while the root is not running — the aged
-    // space. The next ensure must swap the stored identity forward
-    // BEFORE anything tries to load the obsolete one.
+    // The served source moves while the root is not running. A serving
+    // tenure opens nothing, so its ensure must not adopt the new source:
+    // the root keeps what it runs until a user opens it.
     files.set(HOME_PATH, rootSource("home-v2"));
-    const freshIdentity = await identityFor(HOME_PATH);
-    expect(freshIdentity).not.toBe(agedIdentity);
+    expect(await identityFor(HOME_PATH)).not.toBe(bornIdentity);
 
     const ensured = await ensureSpaceRootPattern(runtime, space, {
       isHomeSpace: true,
     });
     expect(ensured.outcome).toBe("resolved-existing");
-    expect(ensured.reconcile).toBe("updated");
-    await runtime.patternUpdater.idle();
     await runtime.idle();
 
     const root = await resolveSpaceRootPattern(runtime, space);
-    expect(getPatternIdentityRef(root!)?.identity).toBe(freshIdentity);
+    expect(getPatternIdentityRef(root!)?.identity).toBe(bornIdentity);
   });
 });

@@ -271,7 +271,6 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { systemPatternAutoUpdate: true },
     });
 
     const engine = runtime.harness as Engine;
@@ -336,7 +335,6 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
     runtime = new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { systemPatternAutoUpdate: true },
     });
     const tx = runtime.edit();
     const compiled = await runtime.patternManager.compilePattern(mapProgram, {

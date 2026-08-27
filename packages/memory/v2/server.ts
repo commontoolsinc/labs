@@ -92,11 +92,15 @@ import * as Engine from "./engine.ts";
 import { respondToHello } from "./handshake.ts";
 import {
   cloneTrackedGraphState,
+  createQueryEvaluationCache,
   extendTrackedGraph,
   fromDirtyKey,
   fromDocKey,
   isGraphQueryCoveredByState,
   type QueryDocKey,
+  type QueryEvaluationCache,
+  type QueryEvaluationCacheDiagnostics,
+  queryEvaluationCacheDiagnostics,
   queryGraph,
   type QueryGraphReuseContext,
   refreshTrackedGraph,
@@ -196,6 +200,11 @@ const timing = getLogger("memory", { enabled: false });
 const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
 const MIN_REFRESH_QUEUE_DRAIN_WAIT_MS = 500;
 const SLOW_QUERY_THRESHOLD_MS = 100;
+const QUERY_EVALUATION_CACHE_MAX_SPACES = 8;
+// ~5 board-scale corpora (a full board evaluation retains ~6k entities).
+// Entity count is the byte proxy: what an entry holds alive is its cloned
+// state's parsed documents, which scale with the entities delivered.
+const QUERY_EVALUATION_CACHE_BUDGET = 32_768;
 const SLOW_QUERY_BUFFER_SIZE = 100;
 const DEFAULT_SESSION_OPEN_CHALLENGE_TTL_SECONDS = 300;
 const SESSION_OPEN_CHALLENGE_BYTES = 32;
@@ -1232,6 +1241,11 @@ class Connection {
 export class Server {
   #sessions: SessionRegistry;
   #connections = new Map<string, Connection>();
+
+  /** Whole-evaluation caches, one per space (see QueryEvaluationCache in
+   * query.ts for the sharing, purity, and seq-rotation rules), held for at
+   * most QUERY_EVALUATION_CACHE_MAX_SPACES spaces in LRU order. */
+  #queryEvaluationCaches = new Map<string, QueryEvaluationCache>();
   #engines = new Map<string, Promise<Engine.Engine>>();
   // The resolved-engine index for the SYNC cross-engine lease lookup
   // (server-execution v2 Phase 5; see openEngine / #liveCoHostedLeaseSpaceFor).
@@ -1331,6 +1345,14 @@ export class Server {
        * dirty spaces held for the next explicit call.
        */
       subscriptionRefreshDelayMs?: number | "manual";
+      /** Cross-space retained-entity budget for the query evaluation
+       * caches (default QUERY_EVALUATION_CACHE_BUDGET). An entry's weight
+       * is the entity count of the evaluation it retains — the proxy for
+       * the parsed documents kept alive — and eviction removes the
+       * least-recently-evaluated spaces' oldest entries until the total
+       * fits. A single evaluation heavier than the whole budget is not
+       * retained at all. */
+      queryEvaluationCacheBudget?: number;
       authorizeSessionOpen: (
         message: SessionOpenRequest,
         context: SessionOpenAuthContext,
@@ -4241,8 +4263,13 @@ export class Server {
             {
               principal: session.principal,
               sessionId: message.sessionId,
+              evaluationCache: this.#evaluationCacheFor(message.space),
             },
           );
+          // Enforced per evaluation, not per request: a later group's
+          // failure (or a failing operation-field attachment) must not
+          // leave an already-inserted entry over budget.
+          this.#enforceEvaluationCacheBudget();
           graphs.set(branch, tracked.state);
           for (const [docKey, entity] of tracked.state.entities) {
             recordUpdate(docKey, entity);
@@ -4352,6 +4379,76 @@ export class Server {
     }
   }
 
+  #evaluationCacheFor(space: string): QueryEvaluationCache {
+    let cache = this.#queryEvaluationCaches.get(space);
+    if (cache !== undefined) {
+      // Recency bump: insertion order is the LRU order.
+      this.#queryEvaluationCaches.delete(space);
+      this.#queryEvaluationCaches.set(space, cache);
+      return cache;
+    }
+    cache = createQueryEvaluationCache();
+    this.#queryEvaluationCaches.set(space, cache);
+    // An inactive space's cache would otherwise linger until that space's
+    // next commit — which may never come. The space bound is the
+    // cardinality backstop; the memory bound is the weight budget below.
+    if (this.#queryEvaluationCaches.size > QUERY_EVALUATION_CACHE_MAX_SPACES) {
+      const oldest = this.#queryEvaluationCaches.keys().next().value;
+      if (oldest !== undefined) {
+        this.#queryEvaluationCaches.delete(oldest);
+      }
+    }
+    return cache;
+  }
+
+  /** Evict least-recently-evaluated spaces' oldest entries until the
+   * caches' total retained weight fits the budget. Runs after every
+   * evaluation that may have inserted; an entry heavier than the whole
+   * budget is therefore never retained past its own evaluation. */
+  #enforceEvaluationCacheBudget(): void {
+    const budget = this.options.queryEvaluationCacheBudget ??
+      QUERY_EVALUATION_CACHE_BUDGET;
+    let total = 0;
+    for (const cache of this.#queryEvaluationCaches.values()) {
+      total += cache.weight;
+    }
+    if (total <= budget) return;
+    // Entry-less leftovers (drained by an earlier pass, or rotation-
+    // cleared and idle since) drop before eviction: an empty cache holds
+    // no weight, only a stale LRU slot. The rebuild preserves order.
+    this.#queryEvaluationCaches = new Map(
+      [...this.#queryEvaluationCaches].filter(
+        ([, cache]) => cache.entries.size > 0,
+      ),
+    );
+    // Least-recently-evaluated spaces first (map insertion order IS the
+    // LRU order), oldest entry first within each. A space drained by THIS
+    // pass keeps its cache — its counters and LRU position belong to a
+    // live space — and is swept as a leftover by the next enforcement.
+    for (const cache of [...this.#queryEvaluationCaches.values()]) {
+      while (total > budget && cache.entries.size > 0) {
+        const oldestEntry = cache.entries.keys().next().value!;
+        const entry = cache.entries.get(oldestEntry)!;
+        cache.entries.delete(oldestEntry);
+        cache.weight -= entry.weight;
+        total -= entry.weight;
+      }
+      if (total <= budget) return;
+    }
+  }
+
+  /** The space's evaluation-cache counters, for diagnostics and tests.
+   * A peek: an absent (never-evaluated or evicted) space reads as empty
+   * rather than being created or recency-bumped by the question. */
+  evaluationCacheDiagnostics(
+    space: string,
+  ): QueryEvaluationCacheDiagnostics {
+    const cache = this.#queryEvaluationCaches.get(space);
+    return cache === undefined
+      ? { seq: -1, entries: 0, weight: 0, hits: 0, misses: 0, rotations: 0 }
+      : queryEvaluationCacheDiagnostics(cache);
+  }
+
   async evaluateGraphQuery(
     space: string,
     query: GraphQuery,
@@ -4364,17 +4461,35 @@ export class Server {
     } = {},
   ): Promise<GraphQueryResult> {
     const startedAt = performance.now();
-    const result = queryGraph(
-      space,
-      engine ?? await this.openEngine(space),
-      query,
-      reuse,
-      scopeContext,
-    );
-    recordSlowQueryDuration("graph.query", space, startedAt, {
-      roots: query.roots.length,
-    });
-    return result;
+    // Cache eligibility decided BEFORE touching the LRU: a historical or
+    // lease-holder-exempt query neither serves nor records an entry, and
+    // must not create a cache or evict a live space's on its way through.
+    const cacheEligible = query.atSeq === undefined &&
+      scopeContext.keyedSnapshots !== true;
+    try {
+      const result = queryGraph(
+        space,
+        engine ?? await this.openEngine(space),
+        query,
+        reuse,
+        {
+          ...scopeContext,
+          ...(cacheEligible
+            ? { evaluationCache: this.#evaluationCacheFor(space) }
+            : {}),
+        },
+      );
+      recordSlowQueryDuration("graph.query", space, startedAt, {
+        roots: query.roots.length,
+      });
+      return result;
+    } finally {
+      // The insert precedes the snapshot mapping, so enforcement must
+      // cover the throw path too.
+      if (cacheEligible) {
+        this.#enforceEvaluationCacheBudget();
+      }
+    }
   }
 
   async evaluateWatchSet(
@@ -4402,9 +4517,13 @@ export class Server {
         resolvedEngine,
         query,
         reuse,
-        scopeContext,
+        {
+          ...scopeContext,
+          evaluationCache: this.#evaluationCacheFor(space),
+        },
       );
       serverSeq = result.serverSeq;
+      this.#enforceEvaluationCacheBudget();
       graphs.set(branch, result.state);
       for (const [docKey, entity] of result.state.entities) {
         const { scopeKey } = fromDocKey(docKey);

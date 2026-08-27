@@ -1,16 +1,10 @@
-import {
-  fabricFromRealmValue,
-  newDefaultJsonCodecEngine,
-  realmFromFabricValue,
-} from "@commonfabric/data-model/codecs";
-import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
+import { newDefaultJsonCodecEngine } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   toCompactDebugString,
   toStructuredDebugValue,
 } from "@commonfabric/data-model/value-debug";
-import { isPlainObject } from "@commonfabric/utils/types";
 import {
   type SiteTable,
   siteTableCause,
@@ -23,22 +17,15 @@ import {
   type RenderDeclassificationPolicy,
   WorkerReconciler,
 } from "@commonfabric/html/worker";
-import {
-  DID,
-  Identity,
-  keyPairFromRealmValue,
-  type Session,
-} from "@commonfabric/identity";
+import { DID, Identity, type Session } from "@commonfabric/identity";
 import type { Program } from "@commonfabric/js-compiler";
 import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 import { setLLMUrl } from "@commonfabric/llm";
 import { type ACL, isACLUser, isCapability } from "@commonfabric/memory/acl";
 import {
-  type ApplyOpResolution,
   eventAttentionEntryKey,
   type EventAttentionIndexValue,
   type OperationFieldAddress,
-  type OperationFieldSnapshot,
   SERVER_EXECUTION_ATTENTION_DOC_ID,
   type StreamEventsDocValue,
   toValuePath,
@@ -104,6 +91,8 @@ import {
   resetAllCountBaselines,
   resetAllTimingBaselines,
 } from "@commonfabric/utils/logger";
+import { isPlainObject } from "@commonfabric/utils/types";
+
 import {
   getMetaLink,
   KeepAsCell,
@@ -211,31 +200,9 @@ import {
   type VDomMountRequest,
   type VDomMountResponse,
   type VDomUnmountRequest,
-  type WireApplyOpResolution,
-  type WireOperationFieldSnapshot,
   type WriteStackTraceResponse,
 } from "@/protocol/mod.ts";
 
-const operationFieldToWire = (
-  field: OperationFieldSnapshot,
-): WireOperationFieldSnapshot => ({
-  ...field,
-  materialized: realmFromFabricValue(field.materialized),
-  operations: field.operations.map((operation) => ({
-    ...operation,
-    payload: realmFromFabricValue(operation.payload),
-  })),
-});
-
-const applyOpResolutionToWire = (
-  resolution: ApplyOpResolution,
-): WireApplyOpResolution => ({
-  ...resolution,
-  operations: resolution.operations.map((operation) => ({
-    ...operation,
-    payload: realmFromFabricValue(operation.payload),
-  })),
-});
 import type { VDomOp } from "@/protocol/types.ts";
 import { cellRefToKey, describeFailure } from "@/shared/utils.ts";
 import { postToClient } from "./post-to-client.ts";
@@ -565,26 +532,6 @@ export function toConsoleDebugValue(value: unknown): FabricValue {
   );
 }
 
-/**
- * Converts one of a pattern's `console.*` arguments into the form the
- * notification carries it in. The other half is the `fabricFromRealmValue()`
- * in `client/connection.ts`, which decodes before the client emits.
- *
- * Exported for testing.
- */
-export function toConsoleWireValue(value: unknown): RealmEncodedValue {
-  try {
-    return realmFromFabricValue(toConsoleDebugValue(value));
-  } catch {
-    // An object forged onto a `FabricPrimitive`'s prototype is a `FabricValue`
-    // by every check and still has no encoding, so the encode is the one step
-    // here a hostile argument can stop. It says so and says nothing further:
-    // the value was built to defeat this, and what a reader needs is the
-    // argument's position in the call, which arrives either way.
-    return realmFromFabricValue({ "/unconvertible": "no encoding for value" });
-  }
-}
-
 export const hasExplicitSubscriptionSchema = (schema: unknown): boolean =>
   schema === true ||
   (schema !== undefined && schema !== false &&
@@ -664,14 +611,11 @@ export class RuntimeProcessor {
   static async initialize(data: InitializationData): Promise<RuntimeProcessor> {
     const apiUrlObj = new URL(data.apiUrl);
     const identity = await Identity.fromKeyPair(
-      keyPairFromRealmValue(data.identity, "Initialization `identity`"),
+      data.identity,
     );
     const spaceIdentity = data.spaceIdentity
       ? await Identity.fromKeyPair(
-        keyPairFromRealmValue(
-          data.spaceIdentity,
-          "Initialization `spaceIdentity`",
-        ),
+        data.spaceIdentity,
       )
       : undefined;
     const space = data.spaceDid;
@@ -728,7 +672,7 @@ export class RuntimeProcessor {
           type: NotificationType.ConsoleMessage,
           metadata,
           method,
-          args: args.map((arg) => toConsoleWireValue(arg)),
+          args: args.map((arg) => toConsoleDebugValue(arg)),
         });
         return args;
       },
@@ -1060,14 +1004,9 @@ export class RuntimeProcessor {
     // persists nor re-imports inbound views, so the redacted copies cannot
     // round-trip into under-labeled state.
     //
-    // TODO(danfuzz): `convertCellsToLinks` preserves a `FabricPrimitive` by
-    // identity, so the response can hold live `FabricSpecialObject`s, and
-    // `postMessage`'s structured clone silently strips their prototype and
-    // private state to `{}` on the way to the main thread. The inbound
-    // direction throws instead (`CellHandle.serialize`; see the
-    // `WireCellValue` marker in `protocol/types.ts`) — this outbound direction
-    // loses silently. The subscription-update path below posts the same
-    // conversion. `codec-realm` is the mechanism for both directions.
+    // `convertCellsToLinks()` preserves a `FabricPrimitive` by identity, and
+    // the envelope's encoding carries one to the main thread with its class,
+    // so what the response holds is what the cell held.
     const converted = redactSigilCfcLabelViewsForDisplay(
       convertCellsToLinks(value, {
         includeSchema: true,
@@ -1194,7 +1133,7 @@ export class RuntimeProcessor {
       ...address,
       ...(request.after === undefined ? {} : { after: request.after }),
     });
-    return { field: operationFieldToWire(field) };
+    return { field: field };
   }
 
   async handleOperationApply(
@@ -1213,9 +1152,9 @@ export class RuntimeProcessor {
       ...(request.baselineHash === undefined
         ? {}
         : { baselineHash: request.baselineHash }),
-      payload: fabricFromRealmValue(request.payload),
+      payload: request.payload,
     });
-    return { resolution: applyOpResolutionToWire(resolution) };
+    return { resolution: resolution };
   }
 
   async handleOperationSubscribe(
@@ -1249,10 +1188,10 @@ export class RuntimeProcessor {
             subscription
         ) return;
         queueMicrotask(() =>
-          self.postMessage({
+          postToClient({
             type: NotificationType.OperationUpdate,
             subscriptionId: request.subscriptionId,
-            field: operationFieldToWire(field),
+            field: field,
           })
         );
       });
@@ -1516,11 +1455,11 @@ export class RuntimeProcessor {
     const homeSpaceCell = this.runtime.getHomeSpaceCell();
     await homeSpaceCell.sync();
 
-    // Always the PiecesController path: ensureDefaultPattern() reconciles the
-    // persisted identity and carries the cold-start setup repair that heals an
-    // aged home root. Starting the pattern directly here would skip that
-    // repair, and with `systemPatternAutoUpdate` unset nothing else heals the
-    // root — so no fast path belongs in front of the controller.
+    // Always the PiecesController path: ensureDefaultPattern() follows the
+    // root's origin and carries the cold-start setup repair that heals an aged
+    // home root. Starting the pattern directly here would skip both, and
+    // nothing else heals the root — so no fast path belongs in front of the
+    // controller.
     const homeSession: Session = {
       as: this.identity,
       space: this.runtime.userIdentityDID,
@@ -1659,10 +1598,9 @@ export class RuntimeProcessor {
       throw new Error("Invalid source.");
     }
 
-    // Checked rather than cast. A piece's input is a record of named inputs,
-    // which is the question `isPlainObject()` asks; casting a bare string or
-    // an array to `object` would hand the runtime something it cannot use and
-    // say nothing about why.
+    // Checked rather than cast. The wire carries a `FabricValue`; a piece's
+    // input is narrower, being a record of named inputs, which is the question
+    // `isPlainObject()` asks.
     const argument = request.argument;
     if ((argument !== undefined) && !isPlainObject(argument)) {
       // The rejected value is named rather than its `typeof`, which calls both
@@ -2121,11 +2059,12 @@ export class RuntimeProcessor {
       `/${request.space}/blobs/upload.${encodeURIComponent(suffix)}`,
       host,
     );
-    // `request.body` is ceded to the decode rather than copied for it. That is
-    // legitimate because a handler owns the values its request carries, per
-    // `BaseRequest`, so nothing else can be reading this tree. What comes back
-    // is a `FabricValue`, of which only the one arm is a blob's bytes.
-    const bytes = fabricFromRealmValue(request.body);
+    // The envelope's decode already produced this; `request.body` is a
+    // `FabricBytes` by the time it arrives, and a handler owns the values its
+    // request carries per `BaseRequest`, so nothing else is reading it. The
+    // check is on the arm rather than the decode: the declared type is what
+    // the client is meant to send, not what a malformed message can hold.
+    const bytes = request.body;
     if (!(bytes instanceof FabricBytes)) {
       throw new Error("uploadBlob requires bytes as its body");
     }

@@ -348,7 +348,9 @@ Deno.test(
   },
 );
 
-// --- hasUnverifiedCellUse propagation through callee summaries ---
+//
+// hasUnverifiedCellUse propagation through callee summaries
+//
 
 import { COMMONFABRIC_TYPES } from "../commonfabric-test-types.ts";
 

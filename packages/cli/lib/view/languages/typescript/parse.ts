@@ -1516,7 +1516,7 @@ function registerDefinition(
 function classify(node: ts.Node, ctx: BuildCtx): Desc | null {
   const { sf } = ctx;
 
-  // --- declarations (also statements) ---
+  // declarations (also statements)
   if (ts.isImportDeclaration(node)) {
     return {
       kind: "import",
@@ -1620,11 +1620,11 @@ function classify(node: ts.Node, ctx: BuildCtx): Desc | null {
     };
   }
 
-  // --- variable statements & declarations ---
-  // A single binding is represented by the whole statement (so the `variable`
-  // node covers `export const … ;`); a multi-declarator statement stays generic
-  // and each declaration becomes its own binding node. The single declaration
-  // itself stays generic to avoid labeling one binding at two nesting levels.
+  // variable statements & declarations: A single binding is represented by the
+  // whole statement (so the `variable` node covers `export const … ;`); a
+  // multi-declarator statement stays generic and each declaration becomes its
+  // own binding node. The single declaration itself stays generic to avoid
+  // labeling one binding at two nesting levels.
   if (ts.isVariableStatement(node)) {
     const decls = node.declarationList.declarations;
     if (decls.length === 1) return bindingDesc(decls[0], ctx);
@@ -1638,7 +1638,7 @@ function classify(node: ts.Node, ctx: BuildCtx): Desc | null {
     return bindingDesc(node, ctx);
   }
 
-  // --- other statements ---
+  // other statements
   if (ts.isExpressionStatement(node)) {
     return expressionStatementDesc(node.expression, ctx);
   }
@@ -1691,7 +1691,7 @@ function classify(node: ts.Node, ctx: BuildCtx): Desc | null {
     };
   }
 
-  // --- significant expressions (in argument / body / return position) ---
+  // significant expressions (in argument / body / return position)
   if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
     return {
       kind: "closure",

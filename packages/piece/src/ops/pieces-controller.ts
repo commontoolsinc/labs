@@ -20,7 +20,6 @@ import {
   type Cell,
   Console as RuntimeConsole,
   createSpaceRootIfAbsent,
-  DEFAULT_ROOT_RUN_OPTIONS,
   EntityId,
   entityIdFrom,
   type EntityIdListOptions,
@@ -30,6 +29,8 @@ import {
   getEntityId,
   getMetaLink,
   getPatternIdentityRef,
+  getPatternSetupIdentityRef,
+  getPatternSource,
   getPieceSourceSnapshot,
   isCell,
   isLink,
@@ -44,7 +45,6 @@ import {
   parseLink,
   type Pattern,
   type PatternCoverageCollector,
-  type PatternUpdateOutcome,
   type PieceSourceTransition,
   preparePieceSourceTransitionBaseline,
   Runtime,
@@ -85,6 +85,7 @@ import {
   patternSourceUrl,
 } from "../system-pattern-url.ts";
 import { PieceController } from "./piece-controller.ts";
+import { reconcilePieceSource } from "./piece-origin.ts";
 import { compileProgram } from "./utils.ts";
 export {
   DEFAULT_APP_PATTERN_SOURCE,
@@ -103,14 +104,6 @@ const PRIVILEGED_PIECE_LIST_SCHEMA = internSchema({
   default: [],
   ifc: { confidentiality: [cfcAtom.resource("PrivilegedPieceList")] },
 });
-
-// Default roots have a stronger update policy than ordinary pieces: an
-// existing root is reconciled before start, while a new root is compiled from
-// the current source immediately before creation. Keep the runner's watcher,
-// but do not schedule its duplicate fire-and-forget source check.
-// DEFAULT_ROOT_RUN_OPTIONS moved to the runner's ensure-space-root.ts
-// (OW45 arm-B stage 1): the space-root creation is shared with the
-// SpaceServer's ensure, and the run options ride with it.
 
 // Timing stats record even while the logger is disabled, so every phase is
 // visible in the load summaries (browser worker included, where the
@@ -149,9 +142,6 @@ function filterOutCell(
     !piece.resolveAsCell().equals(resolvedTarget)
   );
 }
-
-/** Backward-compatible name for the result of a pattern update check. */
-export type UpdateOutcome = PatternUpdateOutcome;
 
 /**
  * A cold-start setup repair failed specifically because the CFC SCHEMA
@@ -441,10 +431,16 @@ export class PiecesController<T = unknown> {
   async linkDefaultPattern(
     defaultPatternCell: Cell<any>,
   ): Promise<void> {
-    await this.runtime.editWithRetry((tx) => {
+    const { error } = await this.runtime.editWithRetry((tx) => {
       const spaceCellWithTx = this.spaceCell.withTx(tx);
       spaceCellWithTx.key("defaultPattern").set(defaultPatternCell.withTx(tx));
     });
+    if (error) {
+      throw new Error(
+        `Linking the default pattern failed because storage returned ${error.name}: ${error.message}`,
+        { cause: error },
+      );
+    }
     await this.runtime.idle();
   }
 
@@ -453,10 +449,16 @@ export class PiecesController<T = unknown> {
    * Used when the default pattern is being deleted.
    */
   async unlinkDefaultPattern(): Promise<void> {
-    await this.runtime.editWithRetry((tx) => {
+    const { error } = await this.runtime.editWithRetry((tx) => {
       const spaceCellWithTx = this.spaceCell.withTx(tx);
       spaceCellWithTx.key("defaultPattern").set(undefined);
     });
+    if (error) {
+      throw new Error(
+        `Unlinking the default pattern failed because storage returned ${error.name}: ${error.message}`,
+        { cause: error },
+      );
+    }
     await this.runtime.idle();
   }
 
@@ -497,56 +499,47 @@ export class PiecesController<T = unknown> {
           ),
       );
     } catch (error) {
-      // An obsolete root whose stored pattern this runtime can no longer load
-      // used to heal on ONE entry point only — the boot path
-      // (ensureDefaultPattern reconciles before start).
-      // Every other consumer resolves the root HERE — piece registry
-      // listings, `cf piece ls`, FUSE, the shell's list cells — and
-      // inherited no heal at all: the load failure propagated and every
-      // listing died with the root (2026-07-29 vendor gate,
-      // the cf-cell-context type retirement). Run the same awaited updater
-      // check from this choke point and retry the start ONCE when it
-      // updated; any other outcome rethrows the original failure untouched.
-      if (!runIt || !this.runtime.experimental?.systemPatternAutoUpdate) {
-        throw error;
-      }
-      let outcome: PatternUpdateOutcome;
+      // An unopenable root takes every consumer down with it — piece registry
+      // listings, `cf piece ls`, FUSE, the shell's list cells all resolve the
+      // root HERE. Opening it already reconciled it against its origin, so a
+      // start that still failed is not out of date; the one remaining rescue
+      // is for a root that records no origin at all and whose stored pattern
+      // this runtime cannot load. Roll that one forward to the space's
+      // official system root and retry the start ONCE. Every other failure
+      // rethrows untouched.
+      if (!runIt) throw error;
+      let healed: Cell<NameSchema>;
       try {
         const root = await this.getPieceCell(defaultPattern, false, nameSchema);
-        outcome = await this.runtime.patternUpdater.checkDefaultPattern(
+        const pinnedRef = getPatternIdentityRef(root);
+        if (pinnedRef === undefined || !this.#rootNeedsRollForward(root)) {
+          throw error;
+        }
+        if (
+          await this.runtime.patternManager.loadPatternByIdentity(
+            pinnedRef.identity,
+            pinnedRef.symbol,
+            this.space,
+          ) !== undefined
+        ) throw error;
+        healed = await this.healDefaultRootByRollForward(
           root,
-          deriveSystemPatternSource(this.space, this.runtime),
+          pinnedRef,
+          error,
+          "unloadable",
         );
       } catch {
         throw error;
       }
-      if (outcome !== "updated" && outcome !== "repaired-provenance") {
-        throw error;
-      }
       pieceUpdateLogger.warn("default-root-healed-on-load-failure", () => [
-        "getDefaultPattern: start failed, updater rolled the root forward;",
-        `retrying start once (${this.space})`,
+        "getDefaultPattern: start failed, the root rolled forward to the",
+        `space's official system root; retrying start once (${this.space})`,
       ]);
-      // The metadata swap committed through a transaction view; settle, then
-      // resolve the root AGAIN so the retry observes the committed
-      // patternIdentity rather than the pre-transaction snapshot held by
-      // `defaultPattern` (same trap the boot path documents in
-      // startEnsuredDefaultPattern). The whole settle/re-resolve/retry
-      // sequence surfaces the ORIGINAL start failure if anything in it goes
-      // wrong — a secondary failure here is a diagnostic detail, not the
-      // caller's error.
       try {
         await this.runtime.idle();
-        const refreshedSlot = await timePiecePhase(
-          "getDefaultPattern.spaceCell.resync(after-heal)",
-          () => this.spaceCell.key("defaultPattern").sync(),
-        );
-        const healedPattern = refreshedSlot.get();
-        if (!healedPattern) throw error;
-        await healedPattern.sync();
         return await timePiecePhase(
           "getDefaultPattern.get(retry-after-heal)",
-          () => this.getPieceCell(healedPattern, runIt, nameSchema),
+          () => this.getPieceCell(healed, runIt, nameSchema),
         );
       } catch (retryError) {
         pieceUpdateLogger.warn("default-root-heal-retry-failed", () => [
@@ -557,6 +550,29 @@ export class PiecesController<T = unknown> {
         throw error;
       }
     }
+  }
+
+  /**
+   * Whether a root that cannot be started may be replaced with the space's
+   * official system root.
+   *
+   * A root qualifies when it records no origin, and when it already follows
+   * that same official source — a root pinned to an export of it that this
+   * runtime cannot load reaches the identity the source advertises but not a
+   * runnable pattern, and rolling it forward changes no source. A root
+   * following anything else has an owner's choice behind it, and replacing its
+   * source with the system default would discard that choice rather than
+   * repair anything.
+   *
+   * A by-identity load probe is the evidence this rests on, and with CFC
+   * enforcement disabled that probe reports every artifact outside the
+   * in-memory index as absent, so it proves nothing there.
+   */
+  #rootNeedsRollForward(root: Cell<NameSchema>): boolean {
+    if (this.runtime.cfcEnforcementMode === "disabled") return false;
+    const origin = getPatternSource(root);
+    return origin === undefined ||
+      origin === deriveSystemPatternSource(this.space, this.runtime);
   }
 
   /**
@@ -711,9 +727,20 @@ export class PiecesController<T = unknown> {
     // operate on the real piece rather than the wrapper. The sync above already
     // made the canonical cell local, so this resolves over local links with no
     // further sync. Idempotent for a normal top-level piece.
-    const piece = addressed.resolveAsCell();
+    let piece = addressed.resolveAsCell();
 
     if (runIt) {
+      const outcome = await timePiecePhase(
+        "get.reconcileSource",
+        () => reconcilePieceSource(this.runtime, piece),
+      );
+      if (outcome === "updated") {
+        // The transition committed through a transaction view, and the caller
+        // may have handed us a cell bound to a read transaction older than it.
+        // Detach and resync, or the start below loads the identity the origin
+        // just replaced — and reads through the returned cell describe it.
+        piece = await piece.withTx().sync();
+      }
       // start() handles pattern loading and running. It's idempotent - no
       // effect if already running.
       await timePiecePhase(
@@ -1137,7 +1164,15 @@ export class PiecesController<T = unknown> {
     return piece;
   }
 
-  // note: removing a piece doesn't clean up the piece's cells
+  /**
+   * Remove a piece from this space's registry. Does not clean up the piece's
+   * cells. Returns whether this call removed the piece — `false` means the
+   * piece was not registered, and nothing was written. When the removed piece
+   * is the space's default pattern, the link to it is cleared in the same
+   * commit, so the registry and the link cannot land in a split state. A
+   * removal that cannot commit throws instead, so `false` never stands in for
+   * a storage failure.
+   */
   async remove(pieceOrId: string | Cell<unknown>): Promise<boolean> {
     const piece = typeof pieceOrId === "string"
       ? this.runtime.getCellFromEntityId(this.space, entityIdFrom(pieceOrId))
@@ -1145,27 +1180,36 @@ export class PiecesController<T = unknown> {
     const piecesCell = await this.getPieceRegistry();
     await this.syncPieces(piecesCell);
 
-    // Check if this is the default pattern and clear the link
-    const defaultPattern = await this.getDefaultPattern(false);
-    if (
-      defaultPattern &&
-      piece.resolveAsCell().equals(defaultPattern.resolveAsCell())
-    ) {
-      await this.unlinkDefaultPattern();
-    }
-
-    const { ok } = await this.runtime.editWithRetry((tx) => {
+    const { ok, error } = await this.runtime.editWithRetry((tx) => {
       const pieces = piecesCell.withTx(tx);
 
       // Remove from main list
       const newPieces = filterOutCell(pieces, piece);
-      if (newPieces.length !== pieces.get().length) {
-        pieces.set(newPieces);
-        return true;
-      } else {
+      if (newPieces.length === pieces.get().length) {
         return false;
       }
+      pieces.set(newPieces);
+
+      // Clear the default-pattern link when it points at the removed piece,
+      // in the same commit as the registry write. Read the link inside the
+      // transaction: a conflict retry reruns this callback against fresh
+      // state, and a link concurrently repointed at another piece must be
+      // left in place (the same precondition-guard shape as the roll-forward
+      // swap in startEnsuredDefaultPattern).
+      const defaultPatternCell = this.spaceCell.withTx(tx)
+        .key("defaultPattern");
+      const linked = defaultPatternCell.get();
+      if (linked && piece.resolveAsCell().equals(linked.resolveAsCell())) {
+        defaultPatternCell.set(undefined);
+      }
+      return true;
     });
+    if (error) {
+      throw new Error(
+        `Removing the piece failed because storage returned ${error.name}: ${error.message}`,
+        { cause: error },
+      );
+    }
 
     // Ensure full synchronization
     if (ok) {
@@ -1320,10 +1364,41 @@ export class PiecesController<T = unknown> {
     return piece;
   }
 
+  /**
+   * Open a piece: bring its source up to date with the origin it follows, then
+   * start it.
+   *
+   * Reconciling before the start is what keeps a piece from running source its
+   * own origin has already replaced. A piece that records no origin, or whose
+   * origin cannot be reached, starts on the source it has. A piece compiled
+   * moments ago from the source it was created with is started directly
+   * through {@link startPiece} instead: following that origin again would only
+   * fetch what it was just built from.
+   */
+  async openPiece<T = unknown>(pieceOrId: string | Cell<T>): Promise<void> {
+    const piece = typeof pieceOrId === "string"
+      ? await timePiecePhase(
+        "openPiece.get",
+        () => this.getPieceCell<T>(pieceOrId),
+      )
+      : pieceOrId;
+    if (!piece) throw new Error("Piece not found");
+    const outcome = await timePiecePhase(
+      "openPiece.reconcileSource",
+      () => reconcilePieceSource(this.runtime, piece),
+    );
+    // The transition committed through a transaction view, and the caller may
+    // have handed us a cell bound to a read transaction older than it. Detach
+    // and resync, or the start below loads the identity the origin just
+    // replaced.
+    await this.startPiece(
+      outcome === "updated" ? await piece.withTx().sync() : piece,
+    );
+  }
+
   /** Start scheduling and running a prepared piece. */
   async startPiece<T = unknown>(
     pieceOrId: string | Cell<T>,
-    options: { schedulePatternUpdate?: boolean } = {},
   ): Promise<void> {
     const piece = typeof pieceOrId === "string"
       ? await timePiecePhase(
@@ -1334,7 +1409,7 @@ export class PiecesController<T = unknown> {
     if (!piece) throw new Error("Piece not found");
     await timePiecePhase(
       "startPiece.runtime.start",
-      () => this.runtime.start(piece, options),
+      () => this.runtime.start(piece),
     );
     await timePiecePhase(
       "startPiece.result.pull",
@@ -1489,12 +1564,16 @@ export class PiecesController<T = unknown> {
    * Read the configured default app source from the home space.
    *
    * The value is authored as a URL and canonicalized to the ref that names the
-   * same file, so a root is born with the provenance it will keep. Stamping the
-   * authored spelling instead would leave every new root waiting on a migration
-   * to become followable — and on a deployment with the update flag off, waiting
-   * forever. A locator naming no pattern route is returned as authored.
+   * same file, so a root is born with the provenance it will keep rather than
+   * with a spelling that has to be migrated before anything follows it.
    *
-   * Returns empty string if not configured or if home space is not accessible.
+   * A rooted path that names no file under the patterns route is refused
+   * outright. Resolving one against the host reaches whatever the site serves
+   * for an unrouted path, and a piece cannot record an origin nothing can
+   * follow. An absolute URL is kept as authored: it names its own host.
+   *
+   * Returns empty string if not configured, if the configured value cannot be
+   * an origin, or if the home space is not accessible.
    */
   private async getDefaultAppUrlFromHome(): Promise<string> {
     try {
@@ -1510,9 +1589,15 @@ export class PiecesController<T = unknown> {
           homeSpaceCell.key("defaultPattern")
             .asSchema(homeSchema).key("defaultAppUrl").get(),
       );
-      return typeof url === "string"
-        ? normalizePatternSource(url.trim(), this.runtime.apiUrl)
-        : "";
+      if (typeof url !== "string") return "";
+      const source = normalizePatternSource(url.trim(), this.runtime.apiUrl);
+      if (!source.startsWith("/")) return source;
+      console.warn(
+        `Ignoring the configured defaultAppUrl ${source}: a rooted path ` +
+          "names no pattern this deployment serves, so nothing could follow " +
+          "it. Configure a system pattern or an absolute URL.",
+      );
+      return "";
     } catch (error) {
       console.warn("Failed to read defaultAppUrl from home space:", error);
       return "";
@@ -1612,25 +1697,15 @@ export class PiecesController<T = unknown> {
       );
 
       // Run pattern setup within same transaction
-      this.runtime.run(
-        tx,
-        pattern,
-        {},
-        pieceCell,
-        DEFAULT_ROOT_RUN_OPTIONS,
-      );
+      this.runtime.run(tx, pattern, {}, pieceCell);
 
       // Stamp the provenance the piece tracks for updates, mirroring
-      // ensureDefaultPattern (CT-1890). Without this, every recreated root
-      // is born unprovenanced and checkAndUpdateDefaultPattern can only admit
-      // it while its ref exactly equals the current official identity — the
-      // repair path would otherwise mint roots with no durable update source.
-      // A custom program has no URL the
-      // auto-updater could re-fetch (stamping the "custom" placeholder
-      // would poison URL resolution — it would resolve relative to the
-      // host); its locator, when supplied, is recorded via
-      // setPatternRepository below, so a custom root without a repository
-      // intentionally stays unstamped.
+      // ensureDefaultPattern (CT-1890). Without this, every recreated root is
+      // born detached, and nothing supplies it code again. A custom program
+      // has no URL to re-fetch (stamping the "custom" placeholder would poison
+      // URL resolution — it would resolve relative to the host); its locator,
+      // when supplied, is recorded via setPatternRepository below, so a custom
+      // root without a repository intentionally stays unstamped.
       if (options?.customProgram === undefined) {
         setPatternSource(pieceCell, tx, patternConfig.source);
       }
@@ -1658,7 +1733,7 @@ export class PiecesController<T = unknown> {
     }
 
     // Start the piece
-    await this.startPiece(finalPattern, DEFAULT_ROOT_RUN_OPTIONS);
+    await this.startPiece(finalPattern);
     await this.runtime.idle();
     await this.synced();
 
@@ -1678,10 +1753,9 @@ export class PiecesController<T = unknown> {
    * @returns The default pattern piece, either existing or newly created
    */
   async ensureDefaultPattern(): Promise<PieceController<NameSchema>> {
-    // Fast path: resolve the existing root WITHOUT starting it. The updater
-    // must get a chance to replace an obsolete patternIdentity before
-    // bootstrap tries to load that identity; otherwise an unloadable old root
-    // prevents the very repair that would make it loadable.
+    // Fast path: resolve the existing root WITHOUT starting it, so opening it
+    // can follow its origin before bootstrap tries to load an identity that
+    // origin has already replaced.
     const existingPattern = await this.getDefaultPattern(false);
     if (existingPattern) {
       return await this.startEnsuredDefaultPattern(existingPattern, true);
@@ -1748,30 +1822,44 @@ export class PiecesController<T = unknown> {
     );
   }
 
+  /**
+   * `reconcileBeforeStart` is false only for a root this call just created
+   * from its source: following that origin again would fetch the route to
+   * learn what was compiled from it moments ago.
+   */
   private async startEnsuredDefaultPattern(
     root: Cell<NameSchema>,
     reconcileBeforeStart: boolean,
   ): Promise<PieceController<NameSchema>> {
     let rootToStart = root;
     if (reconcileBeforeStart) {
-      await timePiecePhase(
-        "ensureDefaultPattern.checkAndUpdateDefaultPattern",
-        () => this.checkAndUpdateDefaultPattern(root),
+      const outcome = await timePiecePhase(
+        "ensureDefaultPattern.reconcileSource",
+        () => reconcilePieceSource(this.runtime, root),
       );
-      // The metadata swap committed through a transaction view. Resolve the
-      // root again so start() observes the committed patternIdentity rather
-      // than the pre-transaction snapshot held by the caller's cell.
+      // The swap committed through a transaction view. Resolve the root again
+      // so start() observes the committed patternIdentity rather than the
+      // pre-transaction snapshot held by the caller's cell.
       rootToStart = await this.getDefaultPattern(false) ?? root;
+      // Only when the origin CONFIRMED the pinned pattern. Then a disagreeing
+      // setup marker says the document is staged by another version while the
+      // right one is pinned, which is a stale document rather than a stale
+      // pattern. A root the origin did not confirm may be pinned to a pattern
+      // that is simply wrong for it, and re-staging that one buys nothing the
+      // repair below cannot do with the failure in hand.
+      if (outcome === "current" || outcome === "migrated") {
+        rootToStart = await this.restageRootSetupIfStale(rootToStart);
+      }
     }
 
     try {
       await timePiecePhase(
         "ensureDefaultPattern.startPiece",
-        () => this.startPiece(rootToStart, DEFAULT_ROOT_RUN_OPTIONS),
+        () => this.startPiece(rootToStart),
       );
     } catch (startError) {
-      // Cold-start setup repair. checkAndUpdateDefaultPattern moves
-      // patternIdentity WITHOUT running the setup phase ("Never calls run()"),
+      // Cold-start setup repair. A source transition moves patternIdentity
+      // WITHOUT running the setup phase,
       // and Runner.start() of a not-running piece instantiates the stored
       // identity directly — also without setup. A root whose identity moved
       // while it was not running (the bricked-space heal: no watcher existed
@@ -1806,9 +1894,29 @@ export class PiecesController<T = unknown> {
           this.getSpace(),
         );
       } catch {
+        // A THROWN load may be transient, and a transient failure is not
+        // evidence that the pinned pattern is wrong.
         throw startError;
       }
-      if (pattern === undefined) throw startError;
+      if (pattern === undefined) {
+        // The pattern is not merely unrunnable, it is unreachable through every
+        // supported recovery path, so re-running its setup cannot help. A root
+        // that records no origin has nothing else to fall back on and its space
+        // would stop opening, so it rolls forward to the official system root
+        // for its kind. One that follows an origin keeps what its owner chose:
+        // opening it already tried that origin, and replacing its source with
+        // the system default would discard the choice rather than repair it.
+        if (!this.#rootNeedsRollForward(rootToStart)) throw startError;
+        return new PieceController<NameSchema>(
+          this,
+          await this.healDefaultRootByRollForward(
+            rootToStart,
+            ref,
+            startError,
+            "unloadable",
+          ),
+        );
+      }
       pieceUpdateLogger.warn(
         "cold-start-setup-repair",
         () => [
@@ -1822,11 +1930,6 @@ export class PiecesController<T = unknown> {
       // Pattern hands back a cell bound to a read-only tx, and runSynced
       // would otherwise adopt it for the setup writes.
       const writableRoot = rootToStart.withTx();
-      // runSynced does not plumb schedulePatternUpdate, so the repair may let
-      // the lazy updater schedule one redundant check post-start. Benign: the
-      // awaited checkAndUpdateDefaultPattern above already reconciled, so the
-      // check observes a current identity and no-ops.
-      //
       // expectedPatternIdentity is the repair precondition, not a formality:
       // it atomically rejects a repair superseded by a concurrent source
       // update (the identity is re-asserted inside every setup retry), and it
@@ -1919,6 +2022,65 @@ export class PiecesController<T = unknown> {
   }
 
   /**
+   * Re-stage a root whose document was last set up by a different pattern
+   * version than the one it is pinned to.
+   *
+   * Such a root starts without error and then reads wrong: its result
+   * projection and `schema` meta still describe the version that staged the
+   * document, so fields the pinned version added read as absent. The
+   * cold-start repair below catches the same state only once it has made the
+   * start fail outright. Best-effort — a failed re-stage leaves the root as it
+   * was, and the start reports whatever it reports.
+   */
+  private async restageRootSetupIfStale(
+    root: Cell<NameSchema>,
+  ): Promise<Cell<NameSchema>> {
+    // Nothing to re-stage: a root with no pattern to stage from, or one whose
+    // stored setup already names the pattern it is pinned to.
+    const ref = getPatternIdentityRef(root);
+    const setupRef = getPatternSetupIdentityRef(root);
+    if (
+      ref === undefined ||
+      (setupRef?.identity === ref.identity && setupRef.symbol === ref.symbol)
+    ) return root;
+    try {
+      const pattern = await this.runtime.patternManager.loadPatternByIdentity(
+        ref.identity,
+        ref.symbol,
+        this.getSpace(),
+      );
+      if (pattern === undefined) return root;
+      const result = await timePiecePhase(
+        "ensureDefaultPattern.restageRootSetup",
+        () =>
+          this.runtime.editWithRetry((tx) => {
+            const candidate = root.withTx(tx);
+            const currentRef = getPatternIdentityRef(candidate);
+            if (
+              currentRef?.identity !== ref.identity ||
+              currentRef.symbol !== ref.symbol
+            ) return false;
+            void this.runtime.setup(tx, pattern, undefined, candidate, {
+              prepareForResume: true,
+              reapplyStoredSetup: true,
+            });
+            return true;
+          }),
+      );
+      if (result.error !== undefined || !result.ok) return root;
+      await this.runtime.idle();
+      return await this.getDefaultPattern(false) ?? root;
+    } catch (error) {
+      pieceUpdateLogger.warn("root-setup-restage-failed", () => [
+        "startEnsuredDefaultPattern: could not re-stage a root whose setup",
+        `marker disagrees with its pinned pattern (${this.space})`,
+        error,
+      ]);
+      return root;
+    }
+  }
+
+  /**
    * Runnability backstop for {@link startEnsuredDefaultPattern}'s cold-start
    * repair. Reached only when the pinned pattern's OWN setup repair failed in a
    * way that re-running it cannot fix — a root that loads but cannot run.
@@ -1954,6 +2116,7 @@ export class PiecesController<T = unknown> {
     rootToStart: Cell<NameSchema>,
     pinnedRef: { identity: string; symbol: string },
     migrationError: unknown,
+    reason: "unloadable" | "unrunnable" = "unrunnable",
   ): Promise<Cell<NameSchema>> {
     const runtime = this.runtime;
     const space = this.getSpace();
@@ -1965,7 +2128,9 @@ export class PiecesController<T = unknown> {
     // Name the check that actually refused. Two signals escalate to this heal —
     // a CFC migration rejection and a refused stored argument — and reporting
     // the second as a migration failure sends the reader to the wrong guard.
-    const pinnedFailure = isStoredArgumentSchemaRefusal(migrationError)
+    const pinnedFailure = reason === "unloadable"
+      ? "could not be loaded"
+      : isStoredArgumentSchemaRefusal(migrationError)
       ? "could not read its stored argument"
       : "failed CFC migration";
     const clearError = (reason: string, cause: unknown) =>
@@ -2026,10 +2191,14 @@ export class PiecesController<T = unknown> {
     // no longer `default`) is NOT already-official — rolling it forward to the
     // official `default` entry is exactly the recovery, so it must not
     // short-circuit here. This mirrors PatternUpdater's identity+symbol gate.
-    if (
-      officialRef.identity === pinnedRef.identity &&
-      officialRef.symbol === pinnedRef.symbol
-    ) {
+    const alreadyOfficial = officialRef.identity === pinnedRef.identity &&
+      officialRef.symbol === pinnedRef.symbol;
+    if (alreadyOfficial && reason === "unrunnable") {
+      // The pinned pattern LOADED and its setup was refused. Materializing the
+      // same entry again refuses identically, so do not loop — surface the
+      // clear error now. A root that could not be loaded is a different case:
+      // compiling the official source has just made its artifact available, so
+      // the materialize below is the repair.
       throw clearError(
         `is already the pinned entry ${officialRef.identity}#` +
           `${officialRef.symbol}, so this cannot be repaired by rolling ` +
@@ -2050,6 +2219,18 @@ export class PiecesController<T = unknown> {
     // clobbered by our stale `officialRef`. Returning `false` aborts the write
     // without committing — precedent: pattern-updater's `stillMatches`/
     // `canWrite`. `result.ok === false` (no error) then means "superseded".
+    if (alreadyOfficial) {
+      // Nothing to swap: the root already names the entry the official source
+      // compiles to, and that source has just been compiled into this space.
+      // Materializing it over the document is the whole repair.
+      return await this.materializeHealedRoot(
+        rootToStart,
+        officialPattern,
+        officialRef,
+        clearError,
+      );
+    }
+
     const sourceSnapshot = getPieceSourceSnapshot(rootToStart);
     if (sourceSnapshot === undefined) {
       throw clearError("has no source state to update", migrationError);
@@ -2127,34 +2308,13 @@ export class PiecesController<T = unknown> {
 
     // Re-resolve so the materialize observes the committed patternIdentity
     // (the caller's cell is a pre-swap transaction view), then materialize the
-    // OFFICIAL pattern. expectedPatternIdentity asserts the just-committed
-    // identity and makes runSynced THROW on a setup-commit failure rather than
-    // log-and-continue — so an official pattern that ALSO cannot migrate the
-    // doc surfaces here as the clear error below, not a silently-dead root.
-    const swappedRoot = await this.getDefaultPattern(false) ??
-      rootToStart;
-    try {
-      await timePiecePhase(
-        "ensureDefaultPattern.rollForwardMaterialize",
-        () =>
-          runtime.runSynced(swappedRoot.withTx(), officialPattern, undefined, {
-            expectedPatternIdentity: officialRef,
-          }),
-      );
-    } catch (materializeError) {
-      // The official pattern cannot take this doc either — the end of the line.
-      // Name which check refused rather than always saying "CFC migration": an
-      // argument refusal reaches here too, and reporting that as a migration
-      // failure sends the reader to the wrong guard.
-      throw clearError(
-        `also failed ${
-          isCfcMigrationRejection(materializeError)
-            ? "CFC migration"
-            : "to materialize"
-        } (${msg(materializeError)})`,
-        materializeError,
-      );
-    }
+    // OFFICIAL pattern.
+    const swappedRoot = await this.materializeHealedRoot(
+      await this.getDefaultPattern(false) ?? rootToStart,
+      officialPattern,
+      officialRef,
+      clearError,
+    );
 
     pieceUpdateLogger.warn(
       "default-root-rolled-forward",
@@ -2168,38 +2328,45 @@ export class PiecesController<T = unknown> {
   }
 
   /**
-   * Roll the space's system root pattern forward in place if its toolshed
-   * serves a newer content identity. Best-effort: every failure logs and
-   * returns without throwing. During {@link ensureDefaultPattern}, this runs
-   * before the persisted root is started, so an eligible tracked root's
-   * unloadable obsolete identity can be replaced before bootstrap. If the root
-   * is already running, its watcher applies the same metadata swap in place.
+   * Stage the healed pattern over the root's existing document.
    *
-   * Never calls run()/stop()/recreateDefaultPattern.
+   * `expectedPatternIdentity` asserts the identity the root must already carry
+   * and makes `runSynced` THROW on a setup-commit failure rather than log and
+   * continue — so an official pattern that also cannot migrate the document
+   * surfaces as one clear error rather than a silently dead root.
    */
-  async checkAndUpdateDefaultPattern(
-    resolvedRoot?: Cell<NameSchema>,
-  ): Promise<UpdateOutcome> {
-    const runtime = this.runtime;
-    const space = this.getSpace();
-    if (!runtime.experimental?.systemPatternAutoUpdate) {
-      return "skipped-disabled";
-    }
+  private async materializeHealedRoot(
+    root: Cell<NameSchema>,
+    pattern: Pattern,
+    ref: { identity: string; symbol: string },
+    clearError: (reason: string, cause: unknown) => Error,
+  ): Promise<Cell<NameSchema>> {
     try {
-      const root = resolvedRoot ?? await this.getDefaultPattern(false);
-      if (!root) return "current";
-      return await runtime.patternUpdater.checkDefaultPattern(
-        root,
-        deriveSystemPatternSource(space, runtime),
+      await timePiecePhase(
+        "ensureDefaultPattern.rollForwardMaterialize",
+        () =>
+          this.runtime.runSynced(root.withTx(), pattern, undefined, {
+            expectedPatternIdentity: ref,
+          }),
       );
-    } catch (error) {
-      pieceUpdateLogger.warn("root-resolution-failed", () => [
-        "checkAndUpdateDefaultPattern: root resolution failed",
-        space,
-        error,
-      ]);
-      return "current";
+    } catch (materializeError) {
+      // Name which check refused rather than always saying "CFC migration": an
+      // argument refusal reaches here too, and reporting that as a migration
+      // failure sends the reader to the wrong guard.
+      throw clearError(
+        `also failed ${
+          isCfcMigrationRejection(materializeError)
+            ? "CFC migration"
+            : "to materialize"
+        } (${
+          materializeError instanceof Error
+            ? materializeError.message
+            : String(materializeError)
+        })`,
+        materializeError,
+      );
     }
+    return root;
   }
 }
 

@@ -587,19 +587,14 @@ client does not; this PR):
   shadow + flip notification; flag-OFF silent-flip byte-identity;
   own-echo exemption). The stage-F residual comment at `inputSynced`
   is rewritten to the resolved posture.
-- The Phase-2 revisit (b) — the pattern-updater CHECK half: the
-  `sx2-serving-loop` integration surface is AUTHORED
-  (`packages/patterns/integration/sx2-serving-loop.test.ts`) and the
-  machinery observation was made in the live bring-up runs (the
-  serving loop settles to watermark-covered quiescence with
-  `systemPatternAutoUpdate` flipped ON server-side against toolshed's
-  real routes — the environment the stage-F unit fixture could not
-  provide). Stated honestly: that surface is currently SKIP-LISTED in
-  the ON arm (it deterministically reproduces the demand-cycle
-  starvation fork — the owed row below), so its gates are witnessed
-  by the live bring-up evidence and the serving-loop unit suite, not
-  yet by CI; the row un-skips with the terminal-state follow-up. A
-  full stale-pointer roll-forward journey remains the named
+- The Phase-2 revisit (b) — the source-following half: RETIRED, not
+  covered. A serving tenure opens no piece, so it follows no piece's
+  source origin, and there is no server-side half left to verify. The
+  `sx2-serving-loop` integration surface
+  (`packages/patterns/integration/sx2-serving-loop.test.ts`) keeps its
+  remaining gates and runs in both arms, its ON-arm skip having been
+  retired with the demand-cycle starvation fork (the skip-list row
+  below). A full stale-pointer roll-forward journey remains the named
   follow-up.
 - M1's Phase-2 seam — per-run demanded identities: the demand
   carriage (watchedRootsForSpace per-instance entries + the
@@ -7902,13 +7897,15 @@ supply; OW29/OW32/OW34 closed):
       server-only compilation and closes the forgery path. The spec's
       named end-state (server-only compilation + real attestation,
       `api/cfc.ts` :132-140) remains the complete fix — this OW56 row.
-    - **Finding 2 — version-update is a dual-write under ON, client AND
-      server, unarbitrated.** Both runtimes default
-      `systemPatternAutoUpdate: true` (shell `env.ts`; serving factory
-      `server-execution.ts` :160-172), so both run the pattern-updater
-      check/fetch/compile/persist and attempt the pointer swap; they
-      RACE — OCC-guarded so the loser fails clean (`pattern-updater.ts`
-      :326-338), content-addressed so double-writes converge. NOT a
+    - **Finding 2 — version-update was a dual-write under ON, client AND
+      server, unarbitrated.** CLOSED: following a piece's source origin
+      now runs only where a piece is OPENED, and a serving tenure opens
+      none, so the server no longer fetches, compiles, or swaps on a
+      piece's behalf. What follows is the finding as recorded. Both
+      runtimes defaulted the update posture on, so both ran the
+      check/fetch/compile/persist and attempted the pointer swap; they
+      RACED — OCC-guarded so the loser failed clean,
+      content-addressed so double-writes converged. NOT a
       correctness bug (freshness is safe either way); the cost is a
       duplicated network fetch + full TS compile per piece per runtime,
       and mismatched compiler fingerprints (shell-baked vs server
@@ -7965,26 +7962,26 @@ supply; OW29/OW32/OW34 closed):
     for tail-arriving work, and even a held gate only DELAYS (the
     deadline arm commits what is sealed so far). RULED 2026-08-24
     (owner, verbatim): "agreed with your recommendation: bounded
-    accept-and-retry for now". BUILT (the retry PR): the M1 SIBLING
-    step re-runs its FULL construction (fresh prefix, host tenure,
-    client) at most TWICE; ONLY the tagged structural signature
-    retries — the held-wave probe finding the flushed ping durable
-    (`A3StructuralWindow`) — and every other failure propagates on
-    the first attempt (verified: the title's sibling-fold mutation
-    reds attempt 1 with zero retries; the forced window retries
-    once, logs once, and propagates after attempt 2). Absorbed hits
-    log the greppable marker `a3-structural-window-retry (OW57)` —
-    the CI count is the evidence base for this row's DESTINATION: a
-    product-side seam on the committing tail (its own considered
-    change), which is what would let a held-wave construction bind
-    again. The plain (α3) ORPHAN step shares the construction class
-    and INHERITS this disposition if it ever fires the same
-    signature (durable flushed ping at its held-wave probe) — not
-    pre-wrapped: the ruling's scope is "for now", the observed
-    step. Until then a red of an (α3) step with the ping already
-    durable at the probe is this window, not a product regression,
-    and not the inserting PR's defect. No lift trigger
-    (test-harness item).
+    accept-and-retry for now". That bounded retry shipped as the
+    interim disposition: the M1 SIBLING step re-ran its full
+    construction at most twice, and only a tagged
+    `A3StructuralWindow` retried. CLOSED 2026-08-27: the existing
+    test-only `decorateWaveCommitSink` seam is late enough to make
+    the race deterministic without a product change. The test gates
+    the exact home-space batch whose `eventAppends` and
+    `consequenceOf` both name the ping event, after the emitter and
+    handler/sibling contributions have accumulated but immediately
+    before the real sink's head-checked store commit. While that
+    batch is paused, the client commits the rival sidecar append;
+    releasing it therefore deterministically exercises the
+    production sink's conflict reconciliation and orphan/sibling
+    fold. The settle-gate/queue monkeypatch, tagged structural
+    exception, fresh-attempt teardown, and bounded retry are removed:
+    every assertion now fails on its first construction. Validation:
+    20/20 focused fake-clock runs and the full 28-step events-down file
+    passed; the standard repository checks are recorded on the closing
+    PR. No lift trigger (test-harness item; no product-side seam or
+    behavior change).
   - **OW58 — the consequence-notice resolved-error guard wedge
     (adversarial review of PR #6186, MAJOR-1 — probe-confirmed;
     minted 2026-08-21; PRE-EXISTING since Phase 3, NOT introduced by

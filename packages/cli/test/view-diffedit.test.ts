@@ -1727,7 +1727,9 @@ Deno.test("diffedit: an edit after expanding context saves without duplicating l
   }
 });
 
-// --- regression: review findings (expand overlap, repeated-path revert, etc.) -
+//
+// regression: review findings (expand overlap, repeated-path revert, etc.) -
+//
 
 const MULTI_DIFF = `diff --git a/m.ts b/m.ts
 index 0000000..1111111 100644

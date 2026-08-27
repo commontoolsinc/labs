@@ -1,3 +1,7 @@
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
@@ -23,9 +27,14 @@ class CapturingTransport extends EventEmitter<RuntimeTransportEvents>
   implements RuntimeTransport {
   readonly sent: Array<IPCClientMessage | IPCClientNotification> = [];
   send(original: IPCClientMessage | IPCClientNotification): void {
-    // Cloned, as a real transport delivers it, so what is captured cannot
-    // change under later mutation by the sender.
-    const message = structuredClone(original);
+    // Encoded, cloned and decoded, as a real transport delivers it. The
+    // encoding is what carries the `FabricKeyPair` this payload holds, where a
+    // bare clone would strip it to `{}`; the clone is what makes the copy,
+    // since an encode-decode pair alone returns the sender's own object where
+    // nothing needed encoding, and deep-freezes it in place.
+    const message = fabricFromRealmValue(
+      structuredClone(realmFromFabricValue(original)),
+    ) as IPCClientMessage | IPCClientNotification;
     this.sent.push(message);
     if (!("msgId" in message)) return;
     queueMicrotask(() => {
@@ -42,6 +51,24 @@ class CapturingTransport extends EventEmitter<RuntimeTransportEvents>
 
 describe("initialize-init-data", () => {
   describe("RuntimeClient.initialize InitializationData wiring", () => {
+    it("captures a copy, leaving the sender's own message untouched", () => {
+      // The clone in the middle of the round trip is load-bearing and easy to
+      // drop: an encode and a decode alone hand back the sender's own object
+      // where nothing needed encoding, and deep-freeze it on the way. A double
+      // that did that would freeze `RuntimeClient`'s message under it, which
+      // no real transport does.
+      const transport = new CapturingTransport();
+      const original = {
+        msgId: 1,
+        data: { type: RequestType.Idle },
+      } as unknown as IPCClientMessage;
+
+      transport.send(original);
+
+      expect(transport.sent[0]).not.toBe(original);
+      expect(Object.isFrozen(original)).toBe(false);
+    });
+
     it("forwards patternCoverage into the worker InitializationData", async () => {
       // The flag is set on RuntimeClientOptions but the hand-built
       // InitializationData literal must copy it, or the worker is built without

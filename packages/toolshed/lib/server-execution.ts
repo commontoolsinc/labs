@@ -32,9 +32,6 @@ let host: ExecutorHost | undefined;
  */
 const SERVING_RUNTIME_EXPERIMENTAL = {
   serverExecution: true,
-  // serving-loop.md §3e: the pattern-update posture flips server-side — the
-  // SpaceServer owns the watcher and the swap under the flag.
-  systemPatternAutoUpdate: true,
 } as const satisfies ExperimentalOptions;
 
 /** The production default for the per-space outstanding-network-effect

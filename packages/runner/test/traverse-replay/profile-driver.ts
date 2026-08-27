@@ -117,6 +117,7 @@ Deno.writeTextFileSync(`${outPrefix}.cpuprofile`, JSON.stringify(profile));
 
 //
 // self-time report
+//
 // Attribute sampled time per node via timeDeltas (more accurate than
 // hitCount * interval), then aggregate by frame and by file.
 //

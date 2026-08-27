@@ -25,6 +25,7 @@ export const CALL_NAMES: ReadonlySet<string> = COMMONFABRIC_CALL_EXPORT_NAMES;
 
 //
 // Synthetic identifiers emitted by ts-transformers
+//
 // Mirrors of constants in `packages/ts-transformers/src`. Kept as literals so
 // the pager does not import the transformer's analysis graph. See vocab.test.ts.
 //

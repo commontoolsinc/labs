@@ -197,7 +197,6 @@ describe("stage A: the instance-keyed serving replica (OW17)", () => {
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: false,
           },
         });
         servingRuntime = runtime;

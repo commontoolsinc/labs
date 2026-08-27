@@ -1308,7 +1308,6 @@ describe("intent listener — end to end (design (e) pins 6, 10, 11)", () => {
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: false,
           },
         });
         return {

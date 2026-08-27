@@ -9,7 +9,6 @@ import {
   NAME,
   pattern,
   type PerSession,
-  type PerUser,
   type ReadonlyCell,
   SELF,
   Stream,
@@ -21,22 +20,45 @@ import {
 
 // ===== Shared types =====
 
-export type TopicLinkKind = "pr" | "topic" | "session" | "web";
+/**
+ * What a link points at — a rendering hint, not a behavior switch.
+ *
+ * An open domain rather than an enum, deliberately. This value is PROVIDED
+ * data: it reaches a reader through a published result, where the update gate
+ * requires the new type to be a subset of the old one. A closed enum there can
+ * never gain a member, so declaring one is a promise never to learn a new kind
+ * of link — and the set below is a guess about a corpus that keeps growing.
+ *
+ * Well-known values, which the composer offers and the renderer styles:
+ * `"web"`, `"pr"`, `"topic"`, `"session"`. Anything else stores and renders as
+ * itself rather than being refused.
+ */
+export type TopicLinkKind = string;
 
 /** A display snapshot attached atomically to content. Fabric remains the
  * authority for which principal/key performed the write. `kind: "agent"`
  * disambiguates an agent acting with its human user's key. */
 export interface TopicAuthor {
-  kind: "person" | "agent";
+  /** Open for the same reason `TopicLinkKind` is: this is provided data, so a
+   * closed set here could never gain `"service"` or whatever acts next.
+   * Well-known values are `"person"` and `"agent"`, the latter marking an
+   * agent acting with its human user's key. */
+  kind: string;
   name: string;
   avatar?: string;
 }
 
 export interface AgentAuthoredEvent {
   /** Explicit content-level signature for an agent using its human user's
-   * identity key. Optional only so callers of the previous deployed schema
-   * remain valid; new callers must provide a non-blank name. */
-  agentName?: string;
+   * identity key. Fabric authenticates the write with that key; this says
+   * which agent acted under it.
+   *
+   * Required, and required from the start of a caller's life rather than
+   * eventually: acceptance can widen later but not narrow, so a verb that
+   * tolerates an unsigned call can never stop tolerating one without a break.
+   * Taking it here means the arrival of execution provenance can relax this
+   * to optional compatibly, which is the direction that costs nothing. */
+  agentName: string;
 }
 
 export interface AddCommentEvent extends AgentAuthoredEvent {
@@ -47,20 +69,19 @@ export interface AddCommentEvent extends AgentAuthoredEvent {
 
 export interface AddLinkEvent extends AgentAuthoredEvent {
   /** What the link points at — a rendering hint, not a behavior switch.
-   * Required by the deployed contract even though the handler would default
-   * it to "web": the compat gate compares a verb's event schema in the
-   * result direction, where required-to-optional is refused, so relaxing
-   * this rides the next acknowledged break rather than an ordinary deploy. */
-  kind: TopicLinkKind;
+   * Optional because the handler defaults it to `"web"`, and a caller should
+   * not be made to supply a field the verb never needed. */
+  kind?: TopicLinkKind;
 
   /** The link target. Must be http(s): anything else rejects, because a
    * user-supplied scheme on a shared surface is script execution in every
    * viewer's session. */
   url: string;
 
-  /** Display label. A blank label falls back to the URL; required to be
-   * present for the same gate reason as `kind`. */
-  label: string;
+  /** Display label. Optional, and a blank one falls back to the URL — the
+   * handler has always done that, and requiring the field only kept callers
+   * from relying on it. */
+  label?: string;
 }
 
 export interface SetBodyEvent extends AgentAuthoredEvent {
@@ -169,12 +190,16 @@ export interface TopicComment {
   /** Snapshot taken at write time (profile enrichment comes later; never gate
    * authorship on a profile wish — CT-1879). Comments carry no minted id:
    * array elements have stable entity identity; future editing addresses
-   * elements by reference (`equals()`), not by a synthetic key. */
+   * elements by reference (`equals()`), not by a synthetic key.
+   *
+   * Every comment written from now on carries one, because `addComment`
+   * requires a signature. Still OPTIONAL, and that is not a hedge: a comment
+   * stored by the unsigned path has no author, and a stored record type has to
+   * accept what is already stored. Requiring it here does not make old comments
+   * signed — it makes a deployed piece holding one impossible to update at all,
+   * which `deno task pattern-vintage` refuses rather than discovers in
+   * production. */
   author?: TopicAuthor;
-
-  /** @deprecated Compatibility shadow for consumers of the previous result
-   * schema. New callers must use `author`; the pattern mirrors this field. */
-  authorName: string | Default<"">;
   body: string | Default<"">;
   sentAt: number | Default<0>;
 }
@@ -197,13 +222,6 @@ export interface TopicInput {
   links?: Writable<TopicLink[] | Default<[]>>;
   createdAt?: number | Default<0>;
   createdBy?: TopicAuthor;
-
-  /** @deprecated Compatibility shadow for the previous result contract. */
-  createdByName?: string | Default<"">;
-
-  /** @deprecated Retained only for callers of the previous unsigned mutation
-   * streams. New callers use Profile authorship or an atomic `agentName`. */
-  myName?: PerUser<Writable<string | Default<"">>>;
   bodyUpdatedBy?: Writable<
     TopicAuthor | Default<{ kind: "person"; name: "" }>
   >;
@@ -220,7 +238,7 @@ export interface TopicInput {
    * autocompletes over. A reference to the tracker's array, wired at creation
    * like `myName` (and backfillable as a one-time link-bind on pieces created
    * before it existed). Absent, the editor simply offers no completions. */
-  mentionable?: Writable<TopicPiece[] | Default<[]>>;
+  mentionable?: Writable<TopicMentionable[] | Default<[]>>;
 
   /** Where this topic's `[Label][key]` mentions point, keyed by the token that
    * appears in the body. The editor owns the contents; this pattern owns the
@@ -323,8 +341,23 @@ export interface TopicCrossrefRow {
 }
 
 /**
+ * What the body editor's `@`-mention autocomplete needs of a sibling: the
+ * display name it lists, and the title it matches on.
+ *
+ * `[NAME]` is not decoration here. `cf-code-editor` declares its entries as
+ * `Mentionable`, whose schema carries `required: [NAME]`
+ * (`packages/ui/src/v2/core/mentionable.ts`), so a sibling projection without
+ * it silently offers no completions — the JSX prop binding is loose enough
+ * that TypeScript does not object.
+ */
+export interface TopicMentionable {
+  [NAME]: string | Default<""> | undefined;
+  title: string | Default<"">;
+}
+
+/**
  * The least a board row needs from a topic: its title, and the scalars a
- * full-board survey summarises.
+ * full-board survey summarizes.
  *
  * An input projection, not a published type — every reference this pattern
  * publishes is declared at `TopicPiece`. Keeping it out of the published
@@ -368,10 +401,6 @@ export interface TopicPiece extends TopicSummary {
    * retained topic may not have produced this path yet; its persisted title
    * remains authoritative until it does. */
   [NAME]: string | Default<""> | undefined;
-
-  /** @deprecated Compatibility shadow for consumers of the previous result
-   * schema. New callers must use `createdBy`; the pattern mirrors this field. */
-  createdByName: string | Default<"">;
 
   /** The living document, verbatim Markdown. `setBody` replaces it whole. */
   body: string | Default<"">;
@@ -442,17 +471,22 @@ export interface TopicPiece extends TopicSummary {
    * itself, stored as a reference. The browser equivalent is picking a
    * completion in the body editor, which writes the same map.
    *
-   * OPTIONAL, unlike the verbs beside them, and for the reason every added path
-   * on this projection is: a topic deployed before these existed carries
-   * neither, and a required property it cannot produce refuses its update
-   * outright. The older verbs predate every deployed generation, so they can
-   * stay required; these cannot. */
-  mention?: Stream<MentionEvent>;
+   * Required, like the verbs beside them. They were optional because a topic
+   * deployed before they existed carries neither, and a required property a
+   * piece cannot produce refuses its update — but an optional verb is its own
+   * defect: it pushes a maybe to every call site whose obvious spelling,
+   * `piece.verb?.send(...)`, skips in silence rather than failing. This change
+   * is already a rehearsed break that rewrites every topic, so the generation
+   * that lacked them does not survive it, and the reason for the optionality
+   * goes with it. */
+  mention: Stream<MentionEvent>;
 
   /** Stop referencing a piece: removes every `mention`-made entry naming it.
    * References made in the prose are retracted by editing the prose, not by
-   * this. Optional on the projection for the same reason as `mention`. */
-  unmention?: Stream<UnmentionEvent>;
+   * this. Required on the projection for the same reason as `mention`, and
+   * the pair has to move together: a caller that can make a reference and
+   * only maybe retract it is the worse half of both contracts. */
+  unmention: Stream<UnmentionEvent>;
 }
 
 /**
@@ -502,11 +536,12 @@ export interface TopicOutput extends TopicPiece {
   /** Rename the topic. Lives on the direct interface rather than the shared
    * `TopicPiece` projection, and the placement is the contract: a holder's
    * required demands are write-once, so a required verb added to the
-   * projection every board embeds would refuse those boards' updates.
-   * (`mention` above takes the other safe road, an optional member; a rename
-   * is a direct-address mutation and needs no place on the projection at
-   * all.) Requires `agentName` and returns the persisted title with the
-   * attribution written. */
+   * projection every board embeds refuses those boards' updates unless an
+   * acknowledged break rewrites them. That is what `mention` above costs, and
+   * it is worth paying only for a verb the projection has to carry. A rename
+   * is a direct-address mutation with no place on the projection at all, so
+   * it never faces the question. Requires `agentName` and returns the
+   * persisted title with the attribution written. */
   setTitle: Stream<SetTitleEvent, SetTitleResult>;
 
   /** Attribution of the last rename; unset until the first `setTitle`.
@@ -632,15 +667,13 @@ export const rejectMutation = (verb: string, reason: string): never => {
   throw new Error(`${verb} rejected: ${reason}`);
 };
 
-/** Structured author first, legacy string second. Agent snapshots are labelled
- * explicitly because they share the authenticated principal's identity key. */
+/** The display string for an author, falling back to `someone` when there is
+ * none or the name is blank. Agent snapshots are labeled explicitly because
+ * they share the authenticated principal's identity key. */
 export const topicAuthorLabel = (
   author: TopicAuthor | undefined,
-  legacyName: string | undefined = "",
 ): string => {
-  const name = (author?.name ?? "").trim() ||
-    (legacyName ?? "").trim() ||
-    "someone";
+  const name = (author?.name ?? "").trim() || "someone";
   return author?.kind === "agent" ? `${name} (agent)` : name;
 };
 
@@ -666,12 +699,10 @@ const LINK_KIND_ITEMS = [
 export const appendComment = (
   comments: Writable<TopicComment[] | Default<[]>>,
   body: string,
-  author: TopicAuthor | undefined,
-  legacyName: string,
+  author: TopicAuthor,
 ): TopicComment => {
   const comment = {
     author,
-    authorName: legacyName,
     body: body.trim(),
     sentAt: Date.now(),
   };
@@ -714,7 +745,7 @@ export const submitProfileComment = handler<void, {
   const text = commentDraft.get();
   const author = topicAuthorFromPerson(profileName, profileAvatar);
   if (!text.trim() || !author) return;
-  appendComment(comments, text, author, topicAuthorLabel(author));
+  appendComment(comments, text, author);
   commentDraft.set("");
 });
 
@@ -960,18 +991,15 @@ const lastActivityOf = lift((
   return newest;
 });
 
-/** A legacy Topic has only `createdByName`. Project that snapshot into the
- * structured result instead of returning a dangling link to an absent optional
- * input path; sibling Topic schemas can then validate the piece. */
+/** The structured author, projected rather than returned as a dangling link to
+ * an absent optional input path, so a sibling Topic's schema can validate the
+ * piece. A topic with no author reads as the inert sentinel rather than as
+ * nothing. */
 const createdByOf = lift((
-  { createdBy, createdByName }: {
-    createdBy?: TopicAuthor;
-    createdByName: string;
-  },
-): TopicAuthor => {
-  if (createdBy && createdBy.name.trim()) return createdBy;
-  return { kind: "person", name: createdByName.trim() };
-});
+  { createdBy }: { createdBy?: TopicAuthor },
+): TopicAuthor =>
+  createdBy && createdBy.name.trim() ? createdBy : { kind: "person", name: "" }
+);
 
 // ===== The pattern =====
 
@@ -984,8 +1012,6 @@ export default pattern<TopicInput, TopicOutput>(
       links,
       createdAt,
       createdBy,
-      createdByName,
-      myName,
       bodyUpdatedBy,
       bodyUpdatedAt,
       titleUpdatedBy,
@@ -1023,37 +1049,25 @@ export default pattern<TopicInput, TopicOutput>(
     const profileName = profileWish.result?.name ?? "";
     const profileAvatar = profileWish.result?.avatar ?? "";
     const hasProfile = profileName.trim().length > 0;
-    const createdByView = createdByOf({ createdBy, createdByName });
+    const createdByView = createdByOf({ createdBy });
 
     // --- Streams (external API; also usable headlessly via CLI) ---
 
     const addComment = action<AddCommentEvent, AddCommentResult>(
       ({ body: text, agentName }) => {
         const trimmed = (text ?? "").trim();
-        const author = topicAuthorFromAgent(agentName ?? "");
-        if (agentName !== undefined && !author) {
-          rejectMutation(
-            "addComment",
-            "agentName must be non-blank when given",
-          );
-        }
+        const author = topicAuthorFromAgent(agentName) ??
+          rejectMutation("addComment", "agentName must be non-blank");
         if (!trimmed) rejectMutation("addComment", "body must be non-empty");
-        const legacyName = author
-          ? topicAuthorLabel(author)
-          : (myName.get() ?? "").trim() || "someone";
-        return {
-          comment: appendComment(comments, trimmed, author, legacyName),
-        };
+        return { comment: appendComment(comments, trimmed, author) };
       },
     );
 
     const addLink = action<AddLinkEvent, AddLinkResult>(
       ({ kind, url, label, agentName }) => {
         const trimmedUrl = (url ?? "").trim();
-        const author = topicAuthorFromAgent(agentName ?? "");
-        if (agentName !== undefined && !author) {
-          rejectMutation("addLink", "agentName must be non-blank when given");
-        }
+        const author = topicAuthorFromAgent(agentName) ??
+          rejectMutation("addLink", "agentName must be non-blank");
         if (!trimmedUrl) rejectMutation("addLink", "url must be non-empty");
         if (!isSafeLinkUrl(trimmedUrl)) {
           rejectMutation("addLink", "url must be http(s)");
@@ -1064,13 +1078,14 @@ export default pattern<TopicInput, TopicOutput>(
 
     const setBody = action<SetBodyEvent, SetBodyResult>(
       ({ body: text, agentName }) => {
-        const author = topicAuthorFromAgent(agentName ?? "");
-        if (agentName !== undefined && !author) {
-          rejectMutation("setBody", "agentName must be non-blank when given");
-        }
+        const author = topicAuthorFromAgent(agentName) ??
+          rejectMutation("setBody", "agentName must be non-blank");
         const persisted = text ?? "";
         body.set(persisted);
-        if (!author) return { body: persisted };
+        // Every edit stamps. The unsigned path used to write the body and
+        // leave these alone, which left the PREVIOUS author's name sitting on
+        // content they did not write — a misattribution the verb reported as
+        // success.
         const bodyUpdatedAtValue = Date.now();
         bodyUpdatedBy.set(author);
         bodyUpdatedAt.set(bodyUpdatedAtValue);
@@ -1299,7 +1314,7 @@ export default pattern<TopicInput, TopicOutput>(
               )}
             <cf-hstack justify="between" align="center">
               <cf-text variant="caption" tone="muted">
-                started by {topicAuthorLabel(createdByView, createdByName)}
+                started by {topicAuthorLabel(createdByView)}
                 {createdAt ? ` · ${whenLabel(createdAt)}` : ""}
               </cf-text>
               <cf-hstack gap="2" align="center">
@@ -1475,17 +1490,11 @@ export default pattern<TopicInput, TopicOutput>(
                           <cf-hstack gap="2" align="center">
                             <cf-avatar
                               src={comment.author?.avatar || ""}
-                              name={topicAuthorLabel(
-                                comment.author,
-                                comment.authorName,
-                              )}
+                              name={topicAuthorLabel(comment.author)}
                               size="xs"
                             />
                             <cf-text style="font-weight: 600;">
-                              {topicAuthorLabel(
-                                comment.author,
-                                comment.authorName,
-                              )}
+                              {topicAuthorLabel(comment.author)}
                             </cf-text>
                             <cf-text variant="caption" tone="muted">
                               {whenLabel(comment.sentAt)}
@@ -1589,7 +1598,6 @@ export default pattern<TopicInput, TopicOutput>(
       links,
       createdAt,
       createdBy: createdByView,
-      createdByName,
       bodyUpdatedBy,
       bodyUpdatedAt,
       commentCount,

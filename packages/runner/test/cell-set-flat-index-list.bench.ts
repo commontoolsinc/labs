@@ -160,6 +160,7 @@ async function cleanup(
 
 //
 // write accounting
+//
 // A transaction holds its journal only while it is open: commit() releases it
 // on the way to settling, so tx.journal.novelty(space) is empty afterwards.
 // Each write scenario below therefore takes an `account` callback and hands it

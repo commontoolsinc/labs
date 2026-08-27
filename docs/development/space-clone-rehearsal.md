@@ -81,8 +81,16 @@ deno task cf inspect churn $DB --bucket 60 \
 
 # 4. Run every authored test locally. Then update against the CLONE's api-url
 #    once, with one --test flag per entry and one --datafile flag per attached
-#    data file. Children first, board last, serially — the parent's result
-#    recomputation is what storms.
+#    data file. Serially, and usually children first, board last — the parent's
+#    result recomputation is what storms.
+#
+#    CHECK THE PARENT'S STORED DEMAND BEFORE ASSUMING THAT ORDER. It inverts
+#    when the parent cannot read the new child shape: a required path with no
+#    default that the new child stops publishing empties the parent's WHOLE
+#    array, behind a count that still looks right. Then the parent has to move
+#    first, and the storm is the price of not blanking it. Read the demand out
+#    of the parent's latest stored revision rather than recompiling its source
+#    — a deployed parent is whatever generation it was deployed at.
 deno task cf test <pattern.test.tsx>
 deno task cf test <pattern.integration.test.tsx>
 deno task cf piece setsrc <pattern.tsx> \

@@ -1,10 +1,8 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import {
-  fabricFromRealmValue,
-  realmFromFabricValue,
-} from "@commonfabric/data-model/codecs";
+import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { Identity } from "@commonfabric/identity";
 import type { OperationFieldSnapshot } from "@commonfabric/memory/v2";
 import { Runtime } from "@commonfabric/runner";
@@ -86,17 +84,17 @@ describe("RuntimeClient operation collaboration", () => {
     };
     const wireField = (field: OperationFieldSnapshot) => ({
       ...field,
-      materialized: realmFromFabricValue(field.materialized),
+      materialized: field.materialized,
       operations: field.operations.map((operation) => ({
         ...operation,
-        payload: realmFromFabricValue(operation.payload),
+        payload: operation.payload,
       })),
     });
     const wireResolution = {
       ...resolution,
       operations: resolution.operations.map((operation) => ({
         ...operation,
-        payload: realmFromFabricValue(operation.payload),
+        payload: operation.payload,
       })),
     };
     const conn = {
@@ -189,8 +187,8 @@ describe("RuntimeClient operation collaboration", () => {
       ]);
     const apply = requests.find((request) =>
       (request as { type: RequestType }).type === RequestType.OperationApply
-    ) as { payload: Parameters<typeof fabricFromRealmValue>[0] };
-    expect(fabricFromRealmValue(apply.payload)).toEqual({ updates: [] });
+    ) as { payload: FabricValue };
+    expect(apply.payload).toEqual({ updates: [] });
     expect(
       requests.filter((request) =>
         (request as { operationSessionId?: string }).operationSessionId !==
@@ -349,7 +347,7 @@ describe("RuntimeClient operation collaboration", () => {
       { type: RequestType.OperationQuery, cell } as never,
     );
     expect(
-      (fabricFromRealmValue(queried.field.materialized) as FabricBytes).slice(),
+      (queried.field.materialized as FabricBytes).slice(),
     ).toEqual(new Uint8Array([1, 2, 3]));
     const applied = await RuntimeProcessor.prototype.handleOperationApply.call(
       processor,
@@ -359,16 +357,14 @@ describe("RuntimeClient operation collaboration", () => {
         codec: "synthetic@1",
         submissionId: "bytes:1",
         base: { epoch: 1, version: 0 },
-        payload: realmFromFabricValue(bytes),
+        payload: bytes,
       } as never,
     );
     expect((receivedPayload as FabricBytes).slice()).toEqual(
       new Uint8Array([1, 2, 3]),
     );
     expect(
-      (fabricFromRealmValue(
-        applied.resolution.operations[0].payload,
-      ) as FabricBytes).slice(),
+      (applied.resolution.operations[0].payload as FabricBytes).slice(),
     ).toEqual(new Uint8Array([1, 2, 3]));
   });
 
@@ -432,14 +428,51 @@ describe("RuntimeClient operation collaboration", () => {
     try {
       subscribed!(field);
       await Promise.resolve();
-      expect(notifications).toEqual([{
-        type: NotificationType.OperationUpdate,
-        subscriptionId: "subscription:1",
-        field: {
-          ...field,
-          materialized: realmFromFabricValue(field.materialized),
-        },
-      }]);
+      // Decoded rather than read raw: what the worker posts is an envelope
+      // encoding, and the client refuses anything that is not one. Comparing
+      // the decode is what says this notification can actually be received,
+      // where comparing the posted value would pass for a message that never
+      // crossed.
+      expect(
+        notifications.map((posted) => fabricFromRealmValue(posted as never)),
+      )
+        .toEqual([{
+          type: NotificationType.OperationUpdate,
+          subscriptionId: "subscription:1",
+          field: {
+            ...field,
+            materialized: field.materialized,
+          },
+        }]);
+
+      // The notification goes through `postToClient()`, which is what puts it
+      // under the guard there. It posts from a `queueMicrotask` callback, so
+      // there is no caller's `try` around it: a refused post that threw would
+      // be an uncaught error rather than anything a caller could handle. Made
+      // to throw once, the post is answered with a substitute and nothing
+      // escapes -- where a bare `self.postMessage` here would escape. The
+      // substitute is encoded like anything else this connection sends, so it
+      // is read the same way.
+      notifications.length = 0;
+      let thrown = false;
+      (globalThis as { postMessage: (m: unknown) => void }).postMessage = (
+        m,
+      ) => {
+        if (!thrown) {
+          thrown = true;
+          throw new Error("post refused");
+        }
+        notifications.push(m);
+      };
+      subscribed!(field);
+      await Promise.resolve();
+      expect(notifications).toHaveLength(1);
+      const substitute = fabricFromRealmValue(notifications[0] as never) as {
+        type?: unknown;
+        message?: string;
+      };
+      expect(substitute.type).toBe(NotificationType.ErrorReport);
+      expect(substitute.message).toContain("Undeliverable message");
     } finally {
       (globalThis as { postMessage?: unknown }).postMessage = postMessage;
     }
@@ -475,7 +508,7 @@ describe("RuntimeClient operation collaboration", () => {
       submissionId: "switch:1",
       base: null,
       baselineHash: "baseline",
-      payload: realmFromFabricValue("value"),
+      payload: "value",
     } as never);
     await processor.handleRequest({
       type: RequestType.OperationRelease,
@@ -719,7 +752,7 @@ describe("RuntimeClient operation collaboration", () => {
       codec: "test@1",
       submissionId: "submission:1",
       base: { epoch: 1, version: 0 },
-      payload: realmFromFabricValue("change"),
+      payload: "change",
     } as never);
     await processor.handleOperationSubscribe({
       cell: alias,
@@ -803,7 +836,7 @@ describe("RuntimeClient operation collaboration", () => {
       } as never);
 
       expect(field.field.id).toBe(targetId);
-      expect(fabricFromRealmValue(field.field.materialized)).toBe("value");
+      expect(field.field.materialized).toBe("value");
     } finally {
       await runtime.dispose();
       await storage.close();

@@ -1,13 +1,13 @@
 import { createSession, DID, Identity, Session } from "@commonfabric/identity";
 import { CFC_CONCEPT_KIND, cfcAtom } from "@commonfabric/api/cfc";
 import { entityRefFromString } from "@commonfabric/data-model/cell-rep";
+import type { FabricPlainObject } from "@commonfabric/data-model/fabric-value";
 import { navigate } from "@commonfabric/navigation";
 import { slugIdForSpace } from "@commonfabric/runner/slugs";
 import { NameSchema } from "@commonfabric/runner/schemas";
 import {
   CellHandle,
   FavoritesManager,
-  JSONObject,
   PageHandle,
   type PieceSourceView,
   Program,
@@ -31,7 +31,6 @@ const identityLogger = getLogger("lib-shell.identity", {
 
 export type ExperimentalRuntimeFlags = {
   modernCellRep?: boolean;
-  systemPatternAutoUpdate?: boolean;
   contentAddressedSchemas?: boolean;
 };
 
@@ -345,10 +344,14 @@ export class RuntimeInternals extends EventTarget {
     return this.#favorites;
   }
 
+  /**
+   * Creates a piece in the given space, `options.argument` being the record of
+   * inputs it is created with.
+   */
   async createPiece<T>(
     space: DID,
     source: URL | Program | string,
-    options?: { argument?: JSONObject; run?: boolean },
+    options?: { argument?: FabricPlainObject; run?: boolean },
   ): Promise<PageHandle<T>> {
     this.#check();
     const page = await this.#client.createPage<T>(source, space, options);

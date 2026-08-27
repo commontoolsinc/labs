@@ -240,6 +240,7 @@ Deno.test("parse: null, true and false are colored as boolean literals", () => {
 
 //
 // classifyIdentifier: declaration-name and access branches
+//
 // Covers lines 844-846 (function/method/method-signature names), 848-852
 // (interface/class/class-expression names), 854 (enum name), 869-870
 // (property declaration / enum member), 877 (synthetic helper member access).
@@ -389,12 +390,10 @@ Deno.test("parse: an element-access expression gets a […] generic label", () =
   );
 });
 
-//
-// registerDefinition no-name guard (line 1260)
-// Covered indirectly: registerDefinition is only called when desc.name is set,
-// but the early `if (!desc.name) return` is reached when called for a name.
-// A named binding exercises the body; the guard line itself runs every call.
-//
+// registerDefinition no-name guard (line 1260): Covered indirectly:
+// registerDefinition is only called when desc.name is set, but the early `if
+// (!desc.name) return` is reached when called for a name. A named binding
+// exercises the body; the guard line itself runs every call.
 
 Deno.test("parse: a named binding registers a definition", () => {
   const doc = parseDocument("const namedThing = 1;\n", "m.ts");
@@ -430,7 +429,7 @@ Deno.test("parse: class methods, constructor and accessors become method nodes",
 });
 
 //
-// --- classify: enum / export assignment / export decl / import equals /
+// classify: enum / export assignment / export decl / import equals /
 // module declaration (lines 1353-1390)
 //
 
@@ -477,7 +476,9 @@ Deno.test("parse: an anonymous namespace (string-literal module name) has no nam
   assertEquals(ns!.name, undefined, "a string-named module exposes no name");
 });
 
-// --- classify: multi-declarator variable statement & declaration (1400-1408) -
+//
+// classify: multi-declarator variable statement & declaration (1400-1408) -
+//
 
 Deno.test("parse: a multi-declarator var statement yields a binding node per declaration", () => {
   const doc = parseDocument("const a = 1, b = 2, c = 3;\n", "m.ts");
@@ -589,7 +590,9 @@ Deno.test("parse: a bare arrow-function expression statement is a closure node",
   assert(node!.label.startsWith("λ"), `label was ${node!.label}`);
 });
 
-// --- primaryChildren: arrow + reactive call in return position (1620-1626) ---
+//
+// primaryChildren: arrow + reactive call in return position (1620-1626)
+//
 
 Deno.test("parse: a return of an arrow recurses into its body", () => {
   const src = [
@@ -670,6 +673,7 @@ Deno.test("parse: a computed-callee call is labeled by its first source line", (
 
 //
 // safe() catch path (lines 1725-1727)
+//
 // safe() swallows exceptions in metadata extraction. Hard to force a throw from
 // well-formed input; instead, confirm the surrounding metadata still appears
 // for a normal node (the try path), and rely on malformed schema input below to
@@ -731,6 +735,7 @@ Deno.test("parse: interface metadata describes property, method and index member
 
 //
 // parseSchemaObject + fieldType: array / object / anyOf branches
+//
 // Covers 1819-1820 (non-property-assignment skip), 1847-1857 (fieldType array,
 // object, anyOf/oneOf fallthrough), 1871, 1894-1899 (readSchemaProps/hasProp).
 //

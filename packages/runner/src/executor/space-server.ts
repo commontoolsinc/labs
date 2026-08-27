@@ -269,9 +269,7 @@ export type SpaceServerOptions = {
 
   /** Build the serving runtime over the LOOPBACK storage plane
    * (serving-loop.md §1 plane (a)). The factory owns auth and options;
-   * the SpaceServer asserts the posture (flag ON) and flips the
-   * pattern-update posture is the factory's duty (§3e — pass
-   * `systemPatternAutoUpdate: true`). */
+   * the SpaceServer asserts the posture (flag ON). */
   createRuntime: () => Promise<{
     runtime: Runtime;
     dispose: () => Promise<void>;
@@ -4342,29 +4340,13 @@ export class SpaceServer implements TransactionSealDestination {
             runtime.trustSnapshotForPrincipal(owner),
           );
         },
-        // The FRESHNESS half's write arms carry the same owner
-        // snapshot (F1): the updater stamps its own actionIds
-        // (pattern-update/provenance|transition), so this hook sets
-        // ONLY the snapshot — a second stampServerRun here would
-        // overwrite those actionIds' wave context. The snapshot set
-        // here SURVIVES the arm's later bookkeeping stamp because the
-        // stamper leaves actor-less runs' snapshots alone — the same
-        // invariant the creation hook above relies on, in mirror
-        // order (there: stamp first, snapshot second; here: snapshot
-        // first, the arm's own stamp second).
-        stampReconcileTx: (tx) => {
-          tx.setCfcTrustSnapshot(
-            runtime.trustSnapshotForPrincipal(owner),
-          );
-        },
       });
       // The F2 bound: race the ensure against its deadline. On the
       // deadline the throw lands in the counted-failure arm below and
       // the tenure proceeds serving; the DETACHED work keeps running —
-      // its eventual writes stay safe: the CREATION arm converges by
+      // its eventual writes stay safe: the creation arm converges by
       // address (cause-derived id + the OCC re-check every rival
-      // creator rides), the UPDATE arm by OCC refusal (stillMatches
-      // refuses a moved root, so stale-over-new is impossible) — and
+      // creator rides) — and
       // its eventual rejection is swallowed here so it can never
       // surface as an unhandled rejection.
       work.catch(() => {});
@@ -4382,7 +4364,7 @@ export class SpaceServer implements TransactionSealDestination {
                       "deadline (SpaceServerPolicy.rootEnsureDeadlineMs); " +
                       "the tenure proceeds serving; the detached " +
                       "ensure's writes stay safe (creation converges " +
-                      "by address, the update arm by OCC refusal)",
+                      "by address)",
                   ),
                 ),
               deadlineMs,
@@ -4394,16 +4376,9 @@ export class SpaceServer implements TransactionSealDestination {
       }
       stats.runs += 1;
       if (result.outcome === "created") stats.created += 1;
-      if (
-        result.reconcile === "updated" ||
-        result.reconcile === "repaired-provenance"
-      ) {
-        stats.reconciled += 1;
-      }
       logger.info?.("space-root-ensure", () => [
         `space ${space}: root ensure ${result.outcome} ` +
-        `(reconcile ${result.reconcile}; owner ${owner}` +
-        `${owner === space ? ", self-owned home" : ""})`,
+        `(owner ${owner}${owner === space ? ", self-owned home" : ""})`,
       ]);
     } catch (error) {
       stats.failures += 1;

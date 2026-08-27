@@ -42,6 +42,10 @@ import {
   type IPCRemoteMessage,
   RequestType,
 } from "@/protocol/mod.ts";
+import {
+  fabricFromRealmValue,
+  realmFromFabricValue,
+} from "@commonfabric/data-model/codecs";
 
 const signer = await Identity.fromPassphrase("cell-set-echo-race");
 const space = signer.did();
@@ -115,10 +119,16 @@ class InProcessWorkerTransport extends EventEmitter<RuntimeTransportEvents>
   }
 
   send(original: IPCClientMessage | IPCClientNotification): void {
-    // Cloned, as a real transport delivers it: `BaseRequest` entitles a handler
-    // to own what its request carries, and handing over the sender's own object
-    // would let a handler that cedes a payload reach back into the sender.
-    const message = structuredClone(original);
+    // Encoded, cloned and decoded, as the real transport delivers it: `send()`
+    // encodes, `postMessage` clones, the worker entry decodes. The clone in
+    // the middle is what makes the copy -- a bare encode-decode pair returns
+    // the sender's own object where nothing needed encoding, and deep-freezes
+    // it in place. The handler is entitled to its own: `BaseRequest` lets it
+    // own what its request carries, and handing over the sender's object would
+    // let a handler that cedes a payload reach back into the sender.
+    const message = fabricFromRealmValue(
+      structuredClone(realmFromFabricValue(original)),
+    ) as IPCClientMessage | IPCClientNotification;
     if (!("msgId" in message)) {
       throw new Error("This test sends no one-way client notifications");
     }
@@ -200,7 +210,9 @@ describe("CellSet / CellUpdate echo race over IPC", () => {
       );
       const transport = new InProcessWorkerTransport(processor);
       (globalThis as { postMessage?: unknown }).postMessage = (m: unknown) =>
-        transport.outbox.push(m as IPCRemoteMessage);
+        transport.outbox.push(
+          fabricFromRealmValue(m as never) as IPCRemoteMessage,
+        );
 
       const connectionPromise = new RuntimeConnection(transport).initialize(
         {} as InitializationData,

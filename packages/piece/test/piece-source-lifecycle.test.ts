@@ -15,6 +15,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
   readPieceSourceRevision,
   readPieceSourceState,
+  reconcilePieceSource,
 } from "../src/ops/piece-origin.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
 
@@ -262,7 +263,8 @@ describe("piece source lifecycle", () => {
   });
 
   it("keeps a directly-created same-host piece detached", async () => {
-    runtime.experimental.systemPatternAutoUpdate = true;
+    // A module's authored filename says nothing about where its code came
+    // from, even when it is spelled like a route this deployment serves.
     const path = "/api/patterns/system/manual-piece.tsx";
     const program = {
       ...versionProgram("local"),
@@ -275,7 +277,8 @@ describe("piece source lifecycle", () => {
     webSources[path] = versionProgram("remote");
 
     const piece = await pieces.create(program, { input: {} });
-    await runtime.patternUpdater.idle();
+    expect(await reconcilePieceSource(runtime, piece.getCell()))
+      .toBe("detached");
 
     expect(webFetches).toBe(0);
     expect(getPatternSource(piece.getCell())).toBeUndefined();
