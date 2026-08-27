@@ -6,13 +6,16 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { createBuilder } from "../src/builder/factory.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import type { Cell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { entityIdFrom } from "../src/create-ref.ts";
 import { NAME, UI } from "../src/builder/types.ts";
 import { acquireSchemaRegistryLease } from "../src/schema-registry.ts";
 import {
-  createSidecarPatternCache,
+  openedSidecarSurface,
+  openSidecarSurface,
   parseWishTarget,
+  type SidecarSurfaceState,
   tagMatchesHashtag,
 } from "../src/builtins/wish.ts";
 import {
@@ -3087,13 +3090,13 @@ describe("wish built-in", () => {
       );
     });
 
-    it("fetches the profile-create pattern from the pattern environment apiUrl set after module load", async () => {
-      // Regression test: the sidecar pattern URLs (profile-create / picker /
-      // suggestion) must be resolved when the fetch happens, not at module
-      // import. In the browser worker, wish.ts is imported before the runtime
-      // calls setPatternEnvironment with the real API URL; a module-load-time
-      // const captures the default (the worker's own origin, i.e. the frontend
-      // server), whose SPA fallback serves index.html instead of the pattern.
+    it("asks the host serving the surface's space for the profile-create source", async () => {
+      // A surface records a `system:` origin, which is host-relative on
+      // purpose: it resolves against whichever host serves the space its piece
+      // is in. The process-global pattern environment does not decide that,
+      // and a worker that has not been handed one still reaches the right
+      // host. The identity route is asked first, so an unchanged surface costs
+      // one conditional request and no source download.
       const homeSpaceCell = runtime.getHomeSpaceCell(tx);
       const homeDefaultCell = runtime.getCell(
         userIdentity.did(),
@@ -3134,14 +3137,16 @@ describe("wish built-in", () => {
 
         await result.pull();
 
-        // The missing-profile UI kicks off a deferred profile-create fetch,
-        // which the wish registers as scheduler background work — so one idle
-        // covers it and `recordedUrls`, a plain array with no sink to wait on,
-        // is already written by the time idle resolves.
+        // The missing-profile UI kicks off a deferred open of the create
+        // surface, which the wish registers as scheduler background work — so
+        // one idle covers it and `recordedUrls`, a plain array with no sink to
+        // wait on, is already written by the time idle resolves.
         await runtime.idle();
         expect(recordedUrls).toContain(
-          "https://pattern-env.test/api/patterns/system/profile-create.tsx",
+          "https://example.com/api/patterns/system/profile-create.tsx?identity=",
         );
+        expect(recordedUrls.some((url) => url.includes("pattern-env.test")))
+          .toBe(false);
       } finally {
         globalThis.fetch = originalFetch;
         setPatternEnvironment(originalEnvironment);
@@ -4152,16 +4157,12 @@ describe("wish built-in", () => {
       });
 
       it("picker sidecar fetch failure → result still resolves; error surfaced in picker UI", async () => {
-        // Point the pattern environment at a host whose fetch fails, so the
-        // picker sidecar fetch rejects/404s. Under CT-1829 `.result` no longer
-        // rides the sidecar cell, so it must still resolve to ordered[0]; the
-        // fetch failure is surfaced as an error inside the picker `[UI]` cell,
-        // not as an unhandled rejection.
+        // Fail every request for the picker's source, so opening its surface
+        // cannot answer. Under CT-1829 `.result` no longer rides the sidecar
+        // cell, so it must still resolve to ordered[0]; the failure is
+        // surfaced as an error inside the picker `[UI]` cell, not as an
+        // unhandled rejection.
         const originalFetch = globalThis.fetch;
-        const originalEnvironment = getPatternEnvironment();
-        setPatternEnvironment({
-          apiUrl: new URL("https://ct1829-picker-fail.test/"),
-        });
         globalThis.fetch = ((input: Request | URL | string) => {
           const url = input instanceof Request ? input.url : String(input);
           if (url.includes("profile-picker.tsx")) {
@@ -4177,19 +4178,17 @@ describe("wish built-in", () => {
           // `.result` still resolves to the single best profile.
           expect(result.key("profile").get()?.result?.name).toBe("Ada");
 
-          // The picker sidecar cell surfaces the fetch error: the sidecar cache
-          // swallows the fetch rejection and resolves to undefined, so the new
+          // The picker sidecar cell surfaces the failure: opening the surface
+          // reports the rejection and resolves to undefined, so the
           // undefined-pattern branch commits an error UI into the picker cell.
-          // Give the deferred fetch a moment to route through and commit.
           const pickerCell = result.key("profile").key(UI).key("props")
             .key("$cell").resolveAsCell();
           // The picker launch is scheduler background work, so one settle
-          // covers the rejected fetch and the error UI it commits.
+          // covers the rejected request and the error UI it commits.
           await runtime.settled();
           expect(pickerCell.key(UI).get()).toBeDefined();
         } finally {
           globalThis.fetch = originalFetch;
-          setPatternEnvironment(originalEnvironment);
           await runtime.idle();
         }
       });
@@ -5002,174 +5001,125 @@ describe("tagMatchesHashtag", () => {
   });
 });
 
-describe("createSidecarPatternCache", () => {
-  let originalFetch: typeof globalThis.fetch;
-  let originalEnvironment: ReturnType<typeof getPatternEnvironment>;
+describe("openSidecarSurface", () => {
+  // A surface whose piece the runtime opens through a stubbed reconciler: what
+  // is under test here is when a slot opens its surface and what it does with
+  // the answer, not how a source origin resolves.
+  const SURFACE = { name: "profile-create.tsx", origin: "system:x.tsx" };
 
-  beforeEach(() => {
-    originalFetch = globalThis.fetch;
-    originalEnvironment = getPatternEnvironment();
+  const makeFakeRuntime = (
+    open: (piece: unknown, origin: string) => Promise<unknown>,
+  ) => ({ sourceReconciler: { open } }) as unknown as Runtime;
+
+  const piece = {} as Cell<unknown>;
+
+  it("opens a surface once and reuses what that answered", async () => {
+    const opened: string[] = [];
+    const runtime = makeFakeRuntime((_piece, origin) => {
+      opened.push(origin);
+      return Promise.resolve({ marker: "surface" });
+    });
+    const slot: SidecarSurfaceState = {};
+
+    expect(await openSidecarSurface(runtime, slot, piece, SURFACE))
+      .toEqual({ marker: "surface" });
+    expect(openedSidecarSurface(slot)).toEqual({ marker: "surface" });
+    expect(await openSidecarSurface(runtime, slot, piece, SURFACE))
+      .toEqual({ marker: "surface" });
+    expect(opened).toEqual(["system:x.tsx"]);
   });
 
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
-    setPatternEnvironment(originalEnvironment);
-  });
-
-  // Fake runtime whose harness.resolve hands back the resolver's main() source
-  // and whose compilePattern echoes that source, so the compiled result names
-  // the URL it came from.
-  const makeFakeRuntime = () =>
-    ({
-      harness: {
-        resolve: (resolver: { main(): Promise<{ contents: string }> }) =>
-          resolver.main(),
-      },
-      patternManager: {
-        compilePattern: (program: { contents: string }) =>
-          Promise.resolve({ source: program.contents }),
-      },
-      userIdentityDID: "did:key:sidecar-cache-test",
-    }) as unknown as Runtime;
-
-  // fetch mock that 200s with a body naming the host. Hosts in `failFirst` 404
-  // on their first request and succeed afterward. The `gate` host's requests
-  // stay pending until the returned `release` is called.
-  const installFetchMock = (
-    options: { gate?: string; failFirst?: string[] } = {},
-  ) => {
+  it("joins an open already in flight", async () => {
     let release = () => {};
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const failFirst = new Set(options.failFirst ?? []);
-    const calls: string[] = [];
-    globalThis.fetch = (async (input: Request | URL | string) => {
-      const url = new URL(input instanceof Request ? input.url : String(input));
-      calls.push(url.host);
-      if (url.host === options.gate) await gate;
-      // delete returns true once per host, so only the first request 404s.
-      return failFirst.delete(url.host)
-        ? new Response("not found", { status: 404 })
-        : new Response(`source from ${url.host}`, { status: 200 });
-    }) as typeof fetch;
-    return { release, calls };
-  };
-
-  it("resolves a superseded fetch to undefined and keeps the newer fetch's pattern", async () => {
-    // The fetch for env-a.test stays pending until released, so the fetch for
-    // env-b.test supersedes it and settles first.
-    const { release } = installFetchMock({ gate: "env-a.test" });
-    const fakeRuntime = makeFakeRuntime();
-    const cache = createSidecarPatternCache({
-      name: "profile-create.tsx",
-      retryOnFailure: true,
+    let opens = 0;
+    const runtime = makeFakeRuntime(() => {
+      opens += 1;
+      return gate.then(() => ({ marker: "surface" }));
     });
+    const slot: SidecarSurfaceState = {};
 
-    setPatternEnvironment({ apiUrl: new URL("https://env-a.test/") });
-    const firstFetch = cache.fetch(fakeRuntime);
-
-    setPatternEnvironment({ apiUrl: new URL("https://env-b.test/") });
-    const secondFetch = cache.fetch(fakeRuntime);
-
-    expect(await secondFetch).toEqual({ source: "source from env-b.test" });
-    expect(cache.cached()).toEqual({ source: "source from env-b.test" });
-
+    const first = openSidecarSurface(runtime, slot, piece, SURFACE);
+    const second = openSidecarSurface(runtime, slot, piece, SURFACE);
+    // Nothing is opened yet, so the second launch has no answer to reuse and
+    // must wait on the one already asking.
+    expect(openedSidecarSurface(slot)).toBeUndefined();
     release();
-    expect(await firstFetch).toBeUndefined();
-    expect(cache.cached()).toEqual({ source: "source from env-b.test" });
+
+    expect(await first).toEqual({ marker: "surface" });
+    expect(await second).toEqual({ marker: "surface" });
+    expect(opens).toBe(1);
   });
 
-  it("retries after a failed fetch when retryOnFailure is set", async () => {
-    // First fetch 404s, the rest succeed.
-    const { calls } = installFetchMock({ failFirst: ["env-a.test"] });
-    const fakeRuntime = makeFakeRuntime();
-    setPatternEnvironment({ apiUrl: new URL("https://env-a.test/") });
-    const cache = createSidecarPatternCache({
-      name: "profile-create.tsx",
-      retryOnFailure: true,
+  it("opens again after a failure when the surface retries", async () => {
+    let opens = 0;
+    const runtime = makeFakeRuntime(() => {
+      opens += 1;
+      return Promise.resolve(opens === 1 ? undefined : { marker: "surface" });
     });
+    const slot: SidecarSurfaceState = {};
 
-    expect(await cache.fetch(fakeRuntime)).toBeUndefined();
-    expect(cache.cached()).toBeUndefined();
-    // The cleared memoization lets a later launch re-fetch the same URL.
-    expect(await cache.fetch(fakeRuntime)).toEqual({
-      source: "source from env-a.test",
-    });
-    expect(calls).toEqual(["env-a.test", "env-a.test"]);
+    expect(
+      await openSidecarSurface(runtime, slot, piece, SURFACE, {
+        retryOnFailure: true,
+      }),
+    ).toBeUndefined();
+    expect(
+      await openSidecarSurface(runtime, slot, piece, SURFACE, {
+        retryOnFailure: true,
+      }),
+    ).toEqual({ marker: "surface" });
+    expect(opens).toBe(2);
   });
 
-  it("drops its compiled pattern when the schema registry epoch clears", async () => {
+  it("keeps a failure for a surface that does not retry", async () => {
+    // The suggestion surface's policy: it is an addition to a view that
+    // already works, so a launch that could not open it does not ask again.
+    let opens = 0;
+    const runtime = makeFakeRuntime(() => {
+      opens += 1;
+      return Promise.resolve(undefined);
+    });
+    const slot: SidecarSurfaceState = {};
+
+    expect(await openSidecarSurface(runtime, slot, piece, SURFACE))
+      .toBeUndefined();
+    expect(await openSidecarSurface(runtime, slot, piece, SURFACE))
+      .toBeUndefined();
+    expect(opens).toBe(1);
+  });
+
+  it("drops an opened pattern when the schema registry epoch clears", async () => {
     // A compiled pattern's serialized graph embeds `cid:` schema references
     // minted in the registry epoch that compiled it, and both backings die
-    // with the epoch — the registry clears on last-lease-out, and the
-    // compile context's space belongs to that session. A pattern handed
-    // across the clear would stage links whose references nothing can
-    // resolve (the emission gate throws on exactly that), so the cache
-    // drops with the epoch and the next launch refetches, minting into the
-    // epoch that will use it.
-    const { calls } = installFetchMock();
-    const fakeRuntime = makeFakeRuntime();
-    setPatternEnvironment({ apiUrl: new URL("https://env-a.test/") });
-    const cache = createSidecarPatternCache({ name: "profile-picker.tsx" });
+    // with the epoch — the registry clears on last-lease-out, and the compile
+    // context's space belongs to that session. A pattern handed across the
+    // clear would stage links whose references nothing can resolve (the
+    // emission gate throws on exactly that), so the surface is opened again
+    // and its pattern minted into the epoch that will use it.
+    let opens = 0;
+    const runtime = makeFakeRuntime(() => {
+      opens += 1;
+      return Promise.resolve({ marker: `surface-${opens}` });
+    });
+    const slot: SidecarSurfaceState = {};
 
     const release = acquireSchemaRegistryLease();
-    expect(await cache.fetch(fakeRuntime)).toEqual({
-      source: "source from env-a.test",
-    });
-    expect(cache.cached()).toEqual({ source: "source from env-a.test" });
+    expect(await openSidecarSurface(runtime, slot, piece, SURFACE))
+      .toEqual({ marker: "surface-1" });
+    expect(openedSidecarSurface(slot)).toEqual({ marker: "surface-1" });
 
     release();
     expect(
-      cache.cached(),
+      openedSidecarSurface(slot),
       "a compiled pattern outlived the registry epoch that minted its " +
         "schema references",
     ).toBeUndefined();
 
-    // The next launch re-fetches and recompiles into the new epoch.
-    expect(await cache.fetch(fakeRuntime)).toEqual({
-      source: "source from env-a.test",
-    });
-    expect(calls).toEqual(["env-a.test", "env-a.test"]);
-  });
-
-  it("keeps a failed fetch without retrying when retryOnFailure is not set", async () => {
-    const { calls } = installFetchMock({ failFirst: ["env-a.test"] });
-    const fakeRuntime = makeFakeRuntime();
-    setPatternEnvironment({ apiUrl: new URL("https://env-a.test/") });
-    // suggestion.tsx's policy: a failed fetch is kept, not retried.
-    const cache = createSidecarPatternCache({ name: "suggestion.tsx" });
-
-    expect(await cache.fetch(fakeRuntime)).toBeUndefined();
-    expect(await cache.fetch(fakeRuntime)).toBeUndefined();
-    expect(cache.cached()).toBeUndefined();
-    expect(calls).toEqual(["env-a.test"]);
-  });
-
-  it("invokes onSuccess only for the fetch that records its pattern", async () => {
-    const { release } = installFetchMock({ gate: "env-a.test" });
-    const fakeRuntime = makeFakeRuntime();
-    const cache = createSidecarPatternCache({
-      name: "profile-create.tsx",
-      retryOnFailure: true,
-    });
-
-    const recorded: unknown[] = [];
-    const record = (pattern: unknown) => recorded.push(pattern);
-
-    setPatternEnvironment({ apiUrl: new URL("https://env-a.test/") });
-    const firstFetch = cache.fetch(fakeRuntime, record);
-
-    setPatternEnvironment({ apiUrl: new URL("https://env-b.test/") });
-    const secondFetch = cache.fetch(fakeRuntime, record);
-
-    expect(await secondFetch).toEqual({ source: "source from env-b.test" });
-
-    release();
-    await firstFetch;
-
-    // The winning env-b fetch reports through onSuccess; the superseded env-a
-    // fetch does not.
-    expect(recorded).toEqual([{ source: "source from env-b.test" }]);
+    expect(await openSidecarSurface(runtime, slot, piece, SURFACE))
+      .toEqual({ marker: "surface-2" });
+    expect(opens).toBe(2);
   });
 });

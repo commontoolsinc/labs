@@ -52,12 +52,13 @@ import {
   type StreamEventsDocValue,
 } from "@commonfabric/memory/v2";
 import { UI } from "../src/builder/types.ts";
-import {
-  getPatternEnvironment,
-  setPatternEnvironment,
-} from "../src/builder/env.ts";
+import { resolveEntryIdentity } from "../src/index.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import { waitUntil } from "./support/wait-until.ts";
+
+// The route the toolshed serves the profile-create surface from, which is what
+// the surface's `system:` origin resolves against.
+const SIDECAR_ROUTE = "/api/patterns/system/profile-create.tsx";
 
 class SharedServerStorageManager extends EmulatedStorageManager {
   static override connectTo(
@@ -1540,25 +1541,27 @@ describe("Phase 5 cross-space serving", () => {
     const aliceDid = await seedHome(aliceSigner);
     const bobDid = await seedHome(bobSigner);
 
-    // Serve the profile-create sidecar SOURCE through a gated fetch stub:
-    // the test controls when the (memoized, node-shared) pattern fetch
-    // resolves, so both demanders run while the fetch is pending — the
-    // exact schedule that clobbered the shared input holder.
+    // Serve the profile-create surface through a gated fetch stub: the test
+    // controls when its source resolves, so both demanders run while the open
+    // is pending — the exact schedule that clobbered the shared input holder.
     const sidecarSource = [
       "import { pattern } from 'commonfabric';",
       "export default pattern<{ profiles: unknown }, { echo: unknown }>(",
       "  ({ profiles }) => ({ echo: profiles }),",
       ");",
     ].join("\n");
+    const sidecarIdentity = await resolveEntryIdentity(
+      SIDECAR_ROUTE,
+      () => Promise.resolve(sidecarSource),
+    );
     const gate = Promise.withResolvers<void>();
     const originalFetch = globalThis.fetch;
-    const originalEnvironment = getPatternEnvironment();
-    setPatternEnvironment({
-      apiUrl: new URL("https://x-space-sidecar.test/"),
-    });
     globalThis.fetch = (async (input: Request | URL | string) => {
-      const url = input instanceof Request ? input.url : String(input);
-      if (url.endsWith("/api/patterns/system/profile-create.tsx")) {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname === SIDECAR_ROUTE) {
+        if (url.searchParams.has("identity")) {
+          return new Response(sidecarIdentity, { status: 200 });
+        }
         await gate.promise;
         return new Response(sidecarSource, { status: 200 });
       }
@@ -1685,7 +1688,6 @@ describe("Phase 5 cross-space serving", () => {
     } finally {
       gate.resolve();
       globalThis.fetch = originalFetch;
-      setPatternEnvironment(originalEnvironment);
       for (const cancel of cancels) cancel();
       await serving.idle();
       await serving.dispose();
@@ -1772,15 +1774,20 @@ describe("Phase 5 cross-space serving", () => {
       "  ({ profiles, mine }) => ({ echo: profiles, probe: computed(() => 1 + ((mine!.get() as number | undefined) ?? 0)) }),",
       ");",
     ].join("\n");
+    const sidecarIdentity = await resolveEntryIdentity(
+      SIDECAR_ROUTE,
+      () => Promise.resolve(sidecarSource),
+    );
     const originalFetch = globalThis.fetch;
-    const originalEnvironment = getPatternEnvironment();
-    setPatternEnvironment({
-      apiUrl: new URL("https://x-space-sidecar-chain.test/"),
-    });
     globalThis.fetch = ((input: Request | URL | string) => {
-      const url = input instanceof Request ? input.url : String(input);
-      if (url.endsWith("/api/patterns/system/profile-create.tsx")) {
-        return Promise.resolve(new Response(sidecarSource, { status: 200 }));
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      if (url.pathname === SIDECAR_ROUTE) {
+        return Promise.resolve(
+          new Response(
+            url.searchParams.has("identity") ? sidecarIdentity : sidecarSource,
+            { status: 200 },
+          ),
+        );
       }
       return Promise.resolve(new Response("not found", { status: 404 }));
     }) as typeof fetch;
@@ -1960,7 +1967,6 @@ describe("Phase 5 cross-space serving", () => {
       expect(principals).toContain(bobDid);
     } finally {
       globalThis.fetch = originalFetch;
-      setPatternEnvironment(originalEnvironment);
       for (const cancel of cancels) cancel();
       await serving.idle();
       serving.clearSealDestination();

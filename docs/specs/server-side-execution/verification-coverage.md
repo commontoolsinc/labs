@@ -6820,9 +6820,10 @@ supply; OW29/OW32/OW34 closed):
     `/value/createProfile` and replacing `$UI` with an error span
     carrying a conflict message. Mechanism: every pre-resolve launch
     of the sidecar chains its OWN instantiation continuation on the
-    memoized fetch (`createSidecarPatternCache.fetch` — by design,
-    for cross-slot joiners), so a wish node that runs twice before
-    the fetch resolves instantiates the sidecar twice into the same
+    resolution already in flight (`openSidecarSurface` — by design,
+    so a launch arriving mid-flight joins one rather than starting a
+    second), so a wish node that runs twice before that resolution
+    answers instantiates the sidecar twice into the same
     cause-derived result cell; the losing duplicate's commit fails on
     the conflict class (`StorageTransactionInconsistent` /
     `ConflictError` — its snapshot predates the winner) and

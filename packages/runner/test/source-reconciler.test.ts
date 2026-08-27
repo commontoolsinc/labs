@@ -103,6 +103,9 @@ describe("piece source reconciliation", () => {
   afterEach(async () => {
     identityGate?.resolve();
     await runtime?.sourceReconciler.idle();
+    // A compile the test started writes its cache entries behind itself, so
+    // teardown waits for them rather than closing storage underneath one.
+    await runtime?.patternManager.flushCompileCacheWrites();
     await runtime?.dispose();
   });
 
@@ -1143,6 +1146,126 @@ describe("piece source reconciliation", () => {
         expect(getPatternIdentityRef(piece)).toEqual(originalRef);
         expect(getPatternSource(piece)).toBe(origin);
       }
+    });
+  });
+
+  describe("a piece the runtime supplies", () => {
+    /** A cell for a piece that does not exist yet. */
+    function emptyPiece(fetch: RuntimeFetch) {
+      createRuntime(fetch);
+      return runtime.getCell<{ marker?: string }>(
+        signer.did(),
+        `supplied-${crypto.randomUUID()}`,
+      );
+    }
+
+    function open(piece: Cell<unknown>, origin = PARENT_SOURCE) {
+      return runtime.sourceReconciler.open(piece, origin);
+    }
+
+    it("answers with the source its origin names, for a piece not yet there", async () => {
+      const v1Identity = await identityFor(source("v1"));
+      const piece = emptyPiece(
+        servingFetch(() => v1Identity, () => source("v1")),
+      );
+
+      const pattern = await open(piece);
+      expect(pattern).toBeDefined();
+      // The identity is what the origin advertises. The export is whichever
+      // one compiling the file selects, which this fixture reaches under two
+      // names for one pattern object.
+      expect(runtime.patternManager.getArtifactEntryRef(pattern!)?.identity)
+        .toBe(v1Identity);
+    });
+
+    it("records the supplied origin with the piece's creation revision", async () => {
+      const v1Identity = await identityFor(source("v1"));
+      const piece = emptyPiece(
+        servingFetch(() => v1Identity, () => source("v1")),
+      );
+      const pattern = await open(piece);
+
+      const result = await runtime.editWithRetry((tx) => {
+        runtime.runner.run(tx, pattern!, {}, piece.withTx(tx), {
+          sourceOrigin: PARENT_SOURCE,
+        });
+      });
+      expect(result.error).toBeUndefined();
+
+      expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
+      expect(getPieceSourceRevisions(piece).map((entry) => entry.operation))
+        .toEqual(["create"]);
+      expect(getPieceSourceRevisions(piece).at(-1)?.origin).toBe(PARENT_SOURCE);
+    });
+
+    it("gives an origin to a piece the runtime made before it claimed one", async () => {
+      const v1Identity = await identityFor(source("v1"));
+      const piece = await preparePiece(
+        servingFetch(() => v1Identity, () => source("v1")),
+      );
+      const originalRef = getPatternIdentityRef(piece);
+
+      const pattern = await open(piece);
+
+      expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
+      expect(getPatternIdentityRef(piece)).toEqual(originalRef);
+      expect(getPieceSourceRevisions(piece).map((entry) => entry.operation))
+        .toEqual(["baseline", "follow"]);
+      expect(runtime.patternManager.getArtifactEntryRef(pattern!))
+        .toEqual(originalRef);
+    });
+
+    it("adopts what the origin now names, and answers with that", async () => {
+      const v2Identity = await identityFor(source("v2"));
+      const piece = await preparePiece(
+        servingFetch(() => v2Identity, () => source("v2")),
+      );
+      await stampSource(piece, PARENT_SOURCE);
+
+      const pattern = await open(piece);
+
+      expect(getPatternIdentityRef(piece)).toEqual({
+        identity: v2Identity,
+        symbol: SYMBOL,
+      });
+      expect(runtime.patternManager.getArtifactEntryRef(pattern!)).toEqual({
+        identity: v2Identity,
+        symbol: SYMBOL,
+      });
+      expect(getPieceSourceRevisions(piece).at(-1)?.operation).toBe(
+        "origin-update",
+      );
+    });
+
+    it("leaves an origin its owner chose alone", async () => {
+      // A surface the runtime supplies is still the space owner's piece. Once
+      // they have pointed it somewhere else, the runtime supplying it is no
+      // longer what decides where its code comes from.
+      const piece = await preparePiece(refuseEveryFetch);
+      const chosen = `https://programs.test${PARENT_PATH}`;
+      await stampSource(piece, chosen);
+
+      await open(piece);
+
+      expect(getPatternSource(piece)).toBe(chosen);
+      expect(getPieceSourceRevisions(piece).map((entry) => entry.operation))
+        .toEqual([]);
+    });
+
+    it("supplies nothing for an origin that is not a system pattern", async () => {
+      const piece = emptyPiece(refuseEveryFetch);
+      expect(await open(piece, "https://programs.test/main.tsx"))
+        .toBeUndefined();
+    });
+
+    it("refuses source that does not compile to the advertised identity", async () => {
+      // The host says one thing and serves another, so what it serves is not
+      // the source that origin names.
+      const v2Identity = await identityFor(source("v2"));
+      const piece = emptyPiece(
+        servingFetch(() => v2Identity, () => source("v1")),
+      );
+      expect(await open(piece)).toBeUndefined();
     });
   });
 

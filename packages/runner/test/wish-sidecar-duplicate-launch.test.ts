@@ -4,6 +4,7 @@ import { fromFileUrl } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { resolveEntryIdentity } from "../src/index.ts";
 import { Runtime } from "../src/runtime.ts";
 import {
   sidecarRunFailureDisposition,
@@ -20,9 +21,9 @@ import {
 
 // The profile-resolution starvation family's reproduced member (2026-08-25,
 // OW45 residue): when the `#profile` wish node's create-surface sidecar is
-// launched MORE THAN ONCE before its pattern fetch resolves, every launch
-// chains its own instantiation continuation on the module-global memoized
-// fetch, and the resolve runs the sidecar repeatedly into the SAME
+// launched MORE THAN ONCE before opening its surface answers, every launch
+// chains its own instantiation continuation on that open, and the answer runs
+// the sidecar repeatedly into the SAME
 // cause-derived result cell. One run wins; a duplicate's commit fails on the
 // conflict class (StorageTransactionInconsistent / ConflictError — its
 // snapshot predates the winner), and its error arm then REPLACED the winner's
@@ -36,16 +37,26 @@ import {
 //
 // The duplicate here is driven the way the live one is: two runs of the same
 // content-addressed pattern (two runtimes over one store — the serving loop's
-// re-runs of one wish node are the same shape) share the module-global fetch
-// AND the cause-derived sidecar cell, so both continuations instantiate into
-// one address. The contract pinned: the materialized create surface survives
-// the losing duplicate.
+// re-runs of one wish node are the same shape) open one cause-derived sidecar
+// piece, so both continuations instantiate into one address. The contract
+// pinned: the materialized create surface survives the losing duplicate.
 const signer = await Identity.fromPassphrase("wish-sidecar-duplicate-launch");
 const homeSpace = signer.did();
 
 const read = (name: string) =>
   Deno.readTextFileSync(
     fromFileUrl(new URL("../../patterns/system/", import.meta.url)) + name,
+  );
+
+// The patterns route serves each file under this prefix, and the worker names
+// every module it fetched by its pathname, so a served pattern's identity is
+// resolved over the same names the route answers for.
+const PATTERNS_ROUTE = "/api/patterns/system/";
+
+const identityOfPattern = (name: string) =>
+  resolveEntryIdentity(
+    PATTERNS_ROUTE + name,
+    (module) => Promise.resolve(read(module.slice(PATTERNS_ROUTE.length))),
   );
 
 const WISH_SRC = [
@@ -86,25 +97,25 @@ describe("wish profile-create sidecar duplicate launch", () => {
   });
 
   it("a duplicate pre-fetch launch does not clobber the materialized create surface", async () => {
-    // A unique pattern-environment origin keys this test's entry in the
-    // module-global sidecar cache (the cache memoizes per URL).
-    setPatternEnvironment({
-      apiUrl: new URL("https://sidecar-duplicate-launch.test/"),
-    });
-
     // Serve the REAL profile-create.tsx (+ its profile-home.tsx import). The
-    // ENTRY response is gated: it signals when the first launch's fetch is in
-    // flight and releases only once BOTH runtimes' launches have registered
-    // their continuations on the shared memoized fetch — the duplicate-launch
-    // window, held open deterministically.
+    // IDENTITY response is gated: it signals when the first launch's open is
+    // in flight and releases only once BOTH runtimes' launches have registered
+    // their continuations on their opens — the duplicate-launch window, held
+    // open deterministically.
+    const createIdentity = await identityOfPattern("profile-create.tsx");
     const entryRequested = Promise.withResolvers<void>();
     const entryGate = Promise.withResolvers<void>();
     globalThis.fetch = ((input: Request | URL | string) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.includes("profile-create.tsx")) {
-        entryRequested.resolve();
-        return entryGate.promise.then(() =>
-          new Response(read("profile-create.tsx"), { status: 200 })
+        if (new URL(url).searchParams.has("identity")) {
+          entryRequested.resolve();
+          return entryGate.promise.then(() =>
+            new Response(createIdentity, { status: 200 })
+          );
+        }
+        return Promise.resolve(
+          new Response(read("profile-create.tsx"), { status: 200 }),
         );
       }
       if (url.includes("profile-home.tsx")) {
@@ -168,14 +179,13 @@ describe("wish profile-create sidecar duplicate launch", () => {
       // is raced against the entry witness rather than awaited.
       const demand1 = run1.pull().catch(() => {});
       await Promise.race([demand1, entryRequested.promise]);
-      // The first launch's fetch is in flight (the entry request is the
+      // The first launch's open is in flight (the identity request is the
       // witness); the gate keeps the window open while the SAME piece —
       // hence the same wish node, the same cause-derived sidecar cells —
-      // starts in the second runtime. Its launch joins the shared memoized
-      // fetch and registers the duplicate continuation.
+      // starts in the second runtime. Its launch opens the same piece and
+      // registers the duplicate continuation.
       await entryRequested.promise;
-      const continuationsBefore =
-        wishSidecarDiagnostics.profileCreateFetchContinuations;
+      const opensBefore = wishSidecarDiagnostics.profileCreateSurfaceOpens;
       const runsBefore = wishSidecarDiagnostics.sidecarRunsStarted;
       const racedBefore = wishSidecarDiagnostics.sidecarRunsRaced;
 
@@ -190,21 +200,20 @@ describe("wish profile-create sidecar duplicate launch", () => {
       const demand2 = piece2.pull().catch(() => {});
       void demand2;
       // STRUCTURAL WITNESS: wait until rt2's launch has chained the
-      // duplicate continuation on the shared in-flight fetch (counted at
+      // duplicate continuation on its own in-flight open (counted at
       // registration in wish.ts's diagnostics seam). The gate is held, so
       // this wait cannot lose a race; the bound only converts a hung
       // scheduler into a loud failure instead of a hang.
       for (let attempt = 0; attempt < 500; attempt++) {
         if (
-          wishSidecarDiagnostics.profileCreateFetchContinuations >
-            continuationsBefore
+          wishSidecarDiagnostics.profileCreateSurfaceOpens > opensBefore
         ) break;
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
-      expect(wishSidecarDiagnostics.profileCreateFetchContinuations)
-        .toBeGreaterThan(continuationsBefore);
+      expect(wishSidecarDiagnostics.profileCreateSurfaceOpens)
+        .toBeGreaterThan(opensBefore);
 
-      // Release the fetch: every registered continuation instantiates into
+      // Release the gate: every registered continuation instantiates into
       // the same cause-derived cell; idle() covers the tracked launches.
       entryGate.resolve();
       await Promise.all([rt1.idle(), rt2.idle()]);
