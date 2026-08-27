@@ -135,8 +135,6 @@ g.customElements = { define: () => {}, get: () => undefined };
 g.requestAnimationFrame = (_cb: () => void) => 0;
 g.cancelAnimationFrame = () => {};
 
-// ---------------------------------------------------------------------------
-
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
