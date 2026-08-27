@@ -1988,6 +1988,21 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   ): void;
 
   /**
+   * Tell the post-commit effects this transaction staged and lost that no
+   * further attempt at its commit is coming, by calling each one's `abandon`.
+   * Exactly one of an effect's `flush` and `abandon` runs.
+   *
+   * Called by whoever owns the retries for this transaction, because a commit
+   * rejection does not say whether another attempt would fare better and the
+   * effect cannot tell. CFC enforcement refuses a commit both for a verdict on
+   * the data — a shape its rules do not support — and for metadata this replica
+   * has not read yet, and only the second converges when a later attempt sees
+   * more. Dispatched at most once, and never after a commit of this
+   * transaction succeeded.
+   */
+  abandonStagedWork(error: CommitError): void;
+
+  /**
    * Reads a value from a (local) memory address and throws on error, except for
    * `NotFoundError` which is returned as undefined.
    *

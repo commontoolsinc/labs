@@ -5,7 +5,7 @@ import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { Runtime } from "../src/runtime.ts";
 import { writerClaimFilesCorrespond } from "../src/cfc/writer-claim-correspondence.ts";
 import { mergeCfcSchemaEnvelopes } from "../src/cfc/schema-merge.ts";
-import { reportDroppedCfcRejectedWrite } from "../src/scheduler/events.ts";
+import { reportDroppedCfcRejectedWrite } from "../src/scheduler/cfc-rejection-report.ts";
 import type { JSONSchema, JSONSchemaObj } from "../src/builder/types.ts";
 
 /**
@@ -489,6 +489,6 @@ describe("reportDroppedCfcRejectedWrite", () => {
     }
     expect(seen.length).toBe(1);
     expect(String(seen[0]![0])).toContain("Owner-protected write dropped");
-    expect(seen[0]![1]).toMatchObject({ handlerId: "handler-1" });
+    expect(seen[0]![1]).toMatchObject({ writerId: "handler-1" });
   });
 });

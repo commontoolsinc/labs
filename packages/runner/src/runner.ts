@@ -116,6 +116,7 @@ import {
   schedulerDependencyRead,
 } from "./storage/reactivity-log.ts";
 import {
+  isCfcEnforcementRejection,
   isConflictRejection,
   isStaleReadConflict,
   isStorageTransactionInconsistent,
@@ -1683,7 +1684,7 @@ export class Runner {
           if (
             (error.name === "CfcCommitRefusalError" ||
               error.name === "StorageTransactionAborted") &&
-            error.message.startsWith("CFC enforcement rejected commit")
+            isCfcEnforcementRejection(error)
           ) {
             // The two rejections carry their diagnostic differently: the
             // boundary refusal carries every prepare reason as `reasons`,

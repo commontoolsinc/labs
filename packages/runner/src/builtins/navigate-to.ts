@@ -404,6 +404,10 @@ export function navigateTo(
         ])
       }`,
       kind: "navigateTo",
+      // No `abandon`: nothing waits on a result cell here, and the `navigated`
+      // flag is restored by the commit callback above, so a later attempt
+      // navigates. An effect whose work simply does not happen has nothing to
+      // record.
       // The convergence key (protocol.md §5): the overlay destination
       // BEGINS it on the effects channel before this flush's callback
       // runs, and the channel acks the authoritative intent without

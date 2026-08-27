@@ -10,6 +10,7 @@ import {
 import type { Runtime } from "../runtime.ts";
 import type { ScopeKeyIdentity } from "@commonfabric/memory/v2";
 import type {
+  CommitError,
   IExtendedStorageTransaction,
   IPreconditionFailedError,
   MemorySpace,
@@ -42,6 +43,10 @@ import {
   txToReactivityLog,
 } from "./reactivity.ts";
 import {
+  isCfcRejectedCommitError,
+  reportDroppedCfcRejectedWrite,
+} from "./cfc-rejection-report.ts";
+import {
   type Action,
   type EventHandler,
   type EventPreflightTraceContext,
@@ -62,6 +67,20 @@ type EventCommitError = {
   readonly message: string;
   readonly precondition?: IPreconditionFailedError["precondition"];
 };
+
+/**
+ * The error handed to work staged on an event's transaction when the event ends
+ * without a commit verdict at all — the handler threw, the caller opted out of
+ * retrying, or the seal was refused. There is no rejection to pass on in those
+ * cases, and the staged work needs to hear that none is coming.
+ */
+function eventAbandonError(reason: string): CommitError {
+  return {
+    name: "StorageTransactionAborted",
+    message: `event abandoned before it committed: ${reason}`,
+    reason: new Error(reason),
+  } as CommitError;
+}
 
 function normalizeEventCommitRejection(reason: unknown): EventCommitError {
   if (reason instanceof Error) {
@@ -85,42 +104,6 @@ function normalizeEventCommitRejection(reason: unknown): EventCommitError {
     reason
       ? String(reason)
       : "Storage commit promise rejected without a reason",
-  );
-}
-
-/**
- * Whether a commit error is CFC enforcement's DETERMINISTIC pre-storage
- * rejection (`rejectCommitBeforeStorage` in extended-storage-transaction.ts):
- * the transaction was refused before it reached storage, and re-running
- * recomputes the identical refused write. The served give-up arm and
- * {@link reportDroppedCfcRejectedWrite} key on this one predicate, so the
- * sealed error consequence and the loss report cover exactly the same class.
- */
-export function isCfcRejectedCommitError(
-  error: { name?: string; message?: string } | undefined,
-): error is { name: "CfcCommitRefusalError"; message: string } {
-  return error?.name === "CfcCommitRefusalError" &&
-    typeof error.message === "string";
-}
-
-/**
- * A CFC-enforcement-rejected commit on a give-up disposition is silent data
- * loss of user intent — the UI's write simply never lands (labs#4772 shipped
- * that way for weeks behind the opt-in scheduler logger, which is disabled in
- * deployed workers). Report it unconditionally; the opt-in `logger.warn`
- * alongside still carries the full disposition detail.
- */
-export function reportDroppedCfcRejectedWrite(
-  error: { name?: string; message?: string } | undefined,
-  handlerId: unknown,
-): void {
-  if (!isCfcRejectedCommitError(error)) {
-    return;
-  }
-  console.error(
-    "[cfc] Owner-protected write dropped: CFC enforcement rejected the " +
-      "commit and re-running cannot resolve it.",
-    { error: error.message, handlerId },
   );
 }
 
@@ -1498,6 +1481,7 @@ export async function dispatchQueuedEvent(state: {
           { handlerId },
         );
         runFinalCommitCallback();
+        tx.abandonStagedWork(eventAbandonError("retry opted out"));
       }
       return;
     }
@@ -1524,6 +1508,7 @@ export async function dispatchQueuedEvent(state: {
         // commit callback (with the aborted tx) instead of leaving callers
         // that await it hanging.
         runFinalCommitCallback();
+        tx.abandonStagedWork(eventAbandonError("handler threw"));
       }
       return;
     }
@@ -1563,6 +1548,9 @@ export async function dispatchQueuedEvent(state: {
           `LT1 in-process copy of ${queuedEvent.id} sealed outside its ` +
           "appending wave and was refused; the drain delivers the entry",
         ]);
+        // No abandonment: the durable entry is still the truth and the drain
+        // delivers it, so a further attempt at this event is coming and work
+        // staged on it is waiting for something rather than nothing.
         runFinalCommitCallback();
         return;
       }
@@ -1696,6 +1684,10 @@ export async function dispatchQueuedEvent(state: {
           sealCfcRefusalConsequence();
           runFinalCommitCallback();
           reportDroppedCfcRejectedWrite(error, handlerId);
+          // No further attempt at this event is coming, so anything staged on
+          // the transaction and waiting for it to commit is waiting for
+          // nothing.
+          tx.abandonStagedWork(error as CommitError);
           logger.warn(
             "scheduler",
             disposition.reason === "non-retryable"
@@ -1738,6 +1730,7 @@ export async function dispatchQueuedEvent(state: {
           sealCfcRefusalConsequence();
           runFinalCommitCallback();
           reportDroppedCfcRejectedWrite(error, handlerId);
+          tx.abandonStagedWork(error as CommitError);
           logger.warn(
             "scheduler",
             "Event handler commit terminally rejected (deterministic refusal); " +
@@ -1747,6 +1740,7 @@ export async function dispatchQueuedEvent(state: {
           break;
         case "permanent":
           runFinalCommitCallback();
+          tx.abandonStagedWork(error as CommitError);
           if (permanentRejection === "receipt-exists") {
             logger.warn(
               "event-lost-race",
@@ -1764,6 +1758,7 @@ export async function dispatchQueuedEvent(state: {
           break;
         case "convergence-failed": {
           runFinalCommitCallback();
+          tx.abandonStagedWork(error as CommitError);
           logger.error(
             "commit-convergence-failed",
             () => [
