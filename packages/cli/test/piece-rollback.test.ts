@@ -6,7 +6,7 @@
  * the listing, the preflight, the write — and the exit discipline of both.
  */
 
-import { afterEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type {
   ApplyReport,
@@ -17,6 +17,8 @@ import type {
 import { decode } from "@commonfabric/utils/encoding";
 
 import { runRestore, runRollback } from "../lib/bulk.ts";
+import { resetUnreportedRunGuardsForTest } from "../lib/unreported-run.ts";
+import { guardHarness } from "./unreported-run-helpers.ts";
 import {
   formatRestorableRevision,
   piece,
@@ -146,6 +148,9 @@ const LISTING: RestoreOutcome = {
 describe("piece-rollback", () => {
   // The fixtures pass `quiet`, and the actions apply it globally.
   afterEach(() => setQuietMode(false));
+  // The process-end hook is installed once per process, by the first run to
+  // arm a guard; a case that injects its own effects starts from none.
+  beforeEach(() => resetUnreportedRunGuardsForTest());
 
   describe("formatRestorableRevision()", () => {
     it("puts the id, the time, the reference, and both standings on one line", () => {
@@ -343,6 +348,45 @@ describe("piece-rollback", () => {
         actionHandler?: unknown;
       };
       expect(registered?.actionHandler).toBe(rollbackFromCommand);
+    });
+
+    it("reports what settled and exits nonzero when the process outlives the run", async () => {
+      // The rollback runs the retarget's engine over the retarget's grouped
+      // sessions, so a run that stops settling ends the process the same
+      // silent way — half a reversal made, exit 0, no summary.
+      const process = guardHarness();
+      const abandoned = rollbackFromCommand(
+        { ...ROLLBACK_OPTIONS, apply: true },
+        {
+          runRollback: (_config, request) => {
+            request.onRow?.(REPORT.rows[0]);
+            return new Promise<never>(() => {});
+          },
+          render: () => {},
+          printHint: () => {},
+          guard: process.deps,
+        },
+      );
+      await Promise.resolve();
+      expect(process.endProcess()).toBe(1);
+      expect(process.errors.join("\n")).toContain(
+        "Rollback ended before it reported",
+      );
+      expect(process.errors.join("\n")).toContain("1 row settled");
+      expect(abandoned).toBeInstanceOf(Promise);
+    });
+
+    it("says nothing at process end once the run has reported", async () => {
+      const process = guardHarness();
+      await captureStdout(() =>
+        rollbackFromCommand(ROLLBACK_OPTIONS, {
+          runRollback: () => Promise.resolve({ report: REPORT, plan: DERIVED }),
+          printHint: () => {},
+          guard: process.deps,
+        })
+      );
+      expect(process.endProcess()).toBe(0);
+      expect(process.errors).toEqual([]);
     });
   });
 

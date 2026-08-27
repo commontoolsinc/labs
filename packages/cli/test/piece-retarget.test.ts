@@ -6,7 +6,7 @@
  * boundary.
  */
 
-import { afterEach, describe, it } from "@std/testing/bdd";
+import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import type { PiecesController } from "@commonfabric/piece/ops";
 import type {
@@ -17,6 +17,8 @@ import type {
 import { decode } from "@commonfabric/utils/encoding";
 
 import { runRetarget } from "../lib/bulk.ts";
+import { resetUnreportedRunGuardsForTest } from "../lib/unreported-run.ts";
+import { guardHarness } from "./unreported-run-helpers.ts";
 import {
   formatApplyRow,
   piece,
@@ -90,6 +92,9 @@ const REPORT: ApplyReport = {
 describe("piece-retarget", () => {
   // The fixtures pass `quiet`, and the action applies it globally.
   afterEach(() => setQuietMode(false));
+  // The process-end hook is installed once per process, by the first run to
+  // arm a guard; a case that injects its own effects starts from none.
+  beforeEach(() => resetUnreportedRunGuardsForTest());
 
   describe("formatApplyRow()", () => {
     it("puts the verdict, the piece, its phase, and its cost on one line", () => {
@@ -569,6 +574,75 @@ describe("piece-retarget", () => {
         actionHandler?: unknown;
       };
       expect(registered?.actionHandler).toBe(retargetFromCommand);
+    });
+
+    it("reports what settled and exits nonzero when the process outlives the run", async () => {
+      // The defect's own shape: a run whose promise stops settling. Deno
+      // drains such a process and exits 0, so without the guard the apply
+      // ends having written part of a migration, printed no summary, and
+      // told its caller everything went well.
+      const process = guardHarness();
+      const rows: string[] = [];
+      // Deliberately not awaited — the point is that this promise never
+      // settles, exactly as the run that stopped mid-migration did not.
+      const abandoned = retargetFromCommand({ ...OPTIONS, apply: true }, {
+        runRetarget: (_config, request) => {
+          request.onRow?.({
+            piece: "fid1:aaa",
+            phase: "topics",
+            verdict: "applied",
+            elapsedMs: 12,
+          });
+          return new Promise<ApplyReport>(() => {});
+        },
+        render: (value) => {
+          rows.push(String(value));
+        },
+        printHint: () => {},
+        guard: process.deps,
+      });
+      // The row streamed before the run stalled; the process then ends.
+      await Promise.resolve();
+      expect(rows).toEqual(["applied fid1:aaa topics 12ms"]);
+      expect(process.endProcess()).toBe(1);
+      expect(process.errors.join("\n")).toContain(
+        "Retarget ended before it reported",
+      );
+      expect(process.errors.join("\n")).toContain(
+        "1 row settled — applied: 1.",
+      );
+      // The abandoned promise is the run that never came back; naming it
+      // keeps the lint's floating-promise rule honest about that.
+      expect(abandoned).toBeInstanceOf(Promise);
+    });
+
+    it("says nothing at process end once the run has reported", async () => {
+      const process = guardHarness();
+      await captureStdout(() =>
+        retargetFromCommand(OPTIONS, {
+          runRetarget: () => Promise.resolve(REPORT),
+          printHint: () => {},
+          guard: process.deps,
+        })
+      );
+      expect(process.endProcess()).toBe(0);
+      expect(process.errors).toEqual([]);
+    });
+
+    it("says nothing at process end when the run threw", async () => {
+      // The refusal is its own report, and the CLI prints it on the way to
+      // a nonzero exit; a second line about an unreported run would be one
+      // the caller has to rule out.
+      const process = guardHarness();
+      await expect(
+        retargetFromCommand(OPTIONS, {
+          runRetarget: () => Promise.reject(new Error("the plan is stale")),
+          printHint: () => {},
+          guard: process.deps,
+        }),
+      ).rejects.toThrow("the plan is stale");
+      expect(process.endProcess()).toBe(0);
+      expect(process.errors).toEqual([]);
     });
   });
 

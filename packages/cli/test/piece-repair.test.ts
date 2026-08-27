@@ -20,6 +20,8 @@ import {
 } from "@commonfabric/piece/ops/bulk-local";
 
 import { type RepairRunRequest, runRepair, zeroRowFixer } from "../lib/bulk.ts";
+import { resetUnreportedRunGuardsForTest } from "../lib/unreported-run.ts";
+import { guardHarness } from "./unreported-run-helpers.ts";
 import { piece, repairFromCommand, setQuietMode } from "../commands/piece.ts";
 
 function captureStdout(fn: () => Promise<void>): Promise<string> {
@@ -83,6 +85,9 @@ const REPORT: RepairReport = {
 describe("piece-repair", () => {
   // The fixtures pass `quiet`, and the action applies it globally.
   afterEach(() => setQuietMode(false));
+  // The process-end hook is installed once per process, by the first run to
+  // arm a guard; a case that injects its own effects starts from none.
+  beforeEach(() => resetUnreportedRunGuardsForTest());
 
   describe("repairFromCommand()", () => {
     it("prints the emitted plan to stdout and the verdict tally as a hint", async () => {
@@ -237,6 +242,41 @@ describe("piece-repair", () => {
         actionHandler?: unknown;
       };
       expect(registered?.actionHandler).toBe(repairFromCommand);
+    });
+
+    it("reports the run and exits nonzero when the process outlives it", async () => {
+      // The repair runs one session rather than the retarget's grouped ones,
+      // and ends the same way if an await stops settling: the fixer's writes
+      // are half-made, the process drains, and code 0 says otherwise.
+      const process = guardHarness();
+      const abandoned = repairFromCommand(
+        { ...OPTIONS, path: "topics", apply: true },
+        {
+          runRepair: () => new Promise<RepairReport>(() => {}),
+          render: () => {},
+          printHint: () => {},
+          guard: process.deps,
+        },
+      );
+      await Promise.resolve();
+      expect(process.endProcess()).toBe(1);
+      expect(process.errors.join("\n")).toContain(
+        "Repair ended before it reported",
+      );
+      expect(abandoned).toBeInstanceOf(Promise);
+    });
+
+    it("says nothing at process end once the run has reported", async () => {
+      const process = guardHarness();
+      await captureStdout(() =>
+        repairFromCommand({ ...OPTIONS, path: "topics" }, {
+          runRepair: () => Promise.resolve(REPORT),
+          printHint: () => {},
+          guard: process.deps,
+        })
+      );
+      expect(process.endProcess()).toBe(0);
+      expect(process.errors).toEqual([]);
     });
   });
 
