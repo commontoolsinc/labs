@@ -3075,15 +3075,20 @@ export class Server {
               "authoritative attention cover",
           );
         }
+        const originalUser = original.firedAt?.user;
         if (
-          original.firedAt?.user === undefined || principal === undefined ||
-          original.firedAt.user !== principal
+          principal === undefined ||
+          (originalUser === undefined
+            ? message.action === "retry"
+            : originalUser !== principal)
         ) {
           return respondTypedError<EventAttentionResolveResult>(
             message.requestId,
             toError(
               "AuthorizationError",
-              "Only the original acting user may resolve this event",
+              originalUser === undefined
+                ? "A userless event may be dismissed but not retried"
+                : "Only the original acting user may resolve this event",
             ),
           );
         }

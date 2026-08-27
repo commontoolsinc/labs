@@ -109,6 +109,7 @@ describe("event attention resolution", () => {
     eventId: string,
     stream: StreamLinkRef = STREAM,
     legacySeqless = false,
+    userless = false,
   ): Promise<number> => {
     const engine = await server.engineForSpace(SPACE);
     const sidecarId = streamEntriesDocId(stream);
@@ -142,6 +143,34 @@ describe("event attention resolution", () => {
       .value as StreamEventsDocValue;
     const entry = value.entries!.at(-1)!;
     const stampedSeq = entry.seq!;
+    if (userless) {
+      Engine.applyCommit(engine, {
+        space: SPACE,
+        sessionId,
+        principal,
+        commitClass: "system",
+        commit: {
+          localSeq: nextSeedLocalSeq++,
+          reads: { confirmed: [], pending: [] },
+          operations: [{
+            op: "patch",
+            id: sidecarId,
+            patches: [{
+              op: "remove",
+              path: `/value/entries/${
+                value.entries!.indexOf(entry)
+              }/firedAt/user`,
+            }, {
+              op: "replace",
+              path: `/value/entries/${
+                value.entries!.indexOf(entry)
+              }/firedAt/session`,
+              value: "server",
+            }],
+          }],
+        },
+      });
+    }
     if (legacySeqless) {
       Engine.applyCommit(engine, {
         space: SPACE,
@@ -255,6 +284,62 @@ describe("event attention resolution", () => {
     );
     if (seq === undefined) throw new Error("missing seeded attention seq");
     return server.resolveEventAttention({ ...request, seq });
+  };
+
+  const seedConsumedEvent = async (
+    sessionId: string,
+    principal: string,
+    eventId: string,
+  ): Promise<number> => {
+    const engine = await server.engineForSpace(SPACE);
+    Engine.applyCommit(engine, {
+      space: SPACE,
+      sessionId,
+      principal,
+      commitClass: "authored",
+      commit: {
+        localSeq: nextSeedLocalSeq++,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: SIDECAR,
+          patches: [{
+            op: "append",
+            path: "/value/entries",
+            values: [{ eventId, stream: STREAM }],
+          }],
+        }],
+        eventAppends: [{ id: SIDECAR, eventId }],
+      },
+    });
+    const value = Engine.read(engine, { id: SIDECAR })!
+      .value as StreamEventsDocValue;
+    const entryIndex = value.entries!.length - 1;
+    const seq = value.entries![entryIndex].seq!;
+    Engine.applyCommit(engine, {
+      space: SPACE,
+      sessionId: "server-test-consumer",
+      principal,
+      commitClass: "system",
+      commit: {
+        localSeq: nextSeedLocalSeq++,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: SIDECAR,
+          patches: [{
+            op: "add",
+            path: `/value/entries/${entryIndex}/consequenced`,
+            value: true,
+          }, {
+            op: "add",
+            path: "/value/eventWatermark",
+            value: seq,
+          }],
+        }],
+      },
+    });
+    return seq;
   };
 
   const compactAttentionEntry = async (
@@ -413,6 +498,41 @@ describe("event attention resolution", () => {
       (Engine.read(engine, { id: SIDECAR })!.value as StreamEventsDocValue)
         .entries,
     ).toEqual([]);
+  });
+
+  it("allows a writer to dismiss a userless event but never retry it", async () => {
+    const sessionId = await openSession(ALICE);
+    await seedAttention(
+      sessionId,
+      ALICE,
+      "evt-userless",
+      STREAM,
+      false,
+      true,
+    );
+
+    const retry = await resolveAttention({
+      type: "event.attention.resolve",
+      requestId: "retry-userless",
+      space: SPACE,
+      sessionId,
+      eventId: "evt-userless",
+      sidecarId: SIDECAR,
+      action: "retry",
+    });
+    expect(retry.error?.name).toBe("AuthorizationError");
+
+    const dismiss = await resolveAttention({
+      type: "event.attention.resolve",
+      requestId: "dismiss-userless",
+      space: SPACE,
+      sessionId,
+      eventId: "evt-userless",
+      sidecarId: SIDECAR,
+      action: "dismiss",
+    });
+    expect(dismiss.error).toBeUndefined();
+    expect(dismiss.ok?.resolution).toEqual({ kind: "dismissed" });
   });
 
   it("resolves a legacy seq-less entry through its sequence-zero identity", async () => {
@@ -638,6 +758,44 @@ describe("event attention resolution", () => {
     expect(indexAfterBoth.entries).toEqual({});
   });
 
+  it("resolves a newer attention entry past an older consumed equal-ID entry", async () => {
+    const sessionId = await openSession(ALICE);
+    const consumedSeq = await seedConsumedEvent(
+      sessionId,
+      ALICE,
+      "evt-repeated-consumed",
+    );
+    const attentionSeq = await seedAttention(
+      sessionId,
+      ALICE,
+      "evt-repeated-consumed",
+    );
+    expect(attentionSeq).toBeGreaterThan(consumedSeq);
+
+    const response = await resolveAttention({
+      type: "event.attention.resolve",
+      requestId: "repeated-after-consumed",
+      space: SPACE,
+      sessionId,
+      eventId: "evt-repeated-consumed",
+      seq: attentionSeq,
+      sidecarId: SIDECAR,
+      action: "dismiss",
+    });
+
+    expect(response.error).toBeUndefined();
+    const engine = await server.engineForSpace(SPACE);
+    const entries = (Engine.read(engine, { id: SIDECAR })!
+      .value as StreamEventsDocValue).entries!;
+    expect(entries.find((entry) => entry.seq === consumedSeq)).toMatchObject({
+      eventId: "evt-repeated-consumed",
+      consequenced: true,
+    });
+    expect(
+      entries.find((entry) => entry.seq === attentionSeq)?.resolution,
+    ).toEqual({ kind: "dismissed" });
+  });
+
   it("keeps repeated event IDs in one stream independently resolvable by seq", async () => {
     const sessionId = await openSession(ALICE);
     const firstSeq = await seedAttention(sessionId, ALICE, "evt-repeated");
@@ -681,6 +839,18 @@ describe("event attention resolution", () => {
       action: "dismiss",
     });
     expect(second.error).toBeUndefined();
+    const afterSecondEntries = (Engine.read(engine, { id: SIDECAR })!
+      .value as StreamEventsDocValue).entries!;
+    expect(
+      afterSecondEntries.find((entry) => entry.seq === firstSeq)?.resolution,
+    ).toEqual({ kind: "dismissed" });
+    expect(
+      afterSecondEntries.find((entry) => entry.seq === secondSeq)?.resolution,
+    ).toEqual({ kind: "dismissed" });
+    const afterSecondIndex = Engine.read(engine, {
+      id: SERVER_EXECUTION_ATTENTION_DOC_ID,
+    })?.value as EventAttentionIndexValue;
+    expect(afterSecondIndex.entries).toEqual({});
   });
 
   it("removes one event summary without hiding another event in its stream", async () => {

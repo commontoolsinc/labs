@@ -128,6 +128,22 @@ describe("served-event delivery failure policy", () => {
       throw new Error("expected persisted permanent terminal cover");
     }
     expect(persisted.attention.code).toBe("permanent-delivery-failure");
+    expect(persisted.attention.phase).toBe("dispatch-load");
+    expect(persisted.attention.failureClass).toBe("authorization");
+
+    const changed = observeDeliveryFailure(permanent.checkpoint, {
+      now: 3,
+      phase: "commit-finalization",
+      failureClass: "connection",
+      recoveryEpoch: "connection:1",
+    });
+    expect(changed.kind).toBe("needs-attention");
+    if (changed.kind !== "needs-attention") {
+      throw new Error("expected persisted permanent terminal cover");
+    }
+    expect(changed.attention.phase).toBe("dispatch-load");
+    expect(changed.attention.failureClass).toBe("authorization");
+    expect(changed.checkpoint.recoveryEpoch).toBe("acl:1");
   });
 
   it("accepts current-ACL evidence from the load producer, never from its name alone", () => {
@@ -150,6 +166,13 @@ describe("served-event delivery failure policy", () => {
       recoveryEpoch: "load:1",
       permanentEvidence: false,
     });
+
+    expect(
+      toReplicaLoadFailureError({
+        name: "Error",
+        message: "memory session revoked: diagnostic text only",
+      }, "load:typed-only").failure.failureClass,
+    ).toBe("unknown");
 
     expect(
       toReplicaLoadFailureError({

@@ -3445,6 +3445,7 @@ describe("runtime-processor", () => {
         eventId: "evt-complete",
         seq: 40,
         sidecarId,
+        retryable: false,
         reason: "complete",
         attention,
       } as never);
@@ -3455,6 +3456,7 @@ describe("runtime-processor", () => {
         eventId: "evt-complete",
         seq: 40,
         sidecarId,
+        retryable: false,
         reason: "complete",
         attention,
       }]);
@@ -3530,6 +3532,15 @@ describe("runtime-processor", () => {
           code: attention.code,
           firstFailureAt: attention.firstFailureAt,
         },
+        [eventAttentionEntryKey("evt-userless", 43)]: {
+          eventId: "evt-userless",
+          seq: 43,
+          sidecarId,
+          phase: attention.phase,
+          failureClass: attention.failureClass,
+          code: attention.code,
+          firstFailureAt: attention.firstFailureAt,
+        },
       };
       const provider = {
         sync: () => Promise.resolve({}),
@@ -3566,6 +3577,13 @@ describe("runtime-processor", () => {
                   reason: "legacy reason",
                   attention,
                   firedAt: { user: cfcSigner.did() },
+                }, {
+                  eventId: "evt-userless",
+                  seq: 43,
+                  status: "needs-attention",
+                  reason: "system event reason",
+                  attention,
+                  firedAt: { session: "server" },
                 }],
               },
             };
@@ -3613,6 +3631,7 @@ describe("runtime-processor", () => {
           eventId: "evt-valid",
           seq: 41,
           sidecarId,
+          retryable: true,
           reason: "safe reason",
           attention,
         }, {
@@ -3620,7 +3639,16 @@ describe("runtime-processor", () => {
           eventId: "evt-legacy",
           seq: 0,
           sidecarId,
+          retryable: true,
           reason: "legacy reason",
+          attention,
+        }, {
+          space,
+          eventId: "evt-userless",
+          seq: 43,
+          sidecarId,
+          retryable: false,
+          reason: "system event reason",
           attention,
         }],
       });

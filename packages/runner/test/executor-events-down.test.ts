@@ -49,6 +49,7 @@ import type {
   MemorySpace,
 } from "../src/storage/interface.ts";
 import { ReplicaLoadFailureError } from "../src/storage/interface.ts";
+import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { readWatermarkSeq } from "../src/executor/watermark.ts";
@@ -400,6 +401,7 @@ describe("Phase 3 events-down (serving side)", () => {
     | ((batch: WaveSpaceCommit) => WaveCommitRejection | undefined)
     | undefined;
   let rejectedWaveCommits = 0;
+  let observedWaveCommits: WaveSpaceCommit[];
   type ServingCommitFailure =
     | "result-error"
     | "rejection"
@@ -429,6 +431,7 @@ describe("Phase 3 events-down (serving side)", () => {
           },
         });
       }
+      observedWaveCommits.push(batch);
       return sink.commitWave(batch);
     },
   });
@@ -516,6 +519,7 @@ describe("Phase 3 events-down (serving side)", () => {
     rejectWaveCommitWhen = undefined;
     rejectWaveCommitWith = undefined;
     rejectedWaveCommits = 0;
+    observedWaveCommits = [];
     failNextServingCommit = undefined;
     failServingCommitSequence = [];
     failServingCommitActionPrefix = undefined;
@@ -649,6 +653,13 @@ describe("Phase 3 events-down (serving side)", () => {
       row.consequence_of.includes(entry.eventId)
     );
     expect(carrying.length).toBe(1);
+    const carryingBatch = observedWaveCommits.find((batch) =>
+      batch.consequenceOf.includes(entry.eventId)
+    );
+    expect(carryingBatch).toBeDefined();
+    expect(JSON.stringify(carryingBatch!.operations)).not.toContain(
+      "deliveryDeferral",
+    );
     await waitUntil(
       () => {
         const doc = Engine.read(engine, {
@@ -1581,6 +1592,71 @@ describe("Phase 3 events-down (serving side)", () => {
         (Engine.read(engine, { id: sidecarId })?.value as StreamEventsDocValue)
           .eventWatermark,
       ).toBe(aborted.seq);
+    } finally {
+      cancelProbe();
+      cancelDemand();
+    }
+  });
+
+  it("a served RetryImmediately retry remains settlement and never creates a delivery checkpoint", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const { result } = await standUp(clientRuntime, BUMP_PATTERN, {
+      arg: "retry-immediately-arg",
+      result: "retry-immediately-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    result.key("bump").send({ kind: "warmup" });
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+    await waitUntil(
+      () => sidecarIdsIn(engine).length === 1,
+      "the RetryImmediately stream to become durable",
+    );
+    const sidecarId = sidecarIdsIn(engine)[0];
+    const entries = () => ((Engine.read(engine, { id: sidecarId })?.value as
+      | StreamEventsDocValue
+      | undefined)?.entries ?? []);
+    await waitUntil(
+      () => entries()[0]?.consequenced === true,
+      "the warm-up event to consequence",
+    );
+    await waitUntil(
+      () => host!.spaceServer(space)?.active === true,
+      "the RetryImmediately serving runtime to activate",
+    );
+
+    const streamLink = {
+      space,
+      id: entries()[0].stream.id as never,
+      path: [...entries()[0].stream.path],
+      scope: (entries()[0].stream.scope ?? "space") as never,
+    };
+    let runs = 0;
+    const cancelProbe = servingRuntime!.scheduler.addEventHandler(
+      () => {
+        runs += 1;
+        if (runs === 1) throw new RetryImmediately("test name resolution");
+      },
+      streamLink,
+    );
+    try {
+      result.key("bump").send({ kind: "retry-immediately" });
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () => entries().at(-1)?.consequenced === true && runs === 2,
+        "the served name-resolution retry to consequence",
+      );
+      const retried = entries().at(-1)!;
+      expect(retried.deliveryDeferral).toBeUndefined();
+      expect(retried.attention).toBeUndefined();
+      expect(host!.stats().events.deliveryDeferralsActive).toBe(0);
+      expect(host!.stats().events.deliveryFailuresActive).toBe(0);
     } finally {
       cancelProbe();
       cancelDemand();
@@ -4175,10 +4251,11 @@ describe("Phase 3 events-down (serving side)", () => {
       );
       failNextServingCommit = "result-error";
       failServingCommitActionPrefix = "server-execution/event-consequence:";
-      // A new load generation is a positive recovery wake. The load still
-      // fails, so the retry re-enters failed state with the accumulated budget
-      // and attempts to terminalize immediately. Reject that notice wave: the
-      // entry and its arrival barrier must remain pending.
+      // A successful replacement load is a positive recovery wake. The
+      // handler's required load still fails, so the retry re-enters failed
+      // state with the accumulated budget and attempts to terminalize
+      // immediately. Reject that notice wave: the entry and its arrival
+      // barrier must remain pending.
       GatedStorageManager.signalLoadRecovery(servingManager!);
       await waitUntil(
         () => host!.stats().events.needsAttentionSealFailures === 1,

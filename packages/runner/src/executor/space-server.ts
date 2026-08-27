@@ -1901,16 +1901,22 @@ export class SpaceServer implements TransactionSealDestination {
             "consequenced",
           ],
         }).withTx(tx).set(true);
-        this.#runtime!.getCellFromLink<DeliveryDeferral | undefined>({
-          space: this.space,
-          id: info.streamEntry.sidecarId as never,
-          scope: "space",
-          path: [
-            "entries",
-            String(info.streamEntry.index),
-            "deliveryDeferral",
-          ],
-        }).withTx(tx).set(undefined);
+        if (
+          info.eventId !== undefined &&
+          (this.#deliveryCheckpoints.has(info.eventId) ||
+            this.#pendingDeliveryCheckpointWrites.has(info.eventId))
+        ) {
+          this.#runtime!.getCellFromLink<DeliveryDeferral | undefined>({
+            space: this.space,
+            id: info.streamEntry.sidecarId as never,
+            scope: "space",
+            path: [
+              "entries",
+              String(info.streamEntry.index),
+              "deliveryDeferral",
+            ],
+          }).withTx(tx).set(undefined);
+        }
       } catch (error) {
         // The mark IS the exactly-once record (events.md §4: no window
         // where an event is both consumed and replayable). Letting the
@@ -3072,6 +3078,13 @@ export class SpaceServer implements TransactionSealDestination {
         }
         if (durableCheckpoint !== undefined) {
           let checkpoint = durableCheckpoint;
+          if (
+            this.#pendingAttentionNotices.has(entry.eventId) ||
+            this.#drainInFlight.get(entry.eventId) === "marked"
+          ) {
+            this.#loadParkDeferredInPass = true;
+            break;
+          }
           let mayRetry = checkpoint.state === "recovering" &&
             !this.#deliveryRecoveryAttempts.has(entry.eventId);
           const recoveryEpoch = checkpoint.recoveryEpoch === undefined

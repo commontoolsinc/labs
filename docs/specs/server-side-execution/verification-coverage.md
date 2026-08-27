@@ -7287,8 +7287,9 @@ supply; OW29/OW32/OW34 closed):
     two-tabs-of-one-user step (one Identity in two harness
     sessions: user-granularity sharing — same cell, same hash —
     green OFF and under the true-ON gate, serving loop live).
-  - **OW54 — bounded terminal cover for proven delivery failure:
-    CLOSED (2026-08-26).** A failed served-event head now records a
+  - **OW54 — bounded terminal cover for proven delivery failure: IMPLEMENTED;
+    OQ-23 TRANSIENT FINALIZATION AND VALIDATION FOLLOW-UPS OPEN
+    (2026-08-27).** A failed served-event head records a
     durable typed delivery checkpoint and accumulates only confirmed
     failed-state time. Arrival-barrier followers, dirty-input
     settlement, and the served `RetryImmediately` name-resolution path
@@ -7302,7 +7303,12 @@ supply; OW29/OW32/OW34 closed):
     commit-preparation crashes use the same cover; exact
     `CfcCommitRefusalError` verdicts and explicit handler aborts remain
     error consequences. Ambiguous storage-time or transport outcomes
-    remain outside explicit replay.
+    remain outside explicit replay. No current transient pre-seal transport
+    producer supplies positive no-commit evidence, so that OQ-23 arm remains
+    pending on the ordinary re-drain cadence and this row does not claim the
+    every-entry-terminal invariant for it. It joins this checkpoint policy when
+    its producer can distinguish a pre-storage refusal from an ambiguous
+    outcome without inspecting diagnostic text.
 
     Terminal cover is one entry-local `{status: "needs-attention",
     consequenced: true}` notice plus the per-space unresolved-attention
@@ -7325,7 +7331,7 @@ supply; OW29/OW32/OW34 closed):
     from the checkpoint timestamps rather than freezing it at the last state
     transition.
 
-    Pins cover cumulative flapping and clock skew, typed recovery,
+    Pins cover cumulative flapping and clock skew, typed successful recovery,
     failed-head versus barrier-follower routing, immediate permanent
     evidence, checkpoint and notice commit accounting, terminal
     ordering, CFC versus preparation-crash classification,
@@ -7334,9 +7340,18 @@ supply; OW29/OW32/OW34 closed):
     exclusion, exact-provenance Retry, Retry/Dismiss and lost-response races,
     lost-response replay after source compaction, equal event IDs within and
     across streams, cross-user/sessionless rejection, unresolved retention,
-    in-flight retry ownership at the budget boundary, runtime-client forwarding,
+    userless Dismiss without replay authority, in-flight retry ownership at the
+    budget boundary, runtime-client forwarding,
     mutation-aware shell refresh ownership, dark-theme and live-region
     presentation, and the end-to-end transient and persistent load paths.
+    Direct pins for cold-view T3 observations interleaved with load-park
+    failures, absence of a retry cadence between the single budget-boundary
+    wake and valid storage wakes, foreign-space preflight recompute spending no
+    failure budget, and a served current-ACL denial produced by the live memory
+    authorization path remain validation follow-ups. The structural paths keep
+    cold-view counts separate, schedule only the budget-boundary timer, and
+    create checkpoints only from served head-failure outcomes; these statements
+    do not substitute for those integration pins.
     OQ-19's foreign-derived
     freshness mechanism remains its separate currentness design and is
     not part of this closure.

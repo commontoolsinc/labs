@@ -2799,6 +2799,9 @@ export type EventAttentionNotice = {
   eventId: string;
   seq: number;
   sidecarId: string;
+  /** False when the terminal event has no acting user and can only be
+   * dismissed. Absence preserves Retry for older producers. */
+  retryable?: boolean;
   reason: string;
   attention: DeliveryAttention;
 };

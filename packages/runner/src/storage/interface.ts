@@ -91,8 +91,8 @@ export interface IStorageError {
 
 /** Typed producer evidence for a required replica load that failed before an
  * at-most-once handler could dispatch. The scheduler receives typed failure
- * evidence; error text may inform `failureClass`, but it never constitutes
- * durable `permanentEvidence`. */
+ * evidence; an error name may inform `failureClass`, but diagnostic text never
+ * constitutes policy evidence or durable `permanentEvidence`. */
 export type ReplicaLoadFailure = {
   failureClass: DeliveryFailureClass;
   recoveryEpoch: string;
@@ -125,9 +125,7 @@ export const toReplicaLoadFailureError = (
     aclRevision?: unknown;
   } | undefined;
   const name = typeof named?.name === "string" ? named.name : "";
-  const message = typeof named?.message === "string" ? named.message : "";
-  const failureClass: DeliveryFailureClass = name === "SessionRevokedError" ||
-      message.startsWith("memory session revoked")
+  const failureClass: DeliveryFailureClass = name === "SessionRevokedError"
     ? "session-revoked"
     : name === "ConnectionError"
     ? "connection"
@@ -2142,6 +2140,11 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
  */
 export interface IStorageTransactionAborted extends IStorageError {
   readonly name: "StorageTransactionAborted";
+
+  /** Positive evidence that `abort()` discarded the transaction before a
+   * storage attempt. Commit-promise failures use the same error family but do
+   * not carry this marker because their storage outcome may be ambiguous. */
+  readonly abortedBeforeStorage?: true;
 
   /**
    * Reason provided when transaction was aborted.

@@ -960,7 +960,10 @@ until the closing wave confirms that the complete contribution
 committed. A rejected, resolved-error, rebased-out, or refused-wave
 notice leaves the entry pending, records its checkpoint or notice-write
 failure, and cannot release later events. This contract adds no
-same-wave dependent-withdrawal mechanism.
+same-wave dependent-withdrawal mechanism. A failed processing-state write
+re-derives on a later input, activation, or typed recovery wake. A quiet space
+does not add a timer solely to retry that write: it remains loudly pending
+through the failure counter and warning until one of those valid wakes arrives.
 
 Dropping would be unsound for authored values, which is one more reason
 the classes never share a commit. Whole-wave CAS failure is FORBIDDEN

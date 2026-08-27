@@ -165,6 +165,17 @@ handler fires
 - Ordering: per stream, events process in commit-seq order. Across
   streams in one space, wave order (arrival). No global ordering claim
   beyond the space's commit sequence — same as today.
+- **Terminal positions.** An error consequence, a T3 dropped notice,
+  and a `needs-attention` notice each complete processing at the event's
+  arrival position even when the handler produces no domain writes. A
+  terminal decision sealed into a wave does not release later events:
+  the arrival barrier opens only after the wave outcome confirms that
+  the authoritative consequence or notice durably committed. A notice
+  that fails before seal, resolves `{ error }`, is rebased out at
+  commit, or belongs to a refused wave leaves the earlier event pending
+  and later handlers blocked. This rule does not decide OW63's separate
+  question of whether the existing across-stream order binds across
+  pieces.
 - **Batching is at the COMMIT level only (D-v2-2, ruled 2026-08-02)**:
   the wave commits once, at scheduler idle, with `consequenceOf`
   listing every event processed. Handler-visible semantics are
@@ -227,7 +238,10 @@ ambient-state one.
   watermark instead — the replay rule above skips them, counted
   `skippedIdempotent`. Stream entries at or below `eventWatermark` MAY
   therefore compact (the store-growth lesson: a consumed intent needs
-  no eternal stream copy to keep dedupe sound).
+  no eternal stream copy to keep dedupe sound). This compaction allowance
+  does not apply while an entry carries an unresolved `needs-attention`
+  notice. Retry or Dismiss records its resolution; only a resolved entry
+  may compact under the ordinary watermark rule.
 - Cascade sends minted inside a handler attempt get fresh ids per
   attempt (`event-identity.ts:5-9`); harmless under exactly-once,
   because only the committing attempt's cascades escape the wave.
@@ -456,16 +470,23 @@ loop's duty).
   `timeout`, `unknown`, and commit-preparation failures receive one
   immediate clean reattempt while remaining in the failed state.
   Attempt counts are observations, not the terminal predicate. A
-  failed checkpoint write leaves the event and its arrival barrier
+  persisted wall-clock delta is clamped at zero and capped at the budget.
+  A forward jump can therefore terminalize early, but remains visible in the
+  cover's first/last timestamps and capped accumulated failure time. A failed
+  checkpoint write leaves the event and its arrival barrier
   pending; only committed checkpoint age survives restart or lease
   handoff. A dispatch-load checkpoint names the failed document instance
-  independently of the storage-manager lifetime, so a new generation of that
-  same load can wake one recovery attempt after manager recreation.
-- A current-ACL authorization denial is immediately permanent only
-  when its typed verdict carries the durable ACL revision. A
-  `RowLabelCommitError` is likewise a proven-no-commit protocol
-  verdict. Both use the `commit-finalization` delivery-failure phase
-  and terminalize immediately. For a refused wave, the engine attaches
+  independently of the storage-manager lifetime. Only successful settlement
+  of a new generation for that same document is positive recovery evidence;
+  starting the generation is not. A successful load after storage-manager
+  recreation can therefore wake one recovery attempt.
+- A current-ACL authorization denial is immediately permanent only when
+  its typed verdict carries the durable ACL revision and distinguishes the
+  denial from a revoked or missing session. A required-load denial uses the
+  `dispatch-load` phase; a proven-no-commit denial while finalizing a handler
+  commit uses `commit-finalization`. A `RowLabelCommitError` is a
+  proven-no-commit protocol verdict in `commit-finalization` and terminalizes
+  immediately. For a refused wave, the engine attaches
   the failed operation index and the accumulator maps that operation to
   its owning served event; an unattributed refusal remains an ordinary
   requeue and cannot terminalize unrelated events in the same wave.
@@ -504,8 +525,10 @@ loop's duty).
   server-owned tombstone. The server copies the exact captured stream, payload,
   `rendererTrusted`, and `runtimeInjectedEventKeys`, and stamps the
   original acting user's current session; a different user or a
-  sessionless caller cannot retry it. Dismiss resolves and removes the
-  index item without appending. Concurrent or replayed resolution
+  userless event cannot be retried. A current writer may Dismiss a userless
+  event, resolving its otherwise permanent retention hold without inventing
+  delegated replay authority. Dismiss resolves and removes the index item
+  without appending. Concurrent or replayed resolution
   requests return the recorded winner and append nothing else, even after the
   original entry compacts. The original event identity never reopens; resolved
   entries may compact under the ordinary watermark rule.

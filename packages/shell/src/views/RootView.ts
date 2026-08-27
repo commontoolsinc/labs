@@ -102,7 +102,7 @@ export class XRootView extends BaseView implements ShellApp {
       width: min(24rem, calc(100vw - 2rem));
       max-height: calc(100dvh - 2rem);
       overflow-y: auto;
-      pointer-events: none;
+      pointer-events: auto;
     }
 
     .attention-card {
@@ -551,7 +551,8 @@ export class XRootView extends BaseView implements ShellApp {
     } catch (error) {
       if (
         generation === this._runtimeGeneration && runtime === this.runtime &&
-        space === this.space
+        space === this.space &&
+        this._eventAttentionRefreshOwners.get(space) === owner
       ) {
         console.error("[RootView] Failed to load event attention:", error);
       }
@@ -709,11 +710,15 @@ export class XRootView extends BaseView implements ShellApp {
                       @click="${() =>
                         this._resolveEventAttention(notice, "dismiss")}"
                     >Dismiss</cf-button>
-                    <cf-button
-                      ?disabled="${resolving}"
-                      @click="${() =>
-                        this._resolveEventAttention(notice, "retry")}"
-                    >Retry</cf-button>
+                    ${notice.retryable !== false
+                      ? html`
+                        <cf-button
+                          ?disabled="${resolving}"
+                          @click="${() =>
+                            this._resolveEventAttention(notice, "retry")}"
+                        >Retry</cf-button>
+                      `
+                      : undefined}
                   </div>
                 </section>
               `;

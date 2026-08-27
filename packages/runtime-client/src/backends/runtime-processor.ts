@@ -266,6 +266,7 @@ export function subscribeEventAttentionNotifications(
       eventId: outcome.eventId,
       seq: outcome.seq,
       sidecarId: outcome.sidecarId,
+      retryable: outcome.retryable,
       reason: outcome.reason,
       attention: outcome.attention,
     });
@@ -1586,17 +1587,19 @@ export class RuntimeProcessor {
         const entry = entries.get(
           eventAttentionEntryKey(summary.eventId, summary.seq),
         );
+        const actingUser = entry?.firedAt?.user;
         if (
           entry?.status !== "needs-attention" ||
           entry.attention === undefined ||
           entry.resolution !== undefined ||
-          entry.firedAt?.user !== this.identity.did()
+          (actingUser !== undefined && actingUser !== this.identity.did())
         ) continue;
         notices.push({
           space: request.space,
           eventId: entry.eventId,
           seq: summary.seq,
           sidecarId,
+          retryable: actingUser !== undefined,
           reason: entry.reason ?? "Event delivery needs attention",
           attention: entry.attention,
         });

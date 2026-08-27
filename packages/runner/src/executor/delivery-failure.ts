@@ -145,15 +145,20 @@ export const observeDeliveryFailure = (
     }
     : {
       ...current,
-      phase: observation.phase,
-      failureClass: observation.failureClass,
+      phase: current.permanentEvidence === true
+        ? current.phase
+        : observation.phase,
+      failureClass: current.permanentEvidence === true
+        ? current.failureClass
+        : observation.failureClass,
       lastFailureAt: observation.now,
       failureCount: current.failureCount + 1,
       activeFailureStartedAt: current.state === "failed"
         ? current.activeFailureStartedAt ?? observation.now
         : observation.now,
       state: "failed",
-      ...(observation.recoveryEpoch === undefined
+      ...(current.permanentEvidence === true ||
+          observation.recoveryEpoch === undefined
         ? {}
         : { recoveryEpoch: observation.recoveryEpoch }),
       ...(current.permanentEvidence === true ||

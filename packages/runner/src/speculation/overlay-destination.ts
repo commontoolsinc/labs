@@ -142,6 +142,7 @@ export type EventIntentOutcome = {
   seq?: number;
   sidecarId?: string;
   kind: "dropped" | "errored" | "refused" | "needs-attention";
+  retryable?: boolean;
   reason: string;
   attention?: DeliveryAttention;
 };
@@ -1439,6 +1440,7 @@ export class SpeculationOverlayDestination
         seq: entry.seq,
         sidecarId,
         kind: "needs-attention",
+        retryable: entry.firedAt?.user !== undefined,
         reason,
         attention: entry.attention,
       });

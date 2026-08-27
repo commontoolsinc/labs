@@ -143,6 +143,22 @@ export function reportServedEventFailure(
   }
 }
 
+/** Whether a failed event transaction carries positive producer evidence that
+ * an explicit local abort discarded it before storage. Other errors in the
+ * same family can describe ambiguous commit failures and are not terminal
+ * evidence. */
+export function isExplicitTransactionAbort(
+  error:
+    | { name?: string; message?: string; abortedBeforeStorage?: unknown }
+    | undefined,
+): error is {
+  name: "StorageTransactionAborted";
+  abortedBeforeStorage: true;
+} {
+  return error?.name === "StorageTransactionAborted" &&
+    error.abortedBeforeStorage === true;
+}
+
 export function isHeadEventParked(
   state: { readonly eventQueue: readonly QueuedEvent[] },
   now: number = performance.now(),
@@ -1662,10 +1678,7 @@ export async function dispatchQueuedEvent(state: {
         });
       };
       const sealExplicitHandlerAbort = (): void => {
-        if (
-          served === undefined || error?.name !== "StorageTransactionAborted" ||
-          error.message !== "Transaction was aborted"
-        ) return;
+        if (served === undefined || !isExplicitTransactionAbort(error)) return;
         reportServedEventFailure(served, {
           kind: "error",
           message: "Event handler aborted its transaction",

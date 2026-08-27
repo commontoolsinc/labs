@@ -517,6 +517,7 @@ describe("XRootView", () => {
       expect(styles).not.toContain("var(--background, #fff)");
       expect(styles).toContain("max-height: calc(100dvh - 2rem)");
       expect(styles).toContain("overflow-y: auto");
+      expect(styles).toContain("pointer-events: auto");
 
       await view._resolveEventAttention(notice, "retry");
       expect(resolutions).toEqual([{ notice, action: "retry" }]);
@@ -534,6 +535,16 @@ describe("XRootView", () => {
       expect(templateMarkup(view.render())).not.toContain(
         "Event needs attention",
       );
+
+      const userlessNotice = {
+        ...notice,
+        eventId: "evt-userless",
+        retryable: false,
+      };
+      view._handleEventNeedsAttention(userlessNotice);
+      const userlessMarkup = templateMarkup(view.render());
+      expect(userlessMarkup).toContain("Dismiss");
+      expect(userlessMarkup).not.toContain("Retry");
     } finally {
       restore();
     }

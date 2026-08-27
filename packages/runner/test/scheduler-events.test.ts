@@ -23,7 +23,11 @@ import type {
 } from "./scheduler-test-utils.ts";
 import type { RuntimeTelemetryMarker } from "../src/telemetry.ts";
 import { RetryImmediately } from "../src/scheduler/retry-immediately.ts";
-import { reportServedEventFailure } from "../src/scheduler/events.ts";
+import {
+  isExplicitTransactionAbort,
+  reportServedEventFailure,
+} from "../src/scheduler/events.ts";
+import { TransactionAborted } from "../src/storage/transaction-errors.ts";
 
 async function waitForSchedulerCondition(
   runtime: Runtime,
@@ -91,6 +95,15 @@ describe("event handling", () => {
         },
       }, { kind: "error", message: "handler failed" })
     ).not.toThrow();
+  });
+
+  it("recognizes explicit aborts from typed producer evidence only", () => {
+    expect(isExplicitTransactionAbort(TransactionAborted("custom reason")))
+      .toBe(true);
+    expect(isExplicitTransactionAbort({
+      name: "StorageTransactionAborted",
+      message: "Transaction was aborted",
+    })).toBe(false);
   });
 
   afterEach(async () => {

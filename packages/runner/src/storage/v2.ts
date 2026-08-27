@@ -1647,10 +1647,11 @@ export class StorageManager implements IStorageManager {
     failure: unknown;
     waiters: Set<(failure: unknown) => void>;
   }>();
-  // A positive recovery signal is key-specific: a new generation for one doc
-  // names that doc's stable failed boundary. Only a durable checkpoint carrying
-  // the same boundary wakes, so unrelated loads remain inert. The boundary is
-  // stable across manager recreation; the replacement epoch remains unique.
+  // A positive recovery signal is key-specific: successful settlement of a
+  // new generation for one doc names that doc's stable failed boundary. Only a
+  // durable checkpoint carrying the same boundary wakes, so unrelated loads
+  // remain inert. The boundary is stable across manager recreation; the
+  // replacement epoch remains unique.
   #nextPendingLoadGeneration = 1;
   readonly #loadRecoveryIdentity = crypto.randomUUID();
   loadRecoveryObserver:
@@ -1687,10 +1688,6 @@ export class StorageManager implements IStorageManager {
         failure: undefined,
         waiters: new Set<(failure: unknown) => void>(),
       };
-      this.loadRecoveryObserver?.({
-        failedEpoch: this.#loadFailureEpoch(key),
-        recoveryEpoch: this.#loadEpoch(entry.generation),
-      });
     }
     entry.count++;
     this.#pendingLoads.set(key, entry);
@@ -1699,6 +1696,12 @@ export class StorageManager implements IStorageManager {
       entry.count--;
       if (entry.count > 0) return;
       this.#pendingLoads.delete(key);
+      if (entry.failure === undefined) {
+        this.loadRecoveryObserver?.({
+          failedEpoch: this.#loadFailureEpoch(key),
+          recoveryEpoch: this.#loadEpoch(entry.generation),
+        });
+      }
       for (const waiter of entry.waiters) waiter(entry.failure);
       entry.waiters.clear();
     };
