@@ -122,6 +122,46 @@ export interface TopicIndexRow {
 }
 
 /**
+ * Each source's mention list, read once per source.
+ *
+ * A source whose value has not materialized yet — a topic appended a moment
+ * ago, still mid-sync — reads back as `undefined`, and taking `.mentions` of
+ * that throws. Thrown here it kills the whole pivot, and with it the append
+ * that caused it: the board goes on serving every topic it already had and
+ * silently accepts no new one.
+ *
+ * `mentionedBy` below already declares this element as `| undefined` and
+ * already guards it with `mentions[from]?.some(...)`. So the tolerance is not
+ * being added here; the producer is being made to honor the contract its own
+ * consumer states.
+ *
+ * A read taken straight off the cell gets no help from the compiler. `get()` on
+ * `ReadonlyCell<TopicMentionSource>` is declared to return a value rather than
+ * `T | undefined` — `IReadable` in `packages/api/index.ts` — so omitting the
+ * second `?.` there type-checks exactly as well as including it, and every gate
+ * stays green over a board that silently accepts no new topic. Only a read
+ * against a board with an in-flight append tells the two apart.
+ *
+ * Declaring the source structurally is what changes that. The parameter type
+ * says `get(): { mentions: M } | undefined`, so omitting the second `?.` HERE
+ * is a compile error: `deno task cfcheck` fails with "Object is possibly
+ * 'undefined'". `deno task check` passes either way — it walks the
+ * hand-maintained path list in `tasks/typecheck.ts`, which this package is not
+ * on, and patterns are checked by `cfcheck`. So the structural declaration buys
+ * two things rather than one: the read becomes testable, and the optionality
+ * moves somewhere the pattern typechecker can see it.
+ *
+ * Whether a cell's `get()` may return undefined against its declared type is a
+ * question about the cell contract rather than about this pattern, and it is
+ * not answered here.
+ */
+export function mentionListsOf<M>(
+  sources: readonly ({ get(): { mentions: M } | undefined } | undefined)[],
+): (M | undefined)[] {
+  return Array.from(sources, (source) => source?.get()?.mentions);
+}
+
+/**
  * The topics that mention `topic`, out of `list` — the pivot's whole join,
  * lifted out so it can be handed a list a board cannot produce.
  *
@@ -196,7 +236,7 @@ const crossrefTable = lift(
     // reading it there costs a link resolution per topic per topic.
     const list = Array.from(sources);
     // Each topic's mention list, read once, for the same reason.
-    const mentions = list.map((topic) => topic?.get().mentions);
+    const mentions = mentionListsOf(list);
     list.forEach((topic) => {
       // An entry with nothing behind it yet (mid-sync) has no identity to
       // address a row by, and `Writable.for(undefined)` is not a cause. It gets

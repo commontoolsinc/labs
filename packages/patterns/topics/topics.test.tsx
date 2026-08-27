@@ -23,6 +23,7 @@ import {
 import { pattern } from "commonfabric";
 import Topics, {
   mentionedBy,
+  mentionListsOf,
   submitProfileTopic,
   type TopicCrossrefRow,
   type TopicPiece,
@@ -620,6 +621,24 @@ export default pattern(() => {
         .length === 2
   );
 
+  // A source mid-sync reads back as undefined, and taking `.mentions` of that
+  // throws — which killed the pivot and, with it, the append that produced the
+  // half-written source. The first two entries are what a settled board looks
+  // like; the third is the one that used to throw. Reading its list as
+  // undefined is exactly what `mentionedBy` above declares and guards.
+  const assert_mention_lists_tolerate_a_mid_sync_source = assert(() => {
+    const settled = (m: unknown[]) => ({ get: () => ({ mentions: m }) });
+    const midSync = { get: () => undefined };
+    const lists = mentionListsOf([settled([twinA]), settled([]), midSync]);
+    return lists.length === 3 &&
+      (lists[0] as unknown[]).length === 1 &&
+      (lists[1] as unknown[]).length === 0 &&
+      lists[2] === undefined &&
+      // And the consumer stays usable on that output rather than merely not
+      // throwing: the mid-sync row contributes no inbound edge.
+      mentionedBy(twinB, [twinA, twinB], [[twinB], undefined]).length === 1;
+  });
+
   const assert_pure_helpers = assert(() =>
     snippet("a b  c", 3) === "a b…" &&
     snippet("hi", 10) === "hi" &&
@@ -1037,6 +1056,7 @@ export default pattern(() => {
       { assertion: assert_non_topic_mention_lands },
       { action: action_source_retracts_mention },
       { assertion: assert_reference_retracted },
+      { assertion: assert_mention_lists_tolerate_a_mid_sync_source },
       { action: action_ui_mentions_two },
       { action: action_drop_one_from_ui },
       { assertion: assert_ui_dropped_only_that_one },
