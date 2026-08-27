@@ -27,13 +27,14 @@ import {
 } from "../src/cfc/schema-sanitization.ts";
 import { STANDARD_PROMPT_CAVEAT_POLICY } from "../src/cfc/standard-profile.ts";
 
-// Inv-12 Stage 1 same-form matching (SC-25; design §2; spec §4.6.4.1):
-// enforcement keeps working on commitment forms, fail-closed where it
-// cannot. Read gating digests the candidate and compares; a CONCRETE
-// exchange-rule pattern value digest-matches a committed field; a VARIABLE
-// over a committed field does not bind (the rule does not fire — the
-// fail-closed direction: an unevaluable release does not happen).
 describe("CFC commitment-form matching (inv-12 Stage 1)", () => {
+  // Inv-12 Stage 1 same-form matching (SC-25; design §2; spec §4.6.4.1):
+  // enforcement keeps working on commitment forms, fail-closed where it cannot.
+  // Read gating digests the candidate and compares; a CONCRETE exchange-rule
+  // pattern value digest-matches a committed field; a VARIABLE over a committed
+  // field does not bind (the rule does not fire — the fail-closed direction: an
+  // unevaluable release does not happen).
+
   const reader = "did:key:reader";
   const stranger = "did:key:stranger";
   const committedUser = {

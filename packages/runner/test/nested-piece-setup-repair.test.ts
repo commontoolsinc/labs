@@ -61,10 +61,13 @@ const programOf = (contents: string): RuntimeProgram => ({
   files: [{ name: "/main.tsx", contents }],
 });
 
+//
 // The repair keys on ONE variant of the handler-stream failure — the
 // setup-missing "marker was never written" case. Its two siblings are NOT
 // setup-missing (re-running setup would not fix them), so they must not trigger
 // a repair. These messages mirror `describeHandlerStreamFailure`'s three shapes.
+//
+
 describe("isMissingStreamMarkerFailure discriminates the setup-missing variant", () => {
   it("matches the marker-never-written variant", () => {
     expect(

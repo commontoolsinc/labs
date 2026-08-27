@@ -27,12 +27,13 @@ const replicaEntries = (
   return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
 };
 
-// labelMap v2 components (S16 design): persisted entries carry their
-// provenance component so each can follow its own update discipline —
-// `declared` (schema store policy, monotone), `link` (reference-carried,
-// replaced when the link is rewritten), `derived` (default-transition flow
-// labels, replaced on overwrite). Effective label = join of components.
 describe("CFC labelMap component origins", () => {
+  // labelMap v2 components (S16 design): persisted entries carry their
+  // provenance component so each can follow its own update discipline —
+  // `declared` (schema store policy, monotone), `link` (reference-carried,
+  // replaced when the link is rewritten), `derived` (default-transition flow
+  // labels, replaced on overwrite). Effective label = join of components.
+
   it("tags schema-derived entries as declared", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({

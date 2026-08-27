@@ -123,10 +123,11 @@ describe("Shell cross-origin isolation posture", () => {
   });
 });
 
-// The shell routes serve read-only content to any origin. These pin that
-// permissive CORS keeps working alongside the isolation headers, so a future
-// change to one does not silently disturb the other.
 describe("Shell route CORS", () => {
+  // The shell routes serve read-only content to any origin. These pin that
+  // permissive CORS keeps working alongside the isolation headers, so a future
+  // change to one does not silently disturb the other.
+
   it("allows a cross-origin GET with a wildcard origin", async () => {
     const response = await app.request("/", {
       headers: { Origin: "https://example.com" },
@@ -151,9 +152,12 @@ describe("Shell route CORS", () => {
   });
 });
 
+//
 // With no compiled frontend and no SHELL_URL proxy target — the unit-test
 // environment — the shell router answers with a 404 that tells an operator how
 // to bring the shell up. This guards that operator hint and its port.
+//
+
 describe("Shell dev fallback without a compiled build or proxy", () => {
   it("returns 404 with a hint naming SHELL_URL and the shell port", async () => {
     const response = await app.request("/anything");

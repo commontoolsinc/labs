@@ -27,10 +27,12 @@ interface Repo {
 }
 `;
 
+//
 // fetchJson<T> lowers T into an injected `schema` property. The object-literal
 // argument form is covered by the schema-injection fixture; these cases reach
 // the other two emission branches: a non-object-literal argument (spread) and
 // no argument at all.
+//
 
 Deno.test("fetchJson injects a schema by spreading a non-literal argument", async () => {
   const source = `

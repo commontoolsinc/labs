@@ -21,10 +21,13 @@ function providerFailure(statusCode: number): APICallError {
   });
 }
 
+//
 // The routes ask the AI SDK for a single attempt, so these two shapes do not
 // reach the classifier from them. They are what the classifier sees if a call
 // site ever asks for retries again, and the status has to survive the wrapping
 // either way.
+//
+
 Deno.test("a status survives a retry wrapper", () => {
   const wrapped = new RetryError({
     message: "Failed after 3 attempts",
@@ -47,9 +50,12 @@ Deno.test("a cycle among causes does not trap the search", () => {
   assertEquals(httpStatusForError(outer), 500);
 });
 
+//
 // The AI SDK raises these over what the caller sent, before any provider is
 // asked. Reporting them against the provider would send the caller looking in
 // the wrong place.
+//
+
 Deno.test("a request the SDK would not send is the caller's mistake", () => {
   assertEquals(
     httpStatusForError(

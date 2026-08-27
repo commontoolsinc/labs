@@ -55,12 +55,11 @@ function selectByLabel(s: Session, label: string): void {
 // 663 — Enter on an in-blob reference that resolves to no node.
 //
 
-// A "use" reference carries a destination line but no definition offset. When
-// that line falls outside every structure node's range, both findTargetIndex
-// (no offset) and nodeAtLine (no containing node) fail, so resolveTargetNode
-// returns null and Enter reports there is nothing to open.
-
 Deno.test("session: Enter on a reference whose line is in no node reports nothing to open", () => {
+  // A "use" reference carries a destination line but no definition offset. When
+  // that line falls outside every structure node's range, both findTargetIndex
+  // (no offset) and nodeAtLine (no containing node) fail, so resolveTargetNode
+  // returns null and Enter reports there is nothing to open.
   // Real card with real targets, but the structure tree is trimmed to just the
   // subject node — placed so the use site sits below its range, outside every
   // node — so following the use reference resolves to no node.
@@ -108,11 +107,12 @@ const useB = base;`;
 // Behavioral anchor near revealMatch (580).
 //
 
-// revealMatch reads matches[currentMatch] and guards `!m`. Every public caller
-// (runSearch, refreshSearchMatches, stepMatch) checks for an empty match set
-// before reaching it, so the no-match return is unreachable from the public
-// API; this test asserts the surrounding reveal behavior stays correct.
 Deno.test("session: a committed search reveals its single match", () => {
+  // revealMatch reads matches[currentMatch] and guards `!m`. Every public
+  // caller (runSearch, refreshSearchMatches, stepMatch) checks for an empty
+  // match set before reaching it, so the no-match return is unreachable from
+  // the public API; this test asserts the surrounding reveal behavior stays
+  // correct.
   const doc = parseDocument("// transformed: /m.ts\nconst tokenz = 1;");
   const s = new Session(
     doc,
@@ -351,8 +351,10 @@ Deno.test("filepickercov2: paging the picker up to the top keeps the scroll non-
 // Behavioral anchors for the reachable structure-tree edges near 288/377/380.
 //
 
+//
 // These do not force the unreachable defensive returns, but assert the
 // surrounding navigation/card behavior stays correct from a real session.
+//
 
 Deno.test("session: card down then up across a multi-target card stays consistent", () => {
   const doc = parseDocument(SAMPLE);

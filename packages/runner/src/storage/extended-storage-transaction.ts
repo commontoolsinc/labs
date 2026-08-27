@@ -109,6 +109,7 @@ import {
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import { normalizeCellScope, scopeRank } from "../scope.ts";
 import type { MergeableOpDelta } from "./mergeable-ops.ts";
+import { CFC_ENFORCEMENT_REJECTION_PREFIX } from "./rejection.ts";
 import {
   clearSchemaRefusalTx,
   isInternalVerifierRead,
@@ -306,6 +307,19 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     ) => void
   >();
   private verdictCallbacksDispatched = false;
+  // Post-commit effects this transaction staged and then discarded, held for
+  // the moment the code that owns its retries stops retrying it — a decision no
+  // rejection carries on its own, since a refusal one attempt cannot get past
+  // is often one a later attempt can. Effects handed to a seal destination are
+  // not here: that clears the outbox too, and it is a handover rather than an
+  // ending.
+  #abandonableEffects: PostCommitSideEffect[] = [];
+  private abandonDispatched = false;
+  // Set when a commit of this transaction succeeded. Abandonment is what the
+  // staged work hears instead of a commit, so a transaction that committed has
+  // nothing to abandon, and saying otherwise would report a request as never
+  // sent after the outbox flushed it.
+  private committed = false;
   // The verdict-time effect run of the current commit(): verdict callbacks
   // plus the CFC outbox flush. What settled()-style barriers wait on in
   // place of the commit promise, whose resolution additionally waits for
@@ -2265,8 +2279,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   abort(reason?: any): Result<any, InactiveTransactionError> {
     this.assertWritable("abort()");
     this.statusOverride = undefined;
-    this.#cfcState.outbox = [];
-    this.outboxIdempotencyKeys.clear();
+    this.clearPostCommitOutbox();
     this.#cfcState.prepare = { status: "unprepared" };
     this.#cfcState.dereferenceTraces = [];
     this.#cfcState.structureContainers = [];
@@ -2284,6 +2297,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (this.commitCallbacksDispatched) {
       return;
     }
+    if (!result.error) this.committed = true;
     // Verdict callbacks never fire after commit callbacks: on the async
     // path the effect chain dispatched them at the verdict already (this is
     // a no-op then); on synchronous fates (abort, pre-storage rejection)
@@ -2322,7 +2336,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.verdictCallbacks.clear();
   }
 
-  private clearPostCommitOutbox(): void {
+  /**
+   * Drop the staged effects. `handedOff` says another runner has taken them,
+   * so they are not held for abandonment: exactly one of `flush` and `abandon`
+   * runs per effect, and a handed-off effect will be flushed elsewhere.
+   */
+  private clearPostCommitOutbox(handedOff = false): void {
+    if (!handedOff) {
+      this.#abandonableEffects.push(...this.#cfcState.outbox);
+    }
     this.#cfcState.outbox = [];
     this.outboxIdempotencyKeys.clear();
   }
@@ -2441,7 +2463,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
           : [];
         const detail = reasons.length > 0 ? `: ${plainReason(reasons[0])}` : "";
         const message =
-          `CFC enforcement rejected commit: relevant transaction was not prepared${detail}`;
+          `${CFC_ENFORCEMENT_REJECTION_PREFIX}: relevant transaction was not prepared${detail}`;
         // WATCH(cfc-verdict): a refusal is terminal only when EVERY reason is
         // a VERDICT on this transaction's data. Anything else — an input
         // prepare could not evaluate, or a prepared state a caller disturbed
@@ -2478,7 +2500,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
               error: {
                 name: "StorageTransactionAborted",
                 message:
-                  "CFC enforcement rejected commit: prepared digest changed",
+                  `${CFC_ENFORCEMENT_REJECTION_PREFIX}: prepared digest changed`,
                 reason: new Error("cfc-prepared-digest-mismatch"),
               },
             });
@@ -2546,7 +2568,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
                 [...this.#cfcState.outbox],
               ) === true;
           if (deferred) {
-            this.clearPostCommitOutbox();
+            this.clearPostCommitOutbox(true);
             return;
           }
           for (const effect of this.#cfcState.outbox) {
@@ -2641,6 +2663,29 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   ): void {
     this.assertWritable("addVerdictCallback()");
     this.verdictCallbacks.add(callback);
+  }
+
+  abandonStagedWork(error: CommitError): void {
+    if (this.committed || this.abandonDispatched) return;
+    this.abandonDispatched = true;
+    // Everything this transaction staged and did not flush: the effects a
+    // discard path moved aside, and any still on the outbox because the
+    // transaction ended without reaching one. A handover empties the outbox
+    // without adding to either, so handed-off effects are in neither.
+    const effects = [...this.#abandonableEffects, ...this.#cfcState.outbox];
+    this.#abandonableEffects = [];
+    this.#cfcState.outbox = [];
+    for (const effect of effects) {
+      try {
+        effect.abandon?.(error);
+      } catch (abandonError) {
+        logger.error(
+          "storage-error",
+          "Post-commit side effect's abandon failed:",
+          { effect, error: abandonError },
+        );
+      }
+    }
   }
 }
 
@@ -3128,6 +3173,14 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   ): void {
     if (this.options.discardSettleCallbacks === true) return;
     return this.wrapped.addVerdictCallback(callback);
+  }
+
+  abandonStagedWork(error: CommitError): void {
+    // A wrapper that discards settle callbacks stands for work whose outcome
+    // nobody acts on — duplicate work run only to compare its writes — so it
+    // does not end the staged work of the transaction it wraps.
+    if (this.options.discardSettleCallbacks === true) return;
+    return this.wrapped.abandonStagedWork(error);
   }
 }
 

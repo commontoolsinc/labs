@@ -13,6 +13,7 @@ import { type Cell } from "../cell.ts";
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { validateAgainstSchema } from "../cfc/schema-sanitization.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { settleAbandonedRequest } from "./abandoned-request.ts";
 import { setPatternCell, setResultCell } from "../result-utils.ts";
 import type { Runtime } from "../runtime.ts";
 import { type Action } from "../scheduler.ts";
@@ -595,7 +596,38 @@ function fetchBuiltin(kind: FetchKind) {
             );
             runtime.trackAsyncWork(work, parentCell);
           },
-          { idempotencyKey: effectKey },
+          {
+            idempotencyKey: effectKey,
+            onRejected: (rejection) => {
+              runtime.trackAsyncWork(
+                settleAbandonedRequest(
+                  runtime,
+                  kind.name,
+                  effectKey,
+                  (settleTx) => {
+                    // The announcement rode the abandoned transaction, so it
+                    // is made again whoever owns the answer now.
+                    sendResult(settleTx, { pending, result, error });
+                    // Decided here rather than when this callback ran: a newer
+                    // request can start in between and claim these cells, and
+                    // its claim id is what says so.
+                    const claim = internal.withTx(settleTx).key("requestId")
+                      .get();
+                    if (
+                      claim !== undefined && claim !== "" &&
+                      claim !== newRequestId
+                    ) {
+                      return;
+                    }
+                    pending.withTx(settleTx).set(false);
+                    result.withTx(settleTx).set(undefined);
+                    error.withTx(settleTx).set(rejection.message);
+                  },
+                ),
+                parentCell,
+              );
+            },
+          },
         );
       }
     };

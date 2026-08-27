@@ -11,12 +11,13 @@ import { llmDialogTestHelpers } from "../src/builtins/llm-dialog.ts";
 
 const { serializeForLLMObservation } = llmDialogTestHelpers;
 
-// Epic C stage C4 — consumer precision (C0 §7): the observation ceiling and
-// label views consume entries per observation class. A public value read of
-// a child under a secret container `shape` no longer inherits the
-// container's shape label (the flat model took the max), and an opaque link
-// handle is a followRef observation consuming the pointer's label only.
 describe("CFC observation precision (C4)", () => {
+  // Epic C stage C4 — consumer precision (C0 §7): the observation ceiling and
+  // label views consume entries per observation class. A public value read of a
+  // child under a secret container `shape` no longer inherits the container's
+  // shape label (the flat model took the max), and an opaque link handle is a
+  // followRef observation consuming the pointer's label only.
+
   const view = (entries: CfcLabelView["entries"]): CfcLabelView => ({
     version: 1,
     entries,

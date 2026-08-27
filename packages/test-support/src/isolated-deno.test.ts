@@ -12,6 +12,7 @@ function decode(bytes: Uint8Array): string {
   return new TextDecoder().decode(bytes);
 }
 
+//
 // Three test tasks build their own run allowlist with
 // `--allow-run=$(deno eval "console.log(Deno.execPath())")`, which names the
 // binary the tests start only while a task's `deno` is the Deno running the
@@ -19,6 +20,8 @@ function decode(bytes: Uint8Array): string {
 // the shell's Deno is not the pinned one, which is the case those tasks exist
 // to handle. The decoy below is the only `deno` on the child's `PATH`, so it
 // runs if the resolution ever goes through `PATH`.
+//
+
 Deno.test({
   name: "a task's `deno` is the Deno running the task, not one on PATH",
   ignore: Deno.build.os === "windows",

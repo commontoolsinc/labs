@@ -7,9 +7,10 @@ import {
 } from "../../test-utils/mock-cell-handle.ts";
 import { CFMarkdown } from "./index.ts";
 
-// What the component renders is covered by cf-markdown.browser.test.ts, which
-// runs in a browser and asserts against the DOM the component built.
 describe("cf-markdown", () => {
+  // What the component renders is covered by cf-markdown.browser.test.ts, which
+  // runs in a browser and asserts against the DOM the component built.
+
   it("is defined", () => {
     expect(CFMarkdown).toBeDefined();
   });

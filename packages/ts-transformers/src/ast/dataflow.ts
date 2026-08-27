@@ -1064,20 +1064,13 @@ export function createDataFlowAnalyzer(
       };
     }
 
-    if (ts.isParenthesizedExpression(expression)) {
-      return analyzeExpression(expression.expression, scope, context);
-    }
-
-    if (ts.isAsExpression(expression)) {
-      return analyzeExpression(expression.expression, scope, context);
-    }
-
-    if (ts.isTypeAssertionExpression(expression)) {
-      return analyzeExpression(expression.expression, scope, context);
-    }
-
-    if (ts.isNonNullExpression(expression)) {
-      return analyzeExpression(expression.expression, scope, context);
+    // A transparent wrapper is analyzed as the expression it wraps. This has to
+    // name the whole set: an unlisted spelling falls to the generic child walk
+    // below, which reaches the same operands but merges them through
+    // `mergeAnalyses` and so drops the inner `rewriteHint`.
+    const unwrappedTarget = unwrapTransparentWrapperOnce(expression);
+    if (unwrappedTarget) {
+      return analyzeExpression(unwrappedTarget, scope, context);
     }
 
     if (ts.isConditionalExpression(expression)) {

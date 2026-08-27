@@ -1,15 +1,18 @@
 import ts from "typescript";
 
 import type { EmitterContext } from "../types.ts";
+import { isTransparentWrapper } from "../../../utils/expression.ts";
 
-const isContainerExpression = (expression: ts.Expression): boolean => {
-  return ts.isObjectLiteralExpression(expression) ||
-    ts.isArrayLiteralExpression(expression) ||
-    ts.isParenthesizedExpression(expression) ||
-    ts.isAsExpression(expression) ||
-    ts.isTypeAssertionExpression(expression) ||
-    ts.isNonNullExpression(expression);
-};
+/**
+ * True for an expression the container emitter owns: a literal that holds other
+ * expressions, or a transparent wrapper around one. A wrapper spelling missing
+ * here is not inert — the emitter declines the expression, and it falls to
+ * whichever emitter claims it next.
+ */
+const isContainerExpression = (expression: ts.Expression): boolean =>
+  ts.isObjectLiteralExpression(expression) ||
+  ts.isArrayLiteralExpression(expression) ||
+  isTransparentWrapper(expression);
 
 export const emitContainerExpression = ({
   expression,

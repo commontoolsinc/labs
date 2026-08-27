@@ -405,16 +405,16 @@ describe("combineSchema array handling", () => {
   });
 });
 
-// combineSchema builds the pseudo-intersection of the schema a doc was
-// entered with and a schema found on a link inside it. For object schemas,
-// keys defined on only ONE side intersect against the other side's
-// additionalProperties — where JSON Schema's "absent additionalProperties"
-// means UNCONSTRAINED, not `false`. The regression pinned here: absent
-// additionalProperties alongside defined properties used to be coerced to
-// `false`, silently blocking the other side's keys exactly as if the
-// author had written an explicitly closed object.
-
 describe("combineSchema additionalProperties handling", () => {
+  // combineSchema builds the pseudo-intersection of the schema a doc was
+  // entered with and a schema found on a link inside it. For object schemas,
+  // keys defined on only ONE side intersect against the other side's
+  // additionalProperties — where JSON Schema's "absent additionalProperties"
+  // means UNCONSTRAINED, not `false`. The regression pinned here: absent
+  // additionalProperties alongside defined properties used to be coerced to
+  // `false`, silently blocking the other side's keys exactly as if the author
+  // had written an explicitly closed object.
+
   const schemaWithOneSidedProperty = {
     type: "object",
     properties: {

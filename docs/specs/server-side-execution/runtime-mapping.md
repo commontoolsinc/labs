@@ -51,9 +51,9 @@ Status legend:
 | --- | --- | --- | --- | --- |
 | 14 | `RetryImmediately`: abort + immediate re-run after `inSpace("name")` DID resolution | `scheduler/retry-immediately.ts:11`, `runner.ts:4933-4943`, event path `scheduler/events.ts:955-983` | protocol §2b (provisioning kept) | COVERED |
 | 15 | Reactive stale-basis retry: off-budget re-queue on conflict / local inconsistency, `readyToRetry` catch-up | `scheduler/run.ts:122-214` | serving-loop §3d (mid-wave CAS drop) | CHANGED |
-| 16 | Bounded retry for non-conflict reactive failures (MAX_RETRIES_FOR_REACTIVE = 10) | `scheduler/run.ts:239-253`, `scheduler/constants.ts:40` | serving-loop §3d (per-action failure isolation) | COVERED |
+| 16 | Bounded retry for non-conflict reactive failures (MAX_RETRIES_FOR_REACTIVE = 10); the permanent and terminal classes take no attempt, and every stop — including an exhausted name-resolution retry — abandons the transaction's staged work | `scheduler/run.ts` (`abandonAction`), `scheduler/constants.ts:40`, `storage/extended-storage-transaction.ts` (`abandonStagedWork`) | serving-loop §3d (per-action failure isolation) | COVERED |
 | 17 | Event-commit backpressure: capped exponential backoff window, `CommitConvergenceError`, disposition classes (permanent / terminal / give-up / backoff) | `scheduler/backpressure.ts:22-57`, `scheduler/events.ts:1096-1210`, `events.ts:1335-1387` | events §5 partially | CHANGED |
-| 18 | CFC-rejected-write loud drop | `scheduler/events.ts:63-75` | serving-loop §3c (named explicitly) | COVERED |
+| 18 | CFC-rejected-write loud drop, on the event path and the reactive-action path alike | `scheduler/cfc-rejection-report.ts`, called from `scheduler/events.ts` and `scheduler/run.ts` | serving-loop §3c (named explicitly) | COVERED |
 
 ### 1c. Events and handlers
 

@@ -21,12 +21,13 @@ const LABELED_SCHEMA = {
   required: ["secret"],
 } as const;
 
-// `prepareTxForCommit` reaches storage through the transaction it prepares,
-// by two routes: the flow-labels relevance probe reads stored metadata, and
-// `prepareCfc` reads and writes the derived label map. A settled transaction
-// refuses both, and cannot commit either, so prepare on one returns without
-// touching it and leaves the terminal state to the commit result.
 describe("Runtime.prepareTxForCommit()", () => {
+  // `prepareTxForCommit` reaches storage through the transaction it prepares,
+  // by two routes: the flow-labels relevance probe reads stored metadata, and
+  // `prepareCfc` reads and writes the derived label map. A settled transaction
+  // refuses both, and cannot commit either, so prepare on one returns without
+  // touching it and leaves the terminal state to the commit result.
+
   const started: {
     runtime: Runtime;
     storageManager: ReturnType<typeof StorageManager.emulate>;

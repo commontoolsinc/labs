@@ -57,10 +57,11 @@ describe("query-result proxy: FabricPrimitive leaves are not proxy-wrapped", () 
   });
 });
 
-// End-to-end: a schema whose `default` carries a non-JSON FabricValue, read
-// through a query-result proxy, must intern without throwing AND without losing
-// the value to a JSON shadow.
 describe("internCellLinkSchema preserves FabricValue schema defaults read through a proxy", () => {
+  // End-to-end: a schema whose `default` carries a non-JSON FabricValue, read
+  // through a query-result proxy, must intern without throwing AND without
+  // losing the value to a JSON shadow.
+
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;

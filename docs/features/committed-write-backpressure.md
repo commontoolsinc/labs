@@ -212,6 +212,32 @@ conflict whose triggering write was already delivered.) A conflict there is a
 wait for catch-up, not a failure, and consumes no budget. Only non-conflict
 transient errors fall back to the bounded `MAX_RETRIES_FOR_REACTIVE` retry, and
 every attempt re-subscribes so the action recovers when its inputs next change.
+
+Whichever way a run ends, the moment the scheduler stops attempting a commit is
+the moment it calls `abandonStagedWork` on that transaction. Every stop does
+so, on both paths: a permanent or terminal rejection, an exhausted retry
+budget, an exhausted name resolution, a handler that threw, and a caller that
+opted out of retrying. A refused late seal is the one refusal that is not a
+stop: the durable entry is still the truth and the drain delivers it, so a
+further attempt is coming and the staged work is waiting for something. Work staged there
+and waiting for the commit hears it as its effect's `abandon`.
+That decision is the scheduler's, because the number of attempts is not a
+property of the rejection. A CFC refusal whose every reason is a verdict on the
+committed data arrives as a terminal class and stops on the first attempt; a
+refusal naming something prepare could not evaluate keeps the retryable class,
+because the attempt that reads it decides differently. Either way the builtin
+waiting on the commit sees a rejection and cannot tell how many follow it, and a
+builtin that guesses either reports an error for work that is about to happen or
+waits forever for work that will not.
+
+A write CFC enforcement refused and nothing will retry is reported through
+`reportDroppedCfcRejectedWrite`, on the reactive path as well as the event path,
+so it is visible rather than dropped in silence. A builtin that staged a request
+on the abandoned transaction settles its result with the error through the
+`onRejected` hook of `enqueueSinkRequestPostCommitEffect`; without that its
+request is staged but never sent, and its result stays pending with nothing
+coming. Every builtin that stages a sink request passes the hook, and `sqlite*` gives
+its effect an `abandon` directly, since it enqueues that effect by hand.
 The backpressure rework targets the event-handler path instead, where a one-shot
 write *is* the user's intent and cannot be re-derived from inputs, so a conflict
 must be actively retried rather than recovered by re-derivation.

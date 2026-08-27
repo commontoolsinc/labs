@@ -11,11 +11,10 @@ if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
 }
 
-// `@/app.ts` is the app the server serves: `configureOpenAPI` plus every
-// router. The document is generated per request from the schemas of the routes
-// mounted on it.
-
 Deno.test("openapi reference", async (t) => {
+  // `@/app.ts` is the app the server serves: `configureOpenAPI` plus every
+  // router. The document is generated per request from the schemas of the
+  // routes mounted on it.
   await t.step("GET /doc serves the OpenAPI document", async () => {
     const response = await app.request("/doc");
     assertEquals(response.status, 200);

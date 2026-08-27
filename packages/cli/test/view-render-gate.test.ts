@@ -58,9 +58,11 @@ function mkNode(over: Partial<StructureNode> = {}): StructureNode {
   };
 }
 
+//
 // The guide column (`guideChar`) is only drawn when a node is selected. With no
 // gutter, the glyph sits at visible column 0 of each row. These tests drive
 // every reachable branch of `guideChar`.
+//
 
 Deno.test("guide: a multi-line node draws top corner, body, and bottom corner", () => {
   // Node covers lines 1..3 of a five-line document. Lines 0 and 4 are outside

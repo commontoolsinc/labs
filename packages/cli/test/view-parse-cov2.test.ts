@@ -304,11 +304,11 @@ Deno.test("incremental highlighter updates a line that adds a closure", () => {
   assert(/=>/.test(joined), "updated text should contain the arrow");
 });
 
-// safe() wraps the best-effort metadata extractors. The public API never feeds
-// them a node that throws, so the catch is exercised directly through the
-// test-only handle: a throwing extractor degrades to undefined, a succeeding
-// one returns its value.
 Deno.test("safe(): a throwing extractor degrades to undefined", () => {
+  // safe() wraps the best-effort metadata extractors. The public API never
+  // feeds them a node that throws, so the catch is exercised directly through
+  // the test-only handle: a throwing extractor degrades to undefined, a
+  // succeeding one returns its value.
   assertEquals(
     _internal.safe(() => {
       throw new Error("boom");

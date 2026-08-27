@@ -4,9 +4,12 @@ import {
   OpenAICompatibleGatewayClient,
 } from "../src/index.ts";
 
+//
 // Importing through the package barrel keeps `defaultHarnessFetch` reachable
 // from the public entry point that consumers use, alongside the gateway client
 // that falls back to it.
+//
+
 Deno.test("barrel re-exports the harness fetch default", () => {
   assertEquals(typeof defaultHarnessFetch, "function");
   assertEquals(typeof OpenAICompatibleGatewayClient, "function");

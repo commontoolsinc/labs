@@ -545,6 +545,17 @@ export type PostCommitSideEffect = {
    * on it instead of re-enacting (T2.Q7). Absent everywhere else. */
   nonce?: string;
   flush(tx: unknown): void | Promise<void>;
+  /**
+   * Called instead of {@link flush} when the work this effect stands for will
+   * not happen: the transaction carrying it was rejected and whoever owns its
+   * retries has stopped. Exactly one of the two runs, so this is where a
+   * builtin ends a request that was staged and never sent.
+   *
+   * Not called when the effect is handed to a seal destination, which runs it
+   * elsewhere — that clears the outbox too, and it is a handover rather than
+   * an ending.
+   */
+  abandon?(error: unknown): void;
 };
 
 export type CfcPrepareState =
