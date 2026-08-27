@@ -4007,6 +4007,14 @@ export class PieceController<T = unknown> {
         // `dangerouslyAllowIncompatibleSchema` a failed load degrades to the
         // stored identity ref alone. Without the flag the load failure stays
         // fatal, unchanged.
+        //
+        // The degradation reaches two populations. A piece with no retained
+        // source takes the transition's displaced-identity arm below. A piece
+        // whose source IS retained but whose artifact will not load — a
+        // compile or evaluation failure under this runtime — keeps its
+        // retained baseline: the stored ref serves only as the concurrency
+        // guard and the candidate's predecessor entry, both of which name an
+        // identity without loading it.
         let previousPattern: Pattern | undefined;
         let previousRef: { identity: string; symbol: string };
         try {

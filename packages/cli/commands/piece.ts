@@ -2238,7 +2238,7 @@ export const piece = targetOptions(
   )
   .option(
     "--dangerously-allow-incompatible-schema",
-    "Replace the source even when pattern or retained-link schema compatibility cannot be proven.",
+    "Replace the source even when pattern or retained-link schema compatibility cannot be proven, or when the current pattern cannot be loaded at all.",
   )
   .option(
     "--check",
