@@ -62,7 +62,9 @@ function assertInheritance(w: World) {
   }
 }
 
-// ---------- C1: same-space cascade (trace T3's shape) ----------
+//
+// C1: same-space cascade (trace T3's shape)
+//
 
 function c1World(splitWaves = false) {
   return makeWorld({
@@ -194,7 +196,9 @@ Deno.test("C1-LT8: a reload between enact and ack can re-enact — bounded, and 
   assert(sawReEnact, "the LT8 window is real: a schedule re-enacts");
 });
 
-// ---------- C2: cross-space chain (trace T4's shape) + FP1 ----------
+//
+// C2: cross-space chain (trace T4's shape) + FP1
+//
 
 function c2World() {
   return makeWorld({
@@ -353,7 +357,9 @@ Deno.test("C2-dedupe: at-least-once redelivery is idempotent at the target (even
   );
 });
 
-// ---------- C3: sessionless chains and uniform inheritance (LT6) ----------
+//
+// C3: sessionless chains and uniform inheritance (LT6)
+//
 
 Deno.test("C3: derivation-emitted events carry the demand identity uniformly (LT6); sessionless writes error", () => {
   const base = makeWorld({
@@ -422,7 +428,9 @@ Deno.test("C3: derivation-emitted events carry the demand identity uniformly (LT
   }
 });
 
-// ---------- C4: push privacy and settledness ----------
+//
+// C4: push privacy and settledness
+//
 
 Deno.test("C4: a subscriber receives only its applicable set (protocol §3); settledness is sound (protocol §4)", () => {
   const w0 = makeWorld({
@@ -455,7 +463,9 @@ Deno.test("C4: a subscriber receives only its applicable set (protocol §3); set
   assert(w.spaces.A.streams.s.entries.every((e) => e.consequenced));
 });
 
-// ---------- C6: admission negatives ----------
+//
+// C6: admission negatives
+//
 
 Deno.test("C6: derived admission is the lease equality check — forgeries and non-holders rejected (protocol §2, serving-loop §2)", () => {
   const w = makeWorld({
@@ -477,7 +487,9 @@ Deno.test("C6: derived admission is the lease equality check — forgeries and n
   assert(!admitDerived(sp, { holder: me, envelope: "service:A" }));
 });
 
-// ---------- C7: the lease fence (DR1, serving-loop §2) ----------
+//
+// C7: the lease fence (DR1, serving-loop §2)
+//
 
 const C7_MENU: Step[] = [
   { kind: "sealProbe", space: "A" },
@@ -535,7 +547,9 @@ Deno.test("C7b: the residue the MUST exists for — discipline OFF makes a same-
   assertEquals(w.servers.A.pendingProbes.length, 0, "probe consumed");
 });
 
-// ---------- C8: mid-wave conflicts, per write class (§3d) ----------
+//
+// C8: mid-wave conflicts, per write class (§3d)
+//
 
 function c8World() {
   return makeWorld({
@@ -634,7 +648,9 @@ Deno.test("C8c: exactly-once under exhaustive racing — no event's consequences
   }
 });
 
-// ---------- C9: DROP vs REQUEUE — the T3 distinction ----------
+//
+// C9: DROP vs REQUEUE — the T3 distinction
+//
 
 Deno.test("C9: an UNRUNNABLE event DROPS (notice + watermark advance, non-wedging); a RACED event never does (events §5; serving-loop §3d)", () => {
   const base = makeWorld({
@@ -673,7 +689,9 @@ Deno.test("C9: an UNRUNNABLE event DROPS (notice + watermark advance, non-wedgin
   assertEquals(w.requeues, 0, "an unrunnable event is never requeued");
 });
 
-// ---------- C10: budget exhaustion — W pinned, continuation ----------
+//
+// C10: budget exhaustion — W pinned, continuation
+//
 
 Deno.test("C10: an exhausted wave commits WITHOUT advancing W; continuation waves finish; W jumps only at true quiescence (serving-loop §3)", () => {
   let w = makeWorld({
@@ -708,7 +726,9 @@ Deno.test("C10: an exhausted wave commits WITHOUT advancing W; continuation wave
   for (const n of counts.values()) assertEquals(n, 1);
 });
 
-// ---------- C8d + C0: rollback closure and the guard rails ----------
+//
+// C8d + C0: rollback closure and the guard rails
+//
 
 Deno.test("C8d: a requeued parent's same-wave cascade NEVER escapes — rollback closes over descendants (events §4; serving-loop §3d)", () => {
   const w0 = makeWorld({
@@ -828,7 +848,9 @@ Deno.test("C0-guards: connection guards; no-actor space writes carry no attribut
   assertEquals("user" in sessionless.firedAt, false, "no user key (OW15)");
 });
 
-// ---------- conformance bridge: model keys === the wire vocabulary ----------
+//
+// conformance bridge: model keys === the wire vocabulary
+//
 
 Deno.test("bridge: model scope-key constructors byte-agree with the real wire vocabulary (LD3, key-vocabulary §3)", () => {
   // The model RESTATES the constructors (model.ts stays import-free);
@@ -919,7 +941,8 @@ Deno.test("bridge: model scope-key constructors byte-agree with the real wire vo
   }
 });
 
-// ---------- C11: narrowing / fan-out (Phase 2 pre-gate, OW3) ----------
+//
+// C11: narrowing / fan-out (Phase 2 pre-gate, OW3)
 //
 // One extension covers the OW3 trio (verification-coverage §3):
 // instance sets stay CLEAN PRODUCTS over principals (scopes §2's
@@ -928,6 +951,7 @@ Deno.test("bridge: model scope-key constructors byte-agree with the real wire vo
 // and W never forks (scopes §9): one integer, waiting on DEMANDED
 // siblings only, undemanded instances never holding it back
 // (scopes §2's watermark × fan-out composition).
+//
 
 const FAN_MENU = (): FanoutStep[] => [
   { kind: "fanInput" },

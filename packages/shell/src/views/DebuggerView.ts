@@ -1356,9 +1356,9 @@ export class XDebuggerView extends LitElement {
     return String(value);
   }
 
-  // ============================================================
+  //
   // Logger stats methods
-  // ============================================================
+  //
 
   private getLoggerRegistry(): Record<string, Logger> {
     const global = globalThis as unknown as {

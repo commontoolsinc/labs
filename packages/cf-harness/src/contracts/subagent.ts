@@ -71,7 +71,10 @@ export const WEB_SEARCH_SUBAGENT_ALLOWED_TOOL_IDS =
  * documentation. `describe_handle` gives it the shape of a reference it was
  * handed, which is what it authors against — it cannot read the value.
  * `run_pattern` is gated on a configured fabric session exactly as it is for
- * the `default` profile.
+ * the `default` profile, and `search_patterns` and `record_feedback` on a
+ * configured pattern index: an author that can find an existing pattern for
+ * the job should compose it rather than write one, and say how the one it ran
+ * turned out.
  */
 export const PATTERN_AUTHOR_SUBAGENT_ALLOWED_TOOL_IDS = [
   "bash",
@@ -79,6 +82,8 @@ export const PATTERN_AUTHOR_SUBAGENT_ALLOWED_TOOL_IDS = [
   "read_skill_resource",
   "describe_handle",
   "run_pattern",
+  "search_patterns",
+  "record_feedback",
 ] as const satisfies readonly BuiltinToolId[];
 export const NO_HOST_TOOL_IDS = [] as const satisfies readonly BuiltinToolId[];
 export const BROWSER_SUBAGENT_HOST_TOOL_IDS = [
@@ -95,13 +100,17 @@ export const BROWSER_SUBAGENT_ALLOWED_SKILL_SCRIPTS = [
 /**
  * Skills preloaded into a `pattern-author` child when the run has a skill
  * registry. These are the documents a pattern author would otherwise spend its
- * whole turn budget rediscovering: the authoring guide and the schema-design
- * guide. Preload is best-effort — a run whose skills root does not carry them
+ * whole turn budget rediscovering: the authoring guide, the schema-design
+ * guide, and the UI guide. The UI guide carries the cf- component and
+ * two-way-binding idiom; without it an author reaches for raw HTML inputs
+ * and DOM-event handlers, which compile and render but never fire.
+ * Preload is best-effort — a run whose skills root does not carry them
  * gets a child with the same tools and no preloaded guidance.
  */
 export const PATTERN_AUTHOR_SUBAGENT_SKILL_NAMES = [
   "pattern-dev",
   "pattern-schema",
+  "pattern-ui",
 ] as const satisfies readonly string[];
 
 /**

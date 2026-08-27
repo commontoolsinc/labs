@@ -1297,6 +1297,31 @@ export class SpaceServer implements TransactionSealDestination {
     }
   }
 
+  /**
+   * THE SESSION REMOUNT's trigger, delivered by the host (storage/v2.ts
+   * `consumeOwedSessionRemount` holds the mechanism and the argument): an
+   * admitted commit touched `space`'s ACL doc, so a session this tenure's
+   * runtime holds on that space — revoked when an EARLIER ACL landed — may
+   * now re-open under a different verdict.
+   *
+   * `space` is usually NOT this server's own. The session that starves is
+   * typically a CROSS-SPACE replica: a served dispatch whose argument set
+   * links into the viewer's HOME space (ProfileCreateSurface's
+   * `["defaultPattern","profiles"]` link is the store-proven case), where
+   * the serving plane's pre-genesis session was de-authorized by that
+   * space's genesis ACL. That is why this is a host fan-out rather than
+   * this server's own `enqueueCommit`: the ACL commit and the starved
+   * session are in different spaces.
+   *
+   * Sibling, not a duplicate, of `#rootEnsureAwaitingOwner`'s re-arm
+   * below — the same boot order, the same trigger, one layer down (that
+   * one re-arms an owed ensure for THIS space; this one re-arms an owed
+   * session.open for ANY space this runtime reads).
+   */
+  noteSpaceAclChanged(space: MemorySpace): void {
+    this.#runtime?.storageManager.noteSpaceAclChanged?.(space);
+  }
+
   /** The host's in-process feed (plane (d)): every admitted commit for
    * this space, own derived commits included (skipped by class + holder
    * below — serving-loop.md §3's self-echo rule). */

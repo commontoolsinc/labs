@@ -188,6 +188,23 @@ Deno.test("main: the patterns list carries the two current phase-7 entries and k
     /never issued/i,
   );
   assertMatch(SERVER_EXECUTION_ON_SKIPS.patterns[1].reason, /0\/8/);
+  // …and the 2026-08-27 lift attempt, whose local re-baseline PASSED (8/8)
+  // while the direct CI unskip probe on the same branch went RED — pinned by
+  // its CI coordinates and by the HOST-side line, so a future seat cannot
+  // read that 8/8 as a clean lift bar, nor re-derive the stage from scratch.
+  assertMatch(
+    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
+    /DIRECT CI UNSKIP PROBE ON THE SAME BRANCH FAILED/,
+  );
+  assertMatch(SERVER_EXECUTION_ON_SKIPS.patterns[1].reason, /33085668531/);
+  assertMatch(
+    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
+    /lunch-poll-vote\.test\.ts:271/,
+  );
+  assertMatch(
+    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
+    /HOST's clickCfButton/,
+  );
   // The topic-board pivot-baseline entry is GONE (#6304 fixed): the
   // guard lookup for that step resolves nothing, so the case runs in
   // the ON lane — it is that issue's acceptance test.

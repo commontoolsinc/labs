@@ -5282,10 +5282,15 @@ supply; OW29/OW32/OW34 closed):
   (2026-08-22): the test-side pass closed the step's own interim-race
   half and ISOLATED the residue as the OW45 row's real arm-B client
   starvation, so the entry now names that product charge, not a test
-  flake). The current census (2026-08-26) is THREE patterns entries:
-  default-app's reload STEP, lunch-poll-vote's FILE entry, and the
-  topic-board pivot-baseline STEP. They gate the FLIP — whose bar is
-  the list EMPTY — not the land. Rows, one per
+  flake). That 2026-08-26 census — THREE patterns entries: default-app's
+  reload STEP, lunch-poll-vote's FILE entry, and the topic-board
+  pivot-baseline STEP — is now TWO: #6316 (2026-08-26) lifted the
+  topic-board STEP with its content-addressed arrival-witness fix, without
+  updating this sentence. **The current census (2026-08-27) is TWO patterns
+  entries: default-app's reload STEP and lunch-poll-vote's FILE entry.**
+  BOTH were campaigned for a lift on 2026-08-27 and NEITHER lifted (the
+  STEP-ENTRY and LUNCH-POLL blocks below). They gate the FLIP — whose bar
+  is the list EMPTY — not the land. Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
   lifts:
   - **OW45 — the profile piece's PROGRAM-materialization write path
@@ -5712,14 +5717,19 @@ supply; OW29/OW32/OW34 closed):
     delivered-and-verified — an UNCAUGHT client-replica throw
     (`#validateArrivedSchemaDocuments`) that failed files wholesale
     (all red lanes real-toolshed; in-process harnesses unaffected;
-    main green at the identical base). The CI ON lanes now run
-    ensure-off (`cf test` needs nothing: no serving host exists in
-    `packages/cli` — the ruled opt-in is its status quo). Flagged, not
-    filled: the exposed delivery gap (computed delivered without its
-    verified `cid:` ref) is PRE-EXISTING machinery, latent again with
-    the lanes off; and no CI lane now exercises the production ensure
-    at the true topology — unit pins and the measurement harness carry
-    it until a lane opts in.
+    main green at the identical base). The CI ON lanes opted out of
+    the ensure while that gap was open (`cf test` needs nothing: no
+    serving host exists in `packages/cli` — the ruled opt-in is its
+    status quo); the exposed delivery gap became OW61's row, whose
+    arrival CONTAINMENT (per-doc quarantine, never a process kill)
+    landed with #6223, and whose residual client-side absorb defect
+    was root-caused and FIXED with #6292 (pre-watch-response
+    `session/effect` frames now reach the replica in wire order —
+    OW61's tail carries the mechanism). WITH THE OPT-OUT RETIRED
+    (the ensure-on lane flip PR, following #6223 and #6292): the ON
+    lanes run the production default again and ARE the CI coverage
+    of the ensure at the true topology — the "no CI lane exercises
+    the ensure" flag this tail carried is closed.
     **CATCH-UP-AND-START BUILT 2026-08-24 — the ruled close of the
     client-start class. RULED 2026-08-24: the coordinator's
     recommendation, ACKED verbatim by the owner ("so ack on all
@@ -6077,6 +6087,69 @@ supply; OW29/OW32/OW34 closed):
     note action or assign the new failure's root cause. The STEP entry is
     restored with this current charge. Its bound guard and separate lift bar
     remain.
+    **THE STEP ENTRY'S LIFT CAMPAIGN AT THE CORRECTED POSTURE, 2026-08-27:
+    7/10 — NO LIFT, and the charge REPRODUCES LOCALLY for the first time.**
+    Method: ON binary at main `4b70949ac` (sha256 `5018e589dc54b19a1…`,
+    re-verified into every run's ledger; a mismatch aborts the run), fresh
+    store and own 97xx port and ON posture probe per run, LLM masked,
+    PID-only teardown with a port-free check, the STEP entry neutralized in
+    the working tree for all ten runs (zero skip prints, step verified RAN
+    per run), `gtimeout 600` never raised, five quiet and five loaded
+    interleaved. TWO posture changes from the archived campaigns, both
+    strictly harder and both deliberate: the space-root ensure is **ON**
+    (the production default — #6248 put the CI ON lanes back on it, so the
+    archived `SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false` no longer matches
+    the lane a lifted step would run in), and the toolshed process now gets
+    the run port as its pattern-source `API_URL`, which is exactly the
+    corrected source authority the RCA above prescribed (`port_8000_holder`
+    `none` in every run; zero `pattern-swap-setup-error` and zero
+    recursive-schema across all ten — the split-source artifact is gone).
+    Greens finish the step in 13–14 s; every red is the test's own 300 s
+    `waitForCondition` bound (313–315 s wall). Reds are NOT load-driven:
+    a03 and a07 quiet, a04 loaded. Campaign-wide: `deferred-start-catchup`
+    **0**, catch-up failures **0**, terminal `Error committing deferred`
+    **0**, stale-read lines **0**, `session-remount` **0**, load-park
+    deferrals/drops **0**, `piece-start-commit-failed` **0**,
+    `sidecar-run-raced` **0**, `schema-doc-quarantine` **0** (the ensure-ON
+    tripwire, clean), `structure-load-stuck` **0**; server-side
+    `event-view-lag` 45 (4–5 per run, greens and reds alike).
+    **The three reds all carry the entry's CURRENT charge verbatim** —
+    `eventInvocationCount: 7` and `notebookInvocationCount: 7` with
+    `notebookActionCount: 0` and empty `notebookActionsById`,
+    `notebookActionTail`, `notebookCoreNodes`: all seven invocation traces,
+    no bound notebook action state. This is the first LOCAL reproduction of
+    the direct-CI charge; the CI artifact could not establish the store side
+    and these runs can. They split into two read-side shapes:
+    (i) **a03 and a07 — the KEYLESS stranded-whole-piece shape**, exactly one
+    `pattern-load-error` for a keyless identity
+    (`keyless:fid1:0r4P8HEr…#default`, `keyless:fid1:R6f49f-N…#default`),
+    then `isNotebook: false`, `noteCount: -1`, `notesLength: 0`, 84 stored UI
+    chips and zero rendered. That is **r06/r09's stated discriminator** — the
+    member whose mechanism was never root-caused and which this row has
+    carried as absence-of-observation since 2026-08-24. It is observed again,
+    2 in 10, at current main. Recorded and NOT resolved by that measurement
+    seat: this row says r06/r09's durable pointers are all REAL identities and
+    the keylessness is session-side, but in a03 the failing keyless identity
+    is present in the DURABLE store at seq 57 of the notebook space, and both
+    reds' notebook spaces carry 8 distinct `keyless:fid1:…` references.
+    Variant or distinct durable-keyless member is a root-cause question.
+    (ii) **a04 — a LIVE but incomplete piece**: zero `pattern-load-error`,
+    `isNotebook: true`, `noteCount: 5`, `notesLength: 5`, 8 stored chips and 4
+    rendered — and still `notebookActionCount: 0`. It matches neither
+    read-side member as stated (r01 needs a complete store; r06/r09 need the
+    keyless load error) and is not the 2026-08-26 store-incomplete shape
+    either, which required the recursive-schema `pattern-swap-setup-error`
+    the source-authority fix removes. Ruled out in all three from store and
+    both logs: the split-source launcher shape, the b04 client-start class,
+    and the fifth-face load-park member (no `memory session revoked`, no
+    `sync-load-failure`, no load-park deferral or terminal drop).
+    **DISPOSITION: NO LIFT.** The bar stays 10/10 quiet-and-loaded; the entry
+    and its bound guard stay, with the charge they already carry — this
+    campaign confirms that wording rather than changing it. Per-run ledger
+    and per-red classifications are on the measuring box at
+    `/Users/berni/labs-worktrees/b1-lifts-evidence/runs/default-app/`
+    (`a03|a04|a07/classification.md` beside the raw dumps) with the running
+    report at `/Users/berni/labs-worktrees/b1-lifts-report.md`.
     Sibling entry, landed mid-review: #5744 (lunch-poll profile-first
     join) re-skipped `integration/lunch-poll-vote.test.ts` as a FILE
     entry on this row's b04 signature — its recorded reds PREDATE the
@@ -6248,6 +6321,89 @@ supply; OW29/OW32/OW34 closed):
     This was neither a server refusal nor loss of a required client wire
     send; it was the server name-resolution retry gate preventing
     issuance.
+    **THE 2026-08-27 LIFT ATTEMPT: the local re-baseline PASSED 8/8 and
+    the DIRECT CI UNSKIP PROBE ON THE SAME BRANCH went RED — NO LIFT.**
+    Recorded in that order because the order is the finding. The bar the
+    local campaign satisfies is the one the
+    2026-08-26 ruling set in place of the old 10/10: an approximately
+    eight-run re-baseline, a red-first mechanism regression, and eight
+    post-fix runs. The regression and the first eight runs landed with
+    #6378; this is the re-baseline, run at main `4b70949ac` on an ON-built
+    binary (sha256 `5018e589dc54b19a1…`, re-verified per run), fresh store
+    and own 97xx port and ON posture probe per run, LLM masked, PID-only
+    teardown with a port-free check, the FILE entry neutralized in the
+    working tree throughout (the file's having RUN verified per run from
+    its own `running 1 test from …` line), `gtimeout 600` never raised,
+    four quiet and four loaded interleaved. **8/8 GREEN in 17–18 s** — the
+    file's recorded green band is 19–39 s and every recorded red was its
+    own 300 s `waitForCondition` net at 313–322 s, so no run came near
+    either. TWO posture changes, both harder and both deliberate: the
+    space-root ensure is **ON**, the production default the CI ON lanes
+    returned to at #6248 — the 2026-08-24 campaign's own n=3 side probe had
+    called ensure-ON "a strictly worse regime for this file" (3/3 red), and
+    the class it saw was root-caused and fixed by #6312 — and the toolshed
+    now self-sources its pattern `API_URL` on the run port, the corrected
+    source authority the default-app RCA prescribed.
+    **The member's own store discriminator is negative in 8/8.** The
+    2026-08-24 red signature was store-side and byte-stable: the GUEST's
+    profile space holding exactly 4 commits with NO `patternIdentity`,
+    against greens reaching 14–21 commits; the missing artifact was the
+    ~98–101-operation authored commit carrying the piece's root doc and its
+    whole `cid:` closure WITH `patternIdentity`. Census over all eight fresh
+    stores: five spaces per run (one more than the archived campaign's four
+    — the ensure is ON now), **every space in every run carrying
+    `patternIdentity`**, each with a materialization commit of 141–198
+    operations; the smallest space in the campaign holds 5 commits. The
+    4-commit zero-`patternIdentity` guest space does not occur once.
+    Counters across the eight: `pattern-load-error` **0**,
+    `pattern-swap-setup-error` **0**, `deferred-start-catchup` **0**,
+    catch-up failures **0**, terminal `Error committing deferred` **0**,
+    `session-remount` **0**, load-park deferrals/drops **0**,
+    `schema-doc-quarantine` **0**, `structure-load-stuck` **0**; stale-read
+    lines 8 (1/run), `piece-start-commit-failed` 8 (1/run — this row already
+    records it as NOT this file's discriminator), `sidecar-run-raced` 8
+    (1/run, #6312's designed loud yield), and the recorded background of
+    `foreign-write-refused` / `seal-space-commit-failed` refusals (80 and
+    40 per run; this row already records that background as firing just as
+    often in greens). Evidence on the measuring box at
+    `/Users/berni/labs-worktrees/b1-lifts-evidence/runs/lunch/` (per-run
+    ledger, test and toolshed logs, meta+stats JSON, own `memory/` store,
+    plus `store-census.txt`), report at
+    `/Users/berni/labs-worktrees/b1-lifts-report.md`.
+    **AND THEN CI SAID NO.** The lift PR (#6410) un-skipped the file, so its
+    own CI ran it in the true lane for the first time since #5744's re-skip:
+    **ON shard 7 of run 33085668531 (job 98564797510, head `0cebb3621`) went
+    RED.** Not at any stage this row records — the failure is
+    `lunch-poll-vote.test.ts:271`, the **HOST's**
+    `clickCfButton("#lp-join-button")`, timing out at the test's own
+    300000 ms bound after 5m10s with `"#lp-join-button": []` and the poll
+    body rendered. Every red this row has recorded for this file is the
+    GUEST's join at line 306, and the 2026-08-24 gate's own finding was
+    that "the host always joins". The 2026-08-24 n=3 ensure-ON side probe is
+    the nearest recorded neighbour — it timed out even earlier, filling the
+    HOST's `#wish-profile-name-input` — and #6312 fixed the member that
+    probe saw. Whether this is that family's residue, a new host-side
+    member, or the fifth-face load-park member reaching this surface is
+    UNDETERMINED from the CI artifact: the CI window between the file's
+    start and its failure is SILENT (zero `pattern-load-error`,
+    `pattern-swap-setup-error`, `sidecar-run-raced`,
+    `deferred-start-catchup`, `session-remount`, `piece-start-commit-failed`
+    — the neighbouring occurrences in that job's log fall outside the
+    window), and **CI does not publish the toolshed log**, so no server-side
+    member can be excluded from it. **The OFF lane's shard 7 PASSED on that
+    same run** (`Pattern Integration Tests (7/10)`, same commit, same runner
+    pool), so the red is ON-specific rather than a general flake in this
+    file. n=1 in CI, against 0/8 locally.
+    **DISPOSITION: NO LIFT.** The entry stays, its reason extended with this
+    probe (and the skip-list test pinned to it) so the 8/8 cannot be read as
+    a clean bar by the next seat. What the split says on its own terms: a
+    local campaign — however careful its posture, and this one deliberately
+    matched the lane on both the ensure and the source authority — is not
+    the lane. This row already carries one member with exactly that profile
+    (the fifth-face load-park member: local control 0/12, CI 2/2 red on two
+    shards), and the honest reading is that the lift bar for this file
+    should require a green DIRECT CI unskip probe, not a local count alone.
+    That is a bar change, so it is the owner's call, flagged not taken.
     **THE ENSURE-ON PROFILE-SURFACE MEMBER ROOT-CAUSED AND FIXED
     2026-08-25 (PR #6312) — the n=3 side probe's "create surface never renders"
     shape and the #6248 board's profile-shard family, reproduced
@@ -6360,9 +6516,12 @@ supply; OW29/OW32/OW34 closed):
     serving plane's home-space session predated the genesis ACL
     (activation-before-genesis, the recorded boot order) and the ACL
     landing revoked it (`#revokeDeauthorizedSessions`,
-    memory/v2/server.ts — by design, heal-on-next-mount; a HOME
+    memory/v2/server.ts — by design; a HOME
     genesis is `{user: OWNER}` with no `"*"`, so the pre-genesis
-    session is de-authorized the moment it lands);
+    session is de-authorized the moment it lands. **This clause read
+    "by design, heal-on-next-mount" until 2026-08-26. That premise was
+    FALSE — nothing remounted — and its falsification is the FIFTH-FACE
+    member recorded at the end of this entry.**);
     `failHeadEventLoadPark` (scheduler/facade.ts) maps ANY load-park
     failure to the TERMINAL drop arm, and the drain sealed
     `{status: "dropped", consequenced: true}` with the watermark
@@ -6608,11 +6767,124 @@ supply; OW29/OW32/OW34 closed):
     double-charges the timing budget anyway — or have the shaper's
     release re-check barrier state. Sibling PRE-EXISTING hazard minted
     separately as **OW63** below.
-    STILL OPEN, untouched by this fix: shard 9
+    STILL OPEN, untouched by that fix: shard 9
     (`cfc-staged-publish`) stays UNHARVESTED — symptom-compatible,
     no store evidence, classification open — and the #6248 lane
     disposition remains the owner's call, now with the fix-before-flip
     option actually available.
+    **FIFTH FACE — THE MISSING SESSION REMOUNT. Store-proven
+    2026-08-26 (CI run 33021643751, the same board's shards 2 and 6,
+    both captures swept whole; forensics report
+    `session-remount-report.md`). FIXED the same day, its own seat.**
+    Not a new code region: a newly-falsified PREMISE, and the one
+    #6365's deferral arm rests on. Post-#6365 the disposition changed
+    exactly as designed — watermark held AT the click's entry (seq
+    17, not 18), `consequence_of` naming the eventId **0**,
+    `events.dropped` **0**, the entry left pending and
+    UNCONSEQUENCED — and the event still never ran: **350 deferrals
+    over 5m47s in shard 2 (329 in shard 6), `loadParkDeferrals` 349
+    / 328, ZERO successful loads**, every one
+    `ConnectionError: memory session revoked: unauthorized` on the
+    same three replicas, at the 250 ms backstop cadence decaying to
+    ~1 s. `processed − loadParkDeferrals == appended` exactly in both
+    shards — every unit of serving-loop progress after the failure
+    was a re-deferral, which is precisely the criterion `stats.ts`
+    sets for that counter. Discriminators, both stores swept:
+    `sidecarError` 0 (not #6312/#6320), `RetryImmediately`/`inSpace`
+    0 (never reached #6378), "no handler registered" 0 (not the
+    previous board's T3 face), `scheduler_basis` rows 197/197 and
+    228/228 in the shared space with 0 into home (not D3), the
+    profile program materialized fine (not OW45's write path). The
+    refused doc is PRESENT and durable: "sync completed without data"
+    was an AUTHORIZATION outcome, not an absence.
+    **The mechanism.** `SpaceReplica.sessionHandle()` (storage/v2.ts)
+    memoized the mount and dropped it only in `close()`, and
+    `terminateSession` (memory/v2/client.ts) is terminal for a
+    session — so every re-drain's load reused the very session the
+    server had revoked. `storage/rejection.ts`'s SessionError note
+    had already named the gap in prose ("the convergence argument is
+    sound, only the remount is missing"); `scheduler/facade.ts`'s
+    load-park docstring asserted the opposite ("healing by design on
+    the next mount"). The capture settled it in rejection.ts's
+    favour, and BOTH docstrings plus this entry's own clause above
+    are reconciled in the fix's PR.
+    **The fix — the space-root ensure's own re-arm, one layer down.**
+    Stage 1 solved the identical boot order for the ensure by
+    latching at the fail-closed refusal and consuming the latch when
+    an admitted commit touches `of:<space>`
+    (`#rootEnsureAwaitingOwner`). The session analog: `SpaceReplica`
+    latches an ACL-doc admission (`noteAclChanged`) and consumes it at
+    `sessionHandle()` (`consumeOwedSessionRemount`) — the one place
+    every read and commit reaches a session — dropping a mount that
+    `SessionRevokedError` or `AuthorizationError` terminated so the
+    next load re-opens. `ExecutorHost.#onCommitAdmitted` fans an
+    `of:<space>` write out to EVERY registered space server, because
+    the starved session is a CROSS-SPACE replica: the ACL commit and
+    the dead session are in different spaces.
+    **Why a LATCH and not an eager teardown, measured not assumed.**
+    The memory server emits the admitted-commit notice BEFORE it runs
+    `#revokeDeauthorizedSessions` (both inside one `transact`). At
+    notification time the session that same commit is about to revoke
+    is still OPEN, so an eager teardown inspects a live session,
+    declines, and the revocation lands a moment later — starving
+    exactly as before. Mutation-checked: making the trigger eager
+    reds the host-glue pin and only that pin.
+    **Soundness — the remount never decides.** It re-runs
+    `session.open`, which re-runs the server's admission against the
+    ACL as it now stands. One CORRECTION to the seat's own brief,
+    recorded because it changes what "fail closed" means here: under
+    OW31 a SERVING mount's READ decisions resolve as whoever OWNS the
+    space, so an ACL change that removes the USER does not
+    de-authorize the serving plane — it re-binds the NEW owner, which
+    is the outcome `#revokeDeauthorizedSessions`'s own comment asks
+    for ("the serving plane's next mount re-binds the new owner
+    instead of reading indefinitely under a stale identity"). The
+    denial the remount must respect is constructible on a principal
+    the ACL does not grant, and that is the general statement anyway.
+    Both are pinned.
+    **Pins, red-first, `executor-session-remount.test.ts`** (a real
+    memory server in ACL-enforce mode with the OW31 delegating class,
+    real signed loopback sessions): the reproduction (pre-genesis
+    session, genesis revokes it, 8 reads / 0 successes / all
+    "revoked", then the ACL notice heals it and the durable doc reads
+    through); fail-closed (one trigger, two outcomes, only the ACL
+    chooses); the ownership re-bind; NO CHURN (a live session survives
+    an ACL commit with zero new `session.open`s); and host glue (a real
+    ExecutorHost whose own admission observer carries the genesis —
+    nothing hand-fed); and the SILENT-STALE-READ pin (the Cubic-P1
+    class: post-remount reads for tracker-covered selectors returned
+    SUCCESS carrying the pre-revocation value — reproduced at the
+    pre-fix commit, fixed by dropping the dead mount's selectors from
+    the watch tracker at both consume sites, pinned both ways).
+    Mutations, all red, each reddening its own pin alone: no-op the
+    consume → the reproduction, fail-closed, ownership re-bind,
+    host-glue, and stale-read pins (no-churn stays green);
+    remove the host fan-out → host glue only; remove the ACL-verdict
+    guard → no-churn only; eager instead of latched → host glue only
+    (the measured ordering-independence proof); remove the tracker
+    drop → stale-read only; remove `pull()`'s consume → stale-read
+    only.
+    **Residual, FLAGGED not filled:** watches installed on the DEAD
+    session are not replayed on remount. The revocation had already
+    stopped their pushes (the server drops the session from its
+    registry and `terminateSession` clears `#watchSpecs`), and the
+    remount now DROPS the dead mount's selectors from the watch
+    tracker (the Cubic-P1 fix — the earlier claim that "each address
+    re-installs on its next pull" was FALSE for tracker-covered
+    selectors and is retracted), so post-remount reads re-install
+    coverage fresh instead of silently serving pre-revocation state —
+    but a general "replay the watch set on remount" still belongs
+    with the reconnect path's replay. **Also unchanged:** CLIENT runtimes get no host
+    notification, so a browser session revoked this way still stays
+    revoked; out of this seat's scope.
+    **The persistent-failure posture is UNCHANGED and still OWED to
+    OW54.** A load whose ACL never changes — or whose re-open is
+    denied — defers indefinitely, exactly as recorded above. The
+    remount removes the case where the heal existed in the design and
+    not in the code; it does not remove the need for a give-up arm.
+    The F1 barrier scenario above ("the load heals ... seconds") now
+    has an actual mechanism behind its premise for the fresh-space
+    boot order; it was written against a heal that did not exist.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
@@ -7743,10 +8015,13 @@ supply; OW29/OW32/OW34 closed):
     dependent: whether the computed doc's frame lands before its
     `cid:` sibling is delivery-window timing (CI hit it consistently;
     one local run at the same head did not). With the test lanes'
-    ensure opt-out (the RULED switch) the defect is LATENT again, not
-    fixed. SURFACED TO THE OWNER 2026-08-24 (the coordinator is
-    carrying it). RULED 2026-08-24 (owner, verbatim — the shipping
-    side is the fix):
+    ensure opt-out (the RULED switch) the defect was LATENT again, not
+    fixed — history: the opt-out retired with the ensure-on lane-flip
+    PR once the containment below and the client absorb fix (#6292,
+    this row's tail) had both landed, and the ON lanes run the
+    production default again. SURFACED TO THE OWNER 2026-08-24 (the
+    coordinator is carrying it). RULED 2026-08-24 (owner, verbatim —
+    the shipping side is the fix):
 
     > "seam 3: that's a bug then, and the most straightforward fix is
     > to make sure the subscription query results include cids when

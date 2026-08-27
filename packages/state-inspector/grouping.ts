@@ -94,7 +94,9 @@ export function analyzeSpaceSignals(
     )
     .get<{ commits: number; entities: number }>();
 
-  // --- Session principals (owners who wrote here) ------------------------
+  //
+  // Session principals (owners who wrote here)
+  //
   const principalCounts = new Map<string, number>();
   for (
     const r of space.db
@@ -116,7 +118,9 @@ export function analyzeSpaceSignals(
     }
   }
 
-  // --- Home detection + profiles[] edges ---------------------------------
+  //
+  // Home detection + profiles[] edges
+  //
   let isHome = false;
   const profileDids = new Set<string>();
   const homeCandidates = space.db
@@ -151,7 +155,9 @@ export function analyzeSpaceSignals(
     }
   }
 
-  // --- All cross-space link targets (cheap candidate query) --------------
+  //
+  // All cross-space link targets (cheap candidate query)
+  //
   const crossSpaceDids = new Set<string>();
   for (
     const { id } of space.db

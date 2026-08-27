@@ -2050,6 +2050,132 @@ Deno.test("CfHarnessPromptLoop drops run_pattern from an explicit allowlist when
   );
 });
 
+/**
+ * A pattern-index client factory that is never called: what the gate turns on
+ * is whether the run HAS one, and no test of the surface reaches the index.
+ */
+const unusedPatternIndexClientFactory = () =>
+  Promise.reject(new Error("the index client is never built in this test"));
+
+Deno.test("CfHarnessPromptLoop advertises the pattern-index tools in the default tool surface when an index is configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "pattern-index-default-surface",
+      model: "gpt-5.4",
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+      patternIndexClientFactory: unusedPatternIndexClientFactory,
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    [
+      "bash",
+      "read_file",
+      "view_image",
+      "read_skill_resource",
+      "edit_file",
+      "write_file",
+      "delegate_task",
+      "run_pattern",
+      "assign_slug",
+      "describe_handle",
+      "search_patterns",
+      "record_feedback",
+    ],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop advertises the pattern-index tools from an explicit allowlist when an index is configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "search_patterns", "record_feedback"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "pattern-index-allowlisted",
+      model: "gpt-5.4",
+      patternIndexClientFactory: unusedPatternIndexClientFactory,
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    ["read_file", "search_patterns", "record_feedback"],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop drops the pattern-index tools from an explicit allowlist when no index is configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedToolIds: ["read_file", "search_patterns", "record_feedback"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "pattern-index-absent",
+      model: "gpt-5.4",
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  await loop.runPrompt({ prompt: "Say hi." });
+
+  const request = JSON.parse(String(fetchCalls[0]?.body)) as {
+    tools: Array<{ function: { name: string } }>;
+  };
+  assertEquals(
+    chatViewOfRequest(request).tools.map((name) => name),
+    ["read_file"],
+  );
+});
+
+Deno.test("CfHarnessPromptLoop withholds the pattern-index tools from the pattern-author profile when no index is configured", async () => {
+  const fetchCalls: RequestInit[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedSubagentProfiles: ["pattern-author"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "pattern-index-profile-gate",
+      model: "gpt-5.4",
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+    }),
+    fetchFn: noToolCallFetch(fetchCalls),
+  });
+
+  const result = await loop.runPrompt({ prompt: "Say hi." });
+
+  // The profile a delegation would run under, as the run's own policy
+  // snapshot records it: `run_pattern` stays, since the run has a session to
+  // back it, and the two index tools leave.
+  const profile = result.runState.cfcPolicySnapshot?.subagents.profileConfigs
+    .find((config) => config.profile === "pattern-author");
+  assertEquals(profile?.allowedToolIds, [
+    "bash",
+    "read_file",
+    "read_skill_resource",
+    "describe_handle",
+    "run_pattern",
+  ]);
+});
+
 Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summary-only result", async () => {
   const requestBodies: Array<{
     messages: Array<{ role: string; content: string }>;

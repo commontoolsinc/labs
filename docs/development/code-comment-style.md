@@ -239,9 +239,15 @@ we were not looking."
 
 ## Section markers
 
-Mark a section of a file or a class with a `//` comment block that opens and
-closes with a line holding nothing but `//`. It carries a noun-phrase title, and
-optionally a fully grammatical description after a blank line:
+Section markers separate major portions of a file or class. They are not
+headers for individual functions and their helpers — doc comments already
+carry that structure, and a reader navigating by rendered documentation never
+sees the marker at all.
+
+Where `//` comments can be used, mark a section of a file or a class with a
+`//` comment block that opens and closes with a line holding nothing but `//`.
+It carries a noun-phrase title, and optionally a fully grammatical description
+after a blank line:
 
 ```ts
 // Shown at module scope.
@@ -256,10 +262,22 @@ optionally a fully grammatical description after a blank line:
 export function fry(): void {}
 ```
 
-Section markers separate major portions of a file or class. They are not
-headers for individual functions and their helpers — doc comments already
-carry that structure, and a reader navigating by rendered documentation never
-sees the marker at all.
+**CSS takes a block comment.** CSS has no line comments, so a section marker in
+a `.css` file, a `css` template literal, or a `<style>` block is a `/* */`
+block, with each delimiter on its own line and every line at the same
+indentation. Each line between the delimiters opens with `**`, which tells a
+marker apart from an ordinary comment:
+
+```css
+/*
+** Frosting variants
+**
+** One per glaze the fryer supports, in the order the menu lists them.
+*/
+```
+
+That flush indentation is what `deno fmt` settles a continuation line on inside
+a `css` template literal, so the single form holds wherever the CSS lives.
 
 **No horizontal rules.** Do not put long runs of dashes, equals signs, or other
 repeated characters into a comment, whether or not as part of a section marker.
@@ -400,8 +418,8 @@ A doc comment with no declaration under it at all is the same defect from the
 other direction, with one exception: the file header documents the file rather
 than any declaration in it, and is written as a doc comment for that reason;
 see [File headers](#file-headers) below. Everything else in that shape is the
-defect. To title a region of a file or a class, use a section marker, which is
-a `//` block; see [Section markers](#section-markers) above.
+defect. To title a region of a file or a class, use a section marker; see
+[Section markers](#section-markers) above.
 
 ### The blank line above
 

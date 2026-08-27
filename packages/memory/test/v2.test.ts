@@ -41,9 +41,9 @@ const toEntityDocument = (
   return document;
 };
 
-// ---------------------------------------------------------------------------
+//
 // Flag-independent tests (run once, not per-flag-state)
-// ---------------------------------------------------------------------------
+//
 
 describe("memory v2 protocol constants", () => {
   it("exports the phase-1 protocol constants", () => {
@@ -119,9 +119,9 @@ describe("memory v2 paths", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Flag-mechanism test (explicitly tests both OFF and ON in one test)
-// ---------------------------------------------------------------------------
+//
 
 describe("memory v2 flags", () => {
   it("reflects the active runtime storage flags", () => {
@@ -433,9 +433,9 @@ describe("parseMemoryProtocolFlags", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+//
 // Boundary encode/decode dispatch test (explicitly tests OFF and ON paths)
-// ---------------------------------------------------------------------------
+//
 
 describe("memory v2 boundary decode", () => {
   it("returns deeply-frozen plain JSON trees", () => {

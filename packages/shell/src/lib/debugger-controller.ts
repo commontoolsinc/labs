@@ -608,9 +608,9 @@ export class DebuggerController implements ReactiveController {
     return this.activeFlags?.["runner"]?.[flagName]?.[id] ?? null;
   }
 
-  // ============================================================
+  //
   // Diagnosis for non-idempotent detection
-  // ============================================================
+  //
 
   /**
    * Run diagnosis and store the result.

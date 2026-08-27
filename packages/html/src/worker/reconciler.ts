@@ -472,7 +472,9 @@ export class WorkerReconciler {
     return this.rootChildId;
   }
 
-  // ============== Private Methods ==============
+  //
+  // Private Methods
+  //
 
   /**
    * Queue operations to be sent to the main thread.

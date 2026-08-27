@@ -37,7 +37,9 @@ import type {
   WriteonlyCell,
 } from "commonfabric";
 
-// ===== Helper Types =====
+//
+// Helper Types
+//
 
 /**
  * Helper type to recursively remove `readonly` properties from type `T`.
@@ -51,7 +53,9 @@ export type Mutable<T> = T extends ReadonlyArray<infer U> ? Mutable<U>[]
 
 type IsAny<T> = 0 extends (1 & T) ? true : false;
 
-// ===== JSON Pointer Path Resolution Utilities =====
+//
+// JSON Pointer Path Resolution Utilities
+//
 
 /**
  * Split a JSON Pointer reference into path segments.
@@ -385,7 +389,9 @@ export type SchemaWithoutCell<
   Depth extends DepthLevel = 9,
 > = SchemaInner<T, Root, Depth, false>;
 
-// ===== Module Augmentation for Schema-based Overloads =====
+//
+// Module Augmentation for Schema-based Overloads
+//
 
 declare module "commonfabric" {
   // Augment PatternFunction with schema-based overloads

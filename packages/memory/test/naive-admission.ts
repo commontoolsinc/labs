@@ -196,7 +196,9 @@ export const naiveRecord = (
   sessionRes.set(commit.localSeq, seq);
 };
 
-// --- Reference value semantics (INV-9's naive fold) ---------------------
+//
+// Reference value semantics (INV-9's naive fold)
+//
 
 const clone = <T>(value: T): T => structuredClone(value);
 

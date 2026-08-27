@@ -13,7 +13,9 @@ export type BuiltinToolId =
   | "delegate_task"
   | "run_pattern"
   | "assign_slug"
-  | "describe_handle";
+  | "describe_handle"
+  | "search_patterns"
+  | "record_feedback";
 
 export const DEFAULT_PARENT_TOOL_IDS = [
   "bash",

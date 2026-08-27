@@ -110,6 +110,7 @@ export {
   type ConsoleEvent,
   ConsoleMethod,
   Engine,
+  ensureCompilerStack,
   type EntryIdentityOptions,
   resolveEntryIdentity,
   type RuntimeProgram,
