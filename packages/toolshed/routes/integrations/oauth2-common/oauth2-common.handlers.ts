@@ -452,10 +452,7 @@ export function createOAuth2Handlers(
     }
   }
 
-  //
-  // BACKGROUND INTEGRATION (shared, not provider-specific)
-  //
-
+  /** BACKGROUND INTEGRATION (shared, not provider-specific) */
   async function backgroundIntegration(c: Context) {
     try {
       const payload = await c.req.json();
