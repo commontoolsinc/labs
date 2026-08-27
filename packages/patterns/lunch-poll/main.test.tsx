@@ -73,50 +73,6 @@ const COLLIDING_INITIAL_OPTION: Option = {
   addedByName: "Daffodil",
 };
 
-/**
- * Participants whose names share prefixes, so the vote-swatch labels must
- * disambiguate them. Names and colours only — each one's identity is a profile
- * cell minted in the pattern body, since a cell cannot be static seed data.
- */
-const COLLIDING_INITIAL_PEOPLE: Array<[string, string]> = [
-  ["Daffodil", "#2f6f4e"],
-  ["Dragonfly", "#c2573a"],
-  ["Dan", "#3b4a6b"],
-  ["Dana", "#a33b35"],
-  ["dan", "#b27722"],
-  ["A", "#7c3aed"],
-  ["a", "#2f6f4e"],
-  ["A1", "#c2573a"],
-  ["Bob Smith", "#3b4a6b"],
-  ["Bob  Smith", "#a33b35"],
-  ["👩🏽‍💻Alice", "#7c3aed"],
-  ["👩🏽‍💻Bob", "#2f6f4e"],
-  ["🇺🇸Alice", "#c2573a"],
-  ["🇺🇸Bob", "#3b4a6b"],
-  ["e\u0301Alice", "#a33b35"],
-  ["e\u0301Bob", "#b27722"],
-];
-
-/** Each colliding participant's vote colour, in the same order. */
-const COLLIDING_VOTE_COLORS: VoteColor[] = [
-  "green",
-  "yellow",
-  "red",
-  "green",
-  "yellow",
-  "red",
-  "green",
-  "yellow",
-  "red",
-  "green",
-  "yellow",
-  "red",
-  "green",
-  "yellow",
-  "red",
-  "green",
-];
-
 export default pattern(() => {
   // Identity is a profile cell; the test claims the viewer's through the
   // `overrideViewer` seam the `#profile` wish fills in production.
@@ -163,15 +119,107 @@ export default pattern(() => {
   // Participant names with shared prefixes use distinct current-day vote labels.
   // Each label preserves complete displayed characters.
   const collidingCastAt = computed(() => nowCell.result ?? undefined);
-  const collidingPeople = COLLIDING_INITIAL_PEOPLE.map((
-    [name, color],
-    index,
-  ) => ({
-    name,
-    color,
-    profile: Writable.of<LunchProfile>({ name }),
-    voteType: COLLIDING_VOTE_COLORS[index] ?? "green",
-  }));
+  // Spell these out because each profile is a stateful resource. Constructing
+  // resources in a native Array.map callback would collect reactive cells in
+  // an ordinary JavaScript array and give their identities unstable ownership.
+  const collidingPeople = [
+    {
+      name: "Daffodil",
+      color: "#2f6f4e",
+      profile: Writable.of<LunchProfile>({ name: "Daffodil" }),
+      voteType: "green" as VoteColor,
+    },
+    {
+      name: "Dragonfly",
+      color: "#c2573a",
+      profile: Writable.of<LunchProfile>({ name: "Dragonfly" }),
+      voteType: "yellow" as VoteColor,
+    },
+    {
+      name: "Dan",
+      color: "#3b4a6b",
+      profile: Writable.of<LunchProfile>({ name: "Dan" }),
+      voteType: "red" as VoteColor,
+    },
+    {
+      name: "Dana",
+      color: "#a33b35",
+      profile: Writable.of<LunchProfile>({ name: "Dana" }),
+      voteType: "green" as VoteColor,
+    },
+    {
+      name: "dan",
+      color: "#b27722",
+      profile: Writable.of<LunchProfile>({ name: "dan" }),
+      voteType: "yellow" as VoteColor,
+    },
+    {
+      name: "A",
+      color: "#7c3aed",
+      profile: Writable.of<LunchProfile>({ name: "A" }),
+      voteType: "red" as VoteColor,
+    },
+    {
+      name: "a",
+      color: "#2f6f4e",
+      profile: Writable.of<LunchProfile>({ name: "a" }),
+      voteType: "green" as VoteColor,
+    },
+    {
+      name: "A1",
+      color: "#c2573a",
+      profile: Writable.of<LunchProfile>({ name: "A1" }),
+      voteType: "yellow" as VoteColor,
+    },
+    {
+      name: "Bob Smith",
+      color: "#3b4a6b",
+      profile: Writable.of<LunchProfile>({ name: "Bob Smith" }),
+      voteType: "red" as VoteColor,
+    },
+    {
+      name: "Bob  Smith",
+      color: "#a33b35",
+      profile: Writable.of<LunchProfile>({ name: "Bob  Smith" }),
+      voteType: "green" as VoteColor,
+    },
+    {
+      name: "👩🏽‍💻Alice",
+      color: "#7c3aed",
+      profile: Writable.of<LunchProfile>({ name: "👩🏽‍💻Alice" }),
+      voteType: "yellow" as VoteColor,
+    },
+    {
+      name: "👩🏽‍💻Bob",
+      color: "#2f6f4e",
+      profile: Writable.of<LunchProfile>({ name: "👩🏽‍💻Bob" }),
+      voteType: "red" as VoteColor,
+    },
+    {
+      name: "🇺🇸Alice",
+      color: "#c2573a",
+      profile: Writable.of<LunchProfile>({ name: "🇺🇸Alice" }),
+      voteType: "green" as VoteColor,
+    },
+    {
+      name: "🇺🇸Bob",
+      color: "#3b4a6b",
+      profile: Writable.of<LunchProfile>({ name: "🇺🇸Bob" }),
+      voteType: "yellow" as VoteColor,
+    },
+    {
+      name: "e\u0301Alice",
+      color: "#a33b35",
+      profile: Writable.of<LunchProfile>({ name: "e\u0301Alice" }),
+      voteType: "red" as VoteColor,
+    },
+    {
+      name: "e\u0301Bob",
+      color: "#b27722",
+      profile: Writable.of<LunchProfile>({ name: "e\u0301Bob" }),
+      voteType: "green" as VoteColor,
+    },
+  ];
   const collidingUsers = computed((): User[] =>
     collidingPeople.map(({ name, color, profile }) => ({
       profile,
