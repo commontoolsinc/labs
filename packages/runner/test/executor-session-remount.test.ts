@@ -199,6 +199,21 @@ describe("the session remount (profile-starvation fifth face)", () => {
     return result as { error?: { name?: string; message?: string } };
   };
 
+  /** A valid doc id nothing has written, minted locally from a cause. A
+   * SUCCEEDED pull registers its selector in the replica's watch tracker
+   * and later pulls for the same address are answered from it WITHOUT a
+   * round trip — so a probe that must actually reach the wire (to observe
+   * a session's live verdict) has to name an address the replica has never
+   * pulled. An absent doc is a perfectly good wire read: the pull is
+   * issued, and a revoked session refuses it exactly as it refuses any
+   * other. */
+  let probeCounter = 0;
+  const mintProbeId = (runtime: Runtime, space: MemorySpace): URI => {
+    probeCounter += 1;
+    return runtime.getCell<string>(space, `wire-probe-${probeCounter}`, undefined)
+      .getAsNormalizedFullLink().id as URI;
+  };
+
   it("a session revoked by the genesis ACL is REMOUNTED when a commit touches the ACL doc, and the starved cross-space read lands", async () => {
     const serving = servingManager();
 
@@ -253,47 +268,114 @@ describe("the session remount (profile-starvation fifth face)", () => {
     expect(document, "the durable doc materialized on the replica")
       .toBeDefined();
 
-    // The remount is not a one-shot: the healed session keeps serving.
-    const again = await probeRead(serving, homeSpace, docId);
-    expect(again.error).toBeUndefined();
+    // The remount is not a one-shot: the healed session keeps serving a
+    // FRESH address (one the replica has never pulled, so the read has to
+    // reach the wire rather than the watch tracker).
+    const minter = clientRuntime(homeSigner);
+    const again = await probeRead(
+      serving,
+      homeSpace,
+      mintProbeId(minter, homeSpace),
+    );
+    expect(again.error, "the healed session keeps serving").toBeUndefined();
   });
 
-  it("a GENUINE de-authorization is NOT healed: the re-open is denied at session.open, nothing widens, the read keeps failing", async () => {
-    const serving = servingManager();
-    await serving.ensureSpaceInitialized(homeSpace);
+  it("FAIL-CLOSED: the remount re-runs session.open, it does not decide it — an unauthorized principal is denied there and the read keeps failing, while the SAME trigger heals it the moment the ACL grants READ", async () => {
+    // The soundness property, and the pin that makes it falsifiable: the
+    // remount hands the decision back to `session.open` every time. One
+    // trigger, two outcomes, and only the ACL chooses between them.
+    //
+    // The principal here is a STRANGER on a plain (non-serving) mount, so
+    // no OW31 binding applies and admission resolves against the envelope
+    // — the shape where a denial is actually constructible. (Under OW31 a
+    // SERVING mount reads a space as whoever owns it, so moving ownership
+    // does not de-authorize the serving plane; it re-binds the new owner,
+    // which is exactly what memory/v2/server.ts's revocation comment says
+    // it wants — pinned separately below.)
+    const stranger = LoopbackStorageManager.connect(server, {
+      as: strangerSigner,
+    });
+    cleanups.push(() => stranger.close());
+    const minter = clientRuntime(homeSigner);
+
+    // Pre-genesis open, then the genesis ACL revokes it: the stranger
+    // holds no READ and there is no `"*"` grant.
+    await stranger.ensureSpaceInitialized(homeSpace);
     await setAcl(homeSigner, homeSpace, { [homeSigner.did()]: "OWNER" });
     const docId = await seedDoc(homeSigner, homeSpace, "fail-closed", "v1");
+    expect(
+      (await probeRead(stranger, homeSpace, docId)).error,
+      "the genesis revoked the pre-genesis session",
+    ).toBeDefined();
 
-    // First the healthy heal, so the denial below is provably a NEW
-    // verdict rather than the same starvation.
+    // An ACL commit lands that does NOT grant the stranger anything. The
+    // trigger fires — and must not rescue the read: `session.open`
+    // re-evaluates and denies. The load keeps failing, the served event
+    // keeps deferring (the ratified wedge), and OW54's give-up arm is
+    // what covers a load that never heals.
+    await setAcl(homeSigner, homeSpace, { [servingSigner.did()]: "READ" });
+    (stranger as AclChangeNotifier).noteSpaceAclChanged?.(homeSpace);
+    for (let attempt = 0; attempt < 4; attempt++) {
+      expect(
+        (await probeRead(stranger, homeSpace, mintProbeId(minter, homeSpace)))
+          .error,
+        "the remount must never widen authority",
+      ).toBeDefined();
+    }
+
+    // The other half of the same trigger: grant the stranger READ and the
+    // NEXT remount is admitted. Without this the pin above would pass on
+    // a fix that simply never remounts.
+    await setAcl(homeSigner, homeSpace, { [strangerSigner.did()]: "READ" });
+    (stranger as AclChangeNotifier).noteSpaceAclChanged?.(homeSpace);
+    await waitUntil(
+      async () =>
+        (await probeRead(stranger, homeSpace, mintProbeId(minter, homeSpace)))
+          .error === undefined,
+      "the ACL grant admits the remounted session",
+    );
+  });
+
+  it("an ownership CHANGE re-binds the new owner rather than reading on under a stale identity — the outcome the revocation sweep's own comment asks for", async () => {
+    // NOT a de-authorization of the serving plane, and worth pinning
+    // because it reads like one. Under OW31 a serving mount's READ
+    // decisions resolve as the space's OWNER, so `#revokeDeauthorizedSessions`
+    // revokes a bound session whose acting principal is no longer the
+    // owner "so the serving plane's next mount re-binds the new owner
+    // instead of reading indefinitely under a stale identity"
+    // (memory/v2/server.ts). That next mount is what did not exist. The
+    // authority does not widen: the memory server re-decides, and it
+    // decides in favour of the space's current owner.
+    const serving = servingManager();
+    const minter = clientRuntime(homeSigner);
+    await serving.ensureSpaceInitialized(homeSpace);
+    await setAcl(homeSigner, homeSpace, { [homeSigner.did()]: "OWNER" });
+    const docId = await seedDoc(homeSigner, homeSpace, "rebind", "v1");
+
     (serving as AclChangeNotifier).noteSpaceAclChanged?.(homeSpace);
     expect((await probeRead(serving, homeSpace, docId)).error).toBeUndefined();
 
-    // Ownership MOVES to a stranger. The bound session is judged as its
-    // acting user against the CURRENT owner resolution, so it is
-    // revoked — and the space identity is no longer the owner either.
+    // Ownership moves. The session bound to the OLD owner is revoked.
     await setAcl(homeSigner, homeSpace, {
       [strangerSigner.did()]: "OWNER",
       [homeSigner.did()]: "READ",
     });
     await waitUntil(
-      async () => (await probeRead(serving, homeSpace, docId)).error !== undefined,
+      async () =>
+        (await probeRead(serving, homeSpace, mintProbeId(minter, homeSpace)))
+          .error !== undefined,
       "the ownership change revoked the bound session",
     );
 
-    // The trigger fires again — and must NOT rescue the read. The
-    // re-open re-resolves the binding to the NEW owner; the serving
-    // envelope is not that principal, so `session.open` denies it. The
-    // load keeps failing, the served event keeps deferring (the
-    // ratified wedge), and OW54's give-up arm is what covers it.
+    // The remount re-resolves the binding from the landed ACL and serves
+    // as the NEW owner.
     (serving as AclChangeNotifier).noteSpaceAclChanged?.(homeSpace);
-    for (let attempt = 0; attempt < 4; attempt++) {
-      const result = await probeRead(serving, homeSpace, docId);
-      expect(
-        result.error,
-        "the remount must never widen authority",
-      ).toBeDefined();
-    }
+    await waitUntil(
+      async () =>
+        (await probeRead(serving, homeSpace, mintProbeId(minter, homeSpace)))
+          .error === undefined,
+      "the remount re-bound the new owner",
+    );
   });
 
   it("HOST GLUE: the genesis ACL rides the host's OWN admission feed and heals a registered space server's foreign session — nothing hand-fed", async () => {
