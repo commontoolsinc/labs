@@ -5358,8 +5358,14 @@ Deno.test("CellBridge.reportSourceRefreshWarning reports into the current .src d
   // What a rebuild leaves behind: a new directory, a new empty error.log, and
   // the piece's entry in `srcInos` pointing at it.
   const rebuiltSrcIno = tree.addDir(pieceIno, ".src");
-  tree.addFile(rebuiltSrcIno, "error.log", "", "string");
+  const rebuiltErrorLogIno = tree.addFile(
+    rebuiltSrcIno,
+    "error.log",
+    "",
+    "string",
+  );
   state.srcInos.set("notes", rebuiltSrcIno);
+  state.srcErrorLogInos.set("notes", rebuiltErrorLogIno);
 
   const errors = captureConsoleErrors();
   try {
@@ -5388,8 +5394,9 @@ Deno.test("CellBridge.reportSourceRefreshWarning reports nothing for a refreshed
   const tree = bridge.tree;
   const pieceIno = tree.addDir(state.piecesIno, "notes");
   const srcIno = tree.addDir(pieceIno, ".src");
-  tree.addFile(srcIno, "error.log", "", "string");
+  const errorLogIno = tree.addFile(srcIno, "error.log", "", "string");
   state.srcInos.set("notes", srcIno);
+  state.srcErrorLogInos.set("notes", errorLogIno);
 
   const errors = captureConsoleErrors();
   try {
@@ -5405,37 +5412,57 @@ Deno.test("CellBridge.reportSourceRefreshWarning reports nothing for a refreshed
   assertEquals(errors.lines, []);
 });
 
-Deno.test("CellBridge.reportSourceRefreshWarning still says so with no source tree to write into", () => {
-  // A system piece, or one whose rebuild was skipped, has no `.src` and so no
-  // `error.log` to keep the report in. The write still committed, so the
-  // console line stands in for the file rather than the report being lost or
-  // the call failing over a directory that was never built.
+Deno.test("CellBridge.reportSourceRefreshWarning leaves an authored error.log alone", () => {
+  // `buildSourceTree` mints the synthetic `error.log` only when no authored
+  // source file claims that name, so a piece that ships one of its own has no
+  // synthetic file and no entry in `srcErrorLogInos`. Resolving the file by
+  // name here would find the authored one and overwrite committed source with
+  // this report; the console line is the whole report such a piece gets.
   const bridge = new CellBridge(new FsTree(), "/tmp/cf-exec");
   const state = buildTestSpace(bridge, "space", []);
   const tree = bridge.tree;
   const pieceIno = tree.addDir(state.piecesIno, "notes");
-  // Registered, but its `.src` holds no synthetic error.log.
   const srcIno = tree.addDir(pieceIno, ".src");
-  state.srcInos.set("empty-src", srcIno);
+  tree.addFile(srcIno, "error.log", "export default 1;\n", "string");
+  state.srcInos.set("notes", srcIno);
+  // No srcErrorLogInos entry: the authored file claimed the name.
 
   const errors = captureConsoleErrors();
   try {
-    // A piece the bridge has no source directory for at all.
     bridge.reportSourceRefreshWarning(
       sourceWritePath("space", "notes", srcIno),
-      "committed, but the refresh failed",
-    );
-    // And one whose directory exists without the synthetic file.
-    bridge.reportSourceRefreshWarning(
-      sourceWritePath("space", "empty-src", srcIno),
       "committed, but the refresh failed",
     );
   } finally {
     errors.restore();
   }
 
-  assertEquals(errors.lines.length, 2);
-  assertEquals(tree.lookup(srcIno, "error.log"), undefined);
+  assertEquals(
+    getFileContent(tree, srcIno, "error.log"),
+    "export default 1;\n",
+  );
+  assertEquals(errors.lines.length, 1);
+});
+
+Deno.test("CellBridge.reportSourceRefreshWarning still says so with no source tree to write into", () => {
+  // A system piece, or one whose rebuild was skipped, has no `.src` and so no
+  // synthetic error.log to keep the report in. The write still committed, so
+  // the console line stands in for the file rather than the report being lost
+  // or the call failing over a directory that was never built.
+  const bridge = new CellBridge(new FsTree(), "/tmp/cf-exec");
+  buildTestSpace(bridge, "space", []);
+
+  const errors = captureConsoleErrors();
+  try {
+    bridge.reportSourceRefreshWarning(
+      sourceWritePath("space", "notes", 0n),
+      "committed, but the refresh failed",
+    );
+  } finally {
+    errors.restore();
+  }
+
+  assertEquals(errors.lines.length, 1);
 });
 
 Deno.test("sourceRefreshWarning describes a committed write whose refresh failed", () => {

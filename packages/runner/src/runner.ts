@@ -1021,6 +1021,16 @@ export interface RunSyncedCommitResult<R> {
  * describes the later dependency synchronization, start, or schema-load
  * failure.
  */
+/**
+ * Why a receipt is refused on a runtime that seals rather than commits. One
+ * string because the refusal is raised twice — once as a fast answer, once
+ * against the transaction the receipt would have described — and a caller
+ * matching on it should not have to know which one it caught.
+ */
+export const SEALING_RECEIPT_REFUSAL =
+  "a committed pattern setup receipt is unavailable while sealing into a " +
+  "wave, whose acceptance a later withdrawal can undo";
+
 export class PatternSetupPostCommitError extends Error {
   #commit: PatternSetupCommitReceipt;
 
@@ -5103,11 +5113,12 @@ export class Runner {
         "a committed pattern setup receipt requires an unbound result cell",
       );
     }
+    // A fast refusal. The condition is asked again inside the transaction,
+    // which is where it decides anything: a destination installed while the
+    // synchronization below is in flight would pass this check and still seal
+    // the transaction the receipt would describe.
     if (this.runtime.sealDestinationInstalled) {
-      throw new Error(
-        "a committed pattern setup receipt is unavailable while sealing " +
-          "into a wave, whose acceptance a later withdrawal can undo",
-      );
+      throw new Error(SEALING_RECEIPT_REFUSAL);
     }
     const result = await this.#runSynced(
       resultCell,
@@ -5201,6 +5212,15 @@ export class Runner {
       );
     } else {
       const outcome = await this.runtime.editWithRetry((tx) => {
+        // Asked here rather than only at the entry point, because a seal
+        // destination can be installed while the synchronization above is in
+        // flight, and because `editWithRetry` builds a fresh transaction per
+        // retry. The receipt describes THIS transaction, so the condition
+        // that decides whether it can describe one has to hold for the
+        // transaction, not for the moment the call started.
+        if (requireCommit && this.runtime.sealDestinationInstalled) {
+          throw new Error(SEALING_RECEIPT_REFUSAL);
+        }
         // runSynced's own setup tx (async surface, e.g. compileAndRun's
         // continuation on a served run): no scheduler run around it;
         // bookkeeping per serving-loop.md §3d.

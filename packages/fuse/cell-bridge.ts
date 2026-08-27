@@ -2353,9 +2353,14 @@ export class CellBridge {
    * state the rebuild updated, is what lets a report outlive the rebuild that
    * a successful write performs.
    *
-   * A piece whose source tree was never built — a system piece, or one the
-   * rebuild skipped — has nowhere to keep the report, and the console line
-   * stands in for it rather than the write failing over a missing file.
+   * A piece with no synthetic `error.log` has nowhere to keep the report: a
+   * system piece or one the rebuild skipped has no source tree at all, and a
+   * piece whose own source contains a file called `error.log` keeps that file
+   * instead — the synthetic one is only minted when the name is free. The
+   * console line stands in for the file in both cases, which is why the
+   * inode is read from `srcErrorLogInos` rather than looked up by name:
+   * resolving by name would find the authored file and overwrite committed
+   * source with this report.
    */
   reportSourceRefreshWarning(
     writePath: SourceWritePath,
@@ -2364,9 +2369,7 @@ export class CellBridge {
     if (warning === undefined) return;
     console.error(`[source] ${warning}`);
     const state = this.spaces.get(writePath.spaceName);
-    const srcIno = state?.srcInos.get(writePath.pieceName);
-    if (srcIno === undefined) return;
-    const errorLogIno = this.tree.lookup(srcIno, "error.log");
+    const errorLogIno = state?.srcErrorLogInos.get(writePath.pieceName);
     if (errorLogIno === undefined) return;
     this.tree.updateFile(errorLogIno, warning);
   }

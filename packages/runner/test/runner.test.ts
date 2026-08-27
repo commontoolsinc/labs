@@ -1885,6 +1885,69 @@ describe("setup/start", () => {
     }
   });
 
+  it("runSyncedWithCommit refuses a wave that starts sealing mid-call", async () => {
+    // The entry check answers for the moment the call started, and the call
+    // then awaits. A destination installed during those awaits would seal the
+    // very transaction the receipt describes, so the condition is asked again
+    // inside the transaction — which is also what covers `editWithRetry`
+    // building a fresh one per retry.
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    };
+    const servingStorage = StorageManager.emulate({ as: signer });
+    const serving = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: servingStorage,
+      servingPosture: true,
+      experimental: { serverExecution: true },
+    });
+    const resultCell = serving.getCell(
+      space,
+      "runSyncedWithCommit sealing mid-call",
+    );
+    await serving.runSynced(resultCell, trustExecutable(serving, pattern), {});
+    const previous = getPatternIdentityRef(resultCell);
+    expect(previous).toBeDefined();
+
+    // Installed from the synchronization the call performs before it opens
+    // its transaction, which is the window the entry check cannot see.
+    const sealed: IExtendedStorageTransaction[] = [];
+    const mutableCell = resultCell as unknown as {
+      sync: typeof resultCell.sync;
+    };
+    const originalSync = resultCell.sync.bind(resultCell);
+    mutableCell.sync = (async (...args: Parameters<typeof resultCell.sync>) => {
+      const synced = await originalSync(...args);
+      if (!serving.sealDestinationInstalled) {
+        serving.installSealDestination({
+          seal: (tx: IExtendedStorageTransaction) => {
+            sealed.push(tx);
+            return tx.commit();
+          },
+        });
+      }
+      return synced;
+    }) as typeof resultCell.sync;
+
+    try {
+      await expect(serving.runSyncedWithCommit(
+        resultCell,
+        trustExecutable(serving, pattern),
+        {},
+        { expectedPatternIdentity: previous! },
+      )).rejects.toThrow("while sealing into a wave");
+      expect(sealed).toEqual([]);
+    } finally {
+      mutableCell.sync = originalSync;
+      serving.clearSealDestination();
+      await serving.dispose();
+      await servingStorage.close();
+    }
+  });
+
   it("runSyncedWithCommit refuses a result cell bound to an open transaction", async () => {
     // Writes staged in a transaction the caller still owns have no storage
     // verdict yet — the caller decides their fate — so there is nothing to
