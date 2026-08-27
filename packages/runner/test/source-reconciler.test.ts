@@ -353,7 +353,11 @@ describe("piece source reconciliation", () => {
         servingFetch(
           () => v1Identity,
           () => source("v1"),
-          (url) => fetched.push(url.pathname),
+          // The identity route and the source download share a pathname, so
+          // only a request WITHOUT the identity query proves a download.
+          (url) => {
+            if (!url.searchParams.has("identity")) fetched.push(url.pathname);
+          },
         ),
       );
       const originalRef = getPatternIdentityRef(piece);
@@ -371,7 +375,7 @@ describe("piece source reconciliation", () => {
         manager.loadPatternByIdentity = load;
       }
       expect(getPatternIdentityRef(piece)).toEqual(originalRef);
-      expect(fetched).toContain(PARENT_PATH);
+      expect(fetched).toEqual([PARENT_PATH, SOURCE_PATH]);
     });
 
     it("keeps the running source when the candidate compiles to no identity", async () => {
@@ -477,7 +481,11 @@ describe("piece source reconciliation", () => {
         servingFetch(
           () => v1Identity,
           () => source("v1"),
-          (url) => fetched.push(url.pathname),
+          // The identity route and the source download share a pathname, so
+          // only a request WITHOUT the identity query proves a download.
+          (url) => {
+            if (!url.searchParams.has("identity")) fetched.push(url.pathname);
+          },
         ),
       );
       const originalRef = getPatternIdentityRef(piece);
@@ -495,7 +503,7 @@ describe("piece source reconciliation", () => {
         manager.loadPatternByIdentity = load;
       }
       expect(getPatternIdentityRef(piece)).toEqual(originalRef);
-      expect(fetched).toContain(PARENT_PATH);
+      expect(fetched).toEqual([PARENT_PATH, SOURCE_PATH]);
     });
 
     it("adopts a candidate that changes the piece contract", async () => {
