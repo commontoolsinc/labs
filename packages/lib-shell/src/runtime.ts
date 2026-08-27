@@ -344,6 +344,10 @@ export class RuntimeInternals extends EventTarget {
     return this.#favorites;
   }
 
+  /**
+   * Creates a piece in the given space, `options.argument` being the record of
+   * inputs it is created with.
+   */
   async createPiece<T>(
     space: DID,
     source: URL | Program | string,

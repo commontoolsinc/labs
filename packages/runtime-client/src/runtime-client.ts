@@ -423,6 +423,13 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     });
   }
 
+  /**
+   * Creates a piece in the given space, from a URL, a program, or the source
+   * of a single-file one.
+   *
+   * `options.argument` is the piece's input, which is a record: a piece is
+   * created with named inputs or with none.
+   */
   async createPage<T = unknown>(
     input: string | URL | Program,
     space: DID,
