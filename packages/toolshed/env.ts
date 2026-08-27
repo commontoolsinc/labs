@@ -137,7 +137,11 @@ export const EnvSchema = z.object({
   // yields, and the reconnecting clients then re-establish their watch
   // sets against the same busy process. Size this above the worst
   // single-loop stretch, not above a round-trip time.
-  MEMORY_WS_IDLE_TIMEOUT_SECONDS: z.coerce.number().nonnegative().default(300),
+  MEMORY_WS_IDLE_TIMEOUT_SECONDS: z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim() === "" ? undefined : value,
+    z.coerce.number().nonnegative().default(300),
+  ),
 
   GOOGLE_CLIENT_ID: z.string().default(""),
   GOOGLE_CLIENT_SECRET: z.string().default(""),

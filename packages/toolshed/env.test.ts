@@ -88,6 +88,8 @@ Deno.test("MEMORY_WS_IDLE_TIMEOUT_SECONDS defaults to 300 and accepts overrides"
     ).MEMORY_WS_IDLE_TIMEOUT_SECONDS;
 
   assertEquals(idle(undefined), 300);
+  assertEquals(idle(""), 300);
+  assertEquals(idle("   "), 300);
   assertEquals(idle("45"), 45);
   assertEquals(idle("0"), 0);
 
