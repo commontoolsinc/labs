@@ -373,7 +373,9 @@ export class CFProfileBadge extends BaseElement implements SealLivenessClient {
         }
       }
 
-      /* ---- Variants (CT-1761) -------------------------------------------- */
+      /*
+      ** Variants
+      */
 
       /* chip: compact name-first pill. No avatar — a small DID-hued "seal dot"
         carries the identity treatment, so an inline name still reads as a

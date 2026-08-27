@@ -66,14 +66,18 @@ export const modalStyles = css`
     display: contents;
   }
 
-  /* ===== Hidden State ===== */
+  /*
+  ** Hidden State
+  */
   :host(:not([open])) .backdrop,
   :host(:not([open])) .container {
     visibility: hidden;
     pointer-events: none;
   }
 
-  /* ===== Backdrop ===== */
+  /*
+  ** Backdrop
+  */
   .backdrop {
     position: fixed;
     inset: 0;
@@ -89,7 +93,9 @@ export const modalStyles = css`
     opacity: 1;
   }
 
-  /* ===== Container (centering) ===== */
+  /*
+  ** Container (centering)
+  */
   .container {
     position: fixed;
     inset: 0;
@@ -99,7 +105,9 @@ export const modalStyles = css`
     padding: var(--cf-spacing-4, 16px);
   }
 
-  /* ===== Dialog ===== */
+  /*
+  ** Dialog
+  */
   .dialog {
     position: relative;
     box-sizing: border-box;
@@ -129,7 +137,9 @@ export const modalStyles = css`
     transform: scale(1);
   }
 
-  /* ===== Size Variants ===== */
+  /*
+  ** Size Variants
+  */
   :host([size="sm"]) .dialog {
     width: var(--_width-sm);
   }
@@ -146,7 +156,9 @@ export const modalStyles = css`
     max-height: min(calc(100vh - 32px), 100%);
   }
 
-  /* ===== Header ===== */
+  /*
+  ** Header
+  */
   .header {
     display: flex;
     justify-content: space-between;
@@ -169,7 +181,9 @@ export const modalStyles = css`
     min-width: 0;
   }
 
-  /* ===== Close Button ===== */
+  /*
+  ** Close Button
+  */
   .close-button {
     background: transparent;
     border: none;
@@ -201,14 +215,18 @@ export const modalStyles = css`
     display: none;
   }
 
-  /* ===== Content ===== */
+  /*
+  ** Content
+  */
   .content {
     padding: var(--cf-modal-padding);
     overflow: auto;
     flex: 1;
   }
 
-  /* ===== Footer ===== */
+  /*
+  ** Footer
+  */
   .footer {
     display: flex;
     justify-content: flex-end;
@@ -228,7 +246,9 @@ export const modalStyles = css`
     width: 100%;
   }
 
-  /* ===== Sheet Presentation Mode ===== */
+  /*
+  ** Sheet Presentation Mode
+  */
 
   /* Grabber: hidden by default */
   .grabber {
@@ -299,7 +319,9 @@ export const modalStyles = css`
     width: 100%;
   }
 
-  /* ===== Reduced Motion ===== */
+  /*
+  ** Reduced Motion
+  */
   @media (prefers-reduced-motion: reduce) {
     .backdrop,
     .dialog {

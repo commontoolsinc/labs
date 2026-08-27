@@ -92,7 +92,9 @@ export class CFTab extends BaseElement {
         height: auto;
       }
 
-      /* ===== Chip variant styles ===== */
+      /*
+      ** Chip variant styles
+      */
 
       /* Suppress underline indicator in chip mode */
       :host([data-variant="chip"]) .tab[data-selected="true"]::after {
