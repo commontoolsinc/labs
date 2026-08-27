@@ -28,6 +28,8 @@ import {
   parseFabricRef,
   parseLinkOrThrow,
   type Pattern,
+  type PatternSetupCommitReceipt,
+  PatternSetupPostCommitError,
   PIECE_SOURCE_MOVED,
   type PieceReconciliation,
   type PieceSourceRevision,
@@ -506,6 +508,20 @@ export interface PatternCompatibilityReport {
   message?: string;
 
   candidate: { identity: string; symbol: string };
+}
+
+/** Result of a pattern update accepted by the setup transaction. */
+export interface PatternUpdateReceipt extends PieceSourceSetResult {
+  /** Stable outcome code for a successful setup transaction. */
+  status: "committed";
+  /** Content-addressed pattern pointer written by the transaction. */
+  ref: { identity: string; symbol: string };
+  /** Source-history revision written atomically with `.ref`. */
+  revisionId: string;
+  /** Outcome of work which refreshes the running piece after commit. */
+  refresh:
+    | { status: "completed" }
+    | { status: "failed"; warning: string };
 }
 
 export type PieceSourceActionResult =
@@ -4337,10 +4353,18 @@ export class PieceController<T = unknown> {
    * `dangerouslyAllowIncompatibleSchema` remains the only thing that opens
    * them.
    *
-   * Returns the origin this write detached — see {@link PieceSourceSetResult}.
-   * A caller reporting what it detached has no other way to be right about
-   * it: the origin at the caller's own read is not the origin at the write,
-   * and only the snapshot this call commits against is.
+   * Returns the accepted setup transaction's receipt: its content-addressed
+   * pointer, its source revision, and the origin this write detached — see
+   * {@link PatternUpdateReceipt} and {@link PieceSourceSetResult}. Every
+   * field is taken from the transaction this call committed, so a later
+   * concurrent update does not retroactively change any of them. A caller
+   * reporting what it detached has no other way to be right about it: the
+   * origin at the caller's own read is not the origin at the write, and only
+   * the snapshot this call commits against is.
+   *
+   * Post-commit refresh failures are reported as `refresh.status === "failed"`
+   * rather than as a rejection, because they do not undo the accepted source
+   * update.
    */
   async setPattern(
     program: RuntimeProgram,
@@ -4349,9 +4373,10 @@ export class PieceController<T = unknown> {
       dangerouslyAllowIncompatibleSchema?: boolean;
       expectedPattern?: { identity: string; symbol: string };
     },
-  ): Promise<PieceSourceSetResult> {
+  ): Promise<PatternUpdateReceipt> {
     const mutationVersion = ++this.#mutationVersion;
     let transition: PieceSourceTransition | undefined;
+    let committedRef: { identity: string; symbol: string } | undefined;
     try {
       await this.#runMutation(mutationVersion, async () => {
         // A piece whose current pattern cannot load is exactly the piece a
@@ -4423,19 +4448,20 @@ export class PieceController<T = unknown> {
             ? { previousEntryIdentity: previousRef.identity }
             : {},
         );
+        const candidate = this.#pieces.runtime.patternManager
+          .getArtifactEntryRef(pattern);
+        if (candidate === undefined) {
+          throw new Error("the candidate source has no pattern identity");
+        }
         // Enforcement is this assertion plus the execute-time validators
         // below, and it must stay that way. Do not move the aggregate
         // compatibility review (`pieceSourceCompatibilityReview`, what
         // `checkPattern` runs) in front of it.
         //
-        // An earlier revision of this PR did, to name every refusal reason at
-        // once, and it silently changed what `setPattern` ACCEPTS: the review
-        // materializes and validates the stored argument, so when the whole
-        // argument document is cold — a nested piece whose host has not synced
-        // yet — it validates `undefined` and refuses, where Runner
-        // deliberately defers and preserves the bytes (CT-1917).
-        // `test/setsrc-cold-argument.test.ts` pins that; it fails with
-        // "value does not match type object" if the review moves here.
+        // The review materializes and validates the stored argument. When the
+        // whole argument document is cold, Runner deliberately defers
+        // validation and preserves its bytes; running the review here would
+        // instead validate `undefined` and refuse the update.
         //
         // Callers who want every reason at once run `checkPattern()`, which is
         // exactly what `--check` is for.
@@ -4454,56 +4480,80 @@ export class PieceController<T = unknown> {
           null,
           baseline,
         );
-        return await execute(this.#pieces, this.id, pattern, undefined, {
-          start: true,
-          expectedPatternIdentity: previousRef,
-          validateArgumentLinks: options?.dangerouslyAllowIncompatibleSchema
-            ? undefined
-            : (argumentCell, argumentSchema) =>
-              assertSuppliedLinkSchemasCompatible(
-                suppliedLinks(argumentCell.getRaw()),
-                argumentSchema,
-                argumentCell,
-                this.#pieces,
-                {
-                  // Same narrowing as the assertion above: this validator arm
-                  // exists only without the flag, where the load succeeded.
-                  priorArgumentSchema: previousPattern!.argumentSchema,
-                  // `applySetupState` rewrites the argument from `getRaw()`, so
-                  // every retained link's envelope is written back unchanged and
-                  // nothing here is rebuilt as an alias. The validator verifies
-                  // that per link against committed state rather than taking
-                  // this declaration on trust — anything the setup staged that
-                  // is NOT already committed (e.g. a link-shaped schema
-                  // default from the incoming pattern) still faces the full
-                  // rebuild rules.
-                  linksPreservedVerbatim: true,
-                },
-              ),
-          repository: options?.repository,
-          sourceTransition: transition,
-        }) as Cell<T>;
+        try {
+          const result = await executePatternUpdate(
+            this.#pieces,
+            this.id,
+            pattern,
+            undefined,
+            {
+              expectedPatternIdentity: previousRef,
+              validateArgumentLinks: options?.dangerouslyAllowIncompatibleSchema
+                ? undefined
+                : (argumentCell, argumentSchema) =>
+                  assertSuppliedLinkSchemasCompatible(
+                    suppliedLinks(argumentCell.getRaw()),
+                    argumentSchema,
+                    argumentCell,
+                    this.#pieces,
+                    {
+                      // Same narrowing as the assertion above: this validator
+                      // arm exists only without the flag, where the load
+                      // succeeded.
+                      priorArgumentSchema: previousPattern!.argumentSchema,
+                      // `applySetupState` rewrites the argument from
+                      // `getRaw()`, so every retained link's envelope is
+                      // written back unchanged. Anything newly staged still
+                      // faces the full rebuild rules.
+                      linksPreservedVerbatim: true,
+                    },
+                  ),
+              repository: options?.repository,
+              sourceTransition: transition,
+            },
+          );
+          committedRef = result.commit.pattern;
+          return result.cell as Cell<T>;
+        } catch (error) {
+          if (error instanceof PatternSetupPostCommitError) {
+            committedRef = error.commit.pattern;
+          }
+          throw error;
+        }
       });
     } catch (error) {
-      if (
-        transition !== undefined &&
-        await this.#sourceTransitionCommitted(transition.revisionId)
-      ) {
+      if (transition !== undefined && committedRef !== undefined) {
+        const warning = pieceSourceErrorMessage(
+          error instanceof PatternSetupPostCommitError ? error.cause : error,
+        );
         console.warn(
           "Piece source was saved, but refreshing the running piece failed:",
           error,
         );
         // The transition committed, so it detached what its precondition
         // named, whatever happened to the refresh afterwards.
-        return { detachedOrigin: transition.expected.origin };
+        return {
+          status: "committed",
+          ref: committedRef,
+          revisionId: transition.revisionId,
+          detachedOrigin: transition.expected.origin,
+          refresh: { status: "failed", warning },
+        };
       }
       throw pinnedSourceMoved(error, options?.expectedPattern);
     }
     // The mutation assigns `transition` before the write it belongs to, and
-    // every earlier exit from it throws — so a mutation that resolved has
-    // one, and a mutation that did not took the catch above. Asserted rather
-    // than guarded because a guard here could never fire.
-    return { detachedOrigin: transition!.expected.origin };
+    // sets `committedRef` from the accepted transaction's receipt; every
+    // earlier exit from it throws — so a mutation that resolved has both, and
+    // a mutation that did not took the catch above. Asserted rather than
+    // guarded because a guard here could never fire.
+    return {
+      status: "committed",
+      ref: committedRef!,
+      revisionId: transition!.revisionId,
+      detachedOrigin: transition!.expected.origin,
+      refresh: { status: "completed" },
+    };
   }
 
   async #runMutation(
@@ -4932,4 +4982,35 @@ async function execute(
   },
 ): Promise<Cell<unknown>> {
   return await pieces.runWithPattern(pattern, pieceId, input, options);
+}
+
+/**
+ * Helper for `setPattern()`, which returns the accepted setup transaction's
+ * receipt in addition to the reconciled cell view.
+ */
+async function executePatternUpdate(
+  pieces: PiecesController,
+  pieceId: string,
+  pattern: Pattern,
+  input: object | undefined,
+  options: {
+    expectedPatternIdentity: { identity: string; symbol: string };
+    validateCurrentArgument?: (argumentCell: Cell<unknown>) => void;
+    validateArgumentLinks?: (
+      argumentCell: Cell<unknown>,
+      argumentSchema: JSONSchema,
+    ) => void;
+    repository?: string;
+    sourceTransition?: PieceSourceTransition;
+  },
+): Promise<{
+  cell: Cell<unknown>;
+  commit: PatternSetupCommitReceipt;
+}> {
+  return await pieces.runPatternUpdate(
+    pattern,
+    pieceId,
+    input,
+    options,
+  );
 }

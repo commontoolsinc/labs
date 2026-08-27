@@ -9,6 +9,7 @@ import {
   encodePlan,
   type PatternCompatibilityReport,
   type PatternRef,
+  type PatternUpdateReceipt,
   type PieceDiffStatus,
   type PiecePatternRef,
   type PiecePlan,
@@ -191,11 +192,36 @@ export function formatPatternRef(
 }
 
 export function formatPatternIdentity(
-  patternRef: PiecePatternRef | undefined,
+  patternRef: { identity: string; symbol: string } | undefined,
 ): string {
   return patternRef === undefined
     ? "<unknown>"
     : `cf:module/${patternRef.identity}#${patternRef.symbol}`;
+}
+
+/**
+ * The success line `piece setsrc` prints from its accepted setup transaction
+ * receipt. Held apart from the command action so the exact text a caller sees
+ * is assertable without driving Cliffy.
+ */
+export function setsrcSuccessLine(
+  config: PieceConfig,
+  update: PatternUpdateReceipt,
+): string {
+  return `Committed source update for piece ${config.piece} (Pattern Ref: ${
+    formatPatternIdentity(update.ref)
+  }, Revision: ${update.revisionId})`;
+}
+
+/** A warning for work which failed after storage accepted the source update. */
+export function setsrcRefreshWarning(
+  update: PatternUpdateReceipt,
+): string | undefined {
+  return update.refresh.status === "failed"
+    ? `Source revision ${update.revisionId} committed as ${
+      formatPatternIdentity(update.ref)
+    }, but refreshing the running piece failed: ${update.refresh.warning}`
+    : undefined;
 }
 
 /** The parenthesised notes under a `cf piece verbs` listing, in print order.
@@ -2162,12 +2188,7 @@ export const piece = targetOptions(
   → Apply it: cf piece setsrc --cell ${config.piece} ${mainPath} ...`));
       return;
     }
-    const pieceConfig = await setPieceSourceFromCommand(options, mainPath);
-    render(`Updated source for piece ${pieceConfig.piece}`);
-    hint(cliText(`NEXT STEPS:
-  → Test in browser: ${pieceConfig.apiUrl}/${pieceConfig.space}/${pieceConfig.piece}
-  → Test a callable: cf call --cell ${pieceConfig.piece} <callableName> ...
-  → Check state:     cf piece inspect --cell ${pieceConfig.piece} ...`));
+    await applyPieceSourceCommandAction(options, mainPath);
   })
   /* piece inspect */
   .command("inspect", "Inspect detailed information about a piece")
@@ -4582,6 +4603,14 @@ export interface SetPieceSourceCommandDependencies {
   setPiecePattern?: typeof setPiecePattern;
 }
 
+/** Injectable effects for testing the successful `piece setsrc` action. */
+export interface ApplyPieceSourceCommandDependencies {
+  setPieceSourceFromCommand?: typeof setPieceSourceFromCommand;
+  render?: (message: string) => void;
+  warn?: (message: string) => void;
+  hint?: (message: string) => void;
+}
+
 /** Injectable dependencies for testing `piece setsrc --check`. */
 export interface CheckPieceSourceCommandDependencies {
   checkPiecePattern?: typeof checkPiecePattern;
@@ -4633,22 +4662,51 @@ export async function checkPieceSourceFromCommand(
   };
 }
 
-/** Apply the parsed `piece setsrc` command while preserving its safety flag. */
+/**
+ * Apply the parsed `piece setsrc` command while preserving its safety flag.
+ *
+ * `update` is the accepted setup transaction's receipt. Its pattern pointer
+ * names what this command committed even when a concurrent command commits a
+ * newer source before this one finishes its post-commit work.
+ */
 export async function setPieceSourceFromCommand(
   options: PieceCLIOptions,
   mainPath: string,
   deps: SetPieceSourceCommandDependencies = {},
-): Promise<PieceConfig> {
-  const pieceConfig = parsePieceOptions(options);
-  await (deps.setPiecePattern ?? setPiecePattern)(
-    pieceConfig,
+): Promise<{
+  config: PieceConfig;
+  update: Awaited<ReturnType<typeof setPiecePattern>>;
+}> {
+  const config = parsePieceOptions(options);
+  const update = await (deps.setPiecePattern ?? setPiecePattern)(
+    config,
     localPatternEntry(mainPath, options),
     {
       dangerouslyAllowIncompatibleSchema:
         options.dangerouslyAllowIncompatibleSchema,
     },
   );
-  return pieceConfig;
+  return { config, update };
+}
+
+/** Applies `piece setsrc` and renders the receipt returned by the commit. */
+export async function applyPieceSourceCommandAction(
+  options: PieceCLIOptions,
+  mainPath: string,
+  deps: ApplyPieceSourceCommandDependencies = {},
+): Promise<void> {
+  const { config, update } = await (
+    deps.setPieceSourceFromCommand ?? setPieceSourceFromCommand
+  )(options, mainPath);
+  (deps.render ?? render)(setsrcSuccessLine(config, update));
+  const refreshWarning = setsrcRefreshWarning(update);
+  if (refreshWarning !== undefined) {
+    (deps.warn ?? console.error)(refreshWarning);
+  }
+  (deps.hint ?? hint)(cliText(`NEXT STEPS:
+  → Test in browser: ${config.apiUrl}/${config.space}/${config.piece}
+  → Test a callable: cf call --piece ${config.piece} <callableName> ...
+  → Check state:     cf piece inspect --piece ${config.piece} ...`));
 }
 
 /**

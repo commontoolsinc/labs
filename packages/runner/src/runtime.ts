@@ -130,7 +130,12 @@ import { PatternManager } from "./pattern-manager.ts";
 import { SourceReconciler } from "./source-reconciler.ts";
 import { snapshotQueryResult } from "./query-result-proxy.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
-import { type PieceSourceTransition, Runner } from "./runner.ts";
+import {
+  type PieceSourceTransition,
+  Runner,
+  type RunSyncedCommitResult,
+  type RunSyncedOptions,
+} from "./runner.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import {
@@ -3383,24 +3388,31 @@ export class Runtime {
     return this.runner.run<T, R>(tx, patternOrModule, argument, resultCell);
   }
 
+  /** Runs a pattern after synchronizing its stored dependencies. */
   runSynced(
     resultCell: Cell<any>,
     pattern: Pattern | Module,
     inputs?: any,
-    options?: {
-      expectedPatternIdentity?: { identity: string; symbol: string };
-      validateCurrentArgument?: (
-        argumentCell: Cell<unknown>,
-      ) => void;
-      validateArgumentLinks?: (
-        argumentCell: Cell<unknown>,
-        argumentSchema: JSONSchema,
-      ) => void;
-      patternRepository?: string;
-      pieceSourceTransition?: PieceSourceTransition;
-    },
-  ) {
+    options?: RunSyncedOptions,
+  ): Promise<Cell<any>> {
     return this.runner.runSynced(resultCell, pattern, inputs, options);
+  }
+
+  /** Runs a pattern and returns its accepted setup transaction receipt. */
+  runSyncedWithCommit(
+    resultCell: Cell<any>,
+    pattern: Pattern | Module,
+    inputs: any,
+    options: RunSyncedOptions & {
+      expectedPatternIdentity: { identity: string; symbol: string };
+    },
+  ): Promise<RunSyncedCommitResult<any>> {
+    return this.runner.runSyncedWithCommit(
+      resultCell,
+      pattern,
+      inputs,
+      options,
+    );
   }
 
   start<T = any>(resultCell: Cell<T>): Promise<boolean> {

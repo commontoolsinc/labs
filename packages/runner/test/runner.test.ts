@@ -30,6 +30,7 @@ import {
   getPatternSetupIdentityRef,
   mergeObjects,
   mergeSchemaDefaults,
+  PatternSetupPostCommitError,
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
 } from "../src/runner.ts";
@@ -1734,6 +1735,156 @@ describe("setup/start", () => {
     expect(result).toBe(resultCell);
   });
 
+  it("runSyncedWithCommit returns the pattern accepted by its setup transaction", async () => {
+    const pattern = (marker: string): Pattern => ({
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {
+        type: "object",
+        properties: { marker: { type: "string" } },
+      },
+      result: { marker },
+      nodes: [],
+    });
+    const resultCell = runtime.getCell(space, "runSynced commit receipt");
+
+    await runtime.runSynced(
+      resultCell,
+      trustExecutable(runtime, pattern("v1")),
+      {},
+    );
+    const previous = getPatternIdentityRef(resultCell);
+    expect(previous).toBeDefined();
+
+    const result = await runtime.runSyncedWithCommit(
+      resultCell,
+      trustExecutable(runtime, pattern("v2")),
+      {},
+      { expectedPatternIdentity: previous! },
+    );
+
+    expect(result.commit.pattern).toEqual(getPatternIdentityRef(resultCell));
+    expect(result.cell.get()).toEqual({ marker: "v2" });
+  });
+
+  it("runSyncedWithCommit carries its receipt through post-commit failures", async () => {
+    const pattern = (marker: string): Pattern => ({
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: { type: "object", properties: {} },
+      result: { marker },
+      nodes: [],
+    });
+    const resultCell = runtime.getCell(
+      space,
+      "runSynced post-commit receipt",
+    );
+    await runtime.runSynced(
+      resultCell,
+      trustExecutable(runtime, pattern("v1")),
+      {},
+    );
+    const previous = getPatternIdentityRef(resultCell);
+    expect(previous).toBeDefined();
+
+    const runner = runtime.runner as unknown as {
+      syncCellsForRunningPattern(
+        resultCell: unknown,
+        pattern: Pattern,
+        inputs?: unknown,
+      ): Promise<boolean>;
+    };
+    const originalSync = runner.syncCellsForRunningPattern.bind(
+      runtime.runner,
+    );
+    const postCommitFailure = new Error("injected post-commit failure");
+    let syncCount = 0;
+    runner.syncCellsForRunningPattern = async (
+      resultCell,
+      executable,
+      inputs,
+    ) => {
+      syncCount++;
+      if (syncCount === 2) throw postCommitFailure;
+      return await originalSync(resultCell, executable, inputs);
+    };
+
+    try {
+      let reported: unknown;
+      try {
+        await runtime.runSyncedWithCommit(
+          resultCell,
+          trustExecutable(runtime, pattern("v2")),
+          {},
+          { expectedPatternIdentity: previous! },
+        );
+      } catch (error) {
+        reported = error;
+      }
+
+      expect(reported).toBeInstanceOf(PatternSetupPostCommitError);
+      const failure = reported as PatternSetupPostCommitError;
+      expect(failure.cause).toBe(postCommitFailure);
+      expect(failure.commit.pattern).toEqual(
+        getPatternIdentityRef(resultCell),
+      );
+    } finally {
+      runner.syncCellsForRunningPattern = originalSync;
+    }
+  });
+
+  it("runSynced preserves its legacy error when post-commit work fails", async () => {
+    const pattern = (marker: string): Pattern => ({
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: { type: "object", properties: {} },
+      result: { marker },
+      nodes: [],
+    });
+    const resultCell = runtime.getCell(
+      space,
+      "runSynced legacy post-commit error",
+    );
+    await runtime.runSynced(
+      resultCell,
+      trustExecutable(runtime, pattern("v1")),
+      {},
+    );
+    const previous = getPatternIdentityRef(resultCell);
+    expect(previous).toBeDefined();
+
+    const runner = runtime.runner as unknown as {
+      syncCellsForRunningPattern(
+        resultCell: unknown,
+        pattern: Pattern,
+        inputs?: unknown,
+      ): Promise<boolean>;
+    };
+    const originalSync = runner.syncCellsForRunningPattern.bind(
+      runtime.runner,
+    );
+    let syncCount = 0;
+    runner.syncCellsForRunningPattern = async (
+      resultCell,
+      executable,
+      inputs,
+    ) => {
+      syncCount++;
+      if (syncCount === 2) {
+        throw new Error("injected legacy post-commit failure");
+      }
+      return await originalSync(resultCell, executable, inputs);
+    };
+
+    try {
+      await expect(runtime.runSynced(
+        resultCell,
+        trustExecutable(runtime, pattern("v2")),
+        {},
+        { expectedPatternIdentity: previous! },
+      )).rejects.toThrow("injected legacy post-commit failure");
+    } finally {
+      runner.syncCellsForRunningPattern = originalSync;
+    }
+  });
+
   it("setup rethrows callback failures from editWithRetry", async () => {
     const pattern: Pattern = {
       argumentSchema: {
@@ -2309,6 +2460,59 @@ describe("setup/start", () => {
       expect(runtime.runner.cancels.size).toBe(1);
     } finally {
       await boundTx.commit();
+    }
+  });
+
+  it("rethrows post-setup failures when writes remain transaction-bound", async () => {
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: { type: "object", properties: {} },
+      result: {},
+      nodes: [],
+    };
+    const trusted = trustExecutable(runtime, pattern);
+    const resultCell = runtime.getCell(
+      space,
+      "transaction-bound post-setup failure",
+    );
+    await runtime.runSynced(resultCell, trusted, {});
+    const currentIdentity = getPatternIdentityRef(resultCell);
+    expect(currentIdentity).toBeDefined();
+
+    const boundTx = runtime.edit();
+    const runner = runtime.runner as unknown as {
+      syncCellsForRunningPattern(
+        resultCell: unknown,
+        pattern: Pattern,
+        inputs?: unknown,
+      ): Promise<boolean>;
+    };
+    const originalSync = runner.syncCellsForRunningPattern.bind(
+      runtime.runner,
+    );
+    let syncCount = 0;
+    runner.syncCellsForRunningPattern = async (
+      resultCell,
+      executable,
+      inputs,
+    ) => {
+      syncCount++;
+      if (syncCount === 2) {
+        throw new Error("transaction-bound post-setup failure");
+      }
+      return await originalSync(resultCell, executable, inputs);
+    };
+
+    try {
+      await expect(runtime.runSynced(
+        resultCell.withTx(boundTx),
+        trusted,
+        {},
+        { expectedPatternIdentity: currentIdentity! },
+      )).rejects.toThrow("transaction-bound post-setup failure");
+    } finally {
+      runner.syncCellsForRunningPattern = originalSync;
+      boundTx.abort();
     }
   });
 });

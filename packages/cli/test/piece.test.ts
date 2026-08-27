@@ -23,6 +23,7 @@ import {
 import { toCell } from "../../runner/src/back-to-cell.ts";
 import { setResultCell } from "../../runner/src/result-utils.ts";
 import {
+  applyPieceSourceCommandAction,
   checkPieceSourceFromCommand,
   formatPatternIdentity,
   formatPatternRef,
@@ -39,6 +40,10 @@ import {
   readTargetPositionals,
   setCellValueFromCommand,
   setPieceSourceFromCommand,
+  setsrcRefreshWarning,
+  setsrcSuccessLine,
+  warnDeprecatedPieceSpelling,
+  withDeprecatedSpellingWarning,
 } from "../commands/piece.ts";
 import {
   CellSelectionError,
@@ -2224,7 +2229,14 @@ describe("cli piece parsing", () => {
 
   it("forwards the dangerous override through setsrc command behavior", async () => {
     let forwarded: unknown;
-    const pieceConfig = await setPieceSourceFromCommand(
+    const applied = {
+      status: "committed" as const,
+      ref: { identity: "B".repeat(43), symbol: "default" },
+      revisionId: "revision-2",
+      detachedOrigin: null,
+      refresh: { status: "completed" as const },
+    };
+    const { config, update } = await setPieceSourceFromCommand(
       {
         apiUrl: API_URL,
         space: SPACE,
@@ -2240,19 +2252,20 @@ describe("cli piece parsing", () => {
       {
         setPiecePattern: (config, entry, options) => {
           forwarded = { config, entry, options };
-          return Promise.resolve();
+          return Promise.resolve(applied);
         },
       },
     );
 
-    expect(pieceConfig).toEqual({
+    expect(config).toEqual({
       apiUrl: API_URL,
       space: SPACE,
       identity: "/tmp/test.key",
       piece: PIECE,
     });
+    expect(update).toEqual(applied);
     expect(forwarded).toEqual({
-      config: pieceConfig,
+      config,
       entry: {
         mainPath: "/repo/pattern.tsx",
         mainExport: "named",
@@ -2262,6 +2275,140 @@ describe("cli piece parsing", () => {
       },
       options: { dangerouslyAllowIncompatibleSchema: true },
     });
+  });
+
+  it("prints the committed pattern pointer and revision in the setsrc success line", () => {
+    expect(setsrcSuccessLine(
+      {
+        apiUrl: API_URL,
+        space: SPACE,
+        identity: "/tmp/test.key",
+        piece: PIECE,
+      },
+      {
+        status: "committed",
+        ref: { identity: "B".repeat(43), symbol: "default" },
+        revisionId: "revision-2",
+        detachedOrigin: null,
+        refresh: { status: "completed" },
+      },
+    )).toBe(
+      `Committed source update for piece ${PIECE} ` +
+        `(Pattern Ref: cf:module/${"B".repeat(43)}#default, ` +
+        `Revision: revision-2)`,
+    );
+  });
+
+  it("renders the setsrc transaction receipt returned by the apply", async () => {
+    const applied = {
+      status: "committed" as const,
+      ref: { identity: "B".repeat(43), symbol: "default" },
+      revisionId: "revision-2",
+      detachedOrigin: null,
+      refresh: { status: "completed" as const },
+    };
+    const rendered: string[] = [];
+    const warned: string[] = [];
+    const hinted: string[] = [];
+
+    await applyPieceSourceCommandAction(
+      {
+        apiUrl: API_URL,
+        space: SPACE,
+        identity: "/tmp/test.key",
+        piece: PIECE,
+      },
+      "/repo/pattern.tsx",
+      {
+        setPieceSourceFromCommand: (options, mainPath) => {
+          expect(mainPath).toBe("/repo/pattern.tsx");
+          return Promise.resolve({
+            config: parsePieceOptions(options),
+            update: applied,
+          });
+        },
+        render: (message) => rendered.push(message),
+        warn: (message) => warned.push(message),
+        hint: (message) => hinted.push(message),
+      },
+    );
+
+    expect(rendered).toEqual([
+      `Committed source update for piece ${PIECE} ` +
+      `(Pattern Ref: cf:module/${"B".repeat(43)}#default, ` +
+      `Revision: revision-2)`,
+    ]);
+    expect(warned).toEqual([]);
+    expect(hinted).toHaveLength(1);
+    expect(hinted[0]).toContain(`${API_URL}/${SPACE}/${PIECE}`);
+  });
+
+  it("reports a setsrc refresh failure without negating its commit", async () => {
+    const update = {
+      status: "committed" as const,
+      ref: { identity: "B".repeat(43), symbol: "default" },
+      revisionId: "revision-2",
+      detachedOrigin: null,
+      refresh: {
+        status: "failed" as const,
+        warning: "dependency unavailable",
+      },
+    };
+    const warned: string[] = [];
+
+    await applyPieceSourceCommandAction(
+      {
+        apiUrl: API_URL,
+        space: SPACE,
+        identity: "/tmp/test.key",
+        piece: PIECE,
+      },
+      "/repo/pattern.tsx",
+      {
+        setPieceSourceFromCommand: () =>
+          Promise.resolve({
+            config: {
+              apiUrl: API_URL,
+              space: SPACE,
+              identity: "/tmp/test.key",
+              piece: PIECE,
+            },
+            update,
+          }),
+        render: () => {},
+        warn: (message) => warned.push(message),
+        hint: () => {},
+      },
+    );
+
+    expect(setsrcRefreshWarning(update)).toBe(
+      `Source revision revision-2 committed as ` +
+        `cf:module/${"B".repeat(43)}#default, but refreshing the running ` +
+        `piece failed: dependency unavailable`,
+    );
+    expect(warned).toEqual([setsrcRefreshWarning(update)!]);
+  });
+
+  it("propagates a setsrc failure before the setup transaction commits", async () => {
+    await expect(setPieceSourceFromCommand(
+      {
+        apiUrl: API_URL,
+        space: SPACE,
+        identity: "/tmp/test.key",
+        piece: PIECE,
+      },
+      "/repo/pattern.tsx",
+      {
+        setPiecePattern: () =>
+          Promise.reject(
+            new Error(
+              "piece pattern changed while the source update was compiling",
+            ),
+          ),
+      },
+    )).rejects.toThrow(
+      "piece pattern changed while the source update was compiling",
+    );
   });
 
   it("aims the setsrc preflight at the same piece and entry the apply would use", async () => {
@@ -3926,7 +4073,16 @@ describe("cli piece parsing", () => {
             Promise.resolve({
               setPattern: (_program: unknown, options: unknown) => {
                 setPatternOptions = options;
-                return Promise.resolve();
+                return Promise.resolve({
+                  status: "committed" as const,
+                  ref: {
+                    identity: "A".repeat(43),
+                    symbol: "default",
+                  },
+                  revisionId: "revision-2",
+                  detachedOrigin: null,
+                  refresh: { status: "completed" as const },
+                });
               },
             }),
         } as any),

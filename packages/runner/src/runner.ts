@@ -996,8 +996,65 @@ const sameRootDocument = (
 type SetupResult<R> = {
   resultCell: Cell<R>;
   pattern?: Pattern;
+  patternRef?: { identity: string; symbol: string };
   needsStart: boolean;
 };
+
+/** Receipt for a pattern setup transaction accepted by storage. */
+export interface PatternSetupCommitReceipt {
+  /** Content-addressed pattern pointer written by the transaction. */
+  pattern: { identity: string; symbol: string };
+}
+
+/** Result of running a pattern through an owned setup transaction. */
+export interface RunSyncedCommitResult<R> {
+  /** Cell view reconciled to the pattern current after post-commit work. */
+  cell: Cell<R>;
+  /** Receipt issued from the accepted setup transaction. */
+  commit: PatternSetupCommitReceipt;
+}
+
+/**
+ * Reports work which failed after storage accepted a pattern setup.
+ *
+ * The receipt remains authoritative for the setup transaction. `.cause`
+ * describes the later dependency synchronization, start, or schema-load
+ * failure.
+ */
+export class PatternSetupPostCommitError extends Error {
+  #commit: PatternSetupCommitReceipt;
+
+  /** Constructs an instance carrying the accepted transaction's receipt. */
+  constructor(commit: PatternSetupCommitReceipt, cause: unknown) {
+    super("pattern setup committed, but post-commit processing failed", {
+      cause,
+    });
+    this.name = "PatternSetupPostCommitError";
+    this.#commit = commit;
+  }
+
+  /** Receipt issued for the accepted setup transaction. */
+  get commit(): PatternSetupCommitReceipt {
+    return this.#commit;
+  }
+}
+
+/** Options which constrain and annotate an atomic pattern setup. */
+export interface RunSyncedOptions {
+  /** Pattern pointer which must still be current inside the transaction. */
+  expectedPatternIdentity?: { identity: string; symbol: string };
+  /** Invariant over the argument stored before setup changes it. */
+  validateCurrentArgument?: (argumentCell: Cell<unknown>) => void;
+  /** Invariant over links retained by the candidate argument schema. */
+  validateArgumentLinks?: (
+    argumentCell: Cell<unknown>,
+    argumentSchema: JSONSchema,
+  ) => void;
+  /** Repository locator written atomically with pattern setup. */
+  patternRepository?: string;
+  /** Source lifecycle change written atomically with pattern setup. */
+  pieceSourceTransition?: PieceSourceTransition;
+}
 
 type SetupValidationOptions = {
   /** Optional invariant over the argument stored before setup changes it. */
@@ -2304,6 +2361,7 @@ export class Runner {
     resultCell: Cell<R>,
     argument: T,
     pattern: Pattern,
+    patternRef: { identity: string; symbol: string },
     setupState: SetupStateReuse,
   ): SetupResult<R> | undefined {
     const key = this.getDocKey(resultCell);
@@ -2328,7 +2386,7 @@ export class Runner {
       if (setupState.restageStoredArgument) {
         this.#validateStoredArgument(tx, resultCell, pattern);
       }
-      return { resultCell, needsStart: false };
+      return { resultCell, patternRef, needsStart: false };
     }
 
     if (setupState.sameStoredSetup) {
@@ -2352,7 +2410,7 @@ export class Runner {
         nextArgument,
         pattern.argumentSchema,
       );
-      return { resultCell, needsStart: false };
+      return { resultCell, patternRef, needsStart: false };
     }
 
     return undefined;
@@ -2964,6 +3022,7 @@ export class Runner {
       resultCell,
       argument,
       pattern,
+      entryRef,
       setupState,
     );
     if (runningSetup) {
@@ -3031,7 +3090,7 @@ export class Runner {
       }
     }
 
-    return { resultCell, pattern, needsStart: true };
+    return { resultCell, pattern, patternRef: entryRef, needsStart: true };
   }
 
   /**
@@ -4972,20 +5031,66 @@ export class Runner {
     };
   }
 
+  /** Runs a pattern and returns its reconciled result-cell view. */
   async runSynced(
     resultCell: Cell<any>,
     pattern: Pattern | Module,
     inputs?: any,
-    options?: {
-      expectedPatternIdentity?: { identity: string; symbol: string };
-      validateCurrentArgument?: SetupValidationOptions[
-        "validateCurrentArgument"
-      ];
-      validateArgumentLinks?: SetupValidationOptions["validateArgumentLinks"];
-      patternRepository?: string;
-      pieceSourceTransition?: PieceSourceTransition;
+    options?: RunSyncedOptions,
+  ): Promise<Cell<any>> {
+    try {
+      return (await this.#runSynced(
+        resultCell,
+        pattern,
+        inputs,
+        options,
+      )).cell;
+    } catch (error) {
+      if (error instanceof PatternSetupPostCommitError) {
+        throw error.cause;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Runs a pattern and returns the accepted setup transaction's receipt.
+   *
+   * The operation owns the transaction so the receipt always represents a
+   * storage verdict, never writes merely staged in a caller-owned transaction.
+   */
+  async runSyncedWithCommit(
+    resultCell: Cell<any>,
+    pattern: Pattern | Module,
+    inputs: any,
+    options: RunSyncedOptions & {
+      expectedPatternIdentity: { identity: string; symbol: string };
     },
-  ) {
+  ): Promise<RunSyncedCommitResult<any>> {
+    if (resultCell.tx?.status().status === "ready") {
+      throw new Error(
+        "a committed pattern setup receipt requires an unbound result cell",
+      );
+    }
+    const result = await this.#runSynced(
+      resultCell,
+      pattern,
+      inputs,
+      options,
+    );
+    return { cell: result.cell, commit: result.commit! };
+  }
+
+  /** Helper for `runSynced()` and `runSyncedWithCommit()`. */
+  async #runSynced(
+    resultCell: Cell<any>,
+    pattern: Pattern | Module,
+    inputs: any,
+    options: RunSyncedOptions | undefined,
+  ): Promise<{
+    cell: Cell<any>;
+    commit?: PatternSetupCommitReceipt;
+  }> {
     await resultCell.sync();
 
     const synced = await this.syncCellsForRunningPattern(
@@ -5004,6 +5109,7 @@ export class Runner {
     // run. Though most likely the worst case is just extra invocations.
     const givenTx = resultCell.tx?.status().status === "ready" && resultCell.tx;
     let setupRes: ReturnType<typeof this.setupInternal> | undefined;
+    let commit: PatternSetupCommitReceipt | undefined;
     const assertExpectedPatternIdentity = (
       cell: Cell<any>,
     ): void => {
@@ -5040,7 +5146,7 @@ export class Runner {
         },
       );
     } else {
-      const { error } = await this.runtime.editWithRetry((tx) => {
+      const outcome = await this.runtime.editWithRetry((tx) => {
         // runSynced's own setup tx (async surface, e.g. compileAndRun's
         // continuation on a served run): no scheduler run around it;
         // bookkeeping per serving-loop.md §3d.
@@ -5049,7 +5155,7 @@ export class Runner {
           kind: "bookkeeping",
         });
         assertExpectedPatternIdentity(resultCell.withTx(tx));
-        setupRes = this.setupInternal(
+        return this.setupInternal(
           tx,
           pattern,
           inputs,
@@ -5062,7 +5168,8 @@ export class Runner {
           },
         );
       });
-      if (error) {
+      if (outcome.error) {
+        const error = outcome.error;
         if (
           error.name === "StorageTransactionAborted" &&
           error.message.startsWith("editWithRetry action threw:") &&
@@ -5075,61 +5182,80 @@ export class Runner {
         }
         logger.error("pattern-setup-error", "Error setting up pattern", error);
         setupRes = undefined;
-      }
-    }
-
-    // If a new pattern was specified, make sure to sync any new cells
-    if (pattern || !synced) {
-      await this.syncCellsForRunningPattern(resultCell, pattern);
-    }
-
-    if (setupRes?.needsStart) {
-      if (givenTx) {
-        this.startWithTx(
-          givenTx,
-          resultCell.withTx(givenTx),
-          setupRes.pattern,
-        );
       } else {
-        // The setup commit can be superseded while dependency sync is in
-        // flight. Resolve startup from the current durable pattern pointer so
-        // a stale caller can never instantiate its old candidate while
-        // recording a newer identity as current.
-        await resultCell.sync();
-        await this.start(resultCell);
+        setupRes = outcome.ok;
+        commit = { pattern: setupRes.patternRef! };
       }
     }
 
-    // A concurrent source update can supersede this caller after its setup
-    // commit but before its post-commit dependency sync settles. Return a view
-    // typed by the pattern that is actually durable now, not by this caller's
-    // stale candidate.
-    let currentRef = getPatternIdentityRef(resultCell);
-    while (currentRef !== undefined) {
-      const loadedRef = currentRef;
-      const currentPattern = await this.runtime.patternManager
-        .loadPatternByIdentity(
-          loadedRef.identity,
-          loadedRef.symbol,
-          resultCell.space,
-        );
-      currentRef = getPatternIdentityRef(resultCell);
-      if (
-        currentRef !== undefined &&
-        patternIdentityKey(currentRef) !== patternIdentityKey(loadedRef)
-      ) {
-        continue;
+    try {
+      // If a new pattern was specified, make sure to sync any new cells
+      if (pattern || !synced) {
+        await this.syncCellsForRunningPattern(resultCell, pattern);
       }
-      if (
-        currentRef === undefined || currentPattern?.resultSchema === undefined
-      ) {
-        return resultCell;
+
+      if (setupRes?.needsStart) {
+        if (givenTx) {
+          this.startWithTx(
+            givenTx,
+            resultCell.withTx(givenTx),
+            setupRes.pattern,
+          );
+        } else {
+          // The setup commit can be superseded while dependency sync is in
+          // flight. Resolve startup from the current durable pattern pointer so
+          // a stale caller can never instantiate its old candidate while
+          // recording a newer identity as current.
+          await resultCell.sync();
+          await this.start(resultCell);
+        }
       }
-      return resultCell.asSchema(currentPattern.resultSchema);
+
+      // A concurrent source update can supersede this caller after its setup
+      // commit but before its post-commit dependency sync settles. Return a view
+      // typed by the pattern that is actually durable now, not by this caller's
+      // stale candidate.
+      let currentRef = getPatternIdentityRef(resultCell);
+      while (currentRef !== undefined) {
+        const loadedRef = currentRef;
+        const currentPattern = await this.runtime.patternManager
+          .loadPatternByIdentity(
+            loadedRef.identity,
+            loadedRef.symbol,
+            resultCell.space,
+          );
+        currentRef = getPatternIdentityRef(resultCell);
+        if (
+          currentRef !== undefined &&
+          patternIdentityKey(currentRef) !== patternIdentityKey(loadedRef)
+        ) {
+          continue;
+        }
+        if (
+          currentRef === undefined || currentPattern?.resultSchema === undefined
+        ) {
+          return {
+            cell: resultCell,
+            ...(commit === undefined ? {} : { commit }),
+          };
+        }
+        return {
+          cell: resultCell.asSchema(currentPattern.resultSchema),
+          ...(commit === undefined ? {} : { commit }),
+        };
+      }
+      return {
+        cell: pattern?.resultSchema !== undefined
+          ? resultCell.asSchema(pattern.resultSchema)
+          : resultCell,
+        ...(commit === undefined ? {} : { commit }),
+      };
+    } catch (error) {
+      if (commit !== undefined) {
+        throw new PatternSetupPostCommitError(commit, error);
+      }
+      throw error;
     }
-    return pattern?.resultSchema !== undefined
-      ? resultCell.asSchema(pattern.resultSchema)
-      : resultCell;
   }
 
   // Result-pattern cache key, per scope INSTANCE (key-vocabulary.md §1

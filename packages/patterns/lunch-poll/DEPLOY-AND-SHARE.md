@@ -242,10 +242,11 @@ the input interface casually against a piece you care about.
 > Piece source was saved, but refreshing the running piece failed: [Error: updated arguments do not match the candidate schema: profileAvatar: value does not match type string]
 > ```
 >
-> The piece is now on the new source and will not start. That line comes
-> _before_ the usual `Updated source for piece …` line and the next-step hints,
-> so a caller reading only the tail of the output takes it for a clean deploy.
-> See "A piece that saved its source and will not start".
+> The piece is now on the new source and will not start. `setsrc` reports the
+> accepted pattern ref and source revision, then repeats the refresh failure as
+> an explicit warning before the next-step hints; do not treat the committed
+> receipt as proof that the running piece refreshed successfully. See "A piece
+> that saved its source and will not start".
 
 ## Option B — migrate the populated name-keyed poll to a fresh piece
 
