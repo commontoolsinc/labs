@@ -296,8 +296,29 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "scheduler retained the served carriage across the " +
         "name-resolution requeue. The prior 10/10 lift bar is " +
         "superseded by that owner-directed approximately eight-run " +
-        "pin. This FILE entry remains explicit until the phase-7 " +
-        "coordinator lifts it.",
+        "pin. THAT RE-BASELINE RAN 2026-08-27 AND PASSED LOCALLY, AND " +
+        "THE DIRECT CI UNSKIP PROBE ON THE SAME BRANCH FAILED: 8/8 " +
+        "green at main 4b70949ac on the ON binary at the current lane " +
+        "posture (ensure ON, toolshed self-sourced), with the " +
+        "member's own store discriminator negative in every run — but " +
+        "the un-skipped file went RED in ON shard 7 of run " +
+        "33085668531 (job 98564797510, head 0cebb3621), at " +
+        "lunch-poll-vote.test.ts:271 on the HOST's " +
+        "clickCfButton(#lp-join-button), 300000ms, 5m10s. That is an " +
+        "EARLIER stage than every red this entry records: the " +
+        "2026-08-24 gate's three reds were the GUEST's join at line " +
+        "306, and its finding was that the host always joins. The CI " +
+        "window is silent — zero pattern-load-error, " +
+        "pattern-swap-setup-error, sidecar-run-raced, " +
+        "deferred-start-catchup, session-remount and " +
+        "piece-start-commit-failed between the file's start and its " +
+        "failure — and CI does not publish the toolshed log, so the " +
+        "server-side members cannot be excluded from that artifact. " +
+        "The OFF lane's shard 7 PASSED on that same run, so the red " +
+        "is ON-specific rather than a general flake in this file. " +
+        "Local 0/8 against CI 1/1 is itself the observation. This " +
+        "FILE entry remains explicit until the phase-7 coordinator " +
+        "lifts it.",
     },
     // The sqlite identity pair's two FILE entries were LIFTED (OW53
     // CLOSED, 2026-08-22): the sqlite builtins consumed the RUNTIME's
