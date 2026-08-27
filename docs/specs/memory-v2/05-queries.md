@@ -379,36 +379,14 @@ wins — a reference's top-level `default` overrides earlier references' and
 the traversal's own, and where no reference declares one the traversal's
 stands.
 
-A discarded reference schema's `ifc` does not ride onto the result: write
-policy consumes declared schemas verbatim, so transplanting flow-control
-clauses between schemas would corrupt the declaration they came from. Instead
-the marking is independent of the combination, at the shared crossing seam
-(`markIfcBearingLinkCrossing`): every content-reading resolver — the read
-entry point's resolutions, the traversal's hops, link resolution's
-intermediate hops (as stored, before any path narrowing), the handle hop of
-an `asCell` crossing, schema-less query-result reads, and raw reads that
-resolve links on the way — marks its transaction cfc-relevant when the
-crossed link's stored schema carries `ifc` (`schemaHasIfc`). The seam loads
-the schema's external `cid:` closure first, so a cold declaration is
-resolvable at the check. The schema-document registry is realm-global and
-content-addressed — a hash registered from any space serves every space's
-check without a read, which is sound because equal hashes name equal bytes.
-Only a document the registry does not hold is read in the referrer
-space, where it lives: closure documents travel WITH the documents that
-refer to them, so a well-formed declaration always resolves from the
-local store, and the loading is registry warming, never a wait for
-delivery. A ref the closure cannot resolve names a corrupt runtime or a
-deliberately malformed written schema; it is logged and ignored — the
-seams mark whatever the schema legibly declares, the traversal narrows
-the broken declaration to `false` (which a shaped reader ignores under
-precedence), and link resolution skips narrowing it rather than throwing
-on the dangling ref. A resolution that reads marks even on a write path:
-`set()`'s pre-write resolution reads the resolved terminal value (the
-stream check), so it opts in, and a transaction it marks relevant must be
-prepared before commit, as every runtime-owned commit path already does.
-Relevance for the write itself belongs to the write-policy gate, and
-enforcement reads stored cfc metadata and label views rather than combined
-schemas.
+A discarded reference schema's `ifc` does not ride onto the result: flow
+control never travels through combined schemas. A transaction is instead
+marked cfc-relevant at each crossing whose stored schema declares `ifc`,
+independently of which side won the combination, and enforcement reads
+stored cfc metadata and label views rather than combined schemas.
+[`link-schema-precedence.md`](../link-schema-precedence.md) specifies that
+crossing seam: the marking sites, the `cid:` closure registry warming, and
+the broken-declaration rule.
 
 The sibling `combineSchema` is the strict best-effort pseudo-intersection,
 used to merge a compound schema's base keywords with its own `anyOf`/`oneOf`
