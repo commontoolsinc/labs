@@ -362,8 +362,11 @@ describe("ExtendedStorageTransaction CFC gate", () => {
 
       await runtime.setup(undefined, pattern, {}, resultCell);
 
+      // A hand-built pattern is KEYLESS: setup stamps no durable pattern
+      // pointer for it (the never-durable contract; L3(a), RULED 2026-08-27).
+      // The staged argument link is the setup-completed evidence instead.
       expect(resultCell.getMetaRaw("patternIdentity"))
-        .toBeDefined();
+        .toBeUndefined();
       expect(parseLink(resultCell.getMetaRaw("argument"), resultCell))
         .toBeDefined();
       const savedTitleLink = parseLink(resultCell.key("savedTitle").getRaw());
@@ -451,8 +454,11 @@ describe("ExtendedStorageTransaction CFC gate", () => {
       await runtime.setup(undefined, pattern, {}, resultCell);
 
       expect(getMetaLink(resultCell, "result")).toBeUndefined();
+      // A hand-built pattern is KEYLESS: setup stamps no durable pattern
+      // pointer for it (the never-durable contract; L3(a), RULED 2026-08-27).
+      // The staged argument link is the setup-completed evidence instead.
       expect(resultCell.getMetaRaw("patternIdentity"))
-        .toBeDefined();
+        .toBeUndefined();
       expect(parseLink(resultCell.getMetaRaw("argument"), resultCell))
         .toBeDefined();
       const savedTitleLink = parseLink(resultCell.key("savedTitle").getRaw());

@@ -1538,6 +1538,21 @@ export class Runner {
     `${MemorySpace}/${ScopeKey}/${URI}`,
     { identity: string; symbol: string }
   >();
+  // SESSION-side pattern-swap channel for RUNNING pieces, the third stamp
+  // stand-in: a re-derived child (a lift returning a pattern) used to reach
+  // its running piece's swap machinery THROUGH the durable stamp — setup
+  // wrote the new `patternIdentity`, the piece's meta watcher fired, and
+  // swapToPattern cancelled the old graph and instantiated the new one.
+  // With keyless stamps gone (L3(a)), a run() over an already-registered
+  // piece requests the swap here instead, handing the LIVE pattern value
+  // straight to the watcher's own swap closure (same guards, same
+  // fail-closed setup). Real patterns keep the durable-stamp path
+  // unchanged. Registered by setupPatternWatcher, removed with the
+  // piece's cancel group.
+  private sessionPatternSwaps = new Map<
+    `${MemorySpace}/${ScopeKey}/${URI}`,
+    (pattern: Pattern, ref: { identity: string; symbol: string }) => void
+  >();
   // Commit-gated starts that have not installed a registration yet, indexed by
   // result so an explicit stop can tombstone them before installation.
   private pendingDeferredStarts = new Map<
@@ -3071,6 +3086,26 @@ export class Runner {
           finishSwap();
         })();
       };
+      // The session-swap half of the watcher (see `sessionPatternSwaps`):
+      // exactly the sinkMeta arm's semantics, driven directly with a live
+      // pattern value instead of through a durable pointer a keyless piece
+      // is forbidden to write.
+      const sessionSwapHandler = (
+        pattern: Pattern,
+        newRef: { identity: string; symbol: string },
+      ) => {
+        if (!active || startLifecycleEpoch !== this.lifecycleEpoch) return;
+        const newKey = patternIdentityKey(newRef);
+        if (newKey === currentPatternKey) return; // No change
+        currentPatternKey = newKey;
+        swapToPattern(pattern, newRef);
+      };
+      this.sessionPatternSwaps.set(key, sessionSwapHandler);
+      addCancel(() => {
+        if (this.sessionPatternSwaps.get(key) === sessionSwapHandler) {
+          this.sessionPatternSwaps.delete(key);
+        }
+      });
       addCancel(
         resultCell.sinkMeta("patternIdentity", (newValue) => {
           if (!active || startLifecycleEpoch !== this.lifecycleEpoch) return;
@@ -4474,6 +4509,33 @@ export class Runner {
         );
         if (pullOnceAfterStart) {
           this.pullCellOnceAfterSuccessfulCommit(tx, resultCell);
+        }
+      }
+      // ALREADY-RUNNING piece, full setup staged, KEYLESS pattern: the
+      // durable stamp used to carry this exact moment to the piece's meta
+      // watcher, whose swap replaced the running graph with the new
+      // version (the derive-returning-pattern re-derivation path). A
+      // keyless identity never lands durably (L3(a), RULED 2026-08-27),
+      // so request the swap through the session channel instead — after
+      // the setup commit lands, mirroring the watcher's own ordering, and
+      // with the watcher's own guards deciding whether anything changed.
+      // Real patterns keep the durable-stamp path.
+      if (installedCancel === undefined && cancelDeferredStart === undefined) {
+        const swapKey = this.getDocKey(resultCell);
+        const sessionSwap = this.sessionPatternSwaps.get(swapKey);
+        const sessionRef = pattern !== undefined
+          ? this.runtime.patternManager.getArtifactEntryRef(pattern)
+          : undefined;
+        if (
+          sessionSwap !== undefined &&
+          pattern !== undefined &&
+          sessionRef !== undefined &&
+          PatternManager.isKeylessPatternIdentity(sessionRef.identity)
+        ) {
+          tx.addCommitCallback((_tx, result) => {
+            if (result.error) return;
+            sessionSwap(pattern, sessionRef);
+          });
         }
       }
     }
