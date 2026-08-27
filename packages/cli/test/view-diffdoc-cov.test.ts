@@ -475,7 +475,9 @@ Deno.test("buildDiffDocument: a Markdown hunk with no workspace file builds head
   );
 });
 
-// --- fileLineText: a hunk claiming a new-side line past EOF stays unverified -
+//
+// fileLineText: a hunk claiming a new-side line past EOF stays unverified -
+//
 
 Deno.test("buildDiffDocument: a hunk naming new-side lines past the workspace EOF cannot verify", () => {
   const root = Deno.makeTempDirSync();

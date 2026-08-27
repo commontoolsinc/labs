@@ -203,7 +203,9 @@ function analyzeTsx(source: string, name: string) {
   return createDataFlowAnalyzer(checker)(findInitializer(sourceFile, name));
 }
 
-// === Structural wrappers around a reactive read (1084-1098) ===
+//
+// Structural wrappers around a reactive read (1084-1098)
+//
 
 Deno.test("parenthesized reactive read stays reactive", () => {
   const analysis = analyze(`const value = (state.count);`, "value");
@@ -233,7 +235,9 @@ Deno.test("non-null assertion around a reactive read stays reactive", () => {
   assert(analysis.containsReactive);
 });
 
-// === Common Fabric Default types (790-797, 924-935) ===
+//
+// Common Fabric Default types (790-797, 924-935)
+//
 
 Deno.test("identifier typed as a Common Fabric Default is a reactive dataflow", () => {
   // The identifier's symbol declares Default<>, so it records as an explicit
@@ -266,14 +270,16 @@ Deno.test("property access whose member is a Common Fabric Default requires rewr
   assertEquals(analysis.requiresRewrite, true);
 });
 
-// === Const-binding aliases resolved through a static access path
-//     (224-304) ===
+//
+// Const-binding aliases resolved through a static access path
+// (224-304)
 //
 // These destructure a field off an implicit reactive parameter (`p`), giving
 // the alias a PLAIN field type (e.g. `number`). A plain type skips the
 // branded-cell short-circuit in the identifier handler and forces resolution
 // through getStableConstAliasInitializer -> getBindingElementStaticAccessPath,
 // which rebuilds the read as `p.<field>` and re-analyzes it as reactive.
+//
 
 function analyzePatternArrow(callbackSource: string) {
   const { sourceFile, checker } = createProgram(
@@ -337,7 +343,9 @@ Deno.test("nested destructuring resolves reactive through the whole path", () =>
   assert(analysis.containsReactive, "nested binding alias is reactive");
 });
 
-// === Element access (1044-1082) ===
+//
+// Element access (1044-1082)
+//
 
 Deno.test("static string-index element access on a reactive cell is reactive", () => {
   // Static literal index merges target+argument (lines 1052-1057) and stays
@@ -371,14 +379,18 @@ Deno.test("dynamic element access on an ignored branded parameter is inert", () 
   assertEquals(analysis.dataFlows.length, 0);
 });
 
-// === Array-literal reactive elements (1258-1265) ===
+//
+// Array-literal reactive elements (1258-1265)
+//
 
 Deno.test("array literal with a reactive element carries reactive dataflow", () => {
   const analysis = analyze(`const value = [state.count];`, "value");
   assert(analysis.containsReactive, "reactive array element flows");
 });
 
-// === Synthetic property access whose root is not an identifier (696-697) ===
+//
+// Synthetic property access whose root is not an identifier (696-697)
+//
 
 Deno.test("synthetic property access rooted in an object literal is inert", () => {
   // `({}).bar` built synthetically: findRootIdentifier bottoms out on a
@@ -394,13 +406,15 @@ Deno.test("synthetic property access rooted in an object literal is inert", () =
   assertEquals(analysis.dataFlows.length, 0);
 });
 
-// === Reads whose root originates from an ignored (aggregated) scope
-//     parameter (876-878, 973-975) ===
+//
+// Reads whose root originates from an ignored (aggregated) scope
+// parameter (876-878, 973-975)
 //
 // A parameter of a plain (non-builder, non-array-method) callback is an
 // aggregated scope symbol that is NOT a reactive value, so `isSymbolIgnored`
 // treats reads through it as inert. When the read still looks reactive by
 // type/shape, the `originatesFromIgnored` guard short-circuits it to empty.
+//
 
 function analyzeArrow(source: string) {
   const { sourceFile, checker } = createProgram(
@@ -460,7 +474,9 @@ Deno.test("structurally-opaque read off an ignored Default parameter is inert", 
   );
 });
 
-// === JSX attributes, spreads, children (1263-1264, 1292-1295) ===
+//
+// JSX attributes, spreads, children (1263-1264, 1292-1295)
+//
 
 Deno.test("JSX attribute expression carries reactive dataflow", () => {
   const analysis = analyzeTsx(
@@ -483,7 +499,9 @@ Deno.test("JSX element children with a nested element carry reactive dataflow", 
   assert(analysis.containsReactive, "nested child dataflow is reactive");
 });
 
-// === Function-argument callback with a block body (1180-1189, 1231-1240) ===
+//
+// Function-argument callback with a block body (1180-1189, 1231-1240)
+//
 
 Deno.test("call-argument callback block return propagates reactive dataflow", () => {
   // A callback argument with a block body has its return-statement expressions
@@ -507,8 +525,10 @@ Deno.test("standalone arrow with a block body propagates reactive dataflow", () 
   assert(analysis.containsReactive, "arrow block-return dataflow is reactive");
 });
 
-// === Synthetic (transformer-created) node handling (683-697, 749-751,
-//     1004-1032) ===
+//
+// Synthetic (transformer-created) node handling (683-697, 749-751,
+// 1004-1032)
+//
 
 Deno.test("synthetic bare identifier is treated as an opaque reactive parameter", () => {
   // A fully-synthetic identifier with no resolvable symbol is recorded as an

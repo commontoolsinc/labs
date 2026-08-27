@@ -1429,7 +1429,9 @@ export type EntityIdLookupRequest = {
   id: EntityId;
 };
 
-// --- SQLite builtins (docs/specs/sqlite-builtin) ---
+//
+// SQLite builtins (docs/specs/sqlite-builtin)
+//
 
 /** Wire form of SQLite bind parameters. */
 export type SqliteParamsWire =

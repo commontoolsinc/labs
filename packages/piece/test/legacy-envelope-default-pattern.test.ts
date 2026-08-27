@@ -154,7 +154,7 @@ describe("piece layer over a legacy-envelope default pattern (CT-1838)", () => {
   it("T7: getPieceRegistry returns the registry and add succeeds after a pin bump", async () => {
     const spaceName = "legacy-envelope-default-" + crypto.randomUUID();
 
-    // --- Session 1: build the poisoned space. ---
+    // Session 1: build the poisoned space.
     const runtime1 = newRuntime();
     const session1 = await createSession({ identity: signer, spaceName });
     const pieces1 = new PiecesController(session1, runtime1);
@@ -214,9 +214,9 @@ describe("piece layer over a legacy-envelope default pattern (CT-1838)", () => {
     const persistedId = pieceId(persisted)!;
     expect(persistedId).toBeDefined();
 
-    // --- Session 2: fresh runtime under a BUMPED runtimeVersion (the pin
+    // Session 2: fresh runtime under a BUMPED runtimeVersion (the pin
     // bump): the compiled set written by session 1's heal is a miss, so the
-    // default pattern must COLD-load from the legacy source docs. ---
+    // default pattern must COLD-load from the legacy source docs.
     const restore = setCompileCacheRuntimeVersionForTesting(
       "cf-test-bumped-runtime-version-t7",
     );
