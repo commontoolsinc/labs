@@ -2907,26 +2907,26 @@ export class CFPieceMenu extends BaseElement {
             .message}
         </p>
         <div class="warning-actions">
-          <button
-            test-id="piece-source-warning-confirm"
-            ?disabled="${this.sourceActionPending}"
-            @click="${() =>
-              this.changeSource(
-                warning.action,
-                warning.confirmationToken,
-              )}"
-          >
-            Use it anyway
-          </button>
-          <button
-            test-id="piece-source-warning-cancel"
-            ?disabled="${this.sourceActionPending}"
-            @click="${() => {
-              this.compatibilityWarning = undefined;
-            }}"
-          >
-            Cancel
-          </button>
+          ${html`
+            <button
+              test-id="piece-source-warning-confirm"
+              ?disabled="${this.sourceActionPending}"
+              @click="${() =>
+                this.changeSource(warning.action, warning.confirmationToken)}"
+            >
+              Use it anyway
+            </button>
+          `} ${html`
+            <button
+              test-id="piece-source-warning-cancel"
+              ?disabled="${this.sourceActionPending}"
+              @click="${() => {
+                this.compatibilityWarning = undefined;
+              }}"
+            >
+              Cancel
+            </button>
+          `}
         </div>
       </div>
     `;

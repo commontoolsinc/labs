@@ -1697,6 +1697,46 @@ describe("the origin and history panel", () => {
     expect(shows(menu)).not.toContain("piece-source-warning");
   });
 
+  it("puts away a warning the panel raised when it is declined", async () => {
+    const calls: unknown[] = [];
+    const menu = openMenu(pieceCell(
+      () =>
+        Promise.resolve({
+          ...SOURCE,
+          reconciliation: {
+            outcome: "refused" as const,
+            at: 1,
+            origin: SOURCE.origin!.url,
+            reason: "incompatible-schema" as const,
+          },
+        }),
+      {
+        update: (_pieceId, _space, action, options) => {
+          calls.push({ action, options });
+          return Promise.resolve({
+            source: SOURCE,
+            compatibilityWarning: "the input schema changed",
+            confirmationToken: "token-1",
+          });
+        },
+      },
+    ));
+    await menu.showPanel("origin");
+
+    clickTestId(menu, "piece-origin-update-now");
+    await settled();
+    expect(shows(menu)).toContain("piece-source-warning");
+
+    clickTestId(menu, "piece-source-warning-cancel");
+
+    // Declining leaves the piece as it was, and asks nothing further of the
+    // runtime: the one attempt that raised the warning is all there was.
+    const rendered = shows(menu);
+    expect(rendered).not.toContain("piece-source-warning");
+    expect(rendered).toContain("piece-panel-origin");
+    expect(calls).toEqual([{ action: { kind: "adopt" }, options: {} }]);
+  });
+
   it("does not offer to ignore a check that is not what refused it", async () => {
     const menu = openMenu(
       pieceCell(() =>
@@ -1903,6 +1943,73 @@ describe("the origin and history panel", () => {
       },
     ]);
     expect(shows(menu)).not.toContain("piece-origin-entry");
+  });
+
+  it("does nothing when the origin dialog is submitted empty", async () => {
+    const actions: unknown[] = [];
+    const menu = openMenu(pieceCell(undefined, {
+      update: (_pieceId, _space, action) => {
+        actions.push(action);
+        return Promise.resolve({ source: SOURCE });
+      },
+    }));
+    await menu.showPanel("origin");
+    clickTestId(menu, "piece-origin-enter-source");
+
+    // The submit button is disabled while the field is empty, but Enter in
+    // the field submits the form regardless.
+    eventHandler(menu, 'test-id="piece-origin-entry"', "submit")({
+      preventDefault: () => {},
+    } as unknown as Event);
+    await settled();
+
+    expect(actions).toEqual([]);
+    expect(shows(menu)).toContain("piece-origin-entry");
+  });
+
+  it("dismisses the origin dialog when its backdrop is clicked", async () => {
+    const menu = openMenu();
+    await menu.showPanel("origin");
+    clickTestId(menu, "piece-origin-enter-source");
+    expect(shows(menu)).toContain("piece-origin-entry");
+
+    eventHandler(menu, 'class="backdrop dimmed stacked"', "click")(
+      {} as unknown as Event,
+    );
+
+    const rendered = shows(menu);
+    expect(rendered).not.toContain("piece-origin-entry");
+    expect(rendered).toContain("piece-panel-origin");
+  });
+
+  it("takes a forced update that turns out to need no override", async () => {
+    const calls: unknown[] = [];
+    const menu = openMenu(pieceCell(
+      () =>
+        Promise.resolve({
+          ...SOURCE,
+          reconciliation: {
+            outcome: "refused" as const,
+            at: 1,
+            origin: SOURCE.origin!.url,
+            reason: "incompatible-schema" as const,
+          },
+        }),
+      {
+        update: (_pieceId, _space, action, options) => {
+          calls.push({ action, options });
+          return Promise.resolve({ source: SOURCE });
+        },
+      },
+    ));
+    await menu.showPanel("origin");
+
+    clickTestId(menu, "piece-origin-force-update");
+    await settled();
+
+    // The origin was resolved again and what it offers now is compatible, so
+    // there is no warning to confirm and the one attempt is the whole of it.
+    expect(calls).toEqual([{ action: { kind: "adopt" }, options: {} }]);
   });
 
   it("abandons a failed attempt rather than passing it to the panel", async () => {
