@@ -1647,6 +1647,52 @@ describe("cell-handle", () => {
       expect(requests.at(-1)?.values).toEqual([3]);
     });
 
+    it("keeps strict replacements in the shared append queue", async () => {
+      const requests: RequestType[] = [];
+      let stored = [0];
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: {
+            type: RequestType;
+            value?: unknown;
+            values?: unknown[];
+          }) => {
+            requests.push(request.type);
+            if (request.type === RequestType.CellSet) {
+              stored = request.value as number[];
+            } else if (request.type === RequestType.CellPush) {
+              stored = [...stored, ...request.values as number[]];
+            }
+            return Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<number[]>(runtime, ref, [0]);
+      const published: Array<readonly number[] | undefined> = [];
+      cell.subscribe((value) => {
+        published.push(value);
+      });
+
+      cell.push(1);
+      const replacing = cell.setStrict([9]);
+      cell.push(2);
+      const drained = cell.sendStrict([]);
+      await Promise.all([replacing, drained]);
+
+      expect(requests).toEqual([
+        RequestType.CellPush,
+        RequestType.CellSet,
+        RequestType.CellPush,
+        RequestType.CellSend,
+      ]);
+      expect(stored).toEqual([9, 2]);
+      expect(cell.get()).toEqual([9, 2]);
+      expect(published.at(-1)).toEqual([9, 2]);
+    });
+
     it("appends to a queued replacement from an equivalent handle", async () => {
       const requests: Array<{
         type: RequestType;

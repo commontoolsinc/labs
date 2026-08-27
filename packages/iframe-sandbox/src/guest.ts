@@ -133,7 +133,15 @@ export class RemoteCell<T = FabricValue> {
   }
 
   write(value: T): Promise<void> {
-    return this.#enqueueWrite(() => this.#write(value));
+    const snapshot = cloneIfNecessary(value as FabricValue, {
+      frozen: false,
+    }) as T;
+    return this.#enqueueWrite(async () => {
+      if (this.#activeReads.size > 0) {
+        await Promise.all(this.#activeReads);
+      }
+      await this.#write(snapshot);
+    });
   }
 
   update(updater: (current: T) => T): Promise<void> {

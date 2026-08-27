@@ -36,4 +36,19 @@ describe("SQLite query row types", () => {
 
     expect(row.label).toBe("kept");
   });
+
+  it("exposes entry rows as possible for indexed row types", () => {
+    type IndexedRow = SqliteQueryRow<
+      Record<string, unknown> & { constructor: number }
+    >;
+    const row: IndexedRow = [["constructor", 7]];
+
+    expect(row).toEqual([["constructor", 7]]);
+
+    const readAsObject = (value: IndexedRow) => {
+      // @ts-expect-error Indexed rows can arrive as reserved-key entries.
+      return value.constructor.toFixed();
+    };
+    expect(typeof readAsObject).toBe("function");
+  });
 });

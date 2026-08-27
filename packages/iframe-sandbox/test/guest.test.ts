@@ -497,6 +497,31 @@ describe("guest", () => {
       expect(cell.getSnapshot()).toEqual({ status: "ready", value: 3 });
     });
 
+    it("keeps a plain write newer than an active read", async () => {
+      const readResponse = Promise.withResolvers<FabricValue | undefined>();
+      const writeResponse = Promise.withResolvers<FabricValue | undefined>();
+      const operations: string[] = [];
+      const client = {
+        request: (operation: string) => {
+          operations.push(operation);
+          return operation === "read"
+            ? readResponse.promise
+            : writeResponse.promise;
+        },
+      } as unknown as FabricClient;
+      const cell = new RemoteCell<number>(client, "count");
+
+      const reading = cell.read();
+      const writing = cell.write(2);
+      readResponse.resolve(1);
+      await expect(reading).resolves.toBe(1);
+      writeResponse.resolve(undefined);
+      await writing;
+
+      expect(operations).toEqual(["read", "write"]);
+      expect(cell.getSnapshot()).toEqual({ status: "ready", value: 2 });
+    });
+
     it("cleans up a request when sending it fails synchronously", async () => {
       const fabric = connectFabric();
       try {

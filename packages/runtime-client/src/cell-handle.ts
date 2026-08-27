@@ -203,12 +203,17 @@ export class CellHandle<T = unknown> {
     ) as T;
     const writeGeneration = this.#writeGeneration;
     await this.#enqueueOperation(async (queue) => {
-      const published = await this.#sendStrictWrite(
+      const updateGeneration = this.#updateGeneration;
+      await this.#sendStrictWrite(
         snapshot,
         serialized,
         writeGeneration,
       );
-      if (published || !queue.hasValue) {
+      // Publication follows handle-local generations, but this shared queue
+      // follows committed operation order. A later queued append must start
+      // from this replacement even when a still-later mutation suppresses the
+      // replacement's direct publication on this handle.
+      if (updateGeneration === this.#updateGeneration) {
         queue.value = snapshot;
         queue.hasValue = true;
       }
