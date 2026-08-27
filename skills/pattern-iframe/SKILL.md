@@ -1,6 +1,6 @@
 ---
 name: pattern-iframe
-description: Build or generate a Common Fabric pattern whose primary UI is a self-contained `cf-iframe` guest. Use when an agent should turn an input-data shape and a small state/output contract into a working iframe-first pattern without learning the broader pattern framework, including React guests, path-scoped Cell access, stable array-item handles, mergeable pushes, or bridged SQLite.
+description: Build or generate a Common Fabric pattern whose primary UI is a self-contained `cf-iframe` guest. Use when an agent should turn an input-data shape and a small state/output contract into a working iframe-first pattern without learning the broader pattern framework, including React guests, PerSpace/PerUser/PerSession data, path-scoped Cell access, stable array-item handles, mergeable pushes, or bridged SQLite.
 ---
 
 # Iframe-first patterns
@@ -34,6 +34,7 @@ Validate the generated pattern with:
 
 ```bash
 deno fmt packages/patterns/<name>
+deno check packages/patterns/<name>/guest.ts
 deno task cf check packages/patterns/<name>/main.tsx --no-run
 ```
 

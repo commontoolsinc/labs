@@ -188,18 +188,24 @@ function inlineScript(code: string): string {
   return code.replaceAll(/<\/script/gi, "<\\/script");
 }
 
-function scopedWritable(
-  variable: string,
+function moduleString(value: string): string {
+  // SES conservatively rejects import-expression and HTML-comment tokens even
+  // when they occur inside a string. Unicode escapes reconstruct the exact
+  // iframe document at runtime without exposing those tokens to the host
+  // module's source scanner.
+  return JSON.stringify(value)
+    .replaceAll("import", "\\u0069mport")
+    .replaceAll("<!--", "\\u003c!--")
+    .replaceAll("-->", "--\\u003e");
+}
+
+function scopedCellType(
   typeName: string,
   defaultName: string,
-  valueScope: Scope,
+  valueScope: Exclude<Scope, "space">,
 ): string {
-  const constructor = valueScope === "space"
-    ? "Writable"
-    : valueScope === "user"
-    ? "Writable.perUser"
-    : "Writable.perSession";
-  return `const ${variable} = new ${constructor}<${typeName}>(${defaultName});`;
+  const wrapper = valueScope === "user" ? "PerUser" : "PerSession";
+  return `${wrapper}<Writable<${typeName} | Default<typeof ${defaultName}>>>`;
 }
 
 function objectEntries(value: Record<string, string>, indent: string): string {
@@ -240,21 +246,24 @@ function wrapperSource(
   guestHtml: string,
 ): string {
   const databases = Object.entries(config.databases);
+  const scopes = new Set<Scope>([
+    ...(config.stateScope === "space" ? [] : [config.stateScope]),
+    ...(config.outputScope === "space" ? [] : [config.outputScope]),
+    ...databases.map(([, database]) => database.scope),
+  ]);
+  const constructsWritable = config.stateScope === "space" ||
+    config.outputScope === "space";
   const imports = [
     ...(databases.length > 0 ? ["cfSqlite"] : []),
     "type Default",
     "NAME",
     "pattern",
-    ...(databases.some(([, value]) => value.scope === "session")
-      ? ["type PerSession"]
-      : []),
-    ...(databases.some(([, value]) => value.scope === "user")
-      ? ["type PerUser"]
-      : []),
+    ...(scopes.has("session") ? ["type PerSession"] : []),
+    ...(scopes.has("user") ? ["type PerUser"] : []),
     ...(databases.length > 0 ? ["sqliteDatabase", "type SqliteDb"] : []),
     "UI",
     "type VNode",
-    "Writable",
+    constructsWritable ? "Writable" : "type Writable",
   ];
   const contextDatabaseFields = databases.map(([name]) =>
     `  ${JSON.stringify(name)}: SqliteDb;`
@@ -285,6 +294,23 @@ import {
 
 export interface ${config.name}Input {
   input?: IframeInputData | Default<typeof DEFAULT_INPUT>;
+${
+    config.stateScope === "space" ? "" : `  state?: ${
+      scopedCellType(
+        "IframeStateData",
+        "DEFAULT_STATE",
+        config.stateScope,
+      )
+    };\n`
+  }${
+    config.outputScope === "space" ? "" : `  output?: ${
+      scopedCellType(
+        "IframeOutputData",
+        "DEFAULT_OUTPUT",
+        config.outputScope,
+      )
+    };\n`
+  }
 }
 
 export interface ${config.name}Output {
@@ -296,8 +322,8 @@ export interface ${config.name}Output {
 
 interface IframeContextInput {
   input: IframeInputData;
-  state: Writable<IframeStateData>;
-  output: Writable<IframeOutputData>;
+  state: Writable<IframeStateData | Default<typeof DEFAULT_STATE>>;
+  output: Writable<IframeOutputData | Default<typeof DEFAULT_OUTPUT>>;
 ${contextDatabaseFields}
 }
 
@@ -307,26 +333,22 @@ const IframeContext = pattern<IframeContextInput, IframeContextOutput>(
   (context) => context,
 );
 
-const GUEST_HTML = ${JSON.stringify(guestHtml)};
+const GUEST_HTML = ${moduleString(guestHtml)};
 
-export default pattern<${config.name}Input, ${config.name}Output>(({ input }) => {
-  ${
-    scopedWritable(
-      "state",
-      "IframeStateData",
-      "DEFAULT_STATE",
-      config.stateScope,
-    )
-  }
-  ${
-    scopedWritable(
-      "output",
-      "IframeOutputData",
-      "DEFAULT_OUTPUT",
-      config.outputScope,
-    )
-  }
-${databaseSource(config.databases)}  const context = IframeContext({
+export default pattern<${config.name}Input, ${config.name}Output>(({
+  input,
+${config.stateScope === "space" ? "" : "  state,\n"}${
+    config.outputScope === "space" ? "" : "  output,\n"
+  }}) => {
+${
+    config.stateScope === "space"
+      ? "  const state = new Writable<IframeStateData>(DEFAULT_STATE);\n"
+      : ""
+  }${
+    config.outputScope === "space"
+      ? "  const output = new Writable<IframeOutputData>(DEFAULT_OUTPUT);\n"
+      : ""
+  }${databaseSource(config.databases)}  const context = IframeContext({
     input,
     state,
     output,

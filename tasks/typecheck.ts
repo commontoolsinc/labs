@@ -91,6 +91,10 @@ const GLOBS = [
   "packages/static/*.ts",
   "packages/patterns/*.ts",
   "packages/patterns/*.tsx",
+  // Iframe guests compile as ordinary browser modules. Their generated
+  // pattern wrappers remain under the classic JSX environment owned by
+  // `deno task cfcheck`.
+  "packages/patterns/iframe-*/guest.ts",
   "packages/ts-transformers/test/**/*.test.ts",
   // schema-generator tests, excluding test/fixtures: the `*.input.ts`
   // fixtures name ambient wrappers (Cell, Stream, Writable) without

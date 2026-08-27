@@ -33,6 +33,7 @@ type BridgeCommand = {
   id: string;
   operation:
     | "ping"
+    | "resolve-identity"
     | "write"
     | "sqlite-insert"
     | "sqlite-query"
@@ -51,10 +52,25 @@ type BridgeValues = {
   sessionDatabaseRows: string;
 };
 
+type BridgeWireValue =
+  | null
+  | boolean
+  | number
+  | string
+  | readonly BridgeWireValue[]
+  | { readonly [key: string]: BridgeWireValue };
+
 type BridgeTestResult = {
   generation: string;
   ok: boolean;
+  value?: BridgeWireValue;
   error?: string;
+};
+
+type BridgeResolvedIdentity = {
+  id: string;
+  instanceId: string;
+  scope?: "space" | "user" | "session";
 };
 
 type ContextHandleProbe = {
@@ -221,6 +237,7 @@ async function installBridgeTestHarness(page: Page): Promise<void> {
         state.results[event.data.id] = {
           generation: event.data.generation,
           ok: event.data.ok,
+          ...(event.data.value !== undefined && { value: event.data.value }),
           ...(event.data.error && { error: event.data.error }),
         };
       } else if (event.data?.type === "cf-iframe-bridge-test-ready") {
@@ -248,7 +265,7 @@ async function waitForGuestFrameLoaded(page: Page): Promise<void> {
 async function issueCommand(
   page: Page,
   command: BridgeCommand,
-): Promise<string> {
+): Promise<BridgeTestResult> {
   await installBridgeTestHarness(page);
   await page.evaluate((command) => {
     const visit = (root: Document | ShadowRoot): Element | undefined => {
@@ -301,7 +318,27 @@ async function issueCommand(
         JSON.stringify(context, null, 2),
     );
   }
-  return result.generation;
+  return result;
+}
+
+async function resolveBridgeIdentity(
+  page: Page,
+  resource: "shared" | "user" | "session",
+  id: string,
+): Promise<BridgeResolvedIdentity> {
+  const result = await issueCommand(page, {
+    id,
+    operation: "resolve-identity",
+    resource,
+  });
+  const identity = (result.value as { identity?: BridgeResolvedIdentity })
+    ?.identity;
+  if (!identity?.instanceId) {
+    throw new Error(
+      `cf-iframe resolve ${JSON.stringify(id)} returned no instance identity`,
+    );
+  }
+  return identity;
 }
 
 async function waitForGuestReload(
@@ -459,7 +496,9 @@ describe("cf-iframe bridge with multiple users", () => {
     await Promise.all(pages.map((page) => waitForGuestFrameLoaded(page)));
     const guestGenerations = await Promise.all(
       pages.map((page, index) =>
-        issueCommand(page, { id: `ready-${index}`, operation: "ping" })
+        issueCommand(page, { id: `ready-${index}`, operation: "ping" }).then(
+          (result) => result.generation,
+        )
       ),
     );
 
@@ -470,6 +509,46 @@ describe("cf-iframe bridge with multiple users", () => {
       aliceIdentity.did(),
     );
     expect((await bobShell.state())?.identityDid).toBe(bobIdentity.did());
+
+    const scopedIdentities = await Promise.all(
+      pages.map(async (page, index) => {
+        const [shared, user, session] = await Promise.all([
+          resolveBridgeIdentity(page, "shared", `identity-shared-${index}`),
+          resolveBridgeIdentity(page, "user", `identity-user-${index}`),
+          resolveBridgeIdentity(page, "session", `identity-session-${index}`),
+        ]);
+        return { shared, user, session };
+      }),
+    );
+    for (const resource of ["shared", "user", "session"] as const) {
+      expect(scopedIdentities[0][resource].id).toBe(
+        scopedIdentities[1][resource].id,
+      );
+      expect(scopedIdentities[0][resource].id).toBe(
+        scopedIdentities[2][resource].id,
+      );
+    }
+    expect(scopedIdentities[0].shared.instanceId).toBe(
+      scopedIdentities[1].shared.instanceId,
+    );
+    expect(scopedIdentities[0].shared.instanceId).toBe(
+      scopedIdentities[2].shared.instanceId,
+    );
+    expect(scopedIdentities[0].user.instanceId).toBe(
+      scopedIdentities[1].user.instanceId,
+    );
+    expect(scopedIdentities[0].user.instanceId).not.toBe(
+      scopedIdentities[2].user.instanceId,
+    );
+    expect(scopedIdentities[0].session.instanceId).not.toBe(
+      scopedIdentities[1].session.instanceId,
+    );
+    expect(scopedIdentities[0].session.instanceId).not.toBe(
+      scopedIdentities[2].session.instanceId,
+    );
+    expect(scopedIdentities[1].session.instanceId).not.toBe(
+      scopedIdentities[2].session.instanceId,
+    );
     for (const page of pages) {
       expect(await readBridgeValues(page)).toMatchObject({
         shared: "",
@@ -698,6 +777,13 @@ describe("cf-iframe bridge with multiple users", () => {
 
     await clickCfButton(pages[0], "#bridge-reload");
     await waitForGuestReload(pages[0], guestGenerations[0]);
+    expect(
+      await resolveBridgeIdentity(
+        pages[0],
+        "session",
+        "identity-session-after-reload",
+      ),
+    ).toEqual(scopedIdentities[0].session);
     await Promise.all([
       waitForBridgeRowsContaining(pages[0], [aliceRow, bobRow]),
       waitForBridgeRowsContaining(

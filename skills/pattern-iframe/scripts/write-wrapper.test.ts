@@ -55,6 +55,85 @@ export const DEFAULT_OUTPUT: IframeOutputData = { count: 0 };
 `;
 
 describe("iframe pattern wrapper generator", () => {
+  it("keeps state and output scoped to the active viewer", async () => {
+    const directory = await Deno.makeTempDir({
+      prefix: "pattern-iframe-scopes-",
+    });
+    try {
+      const contract = resolve(directory, "contract.ts");
+      const guest = resolve(directory, "guest.ts");
+      const out = resolve(directory, "main.tsx");
+      await Deno.writeTextFile(
+        contract,
+        `${contractPrefix}
+export const IFRAME_PATTERN = {
+  name: "ScopedState",
+  stateScope: "user",
+  outputScope: "session",
+} as const;
+`,
+      );
+      await Deno.writeTextFile(guest, "document.body.textContent = 'guest';\n");
+
+      const result = await generate(contract, guest, out);
+      expect(result.code, decoder.decode(result.stderr)).toBe(0);
+      const generated = await Deno.readTextFile(out);
+      expect(generated).toContain(
+        "state?: PerUser<Writable<IframeStateData | Default<typeof DEFAULT_STATE>>>;",
+      );
+      expect(generated).toContain(
+        "output?: PerSession<Writable<IframeOutputData | Default<typeof DEFAULT_OUTPUT>>>;",
+      );
+      expect(generated).toMatch(
+        /\(\(\{\s*input,\s*state,\s*output,\s*\}\) => \{/,
+      );
+      expect(generated).not.toContain("new Writable.perUser");
+      expect(generated).not.toContain("new Writable.perSession");
+    } finally {
+      await removeDirectory(directory);
+    }
+  });
+
+  it("hides embedded guest tokens from the host module scanner", async () => {
+    const directory = await Deno.makeTempDir({
+      prefix: "pattern-iframe-module-string-",
+    });
+    try {
+      const contract = resolve(directory, "contract.ts");
+      const guest = resolve(directory, "guest.ts");
+      const html = resolve(directory, "guest.html");
+      const out = resolve(directory, "main.tsx");
+      await Deno.writeTextFile(
+        contract,
+        `${contractPrefix}
+export const IFRAME_PATTERN = { name: "ModuleString" } as const;
+`,
+      );
+      await Deno.writeTextFile(
+        guest,
+        `document.body.dataset.syntax = "import(";\n`,
+      );
+      await Deno.writeTextFile(
+        html,
+        "<!doctype html><body><!-- guest --><!-- PATTERN_IFRAME_SCRIPT --></body>",
+      );
+
+      const result = await generate(contract, guest, out, "--html", html);
+      expect(result.code, decoder.decode(result.stderr)).toBe(0);
+      const generated = await Deno.readTextFile(out);
+      const moduleString = generated.match(/^const GUEST_HTML = (.*);$/m)?.[1];
+      expect(moduleString).toBeDefined();
+      expect(moduleString).not.toContain("import");
+      expect(moduleString).not.toContain("<!--");
+      expect(moduleString).not.toContain("-->");
+      expect(moduleString).toContain("\\u0069mport");
+      expect(moduleString).toContain("\\u003c!--");
+      expect(moduleString).toContain("--\\u003e");
+    } finally {
+      await removeDirectory(directory);
+    }
+  });
+
   it("replaces a forced output symlink without overwriting its source", async () => {
     const directory = await Deno.makeTempDir({
       prefix: "pattern-iframe-symlink-",

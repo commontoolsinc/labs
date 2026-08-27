@@ -29,6 +29,8 @@ import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import {
   type Cell,
   entityIdFrom,
+  popFrame,
+  pushFrame,
   Runtime,
   type RuntimeFetch,
   runtimePresets,
@@ -3271,6 +3273,78 @@ describe("runtime-processor", () => {
         event: "new value",
         awaitCommit: true,
       })).rejects.toThrow("send refused");
+    });
+  });
+
+  describe("direct cell appends", () => {
+    it("keeps object members distinct across independent callers", async () => {
+      const signer = await Identity.fromPassphrase(
+        `direct-cell-push-${crypto.randomUUID()}`,
+      );
+      const space = signer.did();
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("http://localhost/"),
+        storageManager,
+      });
+      try {
+        const schema = {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              optionId: { type: "string" },
+            },
+            required: ["optionId"],
+          },
+          default: [],
+        } as const;
+        const cell = runtime.getCell<Array<{ optionId: string }>>(
+          space,
+          `direct-cell-push-${crypto.randomUUID()}`,
+          schema,
+        );
+        await cell.sync();
+        const seed = runtime.edit();
+        cell.withTx(seed).set([]);
+        expect((await seed.commit()).error).toBeUndefined();
+
+        const processor = Object.assign(
+          Object.create(RuntimeProcessor.prototype),
+          { runtime },
+        ) as RuntimeProcessor;
+        const append = async (value: { optionId: string }) => {
+          const callerFrame = pushFrame({
+            runtime,
+            generatedIdCounter: 0,
+          });
+          try {
+            await processor.handleCellPush({
+              type: RequestType.CellPush,
+              cell: createCellRef(cell),
+              values: [value],
+              awaitCommit: true,
+            });
+          } finally {
+            popFrame(callerFrame);
+          }
+        };
+
+        await append({ optionId: "library" });
+        await append({ optionId: "studio" });
+        await cell.pull();
+
+        expect(cell.get()).toEqual([
+          { optionId: "library" },
+          { optionId: "studio" },
+        ]);
+        const first = cell.key(0).resolveAsCell().getAsNormalizedFullLink();
+        const second = cell.key(1).resolveAsCell().getAsNormalizedFullLink();
+        expect(first.id).not.toBe(second.id);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
     });
   });
 

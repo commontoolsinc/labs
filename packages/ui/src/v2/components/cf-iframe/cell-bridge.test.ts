@@ -47,9 +47,20 @@ describe("cf-iframe cell bridge", () => {
     },
   };
 
+  const runtimeStub = <T extends object>(runtime: T): RuntimeClient =>
+    Object.assign(runtime, {
+      cellInstanceId: (cell: CellRef) =>
+        JSON.stringify({
+          id: cell.id,
+          path: cell.path,
+          scope: cell.scope,
+          space: cell.space,
+        }),
+    }) as unknown as RuntimeClient;
+
   it("turns context properties into described cell capabilities", async () => {
     const requests: unknown[] = [];
-    const runtime = {
+    const runtime = runtimeStub({
       [$conn]: () => ({
         request: (request: { type: RequestType }) => {
           requests.push(request);
@@ -65,7 +76,7 @@ describe("cf-iframe cell bridge", () => {
         unsubscribe: () => Promise.resolve(),
         signal: { aborted: false },
       }),
-    } as unknown as RuntimeClient;
+    });
     const context = new CellHandle(runtime, ref, {
       count: 1,
       database: { id: "db-1" },
@@ -116,7 +127,7 @@ describe("cf-iframe cell bridge", () => {
         },
       },
     };
-    const runtime = {
+    const runtime = runtimeStub({
       [$conn]: () => ({
         request: (
           request: { type: RequestType; cell: CellRef; values?: unknown[] },
@@ -143,7 +154,7 @@ describe("cf-iframe cell bridge", () => {
         unsubscribe: () => Promise.resolve(),
         signal: { aborted: false },
       }),
-    } as unknown as RuntimeClient;
+    });
     const context = new CellHandle(runtime, itemsRef, {
       items: [{ title: "A" }],
     });
@@ -157,6 +168,12 @@ describe("cf-iframe cell bridge", () => {
     const stable = await items.key!(0).resolve!();
     expect(stable.identity).toMatchObject({
       id: "of:item-a",
+      instanceId: JSON.stringify({
+        id: "of:item-a",
+        path: [],
+        scope: "space",
+        space: "did:key:test",
+      }),
       scope: "space",
       path: [],
     });
@@ -175,14 +192,14 @@ describe("cf-iframe cell bridge", () => {
   });
 
   it("adapts plain object properties without a runtime connection", async () => {
-    const runtime = {
+    const runtime = runtimeStub({
       [$conn]: () => ({
         request: () => Promise.reject(new Error("request should not be used")),
         subscribe: () => Promise.resolve(),
         unsubscribe: () => Promise.resolve(),
         signal: { aborted: false },
       }),
-    } as unknown as RuntimeClient;
+    });
     const linked = new CellHandle(runtime, ref);
     const marker = new Date(0);
     const inherited = { hidden: "prototype" };
@@ -219,7 +236,7 @@ describe("cf-iframe cell bridge", () => {
 
   it("discovers context properties that materialize after bridge creation", async () => {
     const requests: unknown[] = [];
-    const runtime = {
+    const runtime = runtimeStub({
       [$conn]: () => ({
         request: (request: { type: RequestType }) => {
           requests.push(request);
@@ -229,7 +246,7 @@ describe("cf-iframe cell bridge", () => {
         unsubscribe: () => Promise.resolve(),
         signal: { aborted: false },
       }),
-    } as unknown as RuntimeClient;
+    });
     const lateRef: CellRef = {
       ...ref,
       schema: { type: "object" },
@@ -282,7 +299,7 @@ describe("cf-iframe cell bridge", () => {
     };
     const databaseSchema = { $ref: "cid:fid1:sqlite-schema" };
     let idleCalls = 0;
-    const runtime = {
+    const runtime = runtimeStub({
       idle: () => {
         idleCalls++;
         return Promise.resolve();
@@ -359,7 +376,7 @@ describe("cf-iframe cell bridge", () => {
         unsubscribe: () => Promise.resolve(),
         signal: { aborted: false },
       }),
-    } as unknown as RuntimeClient;
+    });
     const context = new CellHandle<Record<string, unknown>>(runtime, {
       ...ref,
       schema: true,
@@ -418,7 +435,7 @@ describe("cf-iframe cell bridge", () => {
     let retargeted = false;
     let sqliteQueries = 0;
     let demandedSource: CellHandle<unknown> | undefined;
-    const runtime = {
+    const runtime = runtimeStub({
       idle: () => {
         reachedIdle.resolve();
         return idle.promise;
@@ -498,7 +515,7 @@ describe("cf-iframe cell bridge", () => {
         },
         signal: { aborted: false },
       }),
-    } as unknown as RuntimeClient;
+    });
     const context = new CellHandle<Record<string, unknown>>(runtime, {
       ...ref,
       schema: true,
@@ -527,7 +544,7 @@ describe("cf-iframe cell bridge", () => {
 
   it("ignores inherited resource-kind hints", async () => {
     const requests: Array<{ type: RequestType; cell: CellRef }> = [];
-    const runtime = {
+    const runtime = runtimeStub({
       [$conn]: () => ({
         request: (request: { type: RequestType; cell: CellRef }) => {
           requests.push(request);
@@ -554,7 +571,7 @@ describe("cf-iframe cell bridge", () => {
         unsubscribe: () => Promise.resolve(),
         signal: { aborted: false },
       }),
-    } as unknown as RuntimeClient;
+    });
     const context = new CellHandle<Record<string, unknown>>(runtime, {
       ...ref,
       schema: true,
@@ -576,14 +593,14 @@ describe("cf-iframe cell bridge", () => {
   });
 
   it("reports a cell write the runtime refuses", async () => {
-    const runtime = {
+    const runtime = runtimeStub({
       [$conn]: () => ({
         request: () => Promise.reject(new Error("write refused")),
         subscribe: () => Promise.resolve(),
         unsubscribe: () => Promise.resolve(),
         signal: { aborted: false },
       }),
-    } as unknown as RuntimeClient;
+    });
     const context = new CellHandle(runtime, ref, {
       count: 1,
       database: { id: "db-1" },
@@ -595,7 +612,7 @@ describe("cf-iframe cell bridge", () => {
   });
 
   it("omits writes from read-only cell capabilities", async () => {
-    const runtime = {
+    const runtime = runtimeStub({
       [$conn]: () => ({
         request: (request: { type: RequestType }) =>
           request.type === RequestType.CellPull
@@ -605,7 +622,7 @@ describe("cf-iframe cell bridge", () => {
         unsubscribe: () => Promise.resolve(),
         signal: { aborted: false },
       }),
-    } as unknown as RuntimeClient;
+    });
     const context = new CellHandle(runtime, ref, { locked: "fixed" });
 
     const locked = createCellContextBridge(context).resources.locked;
@@ -618,7 +635,7 @@ describe("cf-iframe cell bridge", () => {
 
   it("sinks the current value synchronously before later changes", () => {
     let subscribed: CellHandle<number> | undefined;
-    const runtime = {
+    const runtime = runtimeStub({
       [$conn]: () => ({
         request: () => Promise.resolve({}),
         subscribe: (cell: CellHandle<number>) => {
@@ -628,7 +645,7 @@ describe("cf-iframe cell bridge", () => {
         unsubscribe: () => Promise.resolve(),
         signal: { aborted: false },
       }),
-    } as unknown as RuntimeClient;
+    });
     const context = new CellHandle(runtime, ref, {
       count: 1,
       database: { id: "db-1" },
@@ -644,14 +661,14 @@ describe("cf-iframe cell bridge", () => {
   });
 
   it("reports a stream event the runtime refuses", async () => {
-    const runtime = {
+    const runtime = runtimeStub({
       [$conn]: () => ({
         request: () => Promise.reject(new Error("event refused")),
         subscribe: () => Promise.resolve(),
         unsubscribe: () => Promise.resolve(),
         signal: { aborted: false },
       }),
-    } as unknown as RuntimeClient;
+    });
     const context = new CellHandle(runtime, ref, {
       count: 1,
       database: { id: "db-1" },
@@ -667,7 +684,7 @@ describe("cf-iframe cell bridge", () => {
   it("exposes SQLite query and exec as methods on one database resource", async () => {
     const requests: unknown[] = [];
     let subscribed: CellHandle<Record<string, unknown>> | undefined;
-    const runtime = {
+    const runtime = runtimeStub({
       [$conn]: () => ({
         request: (request: { type: RequestType }) => {
           requests.push(request);
@@ -689,7 +706,7 @@ describe("cf-iframe cell bridge", () => {
         unsubscribe: () => Promise.resolve(),
         signal: { aborted: false },
       }),
-    } as unknown as RuntimeClient;
+    });
     const context = new CellHandle(runtime, ref, {
       count: 1,
       database: { id: "db-1" },
@@ -753,7 +770,7 @@ describe("cf-iframe cell bridge", () => {
   });
 
   it("rejects malformed SQLite operation inputs before sending a request", async () => {
-    const runtime = {
+    const runtime = runtimeStub({
       [$conn]: () => ({
         request: () => {
           throw new Error("request should not be sent");
@@ -762,7 +779,7 @@ describe("cf-iframe cell bridge", () => {
         unsubscribe: () => Promise.resolve(),
         signal: { aborted: false },
       }),
-    } as unknown as RuntimeClient;
+    });
     const context = new CellHandle(runtime, ref, {
       database: { id: "db-1" },
     });

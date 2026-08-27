@@ -127,6 +127,7 @@ function bridgeCell(
   return {
     identity: {
       id: ref.id,
+      instanceId: cell.runtime().cellInstanceId(ref),
       space: ref.space,
       ...(ref.scope !== undefined && { scope: ref.scope }),
       path: [...ref.path],

@@ -145,9 +145,19 @@ export type BridgeCellPath = Array<string | number>;
 
 /** Stable identity metadata returned with an opaque resolved capability. */
 export type BridgeCellIdentity = {
+  /** Stored document ID, shared by every instance of a scoped Cell. */
   id: string;
+
+  /** Opaque identity for this space-, user-, or session-scoped instance. */
+  instanceId?: string;
+
+  /** Space holding the Cell. */
   space?: string;
+
+  /** Scope which selects the Cell instance. */
   scope?: "space" | "user" | "session";
+
+  /** Path within the stored document. */
   path: BridgeCellPath;
 };
 

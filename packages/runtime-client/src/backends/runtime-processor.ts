@@ -69,6 +69,8 @@ import {
   markUiInputBlindWriteTx,
   normalizeSpaceHost,
   PatternCoverageCollector,
+  popFrame,
+  pushFrame,
   resolveExternalRootRefForStructure,
   Runtime,
   runtimePresets,
@@ -1146,9 +1148,22 @@ export class RuntimeProcessor {
 
   handleCellPush(request: CellPushRequest): void | Promise<void> {
     const tx = this.runtime.edit();
-    const cell = getCell(this.runtime, request.cell) as Cell<FabricValue[]>;
-    const values = request.values.map(mapCellRefsToSigilLinks);
-    cell.withTx(tx).push(...values);
+    // A frame ordinal distinguishes members within one append. The operation
+    // cause distinguishes first members minted by independent client runtimes.
+    const frame = pushFrame({
+      cause: `runtime-client cell push ${crypto.randomUUID()}`,
+      runtime: this.runtime,
+      tx,
+      space: request.cell.space,
+      generatedIdCounter: 0,
+    });
+    try {
+      const cell = getCell(this.runtime, request.cell) as Cell<FabricValue[]>;
+      const values = request.values.map(mapCellRefsToSigilLinks);
+      cell.withTx(tx).push(...values);
+    } finally {
+      popFrame(frame);
+    }
     this.runtime.prepareTxForCommit(tx);
     const commit = tx.commit();
     if (request.awaitCommit) return this.requireCellCommit(commit);

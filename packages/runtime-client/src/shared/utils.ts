@@ -1,5 +1,7 @@
+import { hashOf } from "@commonfabric/data-model/value-hash";
 import { cloneCfcLabelView } from "@commonfabric/runner/cfc/label-view-core";
-import { CellRef } from "@/protocol/mod.ts";
+
+import type { CellRef } from "@/protocol/mod.ts";
 
 /**
  * Renders a thrown value as text, for a message that has to be produced
@@ -27,6 +29,23 @@ export function cellRefToIdentityKey(cell: CellRef): string {
     id: cell.id,
     path: cell.path,
   });
+}
+
+/** Returns an opaque identity for one concrete scoped document instance. */
+export function cellRefToInstanceId(
+  cell: CellRef,
+  identity: { principal: string; sessionId: string },
+): string {
+  const scopeKey = cell.scope === "user"
+    ? `user:${identity.principal}`
+    : cell.scope === "session"
+    ? `session:${identity.principal}:${identity.sessionId}`
+    : "space";
+  return hashOf({
+    purpose: "runtime-client:cell-instance:v1",
+    cell: cellRefToIdentityKey(cell),
+    scopeKey,
+  }).toString();
 }
 
 export function cellRefToKey(cell: CellRef): string {

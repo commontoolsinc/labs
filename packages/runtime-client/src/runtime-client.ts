@@ -75,6 +75,7 @@ import {
   type WireApplyOpResolution,
   type WireOperationFieldSnapshot,
 } from "./protocol/mod.ts";
+import { cellRefToInstanceId } from "./shared/utils.ts";
 
 const operationFieldFromWire = (
   field: WireOperationFieldSnapshot,
@@ -119,6 +120,8 @@ export const $conn = Symbol("$request");
  */
 export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   #conn: InitializedRuntimeConnection;
+  readonly #principal: DID | undefined;
+  readonly #sessionInstanceId = crypto.randomUUID();
   #pendingWrites = false;
   #operationSubscriptions = new Map<
     string,
@@ -131,12 +134,26 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   ) {
     super();
     this.#conn = conn;
+    this.#principal = _options.identity?.did();
     this.#conn.on("console", this._onConsole);
     this.#conn.on("navigaterequest", this._onNavigateRequest);
     this.#conn.on("error", this._onError);
     this.#conn.on("telemetry", this._onTelemetry);
     this.#conn.on("pendingwriteschange", this._onPendingWritesChange);
     this.#conn.on("operationupdate", this._onOperationUpdate);
+  }
+
+  /** Returns an opaque identity for the scoped document instance in `ref`. */
+  cellInstanceId(ref: CellRef): string {
+    if (ref.scope !== undefined && ref.scope !== "space" && !this.#principal) {
+      throw new Error(
+        `Cannot identify a ${ref.scope}-scoped Cell without a runtime identity.`,
+      );
+    }
+    return cellRefToInstanceId(ref, {
+      principal: this.#principal ?? "",
+      sessionId: this.#sessionInstanceId,
+    });
   }
 
   /**

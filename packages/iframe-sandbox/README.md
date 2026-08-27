@@ -126,7 +126,8 @@ const tasks = fabric.cell<Array<{ title: string; done: boolean }>>("tasks");
 await tasks.pull();
 
 const task = await tasks.key(0).resolve();
-console.log(task.identity?.id); // Stable entity document ID.
+console.log(task.identity?.id); // Stored entity document ID.
+console.log(task.identity?.instanceId); // Concrete scoped instance ID.
 
 const stop = task.key("title").sink((title) => console.log(title));
 await task.key("done").set(true); // Still the same task after array reorder.
@@ -134,10 +135,13 @@ await task.key("done").set(true); // Still the same task after array reorder.
 
 The host mints an opaque capability for the resolved cell. The guest receives
 identity metadata for keys and diagnostics, but cannot turn an arbitrary ID into
-authority. `Cell.for(cause)` remains the runtime's construction API for a new
-deterministic cell; it is not an array selector. Existing array objects are
-anchored into entity documents, which is why resolving a positional item can
-return a stable handle.
+authority. `.id` names the stored document and is shared by its scoped
+instances. `.instanceId` is opaque: it is stable across sessions for one PerUser
+instance, differs across users, and differs for each PerSession instance.
+`Cell.for(cause)` remains the runtime's construction API for a new deterministic
+cell; it is not an array selector. Existing array objects are anchored into
+entity documents, which is why resolving a positional item can return a stable
+handle.
 
 Use operation-shaped writes when they express the intent. `push()` carries only
 the appended members and uses the runtime's mergeable append instead of reading
@@ -223,10 +227,10 @@ Each loaded document owns a fresh capability session over a `MessagePort`.
 Requests carry a protocol name, version, numeric request ID, operation, and
 either a named resource or an opaque resolved-cell handle. Cell requests may
 carry a path; push requests carry appended members separately from replacement
-values. `resolve` returns a session-local handle plus stable identity metadata.
-Responses correlate by ID and carry either a result or a structured error. Sinks
-have explicit IDs and are cancelled when the guest cancels, reloads, or sends
-the session-level `disconnect` operation.
+values. `resolve` returns a session-local handle plus stable document and
+scoped-instance identity metadata. Responses correlate by ID and carry either a
+result or a structured error. Sinks have explicit IDs and are cancelled when the
+guest cancels, reloads, or sends the session-level `disconnect` operation.
 
 The complete request, response, or event is encoded with `codec-realm`. This
 preserves Fabric values such as `FabricBytes` instead of relying on structured

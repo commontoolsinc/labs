@@ -102,6 +102,8 @@ const GUEST_HTML = `<!doctype html>
     request("set", { resource, path: [], value });
   const call = (resource, method, value) =>
     request("call", { resource, method, value });
+  const resolveIdentity = (resource) =>
+    request("resolve", { resource, path: [] });
   const sink = async (resource, listener) => {
     const subscription = "guest-" + nextSubscriptionId++;
     subscriptions.set(subscription, listener);
@@ -134,6 +136,8 @@ const GUEST_HTML = `<!doctype html>
     if (command.operation === "ping") {
       await ready;
       if (readyError) throw readyError;
+    } else if (command.operation === "resolve-identity") {
+      return await resolveIdentity(command.resource);
     } else if (command.operation === "write") {
       await set(command.resource, command.value);
     } else if (command.operation === "sqlite-insert") {
@@ -189,11 +193,12 @@ const GUEST_HTML = `<!doctype html>
     if (event.data?.type === "cf-iframe-bridge-test-command") {
       const command = event.data.command;
       void handleCommand(command).then(
-        () => globalThis.parent.parent.postMessage({
+        (value) => globalThis.parent.parent.postMessage({
           type: "cf-iframe-bridge-test-result",
           id: command.id,
           generation,
           ok: true,
+          value,
         }, "*"),
         (error) => {
           globalThis.parent.parent.postMessage({
