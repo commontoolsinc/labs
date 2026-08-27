@@ -39,7 +39,8 @@ cookie when it loads. Do not put it behind a public address.
 - **A pattern index URL**, optionally. With one set, the session also offers
   `search_patterns` and `record_feedback`, so a run can find an existing pattern
   rather than write one from scratch, and publishes what it worked out back to
-  the index.
+  the index. It is also what the Index view reads; without one that view says so
+  and the server answers its route with a 404.
 
 ## Running it
 
@@ -208,6 +209,47 @@ Handle scope is reconstructed rather than recorded. A run keeps one handle
 table, its last, so the timeline takes a handle to be in scope from the step its
 token first appears in — the order the model met them in, which is the order
 that matters for reading a run back.
+
+## The Index view
+
+The header switches between **Runs** — everything above — and **Index**, which
+reads the pattern index the server was configured with. The view is named in the
+address as `?view=index`, so it is a page to reload into and to link someone at.
+It needs `--pattern-index-url`; without one, the route it reads through answers
+404 saying the server was started without an index, and the view shows that.
+
+The page holds no key and addresses no host but this server. It posts a function
+name to `/api/index/call`, and the server signs the request with the fabric
+identity and sends it — so the index sees the operator's own identity, the same
+principal a run writes with. Four functions are reachable, all of them reads:
+`listPatterns`, `listEvents`, `getPattern` and `searchPatterns`. Anything else —
+a publication, a recorded event — is refused by name before the index is
+touched, and the request the server sends is composed field by field rather than
+forwarded, so nothing extra survives the crossing. `getPattern` is called
+without `includeSource`: this surface shows metadata, schemas, dependencies and
+events, and a pattern's source is read through the CLI.
+
+The route sits under `/api/`, so the `Host`, `Origin` and token gates that cover
+every other route cover it too.
+
+Three panes:
+
+- **Patterns** — everything the index holds, by score. A row carries the pattern
+  id, its description and hashtags, a badge per event type counted against it,
+  the weighted score those counts produce, and when it was created; the weights
+  themselves are printed beside the heading. Opening a row reads that pattern's
+  argument and result schemas, its dependencies, and the events you recorded
+  against it. Every identifier is a button that copies the whole of itself.
+- **Your events** — your own event stream, newest first, with a box that filters
+  on any field. The index answers each signer with their own events and nobody
+  else's; the shared reading of what everyone did is the score in the table
+  above.
+- **Search** — the query the runtime's `search_patterns` would make, run by
+  hand. Tags, free text and a limit compose a request, and the request is shown
+  beside the results, because what the pane is for is how the index answers
+  rather than what it answered once. Each hit reads `matched/asked` on its text
+  terms: matching is disjunctive and ranked, so the ratio is what says how close
+  a hit is.
 
 ## How the configuration reaches the run
 

@@ -1,7 +1,10 @@
 import { beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { Identity } from "@commonfabric/identity";
 import { KickoffServer, resolveKickoffConfig } from "../../kickoff/server.ts";
 import type { KickoffSessionListing } from "../../kickoff/sessions.ts";
+import type { HarnessFetch } from "../../src/contracts/http-fetch.ts";
+import { PatternIndexClient } from "../../src/pattern-index/client.ts";
 import {
   HarnessInteractiveChatService,
   type HarnessInteractivePromptLoopFactory,
@@ -47,6 +50,9 @@ const advancingClock = () => {
   };
 };
 
+/** The identity the proxied index client signs with in these tests. */
+const signer = await Identity.fromPassphrase("cf-harness kickoff index proxy");
+
 const config = () =>
   resolveKickoffConfig(
     [
@@ -56,6 +62,23 @@ const config = () =>
       "kickoff-test",
       "--session-db",
       "none",
+    ],
+    {},
+    "/kickoff",
+  );
+
+/** The same configuration, with an index for the proxy route to reach. */
+const configWithIndex = () =>
+  resolveKickoffConfig(
+    [
+      "--fabric-identity",
+      "key.pkcs8",
+      "--fabric-space",
+      "kickoff-test",
+      "--session-db",
+      "none",
+      "--pattern-index-url",
+      "https://index.test/api",
     ],
     {},
     "/kickoff",
@@ -116,6 +139,60 @@ describe("kickoff/server", () => {
     );
     expect(response.status).toBe(200);
     return await response.json();
+  };
+
+  /** What the index client was asked for, as it composed the request. */
+  interface IndexRequest {
+    url: string;
+    body: string;
+  }
+
+  /**
+   * A second server, configured with an index, whose client answers from
+   * `responses` rather than from a deployment. The client is handed in because
+   * the real one reads a keyfile off disk to sign with; what the routes are
+   * about is which requests reach it and which are refused before they do.
+   */
+  const indexServer = async (
+    responses: readonly Response[],
+  ): Promise<
+    { server: KickoffServer; cookie: string; requests: IndexRequest[] }
+  > => {
+    const requests: IndexRequest[] = [];
+    let answered = 0;
+    const fetchFn: HarnessFetch = (input, init) => {
+      requests.push({
+        url: String(input),
+        body: typeof init?.body === "string" ? init.body : "",
+      });
+      const response = responses[answered] ?? Response.json({});
+      answered += 1;
+      return Promise.resolve(response);
+    };
+    const indexed = new KickoffServer(
+      configWithIndex(),
+      (onEvent) =>
+        new HarnessInteractiveChatService({
+          createPromptLoop: answeringLoop,
+          now: advancingClock(),
+          onEvent,
+        }),
+      () =>
+        Promise.resolve(
+          new PatternIndexClient({
+            baseUrl: "https://index.test/api",
+            fetchFn,
+            signer,
+          }),
+        ),
+    );
+    const page = await indexed.handle(getRequest("/"));
+    await page.body?.cancel();
+    return {
+      server: indexed,
+      cookie: page.headers.get("set-cookie")!.split(";")[0],
+      requests,
+    };
   };
 
   describe("GET /api/sessions", () => {
@@ -231,6 +308,167 @@ describe("kickoff/server", () => {
       );
 
       expect(response.status).toBe(400);
+    });
+  });
+
+  describe("POST /api/index/call", () => {
+    /** Posts one proxied read at a server that has an index. */
+    const call = async (
+      indexed: { server: KickoffServer; cookie: string },
+      body: unknown,
+    ): Promise<Response> =>
+      await indexed.server.handle(
+        jsonRequest("/api/index/call", body, { cookie: indexed.cookie }),
+      );
+
+    it("answers an allowlisted read with what the index returned", async () => {
+      const listing = {
+        patterns: [{
+          patternId: "pat-1",
+          description: "Totals an expense list",
+          hashtags: ["expenses"],
+          keywords: [],
+          ownerDid: "did:key:zOwner",
+          createdAt: "2026-08-01T00:00:00.000Z",
+          events: { run_succeeded: 2 },
+          score: 2,
+        }],
+        eventTypes: { run_succeeded: 1 },
+      };
+      const indexed = await indexServer([Response.json(listing)]);
+
+      const response = await call(indexed, { fn: "listPatterns" });
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(listing);
+      expect(indexed.requests[0].url).toBe(
+        "https://index.test/api/listPatterns",
+      );
+      expect(JSON.parse(indexed.requests[0].body)).toEqual({});
+    });
+
+    it("sends only the search fields the page supplied", async () => {
+      const indexed = await indexServer([Response.json({ results: [] })]);
+
+      await call(indexed, {
+        fn: "searchPatterns",
+        body: { tags: ["expenses"], text: "totals", limit: 5, mystery: true },
+      });
+
+      expect(indexed.requests[0].url).toBe(
+        "https://index.test/api/searchPatterns",
+      );
+      expect(JSON.parse(indexed.requests[0].body)).toEqual({
+        tags: ["expenses"],
+        text: "totals",
+        limit: 5,
+      });
+    });
+
+    it("asks for a pattern without its source, whatever the page sent", async () => {
+      const indexed = await indexServer([
+        Response.json({
+          patternId: "pat-1",
+          ownerDid: "did:key:zOwner",
+          createdAt: "2026-08-01T00:00:00.000Z",
+          description: "Totals an expense list",
+          hashtags: [],
+          dependencies: [],
+        }),
+      ]);
+
+      await call(indexed, {
+        fn: "getPattern",
+        body: { patternId: "pat-1", includeSource: true },
+      });
+
+      expect(JSON.parse(indexed.requests[0].body)).toEqual({
+        patternId: "pat-1",
+      });
+    });
+
+    it("answers 400 for getPattern with no pattern named", async () => {
+      const indexed = await indexServer([]);
+
+      const response = await call(indexed, { fn: "getPattern", body: {} });
+
+      expect(response.status).toBe(400);
+      expect((await response.json()).error).toBe("patternId is required");
+      expect(indexed.requests).toEqual([]);
+    });
+
+    it("answers 400 for a function outside the allowlist", async () => {
+      const indexed = await indexServer([]);
+
+      for (
+        const fn of ["recordEvent", "publishPattern", "deletePattern", 7]
+      ) {
+        const response = await call(indexed, {
+          fn,
+          body: { patternId: "pat-1", eventType: "thumbs_up" },
+        });
+        expect(response.status).toBe(400);
+        expect((await response.json()).error).toContain("fn must be one of");
+      }
+      expect(indexed.requests).toEqual([]);
+    });
+
+    it("answers 400 for a body that is not JSON", async () => {
+      const indexed = await indexServer([]);
+
+      const response = await indexed.server.handle(
+        new Request("http://127.0.0.1:8100/api/index/call", {
+          method: "POST",
+          headers: {
+            cookie: indexed.cookie,
+            "content-type": "application/json",
+          },
+          body: "not json",
+        }),
+      );
+
+      expect(response.status).toBe(400);
+      expect(indexed.requests).toEqual([]);
+    });
+
+    it("passes through the status the index gave a request it faulted", async () => {
+      const indexed = await indexServer([
+        Response.json({ error: "unknown pattern" }, { status: 404 }),
+      ]);
+
+      const response = await call(indexed, {
+        fn: "getPattern",
+        body: { patternId: "missing" },
+      });
+
+      expect(response.status).toBe(404);
+      // The message names the function and the status; the index's own body
+      // stays behind, as it does everywhere else a failure is rendered.
+      expect((await response.json()).error).toBe(
+        "pattern index getPattern failed (404)",
+      );
+    });
+
+    it("answers 502 when the index itself failed", async () => {
+      const indexed = await indexServer([
+        Response.json({ error: "datastore unavailable" }, { status: 503 }),
+      ]);
+
+      const response = await call(indexed, { fn: "listPatterns" });
+
+      expect(response.status).toBe(502);
+      expect((await response.json()).error).toContain("listPatterns");
+    });
+
+    it("answers 404 when the server was started without an index", async () => {
+      const response = await server.handle(
+        jsonRequest("/api/index/call", { fn: "listPatterns" }, { cookie }),
+      );
+
+      expect(response.status).toBe(404);
+      expect((await response.json()).error).toContain(
+        "started without a pattern index",
+      );
     });
   });
 
@@ -361,6 +599,29 @@ describe("kickoff/server", () => {
       );
 
       expect(response.status).toBe(403);
+    });
+
+    it("answers 403 for an index read made without the cookie", async () => {
+      const indexed = await indexServer([]);
+      const response = await indexed.server.handle(
+        jsonRequest("/api/index/call", { fn: "listPatterns" }),
+      );
+
+      expect(response.status).toBe(403);
+      expect(indexed.requests).toEqual([]);
+    });
+
+    it("answers 403 for an index read from another origin", async () => {
+      const indexed = await indexServer([]);
+      const response = await indexed.server.handle(
+        jsonRequest("/api/index/call", { fn: "listPatterns" }, {
+          cookie: indexed.cookie,
+          origin: "http://evil.test",
+        }),
+      );
+
+      expect(response.status).toBe(403);
+      expect(indexed.requests).toEqual([]);
     });
 
     it("answers 415 for a task posted as a form submission", async () => {
