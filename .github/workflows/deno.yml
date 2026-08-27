@@ -1567,6 +1567,15 @@ jobs:
             --junit-path=../../test-results/patterns-server-execution-on-${{ matrix.shard }}.xml \
             "${TEST_FILES[@]}"
 
+      - name: 📋 Upload toolshed log on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: toolshed-log-pattern-integration-server-execution-on-${{ matrix.shard }}
+          path: ${{ runner.temp }}/toolshed.log
+          retention-days: 14
+          if-no-files-found: ignore
+
       - name: 📤 Upload test timing data
         if: always()
         uses: actions/upload-artifact@v7
