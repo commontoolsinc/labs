@@ -3,7 +3,6 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
 import {
   $conn,
   $onCellUpdate,
@@ -691,9 +690,9 @@ describe("cf-iframe cell bridge", () => {
           if (request.type === RequestType.SqliteQuery) {
             return Promise.resolve({
               rows: [Object.fromEntries([
-                ["title", realmFromFabricValue("One")],
-                ["constructor", realmFromFabricValue("safe-constructor")],
-                ["__proto__", realmFromFabricValue("safe-prototype")],
+                ["title", "One"],
+                ["constructor", "safe-constructor"],
+                ["__proto__", "safe-prototype"],
               ])],
             });
           }
@@ -753,7 +752,7 @@ describe("cf-iframe cell bridge", () => {
       sql: "SELECT title FROM notes WHERE id = ?",
       params: {
         kind: "positional",
-        values: [realmFromFabricValue(1)],
+        values: [1],
       },
     }, {
       type: RequestType.SqliteExec,
@@ -762,8 +761,8 @@ describe("cf-iframe cell bridge", () => {
       params: {
         kind: "named",
         entries: [
-          ["constructor", realmFromFabricValue("New")],
-          ["__proto__", realmFromFabricValue("Prototype")],
+          ["constructor", "New"],
+          ["__proto__", "Prototype"],
         ],
       },
     }]);
