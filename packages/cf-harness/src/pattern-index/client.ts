@@ -108,8 +108,24 @@ export interface PatternIndexRecordEventResponse {
 }
 
 export interface PatternIndexPublishRequest {
+  /**
+   * The program's content-addressed entry identity — what
+   * `computeEntryIdentity` answers for the same `main` and files. The index
+   * stores a pattern under the identity the publisher computed, so the same
+   * source published twice is the same entry rather than a second copy.
+   */
+  patternId: string;
+
   description: string;
   hashtags: readonly string[];
+
+  /**
+   * The request this pattern was written to answer, kept by the index for
+   * ranking and never returned by a read.
+   */
+  directQuery: string;
+
+  keywords?: readonly string[];
   program: PatternIndexProgram;
   argumentSchema?: JSONSchema;
   resultSchema?: JSONSchema;
@@ -119,6 +135,9 @@ export interface PatternIndexPublishRequest {
 
 export interface PatternIndexPublishResponse {
   patternId: string;
+
+  /** `false` when the index already held this identity, which is not an error. */
+  created: boolean;
 }
 
 /**
@@ -247,16 +266,26 @@ export class PatternIndexClient {
   publishPattern(
     request: PatternIndexPublishRequest,
   ): Promise<PatternIndexPublishResponse> {
-    return this.#call<PatternIndexPublishResponse>("publishPattern", {
-      description: request.description,
-      hashtags: [...request.hashtags],
-      program: request.program,
+    const schemas = {
       ...(request.argumentSchema !== undefined
         ? { argumentSchema: request.argumentSchema }
         : {}),
       ...(request.resultSchema !== undefined
         ? { resultSchema: request.resultSchema }
         : {}),
+    };
+    return this.#call<PatternIndexPublishResponse>("publishPattern", {
+      patternId: request.patternId,
+      program: request.program,
+      meta: {
+        directQuery: request.directQuery,
+        description: request.description,
+        hashtags: [...request.hashtags],
+        ...(request.keywords !== undefined
+          ? { keywords: [...request.keywords] }
+          : {}),
+      },
+      ...(Object.keys(schemas).length > 0 ? { schemas } : {}),
       ...(request.dependencies !== undefined
         ? { dependencies: [...request.dependencies] }
         : {}),

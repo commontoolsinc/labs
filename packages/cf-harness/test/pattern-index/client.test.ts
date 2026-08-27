@@ -159,10 +159,12 @@ describe("PatternIndexClient", () => {
 
   it("posts a publication with its program and declared shapes", async () => {
     const { client, requests } = createClient([
-      jsonResponse({ patternId: "pat-2" }),
+      jsonResponse({ patternId: "pat-2", created: true }),
     ]);
     const response = await client.publishPattern({
+      patternId: "pat-2",
       description: "Doubles a number",
+      directQuery: "double a number",
       hashtags: ["math"],
       program: {
         main: "/main.tsx",
@@ -172,15 +174,20 @@ describe("PatternIndexClient", () => {
     });
     expect(requests[0].url).toBe("https://index.test/api/publishPattern");
     expect(JSON.parse(requests[0].body)).toEqual({
-      description: "Doubles a number",
-      hashtags: ["math"],
+      patternId: "pat-2",
       program: {
         main: "/main.tsx",
         files: [{ name: "/main.tsx", contents: "export default 1;" }],
       },
-      resultSchema: { type: "object" },
+      meta: {
+        directQuery: "double a number",
+        description: "Doubles a number",
+        hashtags: ["math"],
+      },
+      schemas: { resultSchema: { type: "object" } },
     });
     expect(response.patternId).toBe("pat-2");
+    expect(response.created).toBe(true);
   });
 
   it("throws a typed error carrying the status and the index's message", async () => {
