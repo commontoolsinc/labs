@@ -39,6 +39,7 @@ import {
 } from "./space-server.ts";
 import {
   emptyServingLoopStats,
+  refreshDeliveryCheckpointStats,
   registerServingLoopStatsProvider,
   type ServingLoopStats,
 } from "./stats.ts";
@@ -174,6 +175,7 @@ export class ExecutorHost {
   /** The §7 counters, live: static counts merged with per-space state
    * (activeSpaces and watermarkLag read the current SpaceServers). */
   stats(): ServingLoopStats {
+    refreshDeliveryCheckpointStats(this.#stats);
     let watermarkLag = 0;
     let activeSpaces = 0;
     for (const server of this.#spaces.values()) {

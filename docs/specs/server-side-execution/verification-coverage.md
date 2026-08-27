@@ -7293,7 +7293,9 @@ supply; OW29/OW32/OW34 closed):
     failed-state time. Arrival-barrier followers, dirty-input
     settlement, and the served `RetryImmediately` name-resolution path
     spend no budget. Positive recovery persists a recovering state and
-    wakes one retry; flapping never erases spent time. An unchanged
+    wakes one retry, including after storage-manager recreation because the
+    failed boundary is keyed by document instance; flapping never erases spent
+    time. An unchanged
     active failure reaches the explicitly ratified 60-second policy
     boundary, while a current-ACL or `RowLabelCommitError`
     proven-no-commit verdict terminalizes immediately. Typed
@@ -7304,7 +7306,8 @@ supply; OW29/OW32/OW34 closed):
 
     Terminal cover is one entry-local `{status: "needs-attention",
     consequenced: true}` notice plus the per-space unresolved-attention
-    discovery index, keyed by stream sidecar and event ID and protected
+    discovery index, keyed by prototype-safe encodings of stream sidecar and
+    event ID and protected
     from authored writes. The entry stays authoritative and uncompactable
     until resolution. The arrival barrier opens only after the notice's
     wave confirms the whole terminal contribution committed; failed
@@ -7314,9 +7317,11 @@ supply; OW29/OW32/OW34 closed):
     exact server-copied payload and admission provenance, and the
     original user's current session; concurrent and replayed requests
     return the recorded winner. The runtime-client and persistent shell
-    surface carry the complete safe attention object, and reconnect
-    discovery reads the unresolved index back through the authoritative
-    entry.
+    surface carry the complete safe attention object for the active space,
+    and reconnect discovery reads the unresolved index back through the
+    authoritative entry. Health reads recompute active failed-state duration
+    from the checkpoint timestamps rather than freezing it at the last state
+    transition.
 
     Pins cover cumulative flapping and clock skew, typed recovery,
     failed-head versus barrier-follower routing, immediate permanent

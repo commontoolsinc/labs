@@ -460,6 +460,8 @@ export class XRootView extends BaseView implements ShellApp {
   #setSpace(space: DID | undefined, token: number): void {
     if (token !== this.#resolveSpaceToken || space === this.space) return;
     this.space = space;
+    this._eventAttention = [];
+    this._resolvingAttention = new Set();
     // Keep browser OTel span attribution in sync with the resolved space —
     // the telemetry sink lives across navigations.
     this.#telemetry?.setSpace(space);
@@ -471,6 +473,7 @@ export class XRootView extends BaseView implements ShellApp {
   readonly _handleEventNeedsAttention = (
     notice: EventAttentionNotice,
   ): void => {
+    if (notice.space !== this.space) return;
     const key = `${notice.space}\0${notice.eventId}`;
     this._eventAttention = [
       ...this._eventAttention.filter((candidate) =>
@@ -486,14 +489,18 @@ export class XRootView extends BaseView implements ShellApp {
     try {
       const notices = await runtime.listEventAttention(space);
       if (
-        generation !== this._runtimeGeneration || runtime !== this.runtime
+        generation !== this._runtimeGeneration || runtime !== this.runtime ||
+        space !== this.space
       ) return;
       this._eventAttention = [
         ...this._eventAttention.filter((notice) => notice.space !== space),
         ...notices,
       ];
     } catch (error) {
-      if (generation === this._runtimeGeneration) {
+      if (
+        generation === this._runtimeGeneration && runtime === this.runtime &&
+        space === this.space
+      ) {
         console.error("[RootView] Failed to load event attention:", error);
       }
     }

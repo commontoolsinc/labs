@@ -4,6 +4,7 @@ import * as Engine from "../v2/engine.ts";
 import { Server } from "../v2/server.ts";
 import {
   encodeMemoryBoundary,
+  eventAttentionIndexKey,
   type EventAttentionIndexValue,
   getMemoryProtocolFlags,
   type HelloOkMessage,
@@ -133,6 +134,8 @@ describe("event attention resolution", () => {
     const currentIndex = Engine.read(engine, {
       id: SERVER_EXECUTION_ATTENTION_DOC_ID,
     })?.value as EventAttentionIndexValue | undefined;
+    const sidecarKey = eventAttentionIndexKey(sidecarId);
+    const eventKey = eventAttentionIndexKey(eventId);
     Engine.applyCommit(engine, {
       space: SPACE,
       sessionId,
@@ -175,9 +178,9 @@ describe("event attention resolution", () => {
             value: {
               entries: {
                 ...(currentIndex?.entries ?? {}),
-                [sidecarId]: {
-                  ...(currentIndex?.entries?.[sidecarId] ?? {}),
-                  [eventId]: {
+                [sidecarKey]: {
+                  ...(currentIndex?.entries?.[sidecarKey] ?? {}),
+                  [eventKey]: {
                     eventId,
                     sidecarId,
                     phase: attention.phase,
@@ -281,7 +284,7 @@ describe("event attention resolution", () => {
     expect(entries[0].resolution).toEqual({ kind: "dismissed" });
   });
 
-  it("concurrent Retry and Dismiss converge on one recorded resolution", async () => {
+  it("overlapping Retry and Dismiss requests return one recorded resolution", async () => {
     const sessionId = await openSession(ALICE);
     await seedAttention(sessionId, ALICE, "evt-retry-race");
     const retryRequest = {
@@ -362,12 +365,15 @@ describe("event attention resolution", () => {
     const before = Engine.read(engine, {
       id: SERVER_EXECUTION_ATTENTION_DOC_ID,
     })?.value as EventAttentionIndexValue;
-    expect(before.entries?.[SIDECAR]?.["evt-shared"]?.sidecarId).toBe(
-      SIDECAR,
-    );
-    expect(before.entries?.[SECOND_SIDECAR]?.["evt-shared"]?.sidecarId).toBe(
-      SECOND_SIDECAR,
-    );
+    const sharedEventKey = eventAttentionIndexKey("evt-shared");
+    expect(
+      before.entries?.[eventAttentionIndexKey(SIDECAR)]?.[sharedEventKey]
+        ?.sidecarId,
+    ).toBe(SIDECAR);
+    expect(
+      before.entries?.[eventAttentionIndexKey(SECOND_SIDECAR)]?.[sharedEventKey]
+        ?.sidecarId,
+    ).toBe(SECOND_SIDECAR);
 
     const first = await server.resolveEventAttention({
       type: "event.attention.resolve",
@@ -382,9 +388,13 @@ describe("event attention resolution", () => {
     const afterFirst = Engine.read(engine, {
       id: SERVER_EXECUTION_ATTENTION_DOC_ID,
     })?.value as EventAttentionIndexValue;
-    expect(afterFirst.entries?.[SIDECAR]).toBeUndefined();
     expect(
-      afterFirst.entries?.[SECOND_SIDECAR]?.["evt-shared"]?.sidecarId,
+      afterFirst.entries?.[eventAttentionIndexKey(SIDECAR)],
+    ).toBeUndefined();
+    expect(
+      afterFirst.entries?.[eventAttentionIndexKey(SECOND_SIDECAR)]?.[
+        sharedEventKey
+      ]?.sidecarId,
     ).toBe(SECOND_SIDECAR);
 
     const second = await server.resolveEventAttention({
@@ -397,6 +407,27 @@ describe("event attention resolution", () => {
       action: "dismiss",
     });
     expect(second.error).toBeUndefined();
+    expect(
+      Engine.read(engine, { id: SERVER_EXECUTION_ATTENTION_DOC_ID })?.value,
+    ).toEqual({ entries: {} });
+  });
+
+  it("resolves an event whose identifier names an object prototype key", async () => {
+    const sessionId = await openSession(ALICE);
+    await seedAttention(sessionId, ALICE, "__proto__");
+
+    const response = await server.resolveEventAttention({
+      type: "event.attention.resolve",
+      requestId: "prototype-key",
+      space: SPACE,
+      sessionId,
+      eventId: "__proto__",
+      sidecarId: SIDECAR,
+      action: "dismiss",
+    });
+
+    expect(response.error).toBeUndefined();
+    const engine = await server.engineForSpace(SPACE);
     expect(
       Engine.read(engine, { id: SERVER_EXECUTION_ATTENTION_DOC_ID })?.value,
     ).toEqual({ entries: {} });

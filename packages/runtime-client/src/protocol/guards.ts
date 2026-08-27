@@ -139,9 +139,9 @@ export function isIPCRemoteResponse(
 }
 
 /**
- * Is `value` an {@link IPCRemoteNotification}? The disjunction of the eight
- * per-notification guards below, so this admits exactly what one of them
- * admits and adds nothing of its own.
+ * Is `value` an {@link IPCRemoteNotification}? The disjunction of the
+ * per-notification guards below admits exactly what one of them admits and
+ * adds nothing of its own.
  */
 export function isIPCRemoteNotification(
   value: unknown,

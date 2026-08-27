@@ -458,7 +458,9 @@ loop's duty).
   Attempt counts are observations, not the terminal predicate. A
   failed checkpoint write leaves the event and its arrival barrier
   pending; only committed checkpoint age survives restart or lease
-  handoff.
+  handoff. A dispatch-load checkpoint names the failed document instance
+  independently of the storage-manager lifetime, so a new generation of that
+  same load can wake one recovery attempt after manager recreation.
 - A current-ACL authorization denial is immediately permanent only
   when its typed verdict carries the durable ACL revision. A
   `RowLabelCommitError` is likewise a proven-no-commit protocol
@@ -485,12 +487,15 @@ loop's duty).
   the handler ran.
 - An unresolved attention entry cannot compact. The same terminal
   contribution adds a safe summary to the per-space unresolved
-  attention index, keyed first by stream sidecar and then by event ID,
+  attention index, keyed first by prototype-safe encodings of the stream
+  sidecar and then the event ID,
   while the stream entry remains authoritative. Authored commits cannot
   mutate this server-owned index. The
   client retires the speculative echo, emits the complete safe
   `needs-attention` outcome, and keeps a persistent Retry/Dismiss
-  surface. Retry is one authenticated same-space CAS: resolve the
+  surface for the active space; navigation clears the prior space's cards and
+  stale refresh results cannot restore them. Retry is one authenticated
+  same-space CAS: resolve the
   original, append exactly one fresh event with `retryOf`, and remove
   the index item. The server copies the exact captured stream, payload,
   `rendererTrusted`, and `runtimeInjectedEventKeys`, and stamps the

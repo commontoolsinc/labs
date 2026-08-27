@@ -43,6 +43,7 @@ import * as Engine from "@commonfabric/memory/v2/engine";
 import {
   type DeliveryAttention,
   type DeliveryDeferral,
+  eventAttentionIndexKey,
   SERVER_EXECUTION_ATTENTION_DOC_ID,
   type StreamEventEntry,
   type StreamEventsDocValue,
@@ -2421,11 +2422,12 @@ export class SpaceServer implements TransactionSealDestination {
       this.#deliveryStatKey(eventId),
       checkpoint === undefined ? undefined : {
         state: checkpoint.state,
-        spentMs: spentDeliveryFailureMs(
-          checkpoint,
-          this.#deliveryFailureNow(),
-          this.#deliveryFailureBudgetMs(),
-        ),
+        readSpentMs: () =>
+          spentDeliveryFailureMs(
+            checkpoint,
+            this.#deliveryFailureNow(),
+            this.#deliveryFailureBudgetMs(),
+          ),
       },
     );
   }
@@ -2471,7 +2473,7 @@ export class SpaceServer implements TransactionSealDestination {
       id: sidecarId as never,
     })?.value as StreamEventsDocValue | undefined;
     return value?.entries?.find((candidate) =>
-      candidate?.eventId === eventId && candidate.seq === seq
+      candidate?.eventId === eventId && (candidate.seq ?? 0) === seq
     );
   }
 
@@ -3471,7 +3473,11 @@ export class SpaceServer implements TransactionSealDestination {
               space: this.#options.space,
               id: SERVER_EXECUTION_ATTENTION_DOC_ID as never,
               scope: "space",
-              path: ["entries", streamEntry.sidecarId, entry.eventId],
+              path: [
+                "entries",
+                eventAttentionIndexKey(streamEntry.sidecarId),
+                eventAttentionIndexKey(entry.eventId),
+              ],
             }).withTx(tx).set({
               eventId: entry.eventId,
               sidecarId: streamEntry.sidecarId,

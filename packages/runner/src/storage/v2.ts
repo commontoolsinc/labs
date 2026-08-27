@@ -1415,7 +1415,6 @@ export class StorageManager implements IStorageManager {
       this.#dataURISyncs.clear();
       this.#sessionId = crypto.randomUUID();
     } finally {
-      this.#failedLoadKeys.clear();
       this.#schemaRegistryLease?.();
       this.#schemaRegistryLease = undefined;
     }
@@ -1439,7 +1438,6 @@ export class StorageManager implements IStorageManager {
       this.#dataURISyncs.clear();
       this.#sessionId = crypto.randomUUID();
     } finally {
-      this.#failedLoadKeys.clear();
       this.#schemaRegistryLease?.();
       this.#schemaRegistryLease = undefined;
     }
@@ -1648,10 +1646,10 @@ export class StorageManager implements IStorageManager {
     failure: unknown;
     waiters: Set<(failure: unknown) => void>;
   }>();
-  // A positive recovery signal is key-specific: a new generation for a doc
-  // whose prior required load failed. Unrelated loads must not wake a failed
-  // event head or pause its failed-state budget.
-  #failedLoadKeys = new Map<string, string>();
+  // A positive recovery signal is key-specific: a new generation for one doc
+  // names that doc's stable failed boundary. Only a durable checkpoint carrying
+  // the same boundary wakes, so unrelated loads remain inert. The boundary is
+  // stable across manager recreation; the replacement epoch remains unique.
   #nextPendingLoadGeneration = 1;
   readonly #loadRecoveryIdentity = crypto.randomUUID();
   loadRecoveryObserver:
@@ -1681,8 +1679,6 @@ export class StorageManager implements IStorageManager {
     const key = entityKey(address, this.scopeKeyIdentity());
     let entry = this.#pendingLoads.get(key);
     if (entry === undefined) {
-      const failedEpoch = this.#failedLoadKeys.get(key);
-      this.#failedLoadKeys.delete(key);
       entry = {
         count: 0,
         generation: this.#nextPendingLoadGeneration++,
@@ -1690,12 +1686,10 @@ export class StorageManager implements IStorageManager {
         failure: undefined,
         waiters: new Set<(failure: unknown) => void>(),
       };
-      if (failedEpoch !== undefined) {
-        this.loadRecoveryObserver?.({
-          failedEpoch,
-          recoveryEpoch: this.#loadEpoch(entry.generation),
-        });
-      }
+      this.loadRecoveryObserver?.({
+        failedEpoch: this.#loadFailureEpoch(key),
+        recoveryEpoch: this.#loadEpoch(entry.generation),
+      });
     }
     entry.count++;
     this.#pendingLoads.set(key, entry);
@@ -1752,6 +1746,10 @@ export class StorageManager implements IStorageManager {
     return `load:${this.#loadRecoveryIdentity}:${generation}`;
   }
 
+  #loadFailureEpoch(key: string): string {
+    return `load-key:${key}`;
+  }
+
   loadsSettled(keys: readonly string[]): Promise<void> {
     // Dedupe up front: `remaining` counts entries, but the shared onSettled is
     // added once per entry's waiter Set and fires once. A duplicated key would
@@ -1760,23 +1758,15 @@ export class StorageManager implements IStorageManager {
       this.#pendingLoads.has(key)
     );
     if (pending.length === 0) return Promise.resolve();
-    // `registerPendingLoad()` removes a settled entry before it calls waiters,
-    // so retain the captured generation beside the waiter.  Reading the map in
-    // the callback would collapse every completed failure to generation zero.
-    const capturedGenerations = new Map(
-      pending.map((key) => [key, this.#pendingLoads.get(key)!.generation]),
-    );
     return new Promise<void>((resolve, reject) => {
       let remaining = pending.length;
       let firstFailure: ReplicaLoadFailureError | undefined;
       const onSettled = (key: string, failure: unknown) => {
         if (failure !== undefined) {
-          const generation = capturedGenerations.get(key)!;
-          this.#failedLoadKeys.set(key, this.#loadEpoch(generation));
           if (firstFailure === undefined) {
             firstFailure = toReplicaLoadFailureError(
               failure,
-              this.#loadEpoch(generation),
+              this.#loadFailureEpoch(key),
             );
           }
         }

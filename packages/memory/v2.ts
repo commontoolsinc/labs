@@ -327,6 +327,13 @@ export type WatermarkDocValue = { seq: number };
 export const SERVER_EXECUTION_ATTENTION_DOC_ID =
   "of:server-execution-attention";
 
+/** Encode an attention-index map key without admitting JavaScript prototype
+ * names. JSON string literals are injective for strings and always begin with
+ * `"`, so dynamic stream and event identifiers remain ordinary own keys. */
+export function eventAttentionIndexKey(value: string): string {
+  return JSON.stringify(value);
+}
+
 export type UnresolvedEventAttention = {
   eventId: string;
   sidecarId: string;

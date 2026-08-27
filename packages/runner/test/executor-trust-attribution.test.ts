@@ -707,8 +707,9 @@ describe("executor-trust-attribution", () => {
             // Model the typed pre-storage failure after the handler has built
             // its write. OW54 persists that failure, then grants one clean
             // retry; the re-dispatch must resolve its actor from the durable
-            // entry again. Explicit `tx.abort()` is intentionally not used:
-            // that is now a safe terminal error consequence.
+            // entry again. The handler no longer aborts directly; the mocked
+            // commit path aborts internally, mirroring the framework sealing
+            // the typed CommitPreparationError before granting one clean retry.
             const error = {
               name: "CommitPreparationError" as const,
               message: "OW34 replay probe: first commit preparation failed",

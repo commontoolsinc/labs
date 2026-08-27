@@ -489,6 +489,7 @@ describe("XRootView", () => {
           recovery: "explicit-retry",
         },
       };
+      (view as unknown as { space: string }).space = notice.space;
       view._handleEventNeedsAttention(notice);
 
       const markup = templateMarkup(view.render());
@@ -503,6 +504,98 @@ describe("XRootView", () => {
       expect(templateMarkup(view.render())).not.toContain(
         "Event needs attention",
       );
+
+      const dismissNotice = { ...notice, eventId: "evt-dismiss" };
+      view._handleEventNeedsAttention(dismissNotice);
+      await view._resolveEventAttention(dismissNotice, "dismiss");
+      expect(resolutions).toEqual([
+        { notice, action: "retry" },
+        { notice: dismissNotice, action: "dismiss" },
+      ]);
+      expect(templateMarkup(view.render())).not.toContain(
+        "Event needs attention",
+      );
+    } finally {
+      restore();
+    }
+  });
+
+  it("shows attention only for the active space and ignores stale refreshes", async () => {
+    const restore = installBrowserGlobals();
+    try {
+      const { XRootView } = await import("../src/views/RootView.ts");
+      const view = new XRootView();
+      const identity = await Identity.fromPassphrase(
+        "root-view-attention-space-test",
+      );
+      const firstSpace = "did:key:z6Mk-shell-attention-first" as never;
+      const secondSpace = "did:key:z6Mk-shell-attention-second" as never;
+      const firstRefresh = Promise.withResolvers<
+        readonly EventAttentionNotice[]
+      >();
+      (view as unknown as { runtime: unknown }).runtime = {
+        listEventAttention: (space: string) =>
+          space === firstSpace ? firstRefresh.promise : Promise.resolve([]),
+      };
+      const lifecycle = view as unknown as {
+        willUpdate(changed: Map<string, unknown>): void;
+      };
+      const setSpace = (space: string) => {
+        const previous = view.app;
+        view.app = {
+          ...view.app,
+          identity,
+          view: { spaceDid: space } as typeof view.app.view,
+        };
+        lifecycle.willUpdate(
+          new Map([[
+            "app",
+            previous,
+          ]]),
+        );
+      };
+      const notice = (
+        space: string,
+        eventId: string,
+        reason: string,
+      ): EventAttentionNotice => ({
+        space: space as never,
+        eventId,
+        sidecarId: `of:stream-events:${eventId}`,
+        reason,
+        attention: {
+          phase: "dispatch-load",
+          failureClass: "connection",
+          code: "delivery-failure-budget-exhausted",
+          firstFailureAt: 10,
+          lastFailureAt: 70_000,
+          accumulatedFailureMs: 60_000,
+          failureCount: 2,
+          recovery: "explicit-retry",
+        },
+      });
+      const firstNotice = notice(firstSpace, "evt-first", "first-space");
+      const secondNotice = notice(
+        secondSpace,
+        "evt-second",
+        "second-space",
+      );
+
+      setSpace(firstSpace);
+      view._handleEventNeedsAttention(firstNotice);
+      expect(templateMarkup(view.render())).toContain("first-space");
+
+      setSpace(secondSpace);
+      await Promise.resolve();
+      view._handleEventNeedsAttention(firstNotice);
+      view._handleEventNeedsAttention(secondNotice);
+      firstRefresh.resolve([firstNotice]);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const markup = templateMarkup(view.render());
+      expect(markup).toContain("second-space");
+      expect(markup).not.toContain("first-space");
     } finally {
       restore();
     }

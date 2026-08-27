@@ -31,6 +31,7 @@ import {
   type EntityIdLookupResult,
   type EntitySnapshot,
   EventAppendDuplicateError,
+  eventAttentionIndexKey,
   type EventAttentionIndexValue,
   type EventAttentionResolveRequest,
   type EventAttentionResolveResult,
@@ -3054,8 +3055,17 @@ export class Server {
         const indexValue = indexDocument?.value as
           | EventAttentionIndexValue
           | undefined;
-        const sidecarSummaries = indexValue?.entries?.[message.sidecarId];
-        const summary = sidecarSummaries?.[message.eventId];
+        const sidecarKey = eventAttentionIndexKey(message.sidecarId);
+        const eventKey = eventAttentionIndexKey(message.eventId);
+        const indexEntries = indexValue?.entries;
+        const sidecarSummaries = indexEntries !== undefined &&
+            Object.hasOwn(indexEntries, sidecarKey)
+          ? indexEntries[sidecarKey]
+          : undefined;
+        const summary = sidecarSummaries !== undefined &&
+            Object.hasOwn(sidecarSummaries, eventKey)
+          ? sidecarSummaries[eventKey]
+          : undefined;
         if (
           summary === undefined || summary.sidecarId !== message.sidecarId
         ) {
@@ -3136,9 +3146,9 @@ export class Server {
               patches: [{
                 op: "remove",
                 path: Object.keys(sidecarSummaries ?? {}).length === 1
-                  ? `/value/entries/${escapePointer(message.sidecarId)}`
-                  : `/value/entries/${escapePointer(message.sidecarId)}/${
-                    escapePointer(message.eventId)
+                  ? `/value/entries/${escapePointer(sidecarKey)}`
+                  : `/value/entries/${escapePointer(sidecarKey)}/${
+                    escapePointer(eventKey)
                   }`,
               }],
             }],

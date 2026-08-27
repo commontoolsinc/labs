@@ -416,8 +416,8 @@ export type ServingLoopStats = {
      * reads as a growing count rather than a single event. Nonzero is
      * not by itself a fault (a revoked-then-remounted session heals in
      * a cycle or two); a count that grows without `processed` moving
-     * names a load that never heals, and the WARN beside each deferral
-     * carries the failing doc key and the error. */
+     * names a load that never heals. The head's debug record carries the
+     * failing doc key and error; its durable checkpoint carries the state. */
     loadParkDeferrals: number;
 
     /** Typed failures observed for the arrival-order head itself. Barrier
@@ -598,13 +598,29 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
 
 type ActiveDeliveryCheckpointStat = {
   state: "failed" | "recovering";
-  spentMs: number;
+  readSpentMs: () => number;
 };
 
 const activeDeliveryCheckpoints = new WeakMap<
   ServingLoopStats,
   Map<string, ActiveDeliveryCheckpointStat>
 >();
+
+/** Refreshes delivery gauges from the active durable checkpoints. Failed-state
+ * time is read now rather than frozen at the checkpoint's last transition. */
+export const refreshDeliveryCheckpointStats = (
+  stats: ServingLoopStats,
+): void => {
+  const rows = activeDeliveryCheckpoints.get(stats);
+  if (rows === undefined) return;
+  stats.events.deliveryDeferralsActive = rows.size;
+  stats.events.deliveryFailuresActive =
+    [...rows.values()].filter((row) => row.state === "failed").length;
+  stats.events.maxAccumulatedDeliveryFailureMs = [...rows.values()].reduce(
+    (max, row) => Math.max(max, row.readSpentMs()),
+    0,
+  );
+};
 
 /** Maintain the process-wide delivery gauges from the per-space servers that
  * own the underlying durable checkpoints. The rows stay out of the serialized
@@ -621,13 +637,7 @@ export const updateDeliveryCheckpointStats = (
   }
   if (checkpoint === undefined) rows.delete(key);
   else rows.set(key, checkpoint);
-  stats.events.deliveryDeferralsActive = rows.size;
-  stats.events.deliveryFailuresActive =
-    [...rows.values()].filter((row) => row.state === "failed").length;
-  stats.events.maxAccumulatedDeliveryFailureMs = [...rows.values()].reduce(
-    (max, row) => Math.max(max, row.spentMs),
-    0,
-  );
+  refreshDeliveryCheckpointStats(stats);
 };
 
 /** The `derivedCommitsBySpace` cap (the settle.series bounding

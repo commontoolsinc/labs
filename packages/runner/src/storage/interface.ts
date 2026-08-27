@@ -90,8 +90,9 @@ export interface IStorageError {
 }
 
 /** Typed producer evidence for a required replica load that failed before an
- * at-most-once handler could dispatch. The scheduler carries this value; it
- * never classifies policy from error text. */
+ * at-most-once handler could dispatch. The scheduler receives typed failure
+ * evidence; error text may inform `failureClass`, but it never constitutes
+ * durable `permanentEvidence`. */
 export type ReplicaLoadFailure = {
   failureClass: DeliveryFailureClass;
   recoveryEpoch: string;
@@ -478,9 +479,9 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    */
   loadsSettled?(keys: readonly string[]): Promise<void>;
 
-  /** The next generation of the SAME required load is a causal recovery
-   * wake. `failedEpoch` names the failed boundary recorded durably on the
-   * event; `recoveryEpoch` names the replacement generation. Carrying both
+  /** A new generation of the SAME required load is a causal recovery wake.
+   * `failedEpoch` is stable for the document across manager recreation;
+   * `recoveryEpoch` uniquely names the replacement generation. Carrying both
    * prevents an unrelated document recovery from authorizing a retry. */
   loadRecoveryObserver?:
     | ((recovery: {

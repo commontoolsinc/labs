@@ -2894,9 +2894,9 @@ export class Scheduler {
       this.queueExecution();
       return;
     }
-    // WARN per deferral, naming the failing doc keys and the error: a
-    // deferral that never clears is a user action that never lands, and
-    // `events.loadParkDeferrals` counts what the log spells out.
+    // The head's debug record names the failing doc keys and error;
+    // `events.loadParkDeferrals` counts every head and barrier deferral, while
+    // the durable checkpoint and terminal attention surface persistent failure.
     this.dropEvent(
       event,
       `Event deferred: required replica load failed before dispatch ` +

@@ -35,6 +35,7 @@ import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import {
   decodeMemoryBoundary,
+  eventAttentionIndexKey,
   SERVER_EXECUTION_ATTENTION_DOC_ID,
   streamEntriesDocId,
   type StreamEventsDocValue,
@@ -1312,7 +1313,15 @@ describe("Phase 3 events-down (serving side)", () => {
       realConsoleError(...args);
     };
     try {
-      result.key("bump").send({ kind: "poison-1" });
+      let poisonAckStatus: string | undefined;
+      (result.key("bump") as unknown as {
+        send(
+          value: unknown,
+          onCommit: (tx: { status(): { status: string } }) => void,
+        ): unknown;
+      }).send({ kind: "poison-1" }, (tx) => {
+        poisonAckStatus = tx.status().status;
+      });
       await clientRuntime.idle();
       await clientRuntime.storageManager.synced();
       await waitUntil(
@@ -1359,13 +1368,20 @@ describe("Phase 3 events-down (serving side)", () => {
       });
       expect(consequenceCommitsNaming(poison1.eventId).length).toBe(1);
       expect(droppedWriteReports).toEqual([]);
+      await waitUntil(
+        () => poisonAckStatus !== undefined,
+        "the terminal durable acknowledgment",
+      );
+      expect(poisonAckStatus).toBe("error");
       const attentionIndex = Engine.read(engine, {
         id: SERVER_EXECUTION_ATTENTION_DOC_ID,
       })?.value as {
         entries?: Record<string, Record<string, { sidecarId?: string }>>;
       } | undefined;
       expect(
-        attentionIndex?.entries?.[sidecarId]?.[poison1.eventId]?.sidecarId,
+        attentionIndex?.entries?.[eventAttentionIndexKey(sidecarId)]?.[
+          eventAttentionIndexKey(poison1.eventId)
+        ]?.sidecarId,
       ).toBe(sidecarId);
       const poisonRunsAtTerminal = probeRuns.get("poison-1");
       await waitUntil(
@@ -3985,6 +4001,9 @@ describe("Phase 3 events-down (serving side)", () => {
         "the failed-head checkpoint to commit",
       );
       deliveryNow += 60_000;
+      expect(host!.stats().events.maxAccumulatedDeliveryFailureMs).toBe(
+        60_000,
+      );
       rejectWaveCommitWhen = (batch) =>
         JSON.stringify(batch.operations).includes('"attention"');
       // A new load generation is a positive recovery wake. The load still
