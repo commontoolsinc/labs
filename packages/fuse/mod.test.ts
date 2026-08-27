@@ -10,6 +10,7 @@ import {
   DEFAULT_CFC_XATTR_NAMESPACE,
   defaultCfcWritebackStatePath,
   disconnectedWriteErrno,
+  finalizeCommittedSourceWrite,
   isConnectionWriteFailure,
   parseCfcXattrNamespace,
   rootSpaceLookupNames,
@@ -204,6 +205,34 @@ Deno.test("source writeback hands its receipt to the finalize that rebuilds .src
       "bridge.finalizeSourceWritePath(writeTarget.target, receipt)",
     ),
     "source writeback must hand the update receipt to the finalize",
+  );
+});
+
+Deno.test("source projection failures after commit become warnings, not rejected writes", async () => {
+  const receipt = {
+    status: "committed" as const,
+    ref: { identity: "A".repeat(43), symbol: "default" },
+    revisionId: "revision-committed-before-finalize",
+    detachedOrigin: null,
+    refresh: { status: "completed" as const },
+  };
+  const failure = new Error("projection rebuild failed");
+
+  const failed = await finalizeCommittedSourceWrite(receipt, () => {
+    throw failure;
+  });
+  assertEquals(failed, {
+    status: "failed",
+    warning:
+      `Source revision revision-committed-before-finalize committed as ` +
+      `cf:module/${"A".repeat(43)}#default, but refreshing the FUSE ` +
+      `projection failed: projection rebuild failed`,
+    error: failure,
+  });
+
+  assertEquals(
+    await finalizeCommittedSourceWrite(receipt, () => Promise.resolve()),
+    { status: "completed" },
   );
 });
 

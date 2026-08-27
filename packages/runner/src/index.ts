@@ -222,6 +222,7 @@ export {
   preparePieceSourceTransitionBaseline,
   type RunSyncedCommitResult,
   type RunSyncedOptions,
+  type RunSyncedWithCommitOptions,
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
   SEALING_RECEIPT_REFUSAL,

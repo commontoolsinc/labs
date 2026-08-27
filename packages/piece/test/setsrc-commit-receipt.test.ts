@@ -6,6 +6,7 @@ import {
   getPatternIdentityRef,
   getPieceSourceRevisions,
   type Pattern,
+  PatternSetupPostCommitError,
   Runtime,
   type RuntimeProgram,
 } from "@commonfabric/runner";
@@ -133,25 +134,58 @@ describe("setsrc commit receipt", () => {
     const piece = await pieces.create(markedProgram("v1"), { input: {} });
     await runtime.idle();
     const originalSyncPattern = pieces.syncPattern.bind(pieces);
+    const originalRunPatternUpdate = pieces.runPatternUpdate.bind(pieces);
     const originalWarn = console.warn;
+    const cellPrototype = Object.getPrototypeOf(piece.getCell()) as {
+      getMetaRaw: (field: string, options?: unknown) => unknown;
+    };
+    const originalGetMetaRaw = cellPrototype.getMetaRaw;
+    let postCommitFailureReported = false;
+    let sourceHistoryReadsAfterReceipt = 0;
     console.warn = () => {};
     pieces.syncPattern = () => {
       throw new Error("injected post-commit refresh failure");
+    };
+    pieces.runPatternUpdate = (async (...args) => {
+      try {
+        return await originalRunPatternUpdate(...args);
+      } catch (error) {
+        if (error instanceof PatternSetupPostCommitError) {
+          postCommitFailureReported = true;
+        }
+        throw error;
+      }
+    }) as typeof pieces.runPatternUpdate;
+    cellPrototype.getMetaRaw = function (field, options) {
+      if (postCommitFailureReported && field === "pieceSourceHistory") {
+        sourceHistoryReadsAfterReceipt++;
+        throw new Error(
+          "the commit receipt must not be verified by rereading source history",
+        );
+      }
+      return originalGetMetaRaw.call(this, field, options);
     };
 
     try {
       const receipt = await piece.setPattern(markedProgram("v2"));
 
+      expect(postCommitFailureReported).toBe(true);
+      expect(sourceHistoryReadsAfterReceipt).toBe(0);
       expect(receipt.status).toBe("committed");
       expect(receipt.refresh).toEqual({
         status: "failed",
         warning: "injected post-commit refresh failure",
       });
+      // The assertions below deliberately inspect history after the guard has
+      // proved setPattern itself did not. Restore ordinary reads first.
+      postCommitFailureReported = false;
       expect(getPatternIdentityRef(piece.getCell())).toEqual(receipt.ref);
       expect(getPieceSourceRevisions(piece.getCell()).at(-1)?.revisionId)
         .toBe(receipt.revisionId);
     } finally {
       pieces.syncPattern = originalSyncPattern;
+      pieces.runPatternUpdate = originalRunPatternUpdate;
+      cellPrototype.getMetaRaw = originalGetMetaRaw;
       console.warn = originalWarn;
     }
   });
@@ -171,7 +205,20 @@ describe("setsrc commit receipt", () => {
         piece.getCell().withTx(tx),
         pattern,
         undefined,
-        { expectedPatternIdentity: ref },
+        {
+          expectedPatternIdentity: ref,
+          // Ownership is refused before source setup. Supplying an unreachable
+          // transition keeps this test about that ordering while satisfying
+          // the receipt API's required novelty contract.
+          pieceSourceTransition: {
+            revisionId: crypto.randomUUID(),
+            baseline: { kind: "unavailable" },
+            timestamp: Date.now(),
+            operation: "edit",
+            origin: null,
+            expected: { pattern: ref, origin: null, revisionId: null },
+          },
+        },
       )).rejects.toThrow(
         "a committed pattern setup receipt requires an unbound result cell",
       );

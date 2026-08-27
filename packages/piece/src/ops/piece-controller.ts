@@ -5006,7 +5006,7 @@ async function executePatternUpdate(
       argumentSchema: JSONSchema,
     ) => void;
     repository?: string;
-    sourceTransition?: PieceSourceTransition;
+    sourceTransition: PieceSourceTransition;
   },
 ): Promise<{
   cell: Cell<unknown>;

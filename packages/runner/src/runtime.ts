@@ -135,6 +135,7 @@ import {
   Runner,
   type RunSyncedCommitResult,
   type RunSyncedOptions,
+  type RunSyncedWithCommitOptions,
 } from "./runner.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -3403,9 +3404,7 @@ export class Runtime {
     resultCell: Cell<any>,
     pattern: Pattern | Module,
     inputs: any,
-    options: RunSyncedOptions & {
-      expectedPatternIdentity: { identity: string; symbol: string };
-    },
+    options: RunSyncedWithCommitOptions,
   ): Promise<RunSyncedCommitResult<any>> {
     return this.runner.runSyncedWithCommit(
       resultCell,

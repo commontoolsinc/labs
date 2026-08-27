@@ -1435,8 +1435,8 @@ export class PiecesController<T = unknown> {
       ) => void;
       /** Repository locator written atomically with pattern setup. */
       repository?: string;
-      /** Source lifecycle change written atomically with pattern setup. */
-      sourceTransition?: PieceSourceTransition;
+      /** Fresh source lifecycle revision written atomically with setup. */
+      sourceTransition: PieceSourceTransition;
     },
   ): Promise<{
     /** Cell view reconciled to the pattern current after post-commit work. */

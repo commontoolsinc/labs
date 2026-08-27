@@ -1062,8 +1062,22 @@ export interface RunSyncedOptions {
   ) => void;
   /** Repository locator written atomically with pattern setup. */
   patternRepository?: string;
-  /** Source lifecycle change written atomically with pattern setup. */
+  /** Source lifecycle change written atomically with ordinary pattern setup. */
   pieceSourceTransition?: PieceSourceTransition;
+}
+
+/** Options for a pattern setup whose fresh source revision proves a commit. */
+export interface RunSyncedWithCommitOptions extends RunSyncedOptions {
+  /** Pattern pointer which must still be current inside the transaction. */
+  expectedPatternIdentity: { identity: string; symbol: string };
+  /**
+   * Fresh source revision written by this transaction.
+   *
+   * Required because storage elides wholly redundant transactions before they
+   * reach the server. The unique revision is the novelty which makes a
+   * successful verdict proof that storage accepted this particular setup.
+   */
+  pieceSourceTransition: PieceSourceTransition;
 }
 
 type SetupValidationOptions = {
@@ -5067,9 +5081,9 @@ export class Runner {
   }
 
   /**
-   * Runs a pattern and returns the accepted setup transaction's receipt.
+   * Runs a pattern source update and returns its accepted transaction receipt.
    *
-   * A resolved call is proof that storage accepted this transaction. Four
+   * A resolved call is proof that storage accepted this transaction. Five
    * conditions make that so, and each is enforced here rather than inferred
    * from the caller's options or its runtime, so narrowing one cannot quietly
    * downgrade the receipt into a claim nothing checked:
@@ -5087,14 +5101,11 @@ export class Runner {
    *   the real store;
    * - a commit that storage rejects throws, and never falls through to the
    *   post-commit work that a receipt-less run tolerates;
+   * - the required source transition appends a fresh revision, so the setup
+   *   cannot be elided as a wholly redundant transaction before reaching
+   *   storage;
    * - a setup that recorded no pattern pointer throws, because a receipt
    *   naming no pattern is not a receipt.
-   *
-   * One property of the store is still the caller's to respect: a transaction
-   * whose writes all match what storage already holds is elided before it is
-   * sent, so a receipt for a wholly redundant setup reports acceptance of a
-   * commit the server never saw. `setPattern`'s source transition appends a
-   * fresh revision, which is what keeps its commit non-empty.
    *
    * @throws PatternSetupPostCommitError when the transaction commits and the
    * work that refreshes the running piece then fails. Its `.commit` is the
@@ -5104,9 +5115,7 @@ export class Runner {
     resultCell: Cell<any>,
     pattern: Pattern | Module,
     inputs: any,
-    options: RunSyncedOptions & {
-      expectedPatternIdentity: { identity: string; symbol: string };
-    },
+    options: RunSyncedWithCommitOptions,
   ): Promise<RunSyncedCommitResult<any>> {
     if (resultCell.tx?.status().status === "ready") {
       throw new Error(
@@ -5119,6 +5128,15 @@ export class Runner {
     // the transaction the receipt would describe.
     if (this.runtime.sealDestinationInstalled) {
       throw new Error(SEALING_RECEIPT_REFUSAL);
+    }
+    if (options.pieceSourceTransition === undefined) {
+      // TypeScript callers cannot omit this, but the runtime boundary is also
+      // used from JavaScript. Without a fresh revision a redundant setup can
+      // be elided locally and would mint a receipt for a commit storage never
+      // saw, so fail closed rather than relying on a caller's discipline.
+      throw new Error(
+        "a committed pattern setup receipt requires a fresh source transition",
+      );
     }
     const result = await this.#runSynced(
       resultCell,

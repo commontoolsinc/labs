@@ -13,6 +13,7 @@ import {
   NAME,
   type Pattern,
 } from "../src/builder/types.ts";
+import type { Cell } from "../src/cell.ts";
 import { Runtime } from "../src/runtime.ts";
 import { entityKey } from "../src/scheduler/keys.ts";
 import { validateSchemaValue } from "../src/cfc/mod.ts";
@@ -28,9 +29,12 @@ import {
   extractDefaultValues,
   getPatternIdentityRef,
   getPatternSetupIdentityRef,
+  getPieceSourceSnapshot,
   mergeObjects,
   mergeSchemaDefaults,
   PatternSetupPostCommitError,
+  type PieceSourceTransition,
+  preparePieceSourceTransitionBaseline,
   schemaAcceptsOpaqueCellValue,
   schemaHasDefaultValue,
   SEALING_RECEIPT_REFUSAL,
@@ -76,6 +80,63 @@ function setupTrusted(
     argument as never,
     resultCell as never,
   );
+}
+
+async function compileReceiptPattern(
+  runtime: Runtime,
+  marker: string,
+): Promise<Pattern> {
+  return await runtime.patternManager.compilePattern({
+    main: "/main.tsx",
+    files: [{
+      name: "/main.tsx",
+      contents: [
+        "import { pattern } from 'commonfabric';",
+        "interface Args { label?: string }",
+        "export default pattern<Args, { marker: string }>(() => ({",
+        `  marker: ${JSON.stringify(marker)},`,
+        "}));",
+      ].join("\n"),
+    }],
+  }, { space });
+}
+
+async function receiptSourceTransition(
+  runtime: Runtime,
+  resultCell: Cell<unknown>,
+): Promise<PieceSourceTransition> {
+  const expected = getPieceSourceSnapshot(resultCell);
+  if (expected === undefined) {
+    throw new Error("the receipt fixture has no source snapshot");
+  }
+  return {
+    revisionId: crypto.randomUUID(),
+    baseline: await preparePieceSourceTransitionBaseline(
+      runtime,
+      resultCell,
+      expected,
+    ),
+    timestamp: Date.now(),
+    operation: "edit",
+    origin: null,
+    expected,
+  };
+}
+
+/** Transition for tests which must refuse before source setup is reached. */
+function unreachableReceiptSourceTransition(): PieceSourceTransition {
+  return {
+    revisionId: crypto.randomUUID(),
+    baseline: { kind: "unavailable" },
+    timestamp: Date.now(),
+    operation: "edit",
+    origin: null,
+    expected: {
+      pattern: { identity: "of:fid1:unreachable", symbol: "default" },
+      origin: null,
+      revisionId: null,
+    },
+  };
 }
 
 describe("runPattern", () => {
@@ -1737,30 +1798,27 @@ describe("setup/start", () => {
   });
 
   it("runSyncedWithCommit returns the pattern accepted by its setup transaction", async () => {
-    const pattern = (marker: string): Pattern => ({
-      argumentSchema: { type: "object", properties: {} },
-      resultSchema: {
-        type: "object",
-        properties: { marker: { type: "string" } },
-      },
-      result: { marker },
-      nodes: [],
-    });
     const resultCell = runtime.getCell(space, "runSynced commit receipt");
+    const initialPattern = await compileReceiptPattern(runtime, "v1");
+    const nextPattern = await compileReceiptPattern(runtime, "v2");
 
     await runtime.runSynced(
       resultCell,
-      trustExecutable(runtime, pattern("v1")),
+      initialPattern,
       {},
     );
     const previous = getPatternIdentityRef(resultCell);
     expect(previous).toBeDefined();
+    const pieceSourceTransition = await receiptSourceTransition(
+      runtime,
+      resultCell,
+    );
 
     const result = await runtime.runSyncedWithCommit(
       resultCell,
-      trustExecutable(runtime, pattern("v2")),
+      nextPattern,
       {},
-      { expectedPatternIdentity: previous! },
+      { expectedPatternIdentity: previous!, pieceSourceTransition },
     );
 
     expect(result.commit.pattern).toEqual(getPatternIdentityRef(resultCell));
@@ -1768,23 +1826,23 @@ describe("setup/start", () => {
   });
 
   it("runSyncedWithCommit carries its receipt through post-commit failures", async () => {
-    const pattern = (marker: string): Pattern => ({
-      argumentSchema: { type: "object", properties: {} },
-      resultSchema: { type: "object", properties: {} },
-      result: { marker },
-      nodes: [],
-    });
     const resultCell = runtime.getCell(
       space,
       "runSynced post-commit receipt",
     );
+    const initialPattern = await compileReceiptPattern(runtime, "v1");
+    const nextPattern = await compileReceiptPattern(runtime, "v2");
     await runtime.runSynced(
       resultCell,
-      trustExecutable(runtime, pattern("v1")),
+      initialPattern,
       {},
     );
     const previous = getPatternIdentityRef(resultCell);
     expect(previous).toBeDefined();
+    const pieceSourceTransition = await receiptSourceTransition(
+      runtime,
+      resultCell,
+    );
 
     const runner = runtime.runner as unknown as {
       syncCellsForRunningPattern(
@@ -1813,9 +1871,9 @@ describe("setup/start", () => {
       try {
         await runtime.runSyncedWithCommit(
           resultCell,
-          trustExecutable(runtime, pattern("v2")),
+          nextPattern,
           {},
-          { expectedPatternIdentity: previous! },
+          { expectedPatternIdentity: previous!, pieceSourceTransition },
         );
       } catch (error) {
         reported = error;
@@ -1830,6 +1888,33 @@ describe("setup/start", () => {
     } finally {
       runner.syncCellsForRunningPattern = originalSync;
     }
+  });
+
+  it("runSyncedWithCommit refuses a receipt without a fresh source transition", async () => {
+    const pattern: Pattern = {
+      argumentSchema: { type: "object", properties: {} },
+      resultSchema: {},
+      result: {},
+      nodes: [],
+    };
+    const resultCell = runtime.getCell(
+      space,
+      "runSyncedWithCommit no-op receipt refusal",
+    );
+    const executable = trustExecutable(runtime, pattern);
+    await runtime.runSynced(resultCell, executable, {});
+    const previous = getPatternIdentityRef(resultCell);
+    expect(previous).toBeDefined();
+
+    await expect(runtime.runSyncedWithCommit(
+      resultCell,
+      executable,
+      {},
+      // JavaScript callers can bypass the required TypeScript field; the
+      // runtime boundary must still refuse rather than minting a receipt for
+      // the zero-write setup this exact fixture produces.
+      { expectedPatternIdentity: previous! } as never,
+    )).rejects.toThrow("requires a fresh source transition");
   });
 
   it("runSyncedWithCommit refuses to issue a receipt while sealing into a wave", async () => {
@@ -1875,6 +1960,7 @@ describe("setup/start", () => {
             identity: "of:fid1:expected",
             symbol: "default",
           },
+          pieceSourceTransition: unreachableReceiptSourceTransition(),
         },
       )).rejects.toThrow(SEALING_RECEIPT_REFUSAL);
       // Refused at the boundary, so nothing reached the wave to be withdrawn.
@@ -1938,7 +2024,10 @@ describe("setup/start", () => {
         resultCell,
         trustExecutable(serving, pattern),
         {},
-        { expectedPatternIdentity: previous! },
+        {
+          expectedPatternIdentity: previous!,
+          pieceSourceTransition: unreachableReceiptSourceTransition(),
+        },
       )).rejects.toThrow(SEALING_RECEIPT_REFUSAL);
       expect(sealed).toEqual([]);
     } finally {
@@ -1976,6 +2065,7 @@ describe("setup/start", () => {
             identity: "of:fid1:expected",
             symbol: "default",
           },
+          pieceSourceTransition: unreachableReceiptSourceTransition(),
         },
       )).rejects.toThrow("requires an unbound result cell");
     } finally {
@@ -2014,6 +2104,7 @@ describe("setup/start", () => {
             identity: "of:fid1:expected",
             symbol: "default",
           },
+          pieceSourceTransition: unreachableReceiptSourceTransition(),
         },
       )).rejects.toThrow("commit refused by storage");
     } finally {
@@ -2053,7 +2144,10 @@ describe("setup/start", () => {
         resultCell,
         trustExecutable(runtime, pattern),
         {},
-        { expectedPatternIdentity: previous! },
+        {
+          expectedPatternIdentity: previous!,
+          pieceSourceTransition: unreachableReceiptSourceTransition(),
+        },
       )).rejects.toThrow("without recording a pattern identity");
     } finally {
       runner.setupInternal = originalSetupInternal;

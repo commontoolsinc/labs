@@ -9,6 +9,7 @@
 
 import { parseArgs } from "@std/cli/parse-args";
 
+import type { PatternUpdateReceipt } from "@commonfabric/piece/ops";
 import { linkRefFrom } from "@commonfabric/runner/shared";
 
 import {
@@ -208,6 +209,36 @@ export function decodeSourceWriteText(
       .decode(buffer);
   } catch {
     return undefined;
+  }
+}
+
+export type CommittedSourceFinalizeResult =
+  | { status: "completed" }
+  | { status: "failed"; warning: string; error: unknown };
+
+/**
+ * Run local FUSE projection work after a source transaction has committed.
+ *
+ * A failure here cannot undo the receipt and therefore must not reject the
+ * filesystem write. Returning it as a warning keeps the durable outcome and
+ * the local projection outcome separate at the same boundary as Piece does.
+ */
+export async function finalizeCommittedSourceWrite(
+  receipt: PatternUpdateReceipt,
+  finalize: () => Promise<void>,
+): Promise<CommittedSourceFinalizeResult> {
+  try {
+    await finalize();
+    return { status: "completed" };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      status: "failed",
+      warning: `Source revision ${receipt.revisionId} committed as ` +
+        `cf:module/${receipt.ref.identity}#${receipt.ref.symbol}, but ` +
+        `refreshing the FUSE projection failed: ${message}`,
+      error,
+    };
   }
 }
 
@@ -1823,28 +1854,19 @@ export async function main(argv: string[] = Deno.args) {
           return EACCES;
         }
 
+        let receipt: PatternUpdateReceipt;
         try {
-          const receipt = await piece.setPattern({
+          receipt = await piece.setPattern({
             main: baseMain,
             mainExport: baseMainExport,
             files: updatedFiles,
             sourceRoots: program.sourceRoots,
             dataFiles: program.dataFiles,
           }, { dangerouslyAllowIncompatibleSchema });
-          bridge.writeSourceErrorLog(writeTarget.target, "");
-          markExistingReady();
-          await bridge.finalizeSourceWritePath(writeTarget.target, receipt);
-          reconcileCfcWritebacks("source flush post-finalize");
-          markExistingFinalized();
-          if (handle.version === flushVersion) {
-            handle.dirty = false;
-            handle.truncatePending = false;
-          }
-          writeStats.flushed++;
-          console.log(`[write-trace] flush-ok ino=${handle.ino} kind=source`);
-          return 0;
         } catch (e) {
-          // Write compile error to error.log
+          // No receipt means no source transaction committed. Report the
+          // write as failed; every operation after this catch is local
+          // projection work and cannot negate the durable outcome.
           const errorMsg = e instanceof Error ? e.message : String(e);
           if (isConnectionWriteFailure(e)) {
             noteWriteFailure(e);
@@ -1856,6 +1878,31 @@ export async function main(argv: string[] = Deno.args) {
           markExistingFailed(errorMsg);
           return EACCES;
         }
+
+        bridge.writeSourceErrorLog(writeTarget.target, "");
+        markExistingReady();
+        const finalized = await finalizeCommittedSourceWrite(
+          receipt,
+          () => bridge.finalizeSourceWritePath(writeTarget.target, receipt),
+        );
+        if (finalized.status === "failed") {
+          if (isConnectionWriteFailure(finalized.error)) {
+            // The source is already durable, but the mount should still enter
+            // degraded mode when its projection refresh discovers an outage.
+            noteWriteFailure(finalized.error);
+          }
+          console.error(`[source] ${finalized.warning}`);
+          bridge.writeSourceErrorLog(writeTarget.target, finalized.warning);
+        }
+        reconcileCfcWritebacks("source flush post-finalize");
+        markExistingFinalized();
+        if (handle.version === flushVersion) {
+          handle.dirty = false;
+          handle.truncatePending = false;
+        }
+        writeStats.flushed++;
+        console.log(`[write-trace] flush-ok ino=${handle.ino} kind=source`);
+        return 0;
       }
 
       if (
