@@ -127,9 +127,10 @@ the default pattern and starts each registered piece to obtain its name and
 pattern metadata. It does not enumerate every stored piece root.
 
 `cf piece inspect --pattern-identity` prints one piece's source pin — pattern
-identity, export symbol, current source revision when the piece keeps a log, and
-whether the identity's source is retained in the space — without running the
-piece and without pulling its input, result, or link graph.
+identity, export symbol, current source revision when the piece keeps a log, the
+origin it follows when it follows one, and whether the identity's source is
+retained in the space — without running the piece and without pulling its input,
+result, or link graph.
 
 `cf piece survey` reads a holder's own collection — the enumeration `piece ls`
 cannot provide — one cheap identity read per member, the holder last, and emits
@@ -161,6 +162,17 @@ are grouped (`--group-size`), so a group boundary is a resume point: a piece
 already on its row's target reads as landed and is not rewritten, which makes
 re-invoking the same command the resume. Applying implies no verdict — the
 verification is `cf piece survey --diff`, a separate invocation by design.
+
+Each write detaches its piece from the origin it follows: what it runs
+afterwards is the source the plan names. That is recorded rather than gated —
+the survey reads the origin into the row's `expect.origin` and every report row
+for that piece carries it, on the dry run as much as under `--apply`, so what an
+apply would detach is in hand while it is still a decision. A row the run wrote
+carries a second value, the origin its write actually detached, which is the one
+to re-attach from: only the pattern reference is a precondition, so a piece
+whose origin alone moved since the survey is still written and detached off what
+it holds at the write. The report names both when they differ, and says so.
+Re-attaching afterwards is by hand.
 
 `--apply` refuses to start over a row whose prior source is not retained
 (`expect.retained: false`), because such a piece cannot be returned once it has

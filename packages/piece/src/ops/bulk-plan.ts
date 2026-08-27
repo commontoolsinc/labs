@@ -75,6 +75,29 @@ export interface PieceExpect {
   retained: boolean;
 
   /**
+   * The origin the piece followed when the survey read it, exactly as the
+   * piece records it; absent when it was detached then.
+   *
+   * A record of what the plan was built against, and no claim about what any
+   * later run does. A retarget detaches the origin the piece holds when its
+   * write commits, which is this one only while nothing moved it in between
+   * — and only the reference pair is a precondition, so a piece whose origin
+   * alone moved is still written. What a run detached rides its own report
+   * row as `ApplyRow.detachedOrigin`
+   * ([bulk-apply.ts](./bulk-apply.ts)), and that is the value to re-attach
+   * from; this one disagreeing with it is what tells an operator the plan
+   * had gone stale.
+   *
+   * The recorded spelling alone. `PieceOrigin` carries two more fields, the
+   * canonical URL and the kind, and `classifyOrigin` derives both from this
+   * string — the URL against the host this deployment routes the space to —
+   * so recording either would put a re-derivable fact in the artifact in a
+   * spelling that reads differently elsewhere. `RestoreOutcome.origin`
+   * spells the same fact the same way.
+   */
+  origin?: string;
+
+  /**
    * The revision the piece is at, when it already keeps a source-revision log.
    * A piece with no log yet — a legacy piece — has none until its first
    * transition appends a baseline revision, so a survey cannot read one for it.
@@ -446,6 +469,14 @@ export function deriveRollbackPlan(
     return [{
       piece: row.piece,
       ...(row.phase === undefined ? {} : { phase: row.phase }),
+      // No `origin`: the retarget this reverses detached the piece, so a
+      // detached piece is the precondition, and carrying the forward row's
+      // origin would claim the reversal detaches something already gone.
+      // Re-attaching is not the restore's to do either — a restore detaches
+      // in its own right (`docs/specs/piece-source-lifecycle.md`), and the
+      // only re-attachment the runtime has, `follow`, resolves the origin
+      // NOW and adopts whatever source it currently ships, which is not the
+      // reference a rollback promises to land.
       expect: {
         patternIdentity: row.op.patternIdentity,
         symbol: row.op.symbol,
@@ -564,6 +595,7 @@ function isPlanRow(value: unknown): value is PiecePlanRow {
     expect.patternIdentity === "" ||
     typeof expect.symbol !== "string" || expect.symbol === "" ||
     typeof expect.retained !== "boolean" ||
+    !isOptionalName(expect.origin) ||
     !isOptionalName(expect.revisionId) ||
     !isOptionalName(expect.documentHash)
   ) return false;

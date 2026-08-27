@@ -7246,8 +7246,12 @@ describe("piece pull materialization", () => {
     try {
       const firstUpdate = controller.setPattern(firstProgram);
       await firstRunReturned.promise;
+      // Resolves rather than rejects: the transition committed, so the
+      // injected post-commit failure is not this call's failure. It reports
+      // what that committed transition detached, which for a piece following
+      // no origin is nothing.
       await expect(controller.setPattern(winnerProgram)).resolves
-        .toBeUndefined();
+        .toEqual({ detachedOrigin: null });
       expect(getPatternIdentityRef(piece)).toEqual(
         runtime.patternManager.getArtifactEntryRef(winnerPattern),
       );

@@ -6,6 +6,7 @@ import {
   getPatternIdentityRef,
   Runtime,
   type RuntimeProgram,
+  setPatternSource,
   sourceDocKey,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
@@ -147,6 +148,18 @@ describe("bulk-survey", () => {
     return holder;
   }
 
+  /** Stamp the origin a piece follows, as a create from a URL would. */
+  async function stampOrigin(
+    piece: PieceController,
+    origin: string,
+  ): Promise<void> {
+    const { error } = await runtime.editWithRetry((tx) => {
+      setPatternSource(piece.getCell(), tx, origin);
+    });
+    if (error !== undefined) throw error;
+    await runtime.idle();
+  }
+
   function collectionOf(holder: PieceController) {
     return {
       kind: "collection" as const,
@@ -229,6 +242,47 @@ describe("bulk-survey", () => {
       });
       expect(builderRun.plan.rows).toHaveLength(1);
       expect(builderRun.plan.rows[0].expect.retained).toBe(false);
+    });
+
+    it("records the origin a piece follows, and none for a detached one", async () => {
+      const followed = await pieces.create(generationProgram("a"), {
+        input: {},
+      });
+      const detached = await pieces.create(generationProgram("a"), {
+        input: {},
+      });
+      await stampOrigin(followed, "https://origins.test/member.tsx");
+      const holder = await seedHolder([followed, detached]);
+
+      const survey = await surveyPieces(pieces, {
+        selector: collectionOf(holder),
+      });
+
+      // A retarget detaches the piece it writes, so the row records what
+      // the run would detach and what re-attaching by hand takes.
+      expect(survey.plan.rows[0].expect.origin).toBe(
+        "https://origins.test/member.tsx",
+      );
+      expect(survey.plan.rows[1].expect.origin).toBeUndefined();
+      expect(survey.plan.rows[2].expect.origin).toBeUndefined();
+    });
+
+    it("records an origin this runtime cannot resolve, which a retarget detaches all the same", async () => {
+      const followed = await pieces.create(generationProgram("a"), {
+        input: {},
+      });
+      await stampOrigin(followed, "not-a-url");
+      const holder = await seedHolder([followed]);
+
+      const survey = await surveyPieces(pieces, {
+        selector: collectionOf(holder),
+      });
+
+      // Classifying this string drops it — it names no place a source can
+      // be resolved from — while the write detaches it like any other, so
+      // the row records what the piece stores rather than what
+      // classification made of it.
+      expect(survey.plan.rows[0].expect.origin).toBe("not-a-url");
     });
 
     it("reports retained false when the stored source cannot verify", async () => {
