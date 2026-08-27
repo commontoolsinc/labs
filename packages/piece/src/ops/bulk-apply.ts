@@ -95,19 +95,34 @@ export interface ApplyRow {
   warning?: string;
   /**
    * The origin the plan recorded for this piece, absent when the plan
-   * recorded none. A retarget's write detaches the piece from its origin —
-   * the source it runs afterwards is one a human chose, not one the origin
-   * ships — so this names what the run detaches, or on a dry run what it
-   * would; the verdict says which, an `applied` row having detached it and
-   * any other row not.
+   * recorded none. A survey's reading, carried verbatim: it says what the
+   * piece followed when the plan was made and nothing about this run.
    *
    * A field of its own rather than a `warning`, which is a fact about a
    * write that landed and so cannot reach the dry run — the one moment the
-   * operator can still decide. Nothing re-attaches: re-attaching is by
-   * hand, from this string. See
+   * operator can still decide what to do about a detach. See
    * [docs/features/piece-bulk-operations.md](../../../../docs/features/piece-bulk-operations.md).
    */
   origin?: string;
+  /**
+   * The origin this run's write actually detached, present only on a row
+   * this run wrote and only when that write detached one.
+   *
+   * Separate from {@link ApplyRow.origin} because the two can differ and the
+   * difference is the operator's to see. Only the pattern reference is a
+   * precondition of a retarget, so a piece whose origin alone moved since
+   * the survey is still written — and detached off the origin it holds NOW,
+   * not the one the plan recorded. Reporting the recorded one would send an
+   * operator re-attaching by hand to the wrong origin, which is worse than
+   * recording nothing, a wrong record being confidently actionable.
+   *
+   * Substituting it silently would be a smaller lie and still a lie: a plan
+   * that has gone stale is itself worth knowing, so both values ride the
+   * row and the report names both when they disagree. Absent on a row where
+   * the write detached nothing, which — beside a recorded `origin` — is
+   * exactly the case a substitution would have hidden.
+   */
+  detachedOrigin?: string;
   /**
    * The row's wall-clock cost in milliseconds, present on every row an
    * apply session began work on: a row reclassified as landed, moved, or
@@ -181,6 +196,13 @@ export interface WriteOutcome {
   refused?: string;
   /** What the runtime warned about a write that landed anyway. */
   warning?: string;
+  /**
+   * The origin the write detached, when it detached one. The write step is
+   * the only place this can be observed honestly — the detach happens
+   * there, and a value read anywhere earlier is a value the write may have
+   * moved off. See {@link ApplyRow.detachedOrigin}.
+   */
+  detachedOrigin?: string;
 }
 
 /**
@@ -280,6 +302,11 @@ function classify<Op extends ReferenceOp>(
  * describe the row rather than its outcome, so every report of a row spreads
  * these rather than assembling its own — a row reported down one path and
  * not another is how one of them would go missing from a stop.
+ *
+ * What the run OBSERVED does not belong here and is added by the path that
+ * observed it: `detachedOrigin` exists only where a write happened, and
+ * carrying it from the plan row is what made the plan's stale reading
+ * readable as the run's own.
  */
 function carriedFields<Op extends ReferenceOp>(
   row: WorkRow<Op>,
@@ -628,6 +655,13 @@ export async function applyPlan<Op extends ReferenceOp>(
             piece: row.piece,
             ...carried,
             verdict: "applied",
+            // The write's own observation, beside the plan's record rather
+            // than over it: this row is the only one that has both, and a
+            // disagreement between them is what tells the operator their
+            // plan went stale before the run reached it.
+            ...(outcome?.detachedOrigin === undefined
+              ? {}
+              : { detachedOrigin: outcome.detachedOrigin }),
             ...(outcome?.warning === undefined
               ? {}
               : { warning: outcome.warning }),

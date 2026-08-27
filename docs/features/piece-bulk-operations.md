@@ -188,7 +188,9 @@ the source was saved and something after it complained — so a warned row is
 still complete, and the warning rides the report rather than a console nobody
 keeps. A row's `origin` is neither: it is a fact about the plan's row rather
 than about this run's outcome, so it rides every verdict, the dry run's
-included — which is the only moment the detach below is still a decision.
+included — which is the only moment the detach below is still a decision. Its
+`detachedOrigin` is the matching fact about the outcome, and rides only a row
+this run wrote.
 
 `complete` is true when every row reached what the run was for and no session
 boundary failed: under an apply, every row landed or applied; on a dry run,
@@ -210,10 +212,24 @@ as part of the plan; a piece still carrying that origin could be repointed
 afterwards to whatever the origin ships, which is not what the plan's
 reviewer approved.
 
-The detach is recorded rather than gated. The survey reads the origin into the
-row's `expect.origin`, and the apply carries it onto every report row for that
-piece, so both the artifact and the report name what the run detaches.
-Re-attaching afterwards is by hand, from that string. Nothing re-attaches on
+The detach is recorded rather than gated, and recorded twice over, because a
+survey's reading of an origin and a write's are not the same fact. The survey
+reads the origin into the row's `expect.origin` and the apply carries that
+onto every report row, labelled as the plan's. A row this run wrote carries a
+second value beside it — `detachedOrigin`, the origin the write actually
+detached, taken from the snapshot its transaction committed against.
+
+The two disagree when the plan went stale before the run reached the row.
+Only the `{identity, symbol}` pair is a retarget's precondition, so a piece
+whose origin alone moved since the survey is still written, and is detached
+off the origin it holds then rather than the one the plan recorded — including
+the case where it holds none by that point and the write detaches nothing.
+Reporting the recorded value there would send an operator re-attaching by hand
+to an origin the run never touched, which is worse than recording nothing: a
+wrong record is confidently actionable. Substituting the live value silently
+would be a smaller lie and still a lie, so both ride the row, the report names
+both when they differ, and re-attaching is from the report rather than from
+the plan. Re-attaching afterwards is by hand. Nothing re-attaches on
 its own: the runtime's `follow` resolves an origin as it currently stands and
 adopts whatever source it now ships, which is not the reference the plan or
 its rollback promises to land, and a restore detaches in its own right by

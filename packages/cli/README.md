@@ -159,8 +159,12 @@ Each write detaches its piece from the origin it follows: what it runs
 afterwards is the source the plan names. That is recorded rather than gated —
 the survey reads the origin into the row's `expect.origin` and every report row
 for that piece carries it, on the dry run as much as under `--apply`, so what an
-apply would detach is in hand while it is still a decision. Re-attaching
-afterwards is by hand, from the string the report names.
+apply would detach is in hand while it is still a decision. A row the run wrote
+carries a second value, the origin its write actually detached, which is the one
+to re-attach from: only the pattern reference is a precondition, so a piece
+whose origin alone moved since the survey is still written and detached off what
+it holds at the write. The report names both when they differ, and says so.
+Re-attaching afterwards is by hand.
 
 `--apply` refuses to start over a row whose prior source is not retained
 (`expect.retained: false`), because such a piece cannot be returned once it has
