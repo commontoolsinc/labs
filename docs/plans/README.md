@@ -19,6 +19,9 @@ a record: archive it to `docs/history/plans/` following the procedure in
   remaining owner decisions and blocked stages for exchange rules.
 - [CFC TypeScript authoring](cfc_typescript_authoring.md) sequences the
   TypeScript and JSX authoring surface for CFC metadata.
+- [`cf-code-editor` co-presence](cf-code-editor-copresence.md) adds an
+  ephemeral Cloudflare WebSocket plane for live participant names, carets, and
+  selections while Memory remains the sole authority for document contents.
 - [First-class serializable factories](first-class-serializable-factories.md)
   sequences the implementation of durable pattern, module, and handler
   factories.
