@@ -32,11 +32,38 @@ tables with the v2 basis index — and partly a build. The spec §5
 deletion list is enforced by deleting on main and *not rebuilding*,
 with the survival test as the gate on anything that feels needed.
 
-## Coordination state (2026-08-26) — read this first
+## Coordination state (2026-08-27) — read this first
 
 The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
+
+**Delta 2026-08-27: the lunch-poll-vote FILE entry LIFTS (8/8); the
+default-app reload STEP does NOT (7/10). The patterns skip census is
+now ONE entry and NO file-level entry in any suite.** Both campaigns ran
+at main `4b70949ac` on one ON-built binary, fresh store + own 97xx port +
+ON posture probe per run, PID-only teardown, `gtimeout 600` never raised,
+quiet and loaded interleaved — and at **two posture changes from every
+archived campaign, both strictly harder**: the space-root ensure is ON
+(the production default the CI ON lanes returned to at #6248, so the
+archived `SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false` no longer matches the
+lane), and the toolshed self-sources its pattern `API_URL` on the run port
+— the corrected source authority the 2026-08-26 default-app RCA
+prescribed, which removes the split-source artifact that produced that
+campaign's only red. Lunch: 8/8 green in 17–18 s, and the member's own
+store discriminator negative in all eight (every space carries
+`patternIdentity` and a 141–198-op materialization commit; the red
+signature is a 4-commit guest space with none). Default-app: 7/10, three
+reds all carrying the entry's current charge verbatim
+(`eventInvocationCount: 7`, `notebookActionCount: 0`, no bound notebook
+action state) — two of them (a03, a07) with r06/r09's keyless
+`pattern-load-error` discriminator, which is the first fresh OBSERVATION
+of that never-root-caused member since it went to
+absence-of-observation on 2026-08-24, and one (a04) with a live but
+incomplete piece matching no stated member. The remaining entry is the
+last thing between the arc and the flip's list-EMPTY bar. Full ledgers,
+classifications, and posture rationale: verification-coverage.md OW45's
+STEP-ENTRY and LUNCH-POLL blocks.
 
 **Delta 2026-08-26: the default-app reload STEP's post-#6292 gate is
 9/10 — NO LIFT. The older read-side residues are likely closed; the
@@ -56,9 +83,11 @@ root-caused. The STEP entry and guard therefore stay, reworded to the
 new observed charge; the 10/10 lift bar is unchanged. Full ledger and
 store/log discriminators:
 [`ow45-default-app-reload-post-6292-remeasure-2026-08-26.md`](../history/plans/server-execution-v2/optimize/ow45-default-app-reload-post-6292-remeasure-2026-08-26.md).
-The current patterns skip census is THREE entries: this default-app
-STEP, the lunch-poll-vote FILE entry, and the topic-board pivot-baseline
-STEP. The flip still requires the list to be empty.
+That census — THREE patterns entries: this default-app STEP, the
+lunch-poll-vote FILE entry, and the topic-board pivot-baseline STEP —
+has since fallen twice (#6316's topic-board lift, and the lunch lift in
+the 2026-08-27 delta above). The flip still requires the list to be
+empty.
 
 **Delta 2026-08-24 (this PR): the b04 client-start DEATH closed by
 CATCH-UP-AND-START (RULED 2026-08-24); the 10/10 gate found the arm-B

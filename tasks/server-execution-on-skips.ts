@@ -191,6 +191,65 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
   // The product smell the flake used to witness stays tracked as
   // verification-coverage.md OW60, not as a flaky test.
   patterns: [
+    {
+      // The current charge is a direct CI ON failure, not the invalid
+      // split-source launcher topology root-caused in the OW45 RCA. The
+      // unskip probe at 66a969ca0 ran this exact step in ON shard 5 and
+      // failed at its unchanged 300 s condition bound. Its final client
+      // diagnostics reported all seven invocation traces but no bound
+      // notebook action state, with stored note chips present and none
+      // rendered. The run had no pattern-swap-setup-error, recursive-schema
+      // error, or pattern-load-error, so that older signature is not the
+      // reason for this skip. verification-coverage.md OW45 carries the
+      // full run and job evidence. The entry lifts on the established 10/10
+      // quiet-and-loaded gate under the current source-authority posture;
+      // the flip PR needs this list empty.
+      file: "integration/default-app.test.ts",
+      step: "should persist and reload every rapidly created notebook note",
+      phase: "phase-7",
+      reason: "Direct CI ON unskip probe at head 66a969ca0, run " +
+        "33008274232, shard 5: the log proved this exact step ran with " +
+        "no listed skip, then it failed after 5m22s at waitForCondition's " +
+        "unchanged 300000ms bound. Final client diagnostics reported " +
+        "eventInvocationCount=7 and notebookInvocationCount=7, but " +
+        "isNotebook=false, notesLength=0, notebookActionCount=0, 84 " +
+        "stored UI note chips, and zero rendered note chips. The run had " +
+        "zero pattern-swap-setup-error, recursive-schema errors, and " +
+        "pattern-load-error, so this is distinct from the split-source " +
+        "off-repository launcher failure root-caused by the OW45 RCA. " +
+        "The current CI failure's cause is not yet assigned. Lifts on " +
+        "10/10 quiet-and-loaded ON under the current source-authority " +
+        "posture.",
+    },
+    // The lunch-poll-vote FILE entry is LIFTED (2026-08-27). Its bar was
+    // NOT the old 10/10: the 2026-08-26 owner ruling superseded that with
+    // an approximately eight-run re-baseline, a red-first mechanism
+    // regression, and eight post-fix runs (verification-coverage.md OW45).
+    // The regression and the first eight runs landed with #6378 — the
+    // served event reached `ProfileHome.inSpace()` before the anonymous
+    // target name was cached and `retries: false` dropped its
+    // `RetryImmediately` signal, so the guest's ~98-101-op
+    // program-materialization transaction was never issued; the scheduler
+    // now preserves the served carriage across that name-resolution
+    // requeue. This lift adds the re-baseline AT THE CURRENT LANE POSTURE:
+    // 8/8 GREEN in 17-18 s at main 4b70949ac, ON-built binary (sha256
+    // 5018e589dc54b19a…), fresh store + own 97xx port + posture probe per
+    // run, 4 quiet / 4 loaded interleaved — and, unlike every archived
+    // campaign, with the space-root ensure ON (the production default; the
+    // ON lanes stopped opting out at #6248) and the toolshed's own
+    // pattern-source `API_URL` set to the run port (the split-source
+    // launcher defect the OW45 RCA root-caused). The member's own store
+    // discriminator is negative in 8/8: the red signature is a guest
+    // profile space of exactly 4 commits with NO `patternIdentity`, and
+    // every space of every run here carries `patternIdentity` plus a
+    // 141-198-operation materialization commit. Counters across the eight:
+    // zero pattern-load-error, zero pattern-swap-setup-error, zero
+    // catch-up activations or failures, zero terminal deferred-start
+    // deaths, zero load-park deferrals, zero schema-doc-quarantine. The
+    // entry's history — the 2026-08-19 swatch-stall lift, #5744's
+    // client-start re-skip, the 2026-08-24 gate that closed b04 and
+    // narrowed the charge to the write-side member — is preserved in git
+    // history and in OW45's LUNCH-POLL FILE ENTRY'S OWN GATE block.
     // The sqlite identity pair's two FILE entries were LIFTED (OW53
     // CLOSED, 2026-08-22): the sqlite builtins consumed the RUNTIME's
     // ambient identity — the SERVICE, on a serving runtime — where the

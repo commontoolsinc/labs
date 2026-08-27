@@ -5282,10 +5282,15 @@ supply; OW29/OW32/OW34 closed):
   (2026-08-22): the test-side pass closed the step's own interim-race
   half and ISOLATED the residue as the OW45 row's real arm-B client
   starvation, so the entry now names that product charge, not a test
-  flake). The current census (2026-08-26) is THREE patterns entries:
-  default-app's reload STEP, lunch-poll-vote's FILE entry, and the
-  topic-board pivot-baseline STEP. They gate the FLIP — whose bar is
-  the list EMPTY — not the land. Rows, one per
+  flake). That 2026-08-26 census — THREE patterns entries: default-app's
+  reload STEP, lunch-poll-vote's FILE entry, and the topic-board
+  pivot-baseline STEP — has since fallen twice. #6316 (2026-08-26) lifted
+  the topic-board STEP with its content-addressed arrival-witness fix, and
+  the lunch-poll-vote FILE entry LIFTED 2026-08-27 on its own
+  owner-directed re-baseline (8/8; the LUNCH-POLL block below). **The
+  current census (2026-08-27) is ONE patterns entry — default-app's reload
+  STEP — and NO file-level entry in any suite.** It gates the FLIP —
+  whose bar is the list EMPTY — not the land. Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
   lifts:
   - **OW45 — the profile piece's PROGRAM-materialization write path
@@ -6082,6 +6087,69 @@ supply; OW29/OW32/OW34 closed):
     note action or assign the new failure's root cause. The STEP entry is
     restored with this current charge. Its bound guard and separate lift bar
     remain.
+    **THE STEP ENTRY'S LIFT CAMPAIGN AT THE CORRECTED POSTURE, 2026-08-27:
+    7/10 — NO LIFT, and the charge REPRODUCES LOCALLY for the first time.**
+    Method: ON binary at main `4b70949ac` (sha256 `5018e589dc54b19a1…`,
+    re-verified into every run's ledger; a mismatch aborts the run), fresh
+    store and own 97xx port and ON posture probe per run, LLM masked,
+    PID-only teardown with a port-free check, the STEP entry neutralized in
+    the working tree for all ten runs (zero skip prints, step verified RAN
+    per run), `gtimeout 600` never raised, five quiet and five loaded
+    interleaved. TWO posture changes from the archived campaigns, both
+    strictly harder and both deliberate: the space-root ensure is **ON**
+    (the production default — #6248 put the CI ON lanes back on it, so the
+    archived `SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false` no longer matches
+    the lane a lifted step would run in), and the toolshed process now gets
+    the run port as its pattern-source `API_URL`, which is exactly the
+    corrected source authority the RCA above prescribed (`port_8000_holder`
+    `none` in every run; zero `pattern-swap-setup-error` and zero
+    recursive-schema across all ten — the split-source artifact is gone).
+    Greens finish the step in 13–14 s; every red is the test's own 300 s
+    `waitForCondition` bound (313–315 s wall). Reds are NOT load-driven:
+    a03 and a07 quiet, a04 loaded. Campaign-wide: `deferred-start-catchup`
+    **0**, catch-up failures **0**, terminal `Error committing deferred`
+    **0**, stale-read lines **0**, `session-remount` **0**, load-park
+    deferrals/drops **0**, `piece-start-commit-failed` **0**,
+    `sidecar-run-raced` **0**, `schema-doc-quarantine` **0** (the ensure-ON
+    tripwire, clean), `structure-load-stuck` **0**; server-side
+    `event-view-lag` 45 (4–5 per run, greens and reds alike).
+    **The three reds all carry the entry's CURRENT charge verbatim** —
+    `eventInvocationCount: 7` and `notebookInvocationCount: 7` with
+    `notebookActionCount: 0` and empty `notebookActionsById`,
+    `notebookActionTail`, `notebookCoreNodes`: all seven invocation traces,
+    no bound notebook action state. This is the first LOCAL reproduction of
+    the direct-CI charge; the CI artifact could not establish the store side
+    and these runs can. They split into two read-side shapes:
+    (i) **a03 and a07 — the KEYLESS stranded-whole-piece shape**, exactly one
+    `pattern-load-error` for a keyless identity
+    (`keyless:fid1:0r4P8HEr…#default`, `keyless:fid1:R6f49f-N…#default`),
+    then `isNotebook: false`, `noteCount: -1`, `notesLength: 0`, 84 stored UI
+    chips and zero rendered. That is **r06/r09's stated discriminator** — the
+    member whose mechanism was never root-caused and which this row has
+    carried as absence-of-observation since 2026-08-24. It is observed again,
+    2 in 10, at current main. Recorded and NOT resolved by that measurement
+    seat: this row says r06/r09's durable pointers are all REAL identities and
+    the keylessness is session-side, but in a03 the failing keyless identity
+    is present in the DURABLE store at seq 57 of the notebook space, and both
+    reds' notebook spaces carry 8 distinct `keyless:fid1:…` references.
+    Variant or distinct durable-keyless member is a root-cause question.
+    (ii) **a04 — a LIVE but incomplete piece**: zero `pattern-load-error`,
+    `isNotebook: true`, `noteCount: 5`, `notesLength: 5`, 8 stored chips and 4
+    rendered — and still `notebookActionCount: 0`. It matches neither
+    read-side member as stated (r01 needs a complete store; r06/r09 need the
+    keyless load error) and is not the 2026-08-26 store-incomplete shape
+    either, which required the recursive-schema `pattern-swap-setup-error`
+    the source-authority fix removes. Ruled out in all three from store and
+    both logs: the split-source launcher shape, the b04 client-start class,
+    and the fifth-face load-park member (no `memory session revoked`, no
+    `sync-load-failure`, no load-park deferral or terminal drop).
+    **DISPOSITION: NO LIFT.** The bar stays 10/10 quiet-and-loaded; the entry
+    and its bound guard stay, with the charge they already carry — this
+    campaign confirms that wording rather than changing it. Per-run ledger
+    and per-red classifications are on the measuring box at
+    `/Users/berni/labs-worktrees/b1-lifts-evidence/runs/default-app/`
+    (`a03|a04|a07/classification.md` beside the raw dumps) with the running
+    report at `/Users/berni/labs-worktrees/b1-lifts-report.md`.
     Sibling entry, landed mid-review: #5744 (lunch-poll profile-first
     join) re-skipped `integration/lunch-poll-vote.test.ts` as a FILE
     entry on this row's b04 signature — its recorded reds PREDATE the
@@ -6253,6 +6321,55 @@ supply; OW29/OW32/OW34 closed):
     This was neither a server refusal nor loss of a required client wire
     send; it was the server name-resolution retry gate preventing
     issuance.
+    **THE LUNCH-POLL FILE ENTRY IS LIFTED (2026-08-27) — 8/8 on the
+    owner-directed re-baseline, at a posture strictly harder than any
+    archived campaign's.** The bar this satisfies is the one the
+    2026-08-26 ruling set in place of the old 10/10: an approximately
+    eight-run re-baseline, a red-first mechanism regression, and eight
+    post-fix runs. The regression and the first eight runs landed with
+    #6378; this is the re-baseline, run at main `4b70949ac` on an ON-built
+    binary (sha256 `5018e589dc54b19a1…`, re-verified per run), fresh store
+    and own 97xx port and ON posture probe per run, LLM masked, PID-only
+    teardown with a port-free check, the FILE entry neutralized in the
+    working tree throughout (the file's having RUN verified per run from
+    its own `running 1 test from …` line), `gtimeout 600` never raised,
+    four quiet and four loaded interleaved. **8/8 GREEN in 17–18 s** — the
+    file's recorded green band is 19–39 s and every recorded red was its
+    own 300 s `waitForCondition` net at 313–322 s, so no run came near
+    either. TWO posture changes, both harder and both deliberate: the
+    space-root ensure is **ON**, the production default the CI ON lanes
+    returned to at #6248 — the 2026-08-24 campaign's own n=3 side probe had
+    called ensure-ON "a strictly worse regime for this file" (3/3 red), and
+    the class it saw was root-caused and fixed by #6312 — and the toolshed
+    now self-sources its pattern `API_URL` on the run port, the corrected
+    source authority the default-app RCA prescribed.
+    **The member's own store discriminator is negative in 8/8.** The
+    2026-08-24 red signature was store-side and byte-stable: the GUEST's
+    profile space holding exactly 4 commits with NO `patternIdentity`,
+    against greens reaching 14–21 commits; the missing artifact was the
+    ~98–101-operation authored commit carrying the piece's root doc and its
+    whole `cid:` closure WITH `patternIdentity`. Census over all eight fresh
+    stores: five spaces per run (one more than the archived campaign's four
+    — the ensure is ON now), **every space in every run carrying
+    `patternIdentity`**, each with a materialization commit of 141–198
+    operations; the smallest space in the campaign holds 5 commits. The
+    4-commit zero-`patternIdentity` guest space does not occur once.
+    Counters across the eight: `pattern-load-error` **0**,
+    `pattern-swap-setup-error` **0**, `deferred-start-catchup` **0**,
+    catch-up failures **0**, terminal `Error committing deferred` **0**,
+    `session-remount` **0**, load-park deferrals/drops **0**,
+    `schema-doc-quarantine` **0**, `structure-load-stuck` **0**; stale-read
+    lines 8 (1/run), `piece-start-commit-failed` 8 (1/run — this row already
+    records it as NOT this file's discriminator), `sidecar-run-raced` 8
+    (1/run, #6312's designed loud yield), and the recorded background of
+    `foreign-write-refused` / `seal-space-commit-failed` refusals naming
+    OTHER spaces (80 and 40 per run). Evidence on the measuring box at
+    `/Users/berni/labs-worktrees/b1-lifts-evidence/runs/lunch/` (per-run
+    ledger, test and toolshed logs, meta+stats JSON, own `memory/` store,
+    plus `store-census.txt`), report at
+    `/Users/berni/labs-worktrees/b1-lifts-report.md`. With this lift NO
+    suite carries a file-level ON skip any more; the flip's list-EMPTY bar
+    is down to default-app's reload STEP alone.
     **THE ENSURE-ON PROFILE-SURFACE MEMBER ROOT-CAUSED AND FIXED
     2026-08-25 (PR #6312) — the n=3 side probe's "create surface never renders"
     shape and the #6248 board's profile-shard family, reproduced
