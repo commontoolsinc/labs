@@ -390,12 +390,11 @@ Deno.test("parse: an element-access expression gets a […] generic label", () =
   );
 });
 
-// registerDefinition no-name guard (line 1260): Covered indirectly:
-// registerDefinition is only called when desc.name is set, but the early `if
-// (!desc.name) return` is reached when called for a name. A named binding
-// exercises the body; the guard line itself runs every call.
-
 Deno.test("parse: a named binding registers a definition", () => {
+  // registerDefinition no-name guard (line 1260): Covered indirectly:
+  // registerDefinition is only called when desc.name is set, but the early `if
+  // (!desc.name) return` is reached when called for a name. A named binding
+  // exercises the body; the guard line itself runs every call.
   const doc = parseDocument("const namedThing = 1;\n", "m.ts");
   assert(doc.definitions.has("namedThing"), "named binding is in the index");
   const def = doc.definitions.get("namedThing")![0];
