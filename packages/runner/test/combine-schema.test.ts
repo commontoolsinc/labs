@@ -504,6 +504,40 @@ describe("combineSchema additionalProperties handling", () => {
       );
     });
   }
+
+  it("keeps the first side's additionalProperties across a property-less permissive second side", () => {
+    const constrained = {
+      type: "object",
+      properties: { name: { type: "string" } },
+      required: ["name"],
+      additionalProperties: { type: "string" },
+    } as const satisfies JSONSchema;
+    const permissive = {
+      type: "object",
+      additionalProperties: true,
+      required: ["extra"],
+    } as const satisfies JSONSchema;
+
+    expect(combineSchema(constrained, permissive)).toEqual({
+      type: "object",
+      properties: { name: { type: "string" } },
+      required: ["name", "extra"],
+      additionalProperties: { type: "string" },
+    });
+  });
+
+  it("drops a property-less permissive second side against a first side without additionalProperties", () => {
+    const constrained = {
+      type: "object",
+      properties: { name: { type: "string" } },
+    } as const satisfies JSONSchema;
+    const permissive = {
+      type: "object",
+      additionalProperties: true,
+    } as const satisfies JSONSchema;
+
+    expect(combineSchema(constrained, permissive)).toEqual(constrained);
+  });
 });
 
 // combineSchemaForLink decides the schema a traversal continues with after

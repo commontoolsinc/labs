@@ -272,6 +272,33 @@ describe("link-ifc-read-relevance at resolution and handle hops", () => {
     expect(tx.getCfcState().relevant).toBe(true);
     expect(hopReasons().length).toBeGreaterThan(0);
   });
+
+  it("mints a nested opaque handle positionally, consuming no crossing", () => {
+    // An opaque position addresses the value where it sits without
+    // following the link, so the mint is not a crossing and marks
+    // nothing; the reads through the handle cross, and mark then.
+    const target = runtime.getCell(
+      space,
+      `target-${seq}-opaque`,
+      undefined,
+      tx,
+    );
+    target.setRaw({ name: "Ada" });
+    const holder = runtime.getCell(
+      space,
+      `holder-${seq}-opaque`,
+      {
+        type: "object",
+        properties: { item: { asCell: ["opaque"] } },
+      } as const satisfies JSONSchema,
+      tx,
+    );
+    holder.setRaw({ item: linkTo(target, labeledLinkSchema) } as never);
+
+    const value = holder.get() as { item?: Cell<{ name: string }> };
+    expect(value.item).toBeDefined();
+    expect(tx.getCfcState().relevant).toBe(false);
+  });
 });
 
 describe("link-ifc-read-relevance closure, narrowing, and raw readers", () => {
