@@ -653,6 +653,21 @@ describe("piece source reconciliation", () => {
       });
     });
 
+    it("settles on a failure that arrives without a message", async () => {
+      // An empty reason is dropped when the record is read, so recording one
+      // would leave every later attempt rewriting the same conclusion.
+      const piece = await preparePiece(() => Promise.reject(new Error()));
+      await stampSource(piece, PARENT_SOURCE);
+
+      expect(await reconcile(piece)).toBe("unavailable");
+      const first = getPieceReconciliation(piece);
+      expect(first).toMatchObject({ outcome: "unreachable" });
+      expect(first?.detail).toBe("Error");
+
+      expect(await reconcile(piece)).toBe("unavailable");
+      expect(getPieceReconciliation(piece)).toEqual(first);
+    });
+
     it("names what a fabric origin holds even when nothing moved", async () => {
       const piece = await preparePiece(refuseEveryFetch);
       const runningRef = getPatternIdentityRef(piece)!;

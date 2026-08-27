@@ -364,6 +364,12 @@ describe("piece source lifecycle", () => {
         url: "https://user:secret@source.test/p.tsx",
       }),
     ).rejects.toThrow("may not carry credentials");
+    // A protocol-relative string reads as a path on this host and resolves to
+    // another authority, and nothing follows one, so a piece that accepted it
+    // would report an origin as fine that no reconciliation can ever reach.
+    await expect(
+      piece.changeSource({ kind: "repoint", url: "//evil.example/p.tsx" }),
+    ).rejects.toThrow("names another host without saying so");
     expect(getPatternSource(piece.getCell())).toBeUndefined();
     const state = await readPieceSourceState(runtime, piece.getCell());
     expect(state.history.map((revision) => revision.operation)).toEqual([

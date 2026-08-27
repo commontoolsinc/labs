@@ -55,6 +55,22 @@ import type { Runtime } from "./runtime.ts";
 import { fabricAuthorityMatchesSpaceHost } from "./space-host.ts";
 import type { MemorySpace } from "./storage/interface.ts";
 
+/**
+ * What went wrong, as a reason a record can carry. Falls back through the
+ * error's name to a fixed phrase, because an empty one is dropped when the
+ * record is read and would make an unchanging failure rewrite itself forever.
+ */
+function reconciliationDetail(error: unknown): string {
+  if (error instanceof Error) {
+    if (error.message.length > 0) return error.message;
+    if (error.name.length > 0) return error.name;
+  } else {
+    const described = String(error);
+    if (described.length > 0) return described;
+  }
+  return "the origin could not be reached";
+}
+
 const logger = getLogger("runner.source-reconcile", {
   enabled: true,
   level: "warn",
@@ -310,7 +326,11 @@ export class SourceReconciler {
       outcome = await this.#dispatch(resultCell, state, signal);
     } catch (error) {
       if (signal.aborted || this.#disposed) throw error;
-      state.detail = error instanceof Error ? error.message : String(error);
+      // A reason has to be non-empty to survive being read back, and an error
+      // can carry an empty message. One that decoded to nothing would be
+      // dropped on the next read and rewritten on every later attempt, so the
+      // same failure would never settle.
+      state.detail = reconciliationDetail(error);
       await this.#record(resultCell, state, "unavailable", signal);
       throw error;
     }

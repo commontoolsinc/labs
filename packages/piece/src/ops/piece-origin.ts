@@ -366,6 +366,17 @@ export function classifyOrigin(
   }
 
   if (source.startsWith("/")) {
+    // A rooted path names a file on the host serving this space. A
+    // protocol-relative string only looks like one: resolving `//elsewhere/x`
+    // against the host yields a URL on `elsewhere`, so a piece would record
+    // something that reads as local and points somewhere else. Nothing
+    // follows one either, which is the shape a piece must never be left in —
+    // an origin reported as fine that no reconciliation will ever resolve.
+    if (source.startsWith("//")) {
+      throw new PieceOriginError(
+        `${source} names another host without saying so; write the URL out`,
+      );
+    }
     const host = runtime.hostForSpace(space);
     return webOrigin(new URL(source, host), source);
   }

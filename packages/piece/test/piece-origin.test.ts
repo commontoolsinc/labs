@@ -657,6 +657,10 @@ describe("the two classifiers a recorded origin meets", () => {
       "../relative.tsx",
       "data:text/plain,x",
       "cf:!!malformed",
+      // A protocol-relative string looks like a rooted path and is not one:
+      // resolved against the host it names a different authority entirely.
+      "//evil.example/x",
+      "//evil.example",
     ];
 
     for (const recorded of strings) {
