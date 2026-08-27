@@ -1533,11 +1533,14 @@ export class Runner {
   // than restage it. Written at the same moment the durable stamps would
   // have been (end of `applySetupState`), erased when a real pattern's
   // stamps supersede it or the staging transaction fails, and it dies with
-  // the session — which is the contract's whole point.
-  private sessionPatternPointers = new Map<
+  // the session — which is the contract's whole point. Bounded like the
+  // shortcut maps beside it, and safe to evict for the same reason: a
+  // missing entry costs the designed no-pattern-meta verdict (the piece's
+  // producer re-derives it) or a restage, never a wrong answer.
+  private sessionPatternPointers = new BoundedKeyMap<
     `${MemorySpace}/${ScopeKey}/${URI}`,
     { identity: string; symbol: string }
-  >();
+  >(RESULT_SHORTCUT_LIMIT);
   // SESSION-side pattern-swap channel for RUNNING pieces, the third stamp
   // stand-in: a re-derived child (a lift returning a pattern) used to reach
   // its running piece's swap machinery THROUGH the durable stamp — setup
@@ -4626,7 +4629,11 @@ export class Runner {
     ): void => {
       const expected = options?.expectedPatternIdentity;
       if (!expected) return;
-      const current = getPatternIdentityRef(cell);
+      // A keyless piece's pointer is session-side (the never-durable
+      // contract), so the currency check reads through the session map when
+      // the durable meta is absent.
+      const current = getPatternIdentityRef(cell) ??
+        this.sessionPatternPointers.get(this.getDocKey(resultCell));
       if (
         current === undefined ||
         patternIdentityKey(current) !== patternIdentityKey(expected)
