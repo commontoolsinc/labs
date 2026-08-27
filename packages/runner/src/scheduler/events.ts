@@ -1487,11 +1487,14 @@ export async function dispatchQueuedEvent(state: {
     }
 
     if (error) {
+      const handlerError = error instanceof Error
+        ? error
+        : new Error(String(error));
       try {
-        state.handleError(error as Error, action);
+        state.handleError(handlerError, action);
       } finally {
         if (tx.status().status === "ready") {
-          tx.abort(error);
+          tx.abort(handlerError);
         }
         // The serving drain's ERROR arm (events.md §5): the handler
         // threw server-side — the error IS the consequence. The
@@ -1499,7 +1502,7 @@ export async function dispatchQueuedEvent(state: {
         // drain seals the error consequence in its own transaction.
         reportServedEventFailure(served, {
           kind: "error",
-          message: error instanceof Error ? error.message : String(error),
+          message: handlerError.message,
         });
         // A throwing handler is a final outcome for this event — settle the
         // commit callback (with the aborted tx) instead of leaving callers

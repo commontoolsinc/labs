@@ -857,6 +857,45 @@ describe("event handling", () => {
     expect(errors).toBe(1);
   });
 
+  it("stringifies non-Error handler failures for served observers", async () => {
+    const eventCell = runtime.getCell<number>(
+      space,
+      "stringifies non-Error handler failures",
+      undefined,
+      tx,
+    );
+    eventCell.set(0);
+    await tx.commit();
+
+    runtime.scheduler.onError(() => undefined);
+    runtime.scheduler.addEventHandler(
+      () => Promise.reject("primitive failure"),
+      eventCell.getAsNormalizedFullLink(),
+    );
+
+    const outcomes: unknown[] = [];
+    runtime.scheduler.queueEvent(
+      eventCell.getAsNormalizedFullLink(),
+      1,
+      false,
+      undefined,
+      false,
+      {
+        eventId: "served-non-error-handler-failure",
+        served: {
+          onFailure: (outcome) => outcomes.push(outcome),
+        },
+      },
+    );
+
+    await runtime.idle();
+
+    expect(outcomes).toEqual([{
+      kind: "error",
+      message: "primitive failure",
+    }]);
+  });
+
   it("settles the commit callback when populateDependencies throws", async () => {
     const eventCell = runtime.getCell<number>(
       space,
