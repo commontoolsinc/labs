@@ -26,7 +26,9 @@
  */
 
 import { parseArgs } from "@std/cli/parse-args";
-import { join, resolve, toFileUrl } from "@std/path";
+import { dirname, fromFileUrl, join, resolve, toFileUrl } from "@std/path";
+
+const moduleDir = dirname(fromFileUrl(import.meta.url));
 import {
   defaultHarnessCredentialStorePath,
   FileHarnessCredentialStore,
@@ -53,6 +55,8 @@ import {
   type HarnessChatResponse,
 } from "../src/contracts/interactive-chat.ts";
 import { HARNESS_CREDENTIAL_OWNER_REF_TYPE } from "../src/contracts/run-manifest.ts";
+import { createCliPromptSlotBinding } from "../src/contracts/prompt-slot.ts";
+import { PATTERN_AUTHOR_SUBAGENT_PROFILE } from "../src/contracts/subagent.ts";
 import type { BuiltinToolId } from "../src/contracts/tool-descriptor.ts";
 import {
   createHarnessInteractiveChatService,
@@ -126,6 +130,7 @@ interface KickoffConfig {
   patternIndex?: HarnessPatternIndexConfig;
   sessionDbPath?: string;
   maxModelTurns?: number;
+  skillsRoot?: string;
 }
 
 const nonEmpty = (value: string | undefined): string | undefined =>
@@ -234,13 +239,22 @@ export const resolveKickoffConfig = (
     space,
   };
 
+  // The repo's skills/ tree gives the pattern-author subagent its preloaded
+  // pattern-dev + pattern-schema skills; without a skills root the parent
+  // model authors patterns blind and burns turns on idiom errors.
+  const skillsRootFlag = flag("skills-root") ??
+    nonEmpty(env.CF_HARNESS_KICKOFF_SKILLS_ROOT) ??
+    resolve(cwd, join(moduleDir, "../../../skills"));
+
   const patternIndexUrl = flag("pattern-index-url") ??
     nonEmpty(env.CF_HARNESS_PATTERN_INDEX_URL);
   const sessionDb = flag("session-db") ??
     nonEmpty(env.CF_HARNESS_KICKOFF_SESSION_DB) ??
     join(dataDir, "sessions.sqlite");
+  // Pattern-building sessions routinely spend a turn per author/run/fix
+  // round; the interactive default of 8 strands a session mid-build.
   const maxModelTurns = flag("max-model-turns") ??
-    nonEmpty(env.CF_HARNESS_KICKOFF_MAX_MODEL_TURNS);
+    nonEmpty(env.CF_HARNESS_KICKOFF_MAX_MODEL_TURNS) ?? "32";
 
   return {
     port,
@@ -270,10 +284,16 @@ export const resolveKickoffConfig = (
         maxModelTurns: positiveInteger(maxModelTurns, "--max-model-turns"),
       }
       : {}),
+    skillsRoot: skillsRootFlag,
   };
 };
 
-/** The policy a kickoff session runs under: see `FABRIC_TOOL_IDS`. */
+/**
+ * The policy a kickoff session runs under: see `FABRIC_TOOL_IDS`. The prompt
+ * slot is bound as a direct command because the page's textarea is the user
+ * typing the command themselves — the same standing the batch CLI's prompt
+ * argument has, and what authorizes effectful tools under CFC enforce modes.
+ */
 export const kickoffChatPolicy = (
   patternIndexConfigured: boolean,
 ): HarnessChatPolicy => ({
@@ -283,6 +303,15 @@ export const kickoffChatPolicy = (
     ...FABRIC_TOOL_IDS,
     ...(patternIndexConfigured ? PATTERN_INDEX_TOOL_IDS : []),
   ],
+  allowedSubagentProfiles: [
+    ...DEFAULT_HARNESS_CHAT_POLICY.allowedSubagentProfiles,
+    PATTERN_AUTHOR_SUBAGENT_PROFILE,
+  ],
+  promptSlot: createCliPromptSlotBinding({
+    kernelName: "cf-harness",
+    surface: "kickoff-web",
+    role: "direct-command",
+  }),
 });
 
 /**
@@ -692,6 +721,9 @@ export const startKickoffServer = async (
             : {}),
           ...(config.maxModelTurns !== undefined
             ? { maxModelTurns: config.maxModelTurns }
+            : {}),
+          ...(config.skillsRoot !== undefined
+            ? { skillsRoot: config.skillsRoot }
             : {}),
         },
         ...(modelOptions.credentialOwner !== undefined
