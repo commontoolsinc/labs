@@ -6785,8 +6785,7 @@ export class Runner {
           // consumed with zero effects and no error. A fact, recorded
           // unconditionally; the scheduler gates on `served`.
           tx.dispatchedHandlerNotRun = {
-            reason:
-              "action argument is undefined (potential schema mismatch)",
+            reason: "action argument is undefined (potential schema mismatch)",
           };
         }
 
