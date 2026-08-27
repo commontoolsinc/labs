@@ -321,19 +321,17 @@ const evaluationIdentityKey = (options: TrackGraphOptions): string =>
   JSON.stringify([options.principal ?? null, options.sessionId ?? null]);
 
 /**
- * Bounds an evaluation cache's entry count. Distinct query shapes per space
- * are few (a session class shares its watch corpus), so the bound exists
- * for the adversarial case, not the expected one; an insert past it is
- * skipped rather than evicting, since within one generation every entry is
- * equally live. Kept small because an entry retains a full cloned state —
- * tracker, entities, and the manager's parsed documents — so the bound is
- * a memory bound as much as a count.
+ * Bounds an evaluation cache's entry COUNT — the cardinality backstop for
+ * adversarial query-shape churn, not the memory bound. Memory is bounded
+ * by the server's cross-space retained-entity budget, which evicts by
+ * weight (see Server's evaluation-cache budget).
  */
 const EVALUATION_CACHE_MAX_ENTRIES = 16;
 
 export type QueryEvaluationCacheDiagnostics = {
   seq: number;
   entries: number;
+  weight: number;
   hits: number;
   misses: number;
   rotations: number;
@@ -366,16 +364,30 @@ export type QueryEvaluationCacheDiagnostics = {
  * cache before any post-change evaluation could be served from it.
  */
 export type QueryEvaluationCache = {
+  /** The engine the entries were evaluated against. A sequence number
+   * identifies state only within its engine, so a different engine object
+   * for the same space rotates the cache exactly as a seq advance does —
+   * both entry points accept a caller-supplied engine. */
+  engine: Engine.Engine | null;
   seq: number;
-  entries: Map<string, { state: TrackedGraphState; share: StateScopeClass }>;
+  entries: Map<
+    string,
+    { state: TrackedGraphState; share: StateScopeClass; weight: number }
+  >;
+  /** Sum of entry weights (retained entity count — the proxy for the
+   * parsed documents an entry keeps alive). The server enforces its
+   * cross-space budget against this. */
+  weight: number;
   hits: number;
   misses: number;
   rotations: number;
 };
 
 export const createQueryEvaluationCache = (): QueryEvaluationCache => ({
+  engine: null,
   seq: -1,
   entries: new Map(),
+  weight: 0,
   hits: 0,
   misses: 0,
   rotations: 0,
@@ -386,6 +398,7 @@ export const queryEvaluationCacheDiagnostics = (
 ): QueryEvaluationCacheDiagnostics => ({
   seq: cache.seq,
   entries: cache.entries.size,
+  weight: cache.weight,
   hits: cache.hits,
   misses: cache.misses,
   rotations: cache.rotations,
@@ -469,16 +482,18 @@ const cloneWithRewrittenResidue = (
   state: TrackedGraphState,
   residue: { key: QueryDocKey; id: string; scope: CellScope }[],
   options: TrackGraphOptions,
-): TrackedGraphState | null => {
+): { state: TrackedGraphState; probeReads: number } | null => {
   const identity: ScopeKeyIdentity = {
     principal: options.principal,
     sessionId: options.sessionId,
   };
   const mapping = new Map<string, string>();
+  let probeReads = 0;
   for (const { key, id, scope } of residue) {
     const requesterScopeKey = resolveScopeKey(scope, identity);
     const requesterKey = `${space}/${requesterScopeKey}/${id}`;
     if (requesterKey !== key) {
+      probeReads++;
       const probe = Engine.readState(engine, {
         id,
         scope,
@@ -495,7 +510,7 @@ const cloneWithRewrittenResidue = (
   }
   const clone = cloneTrackedGraphStateForIdentity(engine, state, options);
   if (mapping.size === 0) {
-    return clone;
+    return { state: clone, probeReads };
   }
   const missed = new MapSetStringToPathSelectors(true);
   for (const [key, selectors] of clone.missed) {
@@ -515,7 +530,7 @@ const cloneWithRewrittenResidue = (
       new Set([...misses].map((miss) => mapping.get(miss) ?? miss)),
     );
   }
-  return { ...clone, missed, missedBy, missesOf };
+  return { state: { ...clone, missed, missedBy, missesOf }, probeReads };
 };
 
 /**
@@ -1048,9 +1063,11 @@ export const trackGraph = (
   let cacheKeys: { pure: string; identity: string } | undefined;
   if (cache !== undefined) {
     const currentSeq = Engine.serverSeq(engine);
-    if (cache.seq !== currentSeq) {
+    if (cache.engine !== engine || cache.seq !== currentSeq) {
+      cache.engine = engine;
       cache.seq = currentSeq;
       cache.entries.clear();
+      cache.weight = 0;
       cache.rotations++;
     }
     const queryKey = evaluationQueryKey(query);
@@ -1060,16 +1077,28 @@ export const trackGraph = (
     };
     const pureEntry = cache.entries.get(cacheKeys.pure);
     let served: TrackedGraphState | null = null;
+    let probeReads = 0;
     if (pureEntry !== undefined) {
-      served = pureEntry.share.kind === "absent-residue"
-        ? cloneWithRewrittenResidue(
+      if (pureEntry.share.kind === "absent-residue") {
+        const rewritten = cloneWithRewrittenResidue(
           engine,
           space,
           pureEntry.state,
           pureEntry.share.residue,
           options,
-        )
-        : cloneTrackedGraphStateForIdentity(engine, pureEntry.state, options);
+        );
+        if (rewritten !== null) {
+          served = rewritten.state;
+        }
+        probeReads = rewritten?.probeReads ??
+          pureEntry.share.residue.length;
+      } else {
+        served = cloneTrackedGraphStateForIdentity(
+          engine,
+          pureEntry.state,
+          options,
+        );
+      }
     }
     if (served === null) {
       // Either no shared entry, or its residue is PRESENT for this
@@ -1088,12 +1117,12 @@ export const trackGraph = (
     }
     if (served !== null) {
       cache.hits++;
-      // A hit ran no traversal, and its stats say so: zero walk counters
-      // are the truth of what THIS call cost, not an accounting gap.
+      // A hit ran no traversal, and its stats say so — but the residue
+      // absence probes ARE engine reads, and they report as such.
       return {
         serverSeq: currentSeq,
         state: served,
-        stats: createQueryTraversalStats(),
+        stats: { ...createQueryTraversalStats(), managerReads: probeReads },
       };
     }
     cache.misses++;
@@ -1198,13 +1227,18 @@ export const trackGraph = (
     // The cache keeps its own clone: the state returned below belongs to
     // the caller's session, whose refreshes and extensions mutate it.
     const share = classifyStateScope(state);
-    cache.entries.set(
-      share.kind === "tainted" ? cacheKeys.identity : cacheKeys.pure,
-      {
-        state: cloneTrackedGraphState(engine, state),
-        share,
-      },
-    );
+    const weight = state.entities.size;
+    const key = share.kind === "tainted" ? cacheKeys.identity : cacheKeys.pure;
+    const previous = cache.entries.get(key);
+    if (previous !== undefined) {
+      cache.weight -= previous.weight;
+    }
+    cache.entries.set(key, {
+      state: cloneTrackedGraphState(engine, state),
+      share,
+      weight,
+    });
+    cache.weight += weight;
   }
   return {
     serverSeq: Engine.serverSeq(engine),

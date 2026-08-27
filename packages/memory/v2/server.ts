@@ -194,6 +194,10 @@ const SUBSCRIPTION_REFRESH_DELAY_MS = 5;
 const MIN_REFRESH_QUEUE_DRAIN_WAIT_MS = 500;
 const SLOW_QUERY_THRESHOLD_MS = 100;
 const QUERY_EVALUATION_CACHE_MAX_SPACES = 8;
+// ~5 board-scale corpora (a full board evaluation retains ~6k entities).
+// Entity count is the byte proxy: what an entry holds alive is its cloned
+// state's parsed documents, which scale with the entities delivered.
+const QUERY_EVALUATION_CACHE_BUDGET = 32_768;
 const SLOW_QUERY_BUFFER_SIZE = 100;
 const DEFAULT_SESSION_OPEN_CHALLENGE_TTL_SECONDS = 300;
 const SESSION_OPEN_CHALLENGE_BYTES = 32;
@@ -1289,6 +1293,14 @@ export class Server {
        * dirty spaces held for the next explicit call.
        */
       subscriptionRefreshDelayMs?: number | "manual";
+      /** Cross-space retained-entity budget for the query evaluation
+       * caches (default QUERY_EVALUATION_CACHE_BUDGET). An entry's weight
+       * is the entity count of the evaluation it retains — the proxy for
+       * the parsed documents kept alive — and eviction removes the
+       * least-recently-evaluated spaces' oldest entries until the total
+       * fits. A single evaluation heavier than the whole budget is not
+       * retained at all. */
+      queryEvaluationCacheBudget?: number;
       authorizeSessionOpen: (
         message: SessionOpenRequest,
         context: SessionOpenAuthContext,
@@ -3943,6 +3955,7 @@ export class Server {
       session.lastSyncedSeq = serverSeq;
       session.operationCursors = nextOperationCursors;
       this.#notifyDemandChanged(message.space, "watch", session.principal);
+      this.#enforceEvaluationCacheBudget();
       recordSlowQueryDuration(
         "session.watch.add",
         message.space,
@@ -3990,11 +4003,9 @@ export class Server {
     }
     cache = createQueryEvaluationCache();
     this.#queryEvaluationCaches.set(space, cache);
-    // An entry retains full cloned graph states (parsed documents
-    // included), and an inactive space's cache would otherwise linger
-    // until that space's next commit — which may never come. Bounding the
-    // SPACES held, least-recently-evaluated first, caps total retention at
-    // spaces × entries × corpus, on top of the per-commit rotation.
+    // An inactive space's cache would otherwise linger until that space's
+    // next commit — which may never come. The space bound is the
+    // cardinality backstop; the memory bound is the weight budget below.
     if (this.#queryEvaluationCaches.size > QUERY_EVALUATION_CACHE_MAX_SPACES) {
       const oldest = this.#queryEvaluationCaches.keys().next().value;
       if (oldest !== undefined) {
@@ -4002,6 +4013,33 @@ export class Server {
       }
     }
     return cache;
+  }
+
+  /** Evict least-recently-evaluated spaces' oldest entries until the
+   * caches' total retained weight fits the budget. Runs after every
+   * evaluation that may have inserted; an entry heavier than the whole
+   * budget is therefore never retained past its own evaluation. */
+  #enforceEvaluationCacheBudget(): void {
+    const budget = this.options.queryEvaluationCacheBudget ??
+      QUERY_EVALUATION_CACHE_BUDGET;
+    let total = 0;
+    for (const cache of this.#queryEvaluationCaches.values()) {
+      total += cache.weight;
+    }
+    while (total > budget) {
+      const oldestSpace = this.#queryEvaluationCaches.keys().next().value;
+      if (oldestSpace === undefined) return;
+      const cache = this.#queryEvaluationCaches.get(oldestSpace)!;
+      const oldestEntry = cache.entries.keys().next().value;
+      if (oldestEntry === undefined) {
+        this.#queryEvaluationCaches.delete(oldestSpace);
+        continue;
+      }
+      const entry = cache.entries.get(oldestEntry)!;
+      cache.entries.delete(oldestEntry);
+      cache.weight -= entry.weight;
+      total -= entry.weight;
+    }
   }
 
   /** The space's evaluation-cache counters, for diagnostics and tests.
@@ -4012,7 +4050,7 @@ export class Server {
   ): QueryEvaluationCacheDiagnostics {
     const cache = this.#queryEvaluationCaches.get(space);
     return cache === undefined
-      ? { seq: -1, entries: 0, hits: 0, misses: 0, rotations: 0 }
+      ? { seq: -1, entries: 0, weight: 0, hits: 0, misses: 0, rotations: 0 }
       : queryEvaluationCacheDiagnostics(cache);
   }
 
@@ -4028,6 +4066,11 @@ export class Server {
     } = {},
   ): Promise<GraphQueryResult> {
     const startedAt = performance.now();
+    // Cache eligibility decided BEFORE touching the LRU: a historical or
+    // lease-holder-exempt query neither serves nor records an entry, and
+    // must not create a cache or evict a live space's on its way through.
+    const cacheEligible = query.atSeq === undefined &&
+      scopeContext.keyedSnapshots !== true;
     const result = queryGraph(
       space,
       engine ?? await this.openEngine(space),
@@ -4035,9 +4078,14 @@ export class Server {
       reuse,
       {
         ...scopeContext,
-        evaluationCache: this.#evaluationCacheFor(space),
+        ...(cacheEligible
+          ? { evaluationCache: this.#evaluationCacheFor(space) }
+          : {}),
       },
     );
+    if (cacheEligible) {
+      this.#enforceEvaluationCacheBudget();
+    }
     recordSlowQueryDuration("graph.query", space, startedAt, {
       roots: query.roots.length,
     });
@@ -4075,6 +4123,7 @@ export class Server {
         },
       );
       serverSeq = result.serverSeq;
+      this.#enforceEvaluationCacheBudget();
       graphs.set(branch, result.state);
       for (const [docKey, entity] of result.state.entities) {
         const { scopeKey } = fromDocKey(docKey);

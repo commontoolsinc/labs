@@ -1,6 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { classifyStateScope, type TrackedGraphState } from "../v2/query.ts";
+import { applyCommit, open as openEngine } from "../v2/engine.ts";
+import {
+  classifyStateScope,
+  createQueryEvaluationCache,
+  type TrackedGraphState,
+  trackGraph,
+} from "../v2/query.ts";
 import { Server } from "../v2/server.ts";
 import {
   encodeMemoryBoundary,
@@ -15,9 +21,10 @@ import {
 
 const TEST_AUDIENCE = "did:key:z6Mk-memory-v2-eval-cache-test-audience";
 
-const createServer = (store: string) =>
+const createServer = (store: string, budget?: number) =>
   new Server({
     store: new URL(store),
+    ...(budget === undefined ? {} : { queryEvaluationCacheBudget: budget }),
     subscriptionRefreshDelayMs: 0,
     authorizeSessionOpen(message) {
       const principal = (message.authorization as { principal?: unknown })
@@ -679,6 +686,191 @@ describe("v2 query evaluation cache", () => {
     expect(classifyStateScope(state)).toEqual({ kind: "tainted" });
   });
 
+  it("rotates when a different engine presents the same sequence", async () => {
+    const space = "did:key:z6Mk-eval-cache-engines";
+    const commitFor = (value: number) => ({
+      sessionId: "session:test",
+      invocation: {
+        iss: "did:key:test",
+        aud: "did:key:service",
+        cmd: "/memory/transact",
+        sub: space,
+      },
+      authorization: { proof: "ok" },
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [
+          {
+            op: "set" as const,
+            id: "of:doc:1",
+            value: { value: { n: value } },
+          },
+        ],
+      },
+    });
+    const engineA = await openEngine({
+      url: new URL("memory:///eval-cache-engine-a"),
+    });
+    const engineB = await openEngine({
+      url: new URL("memory:///eval-cache-engine-b"),
+    });
+    applyCommit(engineA, commitFor(1));
+    applyCommit(engineB, commitFor(2));
+
+    // Two engines for one space, both at sequence 1, holding different
+    // values: a sequence number identifies state only within its engine,
+    // so the second engine must rotate the cache rather than be served
+    // the first engine's document.
+    const cache = createQueryEvaluationCache();
+    const query = {
+      roots: [{ id: "of:doc:1", selector: { path: [], schema: true } }],
+    };
+    const fromA = trackGraph(space, engineA, query, undefined, {
+      evaluationCache: cache,
+    });
+    const fromB = trackGraph(space, engineB, query, undefined, {
+      evaluationCache: cache,
+    });
+    const valueOf = (state: TrackedGraphState): number | undefined => {
+      const entity = [...state.entities.values()][0] as {
+        document?: { value?: { n?: number } } | null;
+      };
+      return entity?.document?.value?.n;
+    };
+    expect(valueOf(fromA.state)).toBe(1);
+    expect(valueOf(fromB.state)).toBe(2);
+    expect(cache.hits).toBe(0);
+    expect(cache.rotations).toBe(2);
+  });
+
+  it("reports residue absence probes as engine reads on a hit", async () => {
+    const space = "did:key:z6Mk-eval-cache-probes";
+    const engine = await openEngine({
+      url: new URL("memory:///eval-cache-probes"),
+    });
+    applyCommit(engine, {
+      sessionId: "session:test",
+      invocation: {
+        iss: "did:key:test",
+        aud: "did:key:service",
+        cmd: "/memory/transact",
+        sub: space,
+      },
+      authorization: { proof: "ok" },
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set" as const,
+          id: "of:doc:linked",
+          value: {
+            value: {
+              draft: {
+                "/": {
+                  "link@1": {
+                    path: [],
+                    id: "of:doc:draft",
+                    space,
+                    scope: "user",
+                  },
+                },
+              },
+            },
+          },
+        }],
+      },
+    });
+    const cache = createQueryEvaluationCache();
+    const query = {
+      roots: [{ id: "of:doc:linked", selector: { path: [], schema: true } }],
+    };
+    const miss = trackGraph(space, engine, query, undefined, {
+      principal: "did:key:z6Mk-probe-p1",
+      sessionId: "probe-s1",
+      evaluationCache: cache,
+    });
+    expect(miss.stats.managerReads).toBeGreaterThan(0);
+    const hit = trackGraph(space, engine, query, undefined, {
+      principal: "did:key:z6Mk-probe-p2",
+      sessionId: "probe-s2",
+      evaluationCache: cache,
+    });
+    expect(cache.hits).toBe(1);
+    // One residue doc was probed for absence: a hit is not free of engine
+    // reads, and its stats say exactly what it read.
+    expect(hit.stats.managerReads).toBe(1);
+  });
+
+  it("evicts by weight across spaces until the budget fits", async () => {
+    const server = createServer("memory://eval-cache-budget", 3);
+    const spaces = [
+      "did:key:z6Mk-eval-budget-1",
+      "did:key:z6Mk-eval-budget-2",
+    ];
+    const connections: ReturnType<Server["connect"]>[] = [];
+    try {
+      for (const space of spaces) {
+        const messages: ServerMessage[] = [];
+        const connection = server.connect((message) => messages.push(message));
+        connections.push(connection);
+        const sessionId = await openSession(
+          connection,
+          messages,
+          space,
+          space.slice(-8),
+        );
+        await seedDocs(server, messages, space, sessionId, [
+          "of:doc:1",
+          "of:doc:2",
+        ]);
+        await watchAdd(
+          connection,
+          messages,
+          space,
+          sessionId,
+          space.slice(-8),
+          [
+            { id: "of:doc:1" },
+            { id: "of:doc:2" },
+          ],
+        );
+      }
+      // Each corpus weighs 2; a budget of 3 holds one of them, so the
+      // second space's insert evicted the first space's entry.
+      expect(server.evaluationCacheDiagnostics(spaces[0]).weight).toBe(0);
+      expect(server.evaluationCacheDiagnostics(spaces[1]).weight).toBe(2);
+    } finally {
+      for (const connection of connections) {
+        connection.close();
+      }
+    }
+  });
+
+  it("does not retain an evaluation heavier than the whole budget", async () => {
+    const space = "did:key:z6Mk-eval-budget-oversize";
+    const server = createServer("memory://eval-cache-oversize", 1);
+    const messages: ServerMessage[] = [];
+    const connection = server.connect((message) => messages.push(message));
+    try {
+      const sessionId = await openSession(connection, messages, space, "o");
+      await seedDocs(server, messages, space, sessionId, [
+        "of:doc:1",
+        "of:doc:2",
+      ]);
+      await watchAdd(connection, messages, space, sessionId, "o", [
+        { id: "of:doc:1" },
+        { id: "of:doc:2" },
+      ]);
+      const diagnostics = server.evaluationCacheDiagnostics(space);
+      expect(diagnostics.misses).toBe(1);
+      expect(diagnostics.entries).toBe(0);
+      expect(diagnostics.weight).toBe(0);
+    } finally {
+      connection.close();
+    }
+  });
+
   it("evicts the least-recently-evaluated space's cache beyond the space bound", async () => {
     const server = new Server({
       subscriptionRefreshDelayMs: 0,
@@ -721,6 +913,18 @@ describe("v2 query evaluation cache", () => {
       expect(server.evaluationCacheDiagnostics(spaces[0]).entries).toBe(0);
       expect(server.evaluationCacheDiagnostics(spaces[1]).entries).toBe(1);
       expect(server.evaluationCacheDiagnostics(spaces[8]).entries).toBe(1);
+
+      // A cache-ineligible query must not create a cache for its space —
+      // nor evict a live space's on its way through the LRU.
+      await server.evaluateGraphQuery(
+        spaces[0],
+        { roots: [{ id: "of:doc:1", selector: { path: [], schema: true } }] },
+        undefined,
+        undefined,
+        { keyedSnapshots: true },
+      );
+      expect(server.evaluationCacheDiagnostics(spaces[0]).seq).toBe(-1);
+      expect(server.evaluationCacheDiagnostics(spaces[1]).entries).toBe(1);
     } finally {
       for (const connection of connections) {
         connection.close();
