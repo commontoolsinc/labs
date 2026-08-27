@@ -382,6 +382,23 @@ describe("syncArgumentLinkTargets", () => {
     expect(syncedIds).toContain(id(leaf));
   });
 
+  it("applies `items` to an array index when the schema omits `type`", async () => {
+    const { make, commit } = docBuilder("items fallback");
+    const leaf = make("leaf", { n: 1 });
+    const element = make("element", { child: leaf });
+    const root = make("root", { list: [element] });
+    await commit();
+    await run(root, {
+      type: "object",
+      properties: { list: { items: { properties: { child: {} } } } },
+    } as JSONSchema);
+    // `schemaAtPath` selects no child for a schema that declares `items` and
+    // omits `type: "array"`, so the index resolves through the same fallback
+    // the reader uses — and the walk follows the element's own declaration.
+    expect(syncedIds).toContain(id(element));
+    expect(syncedIds).toContain(id(leaf));
+  });
+
   it("does not treat an out-of-range numeric property as an array item", async () => {
     const { make, commit } = docBuilder("non-index property");
     const leaf = make("leaf", { n: 1 });
