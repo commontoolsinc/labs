@@ -558,6 +558,11 @@ jobs:
           PRESENCE_URL: ${{ vars.SHELL_PRESENCE_URL }}
         run: |
           if [ -n "$PRESENCE_URL" ]; then
+            # `deno eval` holds every permission implicitly, so the module read
+            # and the environment lookup need no flags; the subcommand takes no
+            # `--allow-read` or `--allow-env` and fails on either as an unknown
+            # argument. What reaches GITHUB_ENV is `URL.href`, so it is the
+            # normalized spelling the bundle carries and the grep below matches.
             PRESENCE_URL="$(deno eval '
               import { optionalPresenceUrl } from "./packages/shell/src/lib/presence-url.ts";
               console.log(optionalPresenceUrl(Deno.env.get("PRESENCE_URL"))?.href ?? "");
