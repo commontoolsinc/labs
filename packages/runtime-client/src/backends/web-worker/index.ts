@@ -8,6 +8,7 @@
 import "core-js/proposals/explicit-resource-management";
 import "core-js/proposals/async-explicit-resource-management";
 
+import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { getLogger } from "@commonfabric/utils/logger";
 import { unrefTimer } from "@commonfabric/utils/sleep";
 import { isObjectNotArray } from "@commonfabric/utils/types";
@@ -144,6 +145,26 @@ function setWorkerConsoleBridge(enabled: boolean): void {
   else uninstallWorkerConsoleBridge();
 }
 
+/**
+ * How much of an unreadable request to render in the report about it. Enough
+ * to recognize which message it was, short enough that a hostile payload
+ * cannot flood the channel it is being reported on.
+ */
+const MAX_INVALID_REQUEST_RENDER = 512;
+
+/**
+ * Posts one reply and records it in the ledger by what actually went. A
+ * refused post substitutes an error reply, and counting that as a response
+ * would say the request succeeded.
+ */
+function postReply(payload: IPCRemoteResponse, type: RequestType): void {
+  const delivered = postToClient(payload);
+  ipcLogger.debug(
+    `${delivered ? "responded" : "responded-error"}/${type}`,
+    () => [],
+  );
+}
+
 self.addEventListener("message", async (event: MessageEvent) => {
   // TODO(danfuzz): what arrives here is whatever structured cloning preserved,
   // which is less than the payload type describes; decoding with `codec-realm`
@@ -169,7 +190,14 @@ self.addEventListener("message", async (event: MessageEvent) => {
 
   try {
     if (!isIPCClientMessage(message)) {
-      throw new Error(`Invalid IPC request: ${JSON.stringify(message)}`);
+      // Rendered by `value-debug` rather than `JSON.stringify`, which throws
+      // on a `bigint` -- a value structured cloning delivers here intact --
+      // replacing this report with one that names nothing.
+      throw new Error(
+        `Invalid IPC request: ${
+          toCompactDebugString(message, MAX_INVALID_REQUEST_RENDER)
+        }`,
+      );
     }
     const { msgId, data: request } = message;
     ipcLogger.debug(`received/${request.type}`, () => []);
@@ -196,12 +224,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
         request.data,
       );
       worker = await workerInitialization;
-      // Count the reply only once it is actually posted: if postMessage throws
-      // (e.g. a non-cloneable payload) the catch below records a
-      // `responded-error/*` instead, so the ledger never double-counts one
-      // request as both a success and an error.
-      postToClient({ msgId: message.msgId });
-      ipcLogger.debug(`responded/${request.type}`, () => []);
+      postReply({ msgId: message.msgId }, request.type);
       return;
     }
 
@@ -210,8 +233,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
     // of runtime initialization, so it is answered before the init check.
     if (request.type === RequestType.SetForwardWorkerConsole) {
       setWorkerConsoleBridge(request.enabled);
-      postToClient({ msgId });
-      ipcLogger.debug(`responded/${request.type}`, () => []);
+      postReply({ msgId }, request.type);
       return;
     }
 
@@ -222,8 +244,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
       // After disposal, silently ack any late-arriving requests.
       // Components may still be unsubscribing or finishing in-flight
       // operations during teardown — no point erroring on these.
-      postToClient({ msgId });
-      ipcLogger.debug(`responded/${request.type}`, () => []);
+      postReply({ msgId }, request.type);
       return;
     }
 
@@ -239,8 +260,7 @@ self.addEventListener("message", async (event: MessageEvent) => {
     const payload: IPCRemoteResponse = response !== undefined
       ? { msgId, data: response }
       : { msgId };
-    postToClient(payload);
-    ipcLogger.debug(`responded/${request.type}`, () => []);
+    postReply(payload, request.type);
   } catch (error) {
     console.error("[RuntimeWorker] Error:", error);
     const type = isIPCClientMessage(message) ? message.data.type : "invalid";

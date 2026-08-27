@@ -70,7 +70,7 @@ export class DebuggerController implements ReactiveController {
   private schedulerBaselineVersion = 0;
 
   // Pattern source files for source browser
-  private patternSources: PatternSourceInfo[] = [];
+  private patternSources: readonly PatternSourceInfo[] = [];
   private patternSourcesVersion = 0;
 
   // Debugger breakpoints: action IDs
@@ -476,7 +476,7 @@ export class DebuggerController implements ReactiveController {
   /**
    * Get cached pattern sources
    */
-  getPatternSources(): PatternSourceInfo[] {
+  getPatternSources(): readonly PatternSourceInfo[] {
     return this.patternSources;
   }
 
