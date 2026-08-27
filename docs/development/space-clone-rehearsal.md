@@ -76,7 +76,8 @@ not see it, you are pointed at something else — stop and check before writing.
 ```bash
 # 3. Baseline, before touching anything.
 deno task cf space verify $CLONE
-deno task cf inspect churn $DB --bucket 60 --until "$(date -u '+%Y-%m-%d %H:%M:%S')"
+deno task cf inspect churn $DB --bucket 60 \
+  --since '<an hour before now>' --until "$(date -u '+%Y-%m-%d %H:%M:%S')"
 
 # 4. Run every authored test locally. Then update against the CLONE's api-url
 #    once, with one --test flag per entry and one --datafile flag per attached
@@ -238,6 +239,13 @@ it, the trailing quiet minutes are reported, and the footer prints `last commit`
 against `observed through`: the gap between them is the evidence. A mistyped
 bound is refused rather than silently matching no commits, which would otherwise
 report the window as quiet.
+
+Pass `--since` as well, including for the baseline. Without one the window opens
+at the store's earliest commit, and a clone of a space that has been live for a
+while carries months of them: every bucket between that commit and `--until` is
+materialized, and past 20,000 of them the run is refused rather than reported.
+At `--bucket 60` that ceiling is about fourteen days. An hour of quiet before
+you start is baseline enough to recognize a plateau against.
 
 ## Driving the migration
 
