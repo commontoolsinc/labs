@@ -172,6 +172,24 @@ The current package provides:
   resolved posture (each dial's value and whether the operator, the named
   bundle, or the default supplied it) is recorded as `fabricSessionCfc` in run
   state and the run report, and printed in the operator summary;
+- an opt-in pattern index (`--pattern-index-url`, or its
+  `CF_HARNESS_PATTERN_INDEX_URL` environment fallback), which needs the fabric
+  session configuration: index requests are signed with the session identity
+  under the CF1 first-party scheme, and an indexed pattern runs in the session's
+  space. It adds the `search_patterns` tool, which finds published patterns by
+  hashtag or free text and reports each hit's description, hashtags, usage
+  signals, declared argument and result shapes, and the `cf:pattern:<patternId>`
+  import specifier that composes it. It also extends `run_pattern`, which takes
+  exactly one of `sourceText` and `patternId`: with a `patternId` the published
+  program is fetched host-side and compiled down the same path, and neither its
+  source nor a compile diagnostic quoting it reaches model context — the
+  diagnostic is retained in the run artifact instead. The run reports
+  `instantiated` and then `run_succeeded` or `run_failed` back to the index,
+  best-effort, so a reporting failure never bears on the tool result. Without
+  the index configuration `search_patterns` is absent from the tool surface, for
+  a `pattern-author`-profile subagent as much as for the parent — a child
+  searches through the one client the parent built — and `run_pattern` refuses a
+  `patternId`;
 - a `pattern-author` child profile that authors and runs Common Fabric pattern
   source: `run_pattern` under the same fabric-session gate, plus `read_file`,
   `bash`, and `read_skill_resource`, and no workspace writes, so its deliverable

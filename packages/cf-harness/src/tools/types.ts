@@ -18,6 +18,7 @@ import type {
 import type { HarnessBrowserAccessLease } from "../contracts/browser-access.ts";
 import type { HarnessHandleTable } from "../contracts/handle-table.ts";
 import type { HarnessFabricSession } from "../fabric-session.ts";
+import type { PatternIndexClient } from "../pattern-index/client.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { ToolOutputId } from "../contracts/tool-result.ts";
 import type { ProcessRunner } from "../sandbox/process-runner.ts";
@@ -54,6 +55,14 @@ export interface HarnessToolContext {
    * keeps `run_pattern` out of the tool surface.
    */
   getFabricSession?: () => Promise<HarnessFabricSession>;
+
+  /**
+   * The run's pattern-index client, lazy and cached by the engine.
+   * Undefined when the run has no pattern index configured, which also keeps
+   * `search_patterns` out of the tool surface and `run_pattern`'s
+   * `patternId` argument unusable.
+   */
+  getPatternIndexClient?: () => Promise<PatternIndexClient>;
 
   /**
    * The prompt loop's run-level abort signal, when the invocation came

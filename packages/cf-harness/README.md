@@ -121,6 +121,9 @@ What works today:
     [Inspecting a handle's shape](#inspecting-a-handles-shape))
   - `run_pattern` (present only when the run configures a fabric session; see
     [Running patterns against a Fabric space](#running-patterns-against-a-fabric-space))
+  - `search_patterns` (present only when the run configures a pattern index with
+    `--pattern-index-url`; finds published patterns by hashtag or free text and
+    reports each one's declared shapes and import specifier, never its source)
 - targeted exact-string edits plus whole-file replace/create and append writes
 - initial and in-run image attachments for model vision-capable flows
 - bounded public HTTP(S) fetches through `web_fetch`, with redirect validation,

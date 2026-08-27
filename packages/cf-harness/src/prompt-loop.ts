@@ -679,6 +679,11 @@ const summarizeToolInput = async (
             sourceTextDigest: sourceTextSummary.digest,
           }
           : {}),
+        // The id of a published pattern is a public name rather than
+        // content, so it is carried whole.
+        ...(typeof input.patternId === "string"
+          ? { patternId: input.patternId }
+          : {}),
         ...(isObjectNotArray(input.inputs)
           ? { inputCount: Object.keys(input.inputs).length }
           : {}),
@@ -825,25 +830,27 @@ const createSubagentInputSummary = async (
 
 /**
  * The tool surface a subagent profile offers in this run. `run_pattern` is
- * declared by the `default` profile, but a run with no fabric session cannot
- * build one, so the tool leaves the profile rather than being offered and
- * failing — the same gate the parent surface applies.
+ * declared by the `default` profile and `search_patterns` by `pattern-author`,
+ * but a run with no fabric session or no pattern index cannot back them, so
+ * such a tool leaves the profile rather than being offered and failing — the
+ * same gate the parent surface applies.
  */
 const subagentProfileConfigForRun = (
   profile: HarnessSubagentProfile,
-  fabricSessionAvailable: boolean,
+  availability: HarnessToolBackingAvailability,
 ): HarnessSubagentProfileConfig => {
   const config = getHarnessSubagentProfileConfig(profile);
+  const withheld = withheldToolIds(availability);
   if (
-    fabricSessionAvailable ||
-    !config.allowedToolIds.some((toolId) => FABRIC_SESSION_TOOL_IDS.has(toolId))
+    withheld.size === 0 ||
+    !config.allowedToolIds.some((toolId) => withheld.has(toolId))
   ) {
     return config;
   }
   return {
     ...config,
     allowedToolIds: config.allowedToolIds.filter((toolId) =>
-      !FABRIC_SESSION_TOOL_IDS.has(toolId)
+      !withheld.has(toolId)
     ),
   };
 };
@@ -856,6 +863,29 @@ const subagentProfileConfigForRun = (
 const FABRIC_SESSION_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
   ["run_pattern", "assign_slug"] as const,
 );
+
+/**
+ * The tools that exist only over the pattern index, gated on the same terms
+ * as the fabric-session ones.
+ */
+const PATTERN_INDEX_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
+  ["search_patterns"] as const,
+);
+
+/** What a run can back the gated tools with. */
+interface HarnessToolBackingAvailability {
+  fabricSessionAvailable: boolean;
+  patternIndexAvailable: boolean;
+}
+
+/** The gated tools this run cannot back, and so does not offer. */
+const withheldToolIds = (
+  availability: HarnessToolBackingAvailability,
+): ReadonlySet<BuiltinToolId> =>
+  new Set([
+    ...(availability.fabricSessionAvailable ? [] : FABRIC_SESSION_TOOL_IDS),
+    ...(availability.patternIndexAvailable ? [] : PATTERN_INDEX_TOOL_IDS),
+  ]);
 
 /**
  * The child's initial handle table for a delegation: an empty table salted
@@ -1102,6 +1132,12 @@ const buildSubagentSystemPrompt = (
     ...(profileConfig.profile === PATTERN_AUTHOR_SUBAGENT_PROFILE
       ? [
         "You author Common Fabric pattern source and run it with run_pattern against the one Fabric space this run is configured for. That is the whole job.",
+        ...(profileConfig.allowedToolIds.includes("search_patterns")
+          ? [
+            "Search the pattern index with search_patterns before you author anything. A published pattern that already does the job is the better answer: run it by passing its patternId to run_pattern instead of sourceText.",
+            'When you do author, prefer composing what the index already holds over rewriting it. Each search result carries the import specifier that composes it — `import X from "cf:pattern:<patternId>"` — along with the argument and result shapes to wire against. You never see an indexed pattern\'s source, and you do not need it.',
+          ]
+          : []),
         "Pass pattern source inline as the run_pattern `sourceText` argument. You have no write_file or edit_file; do not try to author patterns as workspace files.",
         "You own the write, compile-error, fix loop. A `compile-error` result is normal iteration material: read the diagnostic, correct the source, and call run_pattern again. Do not hand a compile error back to the parent as the answer.",
         "Use read_file and bash to read existing patterns and pattern documentation in the workspace when the compiler or the preloaded skills leave a question open.",
@@ -2264,21 +2300,17 @@ export class CfHarnessPromptLoop {
     this.#parentToolAllowanceMode = options.allowedToolIds === undefined
       ? "all-builtins"
       : "restricted";
-    // The fabric-session tools join the tool surface exactly when the run
-    // can build a session; see FABRIC_SESSION_TOOL_IDS.
-    const requestedToolIds = options.allowedToolIds ??
-      (this.engine.fabricSessionAvailable
-        ? [
-          ...DEFAULT_PROMPT_LOOP_TOOL_IDS,
-          ...FABRIC_SESSION_TOOL_IDS,
-        ]
-        : DEFAULT_PROMPT_LOOP_TOOL_IDS);
+    // The gated tools join the tool surface exactly when the run can back
+    // them; see FABRIC_SESSION_TOOL_IDS and PATTERN_INDEX_TOOL_IDS.
+    const availability = this.#toolBackingAvailability();
+    const requestedToolIds = options.allowedToolIds ?? [
+      ...DEFAULT_PROMPT_LOOP_TOOL_IDS,
+      ...(availability.fabricSessionAvailable ? FABRIC_SESSION_TOOL_IDS : []),
+      ...(availability.patternIndexAvailable ? PATTERN_INDEX_TOOL_IDS : []),
+    ];
+    const withheld = withheldToolIds(availability);
     this.#allowedToolIds = new Set(
-      this.engine.fabricSessionAvailable
-        ? requestedToolIds
-        : requestedToolIds.filter((toolId) =>
-          !FABRIC_SESSION_TOOL_IDS.has(toolId)
-        ),
+      requestedToolIds.filter((toolId) => !withheld.has(toolId)),
     );
     this.#nativeModelToolIds = options.nativeModelToolIds ?? [];
     this.#allowedSubagentProfiles = new Set(
@@ -2302,6 +2334,14 @@ export class CfHarnessPromptLoop {
       );
     }
     return this.#gatewayClient;
+  }
+
+  /** What this run's engine can back the gated tools with. */
+  #toolBackingAvailability(): HarnessToolBackingAvailability {
+    return {
+      fabricSessionAvailable: this.engine.fabricSessionAvailable,
+      patternIndexAvailable: this.engine.patternIndexAvailable,
+    };
   }
 
   #parentToolAllowance(): HarnessParentToolAllowance {
@@ -2342,7 +2382,7 @@ export class CfHarnessPromptLoop {
         subagentProfileConfigs: allowedSubagentProfiles.map((profile) =>
           subagentProfileConfigForRun(
             profile,
-            this.engine.fabricSessionAvailable,
+            this.#toolBackingAvailability(),
           )
         ),
         ...(cfc?.absenceBehavior !== undefined
@@ -3592,7 +3632,7 @@ export class CfHarnessPromptLoop {
     const delegateInput = options.input;
     const profileConfig = subagentProfileConfigForRun(
       delegateInput.profile,
-      this.engine.fabricSessionAvailable,
+      this.#toolBackingAvailability(),
     );
     const childModel = resolveSubagentModel(options.model, profileConfig);
     const inheritsParentModel = childModel.source === "parent";
@@ -3671,6 +3711,11 @@ export class CfHarnessPromptLoop {
       // `run_pattern` against the one space the run is configured for.
       ...(this.engine.fabricSessionFactory !== undefined
         ? { fabricSessionFactory: this.engine.fabricSessionFactory }
+        : {}),
+      // Likewise the index client: a child searches and runs indexed
+      // patterns through the one the parent built.
+      ...(this.engine.patternIndexClientFactory !== undefined
+        ? { patternIndexClientFactory: this.engine.patternIndexClientFactory }
         : {}),
       ...(parentRunState.runManifest !== undefined
         ? { runManifest: parentRunState.runManifest }

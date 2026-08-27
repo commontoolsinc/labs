@@ -71,7 +71,9 @@ export const WEB_SEARCH_SUBAGENT_ALLOWED_TOOL_IDS =
  * documentation. `describe_handle` gives it the shape of a reference it was
  * handed, which is what it authors against — it cannot read the value.
  * `run_pattern` is gated on a configured fabric session exactly as it is for
- * the `default` profile.
+ * the `default` profile, and `search_patterns` on a configured pattern index:
+ * an author that can find an existing pattern for the job should compose it
+ * rather than write one.
  */
 export const PATTERN_AUTHOR_SUBAGENT_ALLOWED_TOOL_IDS = [
   "bash",
@@ -79,6 +81,7 @@ export const PATTERN_AUTHOR_SUBAGENT_ALLOWED_TOOL_IDS = [
   "read_skill_resource",
   "describe_handle",
   "run_pattern",
+  "search_patterns",
 ] as const satisfies readonly BuiltinToolId[];
 export const NO_HOST_TOOL_IDS = [] as const satisfies readonly BuiltinToolId[];
 export const BROWSER_SUBAGENT_HOST_TOOL_IDS = [

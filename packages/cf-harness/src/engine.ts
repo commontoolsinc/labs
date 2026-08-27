@@ -77,6 +77,11 @@ import {
   type HarnessFabricSessionFactory,
 } from "./fabric-session.ts";
 import { assertValidHarnessHandleTable } from "./handle-table.ts";
+import {
+  cacheHarnessPatternIndexClientFactory,
+  createHarnessPatternIndexClientFactory,
+  type HarnessPatternIndexClientFactory,
+} from "./pattern-index/client.ts";
 import type { HandleValueResolutionContext } from "./tools/handle-values.ts";
 import type { HarnessWellKnownGrant } from "./contracts/well-known-grants.ts";
 import {
@@ -147,6 +152,10 @@ import {
   type RunSkillScriptToolInput,
   type RunSkillScriptToolOutput,
 } from "./tools/run-skill-script.ts";
+import type {
+  SearchPatternsToolInput,
+  SearchPatternsToolOutput,
+} from "./tools/search-patterns.ts";
 import {
   type ViewImageToolInput,
   type ViewImageToolOutput,
@@ -174,6 +183,7 @@ export interface BuiltinToolInputMap {
   run_pattern: RunPatternToolInput;
   assign_slug: AssignSlugToolInput;
   describe_handle: DescribeHandleToolInput;
+  search_patterns: SearchPatternsToolInput;
 }
 
 export interface BuiltinToolOutputMap {
@@ -190,6 +200,7 @@ export interface BuiltinToolOutputMap {
   run_pattern: RunPatternToolOutput;
   assign_slug: AssignSlugToolOutput;
   describe_handle: DescribeHandleToolOutput;
+  search_patterns: SearchPatternsToolOutput;
 }
 
 interface ToolOutputWithId {
@@ -220,6 +231,15 @@ export interface CreateHarnessEngineOptions
    * tool surface.
    */
   fabricSessionFactory?: HarnessFabricSessionFactory;
+
+  /**
+   * Injection seam for the pattern-index client, mirroring
+   * `fabricSessionFactory`. When absent, a factory is built from
+   * `patternIndex` in the resolved config; when both are absent, the run has
+   * no index — `search_patterns` stays out of the tool surface and
+   * `run_pattern` refuses a `patternId`.
+   */
+  patternIndexClientFactory?: HarnessPatternIndexClientFactory;
 
   /**
    * Operator input cells to mint handles for at run start; see
@@ -348,6 +368,7 @@ export class CfHarnessEngine {
   #outputSequence: number;
   readonly #now: () => string;
   readonly #fabricSessionFactory?: HarnessFabricSessionFactory;
+  readonly #patternIndexClientFactory?: HarnessPatternIndexClientFactory;
   readonly #inputCells: readonly HarnessInputCellSpec[];
   readonly #hostMounts: readonly HostSandboxMount[];
   readonly #ownedRunscConfig?: DockerRunscSandboxConfig;
@@ -487,6 +508,19 @@ export class CfHarnessEngine {
     this.#fabricSessionFactory = fabricSessionFactory === undefined
       ? undefined
       : cacheHarnessFabricSessionFactory(fabricSessionFactory);
+    // The index client loads the fabric identity from disk to sign with, so
+    // it is built lazily and cached for the run on the same terms.
+    const patternIndexClientFactory = options.patternIndexClientFactory ??
+      (this.config.patternIndex !== undefined &&
+          this.config.fabricSession !== undefined
+        ? createHarnessPatternIndexClientFactory(
+          this.config.patternIndex,
+          this.config.fabricSession.identityKeyPath,
+        )
+        : undefined);
+    this.#patternIndexClientFactory = patternIndexClientFactory === undefined
+      ? undefined
+      : cacheHarnessPatternIndexClientFactory(patternIndexClientFactory);
     this.#inputCells = options.inputCells ?? [];
     const sandboxConfig = options.sandboxRuntime === undefined
       ? resolveSandboxConfig(this.config, {
@@ -666,6 +700,27 @@ export class CfHarnessEngine {
    */
   get fabricSessionFactory(): HarnessFabricSessionFactory | undefined {
     return this.#fabricSessionFactory;
+  }
+
+  /**
+   * Whether the run can reach the pattern index — either an injected factory
+   * or `patternIndex` connection config. The prompt loop offers
+   * `search_patterns` exactly when this holds.
+   */
+  get patternIndexAvailable(): boolean {
+    return this.#patternIndexClientFactory !== undefined;
+  }
+
+  /**
+   * The run's cached pattern-index factory, or `undefined` when the run has
+   * none. A delegating parent hands its factory to the child engine, so a
+   * subagent searches and runs indexed patterns through the one client the
+   * parent built.
+   */
+  get patternIndexClientFactory():
+    | HarnessPatternIndexClientFactory
+    | undefined {
+    return this.#patternIndexClientFactory;
   }
 
   bindRunModel(model: string): HarnessRunState {
@@ -1591,6 +1646,9 @@ export class CfHarnessEngine {
       handleTable: this.handleTable,
       ...(this.#fabricSessionFactory !== undefined
         ? { getFabricSession: this.#fabricSessionFactory }
+        : {}),
+      ...(this.#patternIndexClientFactory !== undefined
+        ? { getPatternIndexClient: this.#patternIndexClientFactory }
         : {}),
       sandbox: this.sandbox,
       hostProcessRunner: this.hostProcessRunner,

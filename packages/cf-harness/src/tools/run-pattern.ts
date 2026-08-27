@@ -3,6 +3,7 @@ import {
   type Cell,
   compileAndSavePattern,
   getPatternIdentityRef,
+  type RuntimeProgram,
 } from "@commonfabric/runner";
 import {
   selectReferencedCfcSchemaDefs,
@@ -29,10 +30,21 @@ import {
   parseStructuredResultSchema,
   validateAndSanitizeStructuredResult,
 } from "../structured-result.ts";
-import type { HarnessToolDefinition } from "./types.ts";
+import type {
+  PatternIndexEventType,
+  PatternIndexProgram,
+} from "../pattern-index/client.ts";
+import type { HarnessToolContext, HarnessToolDefinition } from "./types.ts";
 
 export interface RunPatternToolInput {
   sourceText?: string;
+
+  /**
+   * A pattern published to the index, run in place of inline source. The
+   * program is fetched host-side and compiled down the same path; its source
+   * never reaches the model, on the success path or on any error path.
+   */
+  patternId?: string;
   inputs?: Record<string, unknown>;
   resultSchema?: JSONSchema;
 }
@@ -119,7 +131,7 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
   toolId: "run_pattern",
   title: "Run Pattern",
   description:
-    "Compile and run a Common Fabric pattern in the configured space, returning a reference to its live result cell. The piece stays out of the space's piece list; assign_slug names and lists it when it deserves a public address.",
+    "Compile and run a Common Fabric pattern in the configured space, returning a reference to its live result cell. Give it either your own sourceText or the patternId of a pattern search_patterns found. The piece stays out of the space's piece list; assign_slug names and lists it when it deserves a public address.",
   effectClass: "side-effect",
   inputSchema: {
     type: "object",
@@ -127,6 +139,11 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
       sourceText: {
         type: "string",
         description: "Pattern source (TypeScript/TSX). At most 256 KiB.",
+      },
+      patternId: {
+        type: "string",
+        description:
+          "Id of a pattern published to the index, as search_patterns reports it. Exactly one of sourceText and patternId is given; the published program is fetched and compiled without passing through this conversation.",
       },
       inputs: {
         type: "object",
@@ -143,7 +160,9 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
           'JSON Schema for the result value. Without it you get resultRef only and no value at all, so pass it whenever you need to read what the pattern computed. A value is returned only for the fields the schema models: an inert one (a number, a boolean, an enum or const string) comes back as itself; anything else is withheld as text and comes back as a reference token addressing that position, which describe_handle can inspect and a later run_pattern can wire by reference. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. The framework\'s own result keys ($NAME, $UI and the other rendering variants) need not be declared.',
       },
     },
-    required: ["sourceText"],
+    // Exactly one of `sourceText` and `patternId` is required, which is a
+    // condition on the pair rather than on either alone; the tool states it
+    // in prose here and enforces it on invocation.
     additionalProperties: false,
   } satisfies JSONSchema,
   outputSchema: {
@@ -219,6 +238,56 @@ export const sealedPositionLink = (
 
 const errorMessage = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
+
+/**
+ * The `RuntimeProgram` a published program compiles as. Every field the index
+ * carries is copied across: an entry point that names the wrong export, a
+ * missing source root, or a dropped data file each compiles or runs into a
+ * failure whose cause is nowhere near the omission.
+ */
+export const runtimeProgramFromIndex = (
+  program: PatternIndexProgram,
+): RuntimeProgram => ({
+  main: program.main,
+  files: program.files.map((file) => ({
+    name: file.name,
+    contents: file.contents,
+  })),
+  ...(program.mainExport !== undefined
+    ? { mainExport: program.mainExport }
+    : {}),
+  ...(program.sourceRoots !== undefined
+    ? { sourceRoots: [...program.sourceRoots] }
+    : {}),
+  ...(program.dataFiles !== undefined
+    ? { dataFiles: [...program.dataFiles] }
+    : {}),
+});
+
+/**
+ * Reports what a run did with an indexed pattern, without letting the report
+ * bear on the run. The index ranks on these events, so a failure to record
+ * one costs ranking accuracy and nothing else — it is logged and dropped
+ * rather than turned into a tool error for a pattern that ran.
+ */
+const recordPatternIndexEvent = (
+  context: HarnessToolContext,
+  patternId: string,
+  eventType: PatternIndexEventType,
+): void => {
+  void (async () => {
+    try {
+      const client = await context.getPatternIndexClient!();
+      await client.recordEvent({ patternId, eventType });
+    } catch (error) {
+      console.error(
+        `run_pattern could not record the ${eventType} event for pattern index entry "${patternId}": ${
+          errorMessage(error)
+        }`,
+      );
+    }
+  })();
+};
 
 /**
  * Replaces bare fabric identifiers in model-facing diagnostic text with a
@@ -396,18 +465,37 @@ export const runPatternTool: HarnessToolDefinition<
         "run_pattern requires a fabric session; configure --fabric-api-url, --fabric-identity, and --fabric-space",
       );
     }
-    if (input.sourceText === undefined) {
-      return errorOutput("error", "run_pattern requires sourceText");
-    }
-    const sourceText = input.sourceText;
-    const sourceTextBytes = new TextEncoder().encode(sourceText).length;
-    if (sourceTextBytes > RUN_PATTERN_MAX_SOURCE_TEXT_BYTES) {
+    if (input.sourceText !== undefined && input.patternId !== undefined) {
       return errorOutput(
         "error",
-        `run_pattern sourceText exceeds the ${
-          RUN_PATTERN_MAX_SOURCE_TEXT_BYTES / 1024
-        } KiB limit (${sourceTextBytes} bytes)`,
+        "run_pattern takes sourceText or patternId, not both; pass your own source or the id of an indexed pattern",
       );
+    }
+    if (input.sourceText === undefined && input.patternId === undefined) {
+      return errorOutput(
+        "error",
+        "run_pattern requires sourceText or patternId",
+      );
+    }
+    if (
+      input.patternId !== undefined &&
+      context.getPatternIndexClient === undefined
+    ) {
+      return errorOutput(
+        "error",
+        "run_pattern patternId requires a pattern index; configure --pattern-index-url, or pass sourceText instead",
+      );
+    }
+    if (input.sourceText !== undefined) {
+      const sourceTextBytes = new TextEncoder().encode(input.sourceText).length;
+      if (sourceTextBytes > RUN_PATTERN_MAX_SOURCE_TEXT_BYTES) {
+        return errorOutput(
+          "error",
+          `run_pattern sourceText exceeds the ${
+            RUN_PATTERN_MAX_SOURCE_TEXT_BYTES / 1024
+          } KiB limit (${sourceTextBytes} bytes)`,
+        );
+      }
     }
     let parsedResultSchema;
     try {
@@ -479,16 +567,57 @@ export const runPatternTool: HarnessToolDefinition<
       }
       pieceInput = converted;
     }
+    // The indexed program is fetched here, on the trusted host side, and goes
+    // straight into the compiler. Nothing read from the index is carried into
+    // any output this tool returns.
+    let program: string | RuntimeProgram;
+    if (input.patternId === undefined) {
+      program = input.sourceText!;
+    } else {
+      let indexed;
+      try {
+        const client = await context.getPatternIndexClient!();
+        indexed = await client.getPattern({
+          patternId: input.patternId,
+          includeSource: true,
+        });
+      } catch (error) {
+        return errorOutput(
+          "error",
+          `pattern index lookup failed for "${input.patternId}": ${
+            errorMessage(error)
+          }`,
+        );
+      }
+      if (indexed.program === undefined) {
+        return errorOutput(
+          "error",
+          `the pattern index returned no program for "${input.patternId}"`,
+        );
+      }
+      program = runtimeProgramFromIndex(indexed.program);
+    }
     let pattern;
     try {
-      pattern = await compileAndSavePattern(pieces.runtime, sourceText, {
+      pattern = await compileAndSavePattern(pieces.runtime, program, {
         space,
       });
     } catch (error) {
-      // Compiler diagnostics are the model's feedback loop, so the full
-      // message goes into the artifact; the prompt loop scrubs bare fabric
-      // identifiers from the model-facing rendering.
-      return errorOutput("compile-error", errorMessage(error));
+      // Compiler diagnostics are the model's feedback loop for source it
+      // wrote, so the full message goes into the artifact; the prompt loop
+      // scrubs bare fabric identifiers from the model-facing rendering. An
+      // indexed pattern is source the model never saw and cannot correct, and
+      // a diagnostic quotes the line it failed on, so there the artifact
+      // keeps the diagnostic and the model gets the fact of the failure.
+      return input.patternId === undefined
+        ? errorOutput("compile-error", errorMessage(error))
+        : {
+          ...errorOutput(
+            "compile-error",
+            `the indexed pattern "${input.patternId}" did not compile; the diagnostic is retained in the run artifact and withheld here, since it quotes source you did not author`,
+          ),
+          rawCauseMessage: errorMessage(error),
+        };
     }
     // An input's value must match the compiled pattern's argument schema for
     // its key before any piece exists, so a mismatch is a model-correctable
@@ -634,7 +763,23 @@ export const runPatternTool: HarnessToolDefinition<
       );
       piece = new PieceController(pieces, pieceCell);
     } catch (error) {
+      if (input.patternId !== undefined) {
+        recordPatternIndexEvent(context, input.patternId, "run_failed");
+      }
       return errorOutput("error", errorMessage(error));
+    }
+    /**
+     * Reports this invocation's outcome to the index, when the pattern came
+     * from there. A cancelled run reports nothing: it neither succeeded nor
+     * failed, and the index ranks on what a pattern did.
+     */
+    const recordOutcome = (eventType: PatternIndexEventType): void => {
+      if (input.patternId !== undefined) {
+        recordPatternIndexEvent(context, input.patternId, eventType);
+      }
+    };
+    if (input.patternId !== undefined) {
+      recordPatternIndexEvent(context, input.patternId, "instantiated");
     }
     // Stops the created piece without the usual `stopPiece` idle wait: an
     // abort path must not wait on the very scheduler the signal is escaping.
@@ -720,6 +865,7 @@ export const runPatternTool: HarnessToolDefinition<
         record.name === "CfcCommitRefusalError"
       );
       if (refusal !== undefined) {
+        recordOutcome("run_failed");
         return {
           ...errorOutput(
             "error",
@@ -734,6 +880,7 @@ export const runPatternTool: HarnessToolDefinition<
         // computation over data the model cannot read may carry that data in
         // what it throws, so the artifact keeps the diagnostic and the model
         // gets the fact of the failure.
+        recordOutcome("run_failed");
         return {
           ...errorOutput(
             "error",
@@ -772,6 +919,7 @@ export const runPatternTool: HarnessToolDefinition<
           ),
       );
       if (ownEpisodes.length > 0) {
+        recordOutcome("run_failed");
         return {
           ...errorOutput(
             "error",
@@ -783,6 +931,7 @@ export const runPatternTool: HarnessToolDefinition<
         };
       }
     }
+    recordOutcome("run_succeeded");
     return {
       outputId,
       status: "ok",
