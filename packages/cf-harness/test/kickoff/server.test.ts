@@ -321,6 +321,32 @@ describe("kickoff/server", () => {
         jsonRequest("/api/index/call", body, { cookie: indexed.cookie }),
       );
 
+    it("answers a host-side failure generically, never with its message", async () => {
+      // A factory that cannot build its client throws host-side — an
+      // unreadable keyfile names the path the operator configured, which the
+      // page must not read.
+      const server = new KickoffServer(
+        config(),
+        (onEvent) =>
+          new HarnessInteractiveChatService({
+            createPromptLoop: answeringLoop,
+            now: advancingClock(),
+            onEvent,
+          }),
+        () => Promise.reject(new Error("ENOENT: /Users/operator/.secret.key")),
+      );
+      const page = await server.handle(getRequest("/"));
+      await page.body?.cancel();
+      const cookie = page.headers.get("set-cookie")!.split(";")[0];
+      const response = await server.handle(
+        jsonRequest("/api/index/call", { fn: "listPatterns" }, { cookie }),
+      );
+      expect(response.status).toBe(502);
+      const body = await response.json();
+      expect(body.error).not.toContain(".secret.key");
+      expect(body.error).toContain("see its log");
+    });
+
     it("answers an allowlisted read with what the index returned", async () => {
       const listing = {
         patterns: [{

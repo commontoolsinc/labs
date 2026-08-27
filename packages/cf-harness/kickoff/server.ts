@@ -990,13 +990,20 @@ export class KickoffServer {
       // and anything else reads as this server failing to reach it. The
       // message alone: a `PatternIndexError`'s detail is the index's body,
       // which is not what an operator page renders.
-      const status = error instanceof PatternIndexError &&
-          error.status >= 400 && error.status < 500
-        ? error.status
-        : 502;
-      return Response.json({
-        error: error instanceof Error ? error.message : String(error),
-      }, { status });
+      // Only the typed index error's stable message crosses to the page: a
+      // host-side failure — an unreadable identity keyfile among them — can
+      // name paths this machine's operator configured, which the browser has
+      // no business reading.
+      if (error instanceof PatternIndexError) {
+        const status = error.status >= 400 && error.status < 500
+          ? error.status
+          : 502;
+        return Response.json({ error: error.message }, { status });
+      }
+      return Response.json(
+        { error: "the index request failed on this server; see its log" },
+        { status: 502 },
+      );
     }
   }
 

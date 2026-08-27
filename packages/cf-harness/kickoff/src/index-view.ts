@@ -39,6 +39,9 @@ interface OpenPattern {
   pattern?: PatternIndexPattern;
   events?: readonly PatternIndexEvent[];
   error?: string;
+
+  /** Why `events` is absent when its read failed rather than pending. */
+  eventsError?: string;
 }
 
 const reason = (error: unknown): string =>
@@ -82,6 +85,7 @@ export class KickoffIndexView extends LitElement {
 
   /** Which read of a pattern's detail is current; only the newest may show. */
   #detailReads = 0;
+  #refreshes = 0;
   /** Which search is current, for the same reason. */
   #searches = 0;
 
@@ -104,28 +108,43 @@ export class KickoffIndexView extends LitElement {
     void this.refresh();
   }
 
-  /** Re-reads both listings. Neither read's failure hides the other's answer. */
+  /**
+   * Re-reads both listings. Neither read's failure hides the other's answer,
+   * and a refresh superseded by a newer one writes nothing — two clicks in
+   * flight must not let the older answer land last.
+   */
   async refresh(): Promise<void> {
-    await Promise.all([this.#loadPatterns(), this.#loadEvents()]);
-    this.loaded = true;
+    const generation = ++this.#refreshes;
+    await Promise.all([
+      this.#loadPatterns(generation),
+      this.#loadEvents(generation),
+    ]);
+    if (generation === this.#refreshes) {
+      this.loaded = true;
+    }
   }
 
-  async #loadPatterns(): Promise<void> {
+  async #loadPatterns(generation: number): Promise<void> {
     try {
       const listing = await listIndexPatterns();
+      if (generation !== this.#refreshes) return;
       this.patterns = listing.patterns;
       this.eventTypes = listing.eventTypes ?? {};
       this.patternsError = undefined;
     } catch (error) {
+      if (generation !== this.#refreshes) return;
       this.patternsError = reason(error);
     }
   }
 
-  async #loadEvents(): Promise<void> {
+  async #loadEvents(generation: number): Promise<void> {
     try {
-      this.events = await listIndexEvents({ limit: 100 });
+      const events = await listIndexEvents({ limit: 100 });
+      if (generation !== this.#refreshes) return;
+      this.events = events;
       this.eventsError = undefined;
     } catch (error) {
+      if (generation !== this.#refreshes) return;
       this.eventsError = reason(error);
     }
   }
@@ -137,6 +156,9 @@ export class KickoffIndexView extends LitElement {
    */
   async #openPattern(patternId: string): Promise<void> {
     if (this.open?.patternId === patternId) {
+      // Closing also invalidates a read still in flight, so its late answer
+      // cannot reopen the row.
+      ++this.#detailReads;
       this.open = undefined;
       return;
     }
@@ -152,11 +174,13 @@ export class KickoffIndexView extends LitElement {
     this.open = {
       patternId,
       ...(typeof pattern === "string" ? { error: pattern } : { pattern }),
-      ...(typeof events === "string" ? {} : { events }),
+      ...(typeof events === "string" ? { eventsError: events } : { events }),
     };
   }
 
   async #runSearch(): Promise<void> {
+    // The disabled binding lands on the next render, not on the click.
+    if (this.searching) return;
     const field = (id: string): string =>
       (this.querySelector(`#${id}`) as HTMLInputElement | null)?.value ?? "";
     const request = searchRequestOf(
@@ -286,7 +310,9 @@ export class KickoffIndexView extends LitElement {
             `}
           `}
         <div class="label">its events</div>
-        ${open.events === undefined
+        ${open.eventsError !== undefined
+          ? html`<p class="error">${open.eventsError}</p>`
+          : open.events === undefined
           ? html`<p class="empty">Reading…</p>`
           : open.events.length === 0
           ? html`<p class="empty">You recorded none against this pattern.</p>`
