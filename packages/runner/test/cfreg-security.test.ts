@@ -21,10 +21,10 @@ import {
 
 const IMPORT = `const cf = require("commonfabric");`;
 
-// The verifier reports whether a module has a VALID approved `__cfReg` call. The
-// loader uses this to grant the real registrar only to approved modules (and a
-// throwing one to the rest) — so this signal is load-bearing.
 describe("verifyCompiledModuleBody reports hoist-registration approval", () => {
+  // The verifier reports whether a module has a VALID approved `__cfReg` call.
+  // The loader uses this to grant the real registrar only to approved modules
+  // (and a throwing one to the rest) — so this signal is load-bearing.
   it("is true for a module with an approved __cfReg call", () => {
     const body =
       `${IMPORT}\nconst __cfPattern_1 = (0, cf.pattern)((s) => s);\n__cfReg({ __cfPattern_1 });`;
@@ -39,10 +39,10 @@ describe("verifyCompiledModuleBody reports hoist-registration approval", () => {
   });
 });
 
-// A module the verifier did NOT approve gets the rejecting registrar, so a
-// `__cfReg` call the static check missed (e.g. smuggled inside an accepted
-// expression) fails closed at runtime instead of registering attacker values.
 describe("createRejectingRegistrar", () => {
+  // A module the verifier did NOT approve gets the rejecting registrar, so a
+  // `__cfReg` call the static check missed (e.g. smuggled inside an accepted
+  // expression) fails closed at runtime instead of registering attacker values.
   it("throws on any registration attempt", () => {
     const { register } = createRejectingRegistrar();
     expect(() => register({ __cfPattern_1: {} })).toThrow(
@@ -56,11 +56,12 @@ describe("createRejectingRegistrar", () => {
   });
 });
 
-// The load-bearing trust gate: only a genuine branded builder artifact may
-// acquire a content-addressed ref. The verifier intentionally does NOT check the
-// registered value's kind, so `indexArtifact`'s `isTrustedBuilderArtifact` is the
-// single boundary that stops forgery — pin it hard.
 describe("isTrustedBuilderArtifact rejects forged values", () => {
+  // The load-bearing trust gate: only a genuine branded builder artifact may
+  // acquire a content-addressed ref. The verifier intentionally does NOT check
+  // the registered value's kind, so `indexArtifact`'s
+  // `isTrustedBuilderArtifact` is the single boundary that stops forgery — pin
+  // it hard.
   it("rejects plain objects, functions, and frozen data", () => {
     expect(isTrustedBuilderArtifact({})).toBe(false);
     expect(isTrustedBuilderArtifact(() => {})).toBe(false);
@@ -103,11 +104,11 @@ describe("isTrustedBuilderArtifact rejects forged values", () => {
   });
 });
 
-// Defense-in-depth on the real registrar (run-once / closed-window /
-// transactional) lives in cfreg-builder-identity.test.ts; here we only assert the
-// rejecting variant, the trust gate, and the approval signal — the pieces the
-// verifier-gating relies on.
 describe("HoistRegistrationSink stays untouched on a rejected registration", () => {
+  // Defense-in-depth on the real registrar (run-once / closed-window /
+  // transactional) lives in cfreg-builder-identity.test.ts; here we only assert
+  // the rejecting variant, the trust gate, and the approval signal — the pieces
+  // the verifier-gating relies on.
   it("an approved registrar still stages+commits normally", () => {
     const sink: HoistRegistrationSink = new Map();
     const { register, commit } = createHoistRegistrar("id", sink);
@@ -117,15 +118,16 @@ describe("HoistRegistrationSink stays untouched on a rejected registration", () 
   });
 });
 
-// CT-1623 follow-up: lock the CONTRACT between the transformer's emitted
-// `__cfReg({ … })` shape and the verifier's static approval check. The transformer
-// and the verifier hold two independent definitions of "a valid registration
-// call"; if they drift, a real registration silently routes to the rejecting
-// registrar (fail-closed, but a confusing breakage). These pin the exact shapes
-// the transformer emits (builder-call-hoisting.ts: a trailing call whose argument
-// is a multiline shorthand object of previously-declared top-level bindings) as
-// APPROVED, and assert the tamper shapes the verifier is meant to refuse are not.
 describe("transformer __cfReg emit round-trips through the verifier", () => {
+  // CT-1623 follow-up: lock the CONTRACT between the transformer's emitted
+  // `__cfReg({ … })` shape and the verifier's static approval check. The
+  // transformer and the verifier hold two independent definitions of "a valid
+  // registration call"; if they drift, a real registration silently routes to
+  // the rejecting registrar (fail-closed, but a confusing breakage). These pin
+  // the exact shapes the transformer emits (builder-call-hoisting.ts: a
+  // trailing call whose argument is a multiline shorthand object of
+  // previously-declared top-level bindings) as APPROVED, and assert the tamper
+  // shapes the verifier is meant to refuse are not.
   it("approves the exact multiline shorthand shape the transformer emits", () => {
     // Mirrors builder-call-hoisting.ts: `factory.createObjectLiteralExpression(
     // …, /* multiline */ true)` over shorthand assignments — one entry per line.
@@ -175,13 +177,13 @@ __cfReg({ __cfLift_1 });`;
   });
 });
 
-// CT-1623 follow-up: pin the outdated-overwrite contract at the public sink
-// layer. `indexArtifact` overwrites the reverse mapping on re-eval so by-identity
-// LOOKUP is always fresh; the same freshness must hold one layer down, where a
-// module that re-evaluates (same identity, fresh artifact instance) re-stages and
-// commits. A second commit under the same identity must REPLACE the prior staged
-// map, not merge a stale instance into it.
 describe("re-registration under the same identity commits the fresh staged set", () => {
+  // CT-1623 follow-up: pin the outdated-overwrite contract at the public sink
+  // layer. `indexArtifact` overwrites the reverse mapping on re-eval so
+  // by-identity LOOKUP is always fresh; the same freshness must hold one layer
+  // down, where a module that re-evaluates (same identity, fresh artifact
+  // instance) re-stages and commits. A second commit under the same identity
+  // must REPLACE the prior staged map, not merge a stale instance into it.
   it("a later commit replaces the sink entry for that identity", () => {
     const sink: HoistRegistrationSink = new Map();
 

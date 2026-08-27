@@ -360,10 +360,13 @@ Deno.test("memory v2 patch reuses unchanged branches across sibling updates", ()
   });
 });
 
+//
 // An `append` op is tail-relative: it inserts `values` at the array's live tail,
 // creating the array (and the path to it) when absent. This is what lets a client
 // whose base is stale or empty still land its elements after whatever durably
 // precedes them.
+//
+
 Deno.test("memory v2 append lands at the live tail", () => {
   const out = applyPatch({ value: ["a", "b"] }, [
     { op: "append", path: "/value", values: ["c"] },
@@ -403,8 +406,11 @@ Deno.test("memory v2 append rejects a non-array target", () => {
   assert(threw, "append onto a non-array must throw");
 });
 
+//
 // `add-unique` appends each value only if no existing element equals it, and
 // creates the array if absent. It is idempotent against durable state.
+//
+
 Deno.test("memory v2 add-unique adds only absent elements", () => {
   const out = applyPatch({ value: ["a", "b"] }, [
     { op: "add-unique", path: "/value", values: ["b", "c", "c"] },
@@ -433,9 +439,10 @@ Deno.test("memory v2 add-unique compares by stored value (objects)", () => {
   assertEquals(out.value, [{ id: 1 }, { id: 2 }]);
 });
 
-// A `FabricSpecialObject` keeps its state in private `#fields`, so its content
-// is what distinguishes two instances, not its (empty) own-property set.
 Deno.test("memory v2 add-unique compares special objects by content", () => {
+  // A `FabricSpecialObject` keeps its state in private `#fields`, so its
+  // content is what distinguishes two instances, not its (empty) own-property
+  // set.
   const out = applyPatch({ value: [new FabricBytes(new Uint8Array([1, 2]))] }, [
     {
       op: "add-unique",
@@ -454,8 +461,8 @@ Deno.test("memory v2 add-unique compares special objects by content", () => {
   ]);
 });
 
-// `NaN` is the same value as `NaN`; `-0` and `+0` are different values.
 Deno.test("memory v2 add-unique on the weird numbers", () => {
+  // `NaN` is the same value as `NaN`; `-0` and `+0` are different values.
   const nan = applyPatch({ value: [NaN] }, [
     { op: "add-unique", path: "/value", values: [NaN] },
   ]) as { value: number[] };
@@ -469,8 +476,11 @@ Deno.test("memory v2 add-unique on the weird numbers", () => {
   assert(Object.is(zero.value[1], +0), "the added +0 must be distinct");
 });
 
+//
 // `increment` adds `by` to the number at the path, treats an absent value as 0,
 // creates the path if absent, and sums when composed.
+//
+
 Deno.test("memory v2 increment adds to an existing number", () => {
   const out = applyPatch({ value: { count: 5 } }, [
     { op: "increment", path: "/value/count", by: 3 },
@@ -522,10 +532,11 @@ Deno.test("memory v2 increment rejects a zero amount", () => {
   assert(threw, "a zero increment must throw");
 });
 
-// A non-finite `by` is meaningless for a concurrent-sum counter and would set
-// the counter to an absorbing `NaN`/`±Infinity`, so it is rejected alongside a
-// zero amount. (`-0 === 0`, so negative zero is already caught by the zero gate.)
 Deno.test("memory v2 increment rejects a non-finite amount", () => {
+  // A non-finite `by` is meaningless for a concurrent-sum counter and would set
+  // the counter to an absorbing `NaN`/`±Infinity`, so it is rejected alongside
+  // a zero amount. (`-0 === 0`, so negative zero is already caught by the zero
+  // gate.)
   for (const by of [NaN, Infinity, -Infinity]) {
     let threw = false;
     try {
@@ -539,8 +550,11 @@ Deno.test("memory v2 increment rejects a non-finite amount", () => {
   }
 });
 
+//
 // `remove-by-value` removes every element equal to the given value (by stored
 // value), idempotently, and is a no-op on a missing/non-array target.
+//
+
 Deno.test("memory v2 remove-by-value removes matching elements", () => {
   const out = applyPatch({ value: ["a", "b", "a", "c"] }, [
     { op: "remove-by-value", path: "/value", value: "a" },
@@ -603,10 +617,13 @@ Deno.test("memory v2 remove-by-value is a no-op when absent", () => {
   assertEquals(missing, {});
 });
 
+//
 // A non-array target is rejected once the path resolves to a traversable
 // container (an object) rather than to a scalar. A scalar target is caught
 // earlier by the spine thaw with a "not traversable" message; an object target
 // reaches the op's own array-shape check.
+//
+
 Deno.test("memory v2 append rejects a non-array object target", () => {
   let threw = false;
   try {
@@ -643,19 +660,20 @@ Deno.test("memory v2 increment rejects the root path", () => {
   assert(threw, "increment at the root must throw");
 });
 
-// Both `increment` and `remove-by-value` read the current value by walking the
-// path through array indices as well as object keys. Incrementing a numeric
-// array element addresses it positionally and writes back into the array.
 Deno.test("memory v2 increment updates a numeric array element by index", () => {
+  // Both `increment` and `remove-by-value` read the current value by walking
+  // the path through array indices as well as object keys. Incrementing a
+  // numeric array element addresses it positionally and writes back into the
+  // array.
   const out = applyPatch({ scores: [10, 20, 30] }, [
     { op: "increment", path: "/scores/1", by: 5 },
   ]) as { scores: number[] };
   assertEquals(out.scores, [10, 25, 30]);
 });
 
-// A path segment that names an out-of-range array index resolves to absent, so
-// remove-by-value finds no array there and leaves the document untouched.
 Deno.test("memory v2 remove-by-value is a no-op through a missing array index", () => {
+  // A path segment that names an out-of-range array index resolves to absent,
+  // so remove-by-value finds no array there and leaves the document untouched.
   const original = { items: [["a"]] };
   const out = applyPatch(original, [
     { op: "remove-by-value", path: "/items/5/inner", value: "a" },
@@ -663,12 +681,14 @@ Deno.test("memory v2 remove-by-value is a no-op through a missing array index", 
   assertEquals(out, { items: [["a"]] });
 });
 
+//
 // `applyPatchToDocument` is the shared "replay these ops over whatever this
 // document currently is" entry point (server-side reconstruction and the
 // client's pending replay). It normalizes an absent base to the empty
 // envelope and guarantees the result IS an entity envelope — a root-level
 // op can produce any FabricValue, and type-laundering a scalar root into
 // EntityDocument would let an invalid shape reach envelope-assuming code.
+//
 
 Deno.test("memory v2 applyPatchToDocument replays over an absent base as the empty envelope", () => {
   const patched = applyPatchToDocument(undefined, [
