@@ -3,6 +3,7 @@
  */
 
 import { assertEquals, assertThrows } from "@std/assert";
+import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
@@ -519,17 +520,33 @@ Deno.test("events - serializeEvent", async (t) => {
     assertEquals((serialized.detail as { blob: unknown }).blob, bytes);
   });
 
-  await t.step("refuses an `Error` handed over in a detail", () => {
-    // The shape most likely to reach the refusal: `cf-error` carries one, and
-    // `cf-code-editor` alone raises six. Nothing binds a handler to that event,
-    // so nothing arrives here -- and an uncaught page exception fails any
-    // browser test, so a case that starts arriving says so at once.
-    const event = new MockCustomEvent("cf-error", {
-      detail: { error: new Error("boom"), message: "upload failed" },
-    }) as unknown as Event;
+  await t.step(
+    "hands on a detail the crossing will refuse, unfabricated",
+    () => {
+      // `cf-error` carries an `Error`, and `cf-code-editor` alone raises six. Its
+      // top layer is a plain record, so it crosses this seam; the member with no
+      // fabric form is the producer's bug and is named by the encoding, which is
+      // where a deep check here would have reached the same verdict at the cost
+      // of a walk on every correct value.
+      //
+      // What matters is the half this seam owns: the value is handed on as it
+      // was, not rendered into an empty record that a handler cannot tell from
+      // real data.
+      const error = new Error("boom");
+      const event = new MockCustomEvent("cf-error", {
+        detail: { error, message: "upload failed" },
+      }) as unknown as Event;
 
-    assertThrows(() => serializeEvent(event), Error, "Cannot yet carry");
-  });
+      const serialized = serializeEvent(event);
+
+      assertEquals((serialized.detail as { error: unknown }).error, error);
+      assertThrows(
+        () => realmFromFabricValue(serialized.detail!),
+        Error,
+        "Cannot encode instance",
+      );
+    },
+  );
 
   await t.step("omits undefined properties", () => {
     const event = new MockEvent("click") as unknown as Event;

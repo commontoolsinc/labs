@@ -7,7 +7,7 @@
 
 import {
   type FabricValue,
-  isValidFabricValue,
+  isValidFabricValueLayer,
 } from "@commonfabric/data-model/fabric-value";
 import type { SigilLink } from "@commonfabric/runner/shared";
 import { isCellHandle } from "@commonfabric/runtime-client";
@@ -352,12 +352,19 @@ function carriedTargetValue(
  * it can be carried further is the encoding's question at the crossing rather
  * than this seam's.
  *
+ * Only the top layer is examined, which is what keeps this off the per-event
+ * cost of a walk. A container whose members are not fabric is the producer's
+ * bug and fails at the crossing, where the encoding names the member it cannot
+ * take -- so a deep check here would spend a walk on every correct value to
+ * reach a verdict the encoding reaches anyway.
+ *
  * A `CellHandle` is the one thing a component exposes that is not fabric and
  * has a representation anyway: the link that reaches its cell. Recognized by
  * its class, so that nothing else defining a `toJSON()` is taken for a cell.
  *
- * Anything else is refused. What reaches the refusal is enumerable, and none of
- * it is something a handler could act on:
+ * Anything else is refused: a value whose very top layer has no fabric form.
+ * What reaches this is enumerable, and none of it is something a handler could
+ * act on:
  *
  * * an `Error`, from `cf-error` -- `cf-code-editor` raises six, and
  *   `cf-file-input`, `cf-file-download` and `cf-copy-button` one apiece.
@@ -387,7 +394,7 @@ function carriedTargetValue(
  *   browser suites failing a test on any uncaught page exception.
  */
 function toSerializableValue(value: unknown): FabricValue {
-  if (isValidFabricValue(value)) return value;
+  if (isValidFabricValueLayer(value)) return value as FabricValue;
 
   if (isCellHandle(value)) return value.toJSON();
 
