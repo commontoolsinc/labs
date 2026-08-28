@@ -10,13 +10,13 @@ import {
   DEFAULT_CFC_XATTR_NAMESPACE,
   defaultCfcWritebackStatePath,
   disconnectedWriteErrno,
-  finalizeCommittedSourceWrite,
   isConnectionWriteFailure,
   parseCfcXattrNamespace,
   rootSpaceLookupNames,
   sourceRelPathToTreeSegments,
   writeUnavailableErrno,
 } from "./mod.ts";
+import { finalizeCommittedSourceWrite } from "./source-write-finalize.ts";
 import { HandleMap } from "./handles.ts";
 import {
   closeKernelFileHandle,
