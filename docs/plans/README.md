@@ -10,6 +10,12 @@ a record: archive it to `docs/history/plans/` following the procedure in
 
 ## Current plans
 
+- [Acquiring skills from the open internet](external-skill-acquisition.md)
+  splits discovery from acquisition against a public skill registry: the
+  registry answers what exists, a digest-verified `.well-known` entry or a git
+  commit SHA answers for the bytes, the text loads by handle into a child the
+  chooser never reads, and a split-mint provenance mark records where it came
+  from without declassifying anything.
 - [`cf view` language and syntax coverage](cf-view-language-coverage.md)
   orders the remaining language, data, build, and configuration formats needed
   for honest coverage of the active organization repositories.
