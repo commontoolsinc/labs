@@ -29,11 +29,7 @@ import {
 import { codecClasses } from "@/fabric-primitives/index.ts";
 import { shallowFabricFromNativeValue } from "@/native-conversion.ts";
 import { isValidFabricNativeObject } from "@/native-type-tags.ts";
-import {
-  LAYER_CORPUS,
-  PlainClass,
-  UnregisteredPrimitive,
-} from "./fabric-value-corpus.ts";
+import { LAYER_CORPUS, PlainClass } from "./fabric-value-corpus.ts";
 import type { FabricValue } from "@/interface.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
@@ -310,10 +306,9 @@ describe("type-check", () => {
     }
 
     describe("agrees with `isValidFabricValueLayer()`", () => {
-      // The vet decides nothing the predicate has not decided, bar the one
-      // added condition below, which the corpus deliberately holds none of.
-      // That the corpus lands on both answers is asserted rather than assumed,
-      // agreement being free for one that has drifted to a side.
+      // The vet decides exactly what the predicate decides. That the corpus
+      // lands on both answers is asserted rather than assumed, agreement being
+      // free for one that has drifted to a side.
       const accepted: string[] = [];
       const refused: string[] = [];
 
@@ -367,29 +362,6 @@ describe("type-check", () => {
           .map(([, value]) => refusalOf(value) === null);
         expect(outcomes).toContain(true);
         expect(outcomes).toContain(false);
-      });
-    });
-
-    // The one added condition, and the one place the vet and the predicate
-    // part company. Such a value is a `FabricPrimitive`, so membership -- all
-    // the predicate asks about -- holds; what it lacks is a codec, so every
-    // path that could do something with it fails later and further away.
-    describe("given a `FabricPrimitive` subclass this system does not register", () => {
-      it("is accepted by `isValidFabricValueLayer()`", () => {
-        expect(isValidFabricValueLayer(new UnregisteredPrimitive())).toBe(true);
-      });
-
-      it("is refused as an unrecognized type", () => {
-        expect(() => assertValidFabricValueLayer(new UnregisteredPrimitive()))
-          .toThrow(
-            "Not representable as a `FabricValue`: `UnregisteredPrimitive` " +
-              "(not a recognized fabric type)",
-          );
-      });
-
-      it("is refused in the same words the shallow conversion uses", () => {
-        const value = new UnregisteredPrimitive();
-        expect(refusalOf(value)).toBe(conversionRefusalOf(value));
       });
     });
 

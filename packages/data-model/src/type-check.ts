@@ -2,8 +2,7 @@
  * The predicates deciding whether a value belongs to the `FabricValue` type,
  * and the narrowings that ask a shape question about one that already does.
  * The single-level predicate has a throwing form beside it, which decides
- * nothing the predicate has not already decided and exists to say why the
- * answer was no.
+ * exactly what the predicate decides and exists to say why the answer was no.
  *
  * Membership turns on inertness: a `FabricValue` is data, so anything that is
  * live code is refused -- a function, an accessor-backed property, the
@@ -26,14 +25,12 @@ import {
   unsafeObjectKeyIn,
 } from "@commonfabric/utils/types";
 
-import { JSON_CODEC } from "./codec-interface/interface.ts";
 import { isValidFabricNativeObject } from "./native-builtin-tags.ts";
 import {
   type FabricArray,
   type FabricContainerValue,
   FabricInstance,
   type FabricPlainObject,
-  FabricPrimitive,
   FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
@@ -102,44 +99,23 @@ export function isValidFabricValueLayer(
 }
 
 /**
- * Helper for `assertValidFabricValueLayer()`, which reports a `FabricPrimitive`
- * of a class this system does not register.
- *
- * Registration is asked as "does the class declare a codec", which is the
- * property that matters: a primitive with no codec cannot be encoded, so it
- * cannot cross any boundary a `FabricValue` is expected to cross. Asking it
- * this way also keeps the question answerable from here, a registry of the
- * concrete classes being layered above this module.
- */
-function isUncodeableFabricPrimitive(value: unknown): boolean {
-  return (value instanceof FabricPrimitive) &&
-    !(JSON_CODEC in (value.constructor as object));
-}
-
-/**
  * Throws unless the value is usable as a `FabricValueLayer`, naming what is
  * wrong with it when it is not. This is `isValidFabricValueLayer()` asked so
- * that the answer carries a reason: that predicate is what decides the
- * outcome, and everything past the decision exists to say why it went the way
- * it did.
+ * that the answer carries a reason: that predicate decides the outcome and
+ * this adds nothing to it, everything past the decision existing to say why it
+ * went the way it did.
  *
- * One condition is added, and it is the one place the two part company. A
- * `FabricPrimitive` of a class this system does not register is a member of the
- * type -- membership being all the predicate asks about -- and has no codec, so
- * admitting it only moves its failure to encode time and away from the value
- * that caused it.
- *
- * A `FabricNativeObject` is refused too, and told which refusal it is: a `Date`
- * and a `Map` alike are values conversion has a say over, which is a different
- * position from a class instance that has no fabric form at all. The message
- * says which, and sends the caller to ask.
+ * A `FabricNativeObject` gets a reason of its own: a `Date` and a `Map` alike
+ * are values conversion has a say over, which is a different position from a
+ * class instance that has no fabric form at all. The message says which, and
+ * sends the caller to ask.
  *
  * @param value The value to check.
  */
 export function assertValidFabricValueLayer(
   value: unknown,
 ): asserts value is FabricValueLayer {
-  if (isValidFabricValueLayer(value) && !isUncodeableFabricPrimitive(value)) {
+  if (isValidFabricValueLayer(value)) {
     return;
   }
 
@@ -206,9 +182,8 @@ export function assertValidFabricValueLayer(
     );
   }
 
-  // No recognized shape at all: an ordinary class instance, or the
-  // unregistered `FabricPrimitive` the added condition above turns away. Death
-  // before confusion!
+  // No recognized shape at all -- an ordinary class instance, most commonly.
+  // Death before confusion!
   throw new Error(
     `Not representable as a \`FabricValue\`: ${
       backtickQuote((value as object).constructor?.name ?? typeof value)

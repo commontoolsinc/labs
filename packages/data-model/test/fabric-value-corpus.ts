@@ -9,7 +9,6 @@
  * dropped from here is an arm the cross-checks stop reaching.
  */
 
-import { BaseFabricPrimitive } from "@/fabric-bases/BaseFabricPrimitive.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
@@ -25,14 +24,6 @@ export class PlainClass {}
  * An `Array` subclass, whose instances are live code rather than inert data.
  */
 export class ArraySubclass extends Array {}
-
-/**
- * A `FabricPrimitive` subclass this system does not register: a member of the
- * `FabricValue` type by every structural test, and yet no codec knows it, so
- * nothing can encode one. Defining it here is the only way to have one --
- * every concrete primitive the package ships is registered.
- */
-export class UnregisteredPrimitive extends BaseFabricPrimitive {}
 
 /**
  * One entry per dispatch arm, labeled. The labels reach test names, so they
