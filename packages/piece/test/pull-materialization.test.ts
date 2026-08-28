@@ -5949,6 +5949,37 @@ describe("piece pull materialization", () => {
     });
   });
 
+  it("syncPattern prefers the live session pointer over a legacy keyless durable pointer", async () => {
+    const piece = await pieces.runPersistent(
+      trustPattern(
+        runtime,
+        sourceLessMultiplierPattern("sync-legacy-keyless", 2),
+      ),
+      { input: 5 },
+      "sync-legacy-keyless-" + crypto.randomUUID(),
+      { start: true },
+    );
+    expect(getPatternIdentityRef(piece)).toBeUndefined();
+    expect(runtime.runner.sessionPatternPointerFor(piece)).toBeDefined();
+
+    // A legacy pre-guard durable `keyless:` orphan landing AFTER this
+    // session's keyless setup — the remote-sync-lag interleaving (the
+    // in-session setup cleared the metas transactionally; a lagging sync
+    // can still deliver the old record afterwards). Such a pointer is
+    // unloadable everywhere except the session that MINTED it — never this
+    // one — so it must not shadow the live session pointer.
+    const { error } = await runtime.editWithRetry((tx) => {
+      piece.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: "keyless:fid1:legacy-orphan-from-a-pre-guard-session",
+        symbol: "default",
+      });
+    });
+    expect(error).toBeUndefined();
+
+    const pattern = await pieces.syncPattern(piece);
+    expect(pattern).toBeDefined();
+  });
+
   it("persists setPattern replacement by identity for fresh runtime reloads", async () => {
     const repository = "https://github.com/commontoolsinc/labs";
     const firstPattern = await runtime.patternManager.compilePattern(

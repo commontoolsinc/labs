@@ -1438,17 +1438,30 @@ export class PiecesController<T = unknown> {
     // durable pointer (the never-durable contract; L3(a), RULED 2026-08-27)
     // — in the session that set it up, the runner's session-side pointer
     // answers instead, and `loadPatternByIdentity` serves the minted
-    // identity from the in-memory index.
-    let ref = getPatternIdentityRef(piece) ??
-      this.runtime.runner.sessionPatternPointerFor(piece);
+    // identity from the in-memory index. A durable `keyless:` pointer is a
+    // LEGACY orphan (pre-guard leak, or one delivered by a lagging remote
+    // sync after this session's setup cleared it) — unloadable everywhere
+    // except the session that minted it, never this one — so it must not
+    // shadow the live session pointer; it stays the last resort so a fresh
+    // session's orphan keeps its designed no-pattern outcome.
+    const resolvePatternRef = () => {
+      const durable = getPatternIdentityRef(piece);
+      if (
+        durable !== undefined &&
+        !PatternManager.isKeylessPatternIdentity(durable.identity)
+      ) {
+        return durable;
+      }
+      return this.runtime.runner.sessionPatternPointerFor(piece) ?? durable;
+    };
+    let ref = resolvePatternRef();
     if (!ref) {
       // Under remote sync, metadata can transiently lag the result value even
       // though setup just wrote both. Wait for storage to settle and retry once
       // before treating the pattern metadata as missing.
       await timePiecePhase("syncPattern.retry.synced", () => this.synced());
       await timePiecePhase("syncPattern.retry.piece.sync", () => piece.sync());
-      ref = getPatternIdentityRef(piece) ??
-        this.runtime.runner.sessionPatternPointerFor(piece);
+      ref = resolvePatternRef();
     }
     if (!ref) throw new Error("piece missing pattern identity");
 

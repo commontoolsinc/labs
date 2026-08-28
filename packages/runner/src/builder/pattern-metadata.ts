@@ -130,9 +130,12 @@ export function resolveOriginal<T>(value: T): T {
  *
  * - trust propagates EAGERLY (sound: builders brand their artifacts at
  *   creation time, before any copy can be made);
- * - the entry ref propagates eagerly when already known, but lookups still
- *   walk `derivedFrom` lazily ({@link getArtifactEntryRef}) because refs are
- *   indexed only post-evaluation — AFTER build-time copies were made.
+ * - a REAL entry ref propagates eagerly when already known — a session
+ *   `keyless:` ref never does (pinning the mint onto the copy would shadow
+ *   the root's later real promotion; see the guard in the body) — and
+ *   lookups still walk `derivedFrom` lazily ({@link getArtifactEntryRef})
+ *   because refs are indexed only post-evaluation — AFTER build-time
+ *   copies were made.
  *
  * Only runner-owned copy sites may call this; it is the sole way a copy can
  * inherit trust, so forged values (which are never passed here with a trusted
