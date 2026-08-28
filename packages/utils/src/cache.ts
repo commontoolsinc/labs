@@ -51,7 +51,7 @@ export interface BoundedKeyMapOptions<K, V> {
 export class BoundedKeyMap<K, V> implements ReadonlyMap<K, V> {
   readonly #entries = new Map<K, V>();
   readonly #limit: number;
-  readonly #onEvict?: (key: K, value: V) => void;
+  readonly #onEvict: ((key: K, value: V) => void) | undefined;
 
   /**
    * Constructs an instance which holds at most `limit` entries. A `limit`
