@@ -89,6 +89,7 @@ export {
   type PreparedPieceSourceChange,
 } from "./piece-controller.ts";
 export {
+  acceptEnteredOrigin,
   classifyOrigin,
   type PieceOrigin,
   PieceOriginError,

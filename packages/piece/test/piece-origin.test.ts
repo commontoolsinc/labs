@@ -6,6 +6,7 @@ import { createSession, Identity } from "@commonfabric/identity";
 import {
   applyPieceSourceTransition,
   type Cell,
+  classifyPieceOriginString,
   getPatternIdentityRef,
   getPieceSourceRevisions,
   getPieceSourceSnapshot,
@@ -320,6 +321,29 @@ describe("resolvePieceOriginSource", () => {
     expect(reads).toEqual([`piece:${otherSpace}`, `source:${otherSpace}`]);
   });
 
+  it("refuses a self-reference before it registers the host it names", async () => {
+    const registrations: unknown[] = [];
+    const runtime = {
+      mappedHostFor: () => undefined,
+      hostForSpace: () => new URL("https://toolshed.test"),
+      registerSpaceHost: (...args: unknown[]) => {
+        registrations.push(args);
+        return true;
+      },
+    } as unknown as Runtime;
+
+    await expect(resolvePieceOriginSource(
+      runtime,
+      SPACE,
+      `cf://other.test/${SPACE}/of:fid1:${HASH}`,
+      "default",
+      { self: { space: SPACE, pieceId: `of:fid1:${HASH}` } },
+    )).rejects.toThrow("a piece cannot follow itself");
+    // Registering a host changes the route the space resolves through, and a
+    // reference this call refuses must not leave that behind.
+    expect(registrations).toEqual([]);
+  });
+
   it("does not register an unaccepted host while resolving another space", async () => {
     const otherSpace = "did:key:z6MkspaceBBBB" as MemorySpace;
     const registrations: unknown[] = [];
@@ -602,6 +626,96 @@ function pieceWith(
   return { piece, runtime };
 }
 
+describe("the two classifiers a recorded origin meets", () => {
+  it("agree on which strings can be followed at all", () => {
+    // `classifyOrigin` decides what the source panel shows and what an
+    // entered origin is allowed to become. `classifyPieceOriginString`
+    // decides what reconciliation will follow. They answer different
+    // questions and use different words for the kinds, but they have to
+    // agree on the boundary: a string one accepts and the other calls
+    // unusable would be stored as an origin that nothing follows, and
+    // reported by the panel as an origin that is fine.
+    const host = "https://toolshed.test";
+    const runtime = { hostForSpace: () => new URL(host) } as unknown as Runtime;
+    const hash = "b".repeat(43);
+    const strings: string[] = [
+      "system:system/home.tsx",
+      "/api/patterns/system/home.tsx",
+      `${host}/api/patterns/system/home.tsx`,
+      "https://example.test/p.tsx",
+      "http://example.test/p.tsx",
+      "ftp://example.test/p.tsx",
+      "not a url",
+      "",
+      "   ",
+      `cf:pattern:${hash}`,
+      `cf:/did:key:z6Mkabc/of:fid1:${hash}`,
+      `cf://host.test/did:key:z6Mkabc/of:fid1:${hash}`,
+      "cf:/did:key:z6Mkabc/some-slug",
+      `cf:of:fid1:${hash}`,
+      `cf:/did:key:z6Mkabc/of:fid1:${hash}@${"c".repeat(43)}`,
+      "../relative.tsx",
+      "data:text/plain,x",
+      "cf:!!malformed",
+      // A protocol-relative string looks like a rooted path and is not one:
+      // resolved against the host it names a different authority entirely.
+      "//evil.example/x",
+      "//evil.example",
+      "/\\evil.example/x",
+      "\\\\evil.example\\x",
+    ];
+
+    // Rooted paths on this host that name nothing under the patterns route.
+    // Reconciliation reports them unusable; this side still reads them as
+    // ordinary web origins. `docs/specs/piece-source-lifecycle.md` says such
+    // a string is not an origin at all, so the two are not yet saying the
+    // same thing about them — listed here rather than left out of the strings
+    // above, because a case a test omits is a case it does not check.
+    const knownAsymmetric = new Set([
+      "/",
+      "/nope.tsx",
+      "/api/patterns/../../etc/passwd",
+    ]);
+    for (const recorded of knownAsymmetric) strings.push(recorded);
+
+    for (const recorded of strings) {
+      const kind = classifyPieceOriginString(recorded, host);
+      // A rooted path carrying no ref names nothing under the patterns route,
+      // and reconciliation reports it unusable rather than following it, so
+      // that is what "followable" has to mean here.
+      const followable = kind.kind !== "unusable" &&
+        !(kind.kind === "legacy-path" && kind.ref === undefined);
+      let usable: boolean;
+      try {
+        classifyOrigin(runtime, SPACE, recorded);
+        usable = true;
+      } catch {
+        usable = false;
+      }
+      const expected = knownAsymmetric.has(recorded) ? true : followable;
+      expect({ recorded, usable }).toEqual({ recorded, usable: expected });
+    }
+  });
+
+  it("refuses a rooted path that resolves to another host", () => {
+    const host = "https://toolshed.test";
+    const runtime = { hostForSpace: () => new URL(host) } as unknown as Runtime;
+    // Both begin with a slash and neither names this host: the URL parser
+    // reads `//` as an authority and a backslash as a separator. A guard
+    // written against the spellings would need one arm per such trick, so
+    // what decides it is where the string actually resolved.
+    for (const recorded of ["//evil.example/x", "/\\evil.example/x"]) {
+      expect(() => classifyOrigin(runtime, SPACE, recorded)).toThrow(
+        "resolves to https://evil.example",
+      );
+    }
+    // A rooted path on this host is still an ordinary origin.
+    expect(classifyOrigin(runtime, SPACE, "/api/patterns/x.tsx").url).toBe(
+      "https://toolshed.test/api/patterns/x.tsx",
+    );
+  });
+});
+
 describe("readPieceOrigin", () => {
   it("reads a piece with no recorded source as detached", () => {
     const { piece, runtime } = pieceWith({});
@@ -702,6 +816,71 @@ describe("readPieceSourceState collects every recorded fact", () => {
     const state = await readPieceSourceState(runtime, piece);
     expect(state.entry).toBeUndefined();
     expect(state.files).toEqual([]);
+  });
+
+  it("separates a string nothing can follow from detachment", async () => {
+    const { piece, runtime } = pieceWith({
+      meta: {
+        patternIdentity: { identity: "abc", symbol: "default" },
+        patternSource: "not a url",
+      },
+    });
+    const state = await readPieceSourceState(runtime, piece);
+    expect(state.origin).toBeUndefined();
+    expect(state.unusableOrigin).toEqual({
+      recorded: "not a url",
+      reason: "not a url is not an absolute URL",
+    });
+
+    const detached = pieceWith({
+      meta: { patternIdentity: { identity: "abc", symbol: "default" } },
+    });
+    const detachedState = await readPieceSourceState(
+      detached.runtime,
+      detached.piece,
+    );
+    expect(detachedState.origin).toBeUndefined();
+    expect(detachedState.unusableOrigin).toBeUndefined();
+  });
+
+  it("reports what following the origin last did", async () => {
+    const { piece, runtime } = pieceWith({
+      meta: {
+        patternIdentity: { identity: "abc", symbol: "default" },
+        patternSource: "https://example.test/recipe.tsx",
+        pieceReconciliation: {
+          outcome: "refused",
+          at: 1_700_000_000_000,
+          origin: "https://example.test/recipe.tsx",
+          offered: { identity: "candidate", symbol: "default" },
+          reason: "incompatible-schema",
+          detail: "the contracts differ",
+        },
+      },
+    });
+    const state = await readPieceSourceState(runtime, piece);
+    expect(state.reconciliation).toEqual({
+      outcome: "refused",
+      at: 1_700_000_000_000,
+      origin: "https://example.test/recipe.tsx",
+      offered: { identity: "candidate", symbol: "default" },
+      reason: "incompatible-schema",
+      detail: "the contracts differ",
+    });
+  });
+
+  it("says nothing about a reconciliation record it cannot read", async () => {
+    const { piece, runtime } = pieceWith({
+      meta: {
+        patternIdentity: { identity: "abc", symbol: "default" },
+        patternSource: "https://example.test/recipe.tsx",
+        pieceReconciliation: { outcome: "invented", at: "recently" },
+      },
+    });
+    const state = await readPieceSourceState(runtime, piece);
+    expect(state.reconciliation).toBeUndefined();
+    // The rest of the piece's source facts still read.
+    expect(state.origin?.url).toBe("https://example.test/recipe.tsx");
   });
 });
 
