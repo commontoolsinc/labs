@@ -250,12 +250,22 @@ produced it.
   while the decisive gate has never started. The workflow run is the level at
   which "complete" means complete.
 
-  All four are one failure at different joints, and it is the invariant CT-2100
+  Nor does the workflow level close it by itself: it reports that the runs
+  which *exist* have finished, not that every run exists. What closes it is an
+  expected set — naming the gate, and knowing the number of checks a complete
+  answer carries — because until then "the coverage gate is absent" and "the
+  coverage gate passed" are the same observation.
+
+  These are one failure at different joints, and it is the invariant CT-2100
   established, reappearing in the reporting layer rather than in the code:
   *anything not read must be recorded as not read.* That was written for a cell
   nobody read rendering as a cell with no label. The same sentence covers
   thirty-three checks nobody fetched rendering as thirty-three checks that are
-  not there.
+  not there. And it carries the same precondition it did there: **to record
+  that something was not read, you have to know what should have been read.**
+  CT-2100's label reader had to be told its bound before a miss could be
+  marked; a check-run reader has to be told the gate's name before an absence
+  can be distinguished from a pass.
 - The sandbox transport guard checked that two directories were *named* in a
   runtime's configuration, never that the runtime read them, and then reported
   `invocationContextTransport: "sidecar"` into the run's policy snapshot on the
