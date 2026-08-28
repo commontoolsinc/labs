@@ -726,9 +726,12 @@ export interface LinkWalk {
    * value holds rather than all of it, and a link in the part not reached is
    * neither reported nor ruled out.
    *
-   * Most values named here hold nothing at all — a hash, a byte string, a
-   * timestamp — so this says where the walk read partially, not where a link
-   * is likely to be hiding.
+   * Some values named here hold nothing at all — a hash, a byte string, a
+   * timestamp. Others hold a whole value out of reach: a `ProblematicValue` or
+   * an `UnknownValue` keeps the state it wrapped in a private field, and that
+   * state is exactly the data whose decoding went wrong or arrived under a tag
+   * this build does not know, links in it included. So a path here is a place
+   * the walk cannot answer for, not a place a link is known to be.
    */
   opaque: readonly (readonly string[])[];
 
