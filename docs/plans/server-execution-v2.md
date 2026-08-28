@@ -38,7 +38,47 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
-**Delta 2026-08-28 (this PR, FINAL disposition): the lunch forever-park's
+**Delta 2026-08-28 (the geometry-3 close PR): the lunch forever-park's
+THIRD supplier geometry — the supplier COMPILE still mid-flight at
+child-replication time (probe 4's residue, run 33165960083) — is CLOSED
+red-first, and lunch-poll-vote's FILE entry is LIFTED: the ON-skip
+registry is EMPTY across ALL FOUR SUITES again.** The close (the #6484
+register's designed move, built with the independent review's three
+sharpenings): on a dry origin AND dry fallback map, the replication
+snapshots BOTH in-flight compile registries (`inProgressCompilations`
+AND `inProgressByIdentityLoads`; never `compileCacheWrites`, its own
+set), allSettles the snapshot once, re-observes a fresh
+`pendingCacheWriteBacks` snapshot (a settled load's recovery persist is
+fire-and-forget but registers there before the load resolves), and
+re-consults primary + fallbacks; still dry keeps the byte-identical
+one-shot throw. An EMPTY registry snapshot takes NO retry — nothing
+could have recorded, and the build's own mutation ladder caught the
+unconditional-retry draft re-rescuing the sibling race and masking the
+sibling-await pin (the F1 class): the short-circuit restored that kill.
+Pin: `pattern-replication-sibling-race.test.ts` step 5 (latch-gated
+mid-flight supplier compile, second-runtime construction, no sleeps),
+watched RED at pre-fix `bd9b1c10b` with the production error;
+once-await mutation reds it alone 5/5; the four existing kills
+re-verified. GEOMETRY 3b (a supplier compile not yet STARTED at consult
+time) is PRE-DECLARED residue in the register — signature:
+`closure-replication-failed` with NO `closure-replication-await-inflight`
+line, fallback counter 0, closure arriving shortly after; the full
+event-driven close (re-issue failed replications on each persist
+record) TOUCHES THE ONE-SHOT CONTRACT and is recorded as an OWNER-COURT
+fork, not built. Lift evidence per the ruled local-plus-CI-probe bar:
+campaign I 8/8 quiet-and-loaded at the fix head (fresh store + posture
+probe per run, ensure-ON default, self-sourced binary sha256
+`a483b13f70b8…` re-verified per run, LLM masked; `structureLoadStuck`
+0, `closure-replication-failed` 0, walls 18–19 s), full runner suite
+green at the head, and THIS PR's own ON-lane board as the direct-CI
+unskip probe under the ruled SURFACE reading — ON shard 7 RUNS
+lunch-poll-vote; the probed surface's verdict decides (red at the
+surface restores the entry with the 3b classification, per the arc's
+standing method). The flip PR's list-EMPTY precondition is met again;
+its bar remains a green ON lane. The delta below is #6484's record,
+kept as history.**
+
+**Delta 2026-08-28 (PR #6484, FINAL disposition): the lunch forever-park's
 WRITE PATH is mapped THREE GEOMETRIES DEEP on four direct-CI probe boards,
 the first two geometries FIXED red-first — and the entry is RESTORED: every
 probe went red at the probed surface, the fourth under the declared hard

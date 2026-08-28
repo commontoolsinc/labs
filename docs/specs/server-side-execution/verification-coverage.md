@@ -5290,8 +5290,12 @@ supply; OW29/OW32/OW34 closed):
   step) and was held only by a co-resident file's red in the same shard,
   while lunch-poll-vote passed its local half 8/8 and its probe went red at
   the probed surface for the second campaign running. **The current census
-  (2026-08-28, after the lunch lift PR's three probe boards) is ONE patterns
-  entry: lunch-poll-vote's FILE entry, RESTORED.** default-app's reload
+  (2026-08-28, after the geometry-3 close PR's lift) is EMPTY — no entry
+  in any suite: lunch-poll-vote's FILE entry, RESTORED by #6484 after its
+  three probe boards, lifted again once the third geometry closed
+  red-first (the GEOMETRY-3 CLOSE and GEOMETRY-3 LIFT blocks at the end
+  of this row; the probe for that lift is the close PR's own ON-lane
+  board under the ruled surface reading).** default-app's reload
   STEP LIFTED 2026-08-28 — the owner ruled the SURFACE reading of the
   probe bar, under which its evidence was already complete (the LIFT block
   at the end of this row). lunch-poll-vote's lift was ATTEMPTED the same
@@ -5301,10 +5305,11 @@ supply; OW29/OW32/OW34 closed):
   probed surface (runs 33160430927, 33164596936, 33165960083; four probes
   across the arc, counting the pre-PR phase-3 board 33138358110 that opened
   it), the last exposing the still-open third geometry (the supplier
-  compile mid-flight), so the entry is restored carrying the accumulated
+  compile mid-flight), so the entry was restored carrying the accumulated
   map (the lunch ROOT-CAUSE, PROBE-2/3/4 blocks at the end of
-  this row). The FLIP's bar remains a green ON lane and every list empty;
-  this entry is again what holds the list (the co-resident `:133` debt the
+  this row) — until the geometry-3 close lifted it on its own bar. The
+  FLIP's bar remains a green ON lane and every list empty; the list-EMPTY
+  half is met again (the co-resident `:133` debt the
   probe surfaced was paid by #6477 — the OBSERVATION's FIXED paragraph
   below). Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
@@ -7692,16 +7697,53 @@ supply; OW29/OW32/OW34 closed):
     the next child creation" would become "…and on the next persist
     event") — an OWNER-LEVEL DESIGN FORK, recorded here for the
     owner's ruling; deliberately not built by this seat.
-    The pin suite (`tasks/server-execution-on-skips.test.ts`) is bound,
-    post-restore, to the SINGLE-entry registry: the patterns list holds
+    The pin suite (`tasks/server-execution-on-skips.test.ts`) was bound,
+    post-restore, to the SINGLE-entry registry: the patterns list held
     exactly the restored FILE entry (reason pinned to the
-    three-geometry map and the probe coordinates), the report carries
-    its SKIP line and no SKIP-STEP line, the shard filter drops exactly
-    that file, and the whole-registry loop asserts it is the only entry
-    anywhere — so any OTHER entry or a silent lift reddens a pin. The
-    flip's bar remains a green ON lane AND every list empty; this entry
-    again holds the list (the co-resident `:133` blocker in the
+    three-geometry map and the probe coordinates), the report carried
+    its SKIP line and no SKIP-STEP line, the shard filter dropped exactly
+    that file, and the whole-registry loop asserted it was the only entry
+    anywhere — so any OTHER entry or a silent lift reddened a pin. [That
+    binding is superseded by the GEOMETRY-3 LIFT below: the suite is
+    rebound to the EMPTY registry, with alias bridges for the two renamed
+    pins.] The
+    flip's bar remains a green ON lane AND every list empty (the
+    co-resident `:133` blocker in the
     OBSERVATION below is PAID by #6477, its FIXED paragraph there).
+    **GEOMETRY-3 LIFT (2026-08-28, the geometry-3 close PR — the entry's
+    second and final lift; the ON-skip registry is EMPTY across all four
+    suites again):** the entry's own stated lift condition — "the
+    in-flight compile await … plus the ruled local-plus-CI-probe bar" —
+    met on its own evidence at the fix head:
+    - **Requirement (1), local:** campaign I, 8 counted runs i01–i08
+      (4 quiet / 4 loaded interleaved, fresh store + own 97xx port +
+      posture probe per run, ensure defaulting ON, toolshed self-sourced
+      at the fix head, binary sha256 `a483b13f70b8…` re-verified into
+      every ledger, LLM masked): **8/8 GREEN**, walls 18–19 s,
+      `structureLoadStuck` 0, `closure-replication-failed` 0,
+      `closure-replication-await-inflight` 0 — the new retry is DORMANT
+      locally, exactly the model (the parent's own sidecar compile
+      persists first locally; the geometry is CI boot order). The
+      standing refusal storm unchanged (40 foreign-write-refused pairs
+      per run, the non-discriminator). Evidence on the measuring box:
+      `/Users/berni/labs-worktrees/geometry3-evidence/` (per-run
+      ledgers, test+toolshed logs, stats, stores; the red-first and
+      mutation-ladder logs under `pin/`).
+    - **Requirement (2), the direct-CI unskip probe — THIS PR's own
+      ON-lane board:** the registry carries no lunch entry, so ON shard
+      7 RUNS lunch-poll-vote; per the ruled SURFACE reading the probed
+      surface's verdict decides. A red AT the surface withdraws the
+      lift and restores the entry carrying the map plus the 3b
+      classification of that red's artifact (3b's signature is
+      pre-declared above); a red elsewhere is classified, not
+      conflated. The probe run's coordinates are recorded on the PR
+      when the board settles.
+    Rebound with the lift: the pin suite asserts every list EMPTY (the
+    17 cases green), the two renamed pins carry alias-bridge lines in
+    `tasks/test-identity-aliases.jsonl`, the ON-lane workflow comment
+    states the empty-list posture, and the plan's Coordination block
+    carries the delta. The flip PR's list-EMPTY precondition is MET
+    again; its bar remains a green ON lane, not merely the empty list.
 
     **OBSERVATION, not owed by this row and NOT one of the two entries —
     `cfc-group-chat-demo.test.ts` is failing ON at current main, 4/6, and
