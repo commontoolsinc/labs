@@ -32,11 +32,33 @@ tables with the v2 basis index — and partly a build. The spec §5
 deletion list is enforced by deleting on main and *not rebuilding*,
 with the survival test as the gate on anything that feels needed.
 
-## Coordination state (2026-08-27) — read this first
+## Coordination state (2026-08-28) — read this first
 
 The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
+
+**Delta 2026-08-28: the probe bar's OPEN interpretation question is RULED —
+"lane green" means the probed SURFACE — and default-app's reload STEP entry
+LIFTED on it. The ON skip list is now ONE entry: lunch-poll-vote's FILE
+entry.** The coordinator recommended that requirement (2) of the ruled bar
+binds the PROBED SURFACE, and that a co-resident failure is a separate
+defect carrying its own accountability rather than a veto on an unrelated
+entry's lift; the owner ruled **"agreed with your recommendations,
+proceed" (2026-08-28)**. Under that reading the default-app step's bar was
+already fully met by evidence in hand — 10/10 quiet-and-loaded locally at
+main `1fc841b6e` with every fixed-mechanism counter zero, AND its direct-CI
+unskip probe running the exact step to `ok (18s)` on a green file (run
+33138358110, ON shard 5, job 98743591519, head `95f313835`) — so the lift
+took NO new measurement. The entry and its bound in-file guard are removed
+together; the pin suite now binds the lift (list length ONE, the step's
+guard lookup `undefined`, no `SKIP-STEP` line). Two things the ruling does
+NOT license, both live: the co-resident `cfc-group-chat-demo.test.ts` red is
+NOT forgiven — it is unlisted debt with its own accountability and a flip
+blocker in its own right (the flip's bar is a green ON lane, not merely an
+empty skip list) — and a probe that reds AT the probed surface still
+withdraws that entry's lift, which is exactly where lunch-poll-vote stands.
+Register: verification-coverage.md OW45's SURFACE READING and LIFT blocks.
 
 **Delta 2026-08-27 (phase 3, #6469): the lift bar CHANGED by owner ruling
 — an ON-skip entry lifts only on its local campaign AND a green direct-CI
@@ -61,7 +83,9 @@ skip-listed, is untouched by the probe diff, and reproduces 4/6 red locally
 at the same head running alone. **That raises the bar's first
 interpretation question, and it is the coordinator's/owner's, flagged not
 filled: does "the probed lane GREEN" mean the probed SURFACE green or every
-test in the shard green?** Under the first reading this entry lifts today.
+test in the shard green?** Under the first reading this entry lifts today —
+**and it did: RULED 2026-08-28 for the surface reading, entry LIFTED; see
+the delta above.**
 **lunch-poll-vote's FILE entry: 8/8 local, probe RED at the probed
 surface** — line 271, the HOST's `#lp-join-button`, 300000 ms, 5m5s, the
 same signature as the 2026-08-26 probe, with the OFF lane green on the same
