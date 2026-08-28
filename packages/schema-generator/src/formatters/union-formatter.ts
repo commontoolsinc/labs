@@ -15,10 +15,13 @@ import {
   getNativeTypeSchema,
   getPropertyNameText,
   isDefaultBrandedMember,
-  resolveAliasedSymbol,
   resolveWrapperNode,
   TypeWithInternals,
 } from "../type-utils.ts";
+import {
+  extractLiteralValueOfSymbol,
+  resolveAliasedSymbol,
+} from "../typescript/literal-value.ts";
 import { dedupeByValueEqual } from "../value-equality.ts";
 
 // Simple primitive schemas only have these keys (possibly just one)
@@ -914,89 +917,7 @@ export class UnionFormatter implements TypeFormatter {
     symbol: ts.Symbol,
     context: GenerationContext,
   ): unknown {
-    const valueDeclaration = resolveAliasedSymbol(
-      symbol,
-      context.typeChecker,
-    ).valueDeclaration;
-    if (
-      valueDeclaration &&
-      ts.isVariableDeclaration(valueDeclaration) &&
-      valueDeclaration.initializer
-    ) {
-      return this.extractValueFromExpression(
-        valueDeclaration.initializer,
-        context,
-      );
-    }
-
-    return undefined;
-  }
-
-  private extractValueFromExpression(
-    expr: ts.Expression,
-    context: GenerationContext,
-  ): unknown {
-    if (
-      ts.isAsExpression(expr) ||
-      ts.isTypeAssertionExpression(expr) ||
-      ts.isSatisfiesExpression(expr) ||
-      ts.isParenthesizedExpression(expr)
-    ) {
-      return this.extractValueFromExpression(expr.expression, context);
-    }
-
-    if (ts.isArrayLiteralExpression(expr)) {
-      return expr.elements.map((element) =>
-        this.extractValueFromExpression(element, context)
-      );
-    }
-
-    if (ts.isObjectLiteralExpression(expr)) {
-      const obj: Record<string, unknown> = {};
-      for (const property of expr.properties) {
-        if (ts.isPropertyAssignment(property)) {
-          const propName = getPropertyNameText(
-            property.name,
-            context.typeChecker,
-          );
-          if (propName) {
-            obj[propName] = this.extractValueFromExpression(
-              property.initializer,
-              context,
-            );
-          }
-        } else if (ts.isShorthandPropertyAssignment(property)) {
-          obj[property.name.text] = this.extractValueFromShorthandProperty(
-            property,
-            context,
-          );
-        }
-      }
-      return obj;
-    }
-
-    if (ts.isStringLiteral(expr)) return expr.text;
-    if (ts.isNumericLiteral(expr)) return Number(expr.text);
-    if (expr.kind === ts.SyntaxKind.TrueKeyword) return true;
-    if (expr.kind === ts.SyntaxKind.FalseKeyword) return false;
-    if (expr.kind === ts.SyntaxKind.NullKeyword) return null;
-
-    return undefined;
-  }
-
-  private extractValueFromShorthandProperty(
-    property: ts.ShorthandPropertyAssignment,
-    context: GenerationContext,
-  ): unknown {
-    const checker = context.typeChecker as ts.TypeChecker & {
-      getShorthandAssignmentValueSymbol?: (
-        node: ts.ShorthandPropertyAssignment,
-      ) => ts.Symbol | undefined;
-    };
-    const symbol = checker.getShorthandAssignmentValueSymbol?.(property) ??
-      context.typeChecker.getSymbolAtLocation(property.name);
-
-    return symbol ? this.extractValueFromSymbol(symbol, context) : undefined;
+    return extractLiteralValueOfSymbol(symbol, context.typeChecker)?.value;
   }
 
   private isUndefinedType(type: ts.Type): boolean {
