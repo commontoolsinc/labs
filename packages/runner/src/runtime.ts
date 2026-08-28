@@ -2457,26 +2457,9 @@ export class Runtime {
     }
     this.prepareTxForCommit(tx);
     return tx.commit().then(async ({ error }) => {
-      // PROBE (temporary): name the parked stage of the :133 retry.
-      console.error(
-        `[PROBE editWithRetry] settled error=${
-          (error as { name?: string } | undefined)?.name ?? "none"
-        } retriesLeft=${maxRetries}`,
-      );
       if (error) {
         if (maxRetries > 0 && isRetryableCommitRejection(error)) {
-          // PROBE (temporary): name the parked stage of the :133 retry.
-          console.error(
-            `[PROBE editWithRetry] rejected name=${
-              (error as { name?: string }).name
-            } msg=${
-              String((error as { message?: string }).message ?? "").slice(0, 80)
-            } retriesLeft=${maxRetries} awaiting readiness`,
-          );
           await this.awaitCommitRetryReadiness(error);
-          console.error(
-            `[PROBE editWithRetry] readiness RESOLVED retriesLeft=${maxRetries}`,
-          );
           return this.editWithRetry<T>(fn, maxRetries - 1);
         } else {
           return { error };
