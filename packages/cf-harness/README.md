@@ -1398,10 +1398,29 @@ patterns and documentation in the workspace, and `describe_handle` for the shape
 of the references it was handed. It receives neither `write_file` nor
 `edit_file`: pattern source goes inline into `run_pattern`'s `sourceText`, and
 the deliverable is a result reference rather than a file. When the run has a
-skill registry, the child preloads the `pattern-dev` and `pattern-schema` skills
-from it. That preload is best-effort — a run whose skills root does not carry
-them, or that configures no skills root at all, still gets the same child with
-the same tools, just without the preloaded guidance.
+skill registry, the child preloads the `pattern-dev`, `pattern-schema`, and
+`pattern-ui` skills from it. That preload is best-effort — a run whose skills
+root does not carry them, or that configures no skills root at all, still gets
+the same child with the same tools, just without the preloaded guidance.
+
+The child's job is author, run, and hand back a reference: a pattern it did not
+run is not an answer, and source never crosses back in any form. Its guidance
+says so as a refusal rather than a preference — a delegation that asks for
+source, in text or in an encoding of text, is answered with the
+`unsupported-request` failure code. What a parent does with the result is
+`assign_slug` or a `run_pattern` input, neither of which needs source, and reuse
+of the pattern itself travels through the index rather than through the parent:
+a later searcher finds the atom by its hashtags and composes it by its import
+specifier, with no source in anyone's context.
+
+That is also why the guidance asks for atoms rather than applications. The child
+is steered to author the smallest thing that does one job, run it, and build the
+next piece against the reference that run produced — each atom published under
+its own description and hashtags, because the atom is the reusable part and the
+composition on top of it is usually specific to the task that asked for it. A
+search hit is a component to wire, not a specification to rebuild: importing it
+costs the import line, and rewriting it from its description publishes a second
+pattern doing the same job under a different id.
 
 The profile carries its own turn budget of 24, in place of the default subagent
 cap of 8. Authoring is a write, compile-error, fix loop and each iteration costs
@@ -1410,9 +1429,14 @@ and a child that ran out of turns has nothing to return. A delegation may still
 name its own `maxModelTurns`, bounded by the same maximum of 64 every profile
 is.
 
-The profile also carries a return contract, applied to any `pattern-author`
-delegation that declares no `returnSchema` of its own — so no such delegation is
-unstructured:
+The profile also carries a return contract, and it is the profile's rather than
+a default: a `pattern-author` delegation that declares a `returnSchema` of its
+own is refused, naming the field and the contract it must answer instead. A
+narrow return channel is only as narrow as the widest schema anyone may declare
+against it, and a caller-written schema can ask for a shape the profile's own
+contract admits no field for. Every other profile leaves the schema to the
+caller, which is the ordinary case; this one holds it, because the shape of what
+it hands back is the point of the profile.
 
 ```json
 {
@@ -1422,7 +1446,13 @@ unstructured:
       "properties": {
         "ok": { "type": "boolean", "const": true },
         "resultRef": { "type": "string" },
-        "describes": { "type": "string" }
+        "describes": { "type": "string" },
+        "hashtags": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "maxItems": 8
+        }
       },
       "required": ["ok", "resultRef", "describes"],
       "additionalProperties": false
@@ -1464,9 +1494,16 @@ space — so it survives sanitization as itself and the parent learns why withou
 any declassification. The optional `detail` elaborates in free text and reaches
 the parent as an opaque link, which is the right treatment: the code is the
 actionable part, and the detail is for a reader entitled to open it. The
-free-form `describes` string on the success branch travels the same way; the
-discriminant, the `code`, and the minted `resultRef` token are what the parent
-acts on.
+free-form `describes` string on the success branch travels the same way, as do
+the `hashtags` beside it — which a run with no pattern index, publishing
+nothing, omits; the discriminant, the `code`, and the minted `resultRef` token
+are what the parent acts on.
+
+The success branch is closed, and there is no field on it for source under any
+name. That is the durable half of the fix: a channel a parent cannot ask source
+through is one a parent stops wanting source through, and the encodings that
+walk text past a sealing rule — code points, bytes, base64, a string split
+across fields — have nowhere on the branch to land.
 
 `ok: false` is heard as a failure whatever else about a child's return is
 malformed. When a return says it failed but does not fit the declared schema,
