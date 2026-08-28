@@ -172,6 +172,8 @@ export type BridgeCellIdentity = {
 export type BridgeResolvedCell = {
   handle: string;
   hasValue: true;
+  /** Operations the host authorizes on this resolved capability. */
+  operations?: string[];
   identity?: BridgeCellIdentity;
   value?: FabricValue;
 };

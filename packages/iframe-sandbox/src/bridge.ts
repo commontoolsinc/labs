@@ -185,6 +185,12 @@ function cellOperation<K extends BridgeCellOperation>(
     : undefined;
 }
 
+function cellOperationNames(cell: BridgeCell): BridgeCellOperation[] {
+  return [...CORE_OPERATIONS].filter((operation) =>
+    cellOperation(cell, operation as BridgeCellOperation) !== undefined
+  ) as BridgeCellOperation[];
+}
+
 function resourceSink(
   resource: BridgeResource,
 ):
@@ -224,11 +230,7 @@ function descriptor(
   const operations: string[] = [];
   if (kind === "cell") {
     const cell = resourceCell(name, resource);
-    for (const operation of CORE_OPERATIONS) {
-      if (cellOperation(cell, operation as BridgeCellOperation)) {
-        operations.push(operation);
-      }
-    }
+    operations.push(...cellOperationNames(cell));
   } else if (resourceSink(resource)) {
     operations.push("sink");
   }
@@ -307,7 +309,14 @@ export class FabricBridgeHost {
   readonly #bridge: FabricBridge;
   readonly #port: MessagePort;
   readonly #subscriptions = new Map<string, BridgeCancel>();
-  readonly #cells = new Map<string, { cell: BridgeCell; resource: string }>();
+  readonly #cells = new Map<
+    string,
+    {
+      cell: BridgeCell;
+      operations: ReadonlySet<BridgeCellOperation>;
+      resource: string;
+    }
+  >();
   #nextCellHandle = 0;
   #operationTail: Promise<void> | undefined;
   #connected = true;
@@ -432,7 +441,7 @@ export class FabricBridgeHost {
 
     switch (operation) {
       case "pull": {
-        const { cell, resource: name } = this.#requestCell(request);
+        const { cell, resource: name } = this.#requestCell(request, "pull");
         const pull = cellOperation(cell, "pull");
         if (!pull) {
           throw bridgeError(
@@ -444,7 +453,10 @@ export class FabricBridgeHost {
         return await pull.call(cell);
       }
       case "initialize": {
-        const { cell, resource: name } = this.#requestCell(request);
+        const { cell, resource: name } = this.#requestCell(
+          request,
+          "initialize",
+        );
         const initialize = cellOperation(cell, "initialize");
         if (!initialize) {
           throw bridgeError(
@@ -456,7 +468,7 @@ export class FabricBridgeHost {
         return await initialize.call(cell, request.value as FabricValue);
       }
       case "set": {
-        const { cell, resource: name } = this.#requestCell(request);
+        const { cell, resource: name } = this.#requestCell(request, "set");
         const set = cellOperation(cell, "set");
         if (!set) {
           throw bridgeError(
@@ -469,7 +481,7 @@ export class FabricBridgeHost {
         return undefined;
       }
       case "push": {
-        const { cell, resource: name } = this.#requestCell(request);
+        const { cell, resource: name } = this.#requestCell(request, "push");
         const push = cellOperation(cell, "push");
         if (!push) {
           throw bridgeError(
@@ -482,19 +494,25 @@ export class FabricBridgeHost {
         return undefined;
       }
       case "resolve": {
-        const target = this.#requestCell(request);
+        const target = this.#requestCell(request, "resolve");
         const resolve = cellOperation(target.cell, "resolve");
         const cell = validateCell(
           target.resource,
           resolve ? await resolve.call(target.cell) : target.cell,
         );
         const handle = `cell-${this.#nextCellHandle++}`;
-        this.#cells.set(handle, { cell, resource: target.resource });
+        const operations = cellOperationNames(cell);
+        this.#cells.set(handle, {
+          cell,
+          operations: new Set(operations),
+          resource: target.resource,
+        });
         const identity = Object.getOwnPropertyDescriptor(cell, "identity");
         const value = cell.get();
         return {
           handle,
           hasValue: true,
+          operations,
           ...(identity && "value" in identity && identity.value !== undefined &&
             {
               identity: identity.value,
@@ -539,7 +557,7 @@ export class FabricBridgeHost {
           | undefined;
         let receiver: object;
         if (request.handle !== undefined || resource?.kind === "cell") {
-          const target = this.#requestCell(request);
+          const target = this.#requestCell(request, "sink");
           const sink = cellOperation(target.cell, "sink");
           sinkResource = sink &&
             ((listener) => sink.call(target.cell, listener));
@@ -574,7 +592,10 @@ export class FabricBridgeHost {
     }
   }
 
-  #requestCell(request: BridgeRequest): {
+  #requestCell(
+    request: BridgeRequest,
+    operation: BridgeCellOperation,
+  ): {
     cell: BridgeCell;
     resource: string;
   } {
@@ -586,6 +607,13 @@ export class FabricBridgeHost {
         throw bridgeError(
           "resource-not-found",
           `No resolved cell handle is named \`${request.handle}\`.`,
+        );
+      }
+      if (!resolved.operations.has(operation)) {
+        throw bridgeError(
+          "method-not-supported",
+          `Resolved cell \`${request.handle}\` does not support ${operation}().`,
+          resolved.resource,
         );
       }
       cell = resolved.cell;

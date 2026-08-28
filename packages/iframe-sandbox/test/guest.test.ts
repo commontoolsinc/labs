@@ -200,6 +200,7 @@ describe("guest", () => {
           response(firstResolve.id, {
             handle: "cell-1",
             hasValue: true,
+            operations: ["get", "initialize", "pull", "resolve"],
             value: 1,
           }),
         );
@@ -213,27 +214,13 @@ describe("guest", () => {
           response(secondResolve.id, {
             handle: "cell-2",
             hasValue: true,
+            operations: ["get", "initialize", "pull"],
             value: 1,
           }),
         );
         const second = await secondResolution;
 
         const initializing = second.initialize(0);
-        const describe = await receive(host);
-        expect(describe.operation).toBe("describe");
-        send(
-          host,
-          response(describe.id, {
-            protocol: BRIDGE_PROTOCOL,
-            version: BRIDGE_VERSION,
-            resources: [{
-              name: "count",
-              kind: "cell",
-              operations: ["get", "initialize", "pull", "set", "sink"],
-              methods: [],
-            }],
-          }),
-        );
         const request = await receive(host);
         expect(request).toMatchObject({
           operation: "initialize",
@@ -244,6 +231,30 @@ describe("guest", () => {
         send(host, response(request.id, 4));
 
         await expect(initializing).resolves.toBe(4);
+      } finally {
+        fabric.disconnect();
+      }
+    });
+
+    it("rejects initialize on an old resolved descriptor without operations", async () => {
+      const fabric = connectFabric();
+      try {
+        const host = handOffPort();
+        const resolution = fabric.cell<number>("count").resolve();
+        const request = await receive(host);
+        send(
+          host,
+          response(request.id, {
+            handle: "old-host-cell",
+            hasValue: true,
+            value: 1,
+          }),
+        );
+        const resolved = await resolution;
+
+        await expect(resolved.initialize(0)).rejects.toMatchObject({
+          code: "method-not-supported",
+        });
       } finally {
         fabric.disconnect();
       }

@@ -13,7 +13,7 @@ import {
   FabricBridgeHost,
 } from "../src/bridge.ts";
 import { connectFabric } from "../src/guest.ts";
-import { GUEST_PORT_HANDOFF } from "../src/ipc.ts";
+import { type BridgeResolvedCell, GUEST_PORT_HANDOFF } from "../src/ipc.ts";
 
 function handOff(port: MessagePort): void {
   globalThis.dispatchEvent(
@@ -275,6 +275,54 @@ describe("Fabric iframe bridge", () => {
       expect(records[order[1]!]!.title).toBe("A moved");
       expect(seen).toEqual(["A", "A moved"]);
       cancel();
+    } finally {
+      client.disconnect();
+      host.disconnect();
+    }
+  });
+
+  it("does not expand a resolved handle after its operations are minted", async () => {
+    let initialized = false;
+    const leaf: BridgeCell = {
+      get: () => 1,
+      pull: () => 1,
+    };
+    const root: BridgeCell = {
+      get: () => 1,
+      pull: () => 1,
+      resolve: () => leaf,
+    };
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(
+      createFabricBridge({ reader: { kind: "cell", cell: root } }),
+      channel.port1,
+    );
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    try {
+      const descriptor = await client.request("resolve", {
+        resource: "reader",
+        path: [],
+      }) as BridgeResolvedCell;
+      Object.defineProperty(leaf, "initialize", {
+        configurable: true,
+        enumerable: true,
+        value: () => {
+          initialized = true;
+          return 9;
+        },
+      });
+      const forged = client.resolvedCell<number>({
+        ...descriptor,
+        operations: [...(descriptor.operations ?? []), "initialize"],
+      });
+
+      await expect(forged.initialize(9)).rejects.toMatchObject({
+        code: "method-not-supported",
+        resource: "reader",
+      });
+      expect(initialized).toBe(false);
     } finally {
       client.disconnect();
       host.disconnect();
