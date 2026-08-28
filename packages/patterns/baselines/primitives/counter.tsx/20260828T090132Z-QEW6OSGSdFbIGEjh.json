@@ -1,0 +1,110 @@
+{
+  "argumentSchema": {
+    "properties": {
+      "label": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "Count",
+        "description": "Heading shown above the number.",
+        "type": "string"
+      },
+      "max": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "asCell": [
+          "cell"
+        ],
+        "default": null,
+        "description": "Highest value the buttons will reach. `null` leaves it unbounded."
+      },
+      "min": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "asCell": [
+          "cell"
+        ],
+        "default": null,
+        "description": "Lowest value the buttons will reach. `null` leaves it unbounded."
+      },
+      "step": {
+        "asCell": [
+          "cell"
+        ],
+        "default": 1,
+        "description": "How much one increment or decrement moves `value`.",
+        "type": "number"
+      },
+      "value": {
+        "asCell": [
+          "cell"
+        ],
+        "default": 0,
+        "description": "The number being counted. A host passes its own cell to share it.",
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "primitives/counter.tsx",
+  "resultSchema": {
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "atMax": {
+        "type": "boolean"
+      },
+      "atMin": {
+        "type": "boolean"
+      },
+      "decrement": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
+      "increment": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
+      "reset": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
+      "value": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "value",
+      "atMin",
+      "atMax",
+      "increment",
+      "decrement",
+      "reset",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}
