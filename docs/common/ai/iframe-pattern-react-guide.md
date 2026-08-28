@@ -147,8 +147,10 @@ or sibling elements outside the React root.
 - `{ status: "ready", value }` after the host pull barrier resolves;
 - `{ status: "error", error }` when the resource cannot be read.
 
-It also returns `set(valueOrUpdater)` and `refresh()`. `refresh()` is the
-explicit host `Cell.pull()` boundary. The hook subscribes through
+It also returns `initialize(defaultValue)`, `set(valueOrUpdater)`, and
+`refresh()`. `initialize()` atomically stores the default only while the Cell is
+undefined and returns the value selected by that transaction. `refresh()` is
+the explicit host `Cell.pull()` boundary. The hook subscribes through
 `useSyncExternalStore`, so host updates rerender the component.
 
 `ready` means the pull completed; a newly scoped or optional Cell can therefore
@@ -156,9 +158,9 @@ be ready with the value `undefined`. Include `undefined` in the hook type. Use
 the declared input default for an absent read-only input. For writable state or
 output, initialize only after that Cell's authoritative pull reports
 `undefined`; do not replace a value that another session may already have
-materialized. Bridge `set()` is strict: after that pull, the default write
-either materializes the absent Cell or rejects if another writer won. Catch
-that rejection; the hook snapshot changes to `error` for the render path.
+materialized. Use `initialize()` rather than `set()` for that default write.
+Bridge `set()` reports commit failure, but its write remains an intentional
+last-writer-wins replacement.
 
 Treat readiness as one aggregate phase. Every resource an action reads must be
 ready before that action becomes available:
@@ -192,14 +194,14 @@ function Editor() {
   const [actionError, setActionError] = React.useState<Error>();
   React.useEffect(() => {
     if (state.status === "ready" && stateValue === undefined) {
-      void state.set(DEFAULT_STATE).catch(() => {});
+      void state.initialize(DEFAULT_STATE).catch(() => {});
     }
-  }, [state.status, stateValue, state.set]);
+  }, [state.status, stateValue, state.initialize]);
   React.useEffect(() => {
     if (output.status === "ready" && outputValue === undefined) {
-      void output.set(DEFAULT_OUTPUT).catch(() => {});
+      void output.initialize(DEFAULT_OUTPUT).catch(() => {});
     }
-  }, [output.status, outputValue, output.set]);
+  }, [output.status, outputValue, output.initialize]);
   const resources = [input, state, output];
   const failure = resources.find((resource) => resource.status === "error");
 

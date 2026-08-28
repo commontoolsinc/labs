@@ -133,6 +133,7 @@ export type BridgeOperation =
   | "describe"
   | "disconnect"
   | "pull"
+  | "initialize"
   | "set"
   | "push"
   | "resolve"
@@ -228,6 +229,7 @@ export function isBridgeRequest(message: unknown): message is BridgeRequest {
     case "disconnect":
       return true;
     case "pull":
+    case "initialize":
     case "set":
     case "resolve":
       return hasCellTarget(message) && hasCellPath(message);

@@ -190,6 +190,24 @@ export class RemoteCell<T = FabricValue> {
     return this.#enqueueOperation(() => this.#set(snapshot));
   }
 
+  /** Atomically stores a default while the cell is undefined. */
+  initialize(value: T): Promise<T> {
+    if (value === undefined) {
+      return Promise.reject(
+        new TypeError("Cell initialize requires a defined value."),
+      );
+    }
+    let snapshot: T;
+    try {
+      snapshot = cloneIfNecessary(value as FabricValue, {
+        frozen: false,
+      }) as T;
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    return this.#enqueueOperation(() => this.#initialize(snapshot));
+  }
+
   update(updater: (current: T) => T): Promise<void> {
     return this.#enqueueOperation(async () => {
       const snapshot = this.#snapshot;
@@ -291,6 +309,32 @@ export class RemoteCell<T = FabricValue> {
       ) {
         this.#setReady(snapshot);
       }
+    } catch (error) {
+      if (
+        eventGeneration === this.#eventGeneration &&
+        this.#snapshot === before
+      ) {
+        this.#setError(error);
+      }
+      throw error;
+    }
+  }
+
+  async #initialize(value: T): Promise<T> {
+    const before = this.#snapshot;
+    const eventGeneration = this.#eventGeneration;
+    try {
+      const current = await this.#client.request("initialize", {
+        ...targetFields(this.#target),
+        value: value as FabricValue,
+      }) as T;
+      if (
+        eventGeneration === this.#eventGeneration &&
+        this.#snapshot === before
+      ) {
+        this.#setReady(current);
+      }
+      return current;
     } catch (error) {
       if (
         eventGeneration === this.#eventGeneration &&

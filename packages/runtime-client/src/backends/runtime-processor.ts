@@ -114,6 +114,7 @@ import {
   type CellGetCfcLabelRequest,
   type CellGetRequest,
   type CellGetResponse,
+  type CellInitializeRequest,
   type CellPullRequest,
   type CellPushRequest,
   type CellResolveAsCellRequest,
@@ -348,6 +349,21 @@ function sqliteParamForRuntime(
     );
   }
   return value;
+}
+
+/** Converts a runtime cell value into the redacted client wire domain. */
+function cellValueForClient(value: unknown): FabricValue {
+  return redactSigilCfcLabelViewsForDisplay(
+    convertCellsToLinks(
+      value as Parameters<typeof convertCellsToLinks>[0],
+      {
+        includeSchema: true,
+        keepAsCell: KeepAsCell.All,
+        doNotConvertCellResults: true,
+        includeCfcLabelView: true,
+      },
+    ),
+  ) as FabricValue;
 }
 
 function sqliteParamsForRuntime(
@@ -1085,14 +1101,7 @@ export class RuntimeProcessor {
     // `convertCellsToLinks()` preserves a `FabricPrimitive` by identity, and
     // the envelope's encoding carries one to the main thread with its class,
     // so what the response holds is what the cell held.
-    const converted = redactSigilCfcLabelViewsForDisplay(
-      convertCellsToLinks(value, {
-        includeSchema: true,
-        keepAsCell: KeepAsCell.All,
-        doNotConvertCellResults: true,
-        includeCfcLabelView: true,
-      }),
-    ) as FabricValue;
+    const converted = cellValueForClient(value);
     // The resolved cell's own schema-bearing ref, when asked for — for a meta
     // link read this addresses the linked cell itself, so the caller can
     // subscribe to it or consult its schema's declarations.
@@ -1126,6 +1135,27 @@ export class RuntimeProcessor {
       type: RequestType.CellGet,
       cell: request.cell,
     });
+  }
+
+  /** Atomically stores a default only while the target remains undefined. */
+  async handleCellInitialize(
+    request: CellInitializeRequest,
+  ): Promise<{ value: FabricValue }> {
+    if (request.value === undefined) {
+      throw new TypeError("Cell initialize requires a defined value.");
+    }
+    const initial = mapCellRefsToSigilLinks(request.value);
+    const result = await this.runtime.editWithRetry((tx) => {
+      const cell = getCell(this.runtime, request.cell).withTx(tx);
+      const current = cell.get();
+      if (current !== undefined) {
+        return cellValueForClient(current);
+      }
+      cell.set(initial);
+      return request.value;
+    });
+    if (result.error) throw new Error(result.error.message);
+    return { value: result.ok };
   }
 
   // A `CellHandle.set` is a blind leaf overwrite (last-write-wins);
@@ -2446,6 +2476,8 @@ export class RuntimeProcessor {
         return this.handleCellGet(request);
       case RequestType.CellPull:
         return await this.handleCellPull(request);
+      case RequestType.CellInitialize:
+        return await this.handleCellInitialize(request);
       case RequestType.CellSet:
         return this.handleCellSet(request);
       case RequestType.CellPush:

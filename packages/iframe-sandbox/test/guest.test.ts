@@ -417,6 +417,35 @@ describe("guest", () => {
       expect(cell.getSnapshot()).toEqual({ status: "ready", value: 2 });
     });
 
+    it("publishes the winner returned by atomic initialization", async () => {
+      const requests: Array<{
+        operation: string;
+        value?: FabricValue;
+      }> = [];
+      const client = {
+        request: (
+          operation: string,
+          fields: { value?: FabricValue },
+        ) => {
+          requests.push({ operation, value: fields.value });
+          return Promise.resolve({ count: 7 });
+        },
+      } as unknown as FabricClient;
+      const cell = new RemoteCell<{ count: number }>(client, "state");
+
+      await expect(cell.initialize({ count: 0 })).resolves.toEqual({
+        count: 7,
+      });
+      expect(requests).toEqual([{
+        operation: "initialize",
+        value: { count: 0 },
+      }]);
+      expect(cell.getSnapshot()).toEqual({
+        status: "ready",
+        value: { count: 7 },
+      });
+    });
+
     it("orders a pull after every previously queued set", async () => {
       const firstResponse = Promise.withResolvers<FabricValue | undefined>();
       const operations: Array<[string, FabricValue | undefined]> = [];

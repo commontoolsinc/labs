@@ -37,11 +37,15 @@ Deno.test("React renders bridged Cells and SQLite invalidations", async () => {
   const previousActEnvironment = environment.IS_REACT_ACT_ENVIRONMENT;
   environment.IS_REACT_ACT_ENVIRONMENT = true;
 
-  let counterSnapshot: ResourceSnapshot<Counter> = { status: "loading" };
+  let counterSnapshot: ResourceSnapshot<Counter | undefined> = {
+    status: "loading",
+  };
+  let durableCounter: Counter | undefined;
+  let initializeCount = 0;
   const cellListeners = new Set<() => void>();
   let writeTail = Promise.resolve();
-  const publishCounter = (count: number) => {
-    counterSnapshot = { status: "ready", value: { count } };
+  const publishCounter = (value: Counter | undefined) => {
+    counterSnapshot = { status: "ready", value };
     for (const listener of cellListeners) listener();
   };
   const counter = {
@@ -52,19 +56,32 @@ Deno.test("React renders bridged Cells and SQLite invalidations", async () => {
       return () => cellListeners.delete(listener);
     },
     pull: () => {
-      publishCounter(1);
-      return Promise.resolve({ count: 1 });
+      publishCounter(durableCounter);
+      return Promise.resolve(durableCounter);
+    },
+    initialize: (value: Counter) => {
+      initializeCount++;
+      durableCounter ??= value;
+      publishCounter(durableCounter);
+      return Promise.resolve(durableCounter);
     },
     set: (value: Counter) => {
-      publishCounter(value.count);
+      durableCounter = value;
+      publishCounter(value);
       return Promise.resolve();
     },
-    update: (updater: (current: Counter) => Counter) => {
+    update: (
+      updater: (current: Counter | undefined) => Counter | undefined,
+    ) => {
       const write = writeTail.then(async () => {
         const current = counterSnapshot.status === "ready"
           ? counterSnapshot.value
           : await counter.pull();
-        await counter.set(updater(current));
+        const next = updater(current);
+        if (next === undefined) {
+          throw new Error("Counter update returned undefined.");
+        }
+        await counter.set(next);
       });
       writeTail = write.catch(() => {});
       return write;
@@ -91,12 +108,21 @@ Deno.test("React renders bridged Cells and SQLite invalidations", async () => {
   const { useCell, useSqliteQuery } = createFabricReact(React, client);
 
   function App() {
-    const count = useCell<Counter>("counter");
+    const count = useCell<Counter | undefined>("counter");
+    const countValue = count.status === "ready" ? count.value : undefined;
     const query = useSqliteQuery<Note>(
       "appDatabase",
       "SELECT id, title FROM notes ORDER BY id",
     );
-    if (count.status !== "ready" || query.status !== "ready") {
+    React.useEffect(() => {
+      if (count.status === "ready" && countValue === undefined) {
+        void count.initialize({ count: 1 });
+      }
+    }, [count.status, countValue, count.initialize]);
+    if (
+      count.status !== "ready" || countValue === undefined ||
+      query.status !== "ready"
+    ) {
       return React.createElement("p", { id: "status" }, "Loading");
     }
     return React.createElement(
@@ -109,10 +135,10 @@ Deno.test("React renders bridged Cells and SQLite invalidations", async () => {
           type: "button",
           onClick: () =>
             void count.set((value) => ({
-              count: value.count + 1,
+              count: (value?.count ?? 0) + 1,
             })),
         },
-        `Count ${count.value.count}`,
+        `Count ${countValue.count}`,
       ),
       React.createElement(
         "p",
@@ -132,6 +158,7 @@ Deno.test("React renders bridged Cells and SQLite invalidations", async () => {
     const button = host.querySelector<HTMLButtonElement>("#increment")!;
     expect(button).toBeInstanceOf(HTMLButtonElement);
     expect(button.textContent?.trim()).toBe("Count 1");
+    expect(initializeCount).toBe(1);
     expect(host.querySelector("#notes")?.textContent).toBe("First");
 
     await perform(() => button.click());

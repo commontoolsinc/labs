@@ -37,6 +37,7 @@ export type BridgeMethod = (
 export type BridgeCell = {
   get(): FabricValue | undefined;
   pull(): FabricValue | undefined | Promise<FabricValue | undefined>;
+  initialize?(value: FabricValue): FabricValue | Promise<FabricValue>;
   set?(value: FabricValue): void | Promise<void>;
   push?(...values: FabricValue[]): void | Promise<void>;
   sink?(
@@ -76,6 +77,7 @@ export function createFabricBridge(
 
 const CORE_OPERATIONS = new Set([
   "get",
+  "initialize",
   "key",
   "pull",
   "push",
@@ -135,6 +137,7 @@ function namedMethodNames(
 
 type BridgeCellOperation =
   | "get"
+  | "initialize"
   | "key"
   | "pull"
   | "push"
@@ -439,6 +442,18 @@ export class FabricBridgeHost {
           );
         }
         return await pull.call(cell);
+      }
+      case "initialize": {
+        const { cell, resource: name } = this.#requestCell(request);
+        const initialize = cellOperation(cell, "initialize");
+        if (!initialize) {
+          throw bridgeError(
+            "method-not-supported",
+            `Cell \`${name}\` does not support initialize().`,
+            name,
+          );
+        }
+        return await initialize.call(cell, request.value as FabricValue);
       }
       case "set": {
         const { cell, resource: name } = this.#requestCell(request);

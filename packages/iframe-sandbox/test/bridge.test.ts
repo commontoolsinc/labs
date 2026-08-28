@@ -39,6 +39,7 @@ function nextTask(): Promise<void> {
 function cellResource(
   get: () => FabricValue | undefined,
   options: {
+    initialize?: (value: FabricValue) => FabricValue | Promise<FabricValue>;
     set?: (value: FabricValue) => void | Promise<void>;
     sink?: (listener: (value: FabricValue | undefined) => void) => BridgeCancel;
     push?: (...values: FabricValue[]) => void | Promise<void>;
@@ -49,6 +50,7 @@ function cellResource(
     cell: {
       get,
       pull: get,
+      ...(options.initialize && { initialize: options.initialize }),
       ...(options.set && { set: options.set }),
       ...(options.sink && { sink: options.sink }),
       ...(options.push && { push: options.push }),
@@ -65,6 +67,10 @@ describe("Fabric iframe bridge", () => {
         ...cellResource(
           () => count,
           {
+            initialize: (value) => {
+              if (count === undefined) count = value as number;
+              return count;
+            },
             set: (value) => {
               count = value as number;
               for (const listener of listeners) listener(count);
@@ -92,7 +98,7 @@ describe("Fabric iframe bridge", () => {
         resources: [{
           name: "count",
           kind: "cell",
-          operations: ["get", "pull", "set", "sink"],
+          operations: ["get", "initialize", "pull", "set", "sink"],
           methods: [],
           schema: { type: "number", description: "Visible counter" },
         }],
@@ -100,6 +106,7 @@ describe("Fabric iframe bridge", () => {
 
       const remote = client.cell<number>("count");
       await expect(remote.pull()).resolves.toBe(1);
+      await expect(remote.initialize(99)).resolves.toBe(1);
       const updates: number[] = [];
       const unsubscribe = remote.sink((value) => {
         if (value !== undefined) updates.push(value);

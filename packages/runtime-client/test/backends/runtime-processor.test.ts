@@ -3464,6 +3464,60 @@ describe("runtime-processor", () => {
     });
   });
 
+  describe("direct cell initialization", () => {
+    it("converges concurrent initializers on one stored value", async () => {
+      const signer = await Identity.fromPassphrase(
+        `direct-cell-initialize-${crypto.randomUUID()}`,
+      );
+      const space = signer.did();
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("http://localhost/"),
+        storageManager,
+      });
+      try {
+        const cell = runtime.getCell<{ winner: string }>(
+          space,
+          `direct-cell-initialize-${crypto.randomUUID()}`,
+          {
+            type: "object",
+            properties: { winner: { type: "string" } },
+            required: ["winner"],
+          },
+        );
+        await cell.sync();
+        const processor = Object.assign(
+          Object.create(RuntimeProcessor.prototype),
+          { runtime },
+        ) as RuntimeProcessor;
+        const ref = createCellRef(cell);
+
+        const [first, second] = await Promise.all([
+          processor.handleCellInitialize({
+            type: RequestType.CellInitialize,
+            cell: ref,
+            value: { winner: "first" },
+          }),
+          processor.handleCellInitialize({
+            type: RequestType.CellInitialize,
+            cell: ref,
+            value: { winner: "second" },
+          }),
+        ]);
+        await cell.pull();
+
+        expect(first.value).toEqual(second.value);
+        expect([{ winner: "first" }, { winner: "second" }]).toContainEqual(
+          first.value,
+        );
+        expect(cell.get()).toEqual(first.value);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+  });
+
   describe("runtime-client CellRef conversion", () => {
     // Inv-12 Stage 0 (SC-25 prerequisite): a cfcLabelView riding an inbound
     // CellRef is a main-thread display artifact — round-tripped through
