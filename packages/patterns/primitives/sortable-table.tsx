@@ -134,13 +134,16 @@ export const SortableTable = pattern<SortableTableInput, SortableTableOutput>(
       [NAME]: computed(() => `Table (${rowCount} rows)`),
       [UI]: (
         <cf-vstack gap="2" padding="3">
-          <cf-table striped hover full-width id="sortable-table">
-            <thead>
-              <tr>{headerCells}</tr>
-            </thead>
-            <tbody>{bodyRows}</tbody>
-          </cf-table>
-          {ifElse(isEmpty, <cf-empty-state message={emptyMessage} />, null)}
+          {ifElse(
+            isEmpty,
+            <cf-empty-state message={emptyMessage} />,
+            <cf-table striped hover full-width>
+              <thead>
+                <tr>{headerCells}</tr>
+              </thead>
+              <tbody>{bodyRows}</tbody>
+            </cf-table>,
+          )}
         </cf-vstack>
       ),
       rows,

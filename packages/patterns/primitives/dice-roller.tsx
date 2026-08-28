@@ -63,7 +63,6 @@ export const DiceRoller = pattern<DiceRollerInput, DiceRollerOutput>(
       [UI]: (
         <cf-vstack gap="2" align="center" padding="3">
           <div
-            id="dice-value"
             style={{
               fontSize: "2.5rem",
               fontWeight: "bold",
@@ -73,7 +72,7 @@ export const DiceRoller = pattern<DiceRollerInput, DiceRollerOutput>(
             {value}
           </div>
           <cf-text tone="muted">{caption}</cf-text>
-          <cf-button id="dice-roll" variant="primary" onClick={roll}>
+          <cf-button variant="primary" onClick={roll}>
             Roll
           </cf-button>
         </cf-vstack>

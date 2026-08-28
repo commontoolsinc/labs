@@ -573,8 +573,15 @@ export const fabricSeedDeps = async (
   patternsRoot: string,
   log: (line: string) => void,
   logError: (line: string) => void,
+  // The two constructions this function exists to perform, injectable so the
+  // wiring between them can be asserted: which setting reaches the fabric and
+  // which reaches the index is a thing to get wrong, and both are strings.
+  openSession: typeof createHarnessFabricSessionFactory =
+    createHarnessFabricSessionFactory,
+  makeClient: typeof createHarnessPatternIndexClientFactory =
+    createHarnessPatternIndexClientFactory,
 ): Promise<SeedDeps> => {
-  const { pieces } = await createHarnessFabricSessionFactory({
+  const { pieces } = await openSession({
     apiUrl: settings.apiUrl,
     identityKeyPath: settings.identityKeyPath,
     space: settings.space,
@@ -582,7 +589,7 @@ export const fabricSeedDeps = async (
   return seedDepsFrom({
     runtime: pieces.runtime,
     space: pieces.getSpace(),
-    getClient: createHarnessPatternIndexClientFactory(
+    getClient: makeClient(
       { baseUrl: settings.indexBaseUrl },
       settings.identityKeyPath,
     ),

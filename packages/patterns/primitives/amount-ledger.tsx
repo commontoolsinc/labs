@@ -102,7 +102,7 @@ export const AmountLedger = pattern<AmountLedgerInput, AmountLedgerOutput>(
         <cf-text style="flex: 1;">{entry.label}</cf-text>
         <cf-text style="font-variant-numeric: tabular-nums;">
           {computed(() =>
-            money(currencySymbol.get(), entry.amount)
+            money(currencySymbol.get(), cents(entry.amount) / 100)
           )}
         </cf-text>
         <cf-button
@@ -122,7 +122,7 @@ export const AmountLedger = pattern<AmountLedgerInput, AmountLedgerOutput>(
         <cf-vstack gap="3" padding="3">
           <cf-heading level={5}>{label}</cf-heading>
 
-          <cf-vstack gap="2" id="amount-ledger-rows">
+          <cf-vstack gap="2">
             {rows}
           </cf-vstack>
 
@@ -132,10 +132,7 @@ export const AmountLedger = pattern<AmountLedgerInput, AmountLedgerOutput>(
 
           <cf-hstack justify="between" align="center">
             <cf-text style="font-weight: 600;">Total</cf-text>
-            <cf-text
-              id="amount-ledger-total"
-              style="font-weight: 600; font-variant-numeric: tabular-nums;"
-            >
+            <cf-text style="font-weight: 600; font-variant-numeric: tabular-nums;">
               {formattedTotal}
             </cf-text>
           </cf-hstack>
@@ -157,20 +154,17 @@ export const AmountLedger = pattern<AmountLedgerInput, AmountLedgerOutput>(
 
           <cf-hstack gap="2">
             <cf-input
-              id="amount-ledger-label"
               $value={draftLabel}
               placeholder="What was it for?"
               style="flex: 1;"
             />
             <cf-input
-              id="amount-ledger-amount"
               type="number"
               $value={draftAmount}
               placeholder="0.00"
               style="width: 7rem;"
             />
             <cf-button
-              id="amount-ledger-add"
               variant="primary"
               onClick={() => {
                 addEntry.send({

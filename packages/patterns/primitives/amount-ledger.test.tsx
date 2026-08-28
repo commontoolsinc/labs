@@ -4,12 +4,18 @@
  *
  * Run: deno task cf test packages/patterns/primitives/amount-ledger.test.tsx
  */
-import { action, assert, pattern, TESTS } from "commonfabric";
+import { action, assert, pattern, TESTS, UI } from "commonfabric";
+import { textContent } from "../test/vnode-helpers.ts";
 import AmountLedger from "./amount-ledger.tsx";
 
 export default pattern(() => {
   const ledger = AmountLedger({ budget: 500 });
   const free = AmountLedger({});
+  // A sub-cent amount a host passed directly rather than through `addEntry`,
+  // which rounds on the way in. `toFixed` and `Math.round` disagree on a
+  // half-cent, so a row formatted from the raw amount reads $0.01 while it
+  // contributes $0.02 to the total.
+  const subCent = AmountLedger({ entries: [{ label: "Odd", amount: 0.015 }] });
 
   const addHotel = action(() =>
     ledger.addEntry.send({ label: "Hotel", amount: 420 })
@@ -62,6 +68,11 @@ export default pattern(() => {
       // With no budget there is nothing to be over.
       { assertion: assert(() => free.overBudget === false) },
       { assertion: assert(() => free.remaining === 0) },
+
+      // The rendered row and the total agree to the penny.
+      { assertion: assert(() => subCent.formattedTotal === "$0.02") },
+      { assertion: assert(() => textContent(subCent[UI]).includes("$0.02")) },
+      { assertion: assert(() => !textContent(subCent[UI]).includes("$0.01")) },
     ],
   };
 });

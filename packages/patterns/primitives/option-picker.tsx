@@ -77,7 +77,6 @@ export const OptionPicker = pattern<OptionPickerInput, OptionPickerOutput>(
         <cf-vstack gap="2" padding="3">
           <cf-text tone="muted">{label}</cf-text>
           <cf-select
-            id="option-picker-select"
             $value={selected}
             items={items}
             style="width: 100%;"

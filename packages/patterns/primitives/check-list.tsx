@@ -153,7 +153,7 @@ export const CheckList = pattern<CheckListInput, CheckListOutput>(
             )}
           </cf-hstack>
 
-          <cf-vstack gap="2" id="check-list-rows">
+          <cf-vstack gap="2">
             {rows}
           </cf-vstack>
 
@@ -165,13 +165,11 @@ export const CheckList = pattern<CheckListInput, CheckListOutput>(
 
           <cf-hstack gap="2">
             <cf-input
-              id="check-list-draft"
               $value={draft}
               placeholder={placeholder}
               style="flex: 1;"
             />
             <cf-button
-              id="check-list-add"
               variant="primary"
               onClick={() => {
                 addItem.send({ title: draft.get() });

@@ -98,7 +98,6 @@ export const Counter = pattern<CounterInput, CounterOutput>(
         <cf-vstack gap="2" align="center" padding="3">
           <cf-text tone="muted">{label}</cf-text>
           <div
-            id="counter-value"
             style={{
               fontSize: "2.5rem",
               fontWeight: "bold",
@@ -109,7 +108,6 @@ export const Counter = pattern<CounterInput, CounterOutput>(
           </div>
           <cf-hstack gap="2">
             <cf-button
-              id="counter-decrement"
               variant="secondary"
               disabled={atMin}
               onClick={decrement}
@@ -117,7 +115,6 @@ export const Counter = pattern<CounterInput, CounterOutput>(
               −
             </cf-button>
             <cf-button
-              id="counter-reset"
               variant="ghost"
               color="neutral"
               onClick={reset}
@@ -125,7 +122,6 @@ export const Counter = pattern<CounterInput, CounterOutput>(
               Reset
             </cf-button>
             <cf-button
-              id="counter-increment"
               variant="primary"
               disabled={atMax}
               onClick={increment}

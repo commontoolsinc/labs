@@ -4,7 +4,8 @@
  *
  * Run: deno task cf test packages/patterns/primitives/sortable-table.test.tsx
  */
-import { action, assert, pattern, TESTS } from "commonfabric";
+import { action, assert, pattern, TESTS, UI } from "commonfabric";
+import { findElement } from "../test/vnode-helpers.ts";
 import SortableTable from "./sortable-table.tsx";
 
 const COLUMNS = [
@@ -20,6 +21,7 @@ const ROWS = [
 
 export default pattern(() => {
   const table = SortableTable({ columns: COLUMNS, rows: ROWS });
+  const empty = SortableTable({ columns: COLUMNS, rows: [] });
 
   const byCost = action(() => table.sortByColumn.send({ label: "Cost" }));
   const byCategory = action(() =>
@@ -63,6 +65,26 @@ export default pattern(() => {
 
       { action: addRow },
       { assertion: assert(() => table.rowCount === 4) },
+
+      // `emptyMessage` is documented as shown IN PLACE OF the table, so an
+      // empty dataset renders no table and no headers at all.
+      { assertion: assert(() => empty.rowCount === 0) },
+      {
+        assertion: assert(() =>
+          findElement(empty[UI], "cf-table") === undefined
+        ),
+      },
+      {
+        assertion: assert(() =>
+          findElement(empty[UI], "cf-empty-state") !== undefined
+        ),
+      },
+      // The populated one still renders its table.
+      {
+        assertion: assert(() =>
+          findElement(table[UI], "cf-table") !== undefined
+        ),
+      },
     ],
   };
 });

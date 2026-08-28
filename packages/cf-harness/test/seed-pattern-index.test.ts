@@ -8,6 +8,7 @@ import {
   runtimePresets,
 } from "@commonfabric/runner";
 import { StorageManager } from "../../runner/src/storage/cache.deno.ts";
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import {
   compileAtom,
   defaultSeedIo,
@@ -134,6 +135,29 @@ describe("seed-pattern-index", () => {
       expect(names.some((name) => name === undefined)).toBe(false);
       expect(paths.every((path) => path.endsWith(".tsx"))).toBe(true);
       expect(paths.some((path) => path.includes("/demo/"))).toBe(false);
+    });
+
+    it("skips a directory entry that is not an atom", async () => {
+      const directory = await Deno.makeTempDir();
+      try {
+        await Deno.writeTextFile(join(directory, "atom.tsx"), "export {};\n");
+        await Deno.writeTextFile(
+          join(directory, "notes.md"),
+          "# not an atom\n",
+        );
+        await Deno.writeTextFile(join(directory, "helper.ts"), "export {};\n");
+        await Deno.writeTextFile(
+          join(directory, "atom.test.tsx"),
+          "export {};\n",
+        );
+        await Deno.mkdir(join(directory, "demo"));
+        const paths = await seedSourcePaths(directory);
+        expect(paths.map((path) => path.split("/").pop())).toEqual([
+          "atom.tsx",
+        ]);
+      } finally {
+        await Deno.remove(directory, { recursive: true });
+      }
     });
 
     it("finds every atom this seed publishes", async () => {
@@ -762,6 +786,93 @@ describe("seed-pattern-index", () => {
       const c = client();
       const { deps } = depsOver(c);
       expect(deps.checkFormatting).toBe(denoFmtCheck);
+    });
+  });
+
+  describe("fabricSeedDeps()", () => {
+    const settings = {
+      apiUrl: "http://localhost:8060",
+      identityKeyPath: "/keys/agent.pkcs8",
+      space: "seeds",
+      indexBaseUrl: "https://index.example",
+    };
+
+    // Which setting reaches the fabric and which reaches the index are both
+    // strings, so wiring one to the other compiles and fails only in the
+    // deployment. This is the assertion that catches it.
+    it("wires the fabric settings to the session and the index URL to the client", async () => {
+      let sessionArgs: unknown;
+      let clientArgs: unknown[] = [];
+      const deps = await fabricSeedDeps(
+        settings,
+        "/repo/packages/patterns",
+        () => {},
+        () => {},
+        ((config: unknown) => {
+          sessionArgs = config;
+          return () =>
+            Promise.resolve({
+              pieces: {
+                runtime: {} as never,
+                getSpace: () => "did:key:zSpace",
+              },
+            });
+        }) as never,
+        ((...args: unknown[]) => {
+          clientArgs = args;
+          return () => Promise.resolve({} as never);
+        }) as never,
+      );
+      expect(sessionArgs).toEqual({
+        apiUrl: "http://localhost:8060",
+        identityKeyPath: "/keys/agent.pkcs8",
+        space: "seeds",
+      });
+      expect(clientArgs[0]).toEqual({ baseUrl: "https://index.example" });
+      expect(clientArgs[1]).toBe("/keys/agent.pkcs8");
+      expect(deps.checkFormatting).toBe(denoFmtCheck);
+    });
+
+    // Exercises the constructions it performs by default rather than the
+    // stand-ins, and fails on the keyfile before reaching any network.
+    it("fails when the identity keyfile is absent", async () => {
+      await expect(
+        fabricSeedDeps(
+          { ...settings, identityKeyPath: "/keys/definitely-absent.pkcs8" },
+          "/repo/packages/patterns",
+          () => {},
+          () => {},
+        ),
+      ).rejects.toThrow();
+    });
+  });
+
+  describe("as a program", () => {
+    // The one path that runs the file as a script rather than importing it.
+    // `--help` neither connects to a fabric nor writes anything, so this is a
+    // smoke test of the entry point itself: it parses, prints, and exits 0.
+    //
+    // Runs through the isolated-lock helper, which points the child at a copy
+    // of `deno.lock` so resolving dependencies cannot rewrite the real one,
+    // and which spawns `Deno.execPath()` rather than whichever `deno` is on
+    // PATH — a different Deno reads transpiled sources from its own part of
+    // the cache, and reports coverage with every file missing.
+    it("prints usage and exits zero", async () => {
+      const output = await runDenoCommandWithTemporaryLock({
+        root: REPO_ROOT,
+        args: (lock) => [
+          "run",
+          "--allow-read",
+          "--allow-env",
+          `--lock=${lock}`,
+          join(REPO_ROOT, "packages/cf-harness/scripts/seed-pattern-index.ts"),
+          "--help",
+        ],
+      });
+      expect(output.code).toBe(0);
+      expect(new TextDecoder().decode(output.stdout)).toContain(
+        "Usage: deno task seed-pattern-index",
+      );
     });
   });
 
