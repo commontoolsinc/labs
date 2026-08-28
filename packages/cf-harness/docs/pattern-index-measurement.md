@@ -4,11 +4,22 @@ How to measure whether the pattern index is doing its job, in a way that a run
 next week can be compared against a run tonight.
 
 The loop under measurement: a console session builds something, publishes it to
-the index, and a later session finds and composes it without the source ever
-entering model context. The question this protocol answers is narrow and worth
-stating exactly — **does a session that was never told the index exists find a
-published part and wire it in?** Everything below exists to keep that question
-answerable.
+the index, and a later session finds and composes it by naming its identifier.
+`search_patterns` answers with a description, shapes and an import specifier and
+never with source, so a composing session works from what a pattern is for
+rather than from what it says.
+
+That last property is the tools' to hold, not this document's to assert, and the
+boundary it holds is the **tool result**. A run's artifact directory is a
+different question: the file tools reserve it, `bash` does not, and `bash`
+stdout is model-facing, so anything written beside a run is reachable from
+inside it (CT-2117). What this measurement can say is narrower and checkable —
+across the phase-2 corpus, no artifact of a run that ran a published pattern by
+identifier held that pattern's source.
+
+The question this protocol answers is narrower still, and worth stating exactly
+— **does a session that was never told the index exists find a published part
+and wire it in?** Everything below exists to keep that question answerable.
 
 ## The rule the whole thing rests on
 
