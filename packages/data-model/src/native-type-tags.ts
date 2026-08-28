@@ -13,6 +13,8 @@
  * alone.
  */
 
+import { constructorOfPrototype } from "@commonfabric/utils/objects";
+
 import { VALUE_TAGS, type ValueTag } from "./VALUE_TAGS.ts";
 import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
@@ -128,43 +130,41 @@ export function tagFromNativeValue(value: unknown): ValueTag | null {
     return VALUE_TAGS.Array;
   }
 
-  // The constructor is read from the _prototype_, not from the value. What is
-  // being asked is which class the value is an instance of, and that is a fact
-  // about its prototype; an own `constructor` property is ordinary data that
-  // happens to share the name, and must not decide the value's type. Reading
-  // it off the value would let `{constructor: Error}` -- a plain record -- be
-  // tagged `Error` and silently rebuilt as one.
-  //
-  // Guard: a null-prototype object has no constructor to find, and an exotic
-  // one may not have a callable one.
-  //
-  // Read ONCE, and used twice: the null-prototype fallback below tests this
-  // same result rather than asking again, so that a value whose prototype is
-  // answered by a trap cannot be one thing to the class lookup and another to
-  // the fallback.
   const proto = Object.getPrototypeOf(value);
-  const ctor = proto === null ? undefined : proto.constructor;
 
-  if (typeof ctor === "function") {
+  // A `null` prototype settles the value here, both ways it can go. It names
+  // no class, so nothing below could recognize one; and `instanceof` walks a
+  // chain that is empty, so the `FabricInstance` test below cannot claim it
+  // either. What is left is an `Error` whose prototype was severed -- still an
+  // error, and `Error.isError()` is what sees it -- or a bare record, which is
+  // tagged `Object` so the object rule decides it by name, the same way an
+  // indirect array is decided by the array rule.
+  if (proto === null) {
+    return isNativeError(value) ? VALUE_TAGS.Error : VALUE_TAGS.Object;
+  }
+
+  // The class is read from the PROTOTYPE, not from the value. What is being
+  // asked is which class the value is an instance of, and that is a fact about
+  // its prototype; an own `constructor` property is ordinary data that happens
+  // to share the name, and must not decide the value's type. Reading it off
+  // the value would let `{constructor: Error}` -- a plain record -- be tagged
+  // `Error` and silently rebuilt as one.
+  const ctor = constructorOfPrototype(proto);
+
+  if (ctor !== undefined) {
     const tag = tagFromNativeClass(ctor);
     if (tag !== null) return tag;
   }
 
   // Fallbacks for values whose constructor wasn't recognized.
 
-  // `Error`s with no reachable constructor -- e.g. one whose prototype has
-  // been severed, or one from another realm. An ordinary subclass (including
-  // `DOMException`) never gets here: `tagFromNativeClass()` matches it via
-  // `prototype instanceof Error`.
+  // `Error`s with no reachable constructor -- e.g. one from another realm. An
+  // ordinary subclass (including `DOMException`) never gets here:
+  // `tagFromNativeClass()` matches it via `prototype instanceof Error`.
   if (isNativeError(value)) return VALUE_TAGS.Error;
 
   // `FabricInstance` values (object-like protocol types).
   if (value instanceof FabricInstance) return VALUE_TAGS.FabricInstance;
-
-  // Null-prototype objects (`Object.create(null)`), which have no constructor
-  // to have been recognized. Tagged `Object` so the object rule decides them
-  // by name, the same way an indirect array is tagged `Array`.
-  if (proto === null) return VALUE_TAGS.Object;
 
   return null;
 }
