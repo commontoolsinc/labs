@@ -262,8 +262,12 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
     // fix, red-first in the same suite: the replication falls back to
     // reading the spaces the manager durably persisted the entry into
     // (content-addressed; fail-closed; genuine absence still loud). The
-    // v4 board is the new attempt's probe. Full chain:
-    // verification-coverage.md OW45's lunch blocks.
+    // v4 board (probe 3) went red at the surface and exposed the
+    // fallback's own keying defect — recorded per persist ENTRY where the
+    // replicated identity is a MODULE of that closure — fixed to
+    // per-module keying, pinned red-first on the exact geometry. The
+    // keying-fix board is the attempt's probe; a red there restores this
+    // entry. Full chain: verification-coverage.md OW45's lunch blocks.
     // The flip PR's list-EMPTY precondition is now MET; the flip bar
     // remains a green ON lane, not merely this empty list.
     // The sqlite identity pair's two FILE entries were LIFTED (OW53

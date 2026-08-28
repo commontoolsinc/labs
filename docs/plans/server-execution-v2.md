@@ -90,7 +90,14 @@ by ORDER, not by race. Second fix, same PR, red-first: the replication
 records every durable persist target per entry and falls back to reading
 those spaces when the heuristic origin is dry (content-addressed —
 byte-identical, integrity-gated, fail-closed; genuine absence still fails
-loud). The v4 board is the new attempt's probe.** Recorded residual,
+loud). The v4 board went RED at the surface and caught the fix's own
+defect — the fallback map keyed by persist ENTRY while the replicated
+identity is a MODULE of that closure, so the lookup missed and the
+fallback never fired; fixed to per-module keying with the exact geometry
+pinned red-first (importer/lib program, index-served lib pattern, dry
+origin). The keying-fix board is the attempt's probe; a red at the
+surface there restores the entry — no further iteration on this PR.**
+Recorded residual,
 flagged not filled: a CROSS-REPLICA supplier (a client/harness write-back
 arriving over the wire) is outside both the await and the recorded-target
 fallback — never observed in any red. Register: verification-coverage.md

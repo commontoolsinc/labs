@@ -7545,9 +7545,32 @@ supply; OW29/OW32/OW34 closed):
     exact production error; recording no-op mutation-killed; the
     no-record loud-failure control keeps the absence contract). Under
     the CI geometry the identity-home persists ARE recorded, so the
-    child replication converges order-independently. The NEW board on
-    the v4 head is this lift attempt's probe; a red at the surface
-    there withdraws again, classified honestly.
+    child replication converges order-independently.
+    **PROBE 3 (the v4 board, run
+    [33164596936](https://github.com/commontoolsinc/labs/actions/runs/33164596936),
+    ON shard 7, job 98827162794): RED at the surface again — and the
+    artifact caught the fix's own defect: the fallback NEVER FIRED
+    (`closure-replication-fallback-origin` 0 beside the same one
+    failure + 80 stuck warns), because the recording KEYED BY THE
+    PERSIST CALL'S ENTRY while the replicated identity is a MODULE of
+    that closure** — the identity-home persists record the home-env
+    ROOT's identity, the failing replication's entry is the
+    profile-home MODULE the in-memory index served, and the lookup
+    found an empty set. The per-module docs were addressable all along
+    (the write functions persist one doc per module; the instrumented
+    green read them by module identity). Fixed: the recording covers
+    EVERY module identity of the persisted set
+    (`recordPersistedClosureSpaces`), and the pin suite gained the
+    exact geometry — an importer program whose LIB module's pattern is
+    served from the in-memory index and replicated from a dry origin —
+    watched red at the entry-keyed head (the lib-id replication's
+    production failure line) and green with module keying; the
+    original single-module tests were blind to the keying by
+    construction (entry == module there), which is recorded so the
+    next pin author widens the module graph first. The board at the
+    keying-fix head is this attempt's probe; a red at the surface
+    there restores the entry with the accumulated map — no further
+    iteration on this PR.
     The pin suite (`tasks/server-execution-on-skips.test.ts`) now binds
     the EMPTY registry: the patterns list length is 0, the report
     carries no SKIP line of any kind, the shard filter passes

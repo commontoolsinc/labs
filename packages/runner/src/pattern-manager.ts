@@ -422,18 +422,25 @@ export class PatternManager {
   // (verification-coverage.md OW45 carries the incident evidence).
   private persistedClosureSpaces = new Map<string, Set<MemorySpace>>();
 
-  /** Record a durable closure persist target for {@link replicateClosures}'
-   * fallback-origin read. */
-  private recordPersistedClosureSpace(
-    entryIdentity: string,
+  /** Record a durable closure persist's target for
+   * {@link replicateClosures}' fallback-origin read — under EVERY module
+   * identity of the persisted set, not just the persist call's entry: the
+   * write functions persist one addressable doc per module, and the
+   * replicated entry is routinely a MODULE of a larger compiled closure
+   * (a pattern served from the in-memory index carries its own module's
+   * identity while the space was supplied by its importer's persist). */
+  private recordPersistedClosureSpaces(
+    identities: Iterable<string>,
     space: MemorySpace,
   ): void {
-    let spaces = this.persistedClosureSpaces.get(entryIdentity);
-    if (spaces === undefined) {
-      spaces = new Set();
-      this.persistedClosureSpaces.set(entryIdentity, spaces);
+    for (const identity of identities) {
+      let spaces = this.persistedClosureSpaces.get(identity);
+      if (spaces === undefined) {
+        spaces = new Set();
+        this.persistedClosureSpaces.set(identity, spaces);
+      }
+      spaces.add(space);
     }
-    spaces.add(space);
   }
   // Maps each storage slot written during this PatternManager session to its
   // complete module set. One slot can hold only one closure shape at a time.
@@ -2170,7 +2177,10 @@ export class PatternManager {
           this.failedCompileCacheRecoveries.delete(
             compileCacheRecoveryKey(space, entryIdentity),
           );
-          this.recordPersistedClosureSpace(entryIdentity, space);
+          this.recordPersistedClosureSpaces(
+            [entryIdentity, ...modules.map((module) => module.identity)],
+            space,
+          );
           return;
         }
         this.persistedCompileCacheClosures.delete(persistenceSlotKey);
@@ -2191,7 +2201,10 @@ export class PatternManager {
       this.failedCompileCacheRecoveries.delete(
         compileCacheRecoveryKey(space, entryIdentity),
       );
-      this.recordPersistedClosureSpace(entryIdentity, space);
+      this.recordPersistedClosureSpaces(
+        [entryIdentity, ...modules.map((module) => module.identity)],
+        space,
+      );
     })();
     this.inProgressCompileCacheWrites.set(persistenceSlotKey, {
       closureSignature,
@@ -2281,7 +2294,10 @@ export class PatternManager {
     this.pendingCacheWriteBacks.add(writeBack);
     try {
       await writeBack;
-      this.recordPersistedClosureSpace(entryIdentity, space);
+      this.recordPersistedClosureSpaces(
+        [entryIdentity, ...modules.map((module) => module.identity)],
+        space,
+      );
     } finally {
       this.compileCacheWrites.delete(writeBack);
       this.pendingCacheWriteBacks.delete(writeBack);

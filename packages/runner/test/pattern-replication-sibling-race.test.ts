@@ -86,6 +86,29 @@ const PROGRAM: RuntimeProgram = {
   ],
 };
 
+// A LIBRARY module and an importer: compiled together, the persist's ENTRY
+// is the importer while the lib's pattern carries the LIB module's own
+// content identity — the CI probe shape, where the replicated entry is a
+// MODULE of the closure some other space's persist wrote.
+const LIB_SOURCE = [
+  "import { pattern } from 'commonfabric';",
+  "export const libPattern = pattern(() => ({ label: 'library child' }));",
+].join("\n");
+const PROGRAM_WITH_LIB: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [
+    {
+      name: "/main.tsx",
+      contents: [
+        "import { pattern } from 'commonfabric';",
+        "import { libPattern } from './lib.tsx';",
+        "export default pattern(() => ({ label: 'importer', libPattern }));",
+      ].join("\n"),
+    },
+    { name: "/lib.tsx", contents: LIB_SOURCE },
+  ],
+};
+
 describe("closure replication: the in-flight sibling supplier race", () => {
   let server: MemoryV2Server.Server;
   let storageManager: EmulatedStorageManager;
@@ -253,6 +276,74 @@ describe("closure replication: the in-flight sibling supplier race", () => {
       } finally {
         await rt2.dispose();
       }
+    },
+  );
+
+  it(
+    "the fallback keys by MODULE identity, not just the persist entry — " +
+      "a pattern served from the in-memory index carries its own module's " +
+      "identity while the space was supplied by its IMPORTER's persist " +
+      "(the direct-CI probe-3 geometry)",
+    async () => {
+      // The main runtime compiles the IMPORTER program into A: the
+      // persist's entry is the importer, and the lib rides the closure as
+      // a module (one addressable doc per module).
+      const importer = await runtime.patternManager.compileOrGetPattern(
+        PROGRAM_WITH_LIB,
+        spaceA,
+      );
+      const importerEntry = runtime.patternManager.getArtifactEntryRef(
+        importer,
+      );
+      if (importerEntry === undefined) throw new Error("no importer entry");
+      await runtime.patternManager.flushCompileCacheWrites();
+      await storageManager.synced();
+
+      // Learn the lib MODULE's content identity from the persisted closure
+      // itself (the module doc whose filename is /lib.tsx).
+      let libIdentity: string | undefined;
+      {
+        const readTx = runtime.edit();
+        try {
+          const closure = await loadVerifiedSourceClosure(
+            runtime,
+            spaceA,
+            importerEntry.identity,
+            readTx,
+          );
+          for (const [identity, doc] of closure ?? []) {
+            if (doc.filename === "/lib.tsx") libIdentity = identity;
+          }
+        } finally {
+          readTx.abort?.("lib identity lookup");
+        }
+      }
+      if (libIdentity === undefined) throw new Error("no lib identity");
+      expect(libIdentity).not.toBe(importerEntry.identity);
+
+      // The lib pattern arrives the CI way: served from the in-memory
+      // artifact index by its own module identity — no per-space persist
+      // happens on this path, so the named space (dry D) stays dry.
+      const libPattern = await runtime.patternManager.loadPatternByIdentity(
+        libIdentity,
+        "libPattern",
+        spaceD,
+      );
+      expect(libPattern).toBeDefined();
+
+      // The child replication for the index-served pattern, origin dry:
+      // its entry is the LIB module's identity. With entry-only keying the
+      // fallback map has no row for it and the replication one-shot-dies;
+      // with module keying it copies from A.
+      runtime.patternManager.replicatePatternToSpace(
+        libPattern as never,
+        spaceC,
+        spaceD,
+      );
+      await runtime.patternManager.flushCompileCacheWrites();
+      await storageManager.synced();
+      const target = await readableClosure(runtime, spaceC, libIdentity);
+      expect(target.source).toContain(libIdentity);
     },
   );
 
