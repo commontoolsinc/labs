@@ -1,6 +1,7 @@
 import { assertEquals, assertMatch, assertThrows } from "@std/assert";
 import {
   assertDockerRunscCfcTransportForMode,
+  cfcTransportReadinessFromDockerRuntimes,
   DEFAULT_DOCKER_RUNSC_IMAGE,
   DockerRunscSandboxRuntime,
   resolveDefaultContainerUser,
@@ -186,7 +187,7 @@ Deno.test("DockerRunscSandboxRuntime describe preserves custom CFC runtime alias
 // dashboard reads, so the wording of these two tags is part of that output.
 //
 
-Deno.test("DockerRunscSandboxRuntime describe names the sandbox kind and the sidecar transport", () => {
+Deno.test("DockerRunscSandboxRuntime describe reports an unprobed sidecar transport as unverified", () => {
   const description = new DockerRunscSandboxRuntime(
     resolveDockerRunscSandboxConfig({
       workspaceHostPath: "/host/project",
@@ -195,7 +196,15 @@ Deno.test("DockerRunscSandboxRuntime describe names the sandbox kind and the sid
   ).describe();
 
   assertEquals(description.kind, "docker-runsc-cfc");
+  // The transport tag records where the harness writes. On its own it says
+  // nothing about whether the runtime reads there, and a snapshot carrying it
+  // alone reads as a working transport, so the readiness of that directory is
+  // reported beside it and starts out unread rather than assumed.
   assertEquals(description.cfc?.invocationContextTransport, "sidecar");
+  assertEquals(
+    description.cfc?.invocationContextTransportReadiness,
+    "unverified",
+  );
 });
 
 Deno.test("DockerRunscSandboxRuntime describe omits the transport when no invocation context dir is configured", () => {
@@ -772,5 +781,516 @@ Deno.test("assertDockerRunscCfcTransportForMode allows enforce modes with both t
       cfcResultDir: "/host/results",
       cfcInvocationContextDir: "/host/ctx",
     });
+  }
+});
+
+//
+// The two CFC sidecar directories are wired between the harness config and the
+// installed Docker runtime's registered arguments, and each is wired
+// independently of the other. Naming one in the harness config says only where
+// the harness will write.
+//
+
+const dockerRuntimes = (runtimeArgs?: readonly string[]) => ({
+  "runsc-cfc": {
+    path: "/host_mnt/Users/example/.local/share/runsc-cfc/runsc",
+    ...(runtimeArgs !== undefined ? { runtimeArgs } : {}),
+  },
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes reports wired when both directories are registered", () => {
+  assertEquals(
+    cfcTransportReadinessFromDockerRuntimes({
+      runtimeName: "runsc-cfc",
+      runtimes: dockerRuntimes([
+        "--cfc",
+        "--cfc-invocation-context-dir=/host/invocations",
+        "--cfc-result-dir=/host/results",
+      ]),
+      cfcInvocationContextDir: "/host/invocations",
+      cfcResultDir: "/host/results",
+    }),
+    { status: "wired" },
+  );
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes reports an unregistered invocation-context directory as unwired", () => {
+  // The registration this defect was found under: the runtime enables CFC and
+  // loads a policy, and is told about neither sidecar directory.
+  assertEquals(
+    cfcTransportReadinessFromDockerRuntimes({
+      runtimeName: "runsc-cfc",
+      runtimes: dockerRuntimes([
+        "--cfc",
+        "--cfc-policy=/host/cfc-policy.json",
+      ]),
+      cfcInvocationContextDir: "/host/invocations",
+      cfcResultDir: "/host/results",
+    }),
+    { status: "unwired", unread: ["invocation-context", "result"] },
+  );
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes reports a working result transport beside an unread invocation-context one", () => {
+  // The transports fail independently, and this pairing is the dangerous one:
+  // result sidecars arrive and output mediation succeeds, so the run looks
+  // healthy while every input label is written into a directory nothing reads.
+  assertEquals(
+    cfcTransportReadinessFromDockerRuntimes({
+      runtimeName: "runsc-cfc",
+      runtimes: dockerRuntimes([
+        "--cfc",
+        "--cfc-result-dir=/host/results",
+      ]),
+      cfcInvocationContextDir: "/host/invocations",
+      cfcResultDir: "/host/results",
+    }),
+    { status: "unwired", unread: ["invocation-context"] },
+  );
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes reports a directory registered under a different path as unwired", () => {
+  assertEquals(
+    cfcTransportReadinessFromDockerRuntimes({
+      runtimeName: "runsc-cfc",
+      runtimes: dockerRuntimes([
+        "--cfc-invocation-context-dir=/host/other-invocations",
+      ]),
+      cfcInvocationContextDir: "/host/invocations",
+    }),
+    { status: "unwired", unread: ["invocation-context"] },
+  );
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes accepts the Docker Desktop host mount projection", () => {
+  // Docker Desktop runs the daemon in a Linux VM, so the runtime argument
+  // carries the /host_mnt projection of the path the harness writes to.
+  assertEquals(
+    cfcTransportReadinessFromDockerRuntimes({
+      runtimeName: "runsc-cfc",
+      runtimes: dockerRuntimes([
+        "--cfc-invocation-context-dir=/host_mnt/Users/example/invocations/",
+      ]),
+      cfcInvocationContextDir: "/Users/example/invocations",
+    }),
+    { status: "wired" },
+  );
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes reads both Go flag spellings", () => {
+  for (
+    const runtimeArgs of [
+      ["-cfc-invocation-context-dir=/host/invocations"],
+      ["--cfc-invocation-context-dir", "/host/invocations"],
+      ["-cfc-invocation-context-dir", "/host/invocations"],
+    ]
+  ) {
+    assertEquals(
+      cfcTransportReadinessFromDockerRuntimes({
+        runtimeName: "runsc-cfc",
+        runtimes: dockerRuntimes(runtimeArgs),
+        cfcInvocationContextDir: "/host/invocations",
+      }),
+      { status: "wired" },
+      `expected ${JSON.stringify(runtimeArgs)} to register the directory`,
+    );
+  }
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes treats a runtime registered without arguments as unwired", () => {
+  // Docker omits runtimeArgs entirely when a runtime carries none, so an
+  // absent key is a reading of "no arguments" and not a failure to read.
+  assertEquals(
+    cfcTransportReadinessFromDockerRuntimes({
+      runtimeName: "runsc-cfc",
+      runtimes: dockerRuntimes(),
+      cfcInvocationContextDir: "/host/invocations",
+    }),
+    { status: "unwired", unread: ["invocation-context"] },
+  );
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes ignores a transport the harness is not configured with", () => {
+  assertEquals(
+    cfcTransportReadinessFromDockerRuntimes({
+      runtimeName: "runsc-cfc",
+      runtimes: dockerRuntimes(["--cfc"]),
+    }),
+    { status: "wired" },
+  );
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes reports indeterminate rather than unwired when it cannot read a registration", () => {
+  // An unreadable registration is the absence of evidence, and must not be
+  // spendable as evidence of a misconfiguration: that would refuse a host
+  // whose runtime is wired correctly.
+  const unreadable: Array<[string, unknown]> = [
+    ["no runtime table", "not-json-shaped"],
+    ["runtime not registered", dockerRuntimes(["--cfc"])],
+    ["non-object entry", { "other-runsc": "path-only" }],
+  ];
+  for (const [label, runtimes] of unreadable) {
+    const readiness = cfcTransportReadinessFromDockerRuntimes({
+      runtimeName: "other-runsc",
+      runtimes,
+      cfcInvocationContextDir: "/host/invocations",
+    });
+    assertEquals(readiness.status, "indeterminate", label);
+  }
+
+  const nonStringArgs = cfcTransportReadinessFromDockerRuntimes({
+    runtimeName: "runsc-cfc",
+    runtimes: { "runsc-cfc": { runtimeArgs: [{ cfc: true }] } },
+    cfcInvocationContextDir: "/host/invocations",
+  });
+  assertEquals(nonStringArgs.status, "indeterminate");
+});
+
+const dockerInfoResult = (
+  runtimeArgs?: readonly string[],
+): ProcessRunResult => ({
+  stdout: `${JSON.stringify(dockerRuntimes(runtimeArgs))}\n`,
+  stderr: "",
+  exitCode: 0,
+});
+
+const enforcingInvocationContext = (
+  cfcEnforcementMode: "enforce-explicit" | "observe" = "enforce-explicit",
+) =>
+  createHarnessCfcInvocationContext({
+    sequence: 1,
+    runId: "run-1",
+    createdAt: "2026-04-30T00:00:00.000Z",
+    toolId: "bash",
+    operation: "shell",
+    cfcEnforcementMode,
+    cwd: "/workspace",
+    runManifest: { present: false },
+    command: "echo hello",
+    cfcInputLabels: {
+      version: 1,
+      entries: [
+        {
+          path: ["command"],
+          label: {
+            confidentiality: [
+              { type: "test.cfc/User", subject: "did:key:argv-reader" },
+            ],
+          },
+        },
+      ],
+    },
+  });
+
+Deno.test("DockerRunscSandboxRuntime refuses an enforcing invocation whose input labels no runtime reads", async () => {
+  const cfcInvocationContext = await enforcingInvocationContext();
+  const runner = new FakeProcessRunner([
+    { stdout: "container-123\n", stderr: "", exitCode: 0 },
+    dockerInfoResult(["--cfc", "--cfc-policy=/host/cfc-policy.json"]),
+    { stdout: "", stderr: "", exitCode: 0 },
+  ]);
+  const runtime = new DockerRunscSandboxRuntime(
+    resolveDockerRunscSandboxConfig({
+      workspaceHostPath: "/host/project",
+      cfcInvocationContextDir: "/host/invocations",
+    }),
+    runner,
+  );
+
+  const result = await runtime.run({
+    argv: ["/bin/echo", "hello"],
+    cfcInvocationContext,
+  });
+
+  assertEquals(result.exitCode, 125);
+  assertMatch(
+    result.stderr,
+    /--cfc-invocation-context-dir=\/host\/invocations/,
+  );
+  assertMatch(result.stderr, /would be written and never read/);
+  // The container is never started, so no output is produced under a posture
+  // the run cannot honour.
+  assertEquals(runner.requests.map((request) => request.args[0]), [
+    "create",
+    "info",
+    "rm",
+  ]);
+  assertEquals(
+    runtime.describe().cfc?.invocationContextTransportReadiness,
+    "unwired",
+  );
+});
+
+Deno.test("DockerRunscSandboxRuntime refuses when only the result transport is registered", async () => {
+  const cfcInvocationContext = await enforcingInvocationContext();
+  const runner = new FakeProcessRunner([
+    { stdout: "container-123\n", stderr: "", exitCode: 0 },
+    dockerInfoResult(["--cfc-result-dir=/host/results"]),
+    { stdout: "", stderr: "", exitCode: 0 },
+  ]);
+  const runtime = new DockerRunscSandboxRuntime(
+    resolveDockerRunscSandboxConfig({
+      workspaceHostPath: "/host/project",
+      cfcInvocationContextDir: "/host/invocations",
+      cfcResultDir: "/host/results",
+    }),
+    runner,
+  );
+
+  const result = await runtime.run({
+    argv: ["/bin/echo", "hello"],
+    cfcInvocationContext,
+  });
+
+  assertEquals(result.exitCode, 125);
+  assertEquals(runner.requests.map((request) => request.args[0]), [
+    "create",
+    "info",
+    "rm",
+  ]);
+});
+
+Deno.test("DockerRunscSandboxRuntime writes the sidecar when the runtime is registered to read it", async () => {
+  const cfcInvocationContextDir = await Deno.makeTempDir();
+  try {
+    const cfcInvocationContext = await enforcingInvocationContext();
+    const [create, start, wait, remove] = dockerLifecycleResults();
+    const runner = new FakeProcessRunner([
+      create!,
+      dockerInfoResult([
+        `--cfc-invocation-context-dir=${cfcInvocationContextDir}`,
+      ]),
+      start!,
+      wait!,
+      remove!,
+    ]);
+    const runtime = new DockerRunscSandboxRuntime(
+      resolveDockerRunscSandboxConfig({
+        workspaceHostPath: "/host/project",
+        cfcInvocationContextDir,
+      }),
+      runner,
+    );
+
+    const result = await runtime.run({
+      argv: ["/bin/echo", "hello"],
+      cfcInvocationContext,
+    });
+
+    assertEquals(result.exitCode, 0);
+    assertEquals(
+      JSON.parse(
+        await Deno.readTextFile(
+          `${cfcInvocationContextDir}/container-123.json`,
+        ),
+      ),
+      cfcInvocationContext,
+    );
+    assertEquals(
+      runtime.describe().cfc?.invocationContextTransportReadiness,
+      "wired",
+    );
+  } finally {
+    await Deno.remove(cfcInvocationContextDir, { recursive: true });
+  }
+});
+
+Deno.test("DockerRunscSandboxRuntime runs an indeterminate registration rather than refusing it", async () => {
+  const cfcInvocationContextDir = await Deno.makeTempDir();
+  try {
+    const cfcInvocationContext = await enforcingInvocationContext();
+    const [create, start, wait, remove] = dockerLifecycleResults();
+    const runner = new FakeProcessRunner([
+      create!,
+      { stdout: "", stderr: "cannot connect to docker", exitCode: 1 },
+      start!,
+      wait!,
+      remove!,
+    ]);
+    const runtime = new DockerRunscSandboxRuntime(
+      resolveDockerRunscSandboxConfig({
+        workspaceHostPath: "/host/project",
+        cfcInvocationContextDir,
+      }),
+      runner,
+    );
+
+    const result = await runtime.run({
+      argv: ["/bin/echo", "hello"],
+      cfcInvocationContext,
+    });
+
+    assertEquals(result.exitCode, 0);
+    // Not read is reported as not read: the snapshot says indeterminate rather
+    // than borrowing either verdict.
+    assertEquals(
+      runtime.describe().cfc?.invocationContextTransportReadiness,
+      "indeterminate",
+    );
+  } finally {
+    await Deno.remove(cfcInvocationContextDir, { recursive: true });
+  }
+});
+
+Deno.test("DockerRunscSandboxRuntime does not probe the registration outside enforcing modes", async () => {
+  const cfcInvocationContextDir = await Deno.makeTempDir();
+  try {
+    const cfcInvocationContext = await enforcingInvocationContext("observe");
+    const runner = new FakeProcessRunner(dockerLifecycleResults());
+    const runtime = new DockerRunscSandboxRuntime(
+      resolveDockerRunscSandboxConfig({
+        workspaceHostPath: "/host/project",
+        cfcInvocationContextDir,
+      }),
+      runner,
+    );
+
+    const result = await runtime.run({
+      argv: ["/bin/echo", "hello"],
+      cfcInvocationContext,
+    });
+
+    assertEquals(result.exitCode, 0);
+    // `observe` neither mediates nor denies, so a missing transport cannot
+    // silently weaken it and there is nothing for the probe to protect.
+    assertEquals(runner.requests.map((request) => request.args[0]), [
+      "create",
+      "start",
+      "wait",
+      "rm",
+    ]);
+  } finally {
+    await Deno.remove(cfcInvocationContextDir, { recursive: true });
+  }
+});
+
+Deno.test("DockerRunscSandboxRuntime probes the runtime registration once per sandbox", async () => {
+  const cfcInvocationContext = await enforcingInvocationContext();
+  const runner = new FakeProcessRunner([
+    { stdout: "container-123\n", stderr: "", exitCode: 0 },
+    dockerInfoResult(["--cfc"]),
+    { stdout: "", stderr: "", exitCode: 0 },
+    { stdout: "container-123\n", stderr: "", exitCode: 0 },
+    { stdout: "", stderr: "", exitCode: 0 },
+  ]);
+  const runtime = new DockerRunscSandboxRuntime(
+    resolveDockerRunscSandboxConfig({
+      workspaceHostPath: "/host/project",
+      cfcInvocationContextDir: "/host/invocations",
+    }),
+    runner,
+  );
+
+  await runtime.run({ argv: ["/bin/echo", "hello"], cfcInvocationContext });
+  await runtime.run({ argv: ["/bin/echo", "hello"], cfcInvocationContext });
+
+  assertEquals(
+    runner.requests.filter((request) => request.args[0] === "info").length,
+    1,
+  );
+});
+
+Deno.test("DockerRunscSandboxRuntime refuses an enforcing invocation with no invocation-context directory configured", async () => {
+  const cfcInvocationContext = await enforcingInvocationContext();
+  const runner = new FakeProcessRunner([
+    { stdout: "container-123\n", stderr: "", exitCode: 0 },
+    { stdout: "", stderr: "", exitCode: 0 },
+  ]);
+  const runtime = new DockerRunscSandboxRuntime({
+    // Written out rather than resolved, so that a host with the invocation
+    // context environment variable set still exercises the absent case.
+    ...resolveDockerRunscSandboxConfig({ workspaceHostPath: "/host/project" }),
+    cfcInvocationContextDir: undefined,
+  }, runner);
+
+  const result = await runtime.run({
+    argv: ["/bin/echo", "hello"],
+    cfcInvocationContext,
+  });
+
+  // The engine refuses this configuration at run start, but that guard sits on
+  // the engine's entry; a runtime constructed directly arrives here carrying
+  // the same labels with nothing behind it.
+  assertEquals(result.exitCode, 125);
+  assertMatch(result.stderr, /have nowhere to be read from/);
+  assertEquals(runner.requests.map((request) => request.args[0]), [
+    "create",
+    "rm",
+  ]);
+});
+
+Deno.test("DockerRunscSandboxRuntime reports an unparseable runtime table as indeterminate", async () => {
+  const cfcInvocationContextDir = await Deno.makeTempDir();
+  try {
+    const cfcInvocationContext = await enforcingInvocationContext();
+    const [create, start, wait, remove] = dockerLifecycleResults();
+    const runner = new FakeProcessRunner([
+      create!,
+      {
+        stdout: "Cannot connect to the Docker daemon\n",
+        stderr: "",
+        exitCode: 0,
+      },
+      start!,
+      wait!,
+      remove!,
+    ]);
+    const runtime = new DockerRunscSandboxRuntime(
+      resolveDockerRunscSandboxConfig({
+        workspaceHostPath: "/host/project",
+        cfcInvocationContextDir,
+      }),
+      runner,
+    );
+
+    const result = await runtime.run({
+      argv: ["/bin/echo", "hello"],
+      cfcInvocationContext,
+    });
+
+    assertEquals(result.exitCode, 0);
+    assertEquals(
+      runtime.describe().cfc?.invocationContextTransportReadiness,
+      "indeterminate",
+    );
+  } finally {
+    await Deno.remove(cfcInvocationContextDir, { recursive: true });
+  }
+});
+
+Deno.test("DockerRunscSandboxRuntime reports an unrunnable docker info as indeterminate", async () => {
+  const cfcInvocationContextDir = await Deno.makeTempDir();
+  try {
+    const cfcInvocationContext = await enforcingInvocationContext();
+    const [create, start, wait, remove] = dockerLifecycleResults();
+    const lifecycle = new FakeProcessRunner([create!, start!, wait!, remove!]);
+    const runner: ProcessRunner = {
+      run(request) {
+        if (request.args[0] === "info") {
+          throw new Error("docker: command not found");
+        }
+        return lifecycle.run(request);
+      },
+    };
+    const runtime = new DockerRunscSandboxRuntime(
+      resolveDockerRunscSandboxConfig({
+        workspaceHostPath: "/host/project",
+        cfcInvocationContextDir,
+      }),
+      runner,
+    );
+
+    const result = await runtime.run({
+      argv: ["/bin/echo", "hello"],
+      cfcInvocationContext,
+    });
+
+    assertEquals(result.exitCode, 0);
+    assertEquals(
+      runtime.describe().cfc?.invocationContextTransportReadiness,
+      "indeterminate",
+    );
+  } finally {
+    await Deno.remove(cfcInvocationContextDir, { recursive: true });
   }
 });

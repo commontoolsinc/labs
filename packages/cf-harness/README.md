@@ -1652,9 +1652,10 @@ FUSE-to-sandbox taint, command completion after a FUSE read, FUSE write
 attempts, and joins between explicit `cfcInputLabels` and a prior FUSE read. The
 result sidecar env var is required for all CFC flow assertions, and the
 invocation context sidecar env var is required for the cases that seed
-`cfcInputLabels`. The installed Docker `runsc-cfc` runtime must also be
-configured with the same `--cfc-invocation-context-dir`, otherwise those
-invocation-label cases are skipped even if cf-harness writes sidecars.
+`cfcInputLabels`. Both env vars gate on being set, not on the installed Docker
+`runsc-cfc` runtime being registered against the same directories; register it
+with the matching `--cfc-invocation-context-dir` as well, or an enforcing case
+refuses at `docker create` rather than exercising the labels it seeds.
 
 The default Fabric CFC flow gate exercises the immediate result sidecar after a
 FUSE read. The stricter host-bind readback probe is opt-in with
@@ -1686,14 +1687,29 @@ payload contains audit/provenance context plus optional trusted `cfcInputLabels`
 for supported startup inputs (`command`, `argv`, `args`, `env`, `cwd`, and
 `stdin`). `stdin` labels are modeled as labels on the stdin source and taint
 only after the sandbox reads or maps fd 0, not as automatic startup task taint.
-When a trusted prompt-slot binding is present, `cf-harness` also derives
-confidentiality-only prompt influence labels for model-authored invocation
-inputs such as shell commands, structured file-tool arguments, and stdin
-payloads. These labels are taint evidence, not integrity or authorization
-claims. When CFC-mediated bash output is released to the model, `cf-harness`
-records the observed output labels in run state and merges those confidentiality
-labels into later model-authored invocation inputs. Opaque and denied outputs
-are not added to this model-context accumulator.
+
+Configuring `cfcInvocationContextDir` says where `cf-harness` writes; it says
+nothing about whether the runtime reads there, and the two sidecar directories
+are registered independently, so a host can have a working result transport —
+sidecars arrive, output mediation succeeds — while every input label goes into a
+directory nothing reads. Under an `enforce-*` mode `cf-harness` therefore reads
+the runtime's registered arguments from `docker info` before starting a
+container, and refuses the invocation when they do not name the directory it
+writes to, because that half fails open: nothing downstream notices a sandbox
+that started untainted. Only a positive reading refuses. A registration that
+could not be read at all is reported as `indeterminate` and the run proceeds, so
+an unreachable Docker daemon cannot pass for evidence of a misconfiguration. The
+CFC policy snapshot carries that reading as
+`cfc.invocationContextTransportReadiness` — `wired`, `unwired`, `indeterminate`,
+or `unverified` before any enforcing invocation has probed. When a trusted
+prompt-slot binding is present, `cf-harness` also derives confidentiality-only
+prompt influence labels for model-authored invocation inputs such as shell
+commands, structured file-tool arguments, and stdin payloads. These labels are
+taint evidence, not integrity or authorization claims. When CFC-mediated bash
+output is released to the model, `cf-harness` records the observed output labels
+in run state and merges those confidentiality labels into later model-authored
+invocation inputs. Opaque and denied outputs are not added to this model-context
+accumulator.
 
 The persisted model-context accumulator is sensitive retained run metadata. It
 does not store raw stdout/stderr bytes, but its labels and observation refs can

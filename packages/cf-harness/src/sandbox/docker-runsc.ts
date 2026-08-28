@@ -21,9 +21,16 @@ import {
 } from "@commonfabric/runner/cfc";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 
+import type { HarnessCfcInvocationContext } from "../contracts/cfc-invocation-context.ts";
 import { SandboxPathEscapeError } from "./errors.ts";
-import { DenoProcessRunner, type ProcessRunner } from "./process-runner.ts";
+import {
+  DenoProcessRunner,
+  type ProcessRunner,
+  type ProcessRunResult,
+} from "./process-runner.ts";
 import type {
+  CfcSidecarTransportKind,
+  CfcTransportReadiness,
   DockerNetworkMode,
   DockerRunscAdditionalMount,
   DockerRunscAdditionalMountConfig,
@@ -295,6 +302,10 @@ export const resolveDockerRunscSandboxConfig = (
  * calls this at run start (before the first tool executes) so a mis-wired
  * enforce run aborts loudly rather than emitting silent denials mid-run.
  * `disabled`/`observe` impose no such floor.
+ *
+ * Naming the directories is the half of the floor that can be checked without
+ * a Docker daemon. Whether the runtime is registered to read them is the other
+ * half, and `cfcTransportReadinessFromDockerRuntimes` below decides it.
  */
 export const assertDockerRunscCfcTransportForMode = (
   mode: CfcEnforcementMode,
@@ -326,6 +337,154 @@ export const assertDockerRunscCfcTransportForMode = (
       }; refusing to start a run that would silently degrade enforcement`,
     );
   }
+};
+
+export const CFC_INVOCATION_CONTEXT_DIR_RUNTIME_FLAG =
+  "cfc-invocation-context-dir";
+export const CFC_RESULT_DIR_RUNTIME_FLAG = "cfc-result-dir";
+
+/**
+ * Docker Desktop runs the daemon inside a Linux VM and projects host paths
+ * into it under this prefix, so a runtime argument and the host path
+ * `cf-harness` writes to name the same directory while differing textually.
+ */
+const DOCKER_DESKTOP_HOST_MOUNT_PREFIX = "/host_mnt";
+
+const stripTrailingSlashes = (path: string): string => {
+  const trimmed = path.replace(/\/+$/, "");
+  return trimmed.length === 0 ? "/" : trimmed;
+};
+
+const hostDirsCorrespond = (
+  runtimeArgValue: string,
+  harnessDir: string,
+): boolean => {
+  const runtimePath = stripTrailingSlashes(runtimeArgValue);
+  const harnessPath = stripTrailingSlashes(harnessDir);
+  return runtimePath === harnessPath ||
+    runtimePath ===
+      stripTrailingSlashes(
+        `${DOCKER_DESKTOP_HOST_MOUNT_PREFIX}${harnessPath}`,
+      );
+};
+
+/**
+ * runsc parses its arguments with Go's `flag` package, which accepts one or
+ * two leading dashes and both the `=` and the separate-token spelling.
+ */
+const runtimeFlagValue = (
+  args: readonly string[],
+  flag: string,
+): string | undefined => {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === undefined) {
+      continue;
+    }
+    for (const dashes of ["--", "-"]) {
+      if (arg.startsWith(`${dashes}${flag}=`)) {
+        return arg.slice(`${dashes}${flag}=`.length);
+      }
+      if (arg === `${dashes}${flag}`) {
+        return args[index + 1];
+      }
+    }
+  }
+  return undefined;
+};
+
+const readRuntimeArgs = (
+  entry: Record<string, unknown>,
+): readonly string[] | "unreadable" => {
+  const args = entry.runtimeArgs;
+  // Docker omits `runtimeArgs` entirely when a runtime is registered without
+  // any, so an absent key is a reading of "no arguments" rather than a failure
+  // to read.
+  if (args === undefined) {
+    return [];
+  }
+  if (
+    !Array.isArray(args) || args.some((arg) => typeof arg !== "string")
+  ) {
+    return "unreadable";
+  }
+  return args as readonly string[];
+};
+
+/**
+ * Decide, from the runtime table `docker info` reports, whether the runtime a
+ * run is about to launch is registered against the same sidecar directories
+ * `cf-harness` is configured with.
+ *
+ * Naming a directory in the harness config says only where the harness will
+ * write; it says nothing about whether anything reads there. The two
+ * transports are wired independently, so a host can have a working result
+ * transport — sidecars arrive, output mediation succeeds, the run looks
+ * healthy — while the invocation context carrying input labels is written into
+ * a directory the runtime was never told about.
+ */
+export const cfcTransportReadinessFromDockerRuntimes = (options: {
+  runtimeName: string;
+  runtimes: unknown;
+  cfcInvocationContextDir?: string;
+  cfcResultDir?: string;
+}): CfcTransportReadiness => {
+  if (!isObjectNotArray(options.runtimes)) {
+    return {
+      status: "indeterminate",
+      reason: "docker info did not report a runtime table",
+    };
+  }
+  const entry = options.runtimes[options.runtimeName];
+  if (entry === undefined) {
+    return {
+      status: "indeterminate",
+      reason:
+        `docker runtime '${options.runtimeName}' is not registered on this host`,
+    };
+  }
+  if (!isObjectNotArray(entry)) {
+    return {
+      status: "indeterminate",
+      reason:
+        `docker info reported a non-object entry for runtime '${options.runtimeName}'`,
+    };
+  }
+  const args = readRuntimeArgs(entry);
+  if (args === "unreadable") {
+    return {
+      status: "indeterminate",
+      reason:
+        `docker info reported non-string runtime arguments for '${options.runtimeName}'`,
+    };
+  }
+  const unread: CfcSidecarTransportKind[] = [];
+  const transports: readonly [
+    CfcSidecarTransportKind,
+    string,
+    string | undefined,
+  ][] = [
+    [
+      "invocation-context",
+      CFC_INVOCATION_CONTEXT_DIR_RUNTIME_FLAG,
+      options.cfcInvocationContextDir,
+    ],
+    ["result", CFC_RESULT_DIR_RUNTIME_FLAG, options.cfcResultDir],
+  ];
+  for (const [kind, flag, harnessDir] of transports) {
+    if (harnessDir === undefined) {
+      continue;
+    }
+    const registered = runtimeFlagValue(args, flag);
+    if (
+      registered === undefined || !hostDirsCorrespond(registered, harnessDir)
+    ) {
+      unread.push(kind);
+    }
+  }
+  return unread.length > 0
+    ? { status: "unwired", unread }
+    : { status: "wired" };
 };
 
 const byteLength = (text: string): number => textEncoder.encode(text).length;
@@ -540,10 +699,72 @@ const cfcResultFromRunscSidecar = (
 };
 
 export class DockerRunscSandboxRuntime implements SandboxRuntime {
+  #cfcTransportReadiness?: CfcTransportReadiness;
+  #cfcTransportReadinessProbe?: Promise<CfcTransportReadiness>;
+
   constructor(
     readonly config: DockerRunscSandboxConfig,
     private readonly runner: ProcessRunner = new DenoProcessRunner(),
   ) {}
+
+  /**
+   * Read the registered arguments of the Docker runtime this sandbox launches
+   * and report whether they name the sidecar directories the harness is
+   * configured with. The reading is memoized: a host's runtime registration
+   * does not change under a run, and one `docker info` per sandbox is enough.
+   */
+  async probeCfcTransportReadiness(): Promise<CfcTransportReadiness> {
+    this.#cfcTransportReadinessProbe ??= this.#readCfcTransportReadiness()
+      .then((readiness) => {
+        this.#cfcTransportReadiness = readiness;
+        return readiness;
+      });
+    return await this.#cfcTransportReadinessProbe;
+  }
+
+  async #readCfcTransportReadiness(): Promise<CfcTransportReadiness> {
+    let result: ProcessRunResult;
+    try {
+      result = await this.runner.run({
+        command: this.config.dockerBinary,
+        args: ["info", "--format", "{{json .Runtimes}}"],
+      });
+    } catch (error) {
+      return {
+        status: "indeterminate",
+        reason: `docker info could not be run: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      };
+    }
+    if (result.exitCode !== 0) {
+      return {
+        status: "indeterminate",
+        reason: `docker info exited ${result.exitCode}`,
+      };
+    }
+    let runtimes: unknown;
+    try {
+      runtimes = JSON.parse(result.stdout);
+    } catch (error) {
+      return {
+        status: "indeterminate",
+        reason: `docker info runtime table could not be parsed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      };
+    }
+    return cfcTransportReadinessFromDockerRuntimes({
+      runtimeName: this.config.runtimeName,
+      runtimes,
+      ...(this.config.cfcInvocationContextDir !== undefined
+        ? { cfcInvocationContextDir: this.config.cfcInvocationContextDir }
+        : {}),
+      ...(this.config.cfcResultDir !== undefined
+        ? { cfcResultDir: this.config.cfcResultDir }
+        : {}),
+    });
+  }
 
   defaultWorkingDirectory(): string {
     return normalizeWorkspacePath(this.config.workspaceMountPath);
@@ -593,7 +814,15 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
         networkMode: this.config.dockerNetworkMode,
         extraDockerArgsCount: this.config.extraDockerArgs.length,
         ...(this.config.cfcInvocationContextDir !== undefined
-          ? { invocationContextTransport: "sidecar" }
+          ? {
+            invocationContextTransport: "sidecar",
+            // Naming the directory says where the harness writes, not that
+            // anything reads there. Until a probe has read the runtime's
+            // registration this snapshot must say so rather than let the
+            // transport tag stand in for a working one.
+            invocationContextTransportReadiness:
+              this.#cfcTransportReadiness?.status ?? "unverified",
+          }
           : {}),
       },
     };
@@ -785,13 +1014,84 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
     }
   }
 
+  /**
+   * Refuse an enforcing invocation whose input labels would be written into a
+   * directory the runtime is not registered to read.
+   *
+   * This half of the CFC sidecar pair fails open: nothing downstream notices
+   * that the sandbox started untainted, so the run goes on reporting the
+   * enforcement posture it printed at startup while dropping every input
+   * label it was handed. Refusing here states the condition once, at the call
+   * it actually affects, instead of leaving it to be inferred from an output
+   * mediation denial that has a different cause.
+   *
+   * Only a positive reading of the runtime's registered arguments refuses. A
+   * host whose registration could not be read is `indeterminate` and runs, so
+   * that an unreadable `docker info` cannot masquerade as evidence of a
+   * misconfiguration.
+   */
+  async #refuseUnreadCfcInvocationContext(
+    context: HarnessCfcInvocationContext,
+    createResult: SandboxCommandResult,
+    dir: string | undefined,
+  ): Promise<SandboxCommandResult | undefined> {
+    const refuse = (detail: string): SandboxCommandResult => ({
+      stdout: createResult.stdout,
+      stderr: appendStderr(
+        createResult.stderr,
+        `refusing to start a container under cfc enforcement mode '${context.cfcEnforcementMode}': ${detail}`,
+      ),
+      exitCode: 125,
+    });
+    if (
+      cfcEnforcementStrictness(context.cfcEnforcementMode) <
+        CFC_ENFORCING_STRICTNESS
+    ) {
+      return undefined;
+    }
+    // `assertDockerRunscCfcTransportForMode` already refuses an unconfigured
+    // transport at run start, but it guards the engine's entry rather than
+    // this one, and a runtime constructed directly reaches here with the same
+    // labels and no guard behind it.
+    if (dir === undefined) {
+      return refuse(
+        `no CFC invocation-context directory is configured, so this invocation's ` +
+          `CFC input labels have nowhere to be read from`,
+      );
+    }
+    const readiness = await this.probeCfcTransportReadiness();
+    if (
+      readiness.status !== "unwired" ||
+      !readiness.unread.includes("invocation-context")
+    ) {
+      return undefined;
+    }
+    return refuse(
+      `the '${this.config.runtimeName}' docker runtime is not registered with ` +
+        `--${CFC_INVOCATION_CONTEXT_DIR_RUNTIME_FLAG}=${dir}, so this invocation's ` +
+        `CFC input labels would be written and never read`,
+    );
+  }
+
   private async writeCfcInvocationContextSidecar(
     containerID: string,
     request: SandboxCommandRequest,
     createResult: SandboxCommandResult,
   ): Promise<SandboxCommandResult | undefined> {
+    const context = request.cfcInvocationContext;
+    if (context === undefined) {
+      return undefined;
+    }
     const dir = this.config.cfcInvocationContextDir;
-    if (dir === undefined || request.cfcInvocationContext === undefined) {
+    const refusal = await this.#refuseUnreadCfcInvocationContext(
+      context,
+      createResult,
+      dir,
+    );
+    if (refusal !== undefined) {
+      return refusal;
+    }
+    if (dir === undefined) {
       return undefined;
     }
     try {

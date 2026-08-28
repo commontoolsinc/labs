@@ -87,6 +87,31 @@ export interface ResolveDockerRunscSandboxConfigOptions {
   cfcInvocationContextDir?: string;
 }
 
+/**
+ * Which of the two host sidecar directories a readiness reading is about.
+ * `cf-harness` writes into the invocation-context directory and reads out of
+ * the result directory; the installed Docker runtime is the counterparty for
+ * both, and it can be wired for either one independently of the other.
+ */
+export type CfcSidecarTransportKind = "invocation-context" | "result";
+
+/**
+ * Whether the installed Docker runtime is registered to use the sidecar
+ * directories `cf-harness` is configured with.
+ *
+ * The three states stay distinct in the type rather than collapsing into a
+ * boolean because the evidence behind them differs. `unwired` is a positive
+ * reading of the runtime's registered arguments; `indeterminate` is the
+ * absence of any reading. Folding the second into the first refuses a host
+ * whose registration simply could not be read, and folding it into `wired`
+ * excuses a broken one — the same substitution of a check that did no work for
+ * a check that ran and found nothing that hid this defect to begin with.
+ */
+export type CfcTransportReadiness =
+  | { status: "wired" }
+  | { status: "unwired"; unread: readonly CfcSidecarTransportKind[] }
+  | { status: "indeterminate"; reason: string };
+
 export interface SandboxCommandRequest {
   argv: string[];
   cwd?: string;
@@ -125,6 +150,7 @@ export interface SandboxRuntimeDescription {
     networkMode?: DockerNetworkMode;
     extraDockerArgsCount?: number;
     invocationContextTransport?: string;
+    invocationContextTransportReadiness?: string;
   };
 }
 
