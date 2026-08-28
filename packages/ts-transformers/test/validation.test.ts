@@ -3532,6 +3532,125 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
+    "errors on a reactive value spread into a collected literal",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<
+        { flags: Writable<Record<string, boolean>> },
+        { kept: unknown }
+      >(({ flags }) => {
+        const kept = VALUES.map((value) => ({ value, ...flags }))
+          .filter(({ value }) => value);
+        return { kept };
+      });
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertStringIncludes(
+        errors.map((error) => error.message).join("\n"),
+        "returns a reactive value",
+      );
+    },
+  );
+
+  await t.step(
+    "errors on a reactive element in a sparse collected array",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ active: Writable<boolean> }, { kept: unknown }>(
+        ({ active }) => {
+          const kept = VALUES.map(() => [, active]).filter(Boolean);
+          return { kept };
+        },
+      );
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertStringIncludes(
+        errors.map((error) => error.message).join("\n"),
+        "returns a reactive value",
+      );
+    },
+  );
+
+  await t.step(
+    "errors when a destructuring assignment binds a reactive value",
+    async () => {
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ active: Writable<boolean> }, { kept: unknown }>(
+        ({ active }) => {
+          const kept = VALUES.map(() => {
+            let flag: boolean | Writable<boolean> = false;
+            [flag] = [active];
+            return flag;
+          }).filter(Boolean);
+          return { kept };
+        },
+      );
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics);
+      assertGreater(errors.length, 0, "Expected at least one error");
+      assertStringIncludes(
+        errors.map((error) => error.message).join("\n"),
+        "returns a reactive value",
+      );
+    },
+  );
+
+  await t.step(
+    "does not read a write through a binding as rebinding it",
+    async () => {
+      // `bag[key] = active` writes into `bag`; `key` is only the subscript,
+      // so returning it collects a plain string.
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      const VALUES = ["a", "b"];
+
+      export default pattern<{ active: Writable<boolean> }, { kept: unknown }>(
+        ({ active }) => {
+          const kept = VALUES.map(() => {
+            const key = "k";
+            const bag: Record<string, unknown> = {};
+            bag[key] = active;
+            return key;
+          });
+          return { kept };
+        },
+      );
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const messages = getErrors(diagnostics).map((error) => error.message)
+        .join("\n");
+      assertEquals(
+        messages.includes("returns a reactive value"),
+        false,
+        "the subscript binding is not what the assignment targets, so the " +
+          "escaping-map check must not claim the collected string",
+      );
+    },
+  );
+
+  await t.step(
     "errors when a lifted plain map result flows through a local",
     async () => {
       const source = `      import { pattern, Writable } from "commonfabric";
