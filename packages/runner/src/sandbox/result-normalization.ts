@@ -8,7 +8,6 @@ import {
   fabricFromNativeValue,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import { isNativeError } from "@commonfabric/data-model/native-builtin-tags";
 
 import { isReactive } from "../builder/types.ts";
 import { hasEncodableForm } from "../encodable-form.ts";
@@ -112,7 +111,7 @@ function normalizeSandboxNativeLeaf(value: unknown): unknown {
     return new FabricBytes(value as Uint8Array);
   }
 
-  if (isNativeError(value)) {
+  if (Error.isError(value)) {
     return FabricError.fromNativeError(value as Error);
   }
 
@@ -146,7 +145,7 @@ function formatActionResultError(
   const actionStr = actionName ? `\n  in action: ${actionName}` : "";
   const hint = hintForActionResult(value);
   const hintStr = hint ? ` ${hint}` : "";
-  const causeIsError = isNativeError(cause);
+  const causeIsError = Error.isError(cause);
   const causeStr = causeIsError ? `\n${(cause as Error).message}` : "";
   return new Error(
     `Action returned a ${typeNameForActionResult(value)}${pathStr}.` +
