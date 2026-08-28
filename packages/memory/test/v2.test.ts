@@ -437,6 +437,7 @@ describe("parseMemoryProtocolFlags", () => {
       null,
     );
     assertEquals(parseMemoryProtocolFlags({ entityIdLookup: "true" }), null);
+    assertEquals(parseMemoryProtocolFlags({ sessionHoldings: "true" }), null);
     assertEquals(
       parseMemoryProtocolFlags({
         modernCellRep: true,

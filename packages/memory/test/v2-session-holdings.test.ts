@@ -302,6 +302,62 @@ describe("session holdings", () => {
     expect(response.error?.name).toBe("InvalidMessageError");
   });
 
+  it("fails a watch.set whose declared holdings are not a list", async () => {
+    const reader = await connect(server);
+    const session = (await open(reader, READER)).sessionId;
+    await reader.connection.receive(encodeMemoryBoundary({
+      type: "session.watch.set",
+      requestId: nextRequestId("watch"),
+      space: SPACE,
+      sessionId: session,
+      watches,
+      holdings: { id: "of:holdings-a", seq: 3 },
+    } as never));
+    const response = shiftMessage(reader.messages) as ResponseMessage<
+      WatchSetResult
+    >;
+    expect(response.error?.name).toBe("InvalidMessageError");
+  });
+
+  it("fails a session.open whose declared holdings do not parse", async () => {
+    // The open-site parse refuses a malformed declaration the same way
+    // the watch.set one does — here a negative seq.
+    const reader = await connect(server);
+    await reader.connection.receive(encodeMemoryBoundary({
+      type: "session.open",
+      requestId: nextRequestId("open"),
+      space: SPACE,
+      session: {},
+      invocation: {
+        iss: READER,
+        aud: reader.sessionOpen.audience,
+        challenge: reader.sessionOpen.challenge.value,
+      },
+      holdings: [{ id: "of:holdings-a", seq: -1 }],
+    } as never));
+    const response = shiftMessage(reader.messages) as ResponseMessage<
+      SessionOpenResult
+    >;
+    expect(response.error?.name).toBe("InvalidMessageError");
+  });
+
+  it("re-delivers a live document declared as a tombstone, and retracts a scoped claim outside the union", async () => {
+    // Deletedness is part of the snapshot the diff compares: a claim to
+    // hold `b` as a tombstone at its current seq does not match the live
+    // document, which is re-delivered. A scope-carrying claim names an
+    // instance the union does not cover and is retracted.
+    const reader = await connect(server);
+    const session = (await open(reader, READER)).sessionId;
+    const sync = await watchSet(reader, session, [
+      { id: "of:holdings-a", seq: seqOf("of:holdings-a") },
+      { id: `cid:${leafHash}`, seq: seqOf(`cid:${leafHash}`) },
+      { id: "of:holdings-b", seq: seqOf("of:holdings-b"), deleted: true },
+      { id: "of:holdings-scoped", scope: "user", seq: 4 },
+    ]);
+    expect(ids(sync.upserts)).toEqual(["of:holdings-b"]);
+    expect(ids(sync.removes)).toEqual(["of:holdings-scoped"]);
+  });
+
   it("retracts a declaration resumed onto a session with no watches", async () => {
     // Zero watches cover nothing: the declared holdings are removed and
     // nothing lingers as delivery memory or tracked demand — a following
