@@ -4,7 +4,10 @@ import {
   assertStringIncludes,
   assertThrows,
 } from "@std/assert";
-import { fromFileUrl } from "@std/path";
+import {
+  createPatternSkillsFixture,
+  PATTERN_SKILL_FIXTURE_RESOURCE_PATH,
+} from "./support/pattern-skills-fixture.ts";
 import {
   createHarnessChatEventEnvelope,
   createHarnessChatSessionStatus,
@@ -1842,7 +1845,8 @@ Deno.test("a normalization whose write fails leaves the record on the stored his
 });
 
 Deno.test("an interactive turn scans its configured skills root into the run and a pattern-author child inherits it", async () => {
-  const skillsRoot = fromFileUrl(new URL("../../../skills", import.meta.url));
+  await using fixture = await createPatternSkillsFixture();
+  const skillsRoot = fixture.skillsRoot;
   const loopOptions: CreateHarnessPromptLoopOptions[] = [];
   const requestBodies: unknown[] = [];
   const service = new HarnessInteractiveChatService({
@@ -1888,8 +1892,8 @@ Deno.test("an interactive turn scans its configured skills root into the run and
                   function: {
                     name: "read_skill_resource",
                     arguments: JSON.stringify({
-                      skill: "lit-component",
-                      path: "references/component-patterns.md",
+                      skill: "pattern-ui",
+                      path: PATTERN_SKILL_FIXTURE_RESOURCE_PATH,
                     }),
                   },
                 }],

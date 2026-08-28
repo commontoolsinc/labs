@@ -1518,13 +1518,18 @@ export class HarnessInteractiveChatService {
   async #startPromptLoop(
     options: CreateHarnessPromptLoopOptions,
   ): Promise<HarnessInteractivePromptLoop> {
-    if (options.engine !== undefined || options.skillsRoot === undefined) {
+    if (options.skillsRoot === undefined) {
       return this.#createPromptLoop(options);
     }
-    const engine = new CfHarnessEngine(options);
-    await persistHarnessRunSkillRegistry(engine, {
-      skillsRoot: options.skillsRoot,
-    });
+    // Scan whichever engine will run — an injected one included, since its
+    // presence is not proof the registry was already recorded. Idempotent:
+    // an engine that already carries a registry is left as it is.
+    const engine = options.engine ?? new CfHarnessEngine(options);
+    if (engine.getRunState().skillRegistry === undefined) {
+      await persistHarnessRunSkillRegistry(engine, {
+        skillsRoot: options.skillsRoot,
+      });
+    }
     return this.#createPromptLoop({ ...options, engine });
   }
 
