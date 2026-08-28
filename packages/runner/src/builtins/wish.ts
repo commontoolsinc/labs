@@ -1551,6 +1551,48 @@ export function createSidecarPatternCache(options: {
   let fetchPromise: Promise<Pattern | undefined> | undefined;
   let fetchUrl: string | undefined;
   let pattern: Pattern | undefined;
+  // The space the cached pattern's closure was COMPILED (and so durably
+  // persisted) into, when the fetch carried a compile-cache context.
+  // Tracked for the serve-time closure kick below: the cache is
+  // process-global while a serving runtime serves MANY spaces, so every
+  // space after the first is served a pattern whose closure was never
+  // persisted THERE — and a later cross-space child replication out of
+  // such a space finds it dry (the OW45 lunch geometry).
+  let compiledSpace: Cell<unknown>["space"] | undefined;
+  // Spaces already kicked this cache epoch (one fire-and-forget
+  // replication per (pattern epoch, space) — repeat serves are free). A
+  // FAILED kick is deliberately not re-kicked here: the replication's own
+  // loud one-shot + park/re-supply machinery owns retries
+  // (pattern-manager.ts, the ruled 3b close).
+  const kickedSpaces = new Set<Cell<unknown>["space"]>();
+
+  // The serve-time closure kick ((2-D) of the ruled 3b close,
+  // verification-coverage.md OW45): serving a cached sidecar pattern for
+  // a space other than the one it compiled into fires the same
+  // replicate-into-the-demanding-space the content-cache hit fires
+  // (compileOrGetPattern's cross-space arm), so the demanding space's
+  // closure supplier is REGISTERED at page-serve time — before any
+  // create-profile click can issue the child replication, whose
+  // strictly-older-ticket await then covers the race by registration
+  // instead of healing after the fact. `space` is undefined off the
+  // serving posture (callers pass the demanding space only when serving)
+  // and `compiledSpace` is undefined for caches with no compile context —
+  // both no-op. Failure degrades to exactly the replication's standing
+  // loud contract.
+  const ensureClosureReplicated = (
+    runtime: Runtime,
+    space: Cell<unknown>["space"] | undefined,
+  ): void => {
+    if (space === undefined || compiledSpace === undefined) return;
+    if (pattern === undefined) return;
+    if (space === compiledSpace || kickedSpaces.has(space)) return;
+    kickedSpaces.add(space);
+    runtime.patternManager.replicatePatternToSpace(
+      pattern,
+      space,
+      compiledSpace,
+    );
+  };
 
   // Resolved lazily (not at module load): in the browser worker this module
   // is imported before the runtime calls `setPatternEnvironment` with the
@@ -1565,6 +1607,9 @@ export function createSidecarPatternCache(options: {
   async function fetchPattern(
     runtime: Runtime,
     url: string,
+    // The RESOLVED compile-cache space (fetch() computes it once, so the
+    // cache can remember where the closure landed), or undefined for a
+    // cache with no compile context.
     compileSpace?: Cell<unknown>["space"],
   ): Promise<Pattern | undefined> {
     try {
@@ -1577,15 +1622,7 @@ export function createSidecarPatternCache(options: {
       }
       const compiled = await runtime.patternManager.compilePattern(
         program,
-        options.compileInUserSpace
-          // Phase 5: a SERVING runtime's compile-cache context is the
-          // SERVED space (the wave's home — its writebacks are
-          // bookkeeping wave writes, serving-loop.md §3d), never the
-          // service identity's own space (a foreign wave write — the
-          // lunch-wall class). Callers pass it; clients keep the
-          // per-user cache context (CT-1623).
-          ? { space: compileSpace ?? runtime.userIdentityDID }
-          : undefined,
+        compileSpace !== undefined ? { space: compileSpace } : undefined,
       );
 
       if (!compiled) throw new WishError(`Can't compile ${options.name}`);
@@ -1611,6 +1648,8 @@ export function createSidecarPatternCache(options: {
     pattern = undefined;
     fetchPromise = undefined;
     fetchUrl = undefined;
+    compiledSpace = undefined;
+    kickedSpaces.clear();
   });
 
   return {
@@ -1618,6 +1657,13 @@ export function createSidecarPatternCache(options: {
     cached(): Pattern | undefined {
       return fetchUrl === patternUrl() ? pattern : undefined;
     },
+    // The serve-time closure kick (see `ensureClosureReplicated` above):
+    // callers on the serving posture invoke this wherever they RUN the
+    // cached pattern for a demanding space, so the space's closure
+    // supplier is registered at serve time. No-ops without a demanding
+    // space (clients), without a compile context, or when the space
+    // already got its kick this cache epoch.
+    ensureClosureReplicated,
     // Memoized fetch for the current environment's URL, started by this call
     // when none is in flight for that URL. When this call starts the fetch,
     // `onSuccess` runs once it resolves with a pattern, unless a later fetch
@@ -1628,13 +1674,24 @@ export function createSidecarPatternCache(options: {
       compileSpace?: Cell<unknown>["space"],
     ): Promise<Pattern | undefined> {
       const url = patternUrl();
+      // Phase 5: a SERVING runtime's compile-cache context is the
+      // SERVED space (the wave's home — its writebacks are
+      // bookkeeping wave writes, serving-loop.md §3d), never the
+      // service identity's own space (a foreign wave write — the
+      // lunch-wall class). Callers pass it; clients keep the
+      // per-user cache context (CT-1623).
+      const targetSpace = options.compileInUserSpace
+        ? compileSpace ?? runtime.userIdentityDID
+        : undefined;
       if (!fetchPromise || fetchUrl !== url) {
         fetchUrl = url;
         pattern = undefined;
+        compiledSpace = undefined;
+        kickedSpaces.clear();
         const started: Promise<Pattern | undefined> = fetchPattern(
           runtime,
           url,
-          compileSpace,
+          targetSpace,
         ).then((fetched) => {
           // Only the fetch the cache currently points to records and reports
           // its result; launches chained on a superseded fetch get undefined
@@ -1642,6 +1699,7 @@ export function createSidecarPatternCache(options: {
           if (fetchPromise !== started) return undefined;
           pattern = fetched;
           if (fetched) {
+            compiledSpace = targetSpace;
             onSuccess?.(fetched);
           } else if (options.retryOnFailure) {
             fetchPromise = undefined;
@@ -1649,6 +1707,18 @@ export function createSidecarPatternCache(options: {
           return fetched;
         });
         fetchPromise = started;
+      } else if (compileSpace !== undefined) {
+        // A demander CHAINED onto an in-flight (or completed) fetch that
+        // another space's demand started: its own space never gets a
+        // compile, so kick the closure replication once the pattern is
+        // in hand. The starting demander's kick no-ops (space ===
+        // compiledSpace). The floating continuation is safe: the fetch
+        // promise never rejects (fetchPattern catches), and the kick
+        // no-ops for a superseded fetch (pattern/compiledSpace reset).
+        const demandingSpace = compileSpace;
+        void fetchPromise.then(() =>
+          ensureClosureReplicated(runtime, demandingSpace)
+        );
       }
       return fetchPromise;
     },
@@ -2374,6 +2444,14 @@ export function wish(
       trackSidecarLaunch(launch);
     } else {
       if (!cancelled && slot.resultCell) {
+        // Serve-time closure kick ((2-D), the ruled 3b close): a cached
+        // pattern served for a space it did not compile into gets its
+        // closure replicated there, registered before any child
+        // replication out of this space can consult it.
+        suggestionPatternCache.ensureClosureReplicated(
+          runtime,
+          runtime.servingPosture ? parentCell.space : undefined,
+        );
         runtime.runner.run(
           tx,
           cachedSuggestionPattern,
@@ -2690,6 +2768,15 @@ export function wish(
       );
       trackSidecarLaunch(launch);
     } else if (!cancelled && slot.resultCell) {
+      // Serve-time closure kick ((2-D), the ruled 3b close): the served
+      // create surface's space gets the profile-create closure replicated
+      // at serve time — before any create-profile click can issue the
+      // child replication that reads this space as its origin (the OW45
+      // lunch geometry).
+      profileCreatePatternCache.ensureClosureReplicated(
+        runtime,
+        runtime.servingPosture ? parentCell.space : undefined,
+      );
       runtime.runner.run(
         tx,
         cachedProfileCreatePattern,
@@ -2830,6 +2917,14 @@ export function wish(
       });
       trackSidecarLaunch(launch);
     } else if (!cancelled && slot.resultCell) {
+      // Serve-time closure kick ((2-D), the ruled 3b close): inert for
+      // this cache today (no compile context — `compileInUserSpace`
+      // unset), wired uniformly so a future compile-context change
+      // cannot silently miss the kick.
+      profilePickerPatternCache.ensureClosureReplicated(
+        runtime,
+        runtime.servingPosture ? parentCell.space : undefined,
+      );
       runtime.runner.run(
         tx,
         cachedProfilePickerPattern,
