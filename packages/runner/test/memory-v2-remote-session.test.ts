@@ -700,6 +700,36 @@ describe("WebSocketTransport failure signaling", () => {
     });
   });
 
+  it("uses the compression mode active when each send is submitted", async () => {
+    await withTransport(async (transport, socket) => {
+      const hello = transport.send("hello");
+      transport.setMessageCompressionEnabled(true);
+      const large = "submitted before compression was disabled ".repeat(1_000);
+      const submittedWhileEnabled = transport.send(large);
+      const disabling = transport.requestMessageCompression(false);
+
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await activeSocket.whenSent(3);
+
+      expect(activeSocket.sent[0]).toBe("hello");
+      expect(activeSocket.sent[1]).toBeInstanceOf(Uint8Array);
+      const control = parseMemoryCompressionControlMessage(
+        requireTextFrame(activeSocket.sent[2]),
+      );
+      if (!control) throw new Error("Expected disable control");
+      activeSocket.receive(encodeMemoryCompressionControlMessage({
+        requestId: control.requestId,
+        enabled: false,
+      }));
+
+      await Promise.all([hello, submittedWhileEnabled, disabling]);
+      expect(await decodeCompressedMemoryMessage(activeSocket.sent[1])).toBe(
+        large,
+      );
+    });
+  });
+
   it("changes compression on a live socket", async () => {
     await withTransport(async (transport, socket) => {
       const opening = transport.send("hello");
