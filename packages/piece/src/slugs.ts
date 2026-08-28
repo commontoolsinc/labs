@@ -127,7 +127,15 @@ export async function resolvePieceAddress(
   }
 
   const target = await resolveSlugTargetCell(pieces, token);
-  if (getPatternIdentityRef(target) === undefined) {
+  // A KEYLESS piece carries no durable pointer (the never-durable
+  // contract; L3(a), RULED 2026-08-27): in the session that set it up the
+  // runner's session pointer vouches for it. A fresh session cannot vouch
+  // for a keyless target — which matches the contract: nothing keyless is
+  // loadable there anyway.
+  if (
+    getPatternIdentityRef(target) === undefined &&
+    pieces.runtime.runner.sessionPatternPointerFor(target) === undefined
+  ) {
     throw new SlugResolutionError(
       `Slug "${token}" redirects to a document that is not a piece.`,
       "not-piece",

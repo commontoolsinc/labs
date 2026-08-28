@@ -24,6 +24,7 @@ import { getTopFrame } from "./pattern.ts";
 import {
   getArtifactEntryRef,
   getPatternProgram,
+  isKeylessPatternIdentity,
   noteDerivedCopy,
 } from "./pattern-metadata.ts";
 import { getVerifiedProvenance } from "../harness/verified-provenance.ts";
@@ -471,11 +472,19 @@ export function patternToEncodableForm(
   // nothing could resolve its ref. That graph holds LIVE modules, so the walk
   // replaces its artifacts here.
   //
+  // A session-synthetic `keyless:` ref counts as NO entry ref at this
+  // boundary (L3(a), RULED 2026-08-27: keyless identities must never land
+  // durably). The mint (`ensureKeylessPatternIdentity`) sets the value's
+  // forward entry ref for in-session by-identity resolution; without this
+  // check, any later boundary write of the minted VALUE would emit a
+  // `$patternRef` no other session can ever resolve, in place of the designed
+  // full-graph fallback.
+  //
   // `moduleToEncodableForm` reads `getTopFrame()` to decide `$implRef`. A
   // frame inherits its parent's runtime (`builder/pattern.ts`), so
   // `frame.runtime` is the same at every point along one stack.
   const entryRef = getArtifactEntryRef(pattern);
-  return entryRef
+  return entryRef && !isKeylessPatternIdentity(entryRef.identity)
     ? {
       $patternRef: { identity: entryRef.identity, symbol: entryRef.symbol },
       argumentSchema: pattern.argumentSchema,

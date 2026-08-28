@@ -20,6 +20,20 @@ export interface WeightedCacheOptions<K, V> extends CacheOptions {
   maxWeight?: number;
 }
 
+/** Options for a {@link BoundedKeyMap}. */
+export interface BoundedKeyMapOptions<K, V> {
+  /**
+   * Called once per entry the map drops by CAPACITY EVICTION — never for the
+   * caller's own removals (`delete`, `clear`) and never for the
+   * refresh-delete of a key being re-`set`. For a consumer whose "loss is
+   * never a wrong answer" claim depends on telling *evicted* apart from
+   * *never present*, this is where it records that distinction (a
+   * tombstone). Called after the entry is removed, before the triggering
+   * `set` inserts its own entry.
+   */
+  onEvict?: (key: K, value: V) => void;
+}
+
 /**
  * A `Map` that drops its oldest key once it holds `limit` of them. Insertion
  * order is the eviction order, and re-setting a key refreshes its place, so
@@ -30,18 +44,22 @@ export interface WeightedCacheOptions<K, V> extends CacheOptions {
  * entries are hints — a value whose loss costs a slower path, never a wrong
  * answer — and where the keys keep arriving: one per instance of something
  * the program creates and discards, rather than one per fixed thing it knows
- * about.
+ * about. Where absence itself feeds a decision, pass
+ * {@link BoundedKeyMapOptions.onEvict} so eviction cannot masquerade as
+ * never-present.
  */
 export class BoundedKeyMap<K, V> implements ReadonlyMap<K, V> {
   readonly #entries = new Map<K, V>();
   readonly #limit: number;
+  readonly #onEvict: ((key: K, value: V) => void) | undefined;
 
   /**
    * Constructs an instance which holds at most `limit` entries. A `limit`
    * below `1` is taken as `1`, there being no useful cache of size zero.
    */
-  constructor(limit: number) {
+  constructor(limit: number, options: BoundedKeyMapOptions<K, V> = {}) {
     this.#limit = Math.max(limit, 1);
+    this.#onEvict = options.onEvict;
   }
 
   /** @inheritDoc */
@@ -70,7 +88,9 @@ export class BoundedKeyMap<K, V> implements ReadonlyMap<K, V> {
     // stops as soon as the new entry has somewhere to go.
     for (const oldest of this.#entries.keys()) {
       if (this.#entries.size < this.#limit) break;
+      const evicted = this.#entries.get(oldest) as V;
       this.#entries.delete(oldest);
+      this.#onEvict?.(oldest, evicted);
     }
     this.#entries.set(key, value);
   }

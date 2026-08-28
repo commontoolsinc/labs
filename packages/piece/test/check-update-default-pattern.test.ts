@@ -21,7 +21,10 @@ import {
   HOME_PATTERN_SOURCE,
   PiecesController,
 } from "../src/ops/pieces-controller.ts";
-import { reconcilePieceSource } from "../src/ops/piece-origin.ts";
+import {
+  readPieceSourceState,
+  reconcilePieceSource,
+} from "../src/ops/piece-origin.ts";
 
 // The routes those refs resolve to. A system pattern is still SERVED at, and
 // its modules still NAMED by, the route path; the `system:` ref is what a
@@ -754,6 +757,69 @@ describe("opening a space root", () => {
       await identityForSource(SOURCE_V2),
     );
     expect(getPatternIdentityRef(updated.getCell())?.symbol).toBe("default");
+  });
+
+  it("heals a legacy keyless default root without recording the keyless identity as displaced", async () => {
+    await setup();
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+
+    // A root left behind by a PRE-GUARD runtime: its durable pointer is a
+    // legacy `keyless:` orphan — session-synthetic, so unloadable in EVERY
+    // session by construction (never minted here; the in-memory index cannot
+    // serve it either). No recorded origin, so the origin-follow reconcile
+    // and the update check cannot repair it: only the ROLL-FORWARD rescue
+    // (the displaced-pattern swap) remains.
+    const orphan = "keyless:fid1:legacy-orphan-from-a-pre-guard-session";
+    await controller.stopPiece(root);
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: orphan,
+        symbol: "default",
+      });
+      root.withTx(tx).setMetaRaw("patternSource", undefined);
+    });
+    expect(error).toBeUndefined();
+
+    // The rescue triggers on a THROWN start. A keyless pointer alone no
+    // longer throws (the start walk tolerates it: not started, not
+    // rejected), so the reachable shape is any start failure COINCIDING
+    // with the orphan pointer — made deterministic here by failing the
+    // first start attempt. The catch then reads ref = the durable keyless
+    // orphan, its load short-circuits to undefined, and the origin-less
+    // root rolls forward through healDefaultRootByRollForward's swap tx —
+    // the path whose direct `displacedPattern` stamp this pin guards.
+    const realStart = runtime.start.bind(runtime);
+    let failedOnce = false;
+    runtime.start = (resultCell) => {
+      if (!failedOnce) {
+        failedOnce = true;
+        return Promise.reject(
+          new Error("forced start failure over the legacy orphan"),
+        );
+      }
+      return realStart(resultCell);
+    };
+
+    stub.setSource(SOURCE_V2);
+    const registry = await controller.getPieceRegistry();
+    await runtime.idle();
+    expect(registry).toBeDefined();
+    expect(failedOnce).toBe(true);
+
+    // Rolled forward to the official entry...
+    const healed = (await controller.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(healed)?.identity).toBe(
+      await identityForSource(SOURCE_V2),
+    );
+    // ...and the displaced KEYLESS identity did NOT land durably. The
+    // `displacedPattern` record exists for recovery, and recovery to a
+    // session identity is impossible by construction — the absent record is
+    // the honest one (L3(a): no `keyless:` byte anywhere in durable state,
+    // the same gate `applyPieceSourceTransition`'s unavailable arm applies).
+    expect(
+      (await readPieceSourceState(runtime, healed)).displacedPattern,
+    ).toBeUndefined();
   });
 
   // The boot path (ensureDefaultPattern) reconciles an unloadable root before

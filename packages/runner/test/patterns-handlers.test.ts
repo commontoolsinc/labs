@@ -493,8 +493,14 @@ describe("Pattern Runner - Handlers", () => {
     expect(errors).toBe(1);
     expect(value).toMatchObject({ result: 5 });
 
-    const patternIdentity = getPatternIdentityRef(piece)?.identity;
-    expect(patternIdentity).toBeDefined();
+    // A hand-built (keyless) piece carries no durable pattern pointer
+    // (the never-durable contract; L3(a), RULED 2026-08-27); the scheduler
+    // diagnostics fall back to the in-hand pattern's session entry ref.
+    expect(getPatternIdentityRef(piece)).toBeUndefined();
+    const patternIdentity = runtime.patternManager.getArtifactEntryRef(
+      divPattern as unknown as object,
+    )?.identity;
+    expect(patternIdentity).toMatch(/^keyless:/);
     expect(lastError?.patternId).toBe(patternIdentity);
     expect(lastError?.space).toBe(space);
     // Diagnostics carry the FULL schemed sourceURI (see diagnostics.ts:
