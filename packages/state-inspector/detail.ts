@@ -342,7 +342,10 @@ function detailFromDoc(
   if (c.kind === "piece" && c.regime === "legacy" && isObjectNotArray(value)) {
     const rid = legacyResultId(value);
     if (rid) lineage.result = refTo(rid, ctx);
-    const internalIds = linksWithPaths(value.internal, DETAIL_LINK_WALK)
+    // The links alone: a detail is a rendering, and this one is bounded to a
+    // depth its own output would not have shown past, so where the walk
+    // stopped changes nothing a reader of it could act on.
+    const internalIds = linksWithPaths(value.internal, DETAIL_LINK_WALK).links
       .map((l) => l.link.id).filter((x): x is string => !!x);
     if (internalIds.length) {
       lineage.internal = internalIds.map((cid) => refTo(cid, ctx)!);
@@ -368,8 +371,9 @@ function detailFromDoc(
     lineage.pattern = ref;
   }
 
-  // outgoing links, resolved
-  const outLinks: LinkRef[] = linksWithPaths(value, DETAIL_LINK_WALK).map(
+  // outgoing links, resolved. The links alone, for the reason above: this
+  // list is shown to a reader rather than reasoned over.
+  const outLinks: LinkRef[] = linksWithPaths(value, DETAIL_LINK_WALK).links.map(
     ({ link, at }) => {
       const external = !!link.space && link.space !== ctx.ownDid &&
         link.space !== `did:key:${ctx.ownDid}`;

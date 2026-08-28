@@ -28,6 +28,7 @@ import {
   type HarnessCellLabelEntry,
   type HarnessCellLabelRecord,
   type HarnessCellLabels,
+  type HarnessCellLabelTruncationReason,
   type HarnessCellLabelUnreadPath,
   type HarnessCellLabelUnreadReason,
   type HarnessCfcAtom,
@@ -98,10 +99,20 @@ interface StoredCellLabels {
 
   /**
    * The paths of this document nothing was looked for at, where the document
-   * itself was read: one per link the walk could not follow. The same
-   * distinction as `unread`, held per path rather than per document.
+   * itself was read: one per link the walk could not follow, and one per path
+   * it sits too deep to descend to. The same distinction as `unread`, held
+   * per path rather than per document.
    */
   unreadPaths?: readonly HarnessCellLabelUnreadPath[];
+
+  /**
+   * Set where the walk over this document stopped before the end of it and
+   * cannot say where, naming why. The paths it never reached were never
+   * enumerated, so this states of the document as a whole what an unread path
+   * states of one path: a path carrying no entry may still be one the space
+   * labels.
+   */
+  truncation?: HarnessCellLabelTruncationReason;
 }
 
 /**
@@ -249,15 +260,14 @@ interface LinkedCell {
   id: string;
 }
 
-// How far into one document's value this reader walks for links. A link it
-// stops short of renders as a path holding no entry, which is how a path the
-// space holds no label for reads — so a truncated walk here reports a cell
-// nothing looked at as a cell the space says nothing about. That is why this
-// reader buys completeness with work rather than the other way round, and why
-// both bounds sit far above the shape of any document a pattern writes: a
-// document reaching either is one no reader could enumerate the paths of
-// anyway. `LinkWalkBounds` covers why a node count is needed alongside a depth
-// this large.
+// How far into one document's value this reader walks for links. Both bounds
+// sit far above the shape of any document a pattern writes, because this
+// reader buys completeness with work rather than the other way round;
+// `LinkWalkBounds` covers why a node count is needed alongside a depth this
+// large. Where a bound does stop the walk, what it stopped short of is
+// recorded — as an unread path where the walk can name one, and as a
+// truncation of the whole cell where it cannot — so a link never looked at
+// never reads as a cell the space says nothing about.
 const LINK_WALK: LinkWalkBounds = {
   maxDepth: 64,
   maxNodes: 100_000,
@@ -265,10 +275,10 @@ const LINK_WALK: LinkWalkBounds = {
 
 /**
  * The cells one document links to, each at the path inside the document it
- * sits at, and the paths whose links were not followed. A pattern's results
- * are their own cells rather than paths inside the piece that names them, so
- * following these one hop is what puts a derived label where a reader looks
- * for it.
+ * sits at, the paths whose links were not followed, and whether the walk ran
+ * out before the end of the value. A pattern's results are their own cells
+ * rather than paths inside the piece that names them, so following these one
+ * hop is what puts a derived label where a reader looks for it.
  *
  * The walk descends through the objects and arrays of the value — an array
  * index is a path segment like any other — and stops at each link it meets:
@@ -276,20 +286,29 @@ const LINK_WALK: LinkWalkBounds = {
  * business of this document's labels.
  *
  * A link this store cannot answer for is returned as an unread path rather
- * than dropped. Dropped, it would leave its path holding no entry, which is
- * how a path the space holds no label for reads — so the cell nobody looked
- * at and the cell the space says nothing about would render alike.
+ * than dropped, and so is a path the walk sat too shallow to reach. Dropped,
+ * either would leave its path holding no entry, which is how a path the space
+ * holds no label for reads — so the cell nobody looked at and the cell the
+ * space says nothing about would render alike.
+ *
+ * A walk that exhausted its node budget can name no path, because it stopped
+ * before enumerating what was left, so it says so of the whole document
+ * instead. That is the weaker statement, and it is deliberately weaker: the
+ * paths it missed are not knowledge this reader has.
  */
 const linkedCellsOf = (
   document: Record<string, unknown> | undefined,
   space: string | undefined,
+  bounds: LinkWalkBounds,
 ): {
   linked: LinkedCell[];
   unreadPaths: HarnessCellLabelUnreadPath[];
+  truncation?: HarnessCellLabelTruncationReason;
 } => {
   const linked: LinkedCell[] = [];
   const unreadPaths: HarnessCellLabelUnreadPath[] = [];
-  for (const { link, at } of linksWithPaths(document?.value, LINK_WALK)) {
+  const walk = linksWithPaths(document?.value, bounds);
+  for (const { link, at } of walk.links) {
     if (link.id === undefined) {
       continue;
     }
@@ -300,7 +319,16 @@ const linkedCellsOf = (
       unreadPaths.push({ path: at, reason });
     }
   }
-  return { linked, unreadPaths };
+  for (const at of walk.tooDeep) {
+    unreadPaths.push({ path: at, reason: "below-read-depth" });
+  }
+  return {
+    linked,
+    unreadPaths,
+    ...(walk.budgetExhausted
+      ? { truncation: "node-budget-exhausted" as const }
+      : {}),
+  };
 };
 
 /** A space DB opened for reading labels, and the space it was resolved from. */
@@ -328,10 +356,27 @@ export interface SpaceLabelReader {
    * An address in another space is not looked up at all: the answer comes
    * back `unread`, which is a different fact from a document with no labels.
    * A link into another space is the same fact one level down, and comes
-   * back as an `unreadPaths` entry at the path that held it.
+   * back as an `unreadPaths` entry at the path that held it — as does a path
+   * lying deeper in the value than the walk descends.
    */
   read(address: CellAddress): StoredCellLabels & { linked: LinkedCell[] };
   close(): void;
+}
+
+/** What an opened reader may be told, beyond which space to open. */
+export interface SpaceLabelReaderOptions {
+  /** An explicit database file, for a host whose store is not discoverable. */
+  dbPath?: string;
+
+  /**
+   * How far into each document's value the link walk reaches. {@link
+   * LINK_WALK} is what a run records under, and sits far above the shape of
+   * any document a pattern writes; a caller reading a store whose shape it
+   * knows may trade that reach for work. Either way what a bound stopped
+   * short of is reported rather than dropped, so a narrower reach costs
+   * knowledge and never truthfulness.
+   */
+  linkWalk?: LinkWalkBounds;
 }
 
 /**
@@ -342,7 +387,7 @@ export interface SpaceLabelReader {
  */
 export const openSpaceLabelReader = async (
   space: string,
-  options: { dbPath?: string } = {},
+  options: SpaceLabelReaderOptions = {},
 ): Promise<SpaceLabelReader> => {
   const discovered = options.dbPath === undefined
     ? discoverSpaceDbs()
@@ -350,6 +395,7 @@ export const openSpaceLabelReader = async (
   const dbPath = options.dbPath ?? await resolveSpace(space, discovered);
   const opened: SpaceDb = openSpace(dbPath);
   const did = spaceDidOfDbPath(dbPath);
+  const bounds = options.linkWalk ?? LINK_WALK;
   return {
     dbPath,
     ...(did !== undefined ? { did } : {}),
@@ -369,7 +415,24 @@ export const openSpaceLabelReader = async (
         return { entries: [], linked: [] };
       }
       const own = labelsOf(outcome.document);
-      const { linked, unreadPaths } = linkedCellsOf(outcome.document, did);
+      const { linked, unreadPaths, truncation } = linkedCellsOf(
+        outcome.document,
+        did,
+        bounds,
+      );
+      if (truncation !== undefined) {
+        // Said out loud as well as recorded. The budget is what makes a
+        // restored graph with a cycle in it finite, so a document that
+        // reaches it is the shape the budget exists against rather than a
+        // large honest value, and the labels of every cell beneath it are
+        // now unknown.
+        console.warn(
+          `cf-harness read only part of "${address.id}" in ${dbPath}: the ` +
+            `value walk stopped after ${bounds.maxNodes} nodes, so the ` +
+            `labels of the cells it links to below that point are unknown ` +
+            `rather than absent. A value this large is usually a cycle.`,
+        );
+      }
       const entries = [...own.entries];
       for (const { path, id } of linked) {
         const target = reconstructOutcome(opened, { id, scope: "space" });
@@ -389,6 +452,7 @@ export const openSpaceLabelReader = async (
         entries,
         linked,
         ...(unreadPaths.length > 0 ? { unreadPaths } : {}),
+        ...(truncation !== undefined ? { truncation } : {}),
       };
     },
     close: () => opened.close(),
@@ -402,6 +466,9 @@ export interface SpaceLabelSnapshotRequest {
 
   /** An explicit database file, for a host whose store is not discoverable. */
   dbPath?: string;
+
+  /** How far into each cell's value the read walks; see {@link LINK_WALK}. */
+  linkWalk?: LinkWalkBounds;
 
   /** The references the run held, in the order it minted them. */
   refs: readonly string[];
@@ -419,9 +486,11 @@ export interface SpaceLabelSnapshotRequest {
  * space does address a cell, so it is recorded and marked unread instead of
  * dropped: the run held it, and a reader that saw it vanish would take the
  * snapshot to cover every cell the run touched. A link the walk could not
- * follow is the same, held as an unread path at the path it sat at. Every
- * other failure lands on the snapshot as a whole, so a reader can tell "no
- * labels" from "not read".
+ * follow is the same, held as an unread path at the path it sat at, as is a
+ * path it sat too shallow to reach. A walk that ran out of nodes names no
+ * path — it stopped before enumerating what it had left — so it marks the
+ * whole cell truncated instead. Every other failure lands on the snapshot as
+ * a whole, so a reader can tell "no labels" from "not read".
  */
 export const readSpaceCellLabels = async (
   request: SpaceLabelSnapshotRequest,
@@ -435,6 +504,7 @@ export const readSpaceCellLabels = async (
   try {
     reader = await openSpaceLabelReader(request.space, {
       ...(request.dbPath !== undefined ? { dbPath: request.dbPath } : {}),
+      ...(request.linkWalk !== undefined ? { linkWalk: request.linkWalk } : {}),
     });
   } catch (error) {
     return {
@@ -477,6 +547,9 @@ export const readSpaceCellLabels = async (
         ...(read.unread !== undefined ? { unreadReason: read.unread } : {}),
         ...(read.unreadPaths !== undefined
           ? { unreadPaths: read.unreadPaths }
+          : {}),
+        ...(read.truncation !== undefined
+          ? { truncationReason: read.truncation }
           : {}),
         entries: read.entries,
       });

@@ -181,8 +181,18 @@ The read is one hop wide. A pattern's results are their own cells, linked from
 the piece that names them, and the derived label sits on the cell — so the
 labels of the cells a run's own cells link to are read too, at the path the link
 sits at. The walk descends through the objects and arrays of a value to find
-those links, however deep inside one they sit, and stops at each: a linked
-cell's own links belong to that cell, not to this one.
+those links and stops at each: a linked cell's own links belong to that cell,
+not to this one.
+
+It descends a bounded way, and what it does not reach it records rather than
+passes over. The bounds sit far above the shape of any document a pattern writes
+— sixty-four levels deep, a hundred thousand values wide — and a path below that
+depth is recorded unread at the path itself, so the cells beneath it read as
+nothing known. A value large enough to exhaust the node budget is a walk that
+stopped before enumerating what was left, so it can name no path: it marks the
+whole cell's labels partial and warns as it does, because a value that size is a
+cycle far more often than it is a document. Either way, a cell the reader did
+not finish never reads as a cell with no label.
 
 It reaches one space. A reference or a link naming a space the opened file
 cannot be shown to be — another space, or any space at all where the file's own

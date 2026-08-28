@@ -97,25 +97,53 @@ export interface HarnessCellLabelEntry {
 
 /**
  * Why a cell or a path of a read snapshot holds no labels because none were
- * looked for. Both reasons are the same hazard: an entity id addresses a
+ * looked for. Each names a place the reader did not look, and asserts that it
+ * looked everywhere else it says it read.
+ *
+ * `cross-space` and `space-unproven` are one hazard: an entity id addresses a
  * document within its own space, so asking the opened store for an id that
  * belongs to another answers with whatever local document shares it.
+ * `cross-space` is an address in a space the opened store is known not to be.
+ * `space-unproven` is an address in a space the opened store cannot be shown
+ * to be either way, which is every spaced address against a file whose name is
+ * not a DID — a fixture, or a copy taken by hand.
  *
- * `cross-space` is an address in a space the opened store is known not to
- * be. `space-unproven` is an address in a space the opened store cannot be
- * shown to be either way, which is every spaced address against a file whose
- * name is not a DID — a fixture, or a copy taken by hand.
+ * `below-read-depth` is a path sitting deeper inside a document than the
+ * reader descends into one. Nothing was read at it or beneath it, and the
+ * path names exactly where that begins.
  */
-export type HarnessCellLabelUnreadReason = "cross-space" | "space-unproven";
+export type HarnessCellLabelUnreadReason =
+  | "cross-space"
+  | "space-unproven"
+  | "below-read-depth";
+
+/**
+ * Why a cell's labels are some of what the space holds rather than all of it.
+ *
+ * `node-budget-exhausted` is a reader that ran out of value nodes partway
+ * through one document and stopped. It states less than an unread path does,
+ * and states it of the whole record rather than of a path, because that is
+ * the whole of what is true: the values left unwalked were never enumerated,
+ * so nothing names them, and a path cannot be produced for a place never
+ * reached. Wherever it is set, every path of the record that carries no entry
+ * is unknown rather than unlabelled.
+ *
+ * A document a pattern writes sits far below the budget. Reaching it is
+ * evidence of the value the budget exists against — a restored graph with a
+ * cycle in it, or a row no reader could enumerate the paths of — so it is
+ * something to investigate rather than something to expect.
+ */
+export type HarnessCellLabelTruncationReason = "node-budget-exhausted";
 
 /**
  * One path inside a cell whose labels were not looked for, and why.
  *
  * A link one hop out of a cell is followed only where the store it addresses
- * is the opened one, and the path the unfollowed link sits at holds no entry
- * as a result. Recording that path is what keeps it readable as a cell
- * nobody asked about: an entry list carries no gaps of its own, so a path
- * missing from one is otherwise a path the space holds no label for.
+ * is the opened one, and a path deeper than the reader descends is not
+ * reached at all; either way the path holds no entry. Recording it is what
+ * keeps it readable as a cell nobody asked about: an entry list carries no
+ * gaps of its own, so a path missing from one is otherwise a path the space
+ * holds no label for.
  */
 export interface HarnessCellLabelUnreadPath {
   /** The path inside the document, as an entry at it would be written. */
@@ -162,10 +190,21 @@ export interface HarnessCellLabelRecord {
   unreadPaths?: readonly HarnessCellLabelUnreadPath[];
 
   /**
+   * Set where the reader did not finish this cell, naming why. It is weaker
+   * than `unreadPaths` and no substitute for one: `unreadPaths` names each
+   * path nothing was read at and thereby vouches for every other path, while
+   * this says only that something was missed and cannot say where. A reader
+   * that meets it takes `entries` as some of what the space holds for this
+   * cell, and every path with no entry as unknown.
+   */
+  truncationReason?: HarnessCellLabelTruncationReason;
+
+  /**
    * The labels, one entry per labelled path. An empty list is a positive
    * finding — the space was read and holds no label for this cell — except
-   * where `unreadReason` is set, which says nothing was asked, and at the
-   * paths `unreadPaths` names, which say the same of one path each.
+   * where `unreadReason` is set, which says nothing was asked, at the paths
+   * `unreadPaths` names, which say the same of one path each, and under a
+   * `truncationReason`, which says the same of paths it cannot name.
    */
   entries: readonly HarnessCellLabelEntry[];
 }

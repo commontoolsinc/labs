@@ -692,15 +692,50 @@ export interface LinkWalkBounds {
 }
 
 /**
- * Every link in a value, in either at-rest form, each with the path inside the
- * value it sits at. The walk descends the objects and arrays of the value and
- * stops at each link it meets, so a linked value's own links belong to that
- * value rather than to this one.
+ * What a bounded walk found, and where it stopped short of finding more. The
+ * two ways it stops are separate fields because they state different things,
+ * and a caller that treated either as the other would overstate what it knows.
+ */
+export interface LinkWalk {
+  /** The links found, in the order the walk met them. */
+  links: LinkAtPath[];
+
+  /**
+   * The paths the walk did not descend into because they sit deeper than
+   * `maxDepth`, one per value it refused at. Nothing was read at such a path
+   * or under it, so a link there is neither reported nor ruled out — and the
+   * statement is exact, because every path of the value not at or under one
+   * of these was walked.
+   */
+  tooDeep: readonly (readonly string[])[];
+
+  /**
+   * Whether `maxNodes` ran out, which stops the walk wherever it had reached.
+   * This is a statement about the walk rather than about a path: the values
+   * it never visited were never enumerated, so nothing names them, and
+   * `links` is some of the value's links rather than all of them. A caller
+   * may not read a path's absence from `links` as the value holding no link
+   * there.
+   */
+  budgetExhausted: boolean;
+}
+
+/**
+ * Every link in a value that `bounds` reaches, in either at-rest form, each
+ * with the path inside the value it sits at — and, beside them, where the
+ * bounds stopped the walk. The walk descends the objects and arrays of the
+ * value and stops at each link it meets, so a linked value's own links belong
+ * to that value rather than to this one.
  *
  * It is generic over shape rather than over an enumeration of the places a
  * link may appear: `decodedLinkOf` is the whole of the link knowledge in it,
  * which is why no caller keeps a list of link-bearing keys in step with the
- * ones the store writes. Every link reachable within `bounds` is found.
+ * ones the store writes.
+ *
+ * A link past `bounds` is not found, and a caller for which a link missed and
+ * a value holding none read alike must take `tooDeep` and `budgetExhausted`
+ * with the links: they are what say that the found set is partial, and which
+ * part of the value the walk can say nothing about.
  *
  * Links come back in the order the walk meets them, depth first, with an
  * object's keys in `Object.entries` order and an array's items in index order.
@@ -708,15 +743,28 @@ export interface LinkWalkBounds {
 export function linksWithPaths(
   v: Json,
   bounds: LinkWalkBounds,
-): LinkAtPath[] {
-  const found: LinkAtPath[] = [];
+): LinkWalk {
+  const links: LinkAtPath[] = [];
+  const tooDeep: (readonly string[])[] = [];
   let budget = bounds.maxNodes;
+  let budgetExhausted = false;
   const walk = (held: Json, at: readonly string[]): void => {
-    if (budget <= 0 || at.length > bounds.maxDepth) return;
+    if (budgetExhausted) return;
+    // Budget before depth: once the budget is gone the walk is over, and a
+    // path it declines from there is one it never reached rather than one it
+    // reached and refused, which is not a fact `tooDeep` may carry.
+    if (budget <= 0) {
+      budgetExhausted = true;
+      return;
+    }
+    if (at.length > bounds.maxDepth) {
+      tooDeep.push(at);
+      return;
+    }
     budget -= 1;
     const link = decodedLinkOf(held);
     if (link) {
-      found.push({ link, at });
+      links.push({ link, at });
       return;
     }
     if (Array.isArray(held)) {
@@ -730,7 +778,7 @@ export function linksWithPaths(
     }
   };
   walk(v, []);
-  return found;
+  return { links, tooDeep, budgetExhausted };
 }
 
 /** Collect every link reachable in a value (does not descend into links). */

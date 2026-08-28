@@ -18,7 +18,7 @@ const unbounded = {
 
 describe("linksWithPaths()", () => {
   it("returns the empty path for a link that is the whole value", () => {
-    expect(linksWithPaths(linkTo("of:root"), unbounded)).toEqual([
+    expect(linksWithPaths(linkTo("of:root"), unbounded).links).toEqual([
       { link: { id: "of:root" }, at: [] },
     ]);
   });
@@ -27,7 +27,7 @@ describe("linksWithPaths()", () => {
     const found = linksWithPaths(
       { outer: { inner: linkTo("of:nested") } },
       unbounded,
-    );
+    ).links;
     expect(found.map(({ link, at }) => [link.id, at])).toEqual([
       ["of:nested", ["outer", "inner"]],
     ]);
@@ -37,7 +37,7 @@ describe("linksWithPaths()", () => {
     const found = linksWithPaths(
       { items: ["first", linkTo("of:second"), { deep: linkTo("of:third") }] },
       unbounded,
-    );
+    ).links;
     expect(found.map(({ link, at }) => [link.id, at])).toEqual([
       ["of:second", ["items", "1"]],
       ["of:third", ["items", "2", "deep"]],
@@ -46,7 +46,8 @@ describe("linksWithPaths()", () => {
 
   it("returns a key containing `/` and `~` as a single segment", () => {
     const key = "a/b~c";
-    const found = linksWithPaths({ [key]: linkTo("of:awkward") }, unbounded);
+    const found = linksWithPaths({ [key]: linkTo("of:awkward") }, unbounded)
+      .links;
     expect(found).toEqual([{ link: { id: "of:awkward" }, at: [key] }]);
     // The whole point of segment arrays: joined, this key is indistinguishable
     // from the two-segment path `["a", "b~c"]`.
@@ -58,22 +59,66 @@ describe("linksWithPaths()", () => {
       a: { b: linkTo("of:at-two"), c: { d: linkTo("of:at-three") } },
     };
     const found = linksWithPaths(value, { ...unbounded, maxDepth: 2 });
-    expect(found.map(({ link }) => link.id)).toEqual(["of:at-two"]);
+    expect(found.links.map(({ link }) => link.id)).toEqual(["of:at-two"]);
+  });
+
+  it("reports the path it refused to descend to as too deep", () => {
+    const value = {
+      a: { b: linkTo("of:at-two"), c: { d: linkTo("of:at-three") } },
+    };
+    const found = linksWithPaths(value, { ...unbounded, maxDepth: 2 });
+    // The path of the value it declined to visit, not of the container it
+    // declined from: the container was read, and reported as holding no link.
+    expect(found.tooDeep).toEqual([["a", "c", "d"]]);
+    expect(found.budgetExhausted).toBe(false);
+  });
+
+  it("reports nothing stopped early for a walk that reached every value", () => {
+    const found = linksWithPaths(
+      { a: { b: linkTo("of:reached") } },
+      unbounded,
+    );
+    expect(found.tooDeep).toEqual([]);
+    expect(found.budgetExhausted).toBe(false);
   });
 
   it("stops at `maxNodes`, so a link past the budget is not returned", () => {
     const value = { a: linkTo("of:first"), b: linkTo("of:second") };
     // The root object is one node, and each of its two children is another.
     expect(
-      linksWithPaths(value, { ...unbounded, maxNodes: 2 }).map((f) =>
+      linksWithPaths(value, { ...unbounded, maxNodes: 2 }).links.map((f) =>
         f.link.id
       ),
     ).toEqual(["of:first"]);
     expect(
-      linksWithPaths(value, { ...unbounded, maxNodes: 3 }).map((f) =>
+      linksWithPaths(value, { ...unbounded, maxNodes: 3 }).links.map((f) =>
         f.link.id
       ),
     ).toEqual(["of:first", "of:second"]);
+  });
+
+  it("reports the budget as exhausted when a link is left past it", () => {
+    const value = { a: linkTo("of:first"), b: linkTo("of:second") };
+    const found = linksWithPaths(value, { ...unbounded, maxNodes: 2 });
+    expect(found.budgetExhausted).toBe(true);
+    // No path for what it missed: the walk stopped before enumerating what
+    // was left, so `b` is not a path it can claim to have declined.
+    expect(found.tooDeep).toEqual([]);
+  });
+
+  it("reports the budget as intact for a walk that spent all of it and finished", () => {
+    const value = { a: linkTo("of:first"), b: linkTo("of:second") };
+    expect(
+      linksWithPaths(value, { ...unbounded, maxNodes: 3 }).budgetExhausted,
+    ).toBe(false);
+  });
+
+  it("reports an exhausted budget rather than a depth stop when both bounds bite", () => {
+    const value = { a: { b: { c: linkTo("of:deep") } } };
+    const found = linksWithPaths(value, { maxDepth: 1, maxNodes: 2 });
+    expect(found.links).toEqual([]);
+    expect(found.budgetExhausted).toBe(true);
+    expect(found.tooDeep).toEqual([]);
   });
 
   it("stops at each link, so a link-shaped value inside a link is not walked", () => {
@@ -81,6 +126,6 @@ describe("linksWithPaths()", () => {
       { "/": { "link@1": { id: "of:outer", schema: linkTo("of:inner") } } },
       unbounded,
     );
-    expect(found.map(({ link }) => link.id)).toEqual(["of:outer"]);
+    expect(found.links.map(({ link }) => link.id)).toEqual(["of:outer"]);
   });
 });

@@ -4,6 +4,8 @@ import { Database } from "@db/sqlite";
 import { jsonFromFabricValue } from "@commonfabric/data-model/codecs";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 
+import type { LinkWalkBounds } from "@commonfabric/state-inspector";
+
 import {
   cellAddressOfRef,
   openSpaceLabelReader,
@@ -73,6 +75,14 @@ const LINKER = entity("linker");
  * either followed or recorded unread at the whole path it sits at.
  */
 const NESTER = entity("nester");
+
+/**
+ * A document holding one link at its surface and one below it. A reader that
+ * descends one level reaches the first and stops short of the second; a
+ * reader with two nodes to spend stops before it has looked at either the
+ * second link or the container holding it.
+ */
+const DEEPER = entity("deeper");
 
 /** One stored link, in the at-rest sigil form the store holds. */
 const link = (id: string, space?: string) => ({
@@ -195,6 +205,12 @@ const documents: Record<string, unknown> = {
       plain: "no link here",
     },
   },
+  [DEEPER]: {
+    value: {
+      shallow: link(COLLIDING),
+      deep: { down: link(COLLIDING) },
+    },
+  },
   [COMMITTED]: {
     value: { attachment: "…" },
     cfc: {
@@ -218,8 +234,20 @@ const documents: Record<string, unknown> = {
   },
 };
 
+/**
+ * Bounds narrower than the ones a run records under, each stopping at a place
+ * {@link DEEPER} reaches: {@link SHALLOW} descends one level, so the link
+ * below that is a path it refuses; {@link SPENT} has two values to spend, so
+ * it runs out with the rest of the document unenumerated.
+ */
+const SHALLOW: LinkWalkBounds = {
+  maxDepth: 1,
+  maxNodes: Number.POSITIVE_INFINITY,
+};
+const SPENT: LinkWalkBounds = { maxDepth: 64, maxNodes: 2 };
+
 /** The documents written as plain JSON rather than through the codec. */
-const PLAIN = new Set([UNLABELLED, LINKER, NESTER]);
+const PLAIN = new Set([UNLABELLED, LINKER, NESTER, DEEPER]);
 
 /**
  * A stored `revision.data` payload. Most documents go in through the codec,
@@ -280,6 +308,42 @@ describe("space-labels", () => {
     didReader.close();
     await Deno.remove(directory, { recursive: true });
   });
+
+  /** Reads the DID-named store under bounds narrower than a run's own. */
+  const withBoundedReader = async (
+    linkWalk: LinkWalkBounds,
+    body: (bounded: SpaceLabelReader) => void,
+  ): Promise<void> => {
+    const bounded = await openSpaceLabelReader("demo-space", {
+      dbPath: didDbPath,
+      linkWalk,
+    });
+    try {
+      body(bounded);
+    } finally {
+      bounded.close();
+    }
+  };
+
+  /** What `body` warned, alongside what it returned. */
+  const collectWarningsOf = async <T>(
+    body: () => Promise<T>,
+  ): Promise<[T, string[]]> => {
+    const warned: string[] = [];
+    const printed = console.warn;
+    console.warn = (...args: unknown[]) => {
+      warned.push(args.map((arg) => String(arg)).join(" "));
+    };
+    try {
+      return [await body(), warned];
+    } finally {
+      console.warn = printed;
+    }
+  };
+
+  const collectWarnings = async (
+    body: () => Promise<unknown>,
+  ): Promise<string[]> => (await collectWarningsOf(body))[1];
 
   describe("cellAddressOfRef()", () => {
     it("returns the entity at the space scope for a bare `of:` id", () => {
@@ -530,6 +594,72 @@ describe("space-labels", () => {
       expect(didReader.read({ id: DECLARED, scope: "space" }).unreadPaths)
         .toBe(undefined);
     });
+
+    it("returns no truncation for a document the walk reached the end of", () => {
+      expect(didReader.read({ id: DEEPER, scope: "space" }).truncation)
+        .toBe(undefined);
+    });
+
+    it("returns the labels of every link of a document both bounds reach", () => {
+      const read = didReader.read({ id: DEEPER, scope: "space" });
+      expect(read.linked.map((cell) => cell.path)).toEqual([
+        ["shallow"],
+        ["deep", "down"],
+      ]);
+    });
+
+    it("returns the path a shallower walk stopped short of as unread", async () => {
+      await withBoundedReader(SHALLOW, (bounded) => {
+        const read = bounded.read({ id: DEEPER, scope: "space" });
+        expect(read.unreadPaths).toEqual([
+          { path: ["deep", "down"], reason: "below-read-depth" },
+        ]);
+        expect(read.truncation).toBe(undefined);
+      });
+    });
+
+    it("returns the labels of the link a shallower walk did reach", async () => {
+      await withBoundedReader(SHALLOW, (bounded) => {
+        const read = bounded.read({ id: DEEPER, scope: "space" });
+        expect(read.linked).toEqual([{ path: ["shallow"], id: COLLIDING }]);
+        expect(read.entries.map((entry) => entry.path)).toEqual([["shallow"]]);
+      });
+    });
+
+    it("returns the whole document truncated when the walk runs out of nodes", async () => {
+      await collectWarnings(() =>
+        withBoundedReader(SPENT, (bounded) => {
+          const read = bounded.read({ id: DEEPER, scope: "space" });
+          expect(read.truncation).toBe("node-budget-exhausted");
+          // No path for what it missed: it stopped before enumerating what
+          // it had left, so the statement is about the document as a whole.
+          expect(read.unreadPaths).toBe(undefined);
+          expect(read.entries.map((entry) => entry.path)).toEqual([
+            ["shallow"],
+          ]);
+        })
+      );
+    });
+
+    it("warns naming the document when the walk runs out of nodes", async () => {
+      const warnings = await collectWarnings(() =>
+        withBoundedReader(SPENT, (bounded) => {
+          bounded.read({ id: DEEPER, scope: "space" });
+        })
+      );
+      expect(warnings.length).toBe(1);
+      expect(warnings[0]).toContain(DEEPER);
+      expect(warnings[0]).toContain(didDbPath);
+    });
+
+    it("warns for no document the walk reached the end of", async () => {
+      const warnings = await collectWarnings(() =>
+        withBoundedReader(SHALLOW, (bounded) => {
+          bounded.read({ id: DEEPER, scope: "space" });
+        })
+      );
+      expect(warnings).toEqual([]);
+    });
   });
 
   describe("readSpaceCellLabels()", () => {
@@ -643,6 +773,40 @@ describe("space-labels", () => {
     it("records no unread path for a cell whose links were all followed", async () => {
       const snapshot = await readAgainstDid([`/${DECLARED}`]);
       expect(snapshot.cells[0].unreadPaths).toBe(undefined);
+    });
+
+    it("records the path of a link below the depth the read descends to", async () => {
+      const snapshot = await readSpaceCellLabels({
+        space: "demo-space",
+        dbPath: didDbPath,
+        linkWalk: SHALLOW,
+        refs: [`/${DEEPER}`],
+        generatedAt: "2026-01-01T00:00:00.000Z",
+      });
+      expect(snapshot.cells[0].unreadPaths).toEqual([
+        { path: ["deep", "down"], reason: "below-read-depth" },
+      ]);
+      expect(snapshot.cells[0].truncationReason).toBe(undefined);
+    });
+
+    it("records the cell as truncated when the read runs out of nodes", async () => {
+      const [snapshot, warnings] = await collectWarningsOf(() =>
+        readSpaceCellLabels({
+          space: "demo-space",
+          dbPath: didDbPath,
+          linkWalk: SPENT,
+          refs: [`/${DEEPER}`],
+          generatedAt: "2026-01-01T00:00:00.000Z",
+        })
+      );
+      expect(snapshot.cells[0].truncationReason).toBe("node-budget-exhausted");
+      expect(snapshot.cells[0].unreadPaths).toBe(undefined);
+      expect(warnings.length).toBe(1);
+    });
+
+    it("records no truncation for a cell the read reached the end of", async () => {
+      const snapshot = await readAgainstDid([`/${DEEPER}`]);
+      expect(snapshot.cells[0].truncationReason).toBe(undefined);
     });
 
     it("returns an unavailable snapshot naming the space when no database is found", async () => {

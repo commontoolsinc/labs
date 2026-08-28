@@ -14,7 +14,9 @@
  *   taken is a cell the space holds no label for. The same cell under a run
  *   whose space could not be read is a cell nobody asked about. It holds per
  *   path as well as per run: a link the snapshot could not follow leaves the
- *   path it sat at unread, and every cell at or under that path with it.
+ *   path it sat at unread, and every cell at or under that path with it. A
+ *   cell whose read ran out partway states less again — that its labels are
+ *   some of what the space holds, without naming which paths it missed.
  * - **Derived against carried.** A value's label may be the join of the
  *   fields it was built from, so a plain input reached through a labelled
  *   object carries a confidentiality atom without having been derived from
@@ -37,6 +39,7 @@ import type {
   HarnessCellLabelEntry,
   HarnessCellLabelRecord,
   HarnessCellLabels,
+  HarnessCellLabelTruncationReason,
   HarnessCfcAtom,
 } from "../src/contracts/cell-labels.ts";
 
@@ -81,14 +84,25 @@ export interface ConsoleCellLabels {
   entries: readonly ConsoleCellLabelEntry[];
 
   /**
-   * The paths beneath this cell that nothing was read for, each a link the
-   * snapshot could not follow, and absent where it followed every one. A
-   * reference landing at or under one of them has no answer here at all —
-   * {@link cellLabelsAt} returns nothing for it — and the cell itself keeps
-   * them so that what is missing from `entries` is on the record rather than
-   * inferred from its absence.
+   * The paths beneath this cell that nothing was read for — a link the
+   * snapshot could not follow, or a path lying deeper than it descends — and
+   * absent where it read every one. A reference landing at or under one of
+   * them has no answer here at all — {@link cellLabelsAt} returns nothing for
+   * it — and the cell itself keeps them so that what is missing from
+   * `entries` is on the record rather than inferred from its absence.
    */
   unreadPaths?: readonly (readonly string[])[];
+
+  /**
+   * Why the snapshot did not finish reading this cell, when it did not. It
+   * says less than `unreadPaths` and about the cell rather than about a path:
+   * the snapshot stopped before enumerating what it had left, so it can name
+   * no path, and everything here is some of what the space holds rather than
+   * all of it. A path with no entry under it is unknown, and a reader that
+   * showed this cell as fully labelled would be reporting the reading it did
+   * not finish as the answer.
+   */
+  truncationReason?: HarnessCellLabelTruncationReason;
 }
 
 /** Why a run shows no labels on any cell, when it shows none. */
@@ -167,6 +181,7 @@ const entryOf = (entry: HarnessCellLabelEntry): ConsoleCellLabelEntry => {
 const labelsOfEntries = (
   entries: readonly ConsoleCellLabelEntry[],
   unreadPaths: readonly (readonly string[])[],
+  truncationReason: HarnessCellLabelTruncationReason | undefined,
 ): ConsoleCellLabels => ({
   confidentiality: dedupe(entries.flatMap((entry) => entry.confidentiality)),
   integrity: dedupe(entries.flatMap((entry) => entry.integrity)),
@@ -178,6 +193,7 @@ const labelsOfEntries = (
   ),
   entries,
   ...(unreadPaths.length > 0 ? { unreadPaths } : {}),
+  ...(truncationReason !== undefined ? { truncationReason } : {}),
 });
 
 /** The paths of one record nothing was read for, as the page compares them. */
@@ -192,7 +208,11 @@ const unreadPathsOf = (
 export const consoleCellLabels = (
   record: HarnessCellLabelRecord,
 ): ConsoleCellLabels =>
-  labelsOfEntries(record.entries.map(entryOf), unreadPathsOf(record));
+  labelsOfEntries(
+    record.entries.map(entryOf),
+    unreadPathsOf(record),
+    record.truncationReason,
+  );
 
 /**
  * The whole snapshot, indexed. A run that wrote no snapshot is `absent`
@@ -368,9 +388,15 @@ const labelViewOfEntry = (entry: HarnessCellLabelEntry): CfcLabelView => ({
  *
  * A reference at or under a path nothing was read for has no answer at all.
  * That is the read-against-unread distinction one level down from the
- * snapshot: a link the walk could not follow leaves its key holding no entry,
- * and an empty label set there would read as a cell the space holds no label
- * for.
+ * snapshot: a link the walk could not follow, or a path it sat too shallow to
+ * reach, leaves its key holding no entry, and an empty label set there would
+ * read as a cell the space holds no label for.
+ *
+ * A cell the walk did not finish carries its {@link
+ * ConsoleCellLabels.truncationReason} down to every path instead. The paths
+ * it missed were never enumerated, so no path can be refused on their
+ * account; what the reader owes such a cell is to show its labels as partial
+ * rather than to show them as all there is.
  */
 const narrow = (
   record: HarnessCellLabelRecord,
@@ -389,6 +415,9 @@ const narrow = (
       entries.push({ ...entryOf(entry), path: [...rebased.path] });
     }
   }
+  // The cell's truncation crosses to every path inside it: the walk that did
+  // not finish did not finish for any of them, and where it stopped is not
+  // something a path can be compared against.
   return labelsOfEntries(
     entries,
     unread.flatMap((each) =>
@@ -396,6 +425,7 @@ const narrow = (
         ? [each.slice(logical.length)]
         : []
     ),
+    record.truncationReason,
   );
 };
 

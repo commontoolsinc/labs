@@ -233,6 +233,45 @@ const nesterSnapshot = snapshot([{
   }],
 }]);
 
+const DEEPER = entity("deeper");
+
+/**
+ * A cell whose value runs deeper than the snapshot descends: the link it
+ * reached is labelled, and the path it stopped at is recorded like any other
+ * path nothing was read for.
+ */
+const deeperSnapshot = snapshot([{
+  entityId: DEEPER,
+  ref: `/${DEEPER}`,
+  schemaHash: SCHEMA_HASH,
+  unreadPaths: [{ path: ["deep", "down"], reason: "below-read-depth" }],
+  entries: [{
+    path: ["shallow"],
+    confidentiality: [atom("linked-secret")],
+    integrity: [],
+    origin: "declared",
+  }],
+}]);
+
+const TRUNCATED = entity("truncated");
+
+/**
+ * A cell the snapshot stopped reading partway through, having spent its node
+ * budget. It names no unread path, because what it missed it never reached.
+ */
+const truncatedSnapshot = snapshot([{
+  entityId: TRUNCATED,
+  ref: `/${TRUNCATED}`,
+  schemaHash: SCHEMA_HASH,
+  truncationReason: "node-budget-exhausted",
+  entries: [{
+    path: ["shallow"],
+    confidentiality: [atom("linked-secret")],
+    integrity: [],
+    origin: "declared",
+  }],
+}]);
+
 const BARELY = entity("barely");
 
 /**
@@ -582,6 +621,72 @@ describe("console/cell-labels", () => {
         const labels = cellLabelsAt(nester, `/${NESTER}/nested`);
         expect(labels?.unreadPaths).toEqual([["theirs"]]);
         expect(labels?.entries.map((entry) => entry.path)).toEqual([["mine"]]);
+      });
+    });
+
+    describe("a path the snapshot sat too shallow to reach", () => {
+      const deeper = consoleCellLabelIndex(deeperSnapshot);
+
+      it("returns `undefined` for a reference at the path the walk stopped short of", () => {
+        expect(cellLabelsAt(deeper, `/${DEEPER}/deep/down`)).toBe(undefined);
+      });
+
+      it("returns `undefined` for a reference beneath the path the walk stopped short of", () => {
+        expect(cellLabelsAt(deeper, `/${DEEPER}/deep/down/summary`)).toBe(
+          undefined,
+        );
+      });
+
+      it("returns the labels of a path the walk reached before it stopped", () => {
+        const labels = cellLabelsAt(deeper, `/${DEEPER}/shallow`);
+        expect(labels?.confidentiality).toEqual(["linked-secret"]);
+        expect(labels?.unreadPaths).toBe(undefined);
+      });
+
+      it("names the path the walk stopped short of on the cell that holds it", () => {
+        const labels = cellLabelsAt(deeper, `/${DEEPER}`);
+        expect(labels?.unreadPaths).toEqual([["deep", "down"]]);
+        expect(labels?.truncationReason).toBe(undefined);
+      });
+    });
+
+    describe("a cell the snapshot did not finish reading", () => {
+      const truncated = consoleCellLabelIndex(truncatedSnapshot);
+
+      it("names why the reading stopped short on the cell", () => {
+        expect(consoleCellLabels(truncatedSnapshot.cells[0]).truncationReason)
+          .toBe("node-budget-exhausted");
+      });
+
+      it("names it on a reference into the cell as well as on the cell", () => {
+        expect(
+          cellLabelsAt(truncated, `/${TRUNCATED}/shallow`)?.truncationReason,
+        )
+          .toBe("node-budget-exhausted");
+      });
+
+      it("returns the labels it did read rather than nothing", () => {
+        expect(
+          cellLabelsAt(truncated, `/${TRUNCATED}/shallow`)?.confidentiality,
+        )
+          .toEqual(["linked-secret"]);
+      });
+
+      it("names no unread path, having never reached what it missed", () => {
+        expect(cellLabelsAt(truncated, `/${TRUNCATED}`)?.unreadPaths).toBe(
+          undefined,
+        );
+      });
+
+      it("counts the cell as read, unlike one nothing was asked about", () => {
+        expect(consoleCellLabelsSummary(truncated).cellsRead).toBe(1);
+      });
+
+      it("names no reason on a cell the snapshot finished reading", () => {
+        expect(
+          cellLabelsAt(consoleCellLabelIndex(readSnapshot), `/${LABELLED}`)
+            ?.truncationReason,
+        ).toBe(undefined);
       });
     });
 
