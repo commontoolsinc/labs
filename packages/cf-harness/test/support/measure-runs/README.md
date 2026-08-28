@@ -5,7 +5,7 @@ extractor is pinned against transcripts whose contents are known rather than
 against whatever a machine happens to be holding under
 `.cf-harness-console/runs`.
 
-`runs/` is an artifact root of five directories:
+`runs/` is an artifact root of six directories:
 
 - `fixture-run/` — the parent run. Its searches cover every answer the extractor
   distinguishes: two hits, none, a refusal from the index, and one call the run
@@ -13,8 +13,11 @@ against whatever a machine happens to be holding under
   named by id, source carrying no `cf:pattern:` import, and source importing two
   of them under three specifiers. The results for those last two calls appear in
   the **opposite order** from the calls, which is what fails a reader that pairs
-  a call to a result by position. It also carries a `skill-registry.json`, which
-  is the only place the skills tree a run scanned is recorded.
+  a call to a result by position. It also makes one `bash` call the sandbox
+  denied and one `read_file` call that ran and failed, so a surface that was
+  withheld is pinned apart from one that answered badly. It also carries a
+  `skill-registry.json`, which is the only place the skills tree a run scanned
+  is recorded.
 - `fixture-run.subagent.1/` — a `delegate_task` child of it.
 - `alias-run/` — source that imports a published pattern and re-exports it
   unchanged. It composes nothing, and counting it as composition is what would

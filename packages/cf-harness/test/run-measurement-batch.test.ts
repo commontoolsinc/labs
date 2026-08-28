@@ -1,4 +1,4 @@
-import { describe, it } from "@std/testing/bdd";
+import { afterEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { fromFileUrl } from "@std/path";
 
@@ -88,7 +88,9 @@ const chatFrame = (
 interface FakeConsoleOptions {
   /**
    * The event streams the server hands out, in the order they are asked for.
-   * The last one is repeated once the list runs out.
+   * Once the list runs out the server hands out an empty, closed stream — a
+   * server with nothing more to say closes, and that is what lets a caller
+   * tell "still working" from "gone".
    */
   streams: readonly {
     frames: readonly string[];
@@ -354,6 +356,16 @@ describe("run-measurement-batch", () => {
           seededPatternIds: ["seed-1", "seed-2"],
         }).seededPatternIds,
       ).toEqual(["seed-1", "seed-2"]);
+    });
+
+    it("throws for superseded pattern identifiers that are not strings", () => {
+      expect(() =>
+        parseMeasurementSuite({
+          label: "l",
+          tasks: [{ id: "a", text: "one" }],
+          supersededPatternIds: [{}],
+        })
+      ).toThrow("supersededPatternIds must be a list of strings");
     });
 
     it("throws for seeded pattern identifiers that are not strings", () => {
@@ -748,6 +760,25 @@ describe("run-measurement-batch", () => {
     it("returns `diverged` for a commit the branch does not contain", async () => {
       expect(await readAncestry("abc", "main", gitRun(true, false)))
         .toEqual({ kind: "diverged", base: "main" });
+    });
+
+    it("returns `unchecked` when git fails to answer, rather than reporting the commit as off the branch", async () => {
+      // `merge-base --is-ancestor` exits 1 for "not an ancestor" and other
+      // codes for failing to answer at all — an unknown base, a broken repo.
+      const reading = await readAncestry(
+        "abc",
+        "main",
+        (args) =>
+          Promise.resolve(
+            args[0] === "cat-file"
+              ? { success: true, code: 0 }
+              : { success: false, code: 128 },
+          ),
+      );
+      expect(reading.kind).toBe("unchecked");
+      expect(reading.kind === "unchecked" ? reading.reason : "").toContain(
+        "exited 128",
+      );
     });
 
     it("returns `unchecked` for a commit this clone does not hold, which is not the same as one off the branch", async () => {
@@ -1254,7 +1285,7 @@ describe("run-measurement-batch", () => {
           await console_.close();
         }
       } finally {
-        await Deno.remove(dir, { recursive: true });
+        // the directory is removed by this block's afterEach
       }
     });
 
@@ -1287,7 +1318,7 @@ describe("run-measurement-batch", () => {
           await console_.close();
         }
       } finally {
-        await Deno.remove(dir, { recursive: true });
+        // the directory is removed by this block's afterEach
       }
     });
 
@@ -1322,7 +1353,7 @@ describe("run-measurement-batch", () => {
           await console_.close();
         }
       } finally {
-        await Deno.remove(dir, { recursive: true });
+        // the directory is removed by this block's afterEach
       }
     });
 
@@ -1349,6 +1380,14 @@ describe("run-measurement-batch", () => {
   });
 
   describe("main()", () => {
+    const temporaryDirectories: string[] = [];
+
+    afterEach(async () => {
+      for (const dir of temporaryDirectories.splice(0)) {
+        await Deno.remove(dir, { recursive: true }).catch(() => {});
+      }
+    });
+
     /**
      * Runs the command against a stand-in console, in a temporary directory
      * holding the suite it is given and receiving the report it writes.
@@ -1362,6 +1401,11 @@ describe("run-measurement-batch", () => {
     ): Promise<{ code: number; logs: string[]; dir: string }> => {
       const console_ = startFakeConsole(options);
       const dir = await Deno.makeTempDir();
+      // Registered before anything can throw, so the directory is removed
+      // however this call ends. A caller's own `finally` cannot do that: if
+      // `await runMain(...)` rejects, the destructuring throws and the
+      // caller's cleanup never runs at all.
+      temporaryDirectories.push(dir);
       try {
         const suitePath = `${dir}/suite.json`;
         await Deno.writeTextFile(suitePath, JSON.stringify(suite));
@@ -1405,7 +1449,7 @@ describe("run-measurement-batch", () => {
           true,
         );
       } finally {
-        await Deno.remove(dir, { recursive: true });
+        // the directory is removed by this block's afterEach
       }
     });
 
@@ -1413,13 +1457,16 @@ describe("run-measurement-batch", () => {
       const { code, dir, logs } = await runMain({
         streams: [completedStream()],
         indexAnswer: { status: 403, body: { error: "DID is not allowlisted" } },
-      }, ONE_TASK);
+      }, { ...ONE_TASK, supersededPatternIds: ["stale-one"] });
       try {
         expect(code).toBe(3);
         const report = await Deno.readTextFile(`${dir}/out/report.md`);
         expect(report).toContain(
-          "**The index did not answer, and the batch refused to start.**",
+          "**The batch refused to start, so no task ran.**",
         );
+        // Declared and never asked about, rather than dropped: a refusal must
+        // not report a suite that named superseded seeds as one that did not.
+        expect(report).toContain("could not be read");
         expect(report).toContain("Nothing below ran.");
         expect(
           logs.some((line) => line.includes("the index did not answer")),
@@ -1429,7 +1476,7 @@ describe("run-measurement-batch", () => {
         );
         expect(json.results).toHaveLength(0);
       } finally {
-        await Deno.remove(dir, { recursive: true });
+        // the directory is removed by this block's afterEach
       }
     });
 
@@ -1455,7 +1502,7 @@ describe("run-measurement-batch", () => {
           "the commit pre-flight refused first, so the index was not asked",
         );
       } finally {
-        await Deno.remove(dir, { recursive: true });
+        // the directory is removed by this block's afterEach
       }
     });
 
@@ -1471,7 +1518,7 @@ describe("run-measurement-batch", () => {
           "**unwitnessed**",
         );
       } finally {
-        await Deno.remove(dir, { recursive: true });
+        // the directory is removed by this block's afterEach
       }
     });
 
@@ -1498,7 +1545,7 @@ describe("run-measurement-batch", () => {
           "Of 2 superseded seeds, 1 were still offered in search when this batch started, 1 were withheld, and 0 could not be read.",
         );
       } finally {
-        await Deno.remove(dir, { recursive: true });
+        // the directory is removed by this block's afterEach
       }
     });
 
@@ -1551,7 +1598,7 @@ describe("run-measurement-batch", () => {
         );
         expect(report).toContain("Hops beyond the first are not resolved.");
       } finally {
-        await Deno.remove(dir, { recursive: true });
+        // the directory is removed by this block's afterEach
       }
     });
   });
@@ -1649,6 +1696,46 @@ describe("run-measurement-batch", () => {
         expect(report).toContain(
           "`pub-rating` **(seeded)**, `pub-reading-shelf` (pre-existing)",
         );
+      } finally {
+        await console_.close();
+      }
+    });
+
+    it("marks origins for a suite that named only superseded seeds", async () => {
+      const console_ = startFakeConsole({
+        streams: [completedStream()],
+        runId: "fixture-run",
+        artifactRoot: FIXTURE_ROOT,
+      });
+      try {
+        const client = await ConsoleClient.open(console_.url);
+        const result = await runTask(
+          client,
+          { id: "books", text: "Track the books I am reading." },
+          () => {},
+        );
+        const report = renderBatchReport({
+          suite: {
+            label: "l",
+            tasks: [result.task],
+            supersededPatternIds: ["pub-rating"],
+          },
+          consoleUrl: console_.url,
+          indexUrl: null,
+          startedAt: "2026-08-28T21:00:00.000Z",
+          endedAt: "2026-08-28T21:00:01.000Z",
+          preflight: { kind: "answered", results: 1 },
+          posture: POSTURE,
+          importedPatternOrigins: {
+            "pub-rating": { kind: "seeded-superseded" },
+            "pub-reading-shelf": { kind: "pre-existing" },
+          },
+          indexBefore: { kind: "read", patterns: [] as never },
+          indexAfter: { kind: "read", patterns: [] as never },
+          results: [result],
+        });
+        expect(report).toContain("**(seeded, superseded duplicate");
+        expect(report).not.toContain("The suite named no seeded patterns");
       } finally {
         await console_.close();
       }
@@ -1838,7 +1925,7 @@ describe("run-measurement-batch", () => {
         results: [],
       });
       expect(report).toContain(
-        "**The index did not answer, and the batch refused to start.**",
+        "**The batch refused to start, so no task ran.**",
       );
       expect(report).toContain("403: DID is not allowlisted");
       expect(report).toContain("Nothing below ran.");

@@ -7,11 +7,14 @@
  * a session discovering it — and running them in sequence is what makes an
  * index change attributable to the task that caused it.
  *
- * Nothing here waits on a clock. Each task's completion is the console's own
- * `turn_completed`, `turn_failed` or `turn_canceled` event, read off the
- * server-sent event stream; a turn that never ends is a batch that never ends,
- * which is a hang an operator can see and cancel rather than a bound that
- * turns a slow run into a failed one.
+ * Nothing here waits on a clock. A completed or failed turn settles on the
+ * console's own `turn_completed` or `turn_failed` event, read off the
+ * server-sent event stream. A canceled turn does not: the service emits
+ * `turn_canceled` while the prompt loop is still unwinding, so the batch holds
+ * that outcome and settles it on the session's own `status_changed` back to
+ * idle, once the run's artifacts are on disk. A turn that never ends is a
+ * batch that never ends, which is a hang an operator can see and cancel rather
+ * than a bound that turns a slow run into a failed one.
  *
  * [The measurement protocol](../docs/pattern-index-measurement.md) is what
  * says which tasks belong in a suite and how they must be worded. Read it
@@ -144,14 +147,18 @@ export const parseMeasurementSuite = (input: unknown): MeasurementSuite => {
   if (!Array.isArray(tasks) || tasks.length === 0) {
     throw new Error("a task suite must carry at least one task");
   }
-  if (
-    seededPatternIds !== undefined &&
-    (!Array.isArray(seededPatternIds) ||
-      seededPatternIds.some((id) => typeof id !== "string"))
+  for (
+    const [field, value] of [
+      ["seededPatternIds", seededPatternIds],
+      ["supersededPatternIds", supersededPatternIds],
+    ] as const
   ) {
-    throw new Error(
-      "a task suite's seededPatternIds must be a list of strings",
-    );
+    if (
+      value !== undefined &&
+      (!Array.isArray(value) || value.some((id) => typeof id !== "string"))
+    ) {
+      throw new Error(`a task suite's ${field} must be a list of strings`);
+    }
   }
   const seen = new Set<string>();
   const parsed = tasks.map((task, index) => {
@@ -368,9 +375,16 @@ export const readAncestry = async (
       };
     }
     const ancestor = await run(["merge-base", "--is-ancestor", gitSha, base]);
-    return ancestor.success
-      ? { kind: "ancestor", base }
-      : { kind: "diverged", base };
+    if (ancestor.success) return { kind: "ancestor", base };
+    // Exit 1 is the answer "not an ancestor". Any other nonzero code is git
+    // failing to answer at all — an unknown base, a broken repository — and
+    // reporting that as `diverged` would assert something about the server's
+    // commit that nothing established.
+    return ancestor.code === 1 ? { kind: "diverged", base } : {
+      kind: "unchecked",
+      reason:
+        `git could not compare ${gitSha} with ${base}: it exited ${ancestor.code}`,
+    };
   } catch (error) {
     // A git that cannot be run at all is an unchecked reading, not a batch
     // that stops: whether the server's commit is on the branch is context for
@@ -1298,11 +1312,15 @@ const renderConfiguration = (
 };
 
 /**
- * The skills tree the runs scanned, read from their own registries.
+ * The skills tree the runs scanned, read from each run's own
+ * `skill-registry.json` — the only place it is recorded, since the console
+ * exposes the root over no route.
  *
  * A run that scanned none says so here rather than leaving the line blank: it
  * authored without the authoring guides, which changes what the runs did for a
- * reason that has nothing to do with the index.
+ * reason that has nothing to do with the index. The reading covers the whole
+ * run family, because a parent that scanned a root while its children did not
+ * is the case that matters and a parent-only reading calls it healthy.
  */
 const skillsRoot = (results: readonly TaskResult[]): string => {
   const roots = new Set(
@@ -1405,7 +1423,7 @@ const renderSupersededVisibility = (
 /** What the index answered the pre-flight search with. */
 const renderPreflight = (preflight: IndexPreflight): string =>
   preflight.kind === "refused"
-    ? `**The index did not answer, and the batch refused to start.** ${preflight.reason}\n\nNothing below ran. An index that refuses a query answers a run exactly as an empty index does, so a batch started into one produces evidence for a discovery problem that is an authorization problem.\n`
+    ? `**The batch refused to start, so no task ran.** ${preflight.reason}\n\nNothing below ran. An index that refuses a query answers a run exactly as an empty index does, so a batch started into one produces evidence for a discovery problem that is an authorization problem.\n`
     : `The index answered a search before the first task: ${preflight.results} results${
       preflight.candidates === undefined
         ? ""
@@ -1426,10 +1444,14 @@ const renderComposition = (
   results: readonly TaskResult[],
   seeded: readonly string[] = [],
   origins: Readonly<Record<string, ImportedPatternOrigin>> = {},
+  superseded: readonly string[] = [],
 ): readonly string[] => {
   const isSeeded = new Set(seeded);
+  // A suite may declare only superseded seeds, and the marks still mean
+  // something: an identifier is then pre-existing or a superseded duplicate.
+  const marksSuperseded = superseded.length > 0;
   const mark = (id: string): string => {
-    if (isSeeded.size === 0) return `\`${id}\``;
+    if (isSeeded.size === 0 && !marksSuperseded) return `\`${id}\``;
     const origin = origins[id] ?? {
       kind: "unresolved" as const,
       reason: "this batch resolved no origin for it",
@@ -1481,7 +1503,7 @@ const renderComposition = (
     "",
     `That is ${composed.length} of ${results.length} tasks. Several compositions in one task are one task, not several — read the list, not the total.`,
   );
-  if (isSeeded.size === 0) {
+  if (isSeeded.size === 0 && !marksSuperseded) {
     lines.push(
       "",
       "The suite named no seeded patterns, so nothing here separates composing a seeded atom from composing an entry an earlier run left behind.",
@@ -1545,6 +1567,7 @@ export const renderBatchReport = (batch: BatchResult): string => {
       batch.results,
       batch.suite.seededPatternIds,
       batch.importedPatternOrigins,
+      batch.suite.supersededPatternIds,
     ),
     "## The index, before and after",
     "",
@@ -1655,7 +1678,12 @@ export const main = async (
   // Taken before the tasks run: whether the superseded copies were findable is
   // a fact about the corpus this batch measured, and it changes underneath.
   const supersededVisibility = preflight.kind === "refused"
-    ? {}
+    // Declared but never asked about: recorded as unread rather than dropped,
+    // which would report a suite that named superseded seeds as one that did
+    // not.
+    ? Object.fromEntries(
+      (suite.supersededPatternIds ?? []).map((id) => [id, undefined]),
+    )
     : await readSupersededVisibility(client, suite.supersededPatternIds ?? []);
   const results: TaskResult[] = [];
   if (preflight.kind === "refused") {

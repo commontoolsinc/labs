@@ -154,12 +154,22 @@ const DENIED_RESULT_TYPES: ReadonlySet<string> = new Set([
   "cf-harness.tool-denied",
 ]);
 
+/**
+ * The result the harness synthesizes for a call it recorded and never got an
+ * answer for. It carries a `reason` and no `status`, which is the shape of a
+ * denial, so it is recognized by type before that heuristic runs — otherwise
+ * an interrupted run reports its tools as withheld, which is a claim about
+ * what was allowed rather than about what was interrupted.
+ */
+const UNKNOWN_OUTCOME_RESULT_TYPE = "cf-harness.tool-outcome-unknown";
+
 /** How one recorded tool result reads. */
 export const toolOutcomeOf = (
   output: TranscriptJson<Record<string, unknown>>,
 ): ToolOutcome => {
   if (output.kind === "unread") return "unread";
   const value = output.value;
+  if (value.type === UNKNOWN_OUTCOME_RESULT_TYPE) return "unread";
   if (
     typeof value.type === "string" && DENIED_RESULT_TYPES.has(value.type)
   ) {
@@ -483,6 +493,8 @@ export const totalsOf = (run: RunMeasurement): MeasurementTotals => {
 const BLOCK_COMMENT = /\/\*[\s\S]*?\*\//g;
 const LINE_COMMENT = /(^|[^:])\/\/[^\n]*/g;
 const IMPORT_STATEMENT = /\bimport\s+[\s\S]*?\s+from\s*(['"])([^'"]+)\1\s*;?/g;
+/** `import "cf:pattern:…"`, which binds nothing and so carries no `from`. */
+const BARE_IMPORT_STATEMENT = /\bimport\s*(['"])([^'"]+)\1\s*;?/g;
 const EXPORT_FROM_STATEMENT =
   /\bexport\s+(?:\*|\{[\s\S]*?\})\s+from\s*(['"])([^'"]+)\1\s*;?/g;
 const DEFAULT_IMPORT =
@@ -545,6 +557,9 @@ export const importedPatternIdsOf = (
   const stripped = stripComments(sourceText);
   const specifiers = [
     ...[...stripped.matchAll(IMPORT_STATEMENT)].map(([, , specifier]) =>
+      specifier
+    ),
+    ...[...stripped.matchAll(BARE_IMPORT_STATEMENT)].map(([, , specifier]) =>
       specifier
     ),
     ...[...stripped.matchAll(EXPORT_FROM_STATEMENT)].map(([, , specifier]) =>

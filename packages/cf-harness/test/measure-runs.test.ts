@@ -64,6 +64,11 @@ describe("measure-runs", () => {
       ).toEqual(["alpha", "beta"]);
     });
 
+    it("returns the specifier of a bare import, which binds nothing and has no `from`", () => {
+      expect(importedPatternIdsOf('import "cf:pattern:sideEffect";'))
+        .toEqual(["sideEffect"]);
+    });
+
     it("returns an empty list for source importing no published pattern", () => {
       expect(importedPatternIdsOf('import { cell } from "commontools";'))
         .toEqual([]);
@@ -402,6 +407,20 @@ describe("measure-runs", () => {
 
     it("returns `ok` for a result that reported neither a status nor a failure", () => {
       expect(toolOutcomeOf({ kind: "read", value: {} })).toBe("ok");
+    });
+
+    it("returns `unread` for the result the harness synthesizes when a run was interrupted", () => {
+      // It carries a `reason` and no `status`, which is the shape of a denial.
+      // Counted as denied it would report the surface WITHHELD — a claim about
+      // what was allowed, from evidence about what was interrupted.
+      expect(toolOutcomeOf({
+        kind: "read",
+        value: {
+          type: "cf-harness.tool-outcome-unknown",
+          outcome: "unknown",
+          reason: "process_interrupted",
+        },
+      })).toBe("unread");
     });
 
     it("returns `unread` for a call the run recorded no result for", () => {
