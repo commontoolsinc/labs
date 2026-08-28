@@ -1058,6 +1058,75 @@ describe("stage D seal-into-wave", () => {
     }
   });
 
+  it("commits contributions that do not target a failed foreign space", async () => {
+    const foreignSigner = await Identity.fromPassphrase(
+      "wave unresolved foreign space",
+    );
+    const foreign = foreignSigner.did() as MemorySpace;
+    const wave = newWave({ lease: liveLease() });
+    runtime.installSealDestination(wave);
+
+    const failedHome = runtime.getCell<{ value: number }>(
+      space,
+      "failed-foreign-home",
+      undefined,
+    );
+    const failedForeign = runtime.getCell<{ value: number }>(
+      foreign,
+      "failed-foreign-target",
+      undefined,
+    );
+    const failedTx = runtime.edit();
+    stampWaveRunContext(failedTx, {
+      actionId: "failed-foreign-event",
+      kind: "event-handler",
+      eventId: "e-failed-foreign",
+      acting: { user: "did:key:alice", session: "sess-1" },
+      capabilityRef: "cap:test-grant",
+    });
+    failedTx.enableMultiSpaceWrites?.([space, foreign]);
+    failedHome.withTx(failedTx).set({ value: 1 });
+    failedForeign.withTx(failedTx).set({ value: 2 });
+    expect((await failedTx.commit()).error).toBeUndefined();
+
+    const survivingHome = runtime.getCell<{ value: number }>(
+      space,
+      "failed-foreign-survivor",
+      undefined,
+    );
+    const survivingTx = runtime.edit();
+    stampWaveRunContext(survivingTx, {
+      actionId: "unrelated-home-derivation",
+      kind: "derivation",
+    });
+    survivingHome.withTx(survivingTx).set({ value: 3 });
+    expect((await survivingTx.commit()).error).toBeUndefined();
+
+    wave.failForeignSpace(foreign, "injected engine lookup failure");
+    runtime.clearSealDestination();
+    const outcome = await wave.commitWave(newSink());
+    await wave.settled();
+
+    expect(outcome.aborted).toBeUndefined();
+    expect(outcome.requeuedEventIds).toEqual(["e-failed-foreign"]);
+    expect(outcome.dispositions).toEqual([
+      { kind: "requeued" },
+      { kind: "committed" },
+    ]);
+    expect(
+      Engine.selectDocHead(engine, {
+        id: failedHome.getAsNormalizedFullLink().id,
+        scopeKey: "space",
+      }),
+    ).toBe(0);
+    expect(
+      Engine.selectDocHead(engine, {
+        id: survivingHome.getAsNormalizedFullLink().id,
+        scopeKey: "space",
+      }),
+    ).toBeGreaterThan(0);
+  });
+
   it("refuses a foreign-space write at ACCUMULATION on the default posture: the action fails loudly and counted, the wave survives (serving-loop.md §3d, RULED 2026-08-14 (c))", async () => {
     // The lunch-wall trigger, at its ruled seat: a serving runtime's
     // wish materialization resolves against the RUNTIME's home space —
