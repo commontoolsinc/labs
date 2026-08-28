@@ -84,6 +84,7 @@ import {
   navigateEventContextOf,
   setNavigateEventContext,
 } from "./builtins/navigate-context.ts";
+import { opInputsDocKey } from "./builtins/op-pattern-ref.ts";
 import { waveRunContextOf, waveSettlementOf } from "./executor/wave.ts";
 import {
   causalFormOfBinding,
@@ -131,6 +132,7 @@ import {
   getPatternSourcePath,
   isTrustedBuilderArtifact,
   resolveOriginal,
+  resolveProducerEntryRef,
 } from "./builder/pattern-metadata.ts";
 import {
   resolveBuiltinImplementationIdentity,
@@ -1431,12 +1433,19 @@ interface SetupStateReuse {
  */
 type StoredSetupMarker = "matches" | "other" | "absent";
 
+// `sessionRef` is a KEYLESS piece's session-side stand-in for the durable
+// completion marker (see `Runner.sessionPatternPointers`): the never-durable
+// contract skips the `patternSetupIdentity` stamp for a keyless piece, and
+// without a marker every re-setup of a re-derived sub-piece (a lift
+// returning a pattern) would read "absent" and restage its own running
+// setup.
 function storedSetupMarker(
   resultCell: Cell<unknown>,
   entryRef: { identity: string; symbol: string } | undefined,
+  sessionRef?: { identity: string; symbol: string },
 ): StoredSetupMarker {
   if (entryRef === undefined) return "absent";
-  const stagedRef = getPatternSetupIdentityRef(resultCell);
+  const stagedRef = getPatternSetupIdentityRef(resultCell) ?? sessionRef;
   if (stagedRef === undefined) return "absent";
   return patternIdentityKey(stagedRef) === patternIdentityKey(entryRef)
     ? "matches"
@@ -1508,6 +1517,82 @@ export class Runner {
   // directly ends it.
   private independentlyStartedResults = new Set<
     `${MemorySpace}/${ScopeKey}/${URI}`
+  >();
+  // Tombstones for `sessionPatternPointers` entries dropped by CAPACITY
+  // EVICTION — never by the sanctioned removals (a real pattern's durable
+  // stamps superseding the pointer; a failed staging's cleanup). Each
+  // records the POINTER the eviction dropped, and the zero-evidence
+  // restage exemption in `setupInternal` consults it: an evicted pointer
+  // is "evidence unknown", not "no evidence". A re-setup with a DIFFERENT
+  // identity takes the conservative restage the un-evicted state would
+  // have taken — without the tombstone, eviction silently skipped that
+  // revalidation. A re-setup with the SAME identity is evidence AGREEING
+  // with the stored setup (the mint is a stable content hash of the
+  // pattern structure), so it keeps the exemption's protective verdict:
+  // forcing a restage there would strictly validate a stored argument the
+  // original staging never validated — the cf-get replay breakage the
+  // exemption exists to prevent, manufactured in-session past 4096
+  // setups. Entries are never individually removed (the doubt they record
+  // stays true for every state that consults them); bounded like the
+  // pointer map itself, so a doubly-blown bound degrades honestly to the
+  // designed zero-evidence verdict.
+  private evictedSessionPatternPointers = new BoundedKeyMap<
+    `${MemorySpace}/${ScopeKey}/${URI}`,
+    { identity: string; symbol: string }
+  >(RESULT_SHORTCUT_LIMIT);
+  // SESSION-side pattern pointers for KEYLESS pieces. A hand-built pattern's
+  // setup no longer stamps its session-synthetic `keyless:` ref durably
+  // (never-durable contract; L3(a), RULED 2026-08-27), but the in-session
+  // flows that used to read those stamps are sanctioned and keep working
+  // through this map instead: a separate `start(resultCell)` after setup,
+  // `setup`/`run` without a pattern, restart after `stop()`, and the
+  // setup-reuse marker (`storedSetupMarker`) that lets a re-derived
+  // sub-piece (a lift returning a pattern) reuse its running setup rather
+  // than restage it. Written at the same moment the durable stamps would
+  // have been (end of `applySetupState`), erased when a real pattern's
+  // stamps supersede it or the staging transaction fails, and it dies with
+  // the session — which is the contract's whole point. Bounded like the
+  // shortcut maps beside it. Eviction costs the designed no-pattern-meta
+  // verdict (the piece's producer re-derives it), a restage, or a loud
+  // moved/not-current abort — with one guarded corner: absence alone would
+  // read as the fresh-session ZERO-EVIDENCE state and skip the restage
+  // validation, so evictions leave a tombstone (above) and the exemption
+  // treats "evicted" as evidence-unknown → restage.
+  private sessionPatternPointers = new BoundedKeyMap<
+    `${MemorySpace}/${ScopeKey}/${URI}`,
+    { identity: string; symbol: string }
+  >(RESULT_SHORTCUT_LIMIT, {
+    onEvict: (key, pointer) =>
+      this.evictedSessionPatternPointers.set(key, pointer),
+  });
+
+  /**
+   * The SESSION-side pattern pointer for a keyless piece this runner set up,
+   * or undefined. The piece layer's read-through: a keyless piece carries no
+   * durable `patternIdentity` (the never-durable contract), so consumers
+   * that used to read the durable meta (`PiecesController.syncPattern`)
+   * consult this before concluding the piece has no pattern. Session-scoped
+   * by construction — a fresh runtime correctly finds nothing.
+   */
+  sessionPatternPointerFor(
+    resultCell: Cell<unknown>,
+  ): { identity: string; symbol: string } | undefined {
+    return this.sessionPatternPointers.get(this.getDocKey(resultCell));
+  }
+  // SESSION-side pattern-swap channel for RUNNING pieces, the third stamp
+  // stand-in: a re-derived child (a lift returning a pattern) used to reach
+  // its running piece's swap machinery THROUGH the durable stamp — setup
+  // wrote the new `patternIdentity`, the piece's meta watcher fired, and
+  // swapToPattern cancelled the old graph and instantiated the new one.
+  // With keyless stamps gone (L3(a)), a run() over an already-registered
+  // piece requests the swap here instead, handing the LIVE pattern value
+  // straight to the watcher's own swap closure (same guards, same
+  // fail-closed setup). Real patterns keep the durable-stamp path
+  // unchanged. Registered by setupPatternWatcher, removed with the
+  // piece's cancel group.
+  private sessionPatternSwaps = new Map<
+    `${MemorySpace}/${ScopeKey}/${URI}`,
+    (pattern: Pattern, ref: { identity: string; symbol: string }) => void
   >();
   // Commit-gated starts that have not installed a registration yet, indexed by
   // result so an explicit stop can tombstone them before installation.
@@ -1743,11 +1828,14 @@ export class Runner {
   }
 
   /**
-   * The pattern pointer to record for `pattern`: its real content-addressed
-   * entry ref when it has one (a compiled pattern), else a stable
-   * session-synthetic ref minted for the keyless pattern object (so a separate
-   * start() / setup-without-pattern can resolve it in-session). See
-   * `syntheticPatternIdentity`.
+   * The pattern pointer for `pattern`: its real content-addressed entry ref
+   * when it has one (a compiled pattern), else a stable session-synthetic
+   * `keyless:` ref minted for the hand-built pattern object. The keyless ref
+   * is INDEX-only — it resolves through `artifactFromIdentitySync` for any
+   * in-session holder of the ref, but it is never recorded durably
+   * (`applySetupState` skips the stamp for it; L3(a), RULED 2026-08-27), so
+   * a keyless piece carries no pattern pointer and cannot be started by
+   * identity: its producer re-derives and re-runs it instead.
    */
   private entryRefForPattern(
     pattern: Pattern,
@@ -2298,31 +2386,45 @@ export class Runner {
     }
 
     // Record the content-addressed {identity, symbol} reference — the ONLY
-    // pattern pointer — when the pattern's entry identity is known (every
-    // space-compiled pattern post-E4). On reload this loads the pattern straight
-    // from the compiled cache by identity (or, on a version bump, recompiles
-    // from the source-doc closure). A KEYLESS hand-built pattern has no entry
-    // ref and so gets no durable pointer: it is session-only (run()-only), the
-    // sanctioned "keyless → session-only" behavior. The ref carries the
-    // authoritative export symbol (recorded at compile/load time); we never
-    // recompute it from `pattern`'s program here, since a source-free reloaded
-    // pattern only has a stub program (mainExport "default"), which would
-    // clobber a non-"default" export name.
-    if (entryRef) {
+    // pattern pointer — when the pattern's entry identity is a REAL one
+    // (every space-compiled pattern post-E4). On reload this loads the
+    // pattern straight from the compiled cache by identity (or, on a version
+    // bump, recompiles from the source-doc closure). A KEYLESS hand-built
+    // pattern gets NO durable pointer: `entryRefForPattern` mints a
+    // `keyless:<hash>` session pointer for it, but that identity is
+    // session-only by construction and must never land in durable state
+    // (pattern-manager's contract; L3(a), RULED 2026-08-27 — the serving
+    // runtime's stamp here was the durable keyless writer the 2026-08-27
+    // diagnosis rooted the r06/r09 poisoned-pointer collateral in). Readers
+    // of such a piece get the designed no-pattern-meta verdict; recovery is
+    // the producer's (re-run the producing lift), never a load. The ref
+    // carries the authoritative export symbol (recorded at compile/load
+    // time); we never recompute it from `pattern`'s program here, since a
+    // source-free reloaded pattern only has a stub program (mainExport
+    // "default"), which would clobber a non-"default" export name.
+    const durableEntryRef =
+      entryRef && !PatternManager.isKeylessPatternIdentity(entryRef.identity)
+        ? entryRef
+        : undefined;
+    if (durableEntryRef) {
       resultCell.withTx(tx).setMetaRaw("patternIdentity", {
-        identity: entryRef.identity,
-        symbol: entryRef.symbol,
+        identity: durableEntryRef.identity,
+        symbol: durableEntryRef.symbol,
       });
-      // Same condition as the durable stamp, deliberately: an observer that
-      // saw instantiations the store does not label would report update
-      // targets that cannot be found again, and one that missed a labeled
-      // root would under-report. That includes the KEYLESS case —
-      // `entryRefForPattern` always yields a ref, minting a `keyless:<hash>`
-      // session pointer when there is no content-addressed one, and that
-      // pointer is stamped durably like any other. So keyless roots are
-      // reported here; whether one is an UPGRADE target is a separate judgment
-      // its consumer makes (a `keyless:` identity can never equal a content
-      // identity, so it is not one).
+    }
+    // The instantiation observer is a session-side reporting channel, not a
+    // durable write, so it deliberately does NOT share the durable stamp's
+    // keyless gate: it reports the SESSION pointer, `keyless:` included.
+    // Reporting the session-synthetic identity is exactly how a harness's
+    // stranded-piece guard (cf-harness `run_pattern` via `keylessSince`)
+    // learns that the piece it just materialized is session-bound — under
+    // the never-durable contract such a piece gets the no-pattern-meta
+    // verdict instead of a durable pointer, but it is exactly as unopenable
+    // by any other runtime, and suppressing the report would make that
+    // guard fail open. No consumer uses the reported identity as a load or
+    // update key; the recorders match on the cell hash and treat the
+    // identity as evidence.
+    if (entryRef) {
       this.runtime.onPatternInstantiated?.({
         identity: entryRef.identity,
         symbol: entryRef.symbol,
@@ -2342,10 +2444,91 @@ export class Runner {
     // This completion marker records the identity whose schema, arguments,
     // internal cells, and result projection were staged by setup(). Pattern
     // loading continues to use patternIdentity.
-    if (entryRef) {
+    if (durableEntryRef) {
       resultCell.withTx(tx).setMetaRaw("patternSetupIdentity", {
-        identity: entryRef.identity,
-        symbol: entryRef.symbol,
+        identity: durableEntryRef.identity,
+        symbol: durableEntryRef.symbol,
+      });
+      // The durable stamps staged above supersede a keyless session pointer
+      // — WHEN they commit. They are transaction state, so the pointer
+      // removal rides the same commit: dropping it at staging would leave a
+      // still-committed keyless piece pointer-less if this transaction
+      // fails (its stamps roll back; the delete would not). The
+      // unchanged-value guard keeps a re-setup staged after this one
+      // authoritative — its own bookkeeping then owns the entry.
+      const key = this.getDocKey(resultCell);
+      const priorPointer = this.sessionPatternPointers.get(key);
+      if (priorPointer !== undefined) {
+        tx.addCommitCallback((_tx, result) => {
+          if (
+            !result.error &&
+            this.sessionPatternPointers.get(key) === priorPointer
+          ) {
+            this.sessionPatternPointers.delete(key);
+          }
+        });
+      }
+    } else if (entryRef) {
+      // A piece previously stamped with a DIFFERENT durable pointer (a real
+      // identity from an earlier keyed setup, or a pre-guard legacy keyless
+      // orphan) must not keep it: setup just staged the KEYLESS pattern's
+      // state, and a standing stale pointer would make later starts —
+      // fresh sessions especially — select the OLD pattern over it. Clear
+      // both durable metas transactionally with this setup; the cleared
+      // state IS the keyless piece's designed durable verdict
+      // (no-pattern-meta), and clearing writes no keyless identity.
+      const staleRef = getPatternIdentityRef(resultCell.withTx(tx));
+      if (staleRef !== undefined) {
+        resultCell.withTx(tx).setMetaRaw("patternIdentity", undefined);
+      }
+      if (
+        getPatternSetupIdentityRef(resultCell.withTx(tx)) !== undefined
+      ) {
+        resultCell.withTx(tx).setMetaRaw("patternSetupIdentity", undefined);
+      }
+      // The KEYLESS piece's stand-in for both skipped stamps, session-side:
+      // the pattern pointer (start/resume flows) and the setup-completion
+      // marker (`storedSetupMarker`'s reuse decision — without it a
+      // re-derived sub-piece would restage its running setup every pass).
+      //
+      // Set EAGERLY at staging — visible before this transaction commits,
+      // mirroring `locallyPreparedResults` (the pre-existing idiom for
+      // setup bookkeeping; a concurrent start in the staging window is the
+      // same race that map has always carried). The failure cleanup
+      // RESTORES the prior committed pointer rather than deleting: the
+      // durable stamp this map replaces was transactional, so an earlier
+      // keyless setup's pointer survived a later setup's failed commit.
+      // (If the prior pointer itself was never committed — two failing
+      // stagings interleaved on one doc — the restore resurrects a staged
+      // value; recording per-key committed state would close that residue
+      // and is not worth its weight here.)
+      const key = this.getDocKey(resultCell);
+      const priorPointer = this.sessionPatternPointers.get(key);
+      this.sessionPatternPointers.set(key, entryRef);
+      tx.addCommitCallback((_tx, result) => {
+        if (!result.error) return;
+        if (this.sessionPatternPointers.get(key) === entryRef) {
+          if (priorPointer !== undefined) {
+            this.sessionPatternPointers.set(key, priorPointer);
+          } else {
+            this.sessionPatternPointers.delete(key);
+          }
+        } else if (
+          this.evictedSessionPatternPointers.get(key) === entryRef
+        ) {
+          // The staged pointer was capacity-evicted inside its own staging
+          // window, so the TOMBSTONE now names an identity that never
+          // committed — and a later replay of the pattern that DID commit
+          // would read it as different-identity evidence and restage.
+          // Re-point the tombstone at the last committed pointer (the value
+          // the eviction would have recorded had this staging not refreshed
+          // the entry).
+          if (priorPointer !== undefined) {
+            this.evictedSessionPatternPointers.set(key, priorPointer);
+          } else {
+            this.evictedSessionPatternPointers.delete(key);
+          }
+        }
       });
     }
   }
@@ -2366,7 +2549,11 @@ export class Runner {
       `resultCell: ${resultCell.getAsNormalizedFullLink().id}`,
     ]);
 
-    const previousIdentityRef = getPatternIdentityRef(resultCell.withTx(tx));
+    // A keyless piece set up by THIS session resolves through the
+    // session-side pointer map (its `keyless:` ref is never stamped
+    // durably); a fresh session correctly finds nothing.
+    const previousIdentityRef = getPatternIdentityRef(resultCell.withTx(tx)) ??
+      this.sessionPatternPointers.get(this.getDocKey(resultCell));
     const resolvedPattern = this.resolveSetupPattern(
       patternOrModule,
       previousIdentityRef,
@@ -2398,10 +2585,41 @@ export class Runner {
     // Read through `tx`, like the identity read above: this decides whether the
     // transaction writes the argument, so it belongs in the same conflict set
     // rather than reading around it off committed state.
-    const marker = storedSetupMarker(resultCell.withTx(tx), entryRef);
+    const marker = storedSetupMarker(
+      resultCell.withTx(tx),
+      entryRef,
+      this.sessionPatternPointers.get(this.getDocKey(resultCell)),
+    );
+    // What a capacity eviction dropped for this doc, if anything — the
+    // evidence the exemption below weighs when the live pointer is gone.
+    const evictedPointer = this.evictedSessionPatternPointers.get(
+      this.getDocKey(resultCell),
+    );
     const setupState: SetupStateReuse = {
       sameStoredSetup,
-      restageStoredArgument: !sameStoredSetup || marker === "other",
+      // The zero-evidence exemption: a piece with NO pattern pointer (durable
+      // or session) and NO setup marker carries no evidence any update moved
+      // it — the KEYLESS piece's designed durable verdict (L3(a), RULED
+      // 2026-08-27: a keyless piece stamps nothing, so a FRESH session
+      // re-encountering one reads exactly this), and the pre-marker legacy
+      // root. The absent-marker exemption's own rationale applies in full:
+      // re-staging would validate — and rewrite defaults over — a stored
+      // argument no update touched (the cross-session `cf get` transform
+      // replay failed exactly there). A marker naming ANOTHER identity still
+      // restages, and any surviving pointer keeps the ordinary rule. An
+      // EVICTED session pointer is NOT zero evidence — this session had the
+      // evidence and lost it to capacity. The tombstone says WHICH pattern
+      // it lost: a different-identity re-setup takes the conservative
+      // restage the un-evicted state would have taken, while a
+      // same-identity re-setup keeps the exemption — the evidence agrees
+      // with the stored setup, and forcing a restage there would break the
+      // very replay the exemption ships for.
+      restageStoredArgument: (!sameStoredSetup || marker === "other") &&
+        !(previousIdentityRef === undefined && marker === "absent" &&
+          !validationOptions.reapplyStoredSetup &&
+          (evictedPointer === undefined ||
+            (evictedPointer.identity === entryRef.identity &&
+              evictedPointer.symbol === entryRef.symbol))),
       // "matches" only. An ABSENT marker is not evidence that the running graph
       // is this pattern — it is the absence of evidence either way, and the two
       // must not collapse into one boolean.
@@ -2522,6 +2740,26 @@ export class Runner {
           this.locallyPreparedResults.delete(key);
         }
       });
+      // ALREADY-RUNNING piece, full setup staged, KEYLESS pattern: the
+      // durable stamp used to carry this exact moment to the piece's meta
+      // watcher, whose swap replaced the running graph with the new version
+      // (bare setup(), run(), and the deferred-start arm all funnel through
+      // here — the reuse paths returned earlier). A keyless identity never
+      // lands durably (L3(a), RULED 2026-08-27), so request the swap through
+      // the session channel once the setup commit lands — the watcher's own
+      // ordering, with the watcher's own guards deciding whether anything
+      // changed. Real patterns keep the durable-stamp path.
+      if (PatternManager.isKeylessPatternIdentity(entryRef.identity)) {
+        const sessionSwap = this.sessionPatternSwaps.get(key);
+        if (sessionSwap !== undefined) {
+          const swapPattern = pattern;
+          const swapRef = entryRef;
+          tx.addCommitCallback((_tx, result) => {
+            if (result.error) return;
+            sessionSwap(swapPattern, swapRef);
+          });
+        }
+      }
     }
 
     return { resultCell, pattern, needsStart: true };
@@ -2763,6 +3001,12 @@ export class Runner {
     // pointer may still hold an older identity. The unloadable-pointer
     // roll-forward below writes THIS ref back, never the observed key.
     let runningRef: { identity: string; symbol: string } | undefined;
+    // The live pattern VALUE those nodes were instantiated from. Kept for the
+    // roll-forward's keyless arm: when `runningRef` is absent or keyless (the
+    // never-durable session mint), the durable convergence target is the
+    // value's module-addressed PRODUCER — the first real entry ref up its
+    // derivation chain (`resolveProducerEntryRef`; L3(a), RULED 2026-08-27).
+    let runningPattern: Pattern | undefined;
     let cancelNodes: Cancel | undefined;
     let initialSchedulerRehydrationAvailable = true;
 
@@ -2899,6 +3143,7 @@ export class Runner {
           cancelNodes?.();
           instantiatePattern(pattern);
           runningRef = newRef;
+          runningPattern = pattern;
         };
         if (!this.runtime.sealDestinationInstalled) {
           // The OFF arm (and ON-arm client speculation): today's
@@ -2993,6 +3238,26 @@ export class Runner {
           finishSwap();
         })();
       };
+      // The session-swap half of the watcher (see `sessionPatternSwaps`):
+      // exactly the sinkMeta arm's semantics, driven directly with a live
+      // pattern value instead of through a durable pointer a keyless piece
+      // is forbidden to write.
+      const sessionSwapHandler = (
+        pattern: Pattern,
+        newRef: { identity: string; symbol: string },
+      ) => {
+        if (!active || startLifecycleEpoch !== this.lifecycleEpoch) return;
+        const newKey = patternIdentityKey(newRef);
+        if (newKey === currentPatternKey) return; // No change
+        currentPatternKey = newKey;
+        swapToPattern(pattern, newRef);
+      };
+      this.sessionPatternSwaps.set(key, sessionSwapHandler);
+      addCancel(() => {
+        if (this.sessionPatternSwaps.get(key) === sessionSwapHandler) {
+          this.sessionPatternSwaps.delete(key);
+        }
+      });
       addCancel(
         resultCell.sinkMeta("patternIdentity", (newValue) => {
           if (!active || startLifecycleEpoch !== this.lifecycleEpoch) return;
@@ -3030,10 +3295,27 @@ export class Runner {
                 currentPatternKey !== newKey
               ) return;
               if (!loaded) {
-                logger.error(
-                  "pattern-load-error",
-                  `Failed to load pattern ${newRef.identity}#${newRef.symbol}`,
-                );
+                if (
+                  PatternManager.isKeylessPatternIdentity(newRef.identity)
+                ) {
+                  // A `keyless:` pointer READ from durable state is a
+                  // pre-guard legacy orphan (the guard means nothing new
+                  // mints one into a store): unloadable by construction for
+                  // every session but its minter, and expected in aged
+                  // spaces. Tolerated as the orphan it is — a debug record,
+                  // not an error — and healed below when a producer identity
+                  // is available to converge to.
+                  logger.debug("legacy-keyless-pattern-pointer", () => [
+                    `durable patternIdentity carries a session-synthetic`,
+                    `identity ${newRef.identity}#${newRef.symbol} (pre-guard`,
+                    "legacy state); no session can load it",
+                  ]);
+                } else {
+                  logger.error(
+                    "pattern-load-error",
+                    `Failed to load pattern ${newRef.identity}#${newRef.symbol}`,
+                  );
+                }
                 // CT-1923: an undefined result is a DEFINITIVE verdict — the
                 // load synced and found the identity's docs absent or
                 // uncompilable — while a pattern is still running here. Left
@@ -3042,24 +3324,49 @@ export class Runner {
                 // start-by-identity of this piece is dead (the stranded
                 // blank-section state). Roll the pointer back to the RUNNING
                 // pattern's identity, durably, with a superseded-check so a
-                // legitimate concurrent repoint wins. Gated on the same flag
-                // thrown load errors (which may be transient) never
-                // trigger this. Two verdicts are NOT definitive and must never
-                // trigger it either: with CFC enforcement disabled,
-                // loadPatternByIdentity returns undefined for anything outside
-                // the in-memory index (probe unsupported, not artifact dead);
-                // and a session-synthetic keyless running ref must never be
-                // written durably (a fresh runtime is guaranteed unable to
-                // load it).
+                // legitimate concurrent repoint wins. Thrown load errors
+                // (which may be transient) never trigger this. One verdict is
+                // NOT definitive and must never trigger it: with CFC
+                // enforcement disabled, loadPatternByIdentity returns
+                // undefined for anything outside the in-memory index (probe
+                // unsupported, not artifact dead).
+                //
+                // The ref written back must be durable-legal: a
+                // session-synthetic keyless ref never is (L3(a), RULED
+                // 2026-08-27 — a fresh runtime is guaranteed unable to load
+                // it). When the RUNNING ref is keyless or absent, converge to
+                // the running VALUE's module-addressed PRODUCER instead — the
+                // first real entry ref up its derivation chain (walking as
+                // many steps as recorded). A from-scratch runtime-built value
+                // has no such link; the piece then keeps running on its
+                // session value and the pointer is left alone (the tolerated
+                // orphan), because there is nothing durable-legal to write.
+                const revertTarget = runningRef !== undefined &&
+                    !PatternManager.isKeylessPatternIdentity(
+                      runningRef.identity,
+                    )
+                  ? runningRef
+                  : runningPattern !== undefined
+                  ? resolveProducerEntryRef(runningPattern)
+                  : undefined;
                 if (
                   this.runtime.cfcEnforcementMode !== "disabled" &&
-                  runningRef !== undefined &&
-                  !PatternManager.isKeylessPatternIdentity(
-                    runningRef.identity,
-                  ) &&
-                  patternIdentityKey(runningRef) !== newKey
+                  revertTarget === undefined &&
+                  runningPattern !== undefined
                 ) {
-                  const revertRef = runningRef;
+                  logger.debug("keyless-running-no-producer", () => [
+                    "unloadable durable pointer over a running keyless",
+                    "pattern with no module-addressed producer link;",
+                    "nothing durable-legal to converge to — leaving the",
+                    "pointer as written",
+                  ]);
+                }
+                if (
+                  this.runtime.cfcEnforcementMode !== "disabled" &&
+                  revertTarget !== undefined &&
+                  patternIdentityKey(revertTarget) !== newKey
+                ) {
+                  const revertRef = revertTarget;
                   const rollForward = this.runtime.editWithRetry((tx) => {
                     // Async pointer repair from the meta watcher's load
                     // promise — no scheduler run stamps it; bookkeeping
@@ -3095,7 +3402,9 @@ export class Runner {
                         () => [
                           "durable patternIdentity named an unloadable",
                           `identity (${newRef.identity}#${newRef.symbol});`,
-                          "rolled back to the running pattern",
+                          revertRef === runningRef
+                            ? "rolled back to the running pattern"
+                            : "converged to the running pattern's producer",
                           `${revertRef.identity}#${revertRef.symbol}`,
                         ],
                       );
@@ -3279,7 +3588,10 @@ export class Runner {
     };
 
     const resultCellForRead = tx ? resultCell.withTx(tx) : resultCell;
-    const initialRef = getPatternIdentityRef(resultCellForRead);
+    // Durable pointer first; a keyless piece set up by this session has only
+    // the session-side entry (the never-durable contract).
+    const initialRef = getPatternIdentityRef(resultCellForRead) ??
+      this.sessionPatternPointers.get(key);
 
     // Determine initial pattern
     if (givenPattern) {
@@ -3289,7 +3601,9 @@ export class Runner {
         // Real artifact refs only: setup mints and INDEXES a `keyless:`
         // session pointer for hand-built patterns, so getArtifactEntryRef
         // returns it — filter synthetics explicitly, or the roll-forward
-        // would write a pointer no fresh runtime can load.
+        // would write a pointer no fresh runtime can load. The VALUE is kept
+        // regardless: the roll-forward's keyless arm converges through its
+        // derivation chain to a module-addressed producer when one exists.
         const givenRef = this.runtime.patternManager.getArtifactEntryRef(
           givenPattern,
         );
@@ -3297,6 +3611,7 @@ export class Runner {
             !PatternManager.isKeylessPatternIdentity(givenRef.identity)
           ? givenRef
           : undefined;
+        runningPattern = givenPattern;
       } catch (error) {
         // Without cleanup the piece stays registered in `this.cancels`, so
         // every later start() reports "already running" for a piece that has
@@ -3346,12 +3661,14 @@ export class Runner {
 
     // Sync path - instantiate immediately
     currentPatternKey = patternIdentityKey(initialRef);
+    const initialPattern = this.resolveToPattern(initialResolved);
     instantiateInitialPattern(
-      this.resolveToPattern(initialResolved),
+      initialPattern,
       initialRef,
       tx,
     );
     runningRef = initialRef;
+    runningPattern = initialPattern;
     if (!doNotUpdateOnPatternChange) {
       setupPatternWatcher();
     }
@@ -3404,8 +3721,11 @@ export class Runner {
       });
     }
 
-    // Step 4: Check whether the pattern is available, otherwise load it
-    const identityRef = getPatternIdentityRef(rootCell);
+    // Step 4: Check whether the pattern is available, otherwise load it. A
+    // keyless piece carries no durable pointer (never-durable contract); its
+    // pointer, when this session set it up, is the session-side entry.
+    const identityRef = getPatternIdentityRef(rootCell) ??
+      this.sessionPatternPointers.get(key);
     if (!identityRef) {
       // We may have a slug instead of a resultCell, so try the link.
       const maybeLink = parseLink(rootCell.getRaw(), rootCell);
@@ -3467,6 +3787,23 @@ export class Runner {
       identityRef.identity,
       identityRef.symbol,
     ) as Pattern | undefined;
+    if (
+      !pattern &&
+      PatternManager.isKeylessPatternIdentity(identityRef.identity)
+    ) {
+      // A durable `keyless:` pointer is pre-guard legacy state (nothing
+      // mints one into a store any more — L3(a), RULED 2026-08-27), and
+      // session-only by construction: with the in-memory index missed there
+      // is no closure anywhere to load. Tolerate the orphan — record it and
+      // report the piece as not started, rather than failing the caller's
+      // whole start walk over state no session can ever serve.
+      logger.debug("legacy-keyless-pattern-pointer", () => [
+        `piece ${rootCell.getAsNormalizedFullLink().id} carries a`,
+        `session-synthetic patternIdentity ${identityRef.identity}#` +
+        `${identityRef.symbol} (pre-guard legacy state); not startable`,
+      ]);
+      return Promise.resolve(false);
+    }
     if (!pattern) {
       // Load by content identity: in-memory live module → compiled closure →
       // cold recompile from the verified source-doc closure (a version bump).
@@ -3531,7 +3868,13 @@ export class Runner {
     // observe the last persisted result but miss subsequent input updates.
     const expectedPatternKey = patternIdentityKey(identityRef);
     const patternIdentityStillCurrent = (): boolean => {
-      const current = getPatternIdentityRef(rootCell);
+      // A keyless piece's pointer is session-side (never stamped durably),
+      // so the currency re-check must read the same source the walk's step 4
+      // resolved from — a durable-only read would report a keyless piece
+      // "no longer current" forever and restart the resolution cascade in an
+      // unbounded loop.
+      const current = getPatternIdentityRef(rootCell) ??
+        this.sessionPatternPointers.get(this.getDocKey(rootCell));
       return current !== undefined &&
         patternIdentityKey(current) === expectedPatternKey;
     };
@@ -4385,7 +4728,11 @@ export class Runner {
     ): void => {
       const expected = options?.expectedPatternIdentity;
       if (!expected) return;
-      const current = getPatternIdentityRef(cell);
+      // A keyless piece's pointer is session-side (the never-durable
+      // contract), so the currency check reads through the session map when
+      // the durable meta is absent.
+      const current = getPatternIdentityRef(cell) ??
+        this.sessionPatternPointers.get(this.getDocKey(resultCell));
       if (
         current === undefined ||
         patternIdentityKey(current) !== patternIdentityKey(expected)
@@ -5119,7 +5466,10 @@ export class Runner {
         // already-assembled local cells. Stopping an unresolved/storage-only
         // target must not bypass dependency sync and snapshot rehydration on a
         // later explicit start.
-        const stoppedIdentity = getPatternIdentityRef(resultCell);
+        // A keyless piece's pointer is session-side (never stamped durably),
+        // so fall through to it.
+        const stoppedIdentity = getPatternIdentityRef(resultCell) ??
+          this.sessionPatternPointers.get(key);
         if (stoppedIdentity !== undefined) {
           this.locallyStoppedResults.set(
             key,
@@ -6776,6 +7126,18 @@ export class Runner {
               },
             ],
           );
+          // Mark/effects atomicity (events.md §4, RULED 2026-08-27 — the
+          // a04 write-side member): record the skip on the transaction so
+          // the scheduler's event finalize can withdraw a SERVED
+          // dispatch's tx instead of sealing it. The dispatch stamper
+          // wrote the entry's `consequenced` mark into this tx BEFORE
+          // the body ran (space-server.ts), so sealing a skipped run
+          // commits a 1-op mark-only consequence — the entry permanently
+          // consumed with zero effects and no error. A fact, recorded
+          // unconditionally; the scheduler gates on `served`.
+          tx.dispatchedHandlerNotRun = {
+            reason: "action argument is undefined (potential schema mismatch)",
+          };
         }
 
         let result: any = undefined;
@@ -7538,50 +7900,59 @@ export class Runner {
    * bare non-registering `Engine.compileAndEvaluateModules` — whose serialized
    * copy carries a derivation link to its pristine in-memory pattern. It is
    * minted its content-hash session identity right here (the same pointer
-   * `entryRefForPattern` mints for a keyless ROOT pattern), so it rides a
-   * `$patternRef` to that pristine artifact. Leaving it embedded instead
-   * would send it through the immutable-cell JSON round-trip, which corrupts
-   * a nested sub-pattern's output-alias `defer` levels (CT-1812 — the
-   * CT-1811 corruption, reachable ref-lessly). The trust gate stays intact:
-   * minting BRANDS, so only a value whose original is already a trusted
-   * builder pattern is minted.
+   * `entryRefForPattern` mints for a keyless ROOT pattern) — but that
+   * identity is session-synthetic and must never land in the durable inputs
+   * doc (L3(a), RULED 2026-08-27; the sentinel here was one of the durable
+   * keyless writers the 2026-08-27 diagnosis named). So the op is LEFT IN
+   * PLACE — the boundary walk inside `getImmutableCell` serializes its full
+   * graph, readable by any session — and the minted ref is returned for the
+   * caller to register as a SESSION-side resolution hint keyed by the inputs
+   * doc (`registerKeylessOpResolution`): the builtin then resolves the
+   * pristine artifact in-session, so the embedded round-trip's defer
+   * corruption (CT-1812 — the CT-1811 corruption, reachable ref-lessly)
+   * still never engages for the instantiating session. The trust gate stays
+   * intact: minting BRANDS, so only a value whose original is already a
+   * trusted builder pattern is minted.
    *
    * An op with no ref AND no live original — a plain deserialized graph,
    * i.e. a STORED no-entry-ref pattern value (the live keyless writer path
-   * pinned by stored-pattern-rehydration.test.ts) — is left embedded: there
-   * is no pristine artifact in existence to point at, and re-rooting the
-   * graph bind-free is exactly the defer surgery CT-1812 records as the
-   * residual there. Such an op takes the builtin's legacy graph path.
+   * pinned by stored-pattern-rehydration.test.ts) — is left embedded with no
+   * hint: there is no pristine artifact in existence to point at, and
+   * re-rooting the graph bind-free is exactly the defer surgery CT-1812
+   * records as the residual there. Such an op takes the builtin's legacy
+   * graph path.
    */
   private substituteOpPatternRefs(
     moduleRefName: string | undefined,
     inputBindings: FabricExecValue,
-  ): void {
+  ): { identity: string; symbol: string } | undefined {
     if (
       moduleRefName !== "map" && moduleRefName !== "filter" &&
       moduleRefName !== "flatMap"
     ) {
-      return;
+      return undefined;
     }
-    if (!isObjectOrArray(inputBindings)) return;
+    if (!isObjectOrArray(inputBindings)) return undefined;
     const op = (inputBindings as Record<string, unknown>).op;
-    if (!isObjectOrArray(op)) return;
-    let ref = this.runtime.patternManager.getArtifactEntryRef(
+    if (!isObjectOrArray(op)) return undefined;
+    const ref = this.runtime.patternManager.getArtifactEntryRef(
       op as unknown as object,
     );
-    if (!ref) {
-      const original = resolveOriginal(op as unknown as object);
-      if (isTrustedBuilderArtifact(original) && isPattern(original)) {
-        ref = this.runtime.patternManager.ensureKeylessPatternIdentity(
-          original as unknown as Pattern,
-        );
-      }
-    }
-    if (ref) {
+    if (ref && !PatternManager.isKeylessPatternIdentity(ref.identity)) {
       (inputBindings as Record<string, unknown>).op = {
         $patternRef: { identity: ref.identity, symbol: ref.symbol },
       };
+      return undefined;
     }
+    const original = resolveOriginal(op as unknown as object);
+    if (isTrustedBuilderArtifact(original) && isPattern(original)) {
+      // Keyless: session mint only — never substituted into the (durable)
+      // bindings; the caller registers the in-session hint.
+      return this.runtime.patternManager.ensureKeylessPatternIdentity(
+        original as unknown as Pattern,
+      );
+    }
+    return undefined;
   }
 
   private instantiateRawNode(
@@ -7625,8 +7996,14 @@ export class Runner {
     // (linked to its original via `noteDerivedCopy`, preserved through binding)
     // carries its `{ identity, symbol }`; the sentinel then survives the immutable-cell
     // JSON round-trip, so the builtin resolves the live canonical pattern by
-    // identity instead of deserializing the embedded graph.
-    this.substituteOpPatternRefs(moduleRefName, mappedInputBindings);
+    // identity instead of deserializing the embedded graph. A KEYLESS op is
+    // never substituted (its session identity must not land durably); the
+    // returned mint is registered below, once the inputs doc's address is
+    // known, as this session's resolution hint for the builtin.
+    const keylessOpRef = this.substituteOpPatternRefs(
+      moduleRefName,
+      mappedInputBindings,
+    );
 
     // Opaque forwarded references (argument keys the module's schema marks
     // `asCell: ["opaque"]`, e.g. ifElse's `ifTrue`/`ifFalse` branches) are
@@ -7663,6 +8040,17 @@ export class Runner {
       undefined,
       tx,
     );
+    if (keylessOpRef !== undefined) {
+      // The keyless op's in-session resolution hint (see
+      // `substituteOpPatternRefs`): the builtin reads the embedded graph from
+      // this immutable doc and resolves the pristine minted artifact through
+      // this registration instead (CT-1812 stays sealed in-session, with
+      // nothing keyless durable).
+      this.runtime.patternManager.registerKeylessOpResolution(
+        opInputsDocKey(inputsCell),
+        keylessOpRef,
+      );
+    }
 
     // CT-1623: the output spot this node writes through is reserved for this
     // node, so its fully-resolved coordinates are a stable, position-derived,
@@ -8359,11 +8747,18 @@ export function getPieceSourceRevisions(
   return revisions;
 }
 
-/** The source state guarded by a lifecycle transition. */
+/**
+ * The source state guarded by a lifecycle transition. `sessionPattern` is a
+ * KEYLESS piece's session-side pointer (the never-durable contract; L3(a),
+ * RULED 2026-08-27 — the durable meta legitimately holds nothing for one):
+ * callers that resolved it through the runner pass it so a builder-run
+ * piece still has a source state to transition FROM.
+ */
 export function getPieceSourceSnapshot(
   resultCell: Cell<unknown>,
+  sessionPattern?: { identity: string; symbol: string },
 ): PieceSourceSnapshot | undefined {
-  const pattern = getPatternIdentityRef(resultCell);
+  const pattern = getPatternIdentityRef(resultCell) ?? sessionPattern;
   if (pattern === undefined) return undefined;
   const revisions = getPieceSourceRevisions(resultCell);
   return {
@@ -8476,6 +8871,32 @@ export const PIECE_SOURCE_MOVED =
   "piece source changed while the source transition was being prepared";
 
 /**
+ * The session-side pattern the prepare/apply moved-guards below check a
+ * KEYLESS piece's source state against. A keyless expected pattern is
+ * session-side by construction — the durable pointer legitimately holds
+ * nothing (L3(a), RULED 2026-08-27) and a concurrent keyless re-setup moves
+ * neither durable meta nor source revisions — so the only supersession
+ * signal such a piece has is the runner's LIVE session pointer, and the
+ * guards must read exactly that. (An earlier revision substituted the
+ * transition's own expected pattern here, which compared expected against
+ * itself and let a prepared transition apply over a NEWER keyless setup —
+ * the abort the durable stamp used to provide.) The durable read still wins
+ * when present, so a REAL pointer appearing over a keyless piece reads as
+ * moved; an EVICTED session pointer reads as moved too — a spurious loud
+ * abort, failing safe. A real expected pattern gets no fallback: a cleared
+ * or changed durable pointer must read as moved.
+ */
+function keylessTransitionSessionPattern(
+  runtime: Runtime,
+  resultCell: Cell<unknown>,
+  expectedPattern: { identity: string; symbol: string },
+): { identity: string; symbol: string } | undefined {
+  return PatternManager.isKeylessPatternIdentity(expectedPattern.identity)
+    ? runtime.runner.sessionPatternPointerFor(resultCell)
+    : undefined;
+}
+
+/**
  * Verify that a source transition can restore the current source. Recovery
  * paths may omit an unavailable legacy baseline and retain the displaced
  * executable identity outside the restorable history instead.
@@ -8487,7 +8908,10 @@ export async function preparePieceSourceTransitionBaseline(
   options: { allowUnavailable?: boolean } = {},
 ): Promise<PieceSourceTransitionBaseline> {
   await prepareSourceClosureVerification();
-  const current = getPieceSourceSnapshot(resultCell);
+  const current = getPieceSourceSnapshot(
+    resultCell,
+    keylessTransitionSessionPattern(runtime, resultCell, expected.pattern),
+  );
   if (
     current === undefined ||
     !samePieceSourceSnapshot(current, expected)
@@ -8524,7 +8948,16 @@ export function applyPieceSourceTransition(
   transition: PieceSourceTransition,
 ): void {
   const candidate = resultCell.withTx(tx);
-  const current = getPieceSourceSnapshot(candidate);
+  // Same live-session-pointer read as the prepare step above: the guard's
+  // whole job is catching what moved BETWEEN prepare and this commit.
+  const current = getPieceSourceSnapshot(
+    candidate,
+    keylessTransitionSessionPattern(
+      runtime,
+      resultCell,
+      transition.expected.pattern,
+    ),
+  );
   if (
     current === undefined ||
     !samePieceSourceSnapshot(current, transition.expected)
@@ -8557,7 +8990,13 @@ export function applyPieceSourceTransition(
   ) {
     verifyRetainedPattern(nextPattern);
   }
-  if (transition.baseline.kind === "unavailable") {
+  if (
+    transition.baseline.kind === "unavailable" &&
+    // A keyless displaced identity must never land durably (L3(a)): the
+    // displaced executable was a session-built value no session can reload,
+    // and the history's absent baseline is the honest record of that.
+    !PatternManager.isKeylessPatternIdentity(current.pattern.identity)
+  ) {
     candidate.setMetaRaw("displacedPattern", {
       identity: current.pattern.identity,
       symbol: current.pattern.symbol,

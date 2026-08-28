@@ -56,6 +56,15 @@ a record: archive it to `docs/history/plans/` following the procedure in
   collaborative-field substrate, the first CodeMirror codec and editor
   integration, and the checkpoints and review gates required before a future
   WordGard codec.
+- [Seed: pattern verbs as server calls](server-pattern-verbs-seed.md)
+  records the ruled 2026-08-24 serverize direction — upload-pattern /
+  instantiate / setsrc as server calls, client speculative-local with
+  server-state winning, and the thin-CLI end-state — for the arc that picks
+  it up.
+- [Seed: codeless graph rebuild](codeless-graph-rebuild-seed.md) records,
+  for a parked arc, the facts that make a running piece's graph durably
+  reconstructible from scheduler state and module-addressed code — the
+  recovery class the 2026-08-27 keyless close-out ruled out of contract.
 - [Server-primary execution v2](server-execution-v2.md) sequences the
   greenfield rebuild that executes the server-side-execution v2 spec, with
   per-phase task and success-criteria checkboxes. Its

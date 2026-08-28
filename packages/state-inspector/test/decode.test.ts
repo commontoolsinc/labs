@@ -19,13 +19,20 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
 import {
   annotate,
-  collectLinks,
   decodedLinkOf,
   decodeStored,
+  linksWithPaths,
   stringifyInspectorJson,
   summarize,
   summarizeLink,
 } from "../decode.ts";
+
+/** Bounds that reach every value in these fixtures, so a decode test states
+ * what the decode found and never what a bound hid. */
+const UNBOUNDED = {
+  maxDepth: Number.POSITIVE_INFINITY,
+  maxNodes: Number.POSITIVE_INFINITY,
+};
 
 Deno.test("decode: modern FabricLink is recognized as a link", () => {
   const link = new FabricLink({ id: "of:target", path: [] });
@@ -33,10 +40,10 @@ Deno.test("decode: modern FabricLink is recognized as a link", () => {
   assert(decoded, "FabricLink should be recognized");
   assertEquals(decoded!.id, "of:target");
 
-  // and reachable via collectLinks when nested in a plain structure
-  const links = collectLinks({ a: { b: link } });
+  // and reachable by the link walk when nested in a plain structure
+  const links = linksWithPaths({ a: { b: link } }, UNBOUNDED).links;
   assertEquals(links.length, 1);
-  assertEquals(links[0].id, "of:target");
+  assertEquals(links[0].link.id, "of:target");
 });
 
 Deno.test("decode: a modern encoded link round-trips to a recognized link", () => {
@@ -52,8 +59,8 @@ Deno.test("decode: a modern encoded link round-trips to a recognized link", () =
     resetModernCellRepConfig();
   }
   const decoded = decodeStored(encoded) as { value: { ref: unknown } };
-  const links = collectLinks(decoded);
-  assert(links.some((l) => l.id === "of:x"), "modern link must be found");
+  const links = linksWithPaths(decoded, UNBOUNDED).links;
+  assert(links.some((l) => l.link.id === "of:x"), "modern link must be found");
   // and it must not throw when lowered for export
   JSON.stringify(annotate(decoded));
 });

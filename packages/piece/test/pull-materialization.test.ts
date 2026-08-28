@@ -5922,7 +5922,11 @@ describe("piece pull materialization", () => {
       "source-less-set-pattern-" + crypto.randomUUID(),
       { start: true },
     );
-    const previous = getPatternIdentityRef(piece)!;
+    // A hand-built (keyless) piece writes no durable pattern pointer (the
+    // never-durable contract; L3(a), RULED 2026-08-27); its session
+    // identity lives on the runner.
+    expect(getPatternIdentityRef(piece)).toBeUndefined();
+    expect(runtime.runner.sessionPatternPointerFor(piece)).toBeDefined();
     expect(getPieceSourceRevisions(piece)).toEqual([]);
 
     const controller = new PieceController(pieces, piece);
@@ -5933,16 +5937,47 @@ describe("piece pull materialization", () => {
     expect(
       getPieceSourceRevisions(piece).map((revision) => revision.operation),
     ).toEqual(["edit"]);
+    // The displaced executable was a session-built value no session can
+    // reload: a keyless identity never lands durably, so no
+    // `displacedPattern` record is stamped — the history's absent baseline
+    // is the record that the pre-edit past was programmatic.
     expect((await readPieceSourceState(runtime, piece)).displacedPattern)
-      .toEqual({
-        identity: previous.identity,
-        symbol: previous.symbol,
-        displacedAt: expect.any(Number),
-      });
+      .toBeUndefined();
     expect(await controller.result.get()).toEqual({
       version: "source-backed",
       output: 15,
     });
+  });
+
+  it("syncPattern prefers the live session pointer over a legacy keyless durable pointer", async () => {
+    const piece = await pieces.runPersistent(
+      trustPattern(
+        runtime,
+        sourceLessMultiplierPattern("sync-legacy-keyless", 2),
+      ),
+      { input: 5 },
+      "sync-legacy-keyless-" + crypto.randomUUID(),
+      { start: true },
+    );
+    expect(getPatternIdentityRef(piece)).toBeUndefined();
+    expect(runtime.runner.sessionPatternPointerFor(piece)).toBeDefined();
+
+    // A legacy pre-guard durable `keyless:` orphan landing AFTER this
+    // session's keyless setup — the remote-sync-lag interleaving (the
+    // in-session setup cleared the metas transactionally; a lagging sync
+    // can still deliver the old record afterwards). Such a pointer is
+    // unloadable everywhere except the session that MINTED it — never this
+    // one — so it must not shadow the live session pointer.
+    const { error } = await runtime.editWithRetry((tx) => {
+      piece.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: "keyless:fid1:legacy-orphan-from-a-pre-guard-session",
+        symbol: "default",
+      });
+    });
+    expect(error).toBeUndefined();
+
+    const pattern = await pieces.syncPattern(piece);
+    expect(pattern).toBeDefined();
   });
 
   it("persists setPattern replacement by identity for fresh runtime reloads", async () => {

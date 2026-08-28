@@ -804,16 +804,17 @@ export class SpaceServer implements TransactionSealDestination {
    * EVENT_PREQUEUE_STUCK_AFTER. */
   #preQueueDeferralStreaks = new Map<string, number>();
 
-  /** Set when a LOAD-PARK deferral fires while a drain pass is running
-   * (verification-coverage.md's OW45 residue member). The scheduler's
-   * own arrival-order barrier holds every later-arrived durable entry
-   * that is already QUEUED behind the deferred one, but an entry this
-   * pass has not reached yet is out of its reach — and the pass awaits
-   * TWICE per entry (a new sidecar's `sync()`, then the stream doc's),
-   * so a park failure genuinely can land in either gap. The drain reads
-   * this immediately before queueing each entry — past both awaits —
-   * and stops the pass, the same barrier `break` the sidecar-sync-
-   * failure arm makes. Cleared at the top of every pass. */
+  /** Set when a LOAD-PARK deferral — or a handler-not-run withdrawal
+   * (review-6459 F1, the same §2 obligation) — fires while a drain pass
+   * is running (verification-coverage.md's OW45 residue member). The
+   * scheduler's own arrival-order barrier holds every later-arrived
+   * durable entry that is already QUEUED behind the deferred one, but
+   * an entry this pass has not reached yet is out of its reach — and
+   * the pass awaits TWICE per entry (a new sidecar's `sync()`, then the
+   * stream doc's), so a deferral genuinely can land in either gap. The
+   * drain reads this immediately before queueing each entry — past both
+   * awaits — and stops the pass, the same barrier `break` the
+   * sidecar-sync-failure arm makes. Cleared at the top of every pass. */
   #loadParkDeferredInPass = false;
 
   /** Post-commit effects of sealed transactions, deferred per wave
@@ -3356,10 +3357,37 @@ export class SpaceServer implements TransactionSealDestination {
                     return;
                   }
                   if (outcome.kind === "deferred") {
+                    if (
+                      "cause" in outcome && outcome.cause === "handler-not-run"
+                    ) {
+                      // Mark/effects atomicity (events.md §4, RULED
+                      // 2026-08-27): the dispatched handler's body did
+                      // not run and its tx — carrying the pre-stamped
+                      // mark — was withdrawn. Loud counter; the entry
+                      // takes the same plain-deferral pending path
+                      // below (threshold backstop included).
+                      this.#options.stats.events.handlerNotRunDeferrals += 1;
+                    }
                     const deferrals =
                       (this.#eventDeferrals.get(entry.eventId) ?? 0) + 1;
                     this.#eventDeferrals.set(entry.eventId, deferrals);
                     if (deferrals < EVENT_DEFERRAL_DROP_THRESHOLD) {
+                      if (
+                        "cause" in outcome &&
+                        outcome.cause === "handler-not-run"
+                      ) {
+                        // The withdrawal's arrival-order barrier,
+                        // MID-PASS half (events.md §2; review-6459 F1
+                        // completed): the scheduler-side sweep can only
+                        // hold entries already IN the event queue. A
+                        // withdrawal landing while a drain pass awaits
+                        // a later sidecar's sync would let that pass
+                        // queue the next arrival behind the barrier's
+                        // back — the same gap the load-park causes
+                        // close through this flag (see the
+                        // #drainStreamEvents check past every await).
+                        this.#loadParkDeferredInPass = true;
+                      }
                       // No consequence: the entry stays pending; the
                       // re-drain waits for input or the backstop tick
                       // (the cold-view creation race — OW19's
@@ -3370,13 +3398,20 @@ export class SpaceServer implements TransactionSealDestination {
                       this.#armDeferredRescan();
                       return;
                     }
-                    // The race window is long past: no runnable handler
-                    // exists — events.md §5's drop predicate. The
-                    // notice un-renders the echo and un-wedges the
-                    // stream (and the park criterion). Its mark is
-                    // being STAGED for a wave: the copy is `marked`
-                    // until the wave outcome (or the notice's own
-                    // failure) releases it.
+                    // The race window is long past — events.md §5's
+                    // terminal drop. The notice un-renders the echo and
+                    // un-wedges the stream (and the park criterion).
+                    // Its mark is being STAGED for a wave: the copy is
+                    // `marked` until the wave outcome (or the notice's
+                    // own failure) releases it. A §5 DROP notice is the
+                    // user-facing record of a permanently lost action,
+                    // so its message names the CAUSE of the final
+                    // deferral honestly (review-6459 F2): for
+                    // handler-not-run the handler was runnable and
+                    // DISPATCHED — the deferrals were withdrawn
+                    // dispatches, not load attempts — while the classic
+                    // cold-view shape keeps §5's no-runnable-handler
+                    // drop predicate wording.
                     this.#eventDeferrals.delete(entry.eventId);
                     this.#drainInFlight.set(eventId, "marked");
                     this.#sealEventConsequenceNotice(
@@ -3385,8 +3420,12 @@ export class SpaceServer implements TransactionSealDestination {
                       streamEntry,
                       {
                         kind: "dropped",
-                        message: "no runnable handler after " +
-                          `${deferrals} deferred load attempts: ` +
+                        message: ("cause" in outcome &&
+                            outcome.cause === "handler-not-run"
+                          ? "handler did not run after " +
+                            `${deferrals} withdrawn dispatches: `
+                          : "no runnable handler after " +
+                            `${deferrals} deferred load attempts: `) +
                           outcome.message,
                       },
                     );

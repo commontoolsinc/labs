@@ -45,6 +45,7 @@ import {
   parseLink,
   type Pattern,
   type PatternCoverageCollector,
+  PatternManager,
   type PieceSourceTransition,
   preparePieceSourceTransitionBaseline,
   Runtime,
@@ -1433,15 +1434,34 @@ export class PiecesController<T = unknown> {
     await timePiecePhase("syncPattern.piece.sync", () => piece.sync());
 
     // When we subscribe to a doc, our subscription includes the doc's pattern
-    // pointer (`patternIdentity`), so read that.
-    let ref = getPatternIdentityRef(piece);
+    // pointer (`patternIdentity`), so read that. A KEYLESS piece carries no
+    // durable pointer (the never-durable contract; L3(a), RULED 2026-08-27)
+    // — in the session that set it up, the runner's session-side pointer
+    // answers instead, and `loadPatternByIdentity` serves the minted
+    // identity from the in-memory index. A durable `keyless:` pointer is a
+    // LEGACY orphan (pre-guard leak, or one delivered by a lagging remote
+    // sync after this session's setup cleared it) — unloadable everywhere
+    // except the session that minted it, never this one — so it must not
+    // shadow the live session pointer; it stays the last resort so a fresh
+    // session's orphan keeps its designed no-pattern outcome.
+    const resolvePatternRef = () => {
+      const durable = getPatternIdentityRef(piece);
+      if (
+        durable !== undefined &&
+        !PatternManager.isKeylessPatternIdentity(durable.identity)
+      ) {
+        return durable;
+      }
+      return this.runtime.runner.sessionPatternPointerFor(piece) ?? durable;
+    };
+    let ref = resolvePatternRef();
     if (!ref) {
       // Under remote sync, metadata can transiently lag the result value even
       // though setup just wrote both. Wait for storage to settle and retry once
       // before treating the pattern metadata as missing.
       await timePiecePhase("syncPattern.retry.synced", () => this.synced());
       await timePiecePhase("syncPattern.retry.piece.sync", () => piece.sync());
-      ref = getPatternIdentityRef(piece);
+      ref = resolvePatternRef();
     }
     if (!ref) throw new Error("piece missing pattern identity");
 
@@ -1884,7 +1904,11 @@ export class PiecesController<T = unknown> {
       // cannot proceed or fails for its own reasons, surface the ORIGINAL start
       // error; nothing is torn down or overwritten.
       const runtime = this.runtime;
-      const ref = getPatternIdentityRef(rootToStart);
+      // Keyless pieces resolve through the session pointer (never stamped
+      // durably); a fresh session correctly finds nothing and surfaces the
+      // original start error.
+      const ref = getPatternIdentityRef(rootToStart) ??
+        runtime.runner.sessionPatternPointerFor(rootToStart);
       if (ref === undefined) throw startError;
       let pattern;
       try {
@@ -2265,11 +2289,20 @@ export class PiecesController<T = unknown> {
         officialRef,
         sourceTransition,
       );
-      rootTx.setMetaRaw("displacedPattern", {
-        identity: pinnedRef.identity,
-        symbol: pinnedRef.symbol,
-        displacedAt: sourceTransition.timestamp,
-      });
+      // A keyless displaced identity must never land durably (L3(a)):
+      // `displacedPattern` exists for recovery, recovery to a
+      // session-synthetic identity is impossible by construction, and the
+      // absent record is the honest one — the same gate
+      // `applyPieceSourceTransition`'s unavailable arm applies to ITS stamp
+      // four lines up. Reachable with a keyless `pinnedRef` when a legacy
+      // orphan pointer coincides with a start failure on a default root.
+      if (!PatternManager.isKeylessPatternIdentity(pinnedRef.identity)) {
+        rootTx.setMetaRaw("displacedPattern", {
+          identity: pinnedRef.identity,
+          symbol: pinnedRef.symbol,
+          displacedAt: sourceTransition.timestamp,
+        });
+      }
       rootTx.setMetaRaw("patternIdentity", officialRef);
       return true;
     });
@@ -2397,7 +2430,11 @@ async function getCellByIdOrPiece(
     }
     if (
       getMetaLink(piece, "result") === undefined &&
-      getPatternIdentityRef(piece) === undefined
+      getPatternIdentityRef(piece) === undefined &&
+      // A KEYLESS piece carries no durable pointer (the never-durable
+      // contract; L3(a), RULED 2026-08-27); in the session that set it up
+      // the runner's session pointer vouches for it.
+      pieces.runtime.runner.sessionPatternPointerFor(piece) === undefined
     ) {
       throw new Error(
         `Piece ${cellId} has neither a parent result nor a pattern`,

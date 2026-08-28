@@ -1,10 +1,21 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { consoleRunHandles, consoleRunSteps } from "../../console/steps.ts";
+import {
+  consoleRunHandles,
+  consoleRunSteps,
+  type ConsoleStep,
+  consoleStepArguments,
+} from "../../console/steps.ts";
 import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
 import type { HarnessHandleTable } from "../../src/contracts/handle-table.ts";
 import type { HarnessCfcInvocationContext } from "../../src/contracts/cfc-invocation-context.ts";
 import { createToolOutputId } from "../../src/contracts/tool-result.ts";
+import {
+  HARNESS_CELL_LABELS_TYPE,
+  type HarnessCellLabelRecord,
+  type HarnessCellLabels,
+} from "../../src/contracts/cell-labels.ts";
+import { consoleCellLabelIndex } from "../../console/cell-labels.ts";
 
 const call = (
   id: string,
@@ -34,6 +45,36 @@ const result = (
   toolCallId,
   toolName,
   content: typeof content === "string" ? content : JSON.stringify(content),
+});
+
+/** A snapshot the space was read for, holding these cells and no others. */
+const labelSnapshot = (
+  cells: readonly HarnessCellLabelRecord[],
+): HarnessCellLabels => ({
+  type: HARNESS_CELL_LABELS_TYPE,
+  version: 1,
+  generatedAt: "2026-01-01T00:00:00.000Z",
+  status: "read",
+  cells,
+});
+
+/** One cell the space labels `Secret` at its root. */
+const secretCell = (
+  entityId: string,
+  ref: string,
+): HarnessCellLabelRecord => ({
+  entityId,
+  ref,
+  entries: [
+    {
+      path: [],
+      confidentiality: [
+        { type: "https://common.tools/cfc/Secret", name: "Secret" },
+      ],
+      integrity: [],
+      origin: "declared",
+    },
+  ],
 });
 
 describe("console/steps", () => {
@@ -164,6 +205,9 @@ describe("console/steps", () => {
           ref: "/of:fid1:aaa",
           addressKey: '[null,"of:fid1:aaa","space",[]]',
           introducedAtStep: 0,
+          producedByStep: 0,
+          uses: [],
+          confidentiality: [],
         },
       ]);
     });
@@ -177,6 +221,49 @@ describe("console/steps", () => {
       expect(handles).toHaveLength(1);
       expect(handles[0].token).toBe("cfh:a:zzzzz");
       expect(handles[0].ref).toBeUndefined();
+    });
+
+    it("carries the labels the space holds for the cell a handle names", () => {
+      const steps = consoleRunSteps([
+        call("c1", "run_pattern", {}),
+        result("c1", "run_pattern", { resultRef: "cfh:a:aaaaa" }),
+      ]);
+      const handles = consoleRunHandles(
+        steps,
+        table,
+        consoleCellLabelIndex(
+          labelSnapshot([secretCell("of:fid1:aaa", "/of:fid1:aaa")]),
+        ),
+      );
+      expect(handles[0].labels?.confidentiality).toEqual(["Secret"]);
+      // What a call put on the argument is a different fact, and stays its
+      // own field: this run made no call carrying an atom.
+      expect(handles[0].confidentiality).toEqual([]);
+    });
+
+    it("tells a cell the snapshot holds no label for from one it never read", () => {
+      const steps = consoleRunSteps([
+        call("c1", "run_pattern", {}),
+        result("c1", "run_pattern", { resultRef: "cfh:a:aaaaa" }),
+      ]);
+      const read = consoleRunHandles(
+        steps,
+        table,
+        consoleCellLabelIndex(
+          labelSnapshot([
+            { entityId: "of:fid1:aaa", ref: "/of:fid1:aaa", entries: [] },
+          ]),
+        ),
+      );
+      // The space was asked and holds nothing for this cell.
+      expect(read[0].labels?.entries).toEqual([]);
+      const unread = consoleRunHandles(
+        steps,
+        table,
+        consoleCellLabelIndex(undefined),
+      );
+      // Nobody asked, which is not the same reading.
+      expect(unread[0].labels).toBeUndefined();
     });
   });
 });
@@ -435,5 +522,344 @@ describe("console/steps CFC and disclosure", () => {
       result("c1", "assign_slug", { status: "ok", slug: "x" }),
     ]);
     expect(steps[0].disclosure).toBeUndefined();
+  });
+});
+
+describe("console/steps provenance", () => {
+  const call = (
+    id: string,
+    name: string,
+    args: unknown,
+  ): HarnessTranscriptMessage => ({
+    role: "assistant",
+    content: "",
+    toolCalls: [
+      {
+        id,
+        type: "function",
+        function: { name, arguments: JSON.stringify(args) },
+      },
+    ],
+  });
+
+  const result = (
+    toolCallId: string,
+    toolName: string,
+    content: unknown,
+  ): HarnessTranscriptMessage => ({
+    role: "tool",
+    toolCallId,
+    toolName,
+    content: JSON.stringify(content),
+  });
+
+  const table: HarnessHandleTable = {
+    type: "cf-harness.handle-table",
+    version: 1,
+    salt: "run",
+    entries: [
+      {
+        token: "cfh:a:aaaaa",
+        kind: "address",
+        ref: "/of:fid1:abc",
+        addressKey: '[null,"of:fid1:abc","space",[]]',
+        schema: { type: "object", properties: { numbers: { type: "array" } } },
+      },
+    ],
+  };
+
+  /** A run that makes a cell, names it, then wires a pattern to read it. */
+  const composed = (wiredAs: string): readonly ConsoleStep[] =>
+    consoleRunSteps([
+      call("c1", "run_pattern", { sourceText: "x" }),
+      result("c1", "run_pattern", { status: "ok", resultRef: "cfh:a:aaaaa" }),
+      call("c2", "assign_slug", { token: "cfh:a:aaaaa", slug: "numbers" }),
+      result("c2", "assign_slug", {
+        status: "ok",
+        slug: "numbers",
+        url: "http://localhost:8000/space/numbers",
+      }),
+      call("c3", "run_pattern", {
+        sourceText: "y",
+        inputs: { source: wiredAs },
+      }),
+      result("c3", "run_pattern", { status: "ok", resultRef: "cfh:a:bbbbb" }),
+    ]);
+
+  it("names the step whose result minted a handle", () => {
+    const handles = consoleRunHandles(composed("cfh:a:aaaaa"), table);
+    const minted = handles.find((handle) => handle.token === "cfh:a:aaaaa");
+    expect(minted?.producedByStep).toBe(0);
+    expect(minted?.slug).toBe("numbers");
+    expect(minted?.url).toBe("http://localhost:8000/space/numbers");
+  });
+
+  it("records every call a handle was passed into", () => {
+    const handles = consoleRunHandles(composed("cfh:a:aaaaa"), table);
+    const minted = handles.find((handle) => handle.token === "cfh:a:aaaaa");
+    expect(minted?.uses).toEqual([
+      { step: 1, toolName: "assign_slug", as: "token" },
+      { step: 2, toolName: "run_pattern", as: "source" },
+    ]);
+  });
+
+  describe("consoleStepArguments()", () => {
+    it("reads an input written as a handle token as a reference", () => {
+      const steps = composed("cfh:a:aaaaa");
+      const handles = consoleRunHandles(steps, table);
+      const args = consoleStepArguments(steps[2], handles);
+      expect(args).toHaveLength(1);
+      expect(args[0].key).toBe("source");
+      expect(args[0].isReference).toBe(true);
+      expect(args[0].token).toBe("cfh:a:aaaaa");
+      expect(args[0].slug).toBe("numbers");
+      expect(args[0].producedByStep).toBe(0);
+    });
+
+    it("reads an input written as a whole link as the same reference", () => {
+      const steps = composed("/of:fid1:abc");
+      const handles = consoleRunHandles(steps, table);
+      const args = consoleStepArguments(steps[2], handles);
+      expect(args[0].isReference).toBe(true);
+      // The link and the token name one cell, so the link resolves to the
+      // handle's slug and origin rather than reading as an unknown address.
+      expect(args[0].token).toBe("cfh:a:aaaaa");
+      expect(args[0].slug).toBe("numbers");
+      expect(args[0].producedByStep).toBe(0);
+    });
+
+    it("reads a cross-space link as a reference", () => {
+      const steps = consoleRunSteps([
+        call("c1", "run_pattern", {
+          sourceText: "y",
+          inputs: { source: "/@did:key:z6MkAbc/of:fid1:xyz" },
+        }),
+        result("c1", "run_pattern", { status: "ok" }),
+      ]);
+      const args = consoleStepArguments(steps[0], []);
+      // No handle resolves it, but a link the run holds nothing for is still a
+      // reference — reading it as a plain value would lose it entirely.
+      expect(args[0].isReference).toBe(true);
+      expect(args[0].ref).toBe("/@did:key:z6MkAbc/of:fid1:xyz");
+    });
+
+    it("resolves a link naming a path inside a held cell to that cell", () => {
+      const steps = composed("/of:fid1:abc/numbers");
+      const handles = consoleRunHandles(steps, table);
+      const args = consoleStepArguments(steps[2], handles);
+      expect(args[0].isReference).toBe(true);
+      expect(args[0].token).toBe("cfh:a:aaaaa");
+      expect(args[0].producedByStep).toBe(0);
+    });
+
+    it("does not attach a handle to a link that merely shares its prefix", () => {
+      const steps = composed("/of:fid1:abcdef");
+      const handles = consoleRunHandles(steps, table);
+      const args = consoleStepArguments(steps[2], handles);
+      // The held cell is `/of:fid1:abc`; this names a different entity.
+      expect(args[0].isReference).toBe(true);
+      expect(args[0].token).toBeUndefined();
+      expect(args[0].ref).toBe("/of:fid1:abcdef");
+    });
+
+    it("reads a prefix-shaped string that is not a link as a value", () => {
+      const steps = consoleRunSteps([
+        call("c1", "run_pattern", {
+          sourceText: "y",
+          inputs: { source: "/of:" },
+        }),
+        result("c1", "run_pattern", { status: "ok" }),
+      ]);
+      const args = consoleStepArguments(steps[0], []);
+      expect(args[0].isReference).toBe(false);
+    });
+
+    it("puts a label only on the argument its path names", () => {
+      // An invocation context is recorded for a sandbox operation, so its
+      // label paths are rooted at that operation's own arguments.
+      const labelled: HarnessCfcInvocationContext = {
+        type: "cf-harness.cfc-invocation-context",
+        version: 1,
+        sequence: 1,
+        runId: "r",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        toolId: "bash",
+        toolOutputId: createToolOutputId("r", "bash", 1),
+        operation: "shell",
+        cfcEnforcementMode: "enforce-explicit",
+        cwd: "/workspace",
+        runManifest: { present: false },
+        inputs: {},
+        cfcInputLabels: {
+          version: 1,
+          entries: [
+            {
+              path: ["command"],
+              label: {
+                confidentiality: [
+                  {
+                    type:
+                      "https://commonfabric.org/cfc/atom/PromptSlotInfluence",
+                    version: 1,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      };
+      const steps = consoleRunSteps(
+        [
+          call("c1", "bash", { command: "cat x", cwd: "/workspace" }),
+          {
+            role: "tool",
+            toolCallId: "c1",
+            toolName: "bash",
+            content: JSON.stringify({ status: "ok" }),
+            resultRef: {
+              type: "cf-harness.tool-result-ref",
+              outputId: createToolOutputId("r", "bash", 1),
+              toolId: "bash",
+              runId: "r",
+            },
+          },
+        ],
+        [],
+        [],
+        [labelled],
+      );
+      const args = consoleStepArguments(steps[0], []);
+      const command = args.find((argument) => argument.key === "command");
+      const cwd = args.find((argument) => argument.key === "cwd");
+      expect(command?.confidentiality).toEqual(["PromptSlotInfluence"]);
+      // The other argument carried no label, and must not borrow this one.
+      expect(cwd?.confidentiality).toEqual([]);
+    });
+
+    it("keeps a label whose root names no argument of the call", () => {
+      // A tool taking `path` may be mediated as `args`, so the label root
+      // names nothing the model wrote. Dropping the atom would lose an
+      // observed fact; it governs the call instead.
+      const labelled: HarnessCfcInvocationContext = {
+        type: "cf-harness.cfc-invocation-context",
+        version: 1,
+        sequence: 1,
+        runId: "r",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        toolId: "read_file",
+        toolOutputId: createToolOutputId("r", "read_file", 1),
+        operation: "command",
+        cfcEnforcementMode: "enforce-explicit",
+        cwd: "/workspace",
+        runManifest: { present: false },
+        inputs: {},
+        cfcInputLabels: {
+          version: 1,
+          entries: [
+            {
+              path: ["args"],
+              label: {
+                confidentiality: [
+                  {
+                    type:
+                      "https://commonfabric.org/cfc/atom/PromptSlotInfluence",
+                    version: 1,
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      };
+      const steps = consoleRunSteps(
+        [
+          call("c1", "read_file", { path: "notes.md" }),
+          {
+            role: "tool",
+            toolCallId: "c1",
+            toolName: "read_file",
+            content: JSON.stringify({ ok: true }),
+            resultRef: {
+              type: "cf-harness.tool-result-ref",
+              outputId: createToolOutputId("r", "read_file", 1),
+              toolId: "read_file",
+              runId: "r",
+            },
+          },
+        ],
+        [],
+        [],
+        [labelled],
+      );
+      const args = consoleStepArguments(steps[0], []);
+      expect(args[0].key).toBe("path");
+      expect(args[0].confidentiality).toEqual(["PromptSlotInfluence"]);
+    });
+
+    it("reads a literal input as a value rather than a reference", () => {
+      const steps = consoleRunSteps([
+        call("c1", "run_pattern", { sourceText: "x", inputs: { bill: 100 } }),
+        result("c1", "run_pattern", { status: "ok" }),
+      ]);
+      const args = consoleStepArguments(steps[0], []);
+      expect(args[0].isReference).toBe(false);
+      expect(args[0].value).toBe(100);
+    });
+
+    it("reads a handle-taking tool's own argument as a reference", () => {
+      const steps = composed("cfh:a:aaaaa");
+      const handles = consoleRunHandles(steps, table);
+      const args = consoleStepArguments(steps[1], handles);
+      const token = args.find((argument) => argument.key === "token");
+      expect(token?.isReference).toBe(true);
+      expect(token?.producedByStep).toBe(0);
+    });
+
+    it("carries the shape the pattern that made the cell declared", () => {
+      const steps = composed("cfh:a:aaaaa");
+      const handles = consoleRunHandles(steps, table);
+      const args = consoleStepArguments(steps[2], handles);
+      expect(args[0].schema).toEqual(table.entries[0].schema);
+    });
+
+    it("takes an argument's labels from the handle it resolved to", () => {
+      const steps = composed("cfh:a:aaaaa");
+      const handles = consoleRunHandles(
+        steps,
+        table,
+        consoleCellLabelIndex(
+          labelSnapshot([secretCell("of:fid1:abc", "/of:fid1:abc")]),
+        ),
+      );
+      const args = consoleStepArguments(steps[2], handles);
+      expect(args[0].labels?.confidentiality).toEqual(["Secret"]);
+    });
+
+    it("labels an argument written as a whole link the run holds no handle for", () => {
+      const steps = composed("/of:fid1:zzz");
+      const args = consoleStepArguments(
+        steps[2],
+        [],
+        consoleCellLabelIndex(
+          labelSnapshot([secretCell("of:fid1:zzz", "/of:fid1:zzz")]),
+        ),
+      );
+      expect(args[0].token).toBeUndefined();
+      expect(args[0].labels?.confidentiality).toEqual(["Secret"]);
+    });
+
+    it("labels a link naming a path inside a document from the document", () => {
+      const steps = composed("/of:fid1:zzz/numbers");
+      const args = consoleStepArguments(
+        steps[2],
+        [],
+        consoleCellLabelIndex(
+          labelSnapshot([secretCell("of:fid1:zzz", "/of:fid1:zzz")]),
+        ),
+      );
+      // The labels are stored for the document, and the path resolves to it.
+      expect(args[0].ref).toBe("/of:fid1:zzz/numbers");
+      expect(args[0].labels?.confidentiality).toEqual(["Secret"]);
+    });
   });
 });

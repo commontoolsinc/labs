@@ -252,6 +252,18 @@ export type ServedEventFailureOutcome =
     blockedBy: string;
   }
   | {
+    /** Mark/effects atomicity (events.md §4, RULED 2026-08-27): the
+     * dispatched handler's BODY did not run (the runner's
+     * argument-did-not-resolve skip), so the transaction — carrying the
+     * pre-stamped `consequenced` mark and nothing else — was WITHDRAWN
+     * instead of sealed. No consequence: the entry stays pending and the
+     * drain re-delivers it; the deferral threshold hardens a permanently
+     * unresolvable argument into the visible §5 DROP notice. */
+    kind: "deferred";
+    cause: "handler-not-run";
+    message: string;
+  }
+  | {
     kind: "deferred";
     cause: "delivery-failure";
     role: "failed-head";

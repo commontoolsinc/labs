@@ -271,6 +271,60 @@ export function dropQueuedEvent(
   notifyEventDropped(state, event, reason, servedKind, options);
 }
 
+/**
+ * events.md §2's per-space ARRIVAL-ORDER BARRIER, carried by a deferral
+ * (the in-queue sweep `failHeadEventLoadPark` performs in facade.ts,
+ * shared here by the deferral arms that live in this module — the
+ * handler-not-run withdrawal and the piece-start deferral): when a
+ * served event DEFERS — its durable entry left pending for a later
+ * drain — every later-arrived durable served entry queued behind it in
+ * the SAME SPACE defers with it, or a later arrival's consequence lands
+ * ahead of an earlier one (the b01 register class, re-demonstrated on
+ * the handler-not-run withdrawal as review-6459 F1: the drain queues a
+ * pass's pending entries together, so a healthy follower dispatches —
+ * and SEALS — right behind the deferred head). The exclusions mirror
+ * the load-park arm's, deliberately: cross-space queue neighbours
+ * (§2's order is per-space) and LT1 in-process copies (`served` with
+ * no `streamEntry`) — a running event's same-wave cascade children,
+ * not later arrivals. The enqueueSeq guard scopes the sweep to LATER
+ * arrivals, which the facade arm gets implicitly (its failing event is
+ * the un-dispatched queue head, so everything queued is later): these
+ * arms run after the deferring event left the queue (dispatch) or off
+ * the head slot (piece load), and an earlier event requeued by a
+ * concurrent commit verdict must not be barred behind an event that
+ * arrived after it. Sweeping is order-safe by construction — a swept
+ * entry re-drains in arrival order on a later pass — so a spurious
+ * sweep costs one deferral round, never disorder.
+ */
+export function deferLaterSameSpaceServedEvents(
+  state:
+    & Pick<SchedulerEventQueueState, "runtime" | "eventQueue">
+    & Partial<Pick<SchedulerEventQueueState, "releaseLineageEvent">>,
+  behind: Pick<QueuedEvent, "id" | "eventLink" | "enqueueSeq">,
+  deferralReason: string,
+): void {
+  for (const later of [...state.eventQueue]) {
+    if (later.eventLink.space !== behind.eventLink.space) continue;
+    if (later.served?.streamEntry === undefined) continue;
+    if (later.enqueueSeq <= behind.enqueueSeq) continue;
+    dropQueuedEvent(
+      state,
+      later,
+      `Event deferred: held behind ${behind.id}, ${deferralReason}; ` +
+        `later-arrived events wait behind it`,
+      "deferred",
+      {
+        quiet: true,
+        servedOutcome: {
+          kind: "deferred",
+          cause: "arrival-barrier",
+          blockedBy: behind.id,
+        },
+      },
+    );
+  }
+}
+
 function findEventHandler(
   handlers: readonly [NormalizedFullLink, EventHandler][],
   eventLink: NormalizedFullLink,
@@ -578,8 +632,25 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
             `Event dropped: no handler registered for ${args.eventLink.id} and its piece could not be started`,
             queuedEvent.served !== undefined ? "deferred" : "dropped",
           );
+          if (queuedEvent.served !== undefined) {
+            // A deferral carries the drain's arrival-order barrier
+            // (events.md §2; review-6459 F1's sibling arm), exactly as
+            // the handler-not-run withdrawal and the facade's load-park
+            // arm do.
+            deferLaterSameSpaceServedEvents(
+              state,
+              queuedEvent,
+              "whose piece could not be started",
+            );
+          }
         }
       } catch (error) {
+        // Unlike the arms above, this one is reachable with the event
+        // ALREADY SETTLED: the finalOutcomeNotified/queue-membership
+        // recheck runs after the load await resolves, and a rejection
+        // never crosses it. A settled head holds no barrier — its
+        // disposition was someone else's (e.g. a lineage drop mid-load).
+        const alreadySettled = queuedEvent.finalOutcomeNotified === true;
         dropQueuedEvent(
           state,
           queuedEvent,
@@ -588,6 +659,14 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           }`,
           queuedEvent.served !== undefined ? "deferred" : "dropped",
         );
+        if (!alreadySettled && queuedEvent.served !== undefined) {
+          // Same deferral disposition as the arm above — same barrier.
+          deferLaterSameSpaceServedEvents(
+            state,
+            queuedEvent,
+            "whose piece failed to start",
+          );
+        }
       } finally {
         state.queueExecution();
       }
@@ -920,8 +999,13 @@ export function preflightQueuedEventDependencies(state: {
   // no instance of that node — the node is node-level CLEAN (it ran for
   // the watchers), so the invalid-upstream pass above found nothing, and
   // the handler would read the actor's MISSING instance (its argument
-  // fails the schema, the run is silently skipped, the entry marked
-  // consequenced with no error — silent event loss). B7 made cleanliness
+  // fails the schema and the run is skipped — which, until the
+  // mark/effects-atomicity fix below in `finalize`, sealed the entry
+  // consequenced with no error: silent event loss. The finalize now
+  // withdraws a skipped served dispatch, so the residual cost of a miss
+  // here is a deferral-and-re-drain cycle, not a lost event — this
+  // preflight remains what makes the FIRST delivery succeed). B7 made
+  // cleanliness
   // per instance: re-arm the fanned-out nodes in the handler's closure
   // whose instance for THIS actor is not current, materializing her own
   // instance (as her transient demand) before the handler runs. The
@@ -1510,6 +1594,51 @@ export async function dispatchQueuedEvent(state: {
         runFinalCommitCallback();
         tx.abandonStagedWork(eventAbandonError("handler threw"));
       }
+      return;
+    }
+
+    // Mark/effects atomicity (events.md §4, RULED 2026-08-27 — the a04
+    // write-side member): a SERVED dispatch whose handler body DID NOT
+    // RUN must not seal. The dispatch stamper wrote the entry's
+    // `consequenced` mark into this tx BEFORE the body ran
+    // (space-server.ts), so sealing the skipped run would commit a 1-op
+    // mark-only consequence — the entry permanently consumed with zero
+    // effects and no error (a04's seqs 53/56: two Create clicks lost to
+    // a transient argument-resolution failure). Withdraw the whole tx
+    // instead: the entry stays pending-unconsequenced, the drain
+    // re-delivers it (a drain copy's plain-deferral arm releases the
+    // in-flight guard and arms the rescan; the 8-deferral threshold
+    // hardens a permanently unresolvable argument into the visible §5
+    // DROP notice), and the retried handler's cause-derived idempotent
+    // writes converge. An LT1 in-process copy carries no onFailure —
+    // its abort alone leaves the durable entry unmarked and the next
+    // wave's drain delivers it once, WITH a streamEntry (C8b).
+    // Client/OFF dispatches carry no mark and keep the silent skip.
+    if (served !== undefined && tx.dispatchedHandlerNotRun !== undefined) {
+      const reason = tx.dispatchedHandlerNotRun.reason;
+      if (tx.status().status === "ready") {
+        tx.abort(
+          new Error(`served handler did not run: ${reason}`),
+        );
+      }
+      reportServedEventFailure(served, {
+        kind: "deferred",
+        cause: "handler-not-run",
+        message: reason,
+      });
+      // The withdrawal is a deferral, and a deferral carries the
+      // drain's arrival-order BARRIER (events.md §2; review-6459 F1):
+      // the drain queues a pass's pending entries together, so
+      // same-space followers already sit behind this head and would
+      // dispatch — and SEAL — next, landing a later arrival's
+      // consequence ahead of the withdrawn entry's re-drain (the b01
+      // overtake: durable log ["B","A"] against arrival [a1, b1]).
+      deferLaterSameSpaceServedEvents(
+        state,
+        queuedEvent,
+        `whose served handler did not run (${reason})`,
+      );
+      runFinalCommitCallback();
       return;
     }
 

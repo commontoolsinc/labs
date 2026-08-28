@@ -5279,13 +5279,34 @@ supply; OW29/OW32/OW34 closed):
   starvation, so the entry now names that product charge, not a test
   flake). That 2026-08-26 census — THREE patterns entries: default-app's
   reload STEP, lunch-poll-vote's FILE entry, and the topic-board
-  pivot-baseline STEP — is now TWO: #6316 (2026-08-26) lifted the
-  topic-board STEP with its content-addressed arrival-witness fix, without
-  updating this sentence. **The current census (2026-08-27) is TWO patterns
-  entries: default-app's reload STEP and lunch-poll-vote's FILE entry.**
-  BOTH were campaigned for a lift on 2026-08-27 and NEITHER lifted (the
-  STEP-ENTRY and LUNCH-POLL blocks below). They gate the FLIP — whose bar
-  is the list EMPTY — not the land. Rows, one per
+  pivot-baseline STEP — fell to TWO with #6316 (2026-08-26, the topic-board
+  STEP lifted by its content-addressed arrival-witness fix, without updating
+  this sentence), and both of those two were campaigned for a lift on
+  2026-08-27 and neither lifted (the STEP-ENTRY and LUNCH-POLL blocks
+  below), then campaigned AGAIN the same day under the newly ruled
+  local-plus-CI-probe bar (the PHASE-3 block at the end of this row) — where
+  they split for OPPOSITE reasons: the default-app step passed BOTH halves
+  of its own evidence (10/10 local, and a GREEN direct-CI run of the exact
+  step) and was held only by a co-resident file's red in the same shard,
+  while lunch-poll-vote passed its local half 8/8 and its probe went red at
+  the probed surface for the second campaign running. **The current census
+  (2026-08-28, after the lunch lift PR's three probe boards) is ONE patterns
+  entry: lunch-poll-vote's FILE entry, RESTORED.** default-app's reload
+  STEP LIFTED 2026-08-28 — the owner ruled the SURFACE reading of the
+  probe bar, under which its evidence was already complete (the LIFT block
+  at the end of this row). lunch-poll-vote's lift was ATTEMPTED the same
+  day on the probe's own artifact — the park root-caused into the
+  closure-replication write path, two supplier geometries fixed red-first
+  on the PR — and every one of the PR's THREE probe boards went red at the
+  probed surface (runs 33160430927, 33164596936, 33165960083; four probes
+  across the arc, counting the pre-PR phase-3 board 33138358110 that opened
+  it), the last exposing the still-open third geometry (the supplier
+  compile mid-flight), so the entry is restored carrying the accumulated
+  map (the lunch ROOT-CAUSE, PROBE-2/3/4 blocks at the end of
+  this row). The FLIP's bar remains a green ON lane and every list empty;
+  this entry is again what holds the list (the co-resident `:133` debt the
+  probe surfaced was paid by #6477 — the OBSERVATION's FIXED paragraph
+  below). Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
   lifts:
   - **OW45 — the profile piece's PROGRAM-materialization write path
@@ -5381,7 +5402,12 @@ supply; OW29/OW32/OW34 closed):
     and loads (4.3–5.9) recorded per run, `warmRequests` 4–6 per run
     in the live stats. The row's REMAINING charge: it gates
     `integration/default-app.test.ts`'s "persist and reload every
-    rapidly created notebook note" STEP — the OW51 fix (2026-08-21)
+    rapidly created notebook note" STEP — **which is NO LONGER
+    SKIP-LISTED as of 2026-08-28 (OW45's LIFT block: 10/10 local plus a
+    green direct-CI probe of that exact step), so the ON lanes run it and
+    any recurrence surfaces as a lane red rather than behind a skip.
+    Whether that closes this charge is this row's own call, flagged not
+    taken** — the OW51 fix (2026-08-21)
     lifted that file's FILE skip and UNMASKED this same
     reload-durability surface there — the reloaded notebook's
     `noteCount` reads `undefined` past the step's wait (1/10 local ON
@@ -6209,7 +6235,113 @@ supply; OW29/OW32/OW34 closed):
     a pointer only one session can load is the unstated
     identity-assignment semantic. Fixing L3 alone would NOT green the
     step (the verdict is L1+L2); fixing L1/L2 alone leaves durable
-    poison pointers. **a04 RECLASSIFIED — a DIFFERENT member, the
+    poison pointers.
+    **RULED 2026-08-27 (owner, coordination chat) — L3 and L2; L1 remains
+    an OPEN owner question (no ruling received; flagged, not filled).**
+    L3 ruled (a), verbatim: keyless identities must NEVER land durably
+    (honor the existing contract; the transformer hoists all
+    source-authored lift()/handler() code to cf:module — CT-1644/CT-1655
+    — so the keyless population is runtime-built pattern VALUES whose
+    PRODUCING CODE is module-addressed; "nothing keyless should ever
+    need loading"). Recovery semantics: reactive producers re-derive on
+    demand (run the producing lift); handler-created-outliving-session
+    is out of contract (must instantiate from content-addressed
+    artifacts) — handler-replay is NOT built, deferred to the
+    codeless-rebuild arc (seed: `docs/plans/codeless-graph-rebuild-seed.md`).
+    L2 ruled PUNT, verbatim: optimistic navigateTo stands even when the
+    authoritative branch computes no intent — the client navigates, so
+    be it; the default-app step must be robust to it (the step's
+    navigation-robustness fix is the companion PR on
+    `claude/server-exec-v2-default-app-test`).
+    **LANDED (keyless close-out PR-1, branch
+    `claude/server-exec-v2-keyless-guard`): the L3(a) guard, all
+    writers.** A THIRD writer beyond the diagnosis's two fell out of
+    the build: the storage-boundary serializer itself
+    (`patternToEncodableForm`) — the mint sets the value's forward
+    entry ref, so the designed "no entry ref → full graph" fallback
+    stopped firing and every boundary write of a minted pattern VALUE
+    emitted the keyless ref. Landed: (1) boundary serializer treats a
+    keyless ref as no-ref (full graph); (2) `Runner.setup` skips the
+    durable `patternIdentity`/`patternSetupIdentity` stamps for
+    keyless refs — keyless pieces genuinely carry no pointer, the
+    verdict `getPatternIdentityRef`'s own doc always claimed; the
+    `onPatternInstantiated` report deliberately does NOT share that
+    gate (it reports the SESSION pointer, keyless included — it is a
+    session-side reporting channel, and cf-harness's stranded-piece
+    guard consumes exactly the keyless evidence via `keylessSince`;
+    coupling it to the stamp made that guard fail open, caught on the
+    board by the pre-existing `fabric-instantiations` pin and now
+    pinned report-flows-AND-store-stays-clean in the scan test);
+    (3) `substituteOpPatternRefs` no longer
+    substitutes the keyless `$patternRef` sentinel — the durable inputs
+    doc carries the full embedded graph and the instantiating session
+    registers a session-side resolution hint keyed by the inputs doc,
+    so CT-1812 stays sealed in-session; (4) `setArtifactEntryRef` lets
+    a REAL ref replace a keyless one (the mint used to permanently
+    shadow a later-indexed real identity — first-write-wins); (5) the
+    CT-1923 roll-forward's refuses-when-running-ref-also-keyless arm
+    now converges the unloadable durable pointer to the running VALUE's
+    module-addressed PRODUCER (`resolveProducerEntryRef`: first real
+    entry ref up the derivation chain, as many steps as recorded); a
+    from-scratch runtime-built value has NO in-memory producer link
+    (frames carry the building code's `implementationIdentity` but
+    nothing records it per-artifact, and a lift-module identity would
+    not be a loadable PATTERN identity anyway) — that shape stays a
+    tolerated orphan, `keyless-running-no-producer` at debug, nothing
+    written; (6) legacy tolerance for pre-guard durable keyless
+    pointers: watcher and start walk record
+    `legacy-keyless-pattern-pointer` at debug (not
+    `pattern-load-error`), `loadPatternByIdentity` short-circuits
+    (storage cannot hold a session identity), the start walk reports
+    not-started instead of rejecting; (7) mint-site tripwire
+    (`keyless-mint-missing-association` + `keylessMintAnomalies`
+    counter): a module-indexed pattern (source path present) reaching
+    the mint is the missing-association bug surfacing — full runner
+    battery ran silent. The build also surfaced — and replaced — THREE
+    in-session roles the durable keyless stamps had been quietly
+    playing, each now served session-side (dies with the session, the
+    contract's own shape): (i) the pattern POINTER for
+    separate-start/resume/stop-restart flows and (ii) the
+    setup-completion MARKER for `storedSetupMarker`'s reuse decision —
+    both via `Runner.sessionPatternPointers`, written exactly where the
+    stamps are skipped; and (iii) the intra-session CHANGE SIGNAL for
+    RUNNING sub-pieces: a lift re-deriving its returned pattern used to
+    reach the running piece's swap machinery THROUGH the stamp (setup
+    wrote the pointer, the meta watcher fired, swapToPattern replaced
+    the graph) — now a session swap channel
+    (`Runner.sessionPatternSwaps`) carries the live value to the
+    watcher's own swap closure with the same guards; real patterns
+    keep the durable-stamp path byte-for-byte. Test pins that read the
+    durable stamp for hand-built pieces were adjusted to the contract
+    (cfc-boundary, patterns-lift/handlers diagnostics-identity source,
+    scheduler-event-receipts' Decision-13 discriminator → setup's
+    result-schema meta). Pinned red-first in
+    `packages/runner/test/keyless-never-durable.test.ts` (raw-sqlite
+    byte scan across all three writer paths; producer convergence;
+    start-walk tolerance; tripwire — 4 of 5 red at base, the
+    legacy-heal pin being a regression guard for the pre-existing
+    roll-forward arm).
+    **FLAGGED OPEN SEMANTIC (found by the close-out build, owed an
+    owner ruling — flagged, not filled): rejected-consequence
+    re-derivation for computation-produced children.** The
+    `child-pattern-start-ownership.test.ts` convergence pin's
+    mechanism WAS the ruled-out churn: pre-guard every re-derivation
+    of a lift-produced child durably re-stamped a fresh per-source
+    `keyless:` pointer in its own setup tx, a rejected handing commit
+    cascaded narrowly, and the child's meta watcher converged the
+    graph to whichever stamp stood. Post-guard the handing run's
+    durable footprint is its piece-instantiate tx, so a rejected
+    handing commit cascades through every subsequent run
+    ("pending dependency not resolved"), durable and local state roll
+    back COHERENTLY to the pre-bump child, the error callbacks
+    release the child and clear the materialization memo — and then
+    nothing re-derives it (the producing lift's inputs are
+    unchanged; the trigger that used to exist was the stamped-pointer
+    watch). Needed: a re-run trigger for a computation whose
+    consequence commit was rejected — the client-side cousin of the
+    §3d mark-vs-effects question above. The end-to-end pin is
+    `it.ignore`d with this flag inline; it lifts on the ruling, not
+    on a build. **a04 RECLASSIFIED — a DIFFERENT member, the
     WRITE-side loss family (lunch third-member kin), not r06/r09:**
     all 7 create events durably appended and marked
     `consequenced: true`, but clientSeq 10 and 11's consequences are
@@ -6225,6 +6357,145 @@ supply; OW29/OW32/OW34 closed):
     running`) did not and could not fire in any of the three reds —
     `deferred-start-catchup` was 0 campaign-wide — so these reds are
     decisively NOT the catchup-resolved-without-running variant.
+    **THE a04 FAMILY ROOT-CAUSED AND FIXED — mark/effects atomicity,
+    RULED 2026-08-27 (owner) and built the same day (branch
+    `claude/server-exec-v2-mark-atomicity`). The ruling:** atomic with
+    all its effects — contribution-level all-or-nothing. If ANY effect
+    op of a consequence contribution is withdrawn or requeued by the
+    wave, the MARK op goes with it — the entry stays
+    pending-unconsequenced, the standard re-drain re-delivers, and the
+    retried handler's cause-derived (idempotent) writes converge. (α)
+    preserved: the mark still commits exactly once, only never without
+    its effects. Handler-launched patterns: launch writes are
+    cause-derived/idempotent; ON's run-until-first-idle analog is the
+    serving cycle's settle — no kickoff logic needed or wanted.
+    **The split point, store-proven (evidence before code): NOT the
+    wave.** commitWave already treats an event-handler contribution
+    atomically (whole-contribution requeue, wave.ts; per-doc drops
+    apply only to derivation kind; the batch build never strips a
+    handler contribution's ops; the mark rides the handler's own tx,
+    runtime.ts `streamEntry` doc + space-server.ts's stamper, written
+    BEFORE the body runs). The wave was HANDED a 1-op contribution:
+    the split is the DISPATCH-side skip at runner.ts's stream path —
+    `readJavaScriptArgument` → `isValidArgument === false` → "action
+    argument is undefined (potential schema mismatch) -- not running"
+    logged, handler body skipped, and the tx — holding the
+    pre-stamped mark and nothing else — sealed and committed cleanly.
+    a04's toolshed.log carries exactly TWO of those ERROR lines
+    (14:34:01.511 and .725, the two notebook create handlers'
+    `$ctx`), one per lost event; `events.processed 15` vs
+    `appended 14` shows clientSeq 10's FIRST run silently requeued
+    (its cause-derived note materialization surviving as the seq-52
+    orphan sets, no consequence_of) before the REDISPATCH hit the
+    skip mid-churn; clientSeq 11 skipped on its first dispatch. The
+    class was already NAMED in prose (scheduler/events.ts's B7
+    comment, scheduler/facade.ts's preflight doc: "its argument fails
+    the schema, the run is silently skipped, the entry marked
+    consequenced with no error — silent event loss"); B7 guarded one
+    trigger (the per-actor fan-out instance), a04 is a second trigger
+    (serving-replica view churn on the handler's `$ctx` docs) through
+    the same unguarded skip. **The fix (the ruled substance adapted to
+    the verified point — mark durability ⇒ effects durability):** the
+    runner records the skip on the tx
+    (`dispatchedHandlerNotRun`), and the scheduler's event finalize
+    WITHDRAWS a served dispatch's tx instead of sealing it — aborted,
+    reported `{kind: "deferred", cause: "handler-not-run"}`, counted
+    `events.handlerNotRunDeferrals` (serving-loop.md §7) — so the
+    entry stays pending and re-drains (the 8-deferral threshold
+    hardens a permanently unresolvable argument into the visible §5
+    DROP notice; no stream wedge). An LT1 copy withdraws through the
+    abort alone (no onFailure): the batch marks only a surviving lt1
+    run, the entry lands unmarked, the drain re-delivers with a
+    `streamEntry`. Client/OFF dispatches carry no mark and keep the
+    silent skip. Spec: events.md §5's new handler-body-did-not-run
+    bullet (RULED 2026-08-27). **Pin (red-first, watched):**
+    `executor-events-down.test.ts` "mark/effects atomicity at the
+    DISPATCH layer" — a served event whose handler `$ctx` requires a
+    number the argument doc does not yet hold: at the pre-fix base
+    the entry consequenced with ZERO effects (the a04 1-op shape —
+    watched red at the `consequenced not.toBe(true)` assert); with
+    the fix the entry stays pending through counted deferrals, the
+    healing write re-drains it, and mark + effects land in ONE
+    derived commit exactly once (α run-count witness: the
+    non-idempotent bump reads exactly 1; exactly one consequence-
+    carrying commit; the committing batch holds the sidecar mark op
+    AND the argument write together). Mutation kill: reverting the
+    finalize withdrawal (= the pre-fix base) reds the pin at the same
+    assert. Full events-down suite green with the fix (29 steps).
+    **NAMED FOLLOW-UP, not built (owner, verbatim, 2026-08-27): the
+    mark may duplicate the result-cell write-once guarantee** — "the
+    idea was that all handlers write result cells (even if the value
+    is undefined), and that CAS for that is the write-once guarantee.
+    but if that means we don't need the mark after all, consider
+    marking that for follow-up improvements rather than expanding
+    scope." If mark retirement is taken up, the drain's
+    delivered-scan would key on the handling receipt/result cell
+    (spec §7.6's cause-derived receipt address) instead of the
+    entry's `consequenced` field — recorded here as the candidate
+    key, not a design. Also recorded, not owed by this fix: WHY the
+    redispatch's argument read failed mid-churn (the transient
+    resolution failure on ctx docs the first run's withdrawal left
+    behind) is its own diagnosis — the atomicity fix makes every such
+    transient recoverable by re-drain instead of a permanent loss.
+    **FIX ROUND (independent review of PR #6459, 2026-08-27): F1
+    landed — the withdrawal carries §2's arrival-order barrier.** The
+    review DEMONSTRATED (213 ms probe) that the new deferral arm let
+    a later-arrived same-space served entry overtake the withdrawn
+    head — the b01 class re-opened at a new arm: durable log
+    ["B","A"] against arrival [a1, b1], b1 sealing while a1 was
+    pending. The withdrawal now sweeps later-arrived durable served
+    followers out of the scheduler queue with
+    `{cause: "arrival-barrier", blockedBy}` exactly as
+    `failHeadEventLoadPark` does (a shared events.ts helper,
+    enqueueSeq-guarded because these arms do not fail at the
+    un-dispatched queue head; the piece-start deferral arms — the
+    review's named sibling gap, same no-sweep shape, same disposition
+    — carry the same sweep). Pins red-first, watched: the ordering
+    pin inverts the review's probe (executor-events-down "the
+    handler-not-run withdrawal carries the arrival-order BARRIER" —
+    pre-fix/mutation red at stored log ["B"] while a1 pends; fixed:
+    b1 barrier-deferred and the healed re-drain lands ["A","B"]); a
+    unit pin (scheduler-event-identity) drives both piece-start
+    failure modes and the exclusions (cross-space neighbours and LT1
+    copies stay queued). Mutations killed arm by arm: finalize sweep
+    disabled → ordering pin red at the ["B"] overtake with the piece
+    sweeps still active; piece sweeps disabled → unit pin red with
+    the finalize sweep still active. The barrier's MID-PASS half
+    landed with it: the sweep can only hold entries already queued,
+    and a withdrawal landing while the drain pass awaits a later
+    sidecar's sync let the pass queue the next arrival behind the
+    barrier's back (the load-park fix's P1 gap, reopened for this
+    cause) — the plain-deferral arm now sets
+    `#loadParkDeferredInPass` for handler-not-run, and the drain's
+    existing past-every-await check stops the pass. RESIDUAL,
+    recorded (scoped-verify SV1): the piece-start (cold-view)
+    deferral arms carry NO cause, so they never set the pass flag —
+    their in-queue half is swept by the shared helper, but a
+    piece-start deferral landing mid-pass keeps the pre-existing
+    mid-pass window (their deferrals usually land outside a pass;
+    same one-flag shape if ever taken up). Deterministic
+    pin, red-first (watched): the load-park mid-pass construction —
+    pass held at B's sidecar sync, A2's withdrawal counted inside the
+    hold, gate healed before release — pre-fix durable log
+    ["A","B","A"], fixed ["A","A","B"]; the watched red is the
+    mutation evidence (that tree was the final code minus exactly the
+    flag-set). **F2 landed** — the terminal §5
+    notice branches on the final deferral's cause ("handler did not
+    run after N withdrawn dispatches"; the old
+    no-runnable-handler/load-attempt boilerplate was false in both
+    clauses for this class), red-first through the full 8-deferral
+    budget with THIS cause — which also closes the review's stated
+    gap that the threshold path was code-traced, not test-run. **F3,
+    recorded shape, not built:** a deferral that heals below the
+    threshold leaves its `#eventDeferrals` entry for the tenure, and
+    `#eventDeferrals.size > 0` arms `#eventScanOwed` on every
+    admitted commit — a per-commit drain rescan over an (empty)
+    pending set. Pre-existing for every plain-deferral cause;
+    handler-not-run makes heal-after-defer the COMMON case, so the
+    residue now arms routinely. Cheap close if taken up: delete the
+    eventId on successful seal. **F4: no change owed** — the
+    atomicity pin's final batch assert is corroborative; the teeth
+    are the α run-count and the single consequence-carrying commit.
     Sibling entry, landed mid-review: #5744 (lunch-poll profile-first
     join) re-skipped `integration/lunch-poll-vote.test.ts` as a FILE
     entry on this row's b04 signature — its recorded reds PREDATE the
@@ -6481,6 +6752,37 @@ supply; OW29/OW32/OW34 closed):
     shards), and the honest reading is that the lift bar for this file
     should require a green DIRECT CI unskip probe, not a local count alone.
     That is a bar change, so it is the owner's call, flagged not taken.
+    **RULED 2026-08-27 (owner: "agreed") — THE BAR CHANGE IS TAKEN, AND IT
+    BINDS EVERY ON-SKIP ENTRY, NOT ONLY THIS FILE.** An entry lifts only on
+    BOTH (1) its own local campaign bar AND (2) a GREEN DIRECT-CI UNSKIP
+    PROBE: a commit on the lift branch that removes the entry's guard, a CI
+    board that demonstrably RAN the un-skipped surface, and that probed lane
+    green. A local campaign is evidence about the box it ran on; only the
+    lane is evidence about the lane. Both of this row's entries carry a
+    member with exactly that profile (the fifth-face load-park member: local
+    control 0/12 against CI 2/2 red; this file's 2026-08-26 split: local 0/8
+    against CI 1/1 red), so the probe is not ceremony — it is the only
+    observation that has ever caught them. A RED probe WITHDRAWS that
+    entry's lift: the signature is captured from the job log and classified
+    against this row's recorded members, and any sibling entry's lift stands
+    or falls on its own probe. No rerun-looping — one probe board,
+    classified honestly.
+    **SURFACE READING — RULED 2026-08-28.** The bar was ruled hours before
+    its first use, and the case that distinguishes its two readings arrived
+    immediately: the default-app probe's own step passed while its shard went
+    red on a CO-RESIDENT file the entry has nothing to do with. The
+    coordinator's recommendation — that requirement (2) binds the PROBED
+    SURFACE, so a green probed surface satisfies it, and a co-resident
+    failure is a separate defect carrying its own accountability rather than
+    a veto on an unrelated entry's lift — went to the owner, who ruled
+    **"agreed with your recommendations, proceed" (2026-08-28)**. So
+    requirement (2) reads: the CI board demonstrably RAN the un-skipped
+    surface and THAT SURFACE was green. Two things the reading does not
+    license, both live: a co-resident red is not thereby forgiven — it is a
+    defect owed its own row, seat, or entry (the flip's bar is a green ON
+    lane, not merely an empty skip list, so unlisted co-resident debt still
+    blocks the flip); and a probe that reds AT THE PROBED SURFACE still
+    withdraws the lift exactly as written above.
     **THE ENSURE-ON PROFILE-SURFACE MEMBER ROOT-CAUSED AND FIXED
     2026-08-25 (PR #6312) — the n=3 side probe's "create surface never renders"
     shape and the #6248 board's profile-shard family, reproduced
@@ -6556,7 +6858,17 @@ supply; OW29/OW32/OW34 closed):
     reading: a DROPPED contribution leaves NO basis rows
     (`#basisRowsFor` covers survivors only), so "its own reads re-run
     it when fresh state lands" is structurally false for a first-ever
-    run that gets dropped. (ii) The client and server auto-updaters
+    run that gets dropped — the D3 basis-row gap.
+    **D3 DECOUPLED from the a04 event family (2026-08-27, the
+    mark/effects-atomicity pass):** for HANDLER EVENTS the re-arm is
+    the RE-DRAIN, not basis rows — the durable pending-unconsequenced
+    entry is itself the retry record, so a withdrawn or never-run
+    handler dispatch needs no basis row to run again (the atomicity
+    fix keeps the entry pending exactly so that mechanism carries the
+    recovery). D3 therefore stays scoped to REACTIVE first-runs with
+    no durable retry record behind them — the wish case above, where
+    a dropped first-ever derivation leaves neither basis rows nor any
+    entry to re-drain. (ii) The client and server auto-updaters
     ping-pong the ensure-created root's summary-index child between
     its closure-embedded pattern identity and the standalone compile
     of the same source (alternating authored/derived
@@ -6962,6 +7274,478 @@ supply; OW29/OW32/OW34 closed):
     The F1 barrier scenario above ("the load heals ... seconds") now
     has an actual mechanism behind its premise for the fresh-space
     boot order; it was written against a heal that did not exist.
+    **PHASE 3 — BOTH ENTRIES CAMPAIGNED UNDER THE RULED
+    LOCAL-PLUS-CI-PROBE BAR, 2026-08-27. NEITHER LIFTED, and the two now
+    fail for OPPOSITE reasons.** Base: main `1fc841b6e`, one ON-built
+    binary (sha256
+    `a93047a461c0c4d8cb5c63106179eaf9613b2b431269877255100e7fbaf40e79`,
+    re-verified into every run's ledger; a mismatch aborts the run), fresh
+    store and own 97xx port and ON posture probe per run, ensure defaulting
+    ON, the toolshed self-sourced on the run port, LLM masked, PID-only
+    teardown with a port-free check, `gtimeout 600` never approached, quiet
+    and loaded interleaved. Probe head `95f313835` (both entries and the
+    default-app in-file guard removed in one commit), CI run
+    [33138358110](https://github.com/commontoolsinc/labs/actions/runs/33138358110);
+    eight of the ten ON pattern shards passed, shards 5 and 7 red — the two
+    shards that carry the two probed files.
+
+    **default-app's reload STEP: LOCAL 10/10, CI PROBE OF THE STEP GREEN,
+    LANE RED ON A CO-RESIDENT FILE — the entry's own charge did not
+    reproduce in either arm.** Ten counted runs (5 quiet / 5 loaded,
+    interleaved, plus an uncounted green smoke) at 13–14 s wall each,
+    against 313–315 s for every red the earlier 2026-08-27 campaign
+    recorded; the step itself finished in 7–8 s. Campaign-wide zeroes:
+    `pattern-load-error` (so a03/a07's keyless discriminator is absent —
+    #6451), `pattern-swap-setup-error` and recursive-schema (the
+    split-source artifact stays gone), `deferred-start-catchup(-failed)`,
+    terminal `Error committing deferred`, `session-remount`, load-park
+    deferrals and drops, `piece-start-commit-failed`, `sidecar-run-raced`,
+    `schema-doc-quarantine`, `structure-load-stuck`,
+    `contribution-dropped`, and `events.handlerNotRunDeferrals` — #6459's
+    new deferral arm never had to fire, i.e. the a04 dispatch-side skip did
+    not occur rather than being recovered from. Serving stats:
+    `events.appended` 14 = `events.processed` 14 in all ten (no silent
+    requeue), `dropped` 0, `needsAttention.total` 0, `derivedCommits`
+    54–58, `settleAdvances` 12–15. Then the probe (ON shard 5, job
+    98743591519) ran the exact step with no listed skip and it **PASSED —
+    `ok (18s)`** — the whole `default-app flow test` green, and the shard's
+    published toolshed log clean across the file's window (4
+    `event-view-lag`, nothing else). Shard 5's red is
+    `cfc-group-chat-demo.test.ts:133`: `clickCfButton("#host-send-button")`
+    retargeting to the cf-button host (`cf-button#host-send-button < slot <
+    div < cf-hstack`) — rootcause §2b's disabled-inner-button shape, whose
+    S-G test-aim seat is named-but-unbuilt. That file is NOT skip-listed,
+    is untouched by the probe diff, and **reproduces 4/6 RED locally at the
+    same head running ALONE on a fresh store with the same signature
+    (line 133, same retarget chain)**, so it is neither this entry's charge
+    nor a probe artifact — see the OW31-adjacent observation below.
+    **DISPOSITION AT THE TIME: NO LIFT, on the literal reading of the ruled
+    bar** — the entry and its bound guard stayed, reworded to say exactly
+    this, with an OPEN QUESTION referred to the coordinator/owner: does "the
+    probed lane GREEN" mean the probed SURFACE green, or every test in the
+    shard green? The bar was ruled hours before its first use and the case
+    that distinguishes the two readings arrived immediately. **THAT QUESTION
+    IS NOW RULED (2026-08-28): the SURFACE reading** (the bar's SURFACE
+    READING paragraph above), **and this entry LIFTED on the evidence above
+    — see the LIFT block at the end of this row.**
+
+    **lunch-poll-vote's FILE entry: LOCAL 8/8, CI PROBE RED AT THE PROBED
+    SURFACE — and the mechanism is now OBSERVED SERVER-SIDE for the first
+    time.** Eight counted runs (4 quiet / 4 loaded, interleaved), 16–18 s
+    each, against 313–322 s for every red this entry has ever recorded; the
+    owner-directed approximately-eight-run pin MET locally, with
+    `pattern-load-error`, `deferred-start-catchup(-failed)`,
+    `session-remount`, load-park, `handler-not-run`/`arrival-barrier` and
+    `events.handlerNotRunDeferrals` all zero, `events.appended` 9 in all
+    eight, `dropped` 0, `needsAttention.total` 0, `derivedCommits` 74–87.
+    (Present in every run INCLUDING the greens, so recorded as expected
+    recovery rather than smell: one `sidecar-run-raced` — #6312's
+    loser-yields arm — one `piece-start-commit-failed`, two
+    `event-view-lag`, one stale-read line; b06 also logged two
+    `contribution-dropped` and greened.) The probe (ON shard 7, job
+    98743591583) went RED at the SAME stage and signature as the
+    2026-08-26 probe: `lunch-poll-vote.test.ts:271`, the HOST's
+    `clickCfButton("#lp-join-button")`, `Timed out waiting for
+    #lp-join-button to render. Last probe: {"#lp-join-button": []}`,
+    `waitForCondition` at its unchanged 300000 ms bound, 5m5s, the body
+    reading "0 joined" and **"Unknown profile #MjhprA"**. The OFF lane's
+    shard 7 passed on the same run, so the red is ON-specific.
+    **WHAT IS NEW — the 2026-08-26 disposition's stated blind spot is
+    CLOSED: CI now publishes the toolshed log as a job artifact**
+    (`toolshed-log-pattern-integration-server-execution-on-7`), so the
+    server-side members can be examined instead of merely not excluded. In
+    the file's window that log carries **80 `structure-load-stuck` WARNs**
+    on the profile space `did:key:z6MktpA5…`, the first naming demanded
+    root `of:fid1:32Pic3-REdd7zmJ8gPchJyFD0LECk0u-QrFUXMjhprA` as
+    `pattern-unloadable` after 8 consecutive deferred cycles — the
+    detector's own words, "a forever-park … the home-profile
+    program-write-loss shape" — and **that root's suffix IS the `#MjhprA`
+    the placeholder rendered**. Upstream sit **20
+    `seal-space-commit-failed` / `foreign-write-refused` pairs**:
+    `applyInitialName` and a `__cfLift_1` action running in the HOME wave
+    `did:key:z6Mkv7Tjz…` refused a write to the profile space for want of
+    the §2b delegated carriage. So the chain is this row's ORIGINAL
+    mechanism, end to end: profile program/name write refused → structure
+    load parks forever → the name renders the `#id` placeholder → the join
+    card never renders `#lp-join-button` → line 271 times out.
+    **CRUCIAL DISCRIMINATOR, recorded so nobody chases the refusal: the
+    refusal is NOT it.** All eight local GREENS carry 80
+    `foreign-write-refused` and 40 `seal-space-commit-failed` each — MORE
+    than the CI red — with `structureLoadStuck` 0, `structureLoadRearmed`
+    7–10 and `structureLoadTerminal` 190–199. The foreign-write refusal is
+    a standing, tolerated condition in both arms; **the PARK is the
+    discriminator.** Locally the profile space's structure load always
+    resolves; in CI it never does, and why it never does is the open
+    question this entry now names. Excluded from the CI window, all zero:
+    `pattern-load-error`, `pattern-swap-setup-error`,
+    `deferred-start-catchup`, `session-remount`,
+    `piece-start-commit-failed`, `sidecar-run-raced`, `handler-not-run`,
+    `arrival-barrier`, `memory session revoked`, `sync-load-failure`,
+    `Event deferred` and `Event dropped` — so NOT the b04 client-start
+    class, NOT the a04 mark/effects family, NOT the #6312 sidecar clobber,
+    NOT the fifth-face load-park member, and NOT #6378's name-resolution
+    drop. Each of those was a prior charge for this entry and each is now
+    excluded by OBSERVATION rather than by absence of it.
+    **DISPOSITION: NO LIFT.** Local 8/8 against CI 1/1 red, for the second
+    campaign running — this file's lift needs the park explained, not
+    another local count.
+
+    **THE PARK EXPLAINED — ROOT-CAUSED 2026-08-28 from the probe's own
+    artifact, and FIXED red-first: the child closure replication
+    one-shot-died against the IN-FLIGHT SIBLING replication supplying its
+    origin space.** The discriminating event sits 33 s before the first
+    stuck warn and appears in NO local green (0/8 in the b-runs, 1/1 in
+    the CI red): `closure-replication-failed entry=Jlzs0wulc086…
+    from=did:key:z6Mkv7Tjz… to=did:key:z6MktpA5… Error: source closure
+    unavailable in origin space` at 03:18:09.048 — the shard's ONLY
+    pattern-manager error. That is the CT-1687 write path (S-A's
+    carriage arm) — the ONE writer that supplies a fresh child space's
+    program closure — failing at its READ side and, by its own contract,
+    never retrying ("retried on the next child creation"; a user creates
+    their profile once). With the supplier dead, the profile space's
+    deferral loop re-reads an empty store every cycle: patternIdentity
+    meta present (the carriaged materialization landed), the closure
+    absent, verdict `pattern-unloadable`, forever — the 80 stuck warns
+    are 40 distinct roots x streaks 8+16, the entire piece graph of that
+    one space. The name derivation never runs, the placeholder renders,
+    line 271 times out. WHY the origin was empty — the deduction chain,
+    each link forced: the serving session is ONE (every closure write in
+    every b-run store is the service session's), so the reader and any
+    same-runtime writer share a replica; the LAYERED VIEW was verified en
+    route (a deterministic executor-wave-harness experiment: a fresh-tx
+    read DOES see a held-open wave's staged writes — executor-wave.ts's
+    documented design), so a compile TARGETING the parent space would
+    have been readable the moment its pattern existed (E4 awaits the
+    write-back); the handler demonstrably RAN ProfileHome (the refusal
+    storm at 03:18:09.353 is its actions), so the pattern object existed
+    — therefore it came from the CONTENT CACHE with `cached.space` a
+    DIFFERENT space, and the content-hit arm (pattern-manager.ts ~2435)
+    had fired `replicate(cached.space -> parentSpace)` fire-and-forget:
+    the SIBLING, mid-flight at 03:18:09, its writes not yet issued —
+    the one supplier shape that leaves the origin empty to every read.
+    The b-run stores CONFIRM the machinery by commit class and timing:
+    the first serving-side compile's E4 write-back lands in an
+    identity-home space (seq 2 DERIVED, b01 03:05:48), the sibling
+    replications into the other served spaces land DERIVED via each
+    target's wave (lunch space seq 16, 03:05:51), and the child
+    replications into the two profile spaces land AUTHORED with §2b
+    carriage (seq 2, 03:05:54/56 — protocol §2's server-produced
+    authored row). Local greens are the sibling winning by ~3 s; CI's
+    crawling boot (first home-env compile 12 s after the parent space
+    activated, the click ~1 s after the content cache warmed) flips the
+    edge — the park was CI-timing-armed exactly as the method finding
+    predicted, and the foreign-write refusals stay what this entry
+    already said they are: standing, tolerated, present in every arm,
+    NOT the discriminator. Causality was validated end to end by a
+    working-tree fault injection (never committed): failing exactly the
+    delegated-carriage replication once reproduced the FULL CI signature
+    locally — 1 replication failure, 80 stuck warns over exactly 40
+    `pattern-unloadable` roots, the join flow dead, the 300 s net
+    (evidence: lunch-park-evidence/runs/lunch/inj01 on the measuring
+    box). THE FIX, at the write path and never the tolerance
+    (pattern-manager.ts): every replication registers under its TARGET
+    space with a monotonic ticket (`replicationsIntoSpace`), and a
+    replication awaits the STRICTLY OLDER replications registered INTO
+    its origin space before reading it — event-driven (the siblings' own
+    completion, no timers), acyclic by registration order (no from/to
+    mutual wait), with genuine absence still failing loud and settling
+    (pinned — no hang into `flushCompileCacheWrites` or the S-B
+    durability barrier). Red-first pin
+    `packages/runner/test/pattern-replication-sibling-race.test.ts`: the
+    race is deterministic-by-construction (the child is issued
+    synchronously after the sibling and its origin read is strictly less
+    work than the sibling's read-plus-write); watched red at the
+    pre-fix head with the exact production error line and the child
+    space empty; 6/6 green with the fix; mutation-killed (neutralizing
+    the await hunk alone reds it — the sibling step issues BOTH
+    replications from a second manager whose fallback-origin map is
+    empty, so the later fallback fix cannot mask this pin; moving them
+    back onto the compiling manager silently unpins the await).
+    Recorded residual, flagged not filled: a CROSS-REPLICA supplier (a
+    client/harness write-back
+    arriving over the wire) is outside the await's reach — no observed
+    red has that shape (the deduction above excludes it for this one),
+    and building for it would be filling an unobserved gap. Also
+    corrected en route: this row's original "wave staging vs durable
+    read" framing for the 2026-08-27 park is WRONG — the layered-view
+    experiment kills it — and the 2026-08-26 blind-spot note's
+    hypothesis space ("refused vs dropped vs never issued") resolves as
+    NEVER ISSUED, by a supplier that died before writing.
+
+    **LIFT ATTEMPT — lunch-poll-vote's FILE entry removed 2026-08-28 on
+    the evidence below; WITHDRAWN BY THE PROBES (the PROBE-2/3/4 blocks
+    that follow) and the entry RESTORED with the accumulated map.** The
+    ruled local-plus-CI-probe bar, both halves as they stood at the
+    attempt:
+    - **Requirement (1), the local campaign — MET TWICE, 8/8
+      quiet-and-loaded at the fix head AND 8/8 again at the rebased lift
+      head.** Method both times: ON binary sha256 re-verified into every
+      run's ledger (a mismatch aborts the run), fresh store + own 97xx
+      port + ON posture probe per run, ensure defaulting ON, toolshed
+      self-sourced on the run port, LLM masked, PID-only teardown with a
+      port-free check, 4 quiet / 4 loaded interleaved. Campaign F at the
+      pre-rebase fix commit (binary `8c693ea873…`, loads 4.3–10.4) and
+      campaign G at the rebased head — fix `044993c98` on main
+      `d9dc01d75`, which folds in #6477's UI-write retry on the very
+      fill path this test drives (binary `0ef22fced1…`, loads 3.3–7.5):
+      17–18 s walls in all sixteen runs against 313–322 s for every red
+      this entry ever recorded; `structureLoadStuck` 0,
+      `closure-replication-failed` 0 (the fixed mechanism's own line),
+      `pattern-load-error` 0, `deferred-start-catchup(-failed)` 0,
+      `session-remount` 0, `event-view-lag` 2/run, one designed
+      `sidecar-run-raced` and one recorded-non-discriminator
+      `piece-start-commit-failed` per run, and the tolerated refusal
+      storm present as ever (40 `foreign-write-refused` + 40
+      `seal-space-commit-failed` per run) — the park gone with the storm
+      untouched, which is exactly the discriminator this entry named.
+      The full runner suite is 1312/1312 at the rebased head. Campaign H
+      re-ran the same 8-run posture at the v4 head (sibling-await +
+      fallback-origin; binary `72be0363…`): 8/8 again, 17–19 s walls,
+      `structureLoadStuck` 0, `closure-replication-failed` 0, and
+      `closure-replication-fallback-origin` 0 — locally the heuristic
+      origin is always supplied (the parent compiles first), so the
+      fallback stays dormant exactly as designed; the runner suite is
+      1312/1312 at v4 too. Evidence on the measuring box:
+      `/Users/berni/labs-worktrees/lunch-park-evidence/runs/lunch/`
+      (`f01…f08`, `g01…g08`, `h11…h18` — per-run ledger, test+toolshed
+      logs, stats, own store); report
+      `/Users/berni/labs-worktrees/lunch-park-report.md`.
+    - **Requirement (2), the direct-CI unskip probe — THIS lift PR's own
+      board**: the registry carries no lunch entry, so the ON pattern
+      lanes RUN the file; per the ruled SURFACE reading the probed
+      surface's verdict decides, and a red AT the surface withdraws the
+      lift exactly as the bar states (captured and classified, never
+      rerun-looped).
+    **PROBE 2 (this PR's first board at head `83f31e47f`, run
+    [33160430927](https://github.com/commontoolsinc/labs/actions/runs/33160430927),
+    ON shard 7, job 98813758092): RED AT THE PROBED SURFACE — that lift
+    attempt WITHDREW, and the classification found the SECOND supplier
+    geometry.** The surface itself failed (`:271`, the HOST's join,
+    "Unknown profile #a_FyQU"; 11 co-residents passed — #6477's `:133`
+    fix held); the published toolshed artifact carries the SAME chain —
+    exactly one `closure-replication-failed from=parent(z6Mkv6nW…)
+    to=profile(z6MkpPK85…)` at 09:45:39.983, then 80
+    `structure-load-stuck` (40 roots, `pattern-unloadable`) from
+    09:45:44 — with the sibling-await IN PLACE and inert. The
+    instrumented local greens (SCRATCH build, runs instr01/wdel01/wdel02
+    on the measuring box) then decomposed the supplier model:
+    (i) `compileOrGetPattern` is NEVER CALLED in this flow — the
+    content-cache-hit sibling does not exist here; local greens have
+    `olderIntoOrigin=none-registered` and still pass. (ii) The parent
+    space's closure is supplied by the FIRST home-env/sidecar compile
+    that targets it (`persistCompileCacheTracked(parent)`, whose
+    per-module docs cover the profile-home entry) — locally always the
+    session's first compile (instr01's line 1). (iii) On both CI reds
+    the fetch/activation timeline shows NO compile ever targeting the
+    parent (the two home-env compiles land on the identity-home spaces,
+    09:45:30/34): `loadPatternByIdentity` then serves the pattern from
+    the manager's IN-MEMORY ARTIFACT INDEX — which persists NOTHING
+    per-space — so the parent space never receives the closure from any
+    flow, and the child's read was never going to find it: an ORDER
+    flip, not a data race. (iv) Wave-hold experiments (45 s holds on
+    closure-carrying waves) could not falsify read-visibility — every
+    local read trailed durability — so staged-vs-durable remains
+    UNDISCRIMINATED and is NOT load-bearing for the fix. THE SECOND FIX
+    (same PR, red-first): `replicateClosures` records every durable
+    persist target per entry (`persistedClosureSpaces`) and, on a dry
+    heuristic origin, retries its verified read against those recorded
+    spaces — content-addressed, so the copy is byte-identical and the
+    integrity-gated read stays fail-closed; genuine absence (no recorded
+    target) still fails loud and settles. Pinned in the same suite
+    (fallback test watched red at the sibling-await-only head with the
+    exact production error; recording no-op mutation-killed; the
+    no-record loud-failure control keeps the absence contract). Under
+    the CI geometry the identity-home persists ARE recorded, so the
+    child replication converges order-independently.
+    **PROBE 3 (the v4 board, run
+    [33164596936](https://github.com/commontoolsinc/labs/actions/runs/33164596936),
+    ON shard 7, job 98827162794): RED at the surface again — and the
+    artifact caught the fix's own defect: the fallback NEVER FIRED
+    (`closure-replication-fallback-origin` 0 beside the same one
+    failure + 80 stuck warns), because the recording KEYED BY THE
+    PERSIST CALL'S ENTRY while the replicated identity is a MODULE of
+    that closure** — the identity-home persists record the home-env
+    ROOT's identity, the failing replication's entry is the
+    profile-home MODULE the in-memory index served, and the lookup
+    found an empty set. The per-module docs were addressable all along
+    (the write functions persist one doc per module; the instrumented
+    green read them by module identity). Fixed: the recording covers
+    EVERY module identity of the persisted set
+    (`recordPersistedClosureSpaces`), and the pin suite gained the
+    exact geometry — an importer program whose LIB module's pattern is
+    served from the in-memory index and replicated from a dry origin —
+    watched red at the entry-keyed head (the lib-id replication's
+    production failure line) and green with module keying; the
+    original single-module tests were blind to the keying by
+    construction (entry == module there), which is recorded so the
+    next pin author widens the module graph first. The board at the
+    keying-fix head is this attempt's probe; a red at the surface
+    there restores the entry with the accumulated map — no further
+    iteration on this PR.
+    **PROBE 4 (the keying-fix board, run
+    [33165960083](https://github.com/commontoolsinc/labs/actions/runs/33165960083),
+    ON shard 7, job 98831529935): RED at the surface — the THIRD
+    geometry, and the declared hard stop is honored: THE ENTRY IS
+    RESTORED.** Same signature, fallback counter still 0 — and this
+    time correctly: the artifact's timeline shows both identity-home
+    compiles STILL MID-FLIGHT at the child replication's moment
+    (fetch waves 18 s and 5 s earlier; the profile-home fetches before
+    them belong to the harness process), so NO persist of the
+    profile-home module had completed anywhere server-side and the
+    module-keyed map was genuinely empty. The supplier class the fix
+    chain has not reached: the IN-FLIGHT COMPILE — a compile's E4
+    persist registers in `pendingCacheWriteBacks` only once the
+    compile reaches it, so a mid-compile supplier is invisible to
+    every await the replication holds. DESIGNED, NOT LANDED (the hard
+    stop): on a dry fallback map, await the manager's in-flight
+    compilations once (`inProgressCompilations` — their E4 persists
+    record into the map before the compile promise resolves),
+    re-consult the map, then throw; event-driven, no timers, no
+    deadlock (compiles never await replications; the content-hit
+    replication call is fire-and-forget). WHAT THE PR KEEPS: both
+    landed fixes are real, pinned defect classes (the sibling race and
+    the by-ORDER dry origin with module keying); the pin suite is
+    rebound to the RESTORED single-entry registry; the entry's reason
+    carries the full three-geometry map with the four probes'
+    coordinates so the next seat starts where this one stopped. The
+    lift bar is unchanged (the ruled local-plus-CI-probe bar); the
+    lift condition is now concretely the third geometry's close. What
+    the arc's four probes taught — one before the PR, three on it —
+    recorded as method: each board's artifact advanced the map exactly
+    one geometry — the probe is not a gate ceremony but the arc's only
+    instrument that SEES the CI boot order; and a declared hard stop
+    kept the loop honest.
+    The pin suite (`tasks/server-execution-on-skips.test.ts`) is bound,
+    post-restore, to the SINGLE-entry registry: the patterns list holds
+    exactly the restored FILE entry (reason pinned to the
+    three-geometry map and the probe coordinates), the report carries
+    its SKIP line and no SKIP-STEP line, the shard filter drops exactly
+    that file, and the whole-registry loop asserts it is the only entry
+    anywhere — so any OTHER entry or a silent lift reddens a pin. The
+    flip's bar remains a green ON lane AND every list empty; this entry
+    again holds the list (the co-resident `:133` blocker in the
+    OBSERVATION below is PAID by #6477, its FIXED paragraph there).
+
+    **OBSERVATION, not owed by this row and NOT one of the two entries —
+    `cfc-group-chat-demo.test.ts` is failing ON at current main, 4/6, and
+    is not skip-listed.** The file's ON skip was lifted with OW31's
+    trust-attribution build (that row's live lift condition, green 4/4 at
+    the time). At `1fc841b6e`, run alone on a fresh store under the full ON
+    posture, it reds 4 of 6 at `:133` —
+    `clickCfButton("#host-send-button")`, the aimed button's click
+    retargeting to its own cf-button host, which rootcause §2b identifies
+    as the inner native button being DISABLED (the served `sendDisabled`
+    never flipping). Its named seats S-E (the client binding-write wedge),
+    S-F (the barrier that did not see that write as pending) and S-G (the
+    missing `waitForDisabled(false)` before a served-enable round trip) are
+    all recorded-not-built. Main's own board at `1fc841b6e` was green on
+    that shard, so CI sees it less often than this box does; either way it
+    is a FLIP blocker in its own right (the flip's bar is a green ON lane,
+    not merely an empty skip list) and it is what held the default-app lift
+    under the shard reading. Recorded here because the phase-3 probe is
+    where it surfaced; whether it earns its own row is the coordinator's
+    call. **Under the 2026-08-28 surface ruling it no longer holds that
+    lift — it is a separate unlisted defect carrying its own
+    accountability, and it is still a flip blocker.**
+
+    **FIXED 2026-08-28 (PR #6477, branch
+    `claude/server-exec-v2-groupchat-stall`; red-first, store/probe-proven
+    at `23cf68e7d`).** The mechanism MIGRATED from §2b's recorded shape —
+    not the OW47 standing echo (no `speculative-basis-refused` anywhere; a
+    refill after a 300 s hang landed and enabled the button: one-shot
+    loss, not poison; the "recorded-not-built" S-E/S-F/S-G reading above
+    was stale — OW47 closed them 2026-08-21, S-G for Bob's click only).
+    Two parts, both instrumented-red-proven (4/4 taps): (1) the `:128`
+    fill's blind write is engine-rejected `stale confirmed read` — the
+    room-add wave's consequence stamps the argument doc's FIRST `/cfc`
+    labelMap and adds `/value/rooms`, structure at/above the blind write's
+    shape-read parent, against a pre-wave client basis — a RETRYABLE
+    ConflictError (the ruled vocabulary) that NO UI-write path consumed:
+    `applyCellWrite` fire-and-forgot `tx.commit()` (never pending, no log,
+    no retry; the S-G wait alone hung 300 s ×3). (2) each fill issues TWO
+    same-value writes (change-event + commit()); the second succeeds
+    VACUOUSLY (zero ops against the first's standing optimistic layer,
+    `{ok}` before any verdict), so a token-guarded retry of the first
+    declined toward a no-op owner and the revert erased the only copy
+    (8/8 red at that intermediate head). Fix: `Runtime.commitUiCellWrite`
+    — UI cell writes commit through `editWithRetry`, blind marks +
+    structural parent re-threaded per attempt, VALUE-FOLLOWING lanes
+    (every attempt writes the lane's newest requested value; refcounted
+    entry) closing LWW inversion AND the vacuous owner; a finally-lost
+    write is logged+counted (`runtime.ui-cell-write`/`lost`, the OW46-class
+    detectability); `applyCellWrite` rewired; the S-G wait added at `:133`
+    (mirrors `:203`). Pins red-first in
+    `runner/test/ui-cell-write-conflict-retry.test.ts` (the engine half
+    already pinned by `memory/test/cellset-structural-precondition.test.ts`).
+    Lift evidence: baseline 5/6 red running alone → post-fix 8/8 green →
+    6/6 green on the probe-stripped shipped binary, the draft durable in
+    every store (14/14); runner suite 1309/1310 (the one red re-ran green
+    alone — load flake). The file was never skip-listed: NO census change.
+    The surface-ruled default-app lift (the LIFT block below) never
+    waited on this fix; what it retires is the standing unlisted
+    flip-blocker itself. Review round on the PR: cubic P1/codex P1
+    (a retried CAS push could erase an intervening append) fixed —
+    non-blind writes take ONE attempt, no lane; the processor
+    set/push harness re-pinned at the new routing seam; final tally
+    18/18 green across three gate rounds. Live-class note for the
+    flip: the same race silently ate a real user's keystroke commit
+    wherever a wave landed structure mid-typing — the fix is
+    product-side, not test-side.
+
+    **LIFT — default-app's reload STEP entry is REMOVED, 2026-08-28, under
+    the ruled SURFACE reading of the local-plus-CI-probe bar.** The entry
+    (`integration/default-app.test.ts` :: "should persist and reload every
+    rapidly created notebook note") and its bound in-file
+    `serverExecutionOnStepSkip` guard are both gone from
+    `tasks/server-execution-on-skips.ts` and
+    `packages/patterns/integration/default-app.test.ts`. No new measurement
+    was taken for this lift; the bar was already met by evidence in hand,
+    and the only thing that changed is which reading of requirement (2)
+    governs. The chain, in full:
+    - **Requirement (1), the local campaign bar — MET, 10/10
+      quiet-and-loaded.** Phase 3's campaign at main `1fc841b6e` on one
+      ON-built binary (sha256 `a93047a461c0c4d8…`, re-verified into every
+      run's ledger), fresh store + own 97xx port + ON posture probe per run,
+      ensure defaulting ON, toolshed self-sourced on the run port, LLM
+      masked, PID-only teardown, `gtimeout 600` never approached, 5 quiet / 5
+      loaded interleaved: 13–14 s wall per run against 313–315 s for every
+      red the earlier 2026-08-27 campaign recorded, with EVERY fixed-mechanism
+      counter zero (`pattern-load-error`, `pattern-swap-setup-error` and
+      recursive-schema, `deferred-start-catchup(-failed)`, terminal `Error
+      committing deferred`, `session-remount`, load-park deferrals and drops,
+      `piece-start-commit-failed`, `sidecar-run-raced`,
+      `schema-doc-quarantine`, `structure-load-stuck`, `contribution-dropped`,
+      `events.handlerNotRunDeferrals`) and `events.appended` 14 =
+      `events.processed` 14 in all ten. Ledger: the PHASE 3 block above; the
+      campaign's own report is PR #6469's (merged `23cf68e7d`) record.
+    - **Requirement (2), the direct-CI unskip probe — MET at the probed
+      SURFACE.** Probe head `95f313835`, CI run
+      [33138358110](https://github.com/commontoolsinc/labs/actions/runs/33138358110),
+      ON shard 5, job 98743591519: the registry carried no default-app entry,
+      the job ran this exact step, and it **PASSED — `ok (18s)`** — the whole
+      `default-app flow test` file green, the shard's published toolshed log
+      clean across the file's window (4 `event-view-lag`, nothing else).
+    - **The shard's red was CO-RESIDENT, not this surface.**
+      `cfc-group-chat-demo.test.ts:133` — not skip-listed, untouched by the
+      probe diff, and 4/6 RED locally at the same head running ALONE with the
+      same signature (the OBSERVATION paragraph above). It is a separate
+      defect with its own accountability and its own flip-blocking weight.
+    - **The ruling.** The coordinator recommended that the probe proves the
+      unskipped SURFACE and that co-resident debt carries its own
+      accountability; the owner ruled **2026-08-28: "agreed with your
+      recommendations, proceed"**. Recorded verbatim, with its date, because
+      it is the whole difference between this entry's 2026-08-27
+      NO-LIFT disposition and its lift.
+    - **The lift's own final proof runs on the lift PR's board**: with the
+      entry gone, the ON pattern lanes execute this step on that PR. A red
+      there would be new information against the surface evidence and is
+      captured and reported rather than rerun-looped.
+    The pin suite (`tasks/server-execution-on-skips.test.ts`) is updated to
+    bind the lift rather than the entry: the patterns list holds exactly ONE
+    entry (lunch-poll-vote's FILE entry), the step's guard lookup resolves to
+    `undefined`, and the report carries no `SKIP-STEP` line — so a silent
+    re-skip reds, and a re-listing without a restored in-file guard fails the
+    registry's own step-entry binding check.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:

@@ -5,6 +5,7 @@
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Server } from "../v2/server.ts";
 import { connect, loopback } from "../v2/client.ts";
 import { cfLink, table } from "../v2/sqlite/schema.ts";
@@ -27,6 +28,7 @@ const dbRef = (): SqliteDbRef => ({
       id: "integer primary key",
       author_cf_link: cfLink(),
       body: "text",
+      payload: "blob",
     }),
   },
 });
@@ -79,6 +81,75 @@ describe("sqlite protocol verbs (loopback)", () => {
       "SELECT body FROM messages ORDER BY id",
     );
     expect(r.rows).toEqual([{ body: "hello" }]);
+  });
+
+  it("round-trips BLOB binds and rows over the memory protocol", async () => {
+    const db = dbRef();
+    const payload = new FabricBytes(new Uint8Array([0, 1, 2, 255]));
+    await seedRows(
+      db,
+      "INSERT INTO messages (body, payload) VALUES (?, ?)",
+      ["binary", payload],
+    );
+
+    const result = await session.sqliteQuery(
+      db,
+      "SELECT payload FROM messages WHERE payload = ?",
+      [payload],
+    );
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]!.payload).toBeInstanceOf(FabricBytes);
+    expect((result.rows[0]!.payload as FabricBytes).slice()).toEqual(
+      new Uint8Array([0, 1, 2, 255]),
+    );
+  });
+
+  it("round-trips reserved SQLite column names over the memory protocol", async () => {
+    const db = dbRef();
+    await seedRows(
+      db,
+      "INSERT INTO messages (body) VALUES (?)",
+      ["key-safe"],
+    );
+
+    const params = Object.fromEntries([
+      ["constructor", 1],
+      ["__proto__", 2],
+    ]);
+    const result = await session.sqliteQuery(
+      db,
+      'SELECT :constructor AS "constructor", :__proto__ AS "__proto__" ' +
+        "FROM messages",
+      params,
+    );
+
+    expect(result.rows).toHaveLength(1);
+    expect(Object.hasOwn(result.rows[0]!, "constructor")).toBe(true);
+    expect(Object.hasOwn(result.rows[0]!, "__proto__")).toBe(true);
+    expect(
+      Object.getOwnPropertyDescriptor(result.rows[0]!, "constructor")?.value,
+    )
+      .toBe(1);
+    expect(Object.getOwnPropertyDescriptor(result.rows[0]!, "__proto__")?.value)
+      .toBe(2);
+  });
+
+  it("binds nested BLOB values as JSON byte arrays", async () => {
+    const db = dbRef();
+    const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+    await seedRows(db, "INSERT INTO messages (body) VALUES (?)", ["json"]);
+
+    const result = await session.sqliteQuery(
+      db,
+      "SELECT :payload AS value FROM messages",
+      { payload: { bytes, nested: [new FabricBytes(new Uint8Array([4, 5]))] } },
+    );
+
+    expect(JSON.parse(result.rows[0]!.value as string)).toEqual({
+      bytes: [1, 2, 3],
+      nested: [[4, 5]],
+    });
   });
 
   it("returns an empty result for an auto-created (empty) table", async () => {

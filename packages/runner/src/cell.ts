@@ -783,6 +783,31 @@ export function encodeSqliteParams(
       );
     }
   };
+  const encodeNested = (value: unknown): unknown => {
+    assertDefined(value);
+    const cell = asBoundCell(value);
+    if (cell) {
+      const link = cell.toSigilLinkOrNull();
+      if (link === null) {
+        throw new TypeError(
+          "sqlite: a nested Cell parameter must have a durable link",
+        );
+      }
+      return link;
+    }
+    if (Array.isArray(value)) {
+      return value.map(encodeNested);
+    }
+    if (isPlainContainer(value)) {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, member]) => [
+          key,
+          encodeNested(member),
+        ]),
+      );
+    }
+    return value;
+  };
   const encodeOne = (value: unknown, isLinkCol: boolean): unknown => {
     assertDefined(value);
     const cell = asBoundCell(value);
@@ -792,7 +817,7 @@ export function encodeSqliteParams(
       }
       return encodeCellToSigilString(cell);
     }
-    return value;
+    return encodeNested(value);
   };
   if (Array.isArray(params)) {
     const cols = parseSqliteInsertColumns(sql);
@@ -810,14 +835,15 @@ export function encodeSqliteParams(
             "params (:col) so the binding can be verified.",
         );
       }
-      return v;
+      return encodeNested(v);
     }) as SqliteParamsWire;
   }
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(params)) {
-    out[k] = encodeOne(v, isCfLinkColumn(k));
-  }
-  return out as SqliteParamsWire;
+  return Object.fromEntries(
+    Object.entries(params).map(([key, value]) => [
+      key,
+      encodeOne(value, isCfLinkColumn(key)),
+    ]),
+  ) as SqliteParamsWire;
 }
 
 export function createCell<T>(
@@ -2879,7 +2905,16 @@ export class CellImpl<T extends FabricValue>
         );
     } else {
       // Regular cell behavior: subscribe to changes
-      if (!this.synced) this.sync(); // No await, just kicking this off
+      if (!this.synced) {
+        // sink() returns synchronously and immediately publishes the replica's
+        // current value, but the first backing-doc load remains part of the
+        // runtime's convergence work. A pull begun after this call sees the
+        // cell as synced and will not start a second load of its own, so keep
+        // this promise in the shared settled pool until the first load lands.
+        this.runtime.storageManager.trackUntilSettled(
+          this.sync().catch(() => {}),
+        );
+      }
       return subscribeToReferencedDocs(
         callback,
         this.runtime,
@@ -2929,7 +2964,11 @@ export class CellImpl<T extends FabricValue>
     callback: (value: FabricValue) => Cancel | undefined | void,
     options: SinkOptions = {},
   ): Cancel {
-    if (!this.synced) this.sync();
+    if (!this.synced) {
+      this.runtime.storageManager.trackUntilSettled(
+        this.sync().catch(() => {}),
+      );
+    }
 
     const sink: SinkAction = {
       cleanup: undefined,

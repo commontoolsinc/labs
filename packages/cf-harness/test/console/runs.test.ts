@@ -6,10 +6,19 @@ import {
   listConsoleRuns,
   readConsoleRun,
   readConsoleRunArtifact,
+  readConsoleRunFlow,
   readConsoleToolOutput,
 } from "../../console/run-store.ts";
 import { createHarnessRunState } from "../../src/run-state.ts";
 import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
+import {
+  HARNESS_CELL_LABELS_TYPE,
+  type HarnessCellLabels,
+} from "../../src/contracts/cell-labels.ts";
+import {
+  HARNESS_HANDLE_TABLE_TYPE,
+  type HarnessHandleTable,
+} from "../../src/contracts/handle-table.ts";
 
 const runState = (runId: string, updatedAt: string) => ({
   ...createHarnessRunState({
@@ -46,6 +55,64 @@ const result = (
   toolCallId,
   toolName,
   content: typeof content === "string" ? content : JSON.stringify(content),
+});
+
+/** A snapshot the space was read for, naming one cell it labels. */
+const labelSnapshot = (entityId = "of:fid1:abc"): HarnessCellLabels => ({
+  type: HARNESS_CELL_LABELS_TYPE,
+  version: 1,
+  generatedAt: "2026-01-01T00:00:00.000Z",
+  status: "read",
+  space: { configured: "my-space" },
+  cells: [
+    {
+      entityId,
+      ref: `/${entityId}`,
+      entries: [
+        {
+          path: [],
+          confidentiality: [
+            { type: "https://common.tools/cfc/Secret", name: "Secret" },
+          ],
+          integrity: [],
+          origin: "declared",
+        },
+      ],
+    },
+  ],
+});
+
+/** The same cell, under a reader that ran out of nodes partway through it. */
+const truncatedLabelSnapshot = (
+  entityId = "of:fid1:abc",
+): HarnessCellLabels => ({
+  ...labelSnapshot(entityId),
+  cells: [
+    {
+      entityId,
+      ref: `/${entityId}`,
+      entries: [],
+      truncationReason: "node-budget-exhausted",
+    },
+  ],
+});
+
+/** The same cell, read through and found to carry no label. */
+const bareLabelSnapshot = (entityId = "of:fid1:abc"): HarnessCellLabels => ({
+  ...labelSnapshot(entityId),
+  cells: [{ entityId, ref: `/${entityId}`, entries: [] }],
+});
+
+/** A snapshot taken on a host that holds no copy of the run's space. */
+const unreadSnapshot = (): HarnessCellLabels => ({
+  type: HARNESS_CELL_LABELS_TYPE,
+  version: 1,
+  generatedAt: "2026-01-01T00:00:00.000Z",
+  status: "unavailable",
+  unavailableReason: "space-not-found",
+  unavailableDetail: "no space database for my-space on this host",
+  space: { configured: "my-space" },
+  cells: [],
 });
 
 /** A run that searched, failed to compile, fixed, and named the piece. */
@@ -191,6 +258,7 @@ describe("console/runs", () => {
       root: string,
       runId: string,
       updatedAt: string,
+      cellLabels?: HarnessCellLabels,
     ): Promise<void> => {
       const runRoot = join(root, runId);
       await Deno.mkdir(join(runRoot, "tool-outputs"), { recursive: true });
@@ -198,6 +266,12 @@ describe("console/runs", () => {
         join(runRoot, "run-state.json"),
         JSON.stringify(runState(runId, updatedAt)),
       );
+      if (cellLabels !== undefined) {
+        await Deno.writeTextFile(
+          join(runRoot, "cell-labels.json"),
+          JSON.stringify(cellLabels),
+        );
+      }
       await Deno.writeTextFile(
         join(runRoot, "transcript.json"),
         JSON.stringify(buildTranscript()),
@@ -291,6 +365,218 @@ describe("console/runs", () => {
         expect(
           await readConsoleRunArtifact(root, "r1", "../transcript.json"),
         ).toBeUndefined();
+      });
+    });
+
+    it("reports no label snapshot for a run that wrote none", async () => {
+      await withArtifactRoot(async (root) => {
+        await writeRun(root, "r1", "2026-01-01T00:00:01.000Z");
+        const detail = await readConsoleRun(root, "r1");
+        // Nobody asked the space, which is not a space with nothing to say.
+        expect(detail?.cellLabels.status).toBe("absent");
+        expect(detail?.cellLabels.cellsRead).toBe(0);
+      });
+    });
+
+    it("reads the label snapshot a run wrote, and offers it as an artifact", async () => {
+      await withArtifactRoot(async (root) => {
+        await writeRun(
+          root,
+          "r1",
+          "2026-01-01T00:00:01.000Z",
+          labelSnapshot(),
+        );
+        const detail = await readConsoleRun(root, "r1");
+        expect(detail?.cellLabels.status).toBe("read");
+        expect(detail?.cellLabels.cellsRead).toBe(1);
+        expect(detail?.cellLabels.cellsLabelled).toBe(1);
+        expect(detail?.cellLabels.space?.configured).toBe("my-space");
+        expect(detail?.artifactNames).toContain("cell-labels.json");
+      });
+    });
+
+    /**
+     * A run of a family: the cells it minted, and the snapshot it recorded
+     * for them. A run with no refs minted no cell, so it never records one.
+     */
+    const writeMember = async (
+      root: string,
+      runId: string,
+      options: {
+        refs?: readonly string[];
+        cellLabels?: HarnessCellLabels;
+      } = {},
+    ): Promise<void> => {
+      const runRoot = join(root, runId);
+      await Deno.mkdir(runRoot, { recursive: true });
+      const handleTable: HarnessHandleTable = {
+        type: HARNESS_HANDLE_TABLE_TYPE,
+        version: 1,
+        salt: runId,
+        entries: (options.refs ?? []).map((ref, index) => ({
+          token: `cfh:a:abcd${index + 2}`,
+          kind: "address",
+          ref,
+          addressKey: ref,
+        })),
+      };
+      await Deno.writeTextFile(
+        join(runRoot, "run-state.json"),
+        JSON.stringify({
+          ...runState(runId, "2026-01-01T00:00:01.000Z"),
+          handleTable,
+        }),
+      );
+      if (options.cellLabels !== undefined) {
+        await Deno.writeTextFile(
+          join(runRoot, "cell-labels.json"),
+          JSON.stringify(options.cellLabels),
+        );
+      }
+    };
+
+    /** What the map's header states about the space, for the family of `runId`. */
+    const familyCellLabels = async (root: string, runId: string) =>
+      (await readConsoleRunFlow(root, runId))?.cellLabels;
+
+    it("counts the cells of every run in a family that read its space", async () => {
+      await withArtifactRoot(async (root) => {
+        await writeMember(root, "r1", {
+          refs: ["/of:fid1:abc"],
+          cellLabels: labelSnapshot("of:fid1:abc"),
+        });
+        await writeMember(root, "r1.subagent.0", {
+          refs: ["/of:fid1:def"],
+          cellLabels: labelSnapshot("of:fid1:def"),
+        });
+
+        expect(await familyCellLabels(root, "r1")).toMatchObject({
+          status: "read",
+          cellsRead: 2,
+          cellsLabelled: 2,
+        });
+      });
+    });
+
+    it("refuses to read a child whose space went unread under the root's status", async () => {
+      await withArtifactRoot(async (root) => {
+        await writeMember(root, "r1", {
+          refs: ["/of:fid1:abc"],
+          cellLabels: labelSnapshot("of:fid1:abc"),
+        });
+        await writeMember(root, "r1.subagent.0", {
+          refs: ["/of:fid1:def"],
+          cellLabels: unreadSnapshot(),
+        });
+
+        // The root's `read` would say the child's cells carry no label; they
+        // are cells nobody asked about.
+        expect(await familyCellLabels(root, "r1")).toMatchObject({
+          status: "unavailable",
+          detail: "the runs in this family disagree: 1 read, 1 unavailable",
+        });
+      });
+    });
+
+    it("refuses to read a child that read its space under the root's absent snapshot", async () => {
+      await withArtifactRoot(async (root) => {
+        await writeMember(root, "r1", { refs: ["/of:fid1:abc"] });
+        await writeMember(root, "r1.subagent.0", {
+          refs: ["/of:fid1:def"],
+          cellLabels: labelSnapshot("of:fid1:def"),
+        });
+
+        // The root's `absent` would say nobody asked about the child's cell,
+        // and the child's own snapshot says what the space holds for it.
+        expect(await familyCellLabels(root, "r1")).toMatchObject({
+          status: "unavailable",
+          detail: "the runs in this family disagree: 1 read, 1 absent",
+          cellsRead: 1,
+          cellsLabelled: 1,
+        });
+      });
+    });
+
+    it("leaves a run that minted no cell out of the family's reading", async () => {
+      await withArtifactRoot(async (root) => {
+        await writeMember(root, "r1", {
+          refs: ["/of:fid1:abc"],
+          cellLabels: labelSnapshot("of:fid1:abc"),
+        });
+        // A child with no cell of its own takes no snapshot, which is not a
+        // reading of the space to disagree with.
+        await writeMember(root, "r1.subagent.0");
+
+        expect(await familyCellLabels(root, "r1")).toMatchObject({
+          status: "read",
+          cellsRead: 1,
+        });
+      });
+    });
+
+    it("counts a cell as partial when the root did not finish reading it", async () => {
+      await withArtifactRoot(async (root) => {
+        await writeMember(root, "r1", {
+          refs: ["/of:fid1:abc"],
+          cellLabels: truncatedLabelSnapshot("of:fid1:abc"),
+        });
+        await writeMember(root, "r1.subagent.0", {
+          refs: ["/of:fid1:abc"],
+          cellLabels: labelSnapshot("of:fid1:abc"),
+        });
+
+        // The child read the cell whole; the root did not finish it. Counting
+        // the child's reading alone would state the cell as fully read.
+        expect(await familyCellLabels(root, "r1")).toMatchObject({
+          status: "read",
+          cellsRead: 1,
+          cellsLabelled: 1,
+          cellsPartial: 1,
+        });
+      });
+    });
+
+    it("counts a cell as partial when a child did not finish reading it", async () => {
+      await withArtifactRoot(async (root) => {
+        await writeMember(root, "r1", {
+          refs: ["/of:fid1:abc"],
+          cellLabels: labelSnapshot("of:fid1:abc"),
+        });
+        await writeMember(root, "r1.subagent.0", {
+          refs: ["/of:fid1:abc"],
+          cellLabels: truncatedLabelSnapshot("of:fid1:abc"),
+        });
+
+        // The same two readings, met in the other order, and the same answer:
+        // the fold is a union, so which member arrives first cannot matter.
+        expect(await familyCellLabels(root, "r1")).toMatchObject({
+          status: "read",
+          cellsRead: 1,
+          cellsLabelled: 1,
+          cellsPartial: 1,
+        });
+      });
+    });
+
+    it("reports a cell no member found a label for as unlabelled", async () => {
+      await withArtifactRoot(async (root) => {
+        await writeMember(root, "r1", {
+          refs: ["/of:fid1:abc"],
+          cellLabels: bareLabelSnapshot("of:fid1:abc"),
+        });
+        await writeMember(root, "r1.subagent.0", {
+          refs: ["/of:fid1:abc"],
+          cellLabels: bareLabelSnapshot("of:fid1:abc"),
+        });
+
+        // Both read it through and neither found an entry, which is a cell
+        // the space holds no label for rather than one nobody finished.
+        expect(await familyCellLabels(root, "r1")).toMatchObject({
+          status: "read",
+          cellsRead: 1,
+          cellsLabelled: 0,
+          cellsPartial: 0,
+        });
       });
     });
 

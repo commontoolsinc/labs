@@ -63,6 +63,7 @@ import type {
   CfcLabelMetadataObservation,
   CfcLabelMetadataProtectionMode,
   CfcPolicyEvaluationMode,
+  CfcRefusalDetail,
   CfcTriggerReadGating,
   CfcTxState,
   CfcWriteFloorMode,
@@ -1570,6 +1571,20 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   dispatchedEventTime?: number;
 
   /**
+   * The dispatched handler's BODY did not run (the runner's stream-path
+   * argument-did-not-resolve skip: `isValidArgument === false`, runner.ts).
+   * Set by the runner on the skip; consumed by the scheduler's event
+   * finalize for mark/effects atomicity (events.md §4, RULED 2026-08-27):
+   * a SERVED dispatch's transaction carries the entry's pre-stamped
+   * `consequenced` mark, so sealing a skipped run would commit the mark
+   * with ZERO effects and permanently consume the event (the a04 1-op
+   * shape). The finalize withdraws the whole transaction instead — the
+   * entry stays pending-unconsequenced and the drain re-delivers it.
+   * Client/OFF dispatches carry no mark and keep the silent skip.
+   */
+  dispatchedHandlerNotRun?: { reason: string };
+
+  /**
    * Commit-time preconditions attached to this transaction's commit in
    * the given space (scheduler-v2 §7.6). Violations surface as
    * IPreconditionFailedError (permanent — never retried).
@@ -1878,6 +1893,18 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   recordCfcLabelMetadataObservation(
     observation: CfcLabelMetadataObservation,
   ): void;
+
+  /**
+   * Records a structured description of a refusal one of this transaction's
+   * CFC gates just decided (`cfc/refusal-detail.ts`): the boundary, the atoms
+   * outside it, and the reads that carried them.
+   *
+   * The prose reason remains the enforcement channel — a detail never decides
+   * anything, and recording one neither marks the transaction relevant nor
+   * invalidates a preparation. It exists so a refused caller can act: the
+   * detail names the INPUT to drop, which the reason alone cannot.
+   */
+  recordCfcRefusalDetail(detail: CfcRefusalDetail): void;
 
   /**
    * The trusted policy-writer path for CFC grant documents (§8.12.7 route
@@ -2216,6 +2243,14 @@ export interface IPreconditionFailedError extends Error {
 export interface ICfcCommitRefusalError extends IStorageError {
   readonly name: "CfcCommitRefusalError";
   readonly reasons: readonly string[];
+
+  /**
+   * Structured descriptions of the reasons whose producers could describe
+   * themselves (`cfc/refusal-detail.ts`), paired to `reasons` by their
+   * `reason` text. A refusal every producer left undescribed carries an
+   * empty list — the reasons still stand on their own.
+   */
+  readonly refusals: readonly CfcRefusalDetail[];
 }
 
 /** Commit preparation crashed before any storage attempt. This is typed apart

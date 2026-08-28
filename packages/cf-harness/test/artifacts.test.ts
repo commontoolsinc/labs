@@ -24,6 +24,7 @@ import type {
   SandboxRuntimeDescription,
   SandboxShellRequest,
 } from "../src/sandbox/types.ts";
+import { createPatternSkillsFixture } from "./support/pattern-skills-fixture.ts";
 import {
   chatViewOfRequest,
   responsesBodyFromChatFixture,
@@ -405,6 +406,7 @@ Deno.test({
     "CfHarnessPromptLoop persists the transcript when artifactRoot is configured",
   permissions: { read: true, write: true },
   async fn() {
+    await using fixture = await createPatternSkillsFixture();
     const artifactRoot = await Deno.makeTempDir({
       prefix: "cf-harness-transcript-",
     });
@@ -423,6 +425,7 @@ Deno.test({
           ]),
           runId: "run-loop-persisted",
           model: "gpt-5.4",
+          skillsRoot: fixture.skillsRoot,
           now: (() => {
             const timestamps = [
               "2026-04-15T21:10:00.000Z",

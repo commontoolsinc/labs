@@ -111,6 +111,53 @@ describe("pull() and the first sync of an unseen doc", () => {
     }
   });
 
+  it("includes a sink's in-flight first sync in pull convergence", async () => {
+    const readerStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const readerRt = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: readerStorage,
+    });
+    try {
+      const link = writerRt
+        .getCell(space, RECEIPT_CAUSE, undefined)
+        .getAsNormalizedFullLink();
+      const gate = Promise.withResolvers<void>();
+      const originalSyncCell = readerStorage.syncCell.bind(readerStorage);
+      readerStorage.syncCell = (<T>(cell: Cell<T>): Promise<Cell<T>> => {
+        const target = cell.getAsNormalizedFullLink();
+        if (target.id === link.id) {
+          return gate.promise.then(() => originalSyncCell(cell));
+        }
+        return originalSyncCell(cell);
+      }) as typeof readerStorage.syncCell;
+
+      const receipt = readerRt.getCellFromLink<typeof RECEIPT_VALUE>(link);
+      const seen: Array<typeof RECEIPT_VALUE | undefined> = [];
+      const cancel = receipt.sink((value) => {
+        seen.push(value);
+      });
+      const pullPromise = receipt.pull();
+      let pullResolved = false;
+      void pullPromise.then(() => {
+        pullResolved = true;
+      });
+
+      await readerRt.scheduler.idle();
+      await Promise.resolve();
+      expect(pullResolved).toBe(false);
+
+      gate.resolve();
+      expect(await pullPromise).toEqual(RECEIPT_VALUE);
+      expect(seen).toEqual([undefined, RECEIPT_VALUE]);
+      cancel();
+    } finally {
+      await readerRt.dispose();
+      await readerStorage.close();
+    }
+  });
+
   it("resolves from the replica when the first sync fails outright", async () => {
     // The swallow arm: a failed first sync must degrade to what the replica
     // holds (here: nothing), never reject or hang the pull. Same stance as

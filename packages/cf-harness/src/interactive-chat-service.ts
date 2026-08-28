@@ -2,11 +2,13 @@ import {
   isObjectNotArray,
   type ReadonlyRecord,
 } from "@commonfabric/utils/types";
+import { CfHarnessEngine } from "./engine.ts";
 import {
   CfHarnessPromptLoop,
   type CreateHarnessPromptLoopOptions,
   type RunHarnessTranscriptOptions,
 } from "./prompt-loop.ts";
+import { persistHarnessRunSkillRegistry } from "./skills/run-registry.ts";
 import {
   createHarnessChatErrorResponse,
   createHarnessChatEventEnvelope,
@@ -1420,7 +1422,7 @@ export class HarnessInteractiveChatService {
     const startedSubagents = new Map<string, HarnessChatSubagentSummary>();
 
     try {
-      const loop = this.#createPromptLoop(
+      const loop = await this.#startPromptLoop(
         this.#buildPromptLoopOptions(session, policy, browserAccess),
       );
       const result = await loop.runTranscript({
@@ -1501,6 +1503,35 @@ export class HarnessInteractiveChatService {
         error: chatTurnError(error),
       });
     }
+  }
+
+  /**
+   * Starts a turn's loop on a run that already knows its skills. A turn is its
+   * own run, so the scan happens per turn, against the engine this builds and
+   * hands to the loop: the registry has to be on the run state before the
+   * first model turn for `read_skill_resource` to answer and for a delegated
+   * subagent to inherit its profile's preloaded skills.
+   *
+   * Tools reach the tree on the host here, so the scan records host paths and
+   * no sandbox mount is involved.
+   */
+  async #startPromptLoop(
+    options: CreateHarnessPromptLoopOptions,
+  ): Promise<HarnessInteractivePromptLoop> {
+    // The skills root reaches this either way: on the options directly, or on
+    // an injected engine's own config (where `options.skillsRoot` is unset).
+    // Read both so neither shape is missed.
+    const skillsRoot = options.engine?.config.skillsRoot ?? options.skillsRoot;
+    if (skillsRoot === undefined) {
+      return this.#createPromptLoop(options);
+    }
+    // A turn is its own run, so the scan happens every turn: it records the
+    // registry the skill tools read before the first model call, and a run
+    // that reuses an engine still refreshes it, so a skill added or removed
+    // mid-session is not stale.
+    const engine = options.engine ?? new CfHarnessEngine(options);
+    await persistHarnessRunSkillRegistry(engine, { skillsRoot });
+    return this.#createPromptLoop({ ...options, engine });
   }
 
   #buildPromptLoopOptions(

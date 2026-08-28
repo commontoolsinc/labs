@@ -1,7 +1,7 @@
 import * as FS from "@std/fs";
 import * as Path from "@std/path";
 
-import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
+import type { FabricValue } from "@commonfabric/api";
 import { getLogger } from "@commonfabric/utils/logger";
 import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
 import { metrics, SpanStatusCode, trace } from "@opentelemetry/api";
@@ -68,12 +68,15 @@ import {
   type SessionRevokedMessage,
   type SessionSync,
   type SqliteDbRef,
+  type SqliteNamedParamsWire,
+  type SqliteNativeRow,
   type SqliteParamsWire,
   type SqliteQueryRequest,
-  type SqliteQueryResult,
+  type SqliteQueryWireResult,
   type SqliteRegisterDiskSourceRequest,
   type SqliteRegisterDiskSourceResult,
   type SqliteResultColumn,
+  sqliteRowToWire,
   streamEntriesDocId,
   type StreamEventEntry,
   type StreamEventsDocValue,
@@ -2055,7 +2058,7 @@ export class Server {
     params: SqliteParamsWire | undefined,
     scopeKey: string,
     wantColumns: boolean,
-  ): Promise<{ rows: FabricPlainObject[]; columns?: SqliteResultColumn[] }> {
+  ): Promise<{ rows: SqliteNativeRow[]; columns?: SqliteResultColumn[] }> {
     // Apply the statement guard BEFORE the file-existence short-circuit, so a
     // rejected statement (non-SELECT, core-table/qualified ref, ATTACH/PRAGMA,
     // multi-statement) is refused even against a never-written cell-db rather
@@ -2591,10 +2594,13 @@ export class Server {
 
   async sqliteQuery(
     message: SqliteQueryRequest,
-  ): Promise<ResponseMessage<SqliteQueryResult>> {
+  ): Promise<ResponseMessage<SqliteQueryWireResult>> {
+    const queryParams = message.namedParams === undefined
+      ? message.params
+      : Object.fromEntries(message.namedParams);
     const session = this.#sessions.get(message.space, message.sessionId);
     if (session === null) {
-      return respondTypedError<SqliteQueryResult>(
+      return respondTypedError<never>(
         message.requestId,
         toError("SessionError", "Unknown session for space"),
       );
@@ -2617,7 +2623,7 @@ export class Server {
           "READ",
         );
       if (deny) {
-        return respondTypedError<SqliteQueryResult>(message.requestId, deny);
+        return respondTypedError<never>(message.requestId, deny);
       }
     }
     try {
@@ -2652,16 +2658,16 @@ export class Server {
           ? this.#readPool.queryWithOrigins(
             disk.path,
             message.sql,
-            message.params,
+            queryParams,
           )
           : {
-            rows: this.#readPool.query(disk.path, message.sql, message.params),
+            rows: this.#readPool.query(disk.path, message.sql, queryParams),
           })
         : await this.#readCellDb(
           message.space,
           message.db,
           message.sql,
-          message.params,
+          queryParams,
           Engine.resolveScopeKey(message.db.scope, {
             principal: session.principal,
             sessionId: message.sessionId,
@@ -2680,16 +2686,19 @@ export class Server {
           "READ",
         );
         if (deny) {
-          return respondTypedError<SqliteQueryResult>(message.requestId, deny);
+          return respondTypedError<never>(message.requestId, deny);
         }
       }
       return {
         type: "response",
         requestId: message.requestId,
-        ok: { rows: result.rows, columns: result.columns },
+        ok: {
+          rows: result.rows.map(sqliteRowToWire),
+          columns: result.columns,
+        },
       };
     } catch (error) {
-      return respondTypedError<SqliteQueryResult>(
+      return respondTypedError<SqliteQueryWireResult>(
         message.requestId,
         toError(
           error instanceof Error ? error.name : "SqliteError",
@@ -6509,6 +6518,15 @@ export class Server {
   }
 }
 
+function isSqliteNamedParamEntries(
+  value: unknown,
+): value is SqliteNamedParamsWire {
+  return Array.isArray(value) &&
+    value.every((entry) =>
+      Array.isArray(entry) && entry.length === 2 && typeof entry[0] === "string"
+    );
+}
+
 export const parseClientMessage = (
   payload: string,
 ): ClientMessage | null => {
@@ -6681,14 +6699,19 @@ export const parseClientMessage = (
       (isObjectNotArray(parsed.db.tables) &&
         Object.keys(parsed.db.tables).length <= 256)) &&
     (parsed.db.scope === undefined || parsed.db.scope === "space" ||
-      parsed.db.scope === "user" || parsed.db.scope === "session")
+      parsed.db.scope === "user" || parsed.db.scope === "session") &&
+    !(parsed.params !== undefined && parsed.namedParams !== undefined) &&
+    (parsed.namedParams === undefined ||
+      isSqliteNamedParamEntries(parsed.namedParams))
   ) {
     const db = {
       id: parsed.db.id,
       tables: isObjectNotArray(parsed.db.tables) ? parsed.db.tables : undefined,
       scope: parsed.db.scope as CellScope | undefined,
     };
-    const params = isObjectOrArray(parsed.params)
+    const params = isSqliteNamedParamEntries(parsed.namedParams)
+      ? Object.fromEntries(parsed.namedParams)
+      : isObjectOrArray(parsed.params)
       ? parsed.params as SqliteParamsWire
       : undefined;
     return {

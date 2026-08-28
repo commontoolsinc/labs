@@ -313,3 +313,12 @@ export {
   validateAndSanitizeStructuredResultValue,
   validateStructuredResultValue,
 } from "./structured-result.ts";
+export {
+  type CfcRefusalAttribution,
+  type CfcRefusalDetail,
+  type CfcRefusalGate,
+  type CfcRefusalInput,
+  type ConsumedAtomSource,
+  describeRefusalInputs,
+  renderCfcAtom,
+} from "./refusal-detail.ts";

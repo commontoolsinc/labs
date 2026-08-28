@@ -7,3 +7,4 @@ if (!customElements.get("cf-iframe")) {
 export type { CFIframe as CFIframeElement } from "./cf-iframe.ts";
 
 export * from "./cf-iframe.ts";
+export * from "./cell-bridge.ts";

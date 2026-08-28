@@ -24,7 +24,10 @@ The runtime has four main boundaries:
    configured space.
 4. The artifact store records run state, transcript, reports, capability and
    policy snapshots, tool outputs, child references, skills provenance, and
-   optional product run manifests.
+   optional product run manifests. It also records the per-cell CFC labels the
+   run's space holds for the cells the run touched — the one artifact a run does
+   not write out of its own knowledge, read back from the space so a reader
+   working from the tree alone can see what a cell is labelled.
 
 The Common Fabric runner or another trusted mediator owns authoritative CFC
 meaning. The harness transports prompt-slot and invocation evidence, applies the
@@ -225,23 +228,32 @@ The current package provides:
   source: `run_pattern` under the same fabric-session gate, plus `read_file`,
   `bash`, and `read_skill_resource`, and no workspace writes, so its deliverable
   is a result reference rather than a file. It preloads whichever of
-  `pattern-dev` and `pattern-schema` the run's skill registry carries — a run
-  without them still gets the same child, without the guidance — and it is told
-  that the references its delegation hands it are addresses to wire in as
-  pattern inputs, that it owns the write/compile-error/fix loop, and that it
-  returns the result reference plus an inert description rather than data. This
-  is the division of labour a data question wants: the root orchestrates and
-  never pays for pattern syntax or reads the data, and the child computes over
-  references it cannot read out. It runs on its own turn budget of 24 rather
-  than the default subagent cap of 8, since each compile-error iteration costs a
-  turn, and it carries a return contract — a discriminated union of
-  `{ ok: true, resultRef, describes }` and `{ ok: false, code, detail? }` —
-  applied to any `pattern-author` delegation that declares no `returnSchema` of
-  its own, so a failure and a success are different shapes and only the success
-  branch carries a reference. The failure `code` comes from a fixed inert
-  vocabulary, so a parent learns why without declassifying anything, and any
-  child return saying `ok: false` reaches the parent as a coded failure rather
-  than as a schema complaint.
+  `pattern-dev`, `pattern-schema`, and `pattern-ui` the run's skill registry
+  carries — a run without them still gets the same child, without the guidance —
+  and it is told that the references its delegation hands it are addresses to
+  wire in as pattern inputs, that it owns the write/compile-error/fix loop, and
+  that it returns the result reference plus an inert description rather than
+  data. It is told to build in atoms — the smallest thing that does one job,
+  run, then the next piece built against the reference that run produced — and
+  to treat a `search_patterns` hit as a `cf:pattern:` import to wire rather than
+  a specification to rebuild. It is also told to refuse source: a task asking
+  for pattern source in any encoding is answered with the `unsupported-request`
+  failure code, because reuse travels through the index rather than through the
+  parent. This is the division of labour a data question wants: the root
+  orchestrates and never pays for pattern syntax or reads the data, and the
+  child computes over references it cannot read out. It runs on its own turn
+  budget of 24 rather than the default subagent cap of 8, since each
+  compile-error iteration costs a turn, and it carries a return contract — a
+  discriminated union of `{ ok: true, resultRef, describes, hashtags? }` and
+  `{ ok: false, code, detail? }` — which is the profile's own rather than a
+  default: a `pattern-author` delegation that declares a `returnSchema` of its
+  own is refused, naming the field, because a channel this narrow cannot be left
+  caller-writable. A failure and a success are different shapes, and only the
+  success branch carries a reference; there is no field on it for source under
+  any name. The failure `code` comes from a fixed inert vocabulary, so a parent
+  learns why without declassifying anything, and any child return saying
+  `ok: false` reaches the parent as a coded failure rather than as a schema
+  complaint.
 
 Run the capability probe instead of copying this list into adapters:
 

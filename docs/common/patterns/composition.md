@@ -16,6 +16,12 @@ Use either function call or JSX syntax:
 {items.map((item) => <ItemCard item={item} />)}
 ```
 
+A mapped list tracks **the cell it maps**. Deriving a different *arrangement* of
+it — sorted, grouped, reversed — into a `computed()` and mapping that renders
+the first arrangement and then never moves, because the cell the renderer
+watches never changed. Write the new order into the mapped cell instead. See
+[a mapped list reorders in a `computed()` and the rows never move](../../development/debugging/gotchas/mapped-list-order-from-computed.md).
+
 ## How It Works
 
 When you place a pattern result in the vdom, the runtime:

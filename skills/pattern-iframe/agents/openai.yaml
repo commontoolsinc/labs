@@ -1,0 +1,4 @@
+interface:
+  display_name: "Iframe Pattern"
+  short_description: "Build self-contained iframe-first patterns"
+  default_prompt: "Use $pattern-iframe to build a self-contained iframe-first Common Fabric pattern."

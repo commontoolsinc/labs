@@ -189,6 +189,20 @@ export interface PatternIndexPublishRequest {
   resultSchema?: JSONSchema;
   dependencies?: readonly string[];
   priorPatternId?: string;
+
+  /**
+   * Set to keep this entry out of search. The pattern is recorded in full
+   * either way — `getPattern` answers for it, a `cf:pattern:` import resolves
+   * it, and events record against it — so this decides discovery and nothing
+   * else. Absent means the entry is offered to search, which is what every
+   * publication did before the render gate existed, and the request then
+   * carries neither field.
+   *
+   * The reason travels with the flag rather than beside it because the index
+   * refuses one without the other: a hidden entry nobody recorded a reason
+   * for is an entry nobody can decide about later.
+   */
+  nonDiscoverable?: { readonly reason: string };
 }
 
 export interface PatternIndexPublishResponse {
@@ -397,6 +411,12 @@ export class PatternIndexClient {
       ...(Object.keys(schemas).length > 0 ? { schemas } : {}),
       ...(request.dependencies !== undefined
         ? { dependencies: [...request.dependencies] }
+        : {}),
+      ...(request.nonDiscoverable !== undefined
+        ? {
+          discoverable: false,
+          discoverabilityReason: request.nonDiscoverable.reason,
+        }
         : {}),
       ...(request.priorPatternId !== undefined
         ? { priorPatternId: request.priorPatternId }

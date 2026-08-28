@@ -95,6 +95,53 @@ describe("subagent", () => {
       });
     });
 
+    it("carries the published hashtags on the success branch, sealed like the prose", () => {
+      const sanitized = validateAndSanitizeSubagentReturn({
+        schema: PATTERN_AUTHOR_RETURN_SCHEMA,
+        childRunId: "run-codes.subagent.5",
+        value: {
+          ok: true,
+          resultRef: "cfh:a:9mfcd",
+          describes: "Totals each category against its budget.",
+          hashtags: ["budget", "crud-list"],
+        },
+      });
+
+      expect(sanitized.value).toEqual({
+        ok: true,
+        resultRef: { "@link": "opaque:run-codes.subagent.5#/resultRef" },
+        describes: { "@link": "opaque:run-codes.subagent.5#/describes" },
+        hashtags: [
+          { "@link": "opaque:run-codes.subagent.5#/hashtags/0" },
+          { "@link": "opaque:run-codes.subagent.5#/hashtags/1" },
+        ],
+      });
+    });
+
+    it("admits no field for source under any encoding", () => {
+      // The success branch is closed, so a caller cannot be answered with
+      // source spelled as text or as the integers a sealed string is not.
+      for (
+        const smuggled of [
+          { sourceText: "export default () => ({});" },
+          { sourceCodePoints: [101, 120] },
+        ]
+      ) {
+        expect(() =>
+          validateAndSanitizeSubagentReturn({
+            schema: PATTERN_AUTHOR_RETURN_SCHEMA,
+            childRunId: "run-codes.subagent.6",
+            value: {
+              ok: true,
+              resultRef: "cfh:a:9mfcd",
+              describes: "Counts things.",
+              ...smuggled,
+            },
+          })
+        ).toThrow();
+      }
+    });
+
     it("throws for a failure code outside the vocabulary", () => {
       expect(() =>
         validateAndSanitizeSubagentReturn({

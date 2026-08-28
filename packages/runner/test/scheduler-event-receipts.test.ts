@@ -678,10 +678,16 @@ describe("scheduler event receipts", () => {
 
       // Decision 13: the create-only receipt is the result cell that hosts the
       // handler's launched pattern, not a separate empty witness beside a
-      // second same-cause wrapper in the child space.
-      expect(canonicalResult.getMetaRaw("patternIdentity")).toBeDefined();
+      // second same-cause wrapper in the child space. The launched pattern is
+      // hand-built (KEYLESS), so it writes no durable pattern pointer (the
+      // never-durable contract, L3(a) RULED 2026-08-27); the setup evidence
+      // that survives on the space-scoped receipt doc is the result-schema
+      // meta its setup stages (the argument/value live on the launch's
+      // scoped variant).
+      expect(canonicalResult.getMetaRaw("schema")).toBeDefined();
+      expect(canonicalResult.getMetaRaw("patternIdentity")).toBeUndefined();
       expect(
-        duplicateChildWrapper.getMetaRaw("patternIdentity"),
+        duplicateChildWrapper.getMetaRaw("schema"),
       ).toBeUndefined();
       expect(
         commitTelemetry.markers.some((marker) =>
