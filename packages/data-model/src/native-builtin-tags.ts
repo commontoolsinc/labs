@@ -21,20 +21,6 @@ import { constructorOfObject } from "@commonfabric/utils/objects";
 import { VALUE_TAGS, type ValueTag } from "./VALUE_TAGS.ts";
 
 /**
- * Checks whether a value is a native `Error`.
- *
- * `Error.isError()` recognizes errors from other realms when the engine
- * provides it. Engines without it fall back to `instanceof`, which recognizes
- * errors that share the current realm's prototype hierarchy.
- */
-export function isNativeError(value: unknown): value is Error {
-  const isError = (Error as { isError?: (value: unknown) => boolean }).isError;
-  return typeof isError === "function"
-    ? isError(value)
-    : value instanceof Error;
-}
-
-/**
  * Maps a constructor to its tag, for the native JS builtins alone. Returns
  * `null` for anything else, a fabric class included -- `tagFromNativeClass()`
  * is what knows those.
@@ -122,7 +108,7 @@ export function isValidFabricNativeObject(
   const ctor = constructorOfObject(value);
   const tag = (ctor !== undefined) ? tagFromNativeBuiltinClass(ctor) : null;
 
-  switch (tag ?? (isNativeError(value) ? VALUE_TAGS.Error : null)) {
+  switch (tag ?? (Error.isError(value) ? VALUE_TAGS.Error : null)) {
     case VALUE_TAGS.Error:
     case VALUE_TAGS.Map:
     case VALUE_TAGS.Set:

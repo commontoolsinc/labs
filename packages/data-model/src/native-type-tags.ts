@@ -16,10 +16,7 @@
 import { constructorOfPrototype } from "@commonfabric/utils/objects";
 
 import { VALUE_TAGS, type ValueTag } from "./VALUE_TAGS.ts";
-import {
-  isNativeError,
-  tagFromNativeBuiltinClass,
-} from "./native-builtin-tags.ts";
+import { tagFromNativeBuiltinClass } from "./native-builtin-tags.ts";
 import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
@@ -99,7 +96,7 @@ export function tagFromNativeValue(value: unknown): ValueTag | null {
   // tagged `Object` so the object rule decides it by name, the same way an
   // indirect array is decided by the array rule.
   if (proto === null) {
-    return isNativeError(value) ? VALUE_TAGS.Error : VALUE_TAGS.Object;
+    return Error.isError(value) ? VALUE_TAGS.Error : VALUE_TAGS.Object;
   }
 
   // The class is read from the PROTOTYPE, not from the value. What is being
@@ -120,7 +117,7 @@ export function tagFromNativeValue(value: unknown): ValueTag | null {
   // `Error`s with no reachable constructor -- e.g. one from another realm. An
   // ordinary subclass (including `DOMException`) never gets here:
   // `tagFromNativeClass()` matches it via `prototype instanceof Error`.
-  if (isNativeError(value)) return VALUE_TAGS.Error;
+  if (Error.isError(value)) return VALUE_TAGS.Error;
 
   // `FabricInstance` values (object-like protocol types).
   if (value instanceof FabricInstance) return VALUE_TAGS.FabricInstance;
