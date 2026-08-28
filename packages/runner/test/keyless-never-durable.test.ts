@@ -1017,68 +1017,136 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
   });
 
   it("a first-ever staging evicted mid-window leaves no tombstone when it fails", async () => {
-    // The delete arm of the same repair: the doc had NO committed pointer
-    // before the failed staging, so there is nothing for the tombstone to
-    // fall back to — it is removed, restoring the doc's designed
-    // zero-evidence verdict. A later different-pattern setup then takes the
-    // fresh-session exemption (no restage), exactly as if the aborted
-    // staging had never happened.
-    storageManager = EmulatedStorageManager.emulate({ as: signer });
-    runtime = new Runtime({
-      apiUrl: new URL(import.meta.url),
-      storageManager,
+    // The delete arm of the same repair: this session had NO committed
+    // pointer for the doc before the failed staging, so there is nothing
+    // for the tombstone to fall back to — it is removed, restoring the
+    // designed zero-evidence verdict, exactly as if the aborted staging
+    // had never happened. Discriminating shape (a surviving tombstone
+    // must fail this test): the doc is a CROSS-SESSION one whose stored
+    // argument carries an extra the strict re-setup's schema rejects —
+    // the zero-evidence exemption skips that validation, while a
+    // tombstone left by the aborted staging would read as
+    // different-identity evidence and force the restage that rejects it.
+    const directory = await Deno.makeTempDir({
+      prefix: "keyless-tombstone-delete-",
     });
-    const cell = runtime.getCell<Record<string, unknown>>(
-      space,
-      "tombstone-first-staging-clears",
-    );
-    // Seed the doc with an argument link shape the exemption path expects
-    // (a stored argument written by a plain committed value write).
-    {
-      const seed = runtime.edit();
-      cell.withTx(seed).set({ seeded: true });
-      await seed.commit();
-    }
-
-    // First-EVER keyless staging for this doc (no prior pointer), evicted
-    // inside its own staging window, then failed.
-    const tx = runtime.edit();
-    // deno-lint-ignore no-explicit-any
-    runtime.run(tx, handBuiltPattern() as any, {}, cell);
-    expect(runtime.runner.sessionPatternPointerFor(cell)).toBeDefined();
-    const pointers = (runtime.runner as unknown as {
-      sessionPatternPointers: {
-        set(key: string, value: { identity: string; symbol: string }): void;
-      };
-    }).sessionPatternPointers;
-    for (
-      let i = 0;
-      runtime.runner.sessionPatternPointerFor(cell) !== undefined;
-      i++
-    ) {
-      if (i > 100_000) throw new Error("the pointer never evicted");
-      pointers.set(`first-staging-synthetic/${i}`, {
-        identity: `keyless:churn-${i}`,
-        symbol: "default",
+    const store = toFileUrl(`${directory}/`);
+    const server = newLoopbackServer({
+      subscriptionRefreshDelayMs: 0,
+      store,
+    });
+    const loosePattern = () => ({
+      argumentSchema: { type: "object" },
+      resultSchema: {
+        type: "object",
+        properties: { out: { type: "number" } },
+      },
+      result: { out: { $alias: { cell: "argument", path: ["v"] } } },
+      nodes: [],
+    });
+    const strictPattern = () => ({
+      argumentSchema: {
+        type: "object",
+        properties: { v: { type: "number" } },
+        additionalProperties: false,
+      },
+      resultSchema: {
+        type: "object",
+        properties: { out: { type: "number" } },
+      },
+      result: { out: { $alias: { cell: "argument", path: ["v"] } } },
+      nodes: [],
+    });
+    try {
+      // Session A stages the stored argument (extras allowed) and dies.
+      const managerA = EmulatedStorageManager.connectTo(server, {
+        as: signer,
       });
-    }
-    tx.abort();
+      const runtimeA = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: managerA,
+      });
+      try {
+        const tx = runtimeA.edit();
+        const cell = runtimeA.getCell<Record<string, unknown>>(
+          space,
+          "tombstone-first-staging-clears",
+          undefined,
+          tx,
+        );
+        const running = runtimeA.run(
+          tx,
+          // deno-lint-ignore no-explicit-any
+          loosePattern() as any,
+          { v: 1, extra: 2 },
+          cell,
+        );
+        await tx.commit();
+        await running.pull();
+        await runtimeA.storageManager.synced();
+      } finally {
+        await runtimeA.runner.idlePointerMaintenance();
+        await runtimeA.dispose();
+        await managerA.close();
+      }
 
-    // No tombstone survives: a different keyless pattern's setup reads the
-    // designed zero-evidence state and commits without a restage.
-    const tx2 = runtime.edit();
-    const rerun = runtime.run(
-      tx2,
+      // Session B: first-EVER keyless staging for this doc HERE (no
+      // committed pointer in B), evicted inside its own staging window,
+      // then failed.
+      storageManager = EmulatedStorageManager.connectTo(server, {
+        as: signer,
+      });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      const cell2 = runtime.getCell<Record<string, unknown>>(
+        space,
+        "tombstone-first-staging-clears",
+      );
+      await cell2.sync();
+      const tx2 = runtime.edit();
       // deno-lint-ignore no-explicit-any
-      { ...handBuiltPattern(), result: { marker: "fresh-after-abort" } } as any,
-      {},
-      cell,
-    );
-    const committed = await tx2.commit();
-    expect(committed.error).toBeUndefined();
-    await rerun.pull();
-    expect(runtime.runner.sessionPatternPointerFor(cell)).toBeDefined();
-    runtime.runner.stop(cell);
+      runtime.run(tx2, handBuiltPattern() as any, undefined, cell2);
+      expect(runtime.runner.sessionPatternPointerFor(cell2)).toBeDefined();
+      const pointers = (runtime.runner as unknown as {
+        sessionPatternPointers: {
+          set(key: string, value: { identity: string; symbol: string }): void;
+        };
+      }).sessionPatternPointers;
+      for (
+        let i = 0;
+        runtime.runner.sessionPatternPointerFor(cell2) !== undefined;
+        i++
+      ) {
+        if (i > 100_000) throw new Error("the pointer never evicted");
+        pointers.set(`first-staging-synthetic/${i}`, {
+          identity: `keyless:churn-${i}`,
+          symbol: "default",
+        });
+      }
+      tx2.abort();
+
+      // No tombstone survives: the strict pattern's setup reads the
+      // designed zero-evidence state and does NOT restage-validate A's
+      // stored argument (which its schema would reject) — a surviving
+      // tombstone would force exactly that rejection.
+      const tx3 = runtime.edit();
+      const rerun = runtime.run(
+        tx3,
+        // deno-lint-ignore no-explicit-any
+        strictPattern() as any,
+        { v: 1, extra: 2 },
+        cell2,
+      );
+      const committed = await tx3.commit();
+      expect(committed.error).toBeUndefined();
+      const value = await rerun.pull();
+      expect((value as { out?: number })?.out).toBe(1);
+    } finally {
+      await server.close();
+      await Deno.remove(directory, { recursive: true });
+    }
   });
 
   it("the legacy-tolerance diagnostics render under debug logging", async () => {
@@ -1290,14 +1358,30 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
     );
 
     // Stopped between staging and commit: the captured swap handler runs
-    // against a deactivated watcher and returns without swapping.
+    // against a deactivated watcher and returns without touching the dead
+    // registration. Pinned observables: the committed staging's pointer
+    // stands (the setup legitimately landed), and the piece restarts
+    // cleanly through the ordinary path — a swap fired against the
+    // cancelled registration would leave it wedged or half-instantiated.
     const tx3 = runtime.edit();
     // deno-lint-ignore no-explicit-any
-    runtime.run(tx3, third as any, {}, cell);
+    const third_run = runtime.run(tx3, third as any, {}, cell);
+    void third_run;
+    const thirdPointer = runtime.runner.sessionPatternPointerFor(cell);
+    expect(thirdPointer).toBeDefined();
     runtime.runner.stop(cell);
     const committed = await tx3.commit();
     expect(committed.error).toBeUndefined();
     await runtime.idle();
+    expect(runtime.runner.sessionPatternPointerFor(cell)?.identity).toBe(
+      thirdPointer!.identity,
+    );
+    expect(await runtime.runner.start(cell)).toBe(true);
+    const restarted = await cell.pull();
+    expect((restarted as { marker?: string })?.marker).toBe(
+      "hand-built-swap-v3",
+    );
+    runtime.runner.stop(cell);
   });
 
   it("a stopped keyless piece restarts through the sync in-session lookup", async () => {
