@@ -910,6 +910,112 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
     expect((value as { out?: number })?.out).toBe(1);
   });
 
+  it("a tombstone never keeps an identity that failed to commit", async () => {
+    // The corner where the two bounded maps meet: a staged keyless setup's
+    // pointer is set eagerly, so a capacity wave passing through the
+    // STAGING WINDOW evicts an identity that has not committed — and if
+    // that staging then fails, the tombstone would name a pointer that was
+    // never the doc's committed state. A later replay of the pattern that
+    // DID commit would read a different-identity tombstone and restage —
+    // the same-pattern replay failure reintroduced through the side door.
+    // The failure cleanup re-points such a tombstone at the last committed
+    // pointer.
+    storageManager = EmulatedStorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const strictPattern = () => ({
+      argumentSchema: {
+        type: "object",
+        properties: { v: { type: "number" } },
+        additionalProperties: false,
+      },
+      resultSchema: {
+        type: "object",
+        properties: { out: { type: "number" } },
+      },
+      result: { out: { $alias: { cell: "argument", path: ["v"] } } },
+      nodes: [],
+    });
+
+    const tx = runtime.edit();
+    const cell = runtime.getCell<Record<string, unknown>>(
+      space,
+      "tombstone-uncommitted-identity",
+      undefined,
+      tx,
+    );
+    const running = runtime.run(
+      tx,
+      // deno-lint-ignore no-explicit-any
+      strictPattern() as any,
+      { v: 1, extra: 2 },
+      cell,
+    );
+    await tx.commit();
+    await running.pull();
+    runtime.runner.stop(cell);
+
+    // A DIFFERENT keyless setup staged over it (pointer set eagerly). Its
+    // schema is permissive so the restage validation the different-pattern
+    // staging performs passes — this scenario is about the COMMIT dying,
+    // not the staging.
+    const stagedOnlyPattern = {
+      argumentSchema: { type: "object" },
+      resultSchema: {
+        type: "object",
+        properties: { marker: { type: "string" } },
+      },
+      result: { marker: "staged-only" },
+      nodes: [],
+    };
+    const tx2 = runtime.edit();
+    const rerun = runtime.run(
+      tx2,
+      // deno-lint-ignore no-explicit-any
+      stagedOnlyPattern as any,
+      undefined,
+      cell,
+    );
+    void rerun;
+    // …then a capacity wave evicts the STAGED pointer inside its own
+    // staging window…
+    const pointers = (runtime.runner as unknown as {
+      sessionPatternPointers: {
+        set(key: string, value: { identity: string; symbol: string }): void;
+      };
+    }).sessionPatternPointers;
+    for (
+      let i = 0;
+      runtime.runner.sessionPatternPointerFor(cell) !== undefined;
+      i++
+    ) {
+      if (i > 100_000) throw new Error("the pointer never evicted");
+      pointers.set(`uncommitted-synthetic/${i}`, {
+        identity: `keyless:churn-${i}`,
+        symbol: "default",
+      });
+    }
+    // …and the staging fails.
+    tx2.abort();
+
+    // The COMMITTED pattern's replay must keep the exemption: the tombstone
+    // may not pin the aborted staging's identity as this doc's evidence.
+    const tx3 = runtime.edit();
+    const replay = runtime.run(
+      tx3,
+      // deno-lint-ignore no-explicit-any
+      strictPattern() as any,
+      { v: 1, extra: 2 },
+      cell,
+    );
+    const committed = await tx3.commit();
+    expect(committed.error).toBeUndefined();
+    const value = await replay.pull();
+    expect((value as { out?: number })?.out).toBe(1);
+  });
+
   it("the legacy-tolerance diagnostics render under debug logging", async () => {
     // The tolerance arms log LAZILY: their message closures execute only at
     // debug level, so a closure that throws — a renamed field, a bad

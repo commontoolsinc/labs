@@ -2505,14 +2505,27 @@ export class Runner {
       const priorPointer = this.sessionPatternPointers.get(key);
       this.sessionPatternPointers.set(key, entryRef);
       tx.addCommitCallback((_tx, result) => {
-        if (
-          result.error &&
-          this.sessionPatternPointers.get(key) === entryRef
-        ) {
+        if (!result.error) return;
+        if (this.sessionPatternPointers.get(key) === entryRef) {
           if (priorPointer !== undefined) {
             this.sessionPatternPointers.set(key, priorPointer);
           } else {
             this.sessionPatternPointers.delete(key);
+          }
+        } else if (
+          this.evictedSessionPatternPointers.get(key) === entryRef
+        ) {
+          // The staged pointer was capacity-evicted inside its own staging
+          // window, so the TOMBSTONE now names an identity that never
+          // committed — and a later replay of the pattern that DID commit
+          // would read it as different-identity evidence and restage.
+          // Re-point the tombstone at the last committed pointer (the value
+          // the eviction would have recorded had this staging not refreshed
+          // the entry).
+          if (priorPointer !== undefined) {
+            this.evictedSessionPatternPointers.set(key, priorPointer);
+          } else {
+            this.evictedSessionPatternPointers.delete(key);
           }
         }
       });
