@@ -41,6 +41,12 @@ const NON_PATTERN_FILES = new Set([
   "mod.ts",
 ]);
 
+const NON_PATTERN_BASENAMES = new Set([
+  "contract.ts",
+  "guest.ts",
+  "guest.tsx",
+]);
+
 const NON_PATTERN_PREFIXES = [
   "integration/",
   "tools/",
@@ -115,6 +121,11 @@ export function isPatternSource(
   if (path.endsWith(".test.ts") || path.endsWith(".test.tsx")) return false;
   const key = patternKey(path, patternsDir);
   if (NON_PATTERN_FILES.has(key)) return false;
+  const segments = key.split("/");
+  if (
+    segments[0].startsWith("iframe-") &&
+    NON_PATTERN_BASENAMES.has(segments.at(-1)!)
+  ) return false;
   return !NON_PATTERN_PREFIXES.some((prefix) => key.startsWith(prefix));
 }
 

@@ -1,13 +1,8 @@
-import {
-  fabricFromRealmValue,
-  realmFromFabricValue,
-} from "@commonfabric/data-model/codecs";
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import { css, html, LitElement } from "lit";
 import { property } from "lit/decorators.js";
 import { createRef, Ref, ref } from "lit/directives/ref.js";
+import { type FabricBridge, FabricBridgeHost } from "./bridge.ts";
 import * as IPC from "./ipc.ts";
-import { type Context, getIframeContextHandler, Receipt } from "./context.ts";
 import OuterFrame from "./outer-frame.ts";
 
 type CommonIframeLoadState = "" | "loading" | "loaded";
@@ -15,8 +10,8 @@ type CommonIframeLoadState = "" | "loading" | "loaded";
 // @summary A sandboxed iframe to execute arbitrary scripts.
 // @tag common-iframe-sandbox
 // @prop {string} src - String representation of HTML content to load within an iframe.
-// @prop context - Cell context.
-// @event {CustomEvent} error - An error from the iframe.
+// @prop bridge - Explicit resources made available to the guest.
+// @event {CustomEvent} common-iframe-error - An error from the iframe.
 // @event {CustomEvent} load - The iframe was successfully loaded.
 export class CommonIframeSandboxElement extends LitElement {
   get src() {
@@ -33,8 +28,19 @@ export class CommonIframeSandboxElement extends LitElement {
     }
   }
 
-  @property()
-  accessor context: object | undefined = undefined;
+  get bridge(): FabricBridge | undefined {
+    return this.#bridge;
+  }
+
+  @property({ attribute: false })
+  set bridge(value: FabricBridge | undefined) {
+    const previousValue = this.#bridge;
+    this.#bridge = value;
+    this.requestUpdate("bridge", previousValue);
+    if (this.readyWindow && value !== previousValue && this.src) {
+      this.loadInnerDoc();
+    }
+  }
 
   @property({ attribute: "load-state", reflect: true })
   accessor loadState: CommonIframeLoadState = "";
@@ -50,9 +56,10 @@ export class CommonIframeSandboxElement extends LitElement {
   `;
 
   #src = "";
+  #bridge: FabricBridge | undefined;
 
-  /** The host's end of the channel to the current guest, while there is one. */
-  private guestPort: MessagePort | undefined;
+  /** The capability session belonging to the currently loaded guest. */
+  private guestHost: FabricBridgeHost | undefined;
   private iframeRef: Ref<HTMLIFrameElement> = createRef();
 
   /**
@@ -62,15 +69,6 @@ export class CommonIframeSandboxElement extends LitElement {
    * context, so the frame reattaching brings is a different window.
    */
   private readyWindow: Window | undefined;
-
-  /**
-   * The guest's live subscriptions by key, each held with the context it was
-   * taken out against. A receipt is only good to the context that issued it,
-   * and `context` is a property a consumer may reassign, so what cancels a
-   * subscription is the pair rather than the receipt alone.
-   */
-  private subscriptions: Map<string, { context: Context; receipt: Receipt }> =
-    new Map();
 
   /**
    * Handles the outer frame reporting itself ready, which it does on its own
@@ -121,9 +119,10 @@ export class CommonIframeSandboxElement extends LitElement {
     }
 
     const channel = new MessageChannel();
-    this.guestPort = channel.port1;
-    channel.port1.onmessage = this.onGuestPortMessage;
-    channel.port1.start();
+    this.guestHost = new FabricBridgeHost(
+      this.bridge ?? { resources: {} },
+      channel.port1,
+    );
     guestWindow.postMessage(IPC.GUEST_PORT_HANDOFF, "*", [channel.port2]);
   }
 
@@ -133,44 +132,9 @@ export class CommonIframeSandboxElement extends LitElement {
    * of a closed port is one this element is done with.
    */
   private closeGuestPort() {
-    this.guestPort?.close();
-    this.guestPort = undefined;
+    this.guestHost?.disconnect();
+    this.guestHost = undefined;
   }
-
-  /**
-   * Handles a message on the port to the guest. A detached element ignores
-   * one: the guest may have sent it before the element left the document, and
-   * a write reaching the context handler from outside the document's lifetime
-   * is not this element's to make.
-   */
-  private onGuestPortMessage = (event: MessageEvent) => {
-    if (!this.isConnected) {
-      return;
-    }
-
-    // The guest is untrusted, so what arrives is a claim on two counts: that
-    // it is an encoding at all, and that what it encodes is a message this
-    // protocol writes. The decode settles the first -- it holds the marker
-    // this build mints -- and `isGuestMessage()` the second.
-    let decoded: FabricValue;
-    try {
-      decoded = fabricFromRealmValue(event.data);
-    } catch (error) {
-      console.error(
-        `common-iframe-sandbox: Undecodable message from guest: ` +
-          String(error),
-      );
-      return;
-    }
-    if (!IPC.isGuestMessage(decoded)) {
-      console.error(
-        "common-iframe-sandbox: Malformed message from guest.",
-        decoded,
-      );
-      return;
-    }
-    this.onGuestMessage(decoded);
-  };
 
   /** Handles a message from the outer frame. */
   private onMessage = (event: MessageEvent) => {
@@ -207,10 +171,7 @@ export class CommonIframeSandboxElement extends LitElement {
         // it along without reading it, so this is the first look anything has
         // had at it.
         const raised = outerMessage.data;
-        if (
-          IPC.isGuestMessage(raised) &&
-          raised.type === IPC.GuestMessageType.Error
-        ) {
+        if (IPC.isGuestAlarm(raised)) {
           this.dispatchGuestError(raised.data);
         } else {
           console.error(
@@ -251,87 +212,6 @@ export class CommonIframeSandboxElement extends LitElement {
     );
   }
 
-  /** Handles a message the guest sent, on whichever route carried it. */
-  private onGuestMessage(message: IPC.GuestMessage) {
-    const IframeHandler = getIframeContextHandler();
-    if (IframeHandler == null) {
-      console.error("common-iframe-sandbox: No iframe handler defined.");
-      return;
-    }
-
-    if (!this.context) {
-      console.warn("common-iframe-sandbox: missing `context`.");
-      return;
-    }
-
-    switch (message.type) {
-      case IPC.GuestMessageType.Error: {
-        this.dispatchGuestError(message.data);
-        return;
-      }
-
-      case IPC.GuestMessageType.Read: {
-        const key = message.data;
-        const value = IframeHandler.read(this, this.context, key);
-        this.toGuest({ type: IPC.HostMessageType.Update, data: [key, value] });
-        return;
-      }
-
-      case IPC.GuestMessageType.Write: {
-        const [key, value] = message.data;
-        IframeHandler.write(this, this.context, key, value);
-        return;
-      }
-
-      case IPC.GuestMessageType.Subscribe: {
-        const keys = typeof message.data === "string"
-          ? [message.data]
-          : message.data;
-
-        // TODO(seefeld): Remove this and make this default true on 3/31/2025 or
-        // whenever we delete all pieces anyway. This is just a stopgap to not
-        // break existing pieces.
-        const doNotSendMyDataBack = Array.isArray(message.data);
-
-        for (const key of keys) {
-          if (this.subscriptions.has(key)) {
-            console.warn(
-              "common-iframe-sandbox: Already subscribed to `${key}`",
-            );
-            continue;
-          }
-          const receipt = IframeHandler.subscribe(
-            this,
-            this.context,
-            key,
-            (key, value) => this.notifySubscribers(key, value),
-            doNotSendMyDataBack,
-          );
-          this.subscriptions.set(key, { context: this.context, receipt });
-        }
-        return;
-      }
-
-      case IPC.GuestMessageType.Unsubscribe: {
-        const keys = typeof message.data === "string"
-          ? [message.data]
-          : message.data;
-
-        for (const key of keys) {
-          // A receipt is opaque and may be any value the handler returns,
-          // including falsy ones like `0`. Test for the entry, not the value.
-          const entry = this.subscriptions.get(key);
-          if (entry === undefined) {
-            continue;
-          }
-          IframeHandler.unsubscribe(this, entry.context, entry.receipt);
-          this.subscriptions.delete(key);
-        }
-        return;
-      }
-    }
-  }
-
   /**
    * Lets go of the current guest, if there is one: its subscriptions are
    * cancelled, each against the context it was taken out against, and its port
@@ -341,14 +221,6 @@ export class CommonIframeSandboxElement extends LitElement {
    */
   private releaseGuest() {
     this.closeGuestPort();
-
-    const IframeHandler = getIframeContextHandler();
-    if (IframeHandler != null) {
-      for (const { context, receipt } of this.subscriptions.values()) {
-        IframeHandler.unsubscribe(this, context, receipt);
-      }
-      this.subscriptions.clear();
-    }
   }
 
   /**
@@ -367,22 +239,9 @@ export class CommonIframeSandboxElement extends LitElement {
     });
   }
 
-  /** Tells the guest that `key` now holds `value`. */
-  private notifySubscribers(key: string, value: FabricValue) {
-    this.toGuest({ type: IPC.HostMessageType.Update, data: [key, value] });
-  }
-
   /** Sends `message` to the outer frame. */
   private toOuterFrame(message: IPC.IPCHostMessage) {
     this.iframeRef.value?.contentWindow?.postMessage(message, "*");
-  }
-
-  /**
-   * Sends `message` to the guest. Does nothing when there is no port, which is
-   * every moment outside a loaded guest's lifetime.
-   */
-  private toGuest(message: IPC.HostMessage) {
-    this.guestPort?.postMessage(realmFromFabricValue(message));
   }
 
   /** The outer frame's message listener, as `globalThis` holds it. */
@@ -398,6 +257,9 @@ export class CommonIframeSandboxElement extends LitElement {
   override disconnectedCallback() {
     super.disconnectedCallback();
     globalThis.removeEventListener("message", this.boundOnMessage);
+    queueMicrotask(() => {
+      if (!this.isConnected) this.releaseGuest();
+    });
   }
 
   /** @inheritDoc */

@@ -80,6 +80,7 @@ import {
 import {
   getBlindStructuralTarget,
   ignoreReadForCommit,
+  isDurableReadTx,
   isInternalVerifierRead,
   isMutableTransactionReadAllowed,
   isReadIgnoredForScheduling,
@@ -2859,7 +2860,13 @@ export class V2StorageTransaction implements IStorageTransaction {
     this.#loadedUnderIdentity = true;
     const identity = this.#scopeKeyIdentity;
     const value = toTransactionDocumentValue(
-      branch.replica.getDocument(address.id, address.scope, identity),
+      isDurableReadTx(this) && branch.replica.getNonSpeculativeDocument
+        ? branch.replica.getNonSpeculativeDocument(
+          address.id,
+          address.scope,
+          identity,
+        )
+        : branch.replica.getDocument(address.id, address.scope, identity),
     );
     // The runner's explicit-instance read, transaction layer (stage A): a
     // per-instance run's read of a scoped instance the replica has NEVER
@@ -2918,11 +2925,18 @@ export class V2StorageTransaction implements IStorageTransaction {
         if (firstDocument !== undefined) {
           const { address, value: expected } = firstDocument.initial;
           const actual = toTransactionDocumentValue(
-            currentReplica.getDocument(
-              address.id as URI,
-              address.scope,
-              this.#scopeKeyIdentity,
-            ),
+            isDurableReadTx(this) &&
+              currentReplica.getNonSpeculativeDocument
+              ? currentReplica.getNonSpeculativeDocument(
+                address.id as URI,
+                address.scope,
+                this.#scopeKeyIdentity,
+              )
+              : currentReplica.getDocument(
+                address.id as URI,
+                address.scope,
+                this.#scopeKeyIdentity,
+              ),
           );
           return {
             error: StateInconsistency({
@@ -2952,6 +2966,7 @@ export class V2StorageTransaction implements IStorageTransaction {
           doc.initial,
           branch.replica,
           this.#scopeKeyIdentity,
+          isDurableReadTx(this),
         );
         if (result.error) {
           return { error: result.error };

@@ -1,5 +1,7 @@
 import { defer } from "@commonfabric/utils/defer";
 
+import "../src/common-iframe-sandbox.ts";
+
 import {
   assert,
   assertDeepEquals,
@@ -8,13 +10,10 @@ import {
   ContextShim,
   invertPromise,
   render,
-  setIframeTestHandler,
   waitForEvent,
 } from "./utils.ts";
 
 type TestCase = [string, string, string | null | RegExp];
-
-setIframeTestHandler();
 
 // Cookies should not be set with SameSite=None, but
 // used to test that cookies are not accessible to iframe.

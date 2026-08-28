@@ -99,6 +99,13 @@ export enum RequestType {
   CellGet = "cell:get",
 
   /**
+   * Pulls a cell through the scheduler before reading it. Unlike
+   * {@link CellGet}, this demands lazy producers and waits for their
+   * transitive work to settle.
+   */
+  CellPull = "cell:pull",
+
+  /**
    * Overwrites a cell's value blindly: the write carries no value-equality
    * precondition, so a concurrent write to the same cell does not make it
    * fail. That is not the same as unconditional. A blind write still carries
@@ -110,7 +117,7 @@ export enum RequestType {
   CellSet = "cell:set",
 
   /**
-   * Applies a value to a cell read-modify-write, keeping compare-and-set.
+   * Appends values to an array cell as a mergeable server-side operation.
    * The counterpart to {@link CellSet}'s blind overwrite.
    */
   CellPush = "cell:push",
@@ -160,6 +167,12 @@ export enum RequestType {
 
   /** Forgets a client's pinned operation target. */
   OperationSessionClose = "operation:session-close",
+
+  /** Runs a read-only SQL query against a SQLite database cell. */
+  SqliteQuery = "sqlite:query",
+
+  /** Commits a SQL write through a SQLite database cell. */
+  SqliteExec = "sqlite:exec",
 
   // Runtime operations
 
@@ -782,6 +795,15 @@ export type CellGetRequest = BaseRequest & {
   includeRef?: boolean;
 };
 
+/** The {@link RequestType.CellPull} request. */
+export type CellPullRequest = BaseRequest & {
+  type: RequestType.CellPull;
+  /**
+   * The cell whose producers to demand before reading its current value.
+   */
+  cell: CellRef;
+};
+
 /**
  * The {@link RequestType.CellSet} request. `value` is the whole
  * already-resolved value rather than a delta.
@@ -798,14 +820,14 @@ export type CellSetRequest = BaseRequest & {
    * The value to store, whole and already resolved.
    */
   value: FabricValue;
+  /** Wait for commit confirmation and return a refusal to the caller. */
+  awaitCommit?: boolean;
 };
 
 /**
- * The {@link RequestType.CellPush} request: a read-modify-write append.
- * The same wire shape as {@link CellSetRequest}, carrying the whole
- * already-appended array rather than a delta, but routed as its own request
- * so the runtime keeps the read target as a commit precondition. That is
- * the compare-and-set a blind set gives up.
+ * The {@link RequestType.CellPush} request: a mergeable server-side append.
+ * It carries only the invocation-time member snapshots, so an equivalent
+ * client handle with a stale local cache cannot replace a newer array base.
  */
 export type CellPushRequest = BaseRequest & {
   type: RequestType.CellPush;
@@ -815,10 +837,11 @@ export type CellPushRequest = BaseRequest & {
    */
   cell: CellRef;
 
-  /**
-   * The value to apply, whole and already resolved.
-   */
-  value: FabricValue;
+  /** The members to append, already resolved. */
+  values: FabricValue[];
+
+  /** Wait for commit confirmation and return a refusal to the caller. */
+  awaitCommit?: boolean;
 };
 
 /**
@@ -837,6 +860,8 @@ export type CellSendRequest = BaseRequest & {
    * The event to deliver.
    */
   event: FabricValue;
+  /** Wait for commit confirmation and return a refusal to the caller. */
+  awaitCommit?: boolean;
 };
 
 /**
@@ -963,6 +988,29 @@ export type OperationApplyResponse = {
   resolution: ApplyOpResolution;
 };
 
+/** SQLite bind values as the main-thread connection carries them. */
+export type SqliteParams =
+  | { kind: "positional"; values: readonly FabricValue[] }
+  | {
+    kind: "named";
+    entries: readonly (readonly [string, FabricValue])[];
+  };
+
+/** The {@link RequestType.SqliteQuery} request. */
+export type SqliteQueryRequest = BaseRequest & {
+  type: RequestType.SqliteQuery;
+  cell: CellRef;
+  sql: string;
+  params?: SqliteParams;
+};
+
+/** The {@link RequestType.SqliteExec} request. */
+export type SqliteExecRequest = BaseRequest & {
+  type: RequestType.SqliteExec;
+  cell: CellRef;
+  sql: string;
+  params?: SqliteParams;
+};
 /**
  * The {@link RequestType.GetCell} request. `cause` is what derives the
  * cell: the same space and cause always name the same one.
@@ -2383,6 +2431,7 @@ export type IPCClientRequest =
   | InitializeRequest
   | DisposeRequest
   | CellGetRequest
+  | CellPullRequest
   | CellSetRequest
   | CellPushRequest
   | CellSendRequest
@@ -2397,6 +2446,8 @@ export type IPCClientRequest =
   | OperationSubscribeRequest
   | OperationUnsubscribeRequest
   | OperationSessionCloseRequest
+  | SqliteQueryRequest
+  | SqliteExecRequest
   | GetCellRequest
   | GetHomeSpaceCellRequest
   | EnsureHomePatternRunningRequest
@@ -2499,6 +2550,13 @@ export type CellGetResponse = CellValueResponse & {
    * none to reference.
    */
   cell?: CellRef;
+};
+
+/** Rows returned by {@link RequestType.SqliteQuery}. */
+export type SqliteQueryResponse = {
+  rows: readonly {
+    readonly [key: string]: FabricValue;
+  }[];
 };
 
 /** A reference to one cell, for a request whose answer is which cell. */
@@ -2845,6 +2903,7 @@ export type RemoteResponse =
   | CellGetResponse
   | CellResponse
   | CfcLabelViewResponse
+  | SqliteQueryResponse
   | GraphSnapshotResponse
   | LoggerCountsResponse
   | PatternCoverageResponse
@@ -3001,6 +3060,10 @@ export type Commands = {
     request: CellGetRequest;
     response: CellGetResponse;
   };
+  [RequestType.CellPull]: {
+    request: CellPullRequest;
+    response: CellGetResponse;
+  };
   [RequestType.CellSet]: {
     request: CellSetRequest;
     response: EmptyResponse;
@@ -3056,6 +3119,14 @@ export type Commands = {
   [RequestType.OperationSessionClose]: {
     request: OperationSessionCloseRequest;
     response: BooleanResponse;
+  };
+  [RequestType.SqliteQuery]: {
+    request: SqliteQueryRequest;
+    response: SqliteQueryResponse;
+  };
+  [RequestType.SqliteExec]: {
+    request: SqliteExecRequest;
+    response: EmptyResponse;
   };
   // Page requests
   [RequestType.PageCreate]: {

@@ -71,6 +71,7 @@ import {
   TelemetryNotification,
   type UploadBlobResponse,
 } from "./protocol/mod.ts";
+import { cellRefToInstanceId } from "./shared/utils.ts";
 
 export interface RuntimeClientOptions
   extends Omit<InitializationData, "apiUrl" | "identity" | "spaceIdentity"> {
@@ -95,6 +96,8 @@ export const $conn = Symbol("$request");
  */
 export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   #conn: InitializedRuntimeConnection;
+  readonly #principal: DID | undefined;
+  readonly #sessionInstanceId = crypto.randomUUID();
   #pendingWrites = false;
   #operationSubscriptions = new Map<
     string,
@@ -107,6 +110,7 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   ) {
     super();
     this.#conn = conn;
+    this.#principal = _options.identity?.did();
     this.#conn.on("console", this._onConsole);
     this.#conn.on("navigaterequest", this._onNavigateRequest);
     this.#conn.on("error", this._onError);
@@ -114,6 +118,19 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     this.#conn.on("pendingwriteschange", this._onPendingWritesChange);
     this.#conn.on("operationupdate", this._onOperationUpdate);
     this.#conn.on("eventneedsattention", this._onEventNeedsAttention);
+  }
+
+  /** Returns an opaque identity for the scoped document instance in `ref`. */
+  cellInstanceId(ref: CellRef): string {
+    if (ref.scope !== undefined && ref.scope !== "space" && !this.#principal) {
+      throw new Error(
+        `Cannot identify a ${ref.scope}-scoped Cell without a runtime identity.`,
+      );
+    }
+    return cellRefToInstanceId(ref, {
+      principal: this.#principal ?? "",
+      sessionId: this.#sessionInstanceId,
+    });
   }
 
   /**
