@@ -1519,19 +1519,25 @@ export class Runner {
   >();
   // Tombstones for `sessionPatternPointers` entries dropped by CAPACITY
   // EVICTION — never by the sanctioned removals (a real pattern's durable
-  // stamps superseding the pointer; a failed staging's cleanup). The
-  // zero-evidence restage exemption in `setupInternal` consults this:
-  // an EVICTED pointer is "evidence unknown", not "no evidence", and must
-  // take the conservative restage rather than the fresh-session exemption
-  // — without the tombstone, eviction would silently skip the argument
-  // revalidation the un-evicted state performed. Entries are never
-  // individually removed (the doubt they record stays true for every
-  // state that consults them); bounded like the pointer map itself, so a
-  // doubly-blown bound degrades honestly to the designed zero-evidence
-  // verdict.
+  // stamps superseding the pointer; a failed staging's cleanup). Each
+  // records the POINTER the eviction dropped, and the zero-evidence
+  // restage exemption in `setupInternal` consults it: an evicted pointer
+  // is "evidence unknown", not "no evidence". A re-setup with a DIFFERENT
+  // identity takes the conservative restage the un-evicted state would
+  // have taken — without the tombstone, eviction silently skipped that
+  // revalidation. A re-setup with the SAME identity is evidence AGREEING
+  // with the stored setup (the mint is a stable content hash of the
+  // pattern structure), so it keeps the exemption's protective verdict:
+  // forcing a restage there would strictly validate a stored argument the
+  // original staging never validated — the cf-get replay breakage the
+  // exemption exists to prevent, manufactured in-session past 4096
+  // setups. Entries are never individually removed (the doubt they record
+  // stays true for every state that consults them); bounded like the
+  // pointer map itself, so a doubly-blown bound degrades honestly to the
+  // designed zero-evidence verdict.
   private evictedSessionPatternPointers = new BoundedKeyMap<
     `${MemorySpace}/${ScopeKey}/${URI}`,
-    true
+    { identity: string; symbol: string }
   >(RESULT_SHORTCUT_LIMIT);
   // SESSION-side pattern pointers for KEYLESS pieces. A hand-built pattern's
   // setup no longer stamps its session-synthetic `keyless:` ref durably
@@ -1555,7 +1561,8 @@ export class Runner {
     `${MemorySpace}/${ScopeKey}/${URI}`,
     { identity: string; symbol: string }
   >(RESULT_SHORTCUT_LIMIT, {
-    onEvict: (key) => this.evictedSessionPatternPointers.set(key, true),
+    onEvict: (key, pointer) =>
+      this.evictedSessionPatternPointers.set(key, pointer),
   });
 
   /**
@@ -2569,6 +2576,11 @@ export class Runner {
       entryRef,
       this.sessionPatternPointers.get(this.getDocKey(resultCell)),
     );
+    // What a capacity eviction dropped for this doc, if anything — the
+    // evidence the exemption below weighs when the live pointer is gone.
+    const evictedPointer = this.evictedSessionPatternPointers.get(
+      this.getDocKey(resultCell),
+    );
     const setupState: SetupStateReuse = {
       sameStoredSetup,
       // The zero-evidence exemption: a piece with NO pattern pointer (durable
@@ -2582,14 +2594,18 @@ export class Runner {
       // replay failed exactly there). A marker naming ANOTHER identity still
       // restages, and any surviving pointer keeps the ordinary rule. An
       // EVICTED session pointer is NOT zero evidence — this session had the
-      // evidence and lost it to capacity, so the tombstone routes the piece
-      // to the conservative restage instead of the exemption.
+      // evidence and lost it to capacity. The tombstone says WHICH pattern
+      // it lost: a different-identity re-setup takes the conservative
+      // restage the un-evicted state would have taken, while a
+      // same-identity re-setup keeps the exemption — the evidence agrees
+      // with the stored setup, and forcing a restage there would break the
+      // very replay the exemption ships for.
       restageStoredArgument: (!sameStoredSetup || marker === "other") &&
         !(previousIdentityRef === undefined && marker === "absent" &&
           !validationOptions.reapplyStoredSetup &&
-          !this.evictedSessionPatternPointers.has(
-            this.getDocKey(resultCell),
-          )),
+          (evictedPointer === undefined ||
+            (evictedPointer.identity === entryRef.identity &&
+              evictedPointer.symbol === entryRef.symbol))),
       // "matches" only. An ABSENT marker is not evidence that the running graph
       // is this pattern — it is the absence of evidence either way, and the two
       // must not collapse into one boolean.

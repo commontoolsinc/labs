@@ -822,6 +822,91 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
     expect(loud).toBe(true);
   });
 
+  it("an evicted pointer does not force a restage onto the SAME pattern's replay", async () => {
+    // The discriminating half of the eviction tombstone: it records WHICH
+    // pattern the evicted pointer named. A re-setup with the SAME mint (the
+    // session identity is a stable content hash of the pattern structure —
+    // the cf-get transform replay shape) is evidence AGREEING with the
+    // stored setup, so the exemption's protective verdict stands: no
+    // restage — restaging would strictly validate a stored argument the
+    // original staging never validated (the production incident this
+    // exemption ships for). Only an eviction tombstone naming a DIFFERENT
+    // identity forces the conservative restage.
+    storageManager = EmulatedStorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    // Accepts nothing beyond `v` — but the stored argument will carry an
+    // extra property, written unvalidated by the plain-cell path (as
+    // materialized link reads do in production).
+    const strictPattern = () => ({
+      argumentSchema: {
+        type: "object",
+        properties: { v: { type: "number" } },
+        additionalProperties: false,
+      },
+      resultSchema: {
+        type: "object",
+        properties: { out: { type: "number" } },
+      },
+      result: { out: { $alias: { cell: "argument", path: ["v"] } } },
+      nodes: [],
+    });
+
+    const tx = runtime.edit();
+    const cell = runtime.getCell<Record<string, unknown>>(
+      space,
+      "evicted-pointer-same-pattern-replay",
+      undefined,
+      tx,
+    );
+    const running = runtime.run(
+      tx,
+      // deno-lint-ignore no-explicit-any
+      strictPattern() as any,
+      { v: 1, extra: 2 },
+      cell,
+    );
+    await tx.commit();
+    await running.pull();
+    expect(runtime.runner.sessionPatternPointerFor(cell)).toBeDefined();
+    runtime.runner.stop(cell);
+
+    // Capacity-evict the pointer (same churn as above).
+    const pointers = (runtime.runner as unknown as {
+      sessionPatternPointers: {
+        set(key: string, value: { identity: string; symbol: string }): void;
+      };
+    }).sessionPatternPointers;
+    for (
+      let i = 0;
+      runtime.runner.sessionPatternPointerFor(cell) !== undefined;
+      i++
+    ) {
+      if (i > 100_000) throw new Error("the pointer never evicted");
+      pointers.set(`same-synthetic/${i}`, {
+        identity: `keyless:churn-${i}`,
+        symbol: "default",
+      });
+    }
+
+    // The SAME pattern's replay (structurally identical build → same mint)
+    // must not be broken by the eviction: no restage, no validation error.
+    const tx2 = runtime.edit();
+    const rerun = runtime.run(
+      tx2,
+      // deno-lint-ignore no-explicit-any
+      strictPattern() as any,
+      { v: 1, extra: 2 },
+      cell,
+    );
+    const committed = await tx2.commit();
+    expect(committed.error).toBeUndefined();
+    const value = await rerun.pull();
+    expect((value as { out?: number })?.out).toBe(1);
+  });
+
   it("counts a keyless mint against a module-indexed pattern (missing-association tripwire)", async () => {
     // The sanctioned keyless population is runtime-BUILT values. A pattern
     // carrying a module-index source path reaching the mint means its
