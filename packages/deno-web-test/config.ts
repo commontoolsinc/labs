@@ -101,8 +101,14 @@ export const extractAstralConfig = (config: Config): LaunchOptions => {
   // is a constant inside astral rather than anything decided here. A system
   // browser is preferred so that a local run drives what CI drives; when there
   // is none, this stays unset and astral decides as before.
-  const path = astralBinaryPath();
-  if (path !== undefined) astralConfig.path = path;
+  //
+  // Only for Chrome, which is what the search knows how to find. A config that
+  // asked for another product gets no `path` at all, which leaves astral to
+  // resolve that product exactly as it did before this existed.
+  if ((astralConfig.product ?? "chrome") === "chrome") {
+    const path = astralBinaryPath();
+    if (path !== undefined) astralConfig.path = path;
+  }
 
   return astralConfig;
 };

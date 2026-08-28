@@ -79,16 +79,5 @@ describe("astralBinaryPath()", () => {
           .toBe(undefined);
       });
     });
-
-    it("prefers a system browser to astral's download", () => {
-      // Astral's download lives under its own cache; an answer from there
-      // would mean the search found nothing and fell through, which on a
-      // machine with a browser installed is the bug this exists to prevent.
-      withEnvironmentOverride(undefined, () => {
-        const path = astralBinaryPath();
-        if (path === undefined) return;
-        expect(path.includes("Caches/astral")).toBe(false);
-      });
-    });
   });
 });

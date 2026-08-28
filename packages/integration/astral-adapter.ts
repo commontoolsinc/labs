@@ -56,8 +56,11 @@ function isExecutableFile(path: string): boolean {
 }
 
 /**
- * Returns the browser binary an astral launch should be given, or `undefined`
- * to leave the choice to astral.
+ * Returns the browser binary a **Chrome** astral launch should be given, or
+ * `undefined` to leave the choice to astral. The paths searched are Chrome's
+ * and Chromium's, so a caller launching anything else must not ask -- leaving
+ * `path` unset is what hands the whole question back to astral, including its
+ * own reading of `ASTRAL_BIN_PATH` for that product.
  *
  * This answers the same question astral's own `getBinary()` answers, and
  * differs from it in one way: where astral falls straight through to
