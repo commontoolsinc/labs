@@ -129,6 +129,7 @@ import type {
   SinkMaxConfidentiality,
   TrustSnapshot,
 } from "./cfc/mod.ts";
+import { parseFlagValue } from "./experimental-posture.ts";
 import { STANDARD_PROMPT_CAVEAT_POLICY } from "./cfc/mod.ts";
 import type { CommitBackpressurePolicy } from "./scheduler/backpressure.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
@@ -201,12 +202,14 @@ type MissingOptionKeys = Exclude<keyof RuntimeOptions, RuntimeOptionKey>;
 // the missing key(s).
 const _unclassifiedOptions: never[] = [] as MissingOptionKeys[];
 
-import { parseFlagValue } from "./experimental-posture.ts";
-export { parseFlagValue };
-
-// ---------------------------------------------------------------------------
+//
 // Gate 2: the canonical experimental-flag env mapping.
-// ---------------------------------------------------------------------------
+//
+
+// The parse itself lives in the slim `experimental-posture.ts` module, so
+// the browser shell's build-define reading imports no more of this module's
+// dependency graph; it is re-exported here beside the mapping it parses.
+export { parseFlagValue };
 
 /** Reads one environment variable; pass `Deno.env.get` in Deno contexts. */
 export type EnvReader = (name: string) => string | undefined;
