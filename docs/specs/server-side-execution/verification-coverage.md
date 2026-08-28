@@ -6305,6 +6305,46 @@ supply; OW29/OW32/OW34 closed):
     resolution failure on ctx docs the first run's withdrawal left
     behind) is its own diagnosis — the atomicity fix makes every such
     transient recoverable by re-drain instead of a permanent loss.
+    **FIX ROUND (independent review of PR #6459, 2026-08-27): F1
+    landed — the withdrawal carries §2's arrival-order barrier.** The
+    review DEMONSTRATED (213 ms probe) that the new deferral arm let
+    a later-arrived same-space served entry overtake the withdrawn
+    head — the b01 class re-opened at a new arm: durable log
+    ["B","A"] against arrival [a1, b1], b1 sealing while a1 was
+    pending. The withdrawal now sweeps later-arrived durable served
+    followers out of the scheduler queue with
+    `{cause: "arrival-barrier", blockedBy}` exactly as
+    `failHeadEventLoadPark` does (a shared events.ts helper,
+    enqueueSeq-guarded because these arms do not fail at the
+    un-dispatched queue head; the piece-start deferral arms — the
+    review's named sibling gap, same no-sweep shape, same disposition
+    — carry the same sweep). Pins red-first, watched: the ordering
+    pin inverts the review's probe (executor-events-down "the
+    handler-not-run withdrawal carries the arrival-order BARRIER" —
+    pre-fix/mutation red at stored log ["B"] while a1 pends; fixed:
+    b1 barrier-deferred and the healed re-drain lands ["A","B"]); a
+    unit pin (scheduler-event-identity) drives both piece-start
+    failure modes and the exclusions (cross-space neighbours and LT1
+    copies stay queued). Mutations killed arm by arm: finalize sweep
+    disabled → ordering pin red at the ["B"] overtake with the piece
+    sweeps still active; piece sweeps disabled → unit pin red with
+    the finalize sweep still active. **F2 landed** — the terminal §5
+    notice branches on the final deferral's cause ("handler did not
+    run after N withdrawn dispatches"; the old
+    no-runnable-handler/load-attempt boilerplate was false in both
+    clauses for this class), red-first through the full 8-deferral
+    budget with THIS cause — which also closes the review's stated
+    gap that the threshold path was code-traced, not test-run. **F3,
+    recorded shape, not built:** a deferral that heals below the
+    threshold leaves its `#eventDeferrals` entry for the tenure, and
+    `#eventDeferrals.size > 0` arms `#eventScanOwed` on every
+    admitted commit — a per-commit drain rescan over an (empty)
+    pending set. Pre-existing for every plain-deferral cause;
+    handler-not-run makes heal-after-defer the COMMON case, so the
+    residue now arms routinely. Cheap close if taken up: delete the
+    eventId on successful seal. **F4: no change owed** — the
+    atomicity pin's final batch assert is corroborative; the teeth
+    are the α run-count and the single consequence-carrying commit.
     Sibling entry, landed mid-review: #5744 (lunch-poll profile-first
     join) re-skipped `integration/lunch-poll-vote.test.ts` as a FILE
     entry on this row's b04 signature — its recorded reds PREDATE the
