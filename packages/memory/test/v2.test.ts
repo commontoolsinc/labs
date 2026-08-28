@@ -300,6 +300,7 @@ describe("parseMemoryProtocolFlags", () => {
         applyOp: false,
         syncSchemaTableV2: true,
         messageCompressionV1: false,
+        sessionHoldings: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
