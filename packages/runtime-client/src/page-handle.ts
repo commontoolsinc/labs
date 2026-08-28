@@ -11,19 +11,19 @@ export type PageType = {
 };
 
 export class PageHandle<T = PageType> {
-  private _conn: InitializedRuntimeConnection;
-  private _cell: CellHandle<T>;
+  #conn: InitializedRuntimeConnection;
+  #cell: CellHandle<T>;
 
   constructor(
     rt: RuntimeClient,
     ref: PageRef,
   ) {
-    this._conn = rt[$conn]();
-    this._cell = new CellHandle<T>(rt, ref.cell);
+    this.#conn = rt[$conn]();
+    this.#cell = new CellHandle<T>(rt, ref.cell);
   }
 
   cell(): CellHandle<T> {
-    return this._cell;
+    return this.#cell;
   }
 
   /**
@@ -36,32 +36,32 @@ export class PageHandle<T = PageType> {
    * identity, use `cell().id()` — the full schemed URI.
    */
   id(): string {
-    return this._cell.id().replace(/^of:/, "");
+    return this.#cell.id().replace(/^of:/, "");
   }
 
   name(): string | undefined {
-    const data = this._cell.get() as Record<string, unknown> | undefined;
+    const data = this.#cell.get() as Record<string, unknown> | undefined;
     if (data && typeof data === "object" && NAME in data) {
       return data[NAME] as string;
     }
   }
 
   async start(): Promise<boolean> {
-    const res = await this._conn.request<RequestType.PageStart>({
+    const res = await this.#conn.request<RequestType.PageStart>({
       type: RequestType.PageStart,
       pageId: this.id(),
       // The page's cell knows its space — start/stop route to that
       // space's piece context.
-      space: this._cell.space(),
+      space: this.#cell.space(),
     });
     return res.value;
   }
 
   async stop(): Promise<boolean> {
-    const res = await this._conn.request<RequestType.PageStop>({
+    const res = await this.#conn.request<RequestType.PageStop>({
       type: RequestType.PageStop,
       pageId: this.id(),
-      space: this._cell.space(),
+      space: this.#cell.space(),
     });
     return res.value;
   }
