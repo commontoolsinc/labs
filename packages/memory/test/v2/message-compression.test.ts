@@ -11,6 +11,10 @@ import {
 } from "../../v2/message-compression.ts";
 
 describe("message-compression", () => {
+  it("allows messages to expand to 256 MiB", () => {
+    expect(MAX_DECOMPRESSED_MEMORY_MESSAGE_BYTES).toBe(256 * 1_024 * 1_024);
+  });
+
   it("keeps small messages in their original wire form", async () => {
     const payload = 'fvj1:{"type":"session.ack"}';
 

@@ -102,7 +102,7 @@ The payload is unpadded base64url containing one gzip member. A peer expands
 the envelope before decoding the memory message inside it. Messages below
 1,024 UTF-8 bytes stay in their ordinary form, as do messages whose envelope
 would not be smaller. Receivers therefore accept both ordinary and compressed
-messages after negotiation. Expansion is limited to 64 MiB per envelope and
+messages after negotiation. Expansion is limited to 256 MiB per envelope and
 must produce exactly the declared byte count. Compression work preserves
 WebSocket message order in both directions.
 

@@ -17,7 +17,7 @@ export const MEMORY_COMPRESSION_ENVELOPE_PREFIX = "mcmp1:";
 export const MEMORY_COMPRESSION_THRESHOLD_BYTES = 1_024;
 
 /** Maximum expanded size accepted from one compression envelope. */
-export const MAX_DECOMPRESSED_MEMORY_MESSAGE_BYTES = 64 * 1_024 * 1_024;
+export const MAX_DECOMPRESSED_MEMORY_MESSAGE_BYTES = 256 * 1_024 * 1_024;
 
 const MAX_GZIP_MEMORY_MESSAGE_BYTES = MAX_DECOMPRESSED_MEMORY_MESSAGE_BYTES +
   1_024 * 1_024;
