@@ -379,7 +379,6 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
           status: "failed",
           startedAt: "2026-08-28T01:58:00.000Z",
           completedAt: "2026-08-28T01:59:00.000Z",
-          pullRequestCount: synchronizedStatuses.length,
           error: "One repository was unavailable",
         },
         lastComplete: {
@@ -459,14 +458,14 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
         cells: { index: "of:index", health: "of:health" },
       },
     };
-    const hostActivity = (status, sync) =>
+    const hostActivity = (status, healthFields = {}) =>
       instantiatePattern(GithubActivity, {
         repoUrl: new Writable("https://github.com/acme/project"),
         pullRequestIndex: emptySynchronizedIndex,
         health: {
           ...stoppedHealth,
           status,
-          ...(sync === undefined ? {} : { sync }),
+          ...healthFields,
         },
       });
     const stoppedGithubActivity = hostActivity("stopped");
@@ -475,23 +474,33 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
         "ready",
         "primary",
         hostActivity("ready", {
-          reason: "scheduled",
-          status: "complete",
-          startedAt: "2026-08-28T01:58:00.000Z",
-          completedAt: "2026-08-28T01:59:00.000Z",
-          pullRequestCount: 0,
+          sync: {
+            reason: "scheduled",
+            status: "complete",
+            startedAt: "2026-08-28T01:58:00.000Z",
+            completedAt: "2026-08-28T01:59:00.000Z",
+            pullRequestCount: 0,
+          },
+          lastComplete: {
+            completedAt: "2026-08-28T01:59:00.000Z",
+            pullRequestCount: 0,
+          },
         }),
+        "complete",
       ],
-      ["degraded", "danger", synchronizedGithubActivity],
+      ["degraded", "danger", synchronizedGithubActivity, "failed"],
       ["starting", "accent", hostActivity("starting")],
       [
         "syncing",
         "accent",
         hostActivity("syncing", {
-          reason: "scheduled",
-          status: "running",
-          startedAt: "2026-08-28T01:58:00.000Z",
+          sync: {
+            reason: "scheduled",
+            status: "running",
+            startedAt: "2026-08-28T01:58:00.000Z",
+          },
         }),
+        "running",
       ],
       ["stopped", "neutral", stoppedGithubActivity],
     ];
@@ -509,7 +518,7 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
         ),
       "GitHub activity renders empty synchronized states",
     );
-    for (const [status, color, activity] of hostStatusCases) {
+    for (const [status, color, activity, syncStatus] of hostStatusCases) {
       const badges = elementsOfType(uiOf(activity), "cf-badge");
       assert(
         badges.some((badge) =>
@@ -517,6 +526,15 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
         ),
         `GitHub activity renders ${status} with the ${color} host badge`,
       );
+      if (syncStatus !== undefined) {
+        const rows = elementsOfType(uiOf(activity), "tr").map(textContent);
+        assert(
+          rows.some((row) =>
+            row.includes("Last sync") && row.includes(syncStatus)
+          ),
+          `GitHub activity renders the ${status} host's ${syncStatus} sync`,
+        );
+      }
     }
     const stoppedRows = elementsOfType(
       uiOf(stoppedGithubActivity),
