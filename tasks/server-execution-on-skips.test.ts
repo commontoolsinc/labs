@@ -137,7 +137,13 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list carries the ONE remaining phase-7 entry — the default-app reload STEP LIFTED 2026-08-28 under the owner's surface reading of the ruled local-plus-CI-probe bar (10/10 local at 1fc841b6e AND the direct-CI probe of that exact step green, run 33138358110 shard 5 `ok (18s)`; the shard's red was the co-resident, unlisted cfc-group-chat-demo file) — and keeps the flip bar explicit", async () => {
+// The one entry is lunch-poll-vote's FILE entry. The default-app reload STEP
+// entry lifted 2026-08-28 under the owner's surface reading of the ruled
+// local-plus-CI-probe bar — 10/10 local at 1fc841b6e AND a direct-CI probe of
+// that exact step green (run 33138358110, ON shard 5, `ok (18s)`), the shard's
+// red being the co-resident, unlisted cfc-group-chat-demo file. Evidence
+// chain: verification-coverage.md OW45.
+Deno.test("main: the patterns list carries the one remaining phase-7 entry and keeps the flip bar explicit", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
   // The lunch-poll-vote FILE entry is the one --ignore flag on stdout.

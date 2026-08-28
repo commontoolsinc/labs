@@ -26,20 +26,12 @@ import { Identity } from "@commonfabric/identity";
 import { assert, assertEquals } from "@std/assert";
 import { resolveSpaceDid } from "@commonfabric/lib-shell";
 
-// This file carried the ON arm's STEP-level skip guard
-// (tasks/server-execution-on-skips.ts) for "should persist and reload every
-// rapidly created notebook note". The entry LIFTED 2026-08-28 under the owner's
-// surface reading of the ruled local-plus-CI-probe bar: 10/10 quiet-and-loaded
-// locally at main 1fc841b6e with every fixed-mechanism counter zero, and the
-// DIRECT CI UNSKIP PROBE (run 33138358110, ON shard 5, job 98743591519, head
-// 95f313835) ran this exact step with no listed skip and it PASSED — ok (18s),
-// the whole default-app file green, the shard's toolshed log clean across the
-// file's window. Shard 5's red was a CO-RESIDENT file
-// (cfc-group-chat-demo.test.ts:133), a separate unlisted defect carrying its
-// own accountability, not this step's charge. Evidence chain and the ruling:
-// verification-coverage.md OW45. If a future seat ever needs a step skip here,
-// re-add the guard WITH the entry: the registry's validator fails a step entry
-// whose file never calls `serverExecutionOnStepSkip`, so it cannot go silent.
+// Every step in this file runs under both server-execution postures: no step
+// here is listed in the ON arm's skip registry
+// (tasks/server-execution-on-skips.ts). Listing one requires adding an in-file
+// `serverExecutionOnStepSkip` guard alongside the entry — the registry's
+// validator rejects a step entry whose file never calls the guard, since the
+// entry would otherwise be decoration.
 
 type BrowserWriteTraceEntry = {
   recordedAt: number;
