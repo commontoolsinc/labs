@@ -14,6 +14,7 @@ import {
 } from "@commonfabric/memory/v2/message-compression";
 import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
 import {
+  type RelayFrame,
   startFuseMemoryProxy,
   TraceBeforeRelayQueue,
 } from "../../integration/fuse-memory-proxy.ts";
@@ -48,6 +49,30 @@ describe("fuse-memory-proxy", () => {
       "trace persisted",
       "frame relayed",
     ]);
+  });
+
+  it("continues relaying after a trace failure", async () => {
+    const queue = new TraceBeforeRelayQueue();
+    const relayed: string[] = [];
+    const errors: unknown[] = [];
+    const appendTrace = (frame: RelayFrame) => {
+      if (frame === "bad") throw new Error("trace write failed");
+      return Promise.resolve();
+    };
+    const relay = (frame: RelayFrame) => {
+      if (typeof frame !== "string") throw new Error("expected text frame");
+      relayed.push(frame);
+    };
+    const onError = (cause: unknown) => errors.push(cause);
+
+    queue.enqueue("bad", appendTrace, relay, onError);
+    queue.enqueue("good-1", appendTrace, relay, onError);
+    queue.enqueue("good-2", appendTrace, relay, onError);
+    await queue.idle();
+
+    expect(relayed).toEqual(["good-1", "good-2"]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toEqual(new Error("trace write failed"));
   });
 
   it("relays binary frames and records their expanded text", async () => {

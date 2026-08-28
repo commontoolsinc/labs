@@ -18,8 +18,7 @@ export class TraceBeforeRelayQueue {
     this.#pending = this.#pending.then(async () => {
       await appendTrace(frame);
       relay(frame);
-    });
-    void this.#pending.catch(onError);
+    }).catch(onError);
   }
 
   async idle(): Promise<void> {
