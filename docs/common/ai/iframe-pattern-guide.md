@@ -83,6 +83,12 @@ export const IFRAME_PATTERN = {
 } as const;
 ```
 
+Declare each default with its interface as the annotation, as above, rather
+than `as const`: the wrapper types every resource as
+`Default<IframeStateData, typeof DEFAULT_STATE>`, so a default that does not
+satisfy its interface is a type error at the contract, and an `as const`
+default makes array members `readonly`, which a mutable `Note[]` rejects.
+
 `name` is a TypeScript identifier used for the generated interfaces. The three
 available scopes are:
 
@@ -345,7 +351,13 @@ deno run -A tools/write-iframe-wrapper.ts \
 ```
 
 The helper refuses to overwrite a file. Pass `--force` when regenerating the
-same `main.tsx` after changing the contract or guest.
+same `main.tsx` after changing the contract or guest. Regenerating with an
+unchanged contract and guest does not change the compiled schema. Whether a
+deployed piece accepts the result through `cf piece setsrc` depends on the
+schema it was deployed with: a piece whose schema carried no defaults (one
+deployed before the generator read imported defaults) is refused, since the
+defaults now present would change what its stored values mean; start a new
+piece for it.
 
 For a custom HTML shell, put `<!-- PATTERN_IFRAME_SCRIPT -->` exactly once where
 the bundled module should run, then add `--html .../guest.html`. Without it, the

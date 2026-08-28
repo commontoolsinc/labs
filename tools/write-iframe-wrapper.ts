@@ -205,7 +205,7 @@ function scopedCellType(
   valueScope: Exclude<Scope, "space">,
 ): string {
   const wrapper = valueScope === "user" ? "PerUser" : "PerSession";
-  return `${wrapper}<Writable<${typeName} | Default<typeof ${defaultName}>>>`;
+  return `${wrapper}<Writable<Default<${typeName}, typeof ${defaultName}>>>`;
 }
 
 function objectEntries(value: Record<string, string>, indent: string): string {
@@ -293,7 +293,7 @@ import {
 } from ${JSON.stringify(contractImport)};
 
 export interface ${config.name}Input {
-  input?: IframeInputData | Default<typeof DEFAULT_INPUT>;
+  input?: Default<IframeInputData, typeof DEFAULT_INPUT>;
 ${
     config.stateScope === "space" ? "" : `  state?: ${
       scopedCellType(
@@ -322,8 +322,8 @@ export interface ${config.name}Output {
 
 interface IframeContextInput {
   input: IframeInputData;
-  state: Writable<IframeStateData | Default<typeof DEFAULT_STATE>>;
-  output: Writable<IframeOutputData | Default<typeof DEFAULT_OUTPUT>>;
+  state: Writable<Default<IframeStateData, typeof DEFAULT_STATE>>;
+  output: Writable<Default<IframeOutputData, typeof DEFAULT_OUTPUT>>;
 ${contextDatabaseFields}
 }
 

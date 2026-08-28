@@ -79,10 +79,10 @@ export const IFRAME_PATTERN = {
       expect(result.code, decoder.decode(result.stderr)).toBe(0);
       const generated = await Deno.readTextFile(out);
       expect(generated).toContain(
-        "state?: PerUser<Writable<IframeStateData | Default<typeof DEFAULT_STATE>>>;",
+        "state?: PerUser<Writable<Default<IframeStateData, typeof DEFAULT_STATE>>>;",
       );
       expect(generated).toContain(
-        "output?: PerSession<Writable<IframeOutputData | Default<typeof DEFAULT_OUTPUT>>>;",
+        "output?: PerSession<Writable<Default<IframeOutputData, typeof DEFAULT_OUTPUT>>>;",
       );
       expect(generated).toMatch(
         /\(\(\{\s*input,\s*state,\s*output,\s*\}\) => \{/,
@@ -93,6 +93,130 @@ export const IFRAME_PATTERN = {
       await removeDirectory(directory);
     }
   });
+
+  // Whether a contract default reaches the compiled schema is decided by the
+  // schema generator, not by this script's text: the wrapper is a single
+  // spelling of `Default<T, typeof DEFAULT_T>` over a const imported from the
+  // contract, and the generator's handling of that spelling is pinned in
+  // packages/schema-generator/test/schema/default-union.test.ts. This test is
+  // the end-to-end wiring check — generate, compile with `cf check`, read the
+  // defaults back — so a change on either side that stops them arriving is
+  // caught here even when the wrapper text still looks right.
+  //
+  // The compiled output is the JS the CLI emits, so the default is recovered
+  // as a balanced-brace object literal after `"default":` inside the named
+  // property; the fixture deliberately uses a nested default so a shallow
+  // slice cannot pass by accident.
+  function compiledDefault(main: string, name: string): string {
+    const property = main.indexOf(`${name}: {`);
+    expect(property, `${name} property in pattern schema`).not.toBe(-1);
+    // The property's own members sit one indent deeper than the property;
+    // the next line at the property's indent is where it ends.
+    const indent = main.slice(main.lastIndexOf("\n", property) + 1, property);
+    const end = main.indexOf(`\n${indent}}`, property);
+    const marker = main.indexOf('"default": {', property);
+    expect(
+      marker !== -1 && end !== -1 && marker < end,
+      `${name} default in pattern schema`,
+    ).toBe(true);
+    let depth = 0;
+    for (let i = main.indexOf("{", marker); i < main.length; i++) {
+      if (main[i] === "{") depth++;
+      if (main[i] === "}" && --depth === 0) {
+        return main.slice(marker, i + 1).replace(/\s+/g, " ");
+      }
+    }
+    throw new Error(`unbalanced default literal for ${name}`);
+  }
+
+  for (
+    const [stateScope, outputScope] of [
+      ["space", "space"],
+      ["user", "session"],
+    ] as const
+  ) {
+    it(`compiles the contract defaults into the pattern schema (state ${stateScope}, output ${outputScope})`, async () => {
+      const directory = await Deno.makeTempDir({
+        prefix: "pattern-iframe-defaults-",
+      });
+      try {
+        const contract = resolve(directory, "contract.ts");
+        const guest = resolve(directory, "guest.ts");
+        const out = resolve(directory, "main.tsx");
+        await Deno.writeTextFile(
+          contract,
+          `
+export interface IframeInputData { heading: string; tags: string[] }
+export interface IframeStateData { count: number; last: { by: string } | null }
+export interface IframeOutputData { count: number }
+export const DEFAULT_INPUT: IframeInputData = { heading: "Test", tags: [] };
+export const DEFAULT_STATE: IframeStateData = { count: 0, last: { by: "" } };
+export const DEFAULT_OUTPUT: IframeOutputData = { count: 0 };
+export const IFRAME_PATTERN = {
+  name: "Defaulted",
+  stateScope: ${JSON.stringify(stateScope)},
+  outputScope: ${JSON.stringify(outputScope)},
+} as const;
+`,
+        );
+        await Deno.writeTextFile(
+          guest,
+          "document.body.textContent = 'guest';\n",
+        );
+
+        const result = await generate(contract, guest, out);
+        expect(result.code, decoder.decode(result.stderr)).toBe(0);
+
+        const check = await runDeno((lockPath) => [
+          "run",
+          "--allow-all",
+          "--frozen=true",
+          "--lock",
+          lockPath,
+          resolve(ROOT, "packages/cli/launcher.ts"),
+          "check",
+          out,
+          "--root",
+          directory,
+          "--no-run",
+          "--json",
+        ]);
+        expect(check.code, decoder.decode(check.stderr)).toBe(0);
+        const compiled = JSON.parse(decoder.decode(check.stdout)) as {
+          files: { output: string }[];
+        };
+        const output = compiled.files[0].output;
+        const main = output.slice(output.indexOf("exports.default"));
+        expect(compiledDefault(main, "input")).toBe(
+          '"default": { heading: "Test", tags: [] }',
+        );
+        // A space-scoped resource is a Writable the wrapper constructs from
+        // the contract value; the other scopes declare it as a pattern input
+        // whose schema carries the default.
+        for (
+          const [name, scope, literal] of [
+            ["state", stateScope, '"default": { count: 0, last: { by: "" } }'],
+            ["output", outputScope, '"default": { count: 0 }'],
+          ] as const
+        ) {
+          if (scope === "space") {
+            // The bundler's import aliases carry numerals that move with
+            // import order; match the shape, not the digits.
+            expect(main).toMatch(
+              new RegExp(
+                String
+                  .raw`new \w+\.Writable\(\w+\.DEFAULT_${name.toUpperCase()}`,
+              ),
+            );
+          } else {
+            expect(compiledDefault(main, name)).toBe(literal);
+          }
+        }
+      } finally {
+        await removeDirectory(directory);
+      }
+    });
+  }
 
   it("hides embedded guest tokens from the host module scanner", async () => {
     const directory = await Deno.makeTempDir({
