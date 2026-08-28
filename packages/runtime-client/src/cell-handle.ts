@@ -363,7 +363,7 @@ export class CellHandle<T = unknown> {
    * Returns a new CellHandle with an extended path.
    */
   key<K extends keyof T>(valueKey: K): CellHandle<T[K]> {
-    const childRef = this._extendPath(String(valueKey));
+    const childRef = this.#extendPath(String(valueKey));
     const child = new CellHandle<T[K]>(this.#rt, childRef);
 
     // If we have a cached value, pre-populate the child's cache
@@ -652,7 +652,7 @@ export class CellHandle<T = unknown> {
   ): Promise<Row[]> {
     const serializedParams = params === undefined
       ? undefined
-      : CellHandle.serializeSqliteParams(params);
+      : CellHandle.#serializeSqliteParams(params);
     const response = await this.#enqueueOperation(() =>
       this.#conn.request<RequestType.SqliteQuery>({
         type: RequestType.SqliteQuery,
@@ -680,7 +680,7 @@ export class CellHandle<T = unknown> {
   ): Promise<void> {
     const serializedParams = params === undefined
       ? undefined
-      : CellHandle.serializeSqliteParams(params);
+      : CellHandle.#serializeSqliteParams(params);
     await this.#enqueueOperation(() =>
       this.#conn.request<RequestType.SqliteExec>({
         type: RequestType.SqliteExec,
@@ -712,7 +712,7 @@ export class CellHandle<T = unknown> {
     return newCell as CellHandle<U>;
   }
 
-  private _extendPath(key: string): CellRef {
+  #extendPath(key: string): CellRef {
     return {
       id: this.#ref.id,
       space: this.#ref.space,
@@ -866,11 +866,11 @@ export class CellHandle<T = unknown> {
     return value;
   }
 
-  private static serializeSqliteParams(
+  static #serializeSqliteParams(
     params: ReadonlyArray<ClientCellValue> | Record<string, ClientCellValue>,
   ): SqliteParams {
     const serialize = (value: ClientCellValue) =>
-      CellHandle.sqliteFabricValue(value);
+      CellHandle.#sqliteFabricValue(value);
     return Array.isArray(params)
       ? { kind: "positional", values: params.map(serialize) }
       : {
@@ -882,7 +882,7 @@ export class CellHandle<T = unknown> {
       };
   }
 
-  private static sqliteFabricValue(value: ClientCellValue): FabricValue {
+  static #sqliteFabricValue(value: ClientCellValue): FabricValue {
     if (isCellHandle(value)) return value.ref();
     if (value instanceof FabricBytes) return value;
     if (value instanceof FabricSpecialObject) {
@@ -892,13 +892,13 @@ export class CellHandle<T = unknown> {
       );
     }
     if (Array.isArray(value)) {
-      return value.map((member) => CellHandle.sqliteFabricValue(member));
+      return value.map((member) => CellHandle.#sqliteFabricValue(member));
     }
     if (isObjectOrArray(value)) {
       return Object.fromEntries(
         Object.entries(value).map(([key, member]) => [
           key,
-          CellHandle.sqliteFabricValue(member),
+          CellHandle.#sqliteFabricValue(member),
         ]),
       );
     }

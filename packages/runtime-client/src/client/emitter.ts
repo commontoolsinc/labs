@@ -15,7 +15,7 @@
  * ```
  */
 export class EventEmitter<Events extends Record<string, unknown[]>> {
-  private listeners = new Map<
+  #listeners = new Map<
     keyof Events,
     Set<(...args: unknown[]) => void>
   >();
@@ -24,10 +24,10 @@ export class EventEmitter<Events extends Record<string, unknown[]>> {
     event: K,
     listener: (...args: Events[K]) => void,
   ): this {
-    let set = this.listeners.get(event);
+    let set = this.#listeners.get(event);
     if (!set) {
       set = new Set();
-      this.listeners.set(event, set);
+      this.#listeners.set(event, set);
     }
     set.add(listener as (...args: unknown[]) => void);
     return this;
@@ -37,7 +37,9 @@ export class EventEmitter<Events extends Record<string, unknown[]>> {
     event: K,
     listener: (...args: Events[K]) => void,
   ): this {
-    this.listeners.get(event)?.delete(listener as (...args: unknown[]) => void);
+    this.#listeners.get(event)?.delete(
+      listener as (...args: unknown[]) => void,
+    );
     return this;
   }
 
@@ -53,7 +55,7 @@ export class EventEmitter<Events extends Record<string, unknown[]>> {
   }
 
   emit<K extends keyof Events>(event: K, ...args: Events[K]): boolean {
-    const set = this.listeners.get(event);
+    const set = this.#listeners.get(event);
     if (!set || set.size === 0) return false;
     for (const listener of set) {
       listener(...args);
@@ -63,14 +65,14 @@ export class EventEmitter<Events extends Record<string, unknown[]>> {
 
   removeAllListeners<K extends keyof Events>(event?: K): this {
     if (event === undefined) {
-      this.listeners.clear();
+      this.#listeners.clear();
     } else {
-      this.listeners.delete(event);
+      this.#listeners.delete(event);
     }
     return this;
   }
 
   listenerCount<K extends keyof Events>(event: K): number {
-    return this.listeners.get(event)?.size ?? 0;
+    return this.#listeners.get(event)?.size ?? 0;
   }
 }

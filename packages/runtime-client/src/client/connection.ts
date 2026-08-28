@@ -174,7 +174,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
   constructor(transport: RuntimeTransport) {
     super();
     this.#transport = transport;
-    this.#transport.on("message", this._handleMessage);
+    this.#transport.on("message", this.#handleMessage);
     // Main-thread event-loop lag probe: records into the "runtime-client"
     // timing stats as `loop/mainLag`, next to the `ipc/*` round-trips it
     // contextualizes. A slow round-trip with a quiet mainLag histogram is
@@ -520,7 +520,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     this.#subscriptionDiagnostics.clear();
   }
 
-  private _handleMessage = (message: IPCRemoteMessage): void => {
+  #handleMessage = (message: IPCRemoteMessage): void => {
     // Once dead (disposed), the connection ignores incoming messages without
     // warning: notifications are dropped here, stray/late messages are dropped
     // below. The one exception is a reply to a still-pending request — the
@@ -537,7 +537,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
         console.log(`[IPC\x1B[92m<=\x1B[0m]`, message);
       }
       if (isCellUpdateNotification(message)) {
-        this._handleCellUpdate(message);
+        this.#handleCellUpdate(message);
       } else if (isConsoleNotification(message)) {
         this.emit("console", message);
       } else if (isNavigateRequestNotification(message)) {
@@ -618,7 +618,7 @@ export class RuntimeConnection extends EventEmitter<RuntimeConnectionEvents> {
     }
   };
 
-  private _handleCellUpdate(message: CellUpdateNotification): void {
+  #handleCellUpdate(message: CellUpdateNotification): void {
     const { cell: cellRef, value } = message;
     if (value === undefined) {
       // A value can be reported as `undefined` only when there's been a

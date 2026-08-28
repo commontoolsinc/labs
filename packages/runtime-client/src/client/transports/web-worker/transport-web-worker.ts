@@ -29,9 +29,9 @@ export interface WebWorkerRuntimeTransportOptions {
 export class WebWorkerRuntimeTransport
   extends EventEmitter<RuntimeTransportEvents>
   implements RuntimeTransport {
-  private _ready = false;
-  private _readyPromise = defer<void>();
-  private _worker: Worker;
+  #ready = false;
+  #readyPromise = defer<void>();
+  #worker: Worker;
   constructor(options: WebWorkerRuntimeTransportOptions = {}) {
     super();
     const workerUrl = options.workerUrl ??
@@ -43,15 +43,15 @@ export class WebWorkerRuntimeTransport
         "RuntimeClient `workerUrl` must be explicitly defined in non-Deno environments.",
       );
     }
-    this._worker = new Worker(
+    this.#worker = new Worker(
       workerUrl,
       {
         type: "module",
         name: "runtime-worker",
       },
     );
-    this._worker.addEventListener("message", this._handleMessage);
-    this._worker.addEventListener("error", this._handleError);
+    this.#worker.addEventListener("message", this._handleMessage);
+    this.#worker.addEventListener("error", this._handleError);
   }
 
   /** @inheritDoc */
@@ -68,13 +68,13 @@ export class WebWorkerRuntimeTransport
     // record rather than aliasing it. What is exposed is a value handed to the
     // connection without passing through one of those, of which
     // `PageCreateRequest.argument` is the field to know about.
-    this._worker.postMessage(realmFromFabricValue(data));
+    this.#worker.postMessage(realmFromFabricValue(data));
   }
 
   /** @inheritDoc */
   dispose(): Promise<void> {
     this.removeAllListeners();
-    this._worker.terminate();
+    this.#worker.terminate();
     return Promise.resolve();
   }
 
@@ -83,7 +83,7 @@ export class WebWorkerRuntimeTransport
   }
 
   ready(): Promise<void> {
-    return this._readyPromise.promise;
+    return this.#readyPromise.promise;
   }
 
   /**
@@ -114,6 +114,11 @@ export class WebWorkerRuntimeTransport
 
   // What a decode returns is deep-frozen, so a consumer of a response or a
   // notification reads it rather than reshaping it in place.
+  /**
+   * TypeScript-private rather than a `#` name, and keeping the `_` the rest
+   * of this sweep drops, because `test/client/transport-web-worker.test.ts`
+   * reaches it under exactly that name to deliver a message by hand.
+   */
   private _handleMessage = (event: MessageEvent): void => {
     let data: IPCRemotePost;
 
@@ -133,8 +138,8 @@ export class WebWorkerRuntimeTransport
       // there is `ready()` never settling, and a caller waiting on a promise
       // that will not resolve has no way back. So the failure lands where
       // `_handleError()` puts a pre-ready one, on the promise itself.
-      if (!this._ready) {
-        this._readyPromise.reject(
+      if (!this.#ready) {
+        this.#readyPromise.reject(
           new Error(
             `Undecodable message from the worker: ${describeFailure(error)}`,
           ),
@@ -160,9 +165,9 @@ export class WebWorkerRuntimeTransport
       return;
     }
 
-    if (!this._ready && isWorkerReadyNotification(data)) {
-      this._ready = true;
-      this._readyPromise.resolve();
+    if (!this.#ready && isWorkerReadyNotification(data)) {
+      this.#ready = true;
+      this.#readyPromise.resolve();
       return;
     }
 
@@ -171,6 +176,11 @@ export class WebWorkerRuntimeTransport
     this.emit("message", data as IPCRemoteMessage);
   };
 
+  /**
+   * TypeScript-private rather than a `#` name, and keeping the `_` the rest
+   * of this sweep drops, because `test/client/transport-web-worker.test.ts`
+   * reaches it under exactly that name to deliver a message by hand.
+   */
   private _handleError = (event: ErrorEvent): void => {
     event.preventDefault();
 
@@ -186,8 +196,8 @@ export class WebWorkerRuntimeTransport
       error.stack = event.error.stack;
     }
 
-    if (!this._ready) {
-      this._readyPromise.reject(error);
+    if (!this.#ready) {
+      this.#readyPromise.reject(error);
       return;
     }
 
