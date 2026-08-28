@@ -1,6 +1,9 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
+    // What belongs here is `ES2026`, the version that defines
+    // `Error.isError()`. The pinned TypeScript does not recognize that
+    // target, and declares the method only in its `esnext` lib.
+    "target": "ESNext",
     "module": "NodeNext",
     "moduleResolution": "Node16",
     "strict": true,
