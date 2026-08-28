@@ -332,6 +332,14 @@ only when the shape reappeared in work that could not have inherited it. **A
 single source cannot distinguish a pattern from a habit**, which is this
 section's own proposition applied to the reading of one's own mistakes.
 
+The inverse failure is equally available, and this section should not be read
+as licence for it: four instances agreeing in one stream can also be a habit
+promoted to a method, after which outside confirmation is easy to find, because
+a pattern stated broadly enough matches nearly anything. The count is not what
+settles it. The question is the same one — what could tell me this is a pattern
+that does not share my error — turned on a conclusion rather than on a
+measurement.
+
 Its companion, arrived at the hard way: **a regression test that has not been
 seen to fail is not evidence.** The `no-ui` fix above shipped first with a
 mechanism asserted rather than measured, and with a test that still passed when
