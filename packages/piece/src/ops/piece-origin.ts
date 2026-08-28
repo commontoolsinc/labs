@@ -2,9 +2,9 @@
  * Reading the source facts a piece records: the pattern it runs, the origin it
  * tracks, the history metadata it carries, and its authored source files.
  *
- * An origin is the source URL a piece remembers: either an external web URL or
- * a fabric `cf:` URL. `docs/specs/piece-source-lifecycle.md` is the design of
- * record.
+ * An origin is the source URL a piece remembers: either a `system:` ref naming
+ * a pattern this deployment serves, or a fabric `cf:` URL.
+ * `docs/specs/piece-source-lifecycle.md` is the design of record.
  */
 
 import {

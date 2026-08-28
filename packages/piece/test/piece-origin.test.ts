@@ -950,7 +950,7 @@ describe("reading a piece's source state", () => {
     });
   });
 
-  it("reports a space root's stamped ref as an absolute web origin", async () => {
+  it("reports a space root's stamped ref as the route it addresses", async () => {
     const root = await controller.ensureDefaultPattern();
 
     const state = await readPieceSourceState(runtime, root.getCell());

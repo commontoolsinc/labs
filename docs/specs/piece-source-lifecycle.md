@@ -1292,8 +1292,8 @@ The implementation evidence for this table is concentrated in:
 - [`packages/runtime-client/src/runtime-client.ts`](../../packages/runtime-client/src/runtime-client.ts)
   and
   [`packages/runtime-client/src/backends/runtime-processor.ts`](../../packages/runtime-client/src/backends/runtime-processor.ts)
-  for URL-backed page creation with canonical origin and creation-history
-  stamping;
+  for page creation from a fetched program, which records a detached creation
+  revision;
 - [`packages/piece/src/ops/pieces-controller.ts`](../../packages/piece/src/ops/pieces-controller.ts)
   for system-root origin stamping and pre-start reconciliation;
 - [`packages/piece/src/ops/piece-origin.ts`](../../packages/piece/src/ops/piece-origin.ts)
