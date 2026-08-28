@@ -16,8 +16,9 @@
 // The race is deterministic-by-construction here: the child replication is
 // issued synchronously after the sibling, and its origin read is strictly
 // less work than the sibling's read-plus-write, so unfixed it ALWAYS reads
-// the parent space before the sibling writes it. Two fixes cover the two
-// supplier geometries, and this file pins both:
+// the parent space before the sibling writes it. Three fixes cover the
+// three supplier geometries the arc's direct-CI probes mapped, and this
+// file pins all three:
 //
 // - the SIBLING AWAIT: a replication awaits the earlier-registered
 //   replications INTO its origin space before reading
@@ -29,7 +30,15 @@
 //   warmed it first): on a dry origin the replication retries its read
 //   against the spaces this manager durably persisted the entry into —
 //   content-addressed, so the copy is byte-identical and the verified
-//   read stays fail-closed.
+//   read stays fail-closed;
+// - the IN-FLIGHT-COMPILE AWAIT (the direct-CI probe 4 geometry, run
+//   33165960083: the supplier compile itself is still mid-flight at
+//   consult time, so no persist exists anywhere and the fallback map is
+//   CORRECTLY dry): on a dry origin AND dry map, the replication awaits a
+//   snapshot of the in-flight compile registries once (cold compiles +
+//   by-identity loads; never `compileCacheWrites`, its own set), then
+//   re-consults; genuine absence still throws the same loud one-shot
+//   failure.
 //
 // Layered-view note (why the race needs a missing SUPPLIER and not a
 // wave): a same-runtime compile's E4-awaited write-back into a wave's own
@@ -73,6 +82,9 @@ const spaceE = (await Identity.fromPassphrase(
 const spaceF = (await Identity.fromPassphrase(
   "replication sibling race dead target",
 )).did() as MemorySpace;
+const spaceG = (await Identity.fromPassphrase(
+  "replication sibling race in-flight compile target",
+)).did() as MemorySpace; // where the GATED supplier compile persists
 
 const PROGRAM: RuntimeProgram = {
   main: "/main.tsx",
@@ -125,7 +137,7 @@ describe("closure replication: the in-flight sibling supplier race", () => {
     });
     // World-writable genesis for the replication targets: the write-backs
     // into them are ordinary client-shaped commits by `signer`.
-    for (const space of [spaceB, spaceC, spaceE, spaceF]) {
+    for (const space of [spaceB, spaceC, spaceE, spaceF, spaceG]) {
       Engine.applyCommit(await server.engineForSpace(space), {
         sessionId: "test-genesis-session",
         space,
@@ -176,6 +188,52 @@ describe("closure replication: the in-flight sibling supplier race", () => {
     try {
       await body();
     } finally {
+      delete spied.error;
+    }
+    return captured;
+  };
+
+  /** Capture the `pattern-manager` logger's WARN and ERROR lines, resolved
+   * exactly as the logger resolves them (lazy closures), invoking `onLine`
+   * synchronously per line — the in-flight-supplier step below uses that to
+   * release its compile gate the moment the replication's dry consult
+   * announces itself. Same own-property-spy-over-the-singleton shape as
+   * `captureManagerErrors` (which stays untouched: the existing steps pin
+   * against it byte-identically); both spies delegate so the lines still
+   * print. */
+  const captureManagerLines = async (
+    body: () => Promise<void>,
+    onLine?: (
+      entry: { level: "warn" | "error"; key: string; line: string },
+    ) => void,
+  ): Promise<{ level: "warn" | "error"; key: string; line: string }[]> => {
+    const managerLogger = getLogger("pattern-manager");
+    const captured: { level: "warn" | "error"; key: string; line: string }[] =
+      [];
+    const spied = managerLogger as unknown as {
+      warn?: (key: string, ...messages: LogMessage[]) => void;
+      error?: (key: string, ...messages: LogMessage[]) => void;
+    };
+    const resolveLine = (messages: LogMessage[]): string =>
+      messages.flatMap((message) => {
+        const resolved = typeof message === "function"
+          ? (message as () => unknown)()
+          : message;
+        return Array.isArray(resolved) ? resolved : [resolved];
+      }).map(String).join(" ");
+    for (const level of ["warn", "error"] as const) {
+      const real = managerLogger[level].bind(managerLogger);
+      spied[level] = (key: string, ...messages: LogMessage[]) => {
+        const entry = { level, key, line: resolveLine(messages) };
+        captured.push(entry);
+        onLine?.(entry);
+        real(key, ...messages);
+      };
+    }
+    try {
+      await body();
+    } finally {
+      delete spied.warn;
       delete spied.error;
     }
     return captured;
@@ -467,6 +525,156 @@ describe("closure replication: the in-flight sibling supplier race", () => {
           "source closure unavailable in origin space",
         );
       } finally {
+        await rt2.dispose();
+      }
+    },
+  );
+
+  it(
+    "the supplier compile is still MID-FLIGHT at consult time — the " +
+      "direct-CI probe-4 geometry (run 33165960083): no persist has " +
+      "completed anywhere, the module-keyed fallback map is CORRECTLY " +
+      "dry, and the replication must await the in-flight compile " +
+      "registries once and re-consult instead of one-shot-dying",
+    async () => {
+      // R1's compile supplies only the pattern OBJECT (the entry ref rides
+      // the module-level side table). Everything else runs on a SECOND
+      // manager whose fallback map is empty and whose origin has no
+      // replications into it, ever — the F1 lesson: neither a pre-populated
+      // map nor an older-sibling await may be able to rescue the child, so
+      // the once-await is load-bearing alone and a refactor that drops it
+      // reds this step.
+      const pattern = await runtime.patternManager.compileOrGetPattern(
+        PROGRAM,
+        spaceA,
+      );
+      const entry = runtime.patternManager.getArtifactEntryRef(pattern);
+      if (entry === undefined) throw new Error("compile produced no entry ref");
+      await runtime.patternManager.flushCompileCacheWrites();
+      await storageManager.synced();
+
+      const rt2 = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+        experimental: { serverExecution: true },
+      });
+      const harnessSpy = rt2.harness as unknown as {
+        compileToRecordGraph?: (...args: unknown[]) => Promise<unknown>;
+      };
+      try {
+        // GATE rt2's compile pipeline: the first compileToRecordGraph call
+        // signals that it started, then parks until released. The supplier
+        // compile is then provably IN FLIGHT (it registered in
+        // `inProgressCompilations` synchronously at `compileOrGetPattern`)
+        // and provably PRE-PERSIST (its E4 persist sits far behind the
+        // gate), which is exactly probe 4's timeline: compile waves
+        // running, zero persists anywhere, the fallback map genuinely
+        // empty. No sleeps anywhere — the gate releases on the
+        // replication's own announcement (below), and the fix's
+        // allSettled-then-re-consult is what makes the record visible
+        // before the re-read, deterministically.
+        const compileStarted = Promise.withResolvers<void>();
+        const compileReleased = Promise.withResolvers<void>();
+        const realCompile = harnessSpy.compileToRecordGraph;
+        if (realCompile === undefined) throw new Error("no harness compile");
+        const boundCompile = realCompile.bind(rt2.harness);
+        let gated = true;
+        harnessSpy.compileToRecordGraph = async (...args: unknown[]) => {
+          if (gated) {
+            gated = false;
+            compileStarted.resolve();
+            await compileReleased.promise;
+          }
+          return await boundCompile(...args);
+        };
+
+        // The gated supplier compile of the SAME program — content
+        // addressing gives it the same entry identity — into fresh G. G
+        // must be a space with no durable closure yet: a warm hit skips
+        // the persist entirely and records nothing.
+        const gatedCompile = rt2.patternManager.compileOrGetPattern(
+          PROGRAM,
+          spaceG,
+        );
+        await compileStarted.promise;
+
+        const lines = await captureManagerLines(
+          async () => {
+            // The child replication from a forever-dry origin, issued while
+            // the supplier compile is mid-flight. Unfixed, its consult finds
+            // origin AND map dry and it one-shot-dies; C parks
+            // pattern-unloadable forever (the lunch red).
+            rt2.patternManager.replicatePatternToSpace(
+              pattern,
+              spaceC,
+              spaceD,
+            );
+            await rt2.patternManager.flushCompileCacheWrites();
+            await storageManager.synced();
+          },
+          (entry) => {
+            // Release the gate the moment the dry consult announces itself:
+            // post-fix via the once-await's own warn (the compile then
+            // completes, records G into the fallback map, and the
+            // re-consult finds it); pre-fix / await-neutralized via the
+            // one-shot failure line, so the step finishes fast and red
+            // instead of hanging on the gate.
+            if (
+              entry.key === "closure-replication-await-inflight" ||
+              entry.key === "closure-replication-failed"
+            ) {
+              compileReleased.resolve();
+            }
+          },
+        );
+        await gatedCompile;
+        await rt2.patternManager.flushCompileCacheWrites();
+        await storageManager.synced();
+
+        // THE PIN: C materialized from the space the in-flight supplier
+        // compile persisted into, discovered by the post-await re-consult —
+        // and a fresh runtime loads the pattern from C by identity, which
+        // is what unparks the demanded roots.
+        const target = await readableClosure(rt2, spaceC, entry.identity);
+        expect(target.source).toContain(entry.identity);
+        const rt3 = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager,
+          experimental: { serverExecution: true },
+        });
+        try {
+          const loaded = await rt3.patternManager.loadPatternByIdentity(
+            entry.identity,
+            entry.symbol,
+            spaceC,
+          );
+          expect(loaded).toBeDefined();
+        } finally {
+          await rt3.dispose();
+        }
+
+        // The once-await announced itself exactly once, with the in-flight
+        // census that discriminates geometry 3 from the register's
+        // pre-declared 3b residue (a red with `compilations=0
+        // byIdentityLoads=0` on this line is 3b: the supplier compile had
+        // not STARTED by consult time).
+        const awaited = lines.filter((line) =>
+          line.key === "closure-replication-await-inflight"
+        );
+        expect(awaited.length).toBe(1);
+        expect(awaited[0].line).toContain(`entry=${entry.identity}`);
+        expect(awaited[0].line).toContain(`from=${spaceD}`);
+        expect(awaited[0].line).toContain(`to=${spaceC}`);
+        expect(awaited[0].line).toContain("compilations=1");
+        expect(awaited[0].line).toContain("byIdentityLoads=0");
+        // And the one-shot failure line never fired: the await turned the
+        // former one-shot death into a completed replication.
+        expect(
+          lines.filter((line) => line.key === "closure-replication-failed")
+            .length,
+        ).toBe(0);
+      } finally {
+        delete harnessSpy.compileToRecordGraph;
         await rt2.dispose();
       }
     },

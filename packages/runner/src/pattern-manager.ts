@@ -420,6 +420,10 @@ export class PatternManager {
   // closure entirely — while the closure is content-addressed, so any
   // recorded persist target holds byte-identical, integrity-gated docs
   // (verification-coverage.md OW45 carries the incident evidence).
+  // Growth: monotonic for the session, bounded by the module identities ×
+  // spaces this manager actually persisted (strings + small DID sets) —
+  // negligible today; revisit with an eviction policy only if serving
+  // sessions get very long-lived.
   private persistedClosureSpaces = new Map<string, Set<MemorySpace>>();
 
   /** Record a durable closure persist's target for
@@ -742,8 +746,13 @@ export class PatternManager {
     fromSpace: MemorySpace,
     toSpace: MemorySpace,
     visited = new Set<string>(),
-    delegated?: WritebackDelegation,
-    ticket?: number,
+    // Required (not optional): the older-sibling filter below is only
+    // meaningful relative to THIS replication's registration order. Both
+    // call sites — `replicatePatternToSpace` and the dependency recursion —
+    // thread the entry replication's ticket; a caller without one has no
+    // business in this private method.
+    delegated: WritebackDelegation | undefined,
+    ticket: number,
   ): Promise<void> {
     const visitKey = `${fromSpace}\0${toSpace}\0${entryIdentity}`;
     if (visited.has(visitKey)) return;
@@ -763,7 +772,7 @@ export class PatternManager {
     const intoOrigin = this.replicationsIntoSpace.get(fromSpace);
     if (intoOrigin !== undefined) {
       const older = [...intoOrigin]
-        .filter((entry) => ticket === undefined || entry.ticket < ticket)
+        .filter((entry) => entry.ticket < ticket)
         .map((entry) => entry.settled);
       if (older.length > 0) await Promise.allSettled(older);
     }
@@ -846,39 +855,113 @@ export class PatternManager {
       }
       return { complete: true, sourceDocs, compiledDocs };
     };
-    let origin = await readOrigin(fromSpace);
-    if (!origin.complete) {
-      // FALLBACK ORIGINS (see `persistedClosureSpaces`): the caller-named
-      // origin is a provenance heuristic and can be closure-less through
-      // no fault of any writer — `loadPatternByIdentity` serves patterns
-      // from the in-memory artifact index with no per-space persist. The
-      // closure is CONTENT-ADDRESSED: any space this manager durably
-      // persisted this entry into holds byte-identical docs (the verified
-      // read recomputes identities and the CFC integrity gate stays
-      // fail-closed), so retry the read against the recorded persist
-      // targets before failing. Loud on use: the lane log shows when the
-      // heuristic origin was dry.
-      const primaryReason = origin.reason;
+    /** One full read attempt: the caller-named origin, then the FALLBACK
+     * ORIGINS (see `persistedClosureSpaces`): the caller-named origin is a
+     * provenance heuristic and can be closure-less through no fault of any
+     * writer — `loadPatternByIdentity` serves patterns from the in-memory
+     * artifact index with no per-space persist. The closure is
+     * CONTENT-ADDRESSED: any space this manager durably persisted this
+     * entry into holds byte-identical docs (the verified read recomputes
+     * identities and the CFC integrity gate stays fail-closed), so retry
+     * the read against the recorded persist targets before failing. Loud
+     * on use: the lane log shows when the heuristic origin was dry. An
+     * incomplete result carries the PRIMARY origin's reason — the
+     * production error string the arc's forensics grep for. */
+    const readOriginWithFallbacks = async (): Promise<
+      Awaited<ReturnType<typeof readOrigin>>
+    > => {
+      const primary = await readOrigin(fromSpace);
+      if (primary.complete) return primary;
       for (
         const fallback of this.persistedClosureSpaces.get(entryIdentity) ?? []
       ) {
         if (fallback === fromSpace || fallback === toSpace) continue;
-        const read = await readOrigin(fallback);
+        let read: Awaited<ReturnType<typeof readOrigin>>;
+        try {
+          read = await readOrigin(fallback);
+        } catch (error) {
+          // A store-level error on ONE candidate must not abort the loop —
+          // the remaining recorded targets hold byte-identical copies and
+          // deserve their try. Loud, so the store failure is never
+          // silently absorbed into a clean miss.
+          logger.warn("closure-replication-fallback-read-failed", () => [
+            `entry=${entryIdentity}`,
+            `fallback=${fallback}`,
+            String(error),
+          ]);
+          continue;
+        }
         if (read.complete) {
           logger.warn("closure-replication-fallback-origin", () => [
             `entry=${entryIdentity}`,
             `from=${fromSpace}`,
             `to=${toSpace}`,
             `fallback=${fallback}`,
-            `originReason=${primaryReason}`,
+            `originReason=${primary.reason}`,
           ]);
-          origin = read;
-          break;
+          return read;
         }
       }
-      if (!origin.complete) {
-        throw new Error(primaryReason);
+      return primary;
+    };
+    let origin = await readOriginWithFallbacks();
+    if (!origin.complete) {
+      // GEOMETRY 3 (verification-coverage.md OW45; direct-CI probe 4, run
+      // 33165960083): the SUPPLIER COMPILE itself can still be mid-flight
+      // at consult time — no persist has completed anywhere yet, so the
+      // heuristic origin AND the fallback map are both correctly dry, and
+      // a one-shot throw here parks the target space's demanded roots
+      // `pattern-unloadable` forever. Await the in-flight compile
+      // registries ONCE — a SNAPSHOT, allSettled (a failing compile must
+      // neither hang nor reject this replication; entries registered
+      // after the snapshot are the next consult's business), covering
+      // BOTH cold compiles AND by-identity loads (a supplier can be a
+      // load's recovery compile) but NEVER `compileCacheWrites`: this
+      // replication promise lives there and would await itself. Acyclic:
+      // compiles and loads never await replications (their only
+      // replication call is fire-and-forget), and a compile promise
+      // resolves only after its E4 persist recorded into
+      // `persistedClosureSpaces`.
+      //
+      // EMPTY SNAPSHOT → NO RETRY, byte-identical one-shot throw below.
+      // Deliberate, twice over: (a) with nothing in the registries there
+      // is no supplier whose completion the await could observe — every
+      // `pendingCacheWriteBacks` member belongs to a compile or load
+      // (registry-covered here) or to a sibling replication, which the
+      // strictly-older-ticket await above already covers at registration
+      // time, so an empty-registry retry adds no coverage the design
+      // claims; (b) an empty-registry re-read WOULD still re-race the
+      // sibling window nondeterministically, quietly double-covering the
+      // ticket await — the exact masking that made the F1 pin soft. The
+      // absence of a `closure-replication-await-inflight` line before a
+      // `closure-replication-failed` line is therefore the pre-declared
+      // geometry-3b signature (a supplier compile that had not STARTED by
+      // consult time — see the register's residue record).
+      const inFlightCompilations = [...this.inProgressCompilations.values()];
+      const inFlightLoads = [...this.inProgressByIdentityLoads.values()];
+      if (inFlightCompilations.length > 0 || inFlightLoads.length > 0) {
+        logger.warn("closure-replication-await-inflight", () => [
+          `entry=${entryIdentity}`,
+          `from=${fromSpace}`,
+          `to=${toSpace}`,
+          `compilations=${inFlightCompilations.length}`,
+          `byIdentityLoads=${inFlightLoads.length}`,
+        ]);
+        await Promise.allSettled([...inFlightCompilations, ...inFlightLoads]);
+        // A settled by-identity load's recovery persist is fire-and-forget:
+        // the load resolves after REGISTERING it in
+        // `pendingCacheWriteBacks`, not after completing it. Observe a
+        // FRESH snapshot of that set (replications are never in it — no
+        // self-await) so the persist has recorded before the re-read
+        // consults the map.
+        await Promise.allSettled([...this.pendingCacheWriteBacks]);
+        origin = await readOriginWithFallbacks();
       }
+    }
+    if (!origin.complete) {
+      // The one-shot contract stands byte-identical on the still-failing
+      // path: same loud throw, same production reason string.
+      throw new Error(origin.reason);
     }
     const { sourceDocs, compiledDocs } = origin;
     const modules: CacheableModule[] = [];
