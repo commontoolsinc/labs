@@ -880,20 +880,11 @@ export interface PieceSourceSnapshot {
   revisionId: string | null;
 }
 
-/**
- * What the last attempt to follow a piece's active origin did.
- *
- * `unsupported` is its own outcome rather than a kind of failure: the origin
- * is well formed and nothing is wrong with the piece, but this runtime does
- * not follow origins of that kind yet, so what it holds is unexamined. Told as
- * an error it would send someone looking for a fault; left unsaid it reads as
- * a piece nobody has checked, which is a different thing again.
- */
+/** What the last attempt to follow a piece's active origin did. */
 export type PieceReconciliationOutcome =
   | "followed"
   | "unreachable"
-  | "refused"
-  | "unsupported";
+  | "refused";
 
 /**
  * Why a reconciliation did not adopt what its origin offered.
@@ -8851,7 +8842,7 @@ function isPieceReconciliationOutcome(
   value: unknown,
 ): value is PieceReconciliationOutcome {
   return value === "followed" || value === "unreachable" ||
-    value === "refused" || value === "unsupported";
+    value === "refused";
 }
 
 function isPieceReconciliationReason(

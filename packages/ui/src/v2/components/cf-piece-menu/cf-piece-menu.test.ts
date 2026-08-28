@@ -260,7 +260,10 @@ const SOURCE: PieceSourceView = {
   pieceId: "of:fid1:piece",
   name: "Recipe",
   pattern: { identity: "pattern-identity-value", symbol: "default" },
-  origin: { url: "https://example.test/recipe.tsx", kind: "web" },
+  origin: {
+    url: "https://toolshed.test/api/patterns/recipe.tsx",
+    kind: "system",
+  },
   entry: "/main.tsx",
   files: [
     { name: "/main.tsx", contents: "the main file" },
@@ -1339,8 +1342,10 @@ describe("the origin and history panel", () => {
     await menu.showPanel("origin");
 
     const rendered = shows(menu);
-    expect(rendered).toContain("External web URL");
-    expect(rendered).toContain("https://example.test/recipe.tsx");
+    expect(rendered).toContain("Deployment pattern");
+    expect(rendered).toContain(
+      "https://toolshed.test/api/patterns/recipe.tsx",
+    );
     expect(rendered).toContain(shortIdentity("pattern-identity-value"));
     expect(rendered).toContain("/main.tsx");
     expect(rendered).toContain("of:fid1:piece");
@@ -2085,7 +2090,7 @@ describe("the origin and history panel", () => {
           ...SOURCE,
           origin: {
             url: "https://toolshed.test/api/patterns/system/home.tsx",
-            kind: "web",
+            kind: "system",
             recorded: "/api/patterns/system/home.tsx",
           },
         })
@@ -3550,13 +3555,22 @@ describe("describeOrigin", () => {
       describeOrigin({ url: "cf:pattern:x", kind: "fabric-pattern" }).label,
     ).toBe("Exact pattern");
     expect(
-      describeOrigin({ url: "https://example.test/p.tsx", kind: "web" }).label,
-    ).toBe("External web URL");
+      describeOrigin({
+        url: "https://t.test/api/patterns/p.tsx",
+        kind: "system",
+      })
+        .label,
+    ).toBe("Deployment pattern");
   });
 
   it("says what each kind of origin can do", () => {
-    expect(describeOrigin({ url: "https://e.test/p.tsx", kind: "web" }).detail)
-      .toContain("can return new source later");
+    expect(
+      describeOrigin({
+        url: "https://t.test/api/patterns/p.tsx",
+        kind: "system",
+      })
+        .detail,
+    ).toContain("a new release of the deployment can replace it");
     expect(
       describeOrigin({ url: "cf:pattern:x", kind: "fabric-pattern" }).detail,
     ).toContain("always resolves to");
@@ -3709,22 +3723,7 @@ describe("describeFollowState", () => {
     expect(refusal("argument-mismatch").canForce).toBe(false);
   });
 
-  it("separates an origin nothing follows from one nothing has looked at", () => {
-    const unsupported = describeFollowState({
-      ...SOURCE,
-      reconciliation: {
-        outcome: "unsupported",
-        at: 1,
-        origin: SOURCE.origin!.url,
-      },
-    });
-    expect(unsupported.state).toBe("unsupported");
-    expect(unsupported.summary).toContain("Nothing follows this kind");
-    // Asking by hand is the only thing that resolves such an origin, so it
-    // is offered; there is no check that failed for an override to ignore.
-    expect(unsupported.canUpdate).toBe(true);
-    expect(unsupported.canForce).toBe(false);
-
+  it("reports a piece nothing has looked at as unknown", () => {
     expect(describeFollowState(SOURCE).state).toBe("unknown");
   });
 
@@ -3762,14 +3761,6 @@ describe("what the source-updates box offers", () => {
       },
     }, { box: false, update: false, force: false }],
     ["unknown", SOURCE, { box: true, update: true, force: false }],
-    ["an origin whose kind nothing follows", {
-      ...SOURCE,
-      reconciliation: {
-        outcome: "unsupported",
-        at: 1,
-        origin: SOURCE.origin!.url,
-      },
-    }, { box: true, update: true, force: false }],
     ["unreachable", {
       ...SOURCE,
       reconciliation: {

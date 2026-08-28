@@ -1304,10 +1304,10 @@ describe("opening a space root", () => {
     expect(getPatternSource(root)).toBe(externalSource);
 
     // The local route moves. The root does not follow it: its origin names
-    // another host. Following an external endpoint is specified and not
-    // built, so nothing is fetched on the root's behalf at all.
+    // another host, and an external endpoint is no origin at all, so nothing
+    // is fetched on the root's behalf.
     stub.setSource(SOURCE_V2);
-    expect(await reconcilePieceSource(runtime, root)).toBe("unsupported");
+    expect(await reconcilePieceSource(runtime, root)).toBe("unusable");
     expect(getPatternIdentityRef(root)).toEqual(before);
     expect(getPatternSource(root)).toBe(externalSource);
     expect(stub.identityFetches()).toBe(identityFetchesBefore);

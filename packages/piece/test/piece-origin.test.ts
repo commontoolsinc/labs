@@ -186,31 +186,26 @@ describe("classifyOrigin", () => {
     expect(classifyOrigin(runtime, SPACE, "/api/patterns/system/home.tsx"))
       .toEqual({
         url: "https://toolshed.test/api/patterns/system/home.tsx",
-        kind: "web",
+        kind: "system",
         recorded: "/api/patterns/system/home.tsx",
       });
   });
 
-  it("keeps an absolute web URL as it is", () => {
-    expect(classifyOrigin(runtime, SPACE, "https://example.test/p.tsx"))
-      .toEqual({ url: "https://example.test/p.tsx", kind: "web" });
+  it("rejects an absolute external endpoint", () => {
+    expect(() => classifyOrigin(runtime, SPACE, "https://example.test/p.tsx"))
+      .toThrow("is an external endpoint");
   });
 
-  it("keeps the recorded form of an absolute URL the parser rewrote", () => {
-    // Canonicalizing adds the path a bare origin omits, and drops a default
-    // port. What the piece stores stays visible beside what it resolves to.
-    expect(classifyOrigin(runtime, SPACE, "https://example.test"))
-      .toEqual({
-        url: "https://example.test/",
-        kind: "web",
-        recorded: "https://example.test",
-      });
-    expect(classifyOrigin(runtime, SPACE, "https://example.test:443/p.tsx"))
-      .toEqual({
-        url: "https://example.test/p.tsx",
-        kind: "web",
-        recorded: "https://example.test:443/p.tsx",
-      });
+  it("rejects the patterns route spelled against another host", () => {
+    // It names the same file this deployment serves, but on somebody else's
+    // host, and following it would be following them rather than us.
+    expect(() =>
+      classifyOrigin(
+        runtime,
+        SPACE,
+        "https://other.test/api/patterns/system/home.tsx",
+      )
+    ).toThrow("is an external endpoint");
   });
 
   it("reads an unpinned entity reference as a mutable piece origin", () => {
@@ -743,7 +738,7 @@ describe("readPieceSourceState collects every recorded fact", () => {
         { name: "/aaa.tsx", contents: "aaa" },
       ],
       meta: {
-        patternSource: "https://example.test/recipe.tsx",
+        patternSource: "system:system/home.tsx",
         patternIdentity: { identity: "abc", symbol: "default" },
         patternSetupIdentity: { identity: "older", symbol: "default" },
         displacedPattern: {
@@ -769,8 +764,9 @@ describe("readPieceSourceState collects every recorded fact", () => {
     });
     expect(state.repository).toBe("https://github.com/example/recipes");
     expect(state.origin).toEqual({
-      url: "https://example.test/recipe.tsx",
-      kind: "web",
+      url: "https://toolshed.test/api/patterns/system/home.tsx",
+      kind: "system",
+      recorded: "system:system/home.tsx",
     });
     // Entry file first, then the rest by name.
     expect(state.files.map((file) => file.name)).toEqual([
@@ -873,14 +869,16 @@ describe("readPieceSourceState collects every recorded fact", () => {
     const { piece, runtime } = pieceWith({
       meta: {
         patternIdentity: { identity: "abc", symbol: "default" },
-        patternSource: "https://example.test/recipe.tsx",
+        patternSource: "system:system/home.tsx",
         pieceReconciliation: { outcome: "invented", at: "recently" },
       },
     });
     const state = await readPieceSourceState(runtime, piece);
     expect(state.reconciliation).toBeUndefined();
     // The rest of the piece's source facts still read.
-    expect(state.origin?.url).toBe("https://example.test/recipe.tsx");
+    expect(state.origin?.url).toBe(
+      "https://toolshed.test/api/patterns/system/home.tsx",
+    );
   });
 });
 
@@ -969,7 +967,7 @@ describe("reading a piece's source state", () => {
     // the absolute route it resolves to, with the ref kept alongside it.
     expect(state.origin).toEqual({
       url: `http://toolshed.test${DEFAULT_APP_PATTERN_PATH}`,
-      kind: "web",
+      kind: "system",
       recorded: DEFAULT_APP_PATTERN_SOURCE,
     });
     expect(state.files.length).toBeGreaterThan(0);
@@ -1003,7 +1001,7 @@ describe("reading a piece's source state", () => {
     const state = await readPieceSourceState(runtime, cell);
     expect(state.origin).toEqual({
       url: `http://toolshed.test${DEFAULT_APP_PATTERN_PATH}`,
-      kind: "web",
+      kind: "system",
       recorded: DEFAULT_APP_PATTERN_PATH,
     });
     expect(state.history.at(-1)?.origin).toEqual(state.origin);
@@ -1757,7 +1755,7 @@ describe("reading a piece's source state", () => {
     const source = await controller.create({
       main: "/main.tsx",
       files: [{ name: "/main.tsx", contents: COUNTER_SOURCE }],
-    }, { origin: "https://example.test/upstream.tsx" });
+    }, { origin: "system:system/home.tsx" });
     const destination = new PiecesController(
       await createSession({
         identity: signer,
@@ -1770,9 +1768,9 @@ describe("reading a piece's source state", () => {
     const clone = await source.cloneTo(destination);
     const state = await readPieceSourceState(runtime, clone.getCell());
 
-    expect(state.origin).toEqual({
-      url: "https://example.test/upstream.tsx",
-      kind: "web",
+    expect(state.origin).toMatchObject({
+      kind: "system",
+      recorded: "system:system/home.tsx",
     });
   });
 
