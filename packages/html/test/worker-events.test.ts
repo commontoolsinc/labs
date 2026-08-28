@@ -201,7 +201,7 @@ Deno.test("events - serializeEvent", async (t) => {
 
     const serialized = serializeEvent(event);
 
-    assertEquals(serialized.target?.value, handle.toJSON());
+    assertEquals(serialized.target?.value, handle.toSigilLink());
   });
 
   await t.step("refuses a value that merely defines a `toJSON()`", () => {
@@ -434,7 +434,7 @@ Deno.test("events - serializeEvent", async (t) => {
 
     const serialized = serializeEvent(event);
 
-    assertEquals(serialized.target?.selected, handle.toJSON());
+    assertEquals(serialized.target?.selected, handle.toSigilLink());
   });
 
   await t.step("does not take a `toJSON()` of its own for a cell", () => {
@@ -504,7 +504,7 @@ Deno.test("events - serializeEvent", async (t) => {
 
     const serialized = serializeEvent(event);
 
-    assertEquals(serialized.detail, handle.toJSON());
+    assertEquals(serialized.detail, handle.toSigilLink());
   });
 
   await t.step("carries a `FabricBytes` in a detail as its own bytes", () => {

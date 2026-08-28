@@ -331,7 +331,7 @@ function carriedTargetValue(
   prop: typeof ALLOWLISTED_TARGET_PROPERTIES[number],
   value: unknown,
 ): FabricValue | undefined {
-  if (isCellHandle(value)) return value.toJSON();
+  if (isCellHandle(value)) return value.toSigilLink();
 
   const scalar: DomScalar | undefined = TARGET_PROPERTY_SCALARS[
     prop as keyof typeof TARGET_PROPERTY_SCALARS
@@ -360,7 +360,8 @@ function carriedTargetValue(
  *
  * A `CellHandle` is the one thing a component exposes that is not fabric and
  * has a representation anyway: the link that reaches its cell. Recognized by
- * its class, so that nothing else defining a `toJSON()` is taken for a cell.
+ * its class, and asked for its link by name -- nothing here reaches for a
+ * serialization protocol that happens to yield one.
  *
  * Anything else is refused: a value whose very top layer has no fabric form.
  * What reaches this is enumerable, and none of it is something a handler could
@@ -396,7 +397,7 @@ function carriedTargetValue(
 function toSerializableValue(value: unknown): FabricValue {
   if (isValidFabricValueLayer(value)) return value as FabricValue;
 
-  if (isCellHandle(value)) return value.toJSON();
+  if (isCellHandle(value)) return value.toSigilLink();
 
   throw new Error(
     "Cannot yet carry this value on a DOM event, it being neither a " +
