@@ -7,6 +7,12 @@ const ROOT = resolve(import.meta.dirname!, "..");
 const SCRIPT = resolve(import.meta.dirname!, "write-iframe-wrapper.ts");
 const decoder = new TextDecoder();
 
+function generatedGuestHtml(source: string): string {
+  const literal = source.match(/^const GUEST_HTML = (.*);$/m)?.[1];
+  expect(literal).toBeDefined();
+  return JSON.parse(literal!);
+}
+
 async function removeDirectory(path: string): Promise<void> {
   try {
     await Deno.remove(path, { recursive: true });
@@ -122,6 +128,10 @@ export const IFRAME_PATTERN = {
       expect(generated).toMatch(
         /\(\(\{\s*input,\s*state,\s*output,\s*\}\) => \{/,
       );
+      expect(generated).toContain(
+        "const iframeInput = input ?? DEFAULT_INPUT;",
+      );
+      expect(generated).toContain("input: iframeInput,");
       expect(generated).not.toContain("new Writable.perUser");
       expect(generated).not.toContain("new Writable.perSession");
     } finally {
@@ -400,6 +410,75 @@ export const IFRAME_PATTERN = {
       expect(format.code, decoder.decode(format.stderr)).toBe(0);
     } finally {
       await removeDirectory(directory);
+    }
+  });
+
+  it("bundles D3, Phaser, and Babylon.js guests", async () => {
+    const frameworks = [
+      {
+        name: "D3Guest",
+        marker: "d3-guide-probe",
+        source: `import { select } from "npm:d3@7.9.0";
+select(document.body).append("svg").attr("data-framework", "d3-guide-probe");
+`,
+      },
+      {
+        name: "PhaserGuest",
+        marker: "phaser-guide-probe",
+        source: `import Phaser from "npm:phaser@4.2.1";
+new Phaser.Game({
+  type: Phaser.CANVAS,
+  width: 320,
+  height: 180,
+  scene: { create() { this.add.text(16, 16, "phaser-guide-probe"); } },
+});
+`,
+      },
+      {
+        name: "BabylonGuest",
+        marker: "babylon-guide-probe",
+        source:
+          `import { Engine } from "npm:@babylonjs/core@9.23.0/Engines/engine.js";
+import { CreateBox } from "npm:@babylonjs/core@9.23.0/Meshes/Builders/boxBuilder.js";
+import { Scene } from "npm:@babylonjs/core@9.23.0/scene.js";
+const canvas = document.createElement("canvas");
+canvas.dataset.framework = "babylon-guide-probe";
+document.body.append(canvas);
+const engine = new Engine(canvas);
+const scene = new Scene(engine);
+CreateBox("box", {}, scene);
+engine.runRenderLoop(() => scene.render());
+`,
+      },
+    ] as const;
+
+    for (const framework of frameworks) {
+      const directory = await Deno.makeTempDir({
+        prefix: `pattern-iframe-${framework.name.toLowerCase()}-`,
+      });
+      try {
+        const contract = resolve(directory, "contract.ts");
+        const guest = resolve(directory, "guest.ts");
+        const out = resolve(directory, "main.tsx");
+        await Deno.writeTextFile(
+          contract,
+          `${contractPrefix}
+export const IFRAME_PATTERN = { name: "${framework.name}" } as const;
+`,
+        );
+        await Deno.writeTextFile(guest, framework.source);
+
+        const result = await generate(contract, guest, out);
+
+        expect(result.code, decoder.decode(result.stderr)).toBe(0);
+        const generated = await Deno.readTextFile(out);
+        expect(generated).toContain(framework.marker);
+        expect(generated).toContain("const GUEST_HTML =");
+        const guestHtml = generatedGuestHtml(generated);
+        expect(guestHtml.match(/<!doctype html>/gi)).toHaveLength(1);
+      } finally {
+        await removeDirectory(directory);
+      }
     }
   });
 });
