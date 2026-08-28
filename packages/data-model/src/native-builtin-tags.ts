@@ -15,11 +15,9 @@
  */
 
 import type { FabricNativeObject } from "./interface.ts";
-import {
-  classOfNativeValue,
-  NATIVE_TAGS,
-  type NativeTag,
-} from "./native-tags.ts";
+import { constructorFromObject } from "@commonfabric/utils/objects";
+
+import { NATIVE_TAGS, type NativeTag } from "./native-tags.ts";
 
 /**
  * Checks whether a value is a native `Error`.
@@ -115,7 +113,7 @@ export function isValidFabricNativeObject(
   // class is `Array`, whose tag is not one of the six below, and an `Array`
   // subclass has no recognized class at all. Either way the answer is `false`,
   // which is the right one.
-  const ctor = classOfNativeValue(value);
+  const ctor = constructorFromObject(value);
   const tag = (ctor !== undefined) ? tagFromNativeBuiltinClass(ctor) : null;
 
   switch (tag ?? (isNativeError(value) ? NATIVE_TAGS.Error : null)) {

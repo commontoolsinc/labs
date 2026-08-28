@@ -26,11 +26,9 @@ import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricInstance } from "./interface.ts";
-import {
-  classOfNativeValue,
-  NATIVE_TAGS,
-  type NativeTag,
-} from "./native-tags.ts";
+import { constructorFromObject } from "@commonfabric/utils/objects";
+
+import { NATIVE_TAGS, type NativeTag } from "./native-tags.ts";
 import {
   isNativeError,
   tagFromNativeBuiltinClass,
@@ -97,7 +95,7 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     return NATIVE_TAGS.Array;
   }
 
-  const ctor = classOfNativeValue(value);
+  const ctor = constructorFromObject(value);
   if (ctor !== undefined) {
     const tag = tagFromNativeClass(ctor);
     if (tag !== null) return tag;
