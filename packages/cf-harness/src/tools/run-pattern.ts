@@ -48,7 +48,6 @@ import {
   PATTERN_PUBLICATION_MESSAGES,
   type PatternPublicationReason,
   type PatternPublicationStatus,
-  PROBE_HTML_MAX_CHARS,
   renderPatternUiToHtml,
   syntheticArgument,
 } from "../pattern-index/publish-render-gate.ts";

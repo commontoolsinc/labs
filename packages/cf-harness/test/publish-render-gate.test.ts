@@ -320,6 +320,16 @@ describe("publish-render-gate", () => {
         pyramid: `<a>${`<b>${"<c>y</c>".repeat(50)}</b>`.repeat(5)}</a>`,
         empty: "",
         single: "<p>p</p>",
+        // Position matters when the walk is order-sensitive, and "every
+        // child fits but the total does not" is the case a per-child check
+        // passes and a shared budget catches.
+        oversizedLast: `<p>a</p><p>b</p><section>${
+          "<span>x</span>".repeat(100)
+        }</section>`,
+        eachUnderTotalOver: "<p>a</p>".repeat(50),
+        twoOversized: `<section>${"<span>x</span>".repeat(60)}</section>` +
+          `<section>${"<span>x</span>".repeat(60)}</section>`,
+        textOnly: "just text with no elements at all",
       };
       for (const [name, html] of Object.entries(shapes)) {
         const mock = new MockDoc(

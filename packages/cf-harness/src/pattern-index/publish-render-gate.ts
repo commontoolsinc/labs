@@ -230,9 +230,6 @@ export const PATTERN_DISCOVERABILITY_REASONS: Readonly<
     "superseded by a later iteration of the same capability in the same authoring session",
 };
 
-/** How much of the probe's rendered HTML the artifact keeps. */
-export const PROBE_HTML_MAX_CHARS = 4096;
-
 /**
  * How many rendered nodes are read before the tree is cut down to size.
  *
