@@ -708,8 +708,23 @@ describe("default-app flow test", () => {
         await clickButtonWithExactText(page, "Notes ▾");
         await awaitViewSettled(page);
         await clickButtonWithText(page, "New Notebook");
+        // The wait hands back the NOTEBOOK's piece id at the instant it
+        // approved `isNotebook` — the step's stable read target from here
+        // on. Every later wait and assertion reads the notebook BY THIS ID,
+        // never through `view.pieceId` again: under server execution the
+        // final "Create" click's speculative run may read a stale
+        // `usedCreateAnotherNote` and optimistically navigate into the new
+        // note while the authoritative run computes no navigation — a
+        // sanctioned outcome (the L2 optimistic-enactment question, ruled
+        // PUNT 2026-08-27: the client navigates, so be it). A view-following
+        // read then polls a healthy NOTE through notebook accessors until
+        // the step's net (the 2026-08-27 r06/r09 root cause,
+        // docs/history/plans/server-execution-v2/optimize/
+        // keyless-diagnosis-2026-08-27.md); an id-bound read is indifferent
+        // to where the view wandered.
+        let notebookEntityId: string | undefined;
         try {
-          await waitForCondition(page, async () => {
+          notebookEntityId = await waitForCondition(page, async () => {
             const commonfabric = globalThis.commonfabric as
               | { readCell?: (options: { id: string }) => Promise<unknown> }
               | undefined;
@@ -728,7 +743,9 @@ describe("default-app flow test", () => {
               console.log = originalLog;
             }
             return (current as { isNotebook?: unknown } | undefined)
-              ?.isNotebook === true;
+                ?.isNotebook === true
+              ? pieceId
+              : false;
           });
         } catch (error) {
           console.log(
@@ -737,6 +754,10 @@ describe("default-app flow test", () => {
           );
           throw error;
         }
+        assert(
+          notebookEntityId,
+          "Expected the notebook wait to hand back the notebook piece id",
+        );
 
         // Wait until the notebook toolbar is mounted and interactive before
         // clicking. viewSettled resolves once the worker is idle and the
@@ -800,11 +821,11 @@ describe("default-app flow test", () => {
         let waitFailure: unknown;
         try {
           await waitForCondition(page, notebookSourceStateMatches, {
-            args: [noteCreates],
+            args: [noteCreates, notebookEntityId],
           });
           await waitForRuntimeSynced(page);
           summary = await waitForCondition(page, notebookSourceStateMatches, {
-            args: [noteCreates],
+            args: [noteCreates, notebookEntityId],
           });
         } catch (error) {
           // A wait or the sync barrier failed at its net: the state never
@@ -824,7 +845,11 @@ describe("default-app flow test", () => {
           // failing), then re-throw the authority's own error.
           console.log(
             "Notebook rapid create source diagnostics:",
-            JSON.stringify(await collectNotebookSourceState(page), null, 2),
+            JSON.stringify(
+              await collectNotebookSourceState(page, notebookEntityId),
+              null,
+              2,
+            ),
           );
           console.log(
             "Notebook rapid create render diagnostics:",
@@ -1637,14 +1662,24 @@ async function waitForHomePageReady(
   await waitForRuntimeIdle(page);
 }
 
-async function collectNotebookSourceState(page: Page): Promise<{
+// Reads the notebook by `knownNotebookId` when the caller captured one (the
+// sanctioned optimistic navigation can leave the view on a NOTE — see
+// notebookSourceStateMatches), else by the current view's piece id. Reports
+// `viewPieceId` separately either way, so a failure dump distinguishes
+// "wrong state" from "wrong piece under the reader" — the confusion the
+// 2026-08-27 r06/r09 diagnosis found in this step's recorded reds.
+async function collectNotebookSourceState(
+  page: Page,
+  knownNotebookId?: string,
+): Promise<{
   notebookEntityId?: string;
+  viewPieceId?: string;
   argumentNotesLength?: number;
   noteCount?: number;
   showNewNotePrompt?: boolean;
   usedCreateAnotherNote?: boolean;
 }> {
-  return await page.evaluate(async () => {
+  return await page.evaluate(async (knownId?: string) => {
     const api = globalThis.commonfabric as {
       readCell?: (options: {
         id: string;
@@ -1655,12 +1690,13 @@ async function collectNotebookSourceState(page: Page): Promise<{
 
     const appState = globalThis.app?.serialize?.();
     const view = appState?.view;
-    const notebookEntityId = view && typeof view === "object" &&
+    const viewPieceId = view && typeof view === "object" &&
         "pieceId" in view && typeof view.pieceId === "string"
       ? view.pieceId
       : undefined;
+    const notebookEntityId = knownId ?? viewPieceId;
     if (!notebookEntityId || !api?.readCell) {
-      return { notebookEntityId };
+      return { notebookEntityId, viewPieceId };
     }
 
     const resolveInternalManifest = async (
@@ -1715,6 +1751,7 @@ async function collectNotebookSourceState(page: Page): Promise<{
 
     return {
       notebookEntityId,
+      viewPieceId,
       // `notes` is a first-class Cell in the notebook argument schema. Newer
       // argument links preserve that wrapper, so debug reads return a handle;
       // older pieces may still materialize the array inline.
@@ -1739,7 +1776,7 @@ async function collectNotebookSourceState(page: Page): Promise<{
           .usedCreateAnotherNote
         : undefined,
     };
-  });
+  }, { args: [knownNotebookId] });
 }
 
 // The state notebookSourceStateMatches approves and hands back. Every field
@@ -1763,9 +1800,19 @@ type NotebookSourceSummary = {
 // was when the condition held — a fresh read after the wait can instead land
 // in the ruled interim of a served re-derivation (`noteCount` cleanly
 // `undefined`, then re-triggered and healed) and fail a healthy run.
+//
+// Reads the notebook by the CALLER-CAPTURED id, never through the current
+// view: the final "Create" click's speculative run may enact an optimistic
+// navigation into the new note that the authoritative run computed no intent
+// for — sanctioned (L2 ruled PUNT 2026-08-27), so `view.pieceId` is allowed
+// to be a NOTE here, and a view-following read would poll that healthy note
+// through notebook accessors until the step's net (the 2026-08-27 r06/r09
+// root cause). The id-bound read asserts the same product facts wherever the
+// view wandered.
 const notebookSourceStateMatches = async (
   _probe: ProbeApi,
   expectedCount: number,
+  notebookEntityId: string,
 ): Promise<NotebookSourceSummary | false> => {
   const api = globalThis.commonfabric as {
     readCell?: (options: {
@@ -1775,11 +1822,6 @@ const notebookSourceStateMatches = async (
     }) => Promise<unknown>;
   } | undefined;
 
-  const view = globalThis.app?.serialize?.()?.view;
-  const notebookEntityId = view && typeof view === "object" &&
-      "pieceId" in view && typeof view.pieceId === "string"
-    ? view.pieceId
-    : undefined;
   if (!notebookEntityId || !api?.readCell) return false;
 
   const resolveInternalManifest = async (

@@ -761,7 +761,12 @@ Session-scoped, server-computed, client-enacted effects (README §3.7).
   (below) covers abandoned instances.
 - Exactly-once enactment per nonce is the CLIENT's duty (it may enact
   optimistically from speculation, then reconcile by nonce — navigation
-  is reversible). Reload between intent and ack: on resubscribe the
+  is reversible). Nonce reconciliation covers only the intent-ARRIVES
+  case: when the authoritative run computes no intent for an
+  optimistically enacted navigation (branch divergence on a speculative
+  read), the enactment STANDS un-reconciled — ruled PUNT (owner,
+  2026-08-27; register OW45) — and consumers must be robust to it.
+  Reload between intent and ack: on resubscribe the
   client sees unacked intents and enacts them; nonces make re-enactment
   detectable. The reload × optimistic-enactment window MAY re-enact
   a nonce — the enacted-nonce record lives in the reload-wiped
