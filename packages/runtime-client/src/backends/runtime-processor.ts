@@ -1153,10 +1153,11 @@ export class RuntimeProcessor {
       // cell has been stored, and a write redirect is an address rather than
       // backing data. Treating either as an existing value leaves a later
       // child write with no durable parent and can replace the visible default.
-      // Drop the view schema and follow a final write redirect only for this
-      // existence check, then return the normal projected value when storage
-      // already won.
-      const stored = cell.asSchema(undefined).getRaw({
+      // Follow a final write redirect only for this existence check, while
+      // retaining the view schema because its scope cap controls whether that
+      // redirect is reachable. Then return the normal projected value when
+      // storage already won.
+      const stored = cell.getRaw({
         lastNode: "writeRedirect",
       });
       if (stored !== undefined) {

@@ -3770,6 +3770,63 @@ describe("runtime-processor", () => {
       }
     });
 
+    it("does not initialize through a scope-capped write redirect", async () => {
+      const signer = await Identity.fromPassphrase(
+        `direct-capped-initialize-${crypto.randomUUID()}`,
+      );
+      const space = signer.did();
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("http://localhost/"),
+        storageManager,
+      });
+      try {
+        const schema = {
+          type: "object",
+          properties: { n: { type: "number" } },
+          required: ["n"],
+          default: { n: 1 },
+          scope: "space",
+        } as const;
+        const processor = Object.assign(
+          Object.create(RuntimeProcessor.prototype),
+          { runtime },
+        ) as RuntimeProcessor;
+
+        for (const existing of [undefined, { n: 7 }] as const) {
+          const target = runtime.getCell<{ n: number }>(
+            space,
+            `direct-capped-target-${crypto.randomUUID()}`,
+            undefined,
+            undefined,
+            "session",
+          );
+          const alias = runtime.getCell<{ n: number }>(
+            space,
+            `direct-capped-alias-${crypto.randomUUID()}`,
+          );
+          await Promise.all([target.sync(), alias.sync()]);
+          const seed = runtime.edit();
+          if (existing !== undefined) target.withTx(seed).set(existing);
+          alias.withTx(seed).setRawUntyped(
+            target.getAsWriteRedirectLink({ includeSchema: false }),
+          );
+          expect((await seed.commit()).error).toBeUndefined();
+
+          const capped = alias.asSchema<{ n: number }>(schema);
+          await expect(processor.handleCellInitialize({
+            type: RequestType.CellInitialize,
+            cell: createCellRef(capped),
+            value: { n: 1 },
+          })).rejects.toThrow("Cannot write to read-only address");
+          expect(target.asSchema(undefined).getRaw()).toEqual(existing);
+        }
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
     it("rejects backing values incompatible with the requested schema", async () => {
       const signer = await Identity.fromPassphrase(
         `direct-incompatible-initialize-${crypto.randomUUID()}`,
