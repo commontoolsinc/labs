@@ -63,6 +63,7 @@ import type {
   CfcLabelMetadataObservation,
   CfcLabelMetadataProtectionMode,
   CfcPolicyEvaluationMode,
+  CfcRefusalDetail,
   CfcTriggerReadGating,
   CfcTxState,
   CfcWriteFloorMode,
@@ -1894,6 +1895,18 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   ): void;
 
   /**
+   * Records a structured description of a refusal one of this transaction's
+   * CFC gates just decided (`cfc/refusal-detail.ts`): the boundary, the atoms
+   * outside it, and the reads that carried them.
+   *
+   * The prose reason remains the enforcement channel — a detail never decides
+   * anything, and recording one neither marks the transaction relevant nor
+   * invalidates a preparation. It exists so a refused caller can act: the
+   * detail names the INPUT to drop, which the reason alone cannot.
+   */
+  recordCfcRefusalDetail(detail: CfcRefusalDetail): void;
+
+  /**
    * The trusted policy-writer path for CFC grant documents (§8.12.7 route
    * 2a; cfc/grants.ts module doc). Requires the transaction's CURRENT
    * implementation identity to be a trusted builtin (the arm
@@ -2230,6 +2243,14 @@ export interface IPreconditionFailedError extends Error {
 export interface ICfcCommitRefusalError extends IStorageError {
   readonly name: "CfcCommitRefusalError";
   readonly reasons: readonly string[];
+
+  /**
+   * Structured descriptions of the reasons whose producers could describe
+   * themselves (`cfc/refusal-detail.ts`), paired to `reasons` by their
+   * `reason` text. A refusal every producer left undescribed carries an
+   * empty list — the reasons still stand on their own.
+   */
+  readonly refusals: readonly CfcRefusalDetail[];
 }
 
 /** Commit preparation crashed before any storage attempt. This is typed apart

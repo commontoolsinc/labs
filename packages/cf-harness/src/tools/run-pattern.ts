@@ -7,6 +7,10 @@ import {
   type RuntimeProgram,
 } from "@commonfabric/runner";
 import {
+  type CfcAddress,
+  type CfcRefusalAttribution,
+  type CfcRefusalDetail,
+  type CfcRefusalGate,
   selectReferencedCfcSchemaDefs,
   validateAgainstSchema,
 } from "@commonfabric/runner/cfc";
@@ -116,6 +120,67 @@ export interface RunPatternToolSuccessOutput {
   rawValue?: unknown;
 }
 
+/**
+ * What the commit boundary refused, in terms the caller can act on: the
+ * boundary that refused, the label atoms outside it, and the keys of this
+ * call's own `inputs` that carried those atoms in. When `attribution` is
+ * `complete`, a run without those keys meets the boundary.
+ *
+ * Everything here reaches the model as it stands — the model-facing
+ * rendering strips `rawValue`, `rawCauseMessage`, `pieceId` and
+ * `resultRefSchema` and scrubs the free-text fields, and a structured field
+ * passes through untouched. So nothing here is a document id, a space, or a
+ * path into a document: an offending read that no input key accounts for is
+ * counted rather than named.
+ */
+export interface RunPatternPolicyRefusal {
+  /**
+   * The rules that refused, deduplicated. `sink-ceiling` is an egress whose
+   * confidentiality ceiling the flow exceeded; `writer-fit` is a write whose
+   * target does not admit what the write carries.
+   */
+  gates: readonly CfcRefusalGate[];
+
+  /**
+   * The sinks whose ceilings refused, deduplicated. Empty when what refused
+   * was a write rather than an egress.
+   */
+  sinks: readonly string[];
+
+  /**
+   * The label atoms outside what the boundary admits, rendered as the
+   * boundary renders them.
+   */
+  offendingAtoms: readonly string[];
+
+  /**
+   * Offending atoms left out of `offendingAtoms`. A structured atom can
+   * carry the principal that introduced it, and there is no seam that
+   * redacts a rendered atom, so it is counted rather than named.
+   */
+  withheldAtomCount?: number;
+
+  /**
+   * The keys of this call's own `inputs` whose values carried the offending
+   * atoms in — the inputs to drop and retry without.
+   */
+  inputKeys: readonly string[];
+
+  /**
+   * Offending reads that no key of this call's `inputs` accounts for,
+   * counted by document.
+   */
+  unattributedInputCount?: number;
+
+  /**
+   * Whether `inputKeys` is the whole remedy. `complete` — every offending
+   * atom came in through them, so a run without them proceeds. `partial` —
+   * dropping them narrows the flow without necessarily clearing it. `none` —
+   * nothing was attributed to an input of this call.
+   */
+  attribution: CfcRefusalAttribution;
+}
+
 export interface RunPatternToolErrorOutput {
   outputId: string;
   status: "compile-error" | "error" | "cancelled";
@@ -134,6 +199,12 @@ export interface RunPatternToolErrorOutput {
    * over data the model cannot read may carry that data in its thrown text.
    */
   rawCauseMessage?: string;
+
+  /**
+   * What the commit boundary refused and which of this call's own inputs
+   * carried it, when a policy refusal is what stopped the run.
+   */
+  policyRefusal?: RunPatternPolicyRefusal;
 }
 
 export type RunPatternToolOutput =
@@ -231,6 +302,32 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
         message: { type: "string" },
         pieceId: { type: "string" },
         rawCauseMessage: { type: "string" },
+        policyRefusal: {
+          type: "object",
+          properties: {
+            gates: {
+              type: "array",
+              items: { type: "string", enum: ["sink-ceiling", "writer-fit"] },
+            },
+            sinks: { type: "array", items: { type: "string" } },
+            offendingAtoms: { type: "array", items: { type: "string" } },
+            withheldAtomCount: { type: "integer", minimum: 0 },
+            inputKeys: { type: "array", items: { type: "string" } },
+            unattributedInputCount: { type: "integer", minimum: 0 },
+            attribution: {
+              type: "string",
+              enum: ["complete", "partial", "none"],
+            },
+          },
+          required: [
+            "gates",
+            "sinks",
+            "offendingAtoms",
+            "inputKeys",
+            "attribution",
+          ],
+          additionalProperties: false,
+        },
       },
       required: ["outputId", "status", "message"],
       additionalProperties: false,
@@ -336,6 +433,204 @@ const RUN_PATTERN_SOURCE_MAIN = "/main.tsx";
 /** What a call naming neither a source nor a published pattern is told. */
 const RUN_PATTERN_NO_PROGRAM_MESSAGE =
   "run_pattern requires sourceText or patternId";
+
+/**
+ * What a refusal message says about the raw reason, which stays in the
+ * artifact for the same cause the thrown text does: it names the labels and
+ * the documents the flow touched.
+ */
+const RUN_PATTERN_REFUSAL_ARTIFACT_NOTE =
+  "The refusal reason is retained in the run artifact and withheld here, " +
+  "since it names the labels and documents involved";
+
+/** What a refusal the commit boundary described only in prose is told. */
+const RUN_PATTERN_OPAQUE_REFUSAL_MESSAGE =
+  "the pattern ran but the space's policy refused to commit its result: " +
+  "flow enforcement rejected the write at the commit boundary, so the " +
+  `result never landed. ${RUN_PATTERN_REFUSAL_ARTIFACT_NOTE}`;
+
+/**
+ * Where an agent-supplied input landed. A refusal names the reads that
+ * carried the offending labels; turning one back into something the caller
+ * can act on means finding the key whose value that read belongs to, and the
+ * key is the only part of the answer the caller may be told.
+ */
+interface RunPatternInputAddress {
+  readonly key: string;
+
+  /**
+   * The document the caller's link resolved to, through the canonical entity
+   * seam, so a read spelled differently by another seam still compares.
+   */
+  readonly hash: string;
+
+  readonly path: readonly string[];
+}
+
+const pathStartsWith = (
+  path: readonly string[],
+  prefix: readonly string[],
+): boolean =>
+  prefix.length <= path.length &&
+  prefix.every((segment, index) => segment === path[index]);
+
+/**
+ * The key of `inputs` a refused read belongs to, or `undefined` when none
+ * does.
+ *
+ * A read reaches an input two ways. It reads the document the caller's link
+ * addressed, which the retained addresses match. Or it reads the piece's
+ * argument document, where every input — link or plain JSON — sits under its
+ * own key, so the first path segment is the key. Both are matched, because
+ * one refusal commonly reports the same input through both.
+ */
+const refusalReadInputKey = (
+  read: CfcAddress,
+  addresses: readonly RunPatternInputAddress[],
+  argumentHash: string | undefined,
+  suppliedKeys: readonly string[],
+): string | undefined => {
+  const readHash = comparableEntityHash(read.id);
+  if (readHash === undefined) {
+    return undefined;
+  }
+  for (const address of addresses) {
+    if (address.hash === readHash && pathStartsWith(read.path, address.path)) {
+      return address.key;
+    }
+  }
+  if (argumentHash !== undefined && readHash === argumentHash) {
+    const first = read.path[0];
+    if (first !== undefined && suppliedKeys.includes(first)) {
+      return first;
+    }
+  }
+  return undefined;
+};
+
+/**
+ * Whether a rendered label atom may be named to the model.
+ *
+ * A scalar atom — `"medical"`, `3`, `true` — is the word the data was tagged
+ * with, and naming it is the whole point of the report. A structured atom is
+ * a CFC atom object, and a `Caveat` among them carries the principal that
+ * introduced it; `redactCaveatSourcesForDisplay` strips that principal from a
+ * whole label view, and there is no seam that strips it from an atom already
+ * rendered to a string. So a structured atom is counted rather than named.
+ */
+const namableRefusalAtom = (rendered: string): boolean => {
+  try {
+    const parsed: unknown = JSON.parse(rendered);
+    return parsed === null || typeof parsed !== "object";
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Fold the boundary's refusal details into the one report the caller reads,
+ * resolving each offending read to a key of this call's `inputs`.
+ *
+ * `attribution` is the harness's own question, stricter than the boundary's:
+ * the boundary asks whether every offending atom reached a named READ, and
+ * this asks whether every such read is an input the caller can drop. A read
+ * the caller does not own leaves the answer at `partial` even when the
+ * boundary called its own attribution complete, because dropping inputs
+ * cannot reach it.
+ */
+export const runPatternPolicyRefusal = (
+  refusals: readonly CfcRefusalDetail[],
+  inputKeyFor: (read: CfcAddress) => string | undefined,
+): RunPatternPolicyRefusal | undefined => {
+  if (refusals.length === 0) {
+    return undefined;
+  }
+  const gates: CfcRefusalGate[] = [];
+  const sinks: string[] = [];
+  const offendingAtoms: string[] = [];
+  const inputKeys: string[] = [];
+  const seenAtoms = new Set<string>();
+  const unattributed = new Set<string>();
+  let withheldAtomCount = 0;
+  let everyDetailComplete = true;
+  for (const detail of refusals) {
+    if (!gates.includes(detail.gate)) gates.push(detail.gate);
+    if (detail.sink !== undefined && !sinks.includes(detail.sink)) {
+      sinks.push(detail.sink);
+    }
+    if (detail.attribution !== "complete") everyDetailComplete = false;
+    for (const atom of detail.offendingAtoms) {
+      if (seenAtoms.has(atom)) continue;
+      seenAtoms.add(atom);
+      if (namableRefusalAtom(atom)) offendingAtoms.push(atom);
+      else withheldAtomCount += 1;
+    }
+    for (const input of detail.inputs) {
+      const key = inputKeyFor(input.read);
+      if (key === undefined) {
+        // Counted by document, so one document read at three paths is one
+        // input the caller cannot name rather than three.
+        unattributed.add(comparableEntityHash(input.read.id) ?? "");
+      } else if (!inputKeys.includes(key)) {
+        inputKeys.push(key);
+      }
+    }
+  }
+  const attribution: CfcRefusalAttribution = inputKeys.length === 0
+    ? "none"
+    : everyDetailComplete && unattributed.size === 0
+    ? "complete"
+    : "partial";
+  return {
+    gates,
+    sinks,
+    offendingAtoms,
+    ...(withheldAtomCount > 0 ? { withheldAtomCount } : {}),
+    inputKeys,
+    ...(unattributed.size > 0
+      ? { unattributedInputCount: unattributed.size }
+      : {}),
+    attribution,
+  };
+};
+
+const quoteAll = (values: readonly string[]): string =>
+  values.map((value) => `"${value}"`).join(", ");
+
+/**
+ * The refusal stated as an instruction: what refused, which of the caller's
+ * inputs carried what it refused, and whether dropping those inputs is the
+ * whole remedy or only narrows the flow.
+ */
+export const policyRefusalMessage = (
+  refusal: RunPatternPolicyRefusal,
+): string => {
+  const boundary = refusal.sinks.length > 0
+    ? `the sink${refusal.sinks.length > 1 ? "s" : ""} ${
+      quoteAll(refusal.sinks)
+    }`
+    : "the write it attempted";
+  const atoms = refusal.offendingAtoms.length > 0
+    ? ` (${refusal.offendingAtoms.join(", ")})`
+    : "";
+  const opening =
+    "the pattern ran but the space's policy refused to commit its result: " +
+    `${boundary} does not admit the confidentiality${atoms} this run ` +
+    "carries, so the result never landed";
+  const plural = refusal.inputKeys.length > 1;
+  const keys = `input${plural ? "s" : ""} ${quoteAll(refusal.inputKeys)}`;
+  const remedy = refusal.attribution === "complete"
+    ? `Every label refused here came in through ${keys}, so the same run ` +
+      `without ${plural ? "them" : "it"} proceeds`
+    : refusal.attribution === "partial"
+    ? `Some of what was refused came in through ${keys}; dropping ` +
+      `${plural ? "them" : "it"} narrows the flow without necessarily ` +
+      "clearing it, since reads this call does not own carry refused " +
+      "labels too"
+    : "No input of this call accounts for what was refused, so dropping an " +
+      "input will not clear it";
+  return `${opening}. ${remedy}. ${RUN_PATTERN_REFUSAL_ARTIFACT_NOTE}`;
+};
 
 /**
  * Replaces bare fabric identifiers in model-facing diagnostic text with a
@@ -578,9 +873,15 @@ export const runPatternTool: HarnessToolDefinition<
     let pieceInput: Record<string, unknown> | undefined;
     const liveCellInputs: Array<{ key: string; cell: Cell<unknown> }> = [];
     const plainInputs: Array<{ key: string; value: unknown }> = [];
+    // Where each input landed, kept for the one path that needs it: a policy
+    // refusal names the reads that carried the offending labels, and a read
+    // is only actionable once it is back to the key the caller passed.
+    const suppliedInputKeys: string[] = [];
+    const inputAddresses: RunPatternInputAddress[] = [];
     if (input.inputs !== undefined) {
       const converted: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(input.inputs)) {
+        suppliedInputKeys.push(key);
         const sealedPath = sealedOpaqueLinkPath(value, key);
         if (sealedPath !== undefined) {
           return errorOutput("error", sealedInputRefusal(key, sealedPath));
@@ -601,6 +902,10 @@ export const runPatternTool: HarnessToolDefinition<
                 "error",
                 `run_pattern input "${key}" reference targets another space; only references into the configured session space are allowed`,
               );
+            }
+            const linkHash = comparableEntityHash(link.id);
+            if (linkHash !== undefined) {
+              inputAddresses.push({ key, hash: linkHash, path: link.path });
             }
             const cell = pieces.runtime.getCellFromLink(link);
             liveCellInputs.push({ key, cell });
@@ -1003,13 +1308,40 @@ export const runPatternTool: HarnessToolDefinition<
       );
       if (refusal !== undefined) {
         recordOutcome("run_failed");
+        // The piece's argument document is where every input reaches the
+        // pattern under its own key, so a refused read of it names an input
+        // by its first path segment. Its address is resolved here rather
+        // than kept from creation because only a refusal asks for it, and an
+        // argument cell that will not resolve costs that second route to a
+        // key while the caller's own resolved addresses still answer.
+        let argumentHash: string | undefined;
+        try {
+          argumentHash = comparableEntityHash(
+            (await piece.input.getCell()).getAsNormalizedFullLink().id,
+          );
+        } catch {
+          argumentHash = undefined;
+        }
+        const policyRefusal = runPatternPolicyRefusal(
+          refusal.refusals ?? [],
+          (read) =>
+            refusalReadInputKey(
+              read,
+              inputAddresses,
+              argumentHash,
+              suppliedInputKeys,
+            ),
+        );
         return {
           ...errorOutput(
             "error",
-            `the pattern ran but the space's policy refused to commit its result: flow enforcement rejected the write at the commit boundary, so the result never landed. The refusal reason is retained in the run artifact and withheld here, since it names the labels and documents involved`,
+            policyRefusal === undefined
+              ? RUN_PATTERN_OPAQUE_REFUSAL_MESSAGE
+              : policyRefusalMessage(policyRefusal),
           ),
           pieceId: piece.id,
           rawCauseMessage: refusal.message,
+          ...(policyRefusal !== undefined ? { policyRefusal } : {}),
         };
       }
       if (pieceErrors.length > 0) {

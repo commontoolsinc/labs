@@ -70,6 +70,7 @@ import {
   type CfcLabelMetadataProtectionMode,
   type CfcPolicyEvaluationMode,
   type CfcPrefixProvenanceSummary,
+  CfcRefusalDetail,
   type CfcTriggerReadGating,
   type CfcTrustConfig,
   type CfcTxState,
@@ -150,7 +151,19 @@ type CfcInstrumentationHooks = {
    * only. */
   onFlowLabelProbe?(outcome: "computed" | "memo"): void;
   onPreparedTx?(): void;
-  onPrepareReject?(reasons: readonly string[]): void;
+  /**
+   * CFC prepare refused this transaction. `reasons` are the PLAIN reason
+   * texts (the verdict tag is a classification channel and never leaves the
+   * boundary); `refusals` are the structured descriptions their producers
+   * recorded, paired to those texts; `terminal` is what the commit boundary
+   * will decide the refusal is worth — a verdict on the data, or a refusal a
+   * fresh attempt may resolve.
+   */
+  onPrepareReject?(refusal: {
+    reasons: readonly string[];
+    refusals: readonly CfcRefusalDetail[];
+    terminal: boolean;
+  }): void;
   onDigestInvalidation?(reason: string): void;
   onOutboxFlush?(effect: PostCommitSideEffect): void;
   onSinkDedupHit?(key: string): void;
@@ -366,6 +379,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     consultedGrants: [],
     consultedPolicyManifests: [],
     labelMetadataObservations: [],
+    refusalDetails: [],
   };
   private reportedCfcRelevant = false;
   private reportedCfcPrepared = false;
@@ -1350,6 +1364,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  recordCfcRefusalDetail(detail: CfcRefusalDetail): void {
+    // Deliberately inert: no relevance mark, no digest invalidation, no
+    // prepare-state change. A detail DESCRIBES a decision another line of
+    // this transaction already made; letting it move the enforcement state
+    // would make the description part of the decision.
+    this.#cfcState.refusalDetails.push(deepFreeze(detail));
+  }
+
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {
     this.assertWritable("writeCfcGrant()");
     // The trusted policy-writer path (§8.12.7 route 2a, design §2.3
@@ -1793,6 +1815,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // code (audit S18). The runtime's own persistence is the one legitimate
     // writer, so it alone is exempt.
     let reasons: string[];
+    // Each pass describes its own verdict. Diagnostics are append-only
+    // history on purpose — an observe-mode rollout wants every divergence a
+    // transaction ever produced — but a detail is paired to a reason THIS
+    // pass recorded, so carrying one forward from a pass that a later prepare
+    // superseded would render the same refusal twice, or render one the
+    // current verdict no longer holds.
+    this.#cfcState.refusalDetails = [];
     try {
       // The schema-doc materialization is INSIDE the try on purpose: it is
       // part of commit-prep, and a crash in it must take the same modeled
@@ -1844,7 +1873,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       reasons = [`CFC commit-prep crashed: ${message}`];
     }
     if (reasons.length > 0) {
-      this.cfcInstrumentation.onPrepareReject?.(reasons);
+      const plainReasons = reasons.map(plainReason);
+      const refusedSet = new Set(plainReasons);
+      this.cfcInstrumentation.onPrepareReject?.({
+        reasons: plainReasons,
+        refusals: this.#cfcState.refusalDetails.filter((detail) =>
+          refusedSet.has(detail.reason)
+        ),
+        terminal: isTerminalRefusal(reasons),
+      });
       // A recorded reason makes the transaction CFC-relevant by definition.
       // Without this mark, a reasoned transaction whose reads/writes never
       // tripped an eager mark (e.g. a schema-less labeled flow feeding a
@@ -2480,11 +2517,21 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             },
           });
         }
+        const plainReasons = reasons.map(plainReason);
+        // Pair each detail to a reason that actually refused. A gate records
+        // its detail when it decides, which is also how it records an
+        // observe-mode diagnostic and a reason a later resolution cleared —
+        // neither of those refused this commit, and neither may ride out on
+        // an error that says they did.
+        const refusedSet = new Set(plainReasons);
         return this.rejectCommitBeforeStorage({
           error: {
             name: "CfcCommitRefusalError",
             message,
-            reasons: reasons.map(plainReason),
+            reasons: plainReasons,
+            refusals: this.#cfcState.refusalDetails.filter((detail) =>
+              refusedSet.has(detail.reason)
+            ),
           },
         });
       }
@@ -2950,6 +2997,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     observation: CfcLabelMetadataObservation,
   ): void {
     this.wrapped.recordCfcLabelMetadataObservation(observation);
+  }
+
+  recordCfcRefusalDetail(detail: CfcRefusalDetail): void {
+    this.wrapped.recordCfcRefusalDetail(detail);
   }
 
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {

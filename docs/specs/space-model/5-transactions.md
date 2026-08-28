@@ -198,7 +198,11 @@ storage saw them — and did so on EVERY recorded reason. A refusal is terminal
 only when every reason is a verdict; a reason is a verdict only when its
 producer tags it as one (`cfc/verdict-reason.ts`), so anything untagged — an
 unavailable input, a failed resolution, a prepared state a caller disturbed —
-stays retryable), a
+stays retryable. It carries both channels: `reasons`, the prose one per rule
+that refused, and `refusals`, the structured descriptions
+(`cfc/refusal-detail.ts`) naming the boundary, the offending label atoms, and
+the reads that carried them — which is what lets a consumer state a remedy
+rather than only a verdict), a
 `StoreError`, or the generic `TransactionError`. Those
 are deterministic with respect to the committed data: a re-run recomputes the
 identical refused write, and each doomed attempt costs a server round-trip plus

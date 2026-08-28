@@ -13,6 +13,7 @@ import type {
   LabelObservationClass,
 } from "./label-view-core.ts";
 import type { PolicySnapshot } from "./policy.ts";
+import type { CfcRefusalDetail } from "./refusal-detail.ts";
 import type { SinkMaxConfidentiality } from "./sink-inventory.ts";
 import type { CfcTrustConfig } from "./trust.ts";
 
@@ -802,4 +803,12 @@ export type CfcTxState = {
   // PreparedDigestInput. Only labeled observations are recorded (empty =
   // public = nothing to derive, gate, or bind).
   labelMetadataObservations: CfcLabelMetadataObservation[];
+  // Structured descriptions of the refusals this transaction's gates
+  // recorded (`cfc/refusal-detail.ts`): which boundary refused, which atoms
+  // it refused, and which reads carried them. Recorded in every enforcement
+  // mode; the commit boundary keeps only the ones whose reason survived into
+  // the refusal, so an observe-mode diagnostic never rides out as a verdict.
+  // Never folded into the prepared digest — a description of a decision is
+  // not an input to it.
+  refusalDetails: CfcRefusalDetail[];
 };
