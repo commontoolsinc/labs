@@ -1152,7 +1152,7 @@ export class RuntimeProcessor {
         return cellValueForClient(current);
       }
       cell.set(initial);
-      return request.value;
+      return cellValueForClient(initial);
     });
     if (result.error) throw new Error(result.error.message);
     return { value: result.ok };

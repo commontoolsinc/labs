@@ -106,6 +106,23 @@ describe("ipc", () => {
         ...HEADER,
         type: "request",
         id: 0,
+        operation: "initialize",
+        resource: "count",
+        path: [],
+      })).toBe(false);
+      expect(isBridgeRequest({
+        ...HEADER,
+        type: "request",
+        id: 0,
+        operation: "initialize",
+        resource: "count",
+        path: [],
+        value: undefined,
+      })).toBe(false);
+      expect(isBridgeRequest({
+        ...HEADER,
+        type: "request",
+        id: 0,
         operation: "push",
         resource: "items",
       })).toBe(false);

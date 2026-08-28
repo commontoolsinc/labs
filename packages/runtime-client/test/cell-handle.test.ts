@@ -1075,6 +1075,33 @@ describe("cell-handle", () => {
       }]);
     });
 
+    it("hydrates nested cell handles in the selected initializer", async () => {
+      const linkedRef: CellRef = {
+        ...ref,
+        id: "of:initialized-link" as CellRef["id"],
+      };
+      const runtime = {
+        [$conn]: () => ({
+          request: () =>
+            Promise.resolve({ value: { linked: linkRefFrom(linkedRef) } }),
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<{ linked: CellHandle<unknown> }>(
+        runtime,
+        ref,
+      );
+      const linked = new CellHandle(runtime, linkedRef);
+
+      const selected = await cell.initialize({ linked });
+
+      expect(isCellHandle(selected.linked)).toBe(true);
+      expect(selected.linked.ref()).toEqual(linkedRef);
+      expect(cell.get()?.linked).toBe(selected.linked);
+    });
+
     it("refuses an undefined initializer before contacting the runtime", async () => {
       let requests = 0;
       const runtime = {

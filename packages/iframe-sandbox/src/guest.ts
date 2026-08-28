@@ -273,7 +273,7 @@ export class RemoteCell<T = FabricValue> {
       const result = await this.#client.request("resolve", {
         ...targetFields(this.#target),
       }) as BridgeResolvedCell;
-      return this.#client.resolvedCell<T>(result);
+      return this.#client.resolvedCell<T>(result, this.#target);
     });
     return this.#resolved;
   }
@@ -492,6 +492,8 @@ export class FabricClient {
   #subscriptions = new Map<string, Subscription>();
   #cells = new Map<string, RemoteCell<unknown>>();
   #cellOperationQueues = new Map<string, CellOperationQueue>();
+  #resolvedResources = new Map<string, string>();
+  #manifest: Promise<BridgeManifest> | undefined;
   #disconnected = false;
 
   constructor() {
@@ -499,7 +501,9 @@ export class FabricClient {
   }
 
   describe(): Promise<BridgeManifest> {
-    return this.request("describe") as Promise<BridgeManifest>;
+    return this.#manifest ??= this.#request("describe") as Promise<
+      BridgeManifest
+    >;
   }
 
   cell<T = FabricValue>(name: string): RemoteCell<T> {
@@ -534,7 +538,16 @@ export class FabricClient {
   }
 
   /** Rehydrates a host-minted stable cell capability. */
-  resolvedCell<T = FabricValue>(descriptor: BridgeResolvedCell): RemoteCell<T> {
+  resolvedCell<T = FabricValue>(
+    descriptor: BridgeResolvedCell,
+    source: RemoteCellTarget,
+  ): RemoteCell<T> {
+    const resource = "resource" in source
+      ? source.resource
+      : this.#resolvedResources.get(source.handle);
+    if (resource !== undefined) {
+      this.#resolvedResources.set(descriptor.handle, resource);
+    }
     return this.cellTarget<T>(
       { handle: descriptor.handle, path: [] },
       {
@@ -559,6 +572,54 @@ export class FabricClient {
   }
 
   request(
+    operation: BridgeOperation,
+    fields: Partial<
+      Omit<
+        BridgeRequest,
+        "protocol" | "version" | "type" | "id" | "operation"
+      >
+    > = {},
+  ): Promise<FabricValue | undefined> {
+    if (operation === "initialize") {
+      return this.#initialize(fields);
+    }
+    return this.#request(operation, fields);
+  }
+
+  async #initialize(
+    fields: Partial<
+      Omit<
+        BridgeRequest,
+        "protocol" | "version" | "type" | "id" | "operation"
+      >
+    >,
+  ): Promise<FabricValue | undefined> {
+    const resource = typeof fields.resource === "string"
+      ? fields.resource
+      : typeof fields.handle === "string"
+      ? this.#resolvedResources.get(fields.handle)
+      : undefined;
+    if (resource === undefined) {
+      throw new FabricBridgeError({
+        code: "method-not-supported",
+        message: "The cell capability cannot negotiate initialize().",
+      });
+    }
+    const manifest = await this.describe();
+    const descriptor = manifest.resources.find((entry) =>
+      entry.name === resource
+    );
+    if (!descriptor?.operations.includes("initialize")) {
+      throw new FabricBridgeError({
+        code: "method-not-supported",
+        message: `Cell \`${resource}\` does not support initialize().`,
+        resource,
+      });
+    }
+    return await this.#request("initialize", fields);
+  }
+
+  #request(
     operation: BridgeOperation,
     fields: Partial<
       Omit<
@@ -669,6 +730,8 @@ export class FabricClient {
     for (const pending of this.#pending.values()) pending.reject(error);
     this.#pending.clear();
     this.#subscriptions.clear();
+    this.#resolvedResources.clear();
+    this.#manifest = undefined;
     this.#cellOperationQueues.clear();
     this.#queued = [];
   }

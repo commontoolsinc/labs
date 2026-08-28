@@ -103,6 +103,152 @@ describe("guest", () => {
       }
     });
 
+    it("rejects initialize when a version-two host does not advertise it", async () => {
+      const fabric = connectFabric();
+      try {
+        const initializing = fabric.cell<number>("count").initialize(0);
+        const host = handOffPort();
+        const describe = await receive(host);
+        expect(describe.operation).toBe("describe");
+        send(
+          host,
+          response(describe.id, {
+            protocol: BRIDGE_PROTOCOL,
+            version: BRIDGE_VERSION,
+            resources: [{
+              name: "count",
+              kind: "cell",
+              operations: ["get", "pull", "set", "sink"],
+              methods: [],
+            }],
+          }),
+        );
+
+        await expect(initializing).rejects.toMatchObject({
+          code: "method-not-supported",
+          resource: "count",
+        });
+      } finally {
+        fabric.disconnect();
+      }
+    });
+
+    it("sends initialize after a version-two host advertises it", async () => {
+      const fabric = connectFabric();
+      try {
+        const initializing = fabric.cell<number>("count").initialize(0);
+        const host = handOffPort();
+        const describe = await receive(host);
+        send(
+          host,
+          response(describe.id, {
+            protocol: BRIDGE_PROTOCOL,
+            version: BRIDGE_VERSION,
+            resources: [{
+              name: "count",
+              kind: "cell",
+              operations: ["get", "initialize", "pull", "set", "sink"],
+              methods: [],
+            }],
+          }),
+        );
+        const request = await receive(host);
+        expect(request).toMatchObject({
+          operation: "initialize",
+          resource: "count",
+          path: [],
+          value: 0,
+        });
+        send(host, response(request.id, 4));
+
+        await expect(initializing).resolves.toBe(4);
+      } finally {
+        fabric.disconnect();
+      }
+    });
+
+    it("does not reuse a cached manifest after disconnect", async () => {
+      const fabric = connectFabric();
+      const describing = fabric.describe();
+      const host = handOffPort();
+      const request = await receive(host);
+      send(
+        host,
+        response(request.id, {
+          protocol: BRIDGE_PROTOCOL,
+          version: BRIDGE_VERSION,
+          resources: [],
+        }),
+      );
+      await expect(describing).resolves.toMatchObject({ resources: [] });
+
+      fabric.disconnect();
+
+      await expect(fabric.describe()).rejects.toMatchObject({
+        code: "disconnected",
+      });
+    });
+
+    it("negotiates initialize through resolved cell capabilities", async () => {
+      const fabric = connectFabric();
+      try {
+        const host = handOffPort();
+        const firstResolution = fabric.cell<number>("count").resolve();
+        const firstResolve = await receive(host);
+        send(
+          host,
+          response(firstResolve.id, {
+            handle: "cell-1",
+            hasValue: true,
+            value: 1,
+          }),
+        );
+        const first = await firstResolution;
+
+        const secondResolution = first.resolve();
+        const secondResolve = await receive(host);
+        expect(secondResolve.handle).toBe("cell-1");
+        send(
+          host,
+          response(secondResolve.id, {
+            handle: "cell-2",
+            hasValue: true,
+            value: 1,
+          }),
+        );
+        const second = await secondResolution;
+
+        const initializing = second.initialize(0);
+        const describe = await receive(host);
+        expect(describe.operation).toBe("describe");
+        send(
+          host,
+          response(describe.id, {
+            protocol: BRIDGE_PROTOCOL,
+            version: BRIDGE_VERSION,
+            resources: [{
+              name: "count",
+              kind: "cell",
+              operations: ["get", "initialize", "pull", "set", "sink"],
+              methods: [],
+            }],
+          }),
+        );
+        const request = await receive(host);
+        expect(request).toMatchObject({
+          operation: "initialize",
+          handle: "cell-2",
+          path: [],
+          value: 0,
+        });
+        send(host, response(request.id, 4));
+
+        await expect(initializing).resolves.toBe(4);
+      } finally {
+        fabric.disconnect();
+      }
+    });
+
     it("lets an available port perform the request snapshot", async () => {
       const fabric = connectFabric();
       const originalStructuredClone = globalThis.structuredClone;
