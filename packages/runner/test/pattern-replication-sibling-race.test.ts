@@ -596,7 +596,17 @@ describe("closure replication: the in-flight sibling supplier race", () => {
           PROGRAM,
           spaceG,
         );
-        await compileStarted.promise;
+        // Loud construction guard instead of a silent hang: if the compile
+        // settles without ever reaching the gate, fail the step. (The
+        // loser's derived promise resolves — never rejects — so no
+        // unhandled rejection when it settles after losing the race.)
+        const gateEngaged = await Promise.race([
+          compileStarted.promise.then(() => true),
+          gatedCompile.then(() => false, () => false),
+        ]);
+        if (!gateEngaged) {
+          throw new Error("supplier compile settled before the gate engaged");
+        }
 
         const lines = await captureManagerLines(
           async () => {
