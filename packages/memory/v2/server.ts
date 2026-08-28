@@ -621,14 +621,20 @@ class Connection {
   #pendingReceives = 0;
   #receiveIdle: PromiseWithResolvers<void> | null = null;
 
+  readonly #server: Server;
+  readonly #sendRaw: Send;
+
   constructor(
     readonly id: string,
-    private readonly server: Server,
-    private readonly sendRaw: Send,
-  ) {}
+    server: Server,
+    sendRaw: Send,
+  ) {
+    this.#server = server;
+    this.#sendRaw = sendRaw;
+  }
 
-  private send(message: ServerMessage): void {
-    this.sendRaw(
+  #send(message: ServerMessage): void {
+    this.#sendRaw(
       this.#syncSchemaTable ? compressServerMessageSchemas(message) : message,
     );
   }
@@ -637,26 +643,26 @@ class Connection {
     return this.#sessions.has(sessionKey(space, sessionId));
   }
 
-  private shouldSuppressSessionSend(
+  #shouldSuppressSessionSend(
     space: string,
     sessionId: string,
   ): boolean {
-    return this.server.isAclActive() &&
+    return this.#server.isAclActive() &&
       (!this.hasSession(space, sessionId) ||
-        !this.server.isSessionAttached(space, sessionId, this.id));
+        !this.#server.isSessionAttached(space, sessionId, this.id));
   }
 
-  private sendSessionResponse(
+  #sendSessionResponse(
     space: string,
     sessionId: string,
     requestId: string,
     response: ServerMessage,
   ): void {
-    if (this.shouldSuppressSessionSend(space, sessionId)) {
+    if (this.#shouldSuppressSessionSend(space, sessionId)) {
       // session/revoked is a lifecycle notification; it does not settle the
       // generic request promise. Always pair suppression of an in-flight RPC
       // result with a typed response error carrying the original request id.
-      this.send({
+      this.#send({
         type: "response",
         requestId,
         error: toError(
@@ -666,7 +672,7 @@ class Connection {
       });
       return;
     }
-    this.send(response);
+    this.#send(response);
   }
 
   addSession(space: string, sessionId: string): void {
@@ -686,7 +692,7 @@ class Connection {
     if (!this.#sessions.delete(key) || this.#closed) {
       return;
     }
-    this.send({
+    this.#send({
       type: "session/revoked",
       space,
       sessionId,
@@ -695,7 +701,7 @@ class Connection {
   }
 
   issueSessionOpenAuth(): SessionOpenAuthMetadata {
-    const sessionOpen = this.server.sessionOpenHandshake();
+    const sessionOpen = this.#server.sessionOpenHandshake();
     this.#sessionOpenChallenge = {
       ...sessionOpen.challenge,
       consumed: false,
@@ -704,7 +710,7 @@ class Connection {
   }
 
   sessionOpenAuthContext(message: SessionOpenRequest): SessionOpenAuthContext {
-    const audience = this.server.sessionOpenAudience();
+    const audience = this.#server.sessionOpenAudience();
     const invocation = isObjectNotArray(message.invocation)
       ? message.invocation
       : null;
@@ -726,7 +732,7 @@ class Connection {
         retriable: true,
       });
     }
-    if (challenge.expiresAt <= this.server.nowSeconds()) {
+    if (challenge.expiresAt <= this.#server.nowSeconds()) {
       throw authorizationError("memory session.open challenge expired", {
         retriable: true,
       });
@@ -774,7 +780,7 @@ class Connection {
         const startedAt = performance.now();
         timing.time(arrivedAt, startedAt, "memory", "frame", "queue");
         try {
-          await this.receiveOrdered(payload);
+          await this.#receiveOrdered(payload);
         } finally {
           timing.time(startedAt, "memory", "frame", "handle");
         }
@@ -819,7 +825,7 @@ class Connection {
     return true;
   }
 
-  private requireSession(
+  #requireSession(
     requestId: string,
     space: string,
     sessionId: string,
@@ -827,7 +833,7 @@ class Connection {
     if (this.hasSession(space, sessionId)) {
       return true;
     }
-    this.send({
+    this.#send({
       type: "response",
       requestId,
       error: toError(
@@ -838,14 +844,14 @@ class Connection {
     return false;
   }
 
-  private async receiveOrdered(payload: string): Promise<void> {
+  async #receiveOrdered(payload: string): Promise<void> {
     if (this.#closed) {
       return;
     }
 
     const parsed = parseClientMessage(payload);
     if (parsed === null) {
-      this.send({
+      this.#send({
         type: "response",
         requestId: "invalid",
         error: toError(
@@ -858,7 +864,7 @@ class Connection {
 
     if (!this.#ready) {
       if (parsed.type !== "hello") {
-        this.send({
+        this.#send({
           type: "response",
           requestId: "handshake",
           error: toError("ProtocolError", "memory hello is required first"),
@@ -867,12 +873,12 @@ class Connection {
       }
       const response = respondToHello(
         parsed,
-        this.server.memoryProtocolFlags(),
+        this.#server.memoryProtocolFlags(),
       );
       if (response.type === "hello.ok") {
         response.sessionOpen = this.issueSessionOpenAuth();
       }
-      this.send(response);
+      this.#send(response);
       if (response.type !== "hello.ok") {
         return;
       }
@@ -886,23 +892,23 @@ class Connection {
 
     switch (parsed.type) {
       case "hello":
-        this.send({
+        this.#send({
           type: "response",
           requestId: "handshake",
           error: toError("ProtocolError", "hello may only be sent once"),
         });
         return;
       case "session.open": {
-        const response = await this.server.openSession(parsed, this);
+        const response = await this.#server.openSession(parsed, this);
         if (response.ok?.sessionId) {
           this.addSession(parsed.space, response.ok.sessionId);
         }
-        this.send(response);
+        this.#send(response);
         return;
       }
       case "transact": {
         if (
-          !this.requireSession(
+          !this.#requireSession(
             parsed.requestId,
             parsed.space,
             parsed.sessionId,
@@ -912,12 +918,12 @@ class Connection {
         }
         // Publishing inside the per-space transaction lock makes the verdict
         // visible before any fan-out for the same space can acquire that lock.
-        await this.server.transact(parsed, (verdict) => {
-          this.send(verdict);
+        await this.#server.transact(parsed, (verdict) => {
+          this.#send(verdict);
         });
         // A self-deauthorizing ACL commit defers the writer's terminal
         // session/revoked until after its verdict; deliver it now.
-        this.server.deliverDeferredSelfRevocation(
+        this.#server.deliverDeferredSelfRevocation(
           parsed.space,
           parsed.sessionId,
         );
@@ -925,7 +931,7 @@ class Connection {
       }
       case "graph.query":
         if (
-          !this.requireSession(
+          !this.#requireSession(
             parsed.requestId,
             parsed.space,
             parsed.sessionId,
@@ -934,8 +940,8 @@ class Connection {
           return;
         }
         {
-          const response = await this.server.graphQuery(parsed);
-          this.sendSessionResponse(
+          const response = await this.#server.graphQuery(parsed);
+          this.#sendSessionResponse(
             parsed.space,
             parsed.sessionId,
             parsed.requestId,
@@ -945,7 +951,7 @@ class Connection {
         return;
       case "op.query":
         if (
-          !this.requireSession(
+          !this.#requireSession(
             parsed.requestId,
             parsed.space,
             parsed.sessionId,
@@ -954,8 +960,8 @@ class Connection {
           return;
         }
         {
-          const response = await this.server.operationFieldQuery(parsed);
-          this.sendSessionResponse(
+          const response = await this.#server.operationFieldQuery(parsed);
+          this.#sendSessionResponse(
             parsed.space,
             parsed.sessionId,
             parsed.requestId,
@@ -965,7 +971,7 @@ class Connection {
         return;
       case "entity-id.list":
         if (
-          !this.requireSession(
+          !this.#requireSession(
             parsed.requestId,
             parsed.space,
             parsed.sessionId,
@@ -974,8 +980,8 @@ class Connection {
           return;
         }
         {
-          const response = await this.server.listEntityIds(parsed);
-          this.sendSessionResponse(
+          const response = await this.#server.listEntityIds(parsed);
+          this.#sendSessionResponse(
             parsed.space,
             parsed.sessionId,
             parsed.requestId,
@@ -985,7 +991,7 @@ class Connection {
         return;
       case "entity-id.exists":
         if (
-          !this.requireSession(
+          !this.#requireSession(
             parsed.requestId,
             parsed.space,
             parsed.sessionId,
@@ -994,8 +1000,8 @@ class Connection {
           return;
         }
         {
-          const response = await this.server.entityIdExists(parsed);
-          this.sendSessionResponse(
+          const response = await this.#server.entityIdExists(parsed);
+          this.#sendSessionResponse(
             parsed.space,
             parsed.sessionId,
             parsed.requestId,
@@ -1005,13 +1011,17 @@ class Connection {
         return;
       case "sqlite.query":
         if (
-          !this.requireSession(parsed.requestId, parsed.space, parsed.sessionId)
+          !this.#requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
         ) {
           return;
         }
         {
-          const response = await this.server.sqliteQuery(parsed);
-          this.sendSessionResponse(
+          const response = await this.#server.sqliteQuery(parsed);
+          this.#sendSessionResponse(
             parsed.space,
             parsed.sessionId,
             parsed.requestId,
@@ -1021,13 +1031,17 @@ class Connection {
         return;
       case "sqlite.register-disk-source":
         if (
-          !this.requireSession(parsed.requestId, parsed.space, parsed.sessionId)
+          !this.#requireSession(
+            parsed.requestId,
+            parsed.space,
+            parsed.sessionId,
+          )
         ) {
           return;
         }
         {
-          const response = await this.server.sqliteRegisterDiskSource(parsed);
-          this.sendSessionResponse(
+          const response = await this.#server.sqliteRegisterDiskSource(parsed);
+          this.#sendSessionResponse(
             parsed.space,
             parsed.sessionId,
             parsed.requestId,
@@ -1037,7 +1051,7 @@ class Connection {
         return;
       case "session.watch.set":
         if (
-          !this.requireSession(
+          !this.#requireSession(
             parsed.requestId,
             parsed.space,
             parsed.sessionId,
@@ -1046,8 +1060,8 @@ class Connection {
           return;
         }
         {
-          const response = await this.server.watchSet(parsed);
-          this.sendSessionResponse(
+          const response = await this.#server.watchSet(parsed);
+          this.#sendSessionResponse(
             parsed.space,
             parsed.sessionId,
             parsed.requestId,
@@ -1057,7 +1071,7 @@ class Connection {
         return;
       case "session.watch.add":
         if (
-          !this.requireSession(
+          !this.#requireSession(
             parsed.requestId,
             parsed.space,
             parsed.sessionId,
@@ -1066,8 +1080,8 @@ class Connection {
           return;
         }
         {
-          const response = await this.server.watchAdd(parsed);
-          this.sendSessionResponse(
+          const response = await this.#server.watchAdd(parsed);
+          this.#sendSessionResponse(
             parsed.space,
             parsed.sessionId,
             parsed.requestId,
@@ -1077,7 +1091,7 @@ class Connection {
         return;
       case "session.ack":
         if (
-          !this.requireSession(
+          !this.#requireSession(
             parsed.requestId,
             parsed.space,
             parsed.sessionId,
@@ -1086,8 +1100,8 @@ class Connection {
           return;
         }
         {
-          const response = await this.server.ackSession(parsed);
-          this.sendSessionResponse(
+          const response = await this.#server.ackSession(parsed);
+          this.#sendSessionResponse(
             parsed.space,
             parsed.sessionId,
             parsed.requestId,
@@ -1097,7 +1111,7 @@ class Connection {
         return;
       case "event.attention.resolve":
         if (
-          !this.requireSession(
+          !this.#requireSession(
             parsed.requestId,
             parsed.space,
             parsed.sessionId,
@@ -1106,8 +1120,8 @@ class Connection {
           return;
         }
         {
-          const response = await this.server.resolveEventAttention(parsed);
-          this.sendSessionResponse(
+          const response = await this.#server.resolveEventAttention(parsed);
+          this.#sendSessionResponse(
             parsed.space,
             parsed.sessionId,
             parsed.requestId,
@@ -1156,7 +1170,7 @@ class Connection {
         // Membership is re-read per phase; a prioritized session keeps
         // tracking its delivered derived docs (trackedIds persist), so
         // the phases stay disjoint across the back-to-back calls.
-        const prioritized = this.server.sessionTracksAny(
+        const prioritized = this.#server.sessionTracksAny(
           space,
           sessionId,
           phase.derivedDirty,
@@ -1168,7 +1182,7 @@ class Connection {
       processed += 1;
       let effect: SessionEffectMessage | null;
       try {
-        effect = await this.server.syncSessionForConnection(
+        effect = await this.#server.syncSessionForConnection(
           space,
           sessionId,
           dirtyIds,
@@ -1189,7 +1203,7 @@ class Connection {
           `memory v2: watch refresh evaluation failed for session ${sessionId} in space ${space}; frame skipped`,
           error,
         );
-        this.server.markSessionForFullResync(space, sessionId);
+        this.#server.markSessionForFullResync(space, sessionId);
         continue;
       }
       if (this.#closed) {
@@ -1197,19 +1211,19 @@ class Connection {
         // roll the delivery state back so a later pass (or a resumed
         // session) recomputes and redelivers it.
         if (effect !== null) {
-          this.server.rollbackUndeliveredSync(space, sessionId, effect);
+          this.#server.rollbackUndeliveredSync(space, sessionId, effect);
         }
         return processed;
       }
       // ACL revocation can remove the session while watch evaluation awaits
       // its engine. Never emit the already-computed effect after that removal
       // (the session is gone from the registry — nothing to roll back into).
-      if (this.shouldSuppressSessionSend(space, sessionId)) {
+      if (this.#shouldSuppressSessionSend(space, sessionId)) {
         continue;
       }
       if (effect !== null) {
         try {
-          this.send(effect);
+          this.#send(effect);
         } catch (error) {
           // The send boundary is the commit point for sync state. A send
           // that throws is the only delivery failure visible in-process, so
@@ -1218,7 +1232,7 @@ class Connection {
           // roll back exactly what evaluation advanced, so the next pass
           // recomputes and redelivers from durable state (CT-1927 review,
           // rounds 5-6).
-          this.server.rollbackUndeliveredSync(space, sessionId, effect);
+          this.#server.rollbackUndeliveredSync(space, sessionId, effect);
           console.warn(
             "memory v2: sync send failed; delivery state rolled back for recomputation",
             error,
@@ -1235,9 +1249,9 @@ class Connection {
     }
     this.#closed = true;
     for (const { space, sessionId } of this.#sessions.values()) {
-      this.server.detachSession(space, sessionId, this.id);
+      this.#server.detachSession(space, sessionId, this.id);
     }
-    this.server.disconnect(this);
+    this.#server.disconnect(this);
   }
 }
 
@@ -1900,7 +1914,7 @@ export class Server {
   disconnect(connection: Connection): void {
     this.#connections.delete(connection.id);
     if (this.#connections.size === 0) {
-      this.cancelScheduledRefresh();
+      this.#cancelScheduledRefresh();
     }
   }
 
@@ -1925,9 +1939,9 @@ export class Server {
   }
 
   async close(): Promise<void> {
-    this.cancelScheduledRefresh();
+    this.#cancelScheduledRefresh();
     await this.#refreshing;
-    await this.drainSpacePublicationLocks();
+    await this.#drainSpacePublicationLocks();
     for (const engine of this.#engines.values()) {
       Engine.close(await engine);
     }
@@ -1951,7 +1965,7 @@ export class Server {
    * does not reschedule, so a single call is sufficient.
    */
   async idle(): Promise<void> {
-    await this.drainSpacePublicationLocks();
+    await this.#drainSpacePublicationLocks();
     // Dirty spaces with no timer armed are manual mode's held fan-out.
     // idle() is an explicit synchronization point exactly like
     // flushSessions(), so it drains them rather than returning with
@@ -2889,10 +2903,10 @@ export class Server {
         : null;
       // A resumed session is registered before catch-up, and catch-up awaits
       // graph evaluation. An ACL commit (or takeover) can remove or replace it
-      // during that await, before Connection.receiveOrdered has added its local
-      // handle. In active ACL modes, never return catch-up data or let the
-      // connection add a ghost handle unless this exact token is still owned
-      // by this connection. Off mode preserves the legacy session timing.
+      // during that await, before Connection.#receiveOrdered has added its
+      // local handle. In active ACL modes, never return catch-up data or let
+      // the connection add a ghost handle unless this exact token is still
+      // owned by this connection. Off mode preserves the legacy session timing.
       const current = this.#sessions.get(message.space, opened.sessionId);
       if (
         this.isAclActive() &&
@@ -2997,7 +3011,7 @@ export class Server {
       const lockWaitMs = performance.now() - requestedAt;
       let outcome = "threw";
       try {
-        const decision = await this.decideTransaction(message);
+        const decision = await this.#decideTransaction(message);
         outcome = decision.response.error?.name ?? "ok";
         let verdictError: { value: unknown } | undefined;
         try {
@@ -3347,7 +3361,7 @@ export class Server {
     });
   }
 
-  private async decideTransaction(
+  async #decideTransaction(
     message: TransactRequest,
   ): Promise<TransactDecision> {
     let postCommit: (() => Promise<void>) | undefined;
@@ -3643,7 +3657,7 @@ export class Server {
           let retryAfterSeq: number | undefined;
           if (error instanceof Engine.ConflictError) {
             span.setAttribute("ct.conflict", true);
-            this.stageConflictRefreshDirtyIds(
+            this.#stageConflictRefreshDirtyIds(
               message.space,
               session,
               message.commit,
@@ -4097,7 +4111,7 @@ export class Server {
         // frames are byte-identical to before.
         session.leaseHolderReads === true,
       );
-      await this.attachOperationFields(
+      await this.#attachOperationFields(
         message.space,
         message.sessionId,
         sync,
@@ -4337,7 +4351,7 @@ export class Server {
         ),
         removes: [],
       };
-      await this.attachOperationFields(
+      await this.#attachOperationFields(
         message.space,
         message.sessionId,
         sync,
@@ -4788,7 +4802,7 @@ export class Server {
               }
               sync.caughtUpLocalSeq = session.caughtUpLocalSeq;
             }
-            await this.attachOperationFields(space, sessionId, sync);
+            await this.#attachOperationFields(space, sessionId, sync);
             return {
               type: "session/effect",
               space,
@@ -5177,7 +5191,7 @@ export class Server {
     );
   }
 
-  private async attachOperationFields(
+  async #attachOperationFields(
     space: string,
     sessionId: string,
     sync: SessionSync,
@@ -5266,7 +5280,7 @@ export class Server {
       }
     }
     this.#dirtySpaces.add(space);
-    this.scheduleRefresh();
+    this.#scheduleRefresh();
   }
 
   /** Whether the space has ≥1 live client session (serving-loop.md §1's
@@ -5948,7 +5962,7 @@ export class Server {
     };
   }
 
-  private stageConflictRefreshDirtyIds(
+  #stageConflictRefreshDirtyIds(
     space: string,
     session: SessionState,
     commit: ClientCommit,
@@ -5981,7 +5995,7 @@ export class Server {
   }
 
   async flushSessions(spaces?: Iterable<string>): Promise<void> {
-    this.cancelScheduledRefresh();
+    this.#cancelScheduledRefresh();
     // The same waiting-against-working split the connection's receive keeps,
     // one level coarser: a flush PASS, not a frame. `memory/flush/queue` is
     // how long this pass waited for the flush in front of it,
@@ -5997,7 +6011,7 @@ export class Server {
       const startedAt = performance.now();
       timing.time(requestedAt, startedAt, "memory", "flush", "queue");
       try {
-        await this.refreshLoop(
+        await this.#refreshLoop(
           spaces === undefined ? undefined : new Set(spaces),
         );
       } finally {
@@ -6007,7 +6021,7 @@ export class Server {
           Date.now() - refreshStart,
         );
         if (spaces !== undefined && this.#dirtySpaces.size > 0) {
-          this.scheduleRefresh();
+          this.#scheduleRefresh();
         }
       }
     };
@@ -6021,7 +6035,7 @@ export class Server {
     await this.#refreshing;
   }
 
-  private scheduleRefresh(): void {
+  #scheduleRefresh(): void {
     if (
       this.options.subscriptionRefreshDelayMs === "manual" ||
       this.#dirtySpaces.size === 0 || this.#refreshTurn !== null
@@ -6037,8 +6051,13 @@ export class Server {
     );
   }
 
+  /**
+   * TypeScript-private rather than a `#` name, because
+   * `test/v2-verdict-catchup.test.ts` reaches this member and a `#` name would
+   * put it out of reach.
+   */
   private async flushScheduledSessions(): Promise<void> {
-    await this.waitForConnectionQueuesToDrain(
+    await this.#waitForConnectionQueuesToDrain(
       Math.max(
         MIN_REFRESH_QUEUE_DRAIN_WAIT_MS,
         this.#lastRefreshDurationMs * 2,
@@ -6054,7 +6073,7 @@ export class Server {
     }
   }
 
-  private async waitForConnectionQueuesToDrain(
+  async #waitForConnectionQueuesToDrain(
     maxWaitMs: number,
   ): Promise<void> {
     const deadlineMs = Date.now() + maxWaitMs;
@@ -6082,7 +6101,7 @@ export class Server {
     }
   }
 
-  private cancelScheduledRefresh(): void {
+  #cancelScheduledRefresh(): void {
     if (this.#refreshTurn !== null) {
       this.#refreshTurn.cancel();
       this.#refreshTurn = null;
@@ -6101,6 +6120,9 @@ export class Server {
    * A transaction arriving during fan-out waits for that turn to finish. Locks
    * for other spaces remain independent, so the latency coupling is local to
    * one space.
+   *
+   * TypeScript-private rather than a `#` name, because `test/v2-server.test.ts`
+   * reaches this member and a `#` name would put it out of reach.
    */
   private async withSpacePublicationLock<T>(
     space: string,
@@ -6123,17 +6145,17 @@ export class Server {
   }
 
   /** Waits until every queued per-space publication turn has settled. */
-  private async drainSpacePublicationLocks(): Promise<void> {
+  async #drainSpacePublicationLocks(): Promise<void> {
     while (this.#publicationBySpace.size > 0) {
       await Promise.all(this.#publicationBySpace.values());
     }
   }
 
-  private async refreshLoop(initial?: Set<string>): Promise<void> {
+  async #refreshLoop(initial?: Set<string>): Promise<void> {
     let pending = initial;
     while (true) {
       if (initial === undefined && this.#dirtySpaces.size > 0) {
-        await this.waitForConnectionQueuesToDrain(
+        await this.#waitForConnectionQueuesToDrain(
           Math.max(
             MIN_REFRESH_QUEUE_DRAIN_WAIT_MS,
             this.#lastRefreshDurationMs * 2,
@@ -6295,7 +6317,7 @@ export class Server {
               }
               for (const id of derivedDirty) currentDerived.add(id);
             }
-            this.scheduleRefresh();
+            this.#scheduleRefresh();
             throw error;
           }
         });
@@ -6448,6 +6470,11 @@ export class Server {
     }
   }
 
+  /**
+   * TypeScript-private rather than a `#` name, because
+   * `test/v2-server-acl.test.ts` reaches this member and a `#` name would put
+   * it out of reach.
+   */
   private openEngine(space: string): Promise<Engine.Engine> {
     const existing = this.#engines.get(space);
     if (existing !== undefined) {

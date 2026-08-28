@@ -224,7 +224,7 @@ export function isStorageTransactionInconsistent(
  *    ATTEMPT does clears it, so every attempt still reuses the very handle the
  *    server just refused: the remount is driven by the ACL changing, not by the
  *    retry, which is exactly why it does not make this class retryable;
- *  - `SpaceSession.reopen()` (memory/v2/client.ts) runs only from `restore()`,
+ *  - `SpaceSession.#reopen()` (memory/v2/client.ts) runs only from `restore()`,
  *    which only the client's `reconnect()` calls — i.e. only after a TRANSPORT
  *    close;
  *  - `sendOutstandingCommit`'s catch (memory/v2/client.ts) keeps a commit
@@ -239,7 +239,7 @@ export function isStorageTransactionInconsistent(
  * SERVER dropped — an ACL de-authorization sweep (`#revokeDeauthorizedSessions`,
  * memory/v2/server.ts, whose own comment is "its next message fails closed
  * (Unknown session)"), or a takeover, both of which also delete the entry
- * `Connection.requireSession` checks. That is terminal for the session: the
+ * `Connection.#requireSession` checks. That is terminal for the session: the
  * client's remedy is the `session/revoked` frame, which CLOSES it
  * (`terminateSession`), not a reopen — and a reopen would be denied at
  * `session.open`.

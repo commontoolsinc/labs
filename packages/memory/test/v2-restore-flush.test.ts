@@ -19,7 +19,7 @@ class ReconnectableTransport implements Transport {
   connectionCount = 0;
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
-  #connection: ReturnType<Server["connect"]> | null = null;
+  #connectionCache: ReturnType<Server["connect"]> | null = null;
   #delayTransacts = false;
   #transactRequestLocalSeqById = new Map<string, number>();
   #delayedTransactResponses: Array<{
@@ -29,7 +29,11 @@ class ReconnectableTransport implements Transport {
   #deliveredTransactLocalSeqs: number[] = [];
   #firstPendingTransact = defer<void>();
 
-  constructor(private readonly server: Server) {}
+  readonly #server: Server;
+
+  constructor(server: Server) {
+    this.#server = server;
+  }
 
   async send(payload: string): Promise<void> {
     const message = decodeMemoryBoundary(payload) as {
@@ -64,8 +68,8 @@ class ReconnectableTransport implements Transport {
   }
 
   disconnect(): void {
-    this.#connection?.close();
-    this.#connection = null;
+    this.#connectionCache?.close();
+    this.#connectionCache = null;
     queueMicrotask(() => this.#closeReceiver(new Error("disconnect")));
   }
 
@@ -104,13 +108,13 @@ class ReconnectableTransport implements Transport {
     if (typeof message.commit?.localSeq === "number") {
       this.#deliveredTransactLocalSeqs.push(message.commit.localSeq);
     }
-    await this.connection().receive(payload);
+    await this.#connection().receive(payload);
   }
 
-  private connection(): ReturnType<Server["connect"]> {
-    if (this.#connection === null) {
+  #connection(): ReturnType<Server["connect"]> {
+    if (this.#connectionCache === null) {
       this.connectionCount++;
-      this.#connection = this.server.connect((message) => {
+      this.#connectionCache = this.#server.connect((message) => {
         const response = message as { requestId?: string };
         const requestId = response.requestId;
         const localSeq = typeof requestId === "string"
@@ -133,7 +137,7 @@ class ReconnectableTransport implements Transport {
         this.#receiver(payload);
       });
     }
-    return this.#connection;
+    return this.#connectionCache;
   }
 }
 

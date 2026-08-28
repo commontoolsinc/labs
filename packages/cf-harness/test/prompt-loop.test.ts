@@ -79,10 +79,16 @@ const contextPromptSlotBinding: PromptSlotBinding = {
 class FakeSandboxRuntime implements SandboxRuntime {
   readonly shellRequests: SandboxShellRequest[] = [];
 
+  readonly #shellResults: SandboxCommandResult[];
+  readonly #shellError?: Error;
+
   constructor(
-    private readonly shellResults: SandboxCommandResult[] = [],
-    private readonly shellError?: Error,
-  ) {}
+    shellResults: SandboxCommandResult[] = [],
+    shellError?: Error,
+  ) {
+    this.#shellResults = shellResults;
+    this.#shellError = shellError;
+  }
 
   describe(): SandboxRuntimeDescription {
     return {
@@ -129,11 +135,11 @@ class FakeSandboxRuntime implements SandboxRuntime {
         exitCode: 0,
       });
     }
-    if (this.shellError) {
-      return Promise.reject(this.shellError);
+    if (this.#shellError) {
+      return Promise.reject(this.#shellError);
     }
     return Promise.resolve(
-      this.shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+      this.#shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
     );
   }
 }
@@ -157,12 +163,16 @@ class FakeRunSandboxRuntime extends FakeSandboxRuntime {
 class FakeProcessRunner implements ProcessRunner {
   readonly requests: ProcessRunRequest[] = [];
 
-  constructor(private readonly results: ProcessRunResult[] = []) {}
+  readonly #results: ProcessRunResult[];
+
+  constructor(results: ProcessRunResult[] = []) {
+    this.#results = results;
+  }
 
   run(request: ProcessRunRequest): Promise<ProcessRunResult> {
     this.requests.push(request);
     return Promise.resolve(
-      this.results.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+      this.#results.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
     );
   }
 }
@@ -850,7 +860,10 @@ class RecordingArtifactStore implements HarnessArtifactStore {
     path: string;
   }> = [];
 
-  constructor(readonly artifactRoot: string, private readonly runId: string) {
+  readonly #runId: string;
+
+  constructor(readonly artifactRoot: string, runId: string) {
+    this.#runId = runId;
     this.runRoot = `${artifactRoot}/${runId}`;
   }
 
