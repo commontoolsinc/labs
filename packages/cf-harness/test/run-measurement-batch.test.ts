@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { fromFileUrl } from "@std/path";
 
 import {
+  classifyImportedPattern,
   ConsoleClient,
   indexChangeOf,
   type IndexPreflight,
@@ -13,6 +14,7 @@ import {
   readServerMeta,
   readSseFrames,
   renderBatchReport,
+  resolveImportedPatternOrigins,
   runTask,
 } from "../scripts/run-measurement-batch.ts";
 import { main } from "../scripts/run-measurement-batch.ts";
@@ -65,6 +67,9 @@ interface FakeConsoleOptions {
 
   /** What `/api/meta` answers, standing in for the fabric server. */
   meta?: unknown;
+
+  /** What `getPattern` reports each pattern depends on. */
+  dependencies?: Readonly<Record<string, readonly string[]>>;
 }
 
 interface FakeConsole {
@@ -134,12 +139,21 @@ const startFakeConsole = (options: FakeConsoleOptions): FakeConsole => {
       if (answer !== undefined) {
         return Response.json(answer.body, { status: answer.status });
       }
-      const { fn } = await request.json() as { fn: string };
-      return Response.json(
-        fn === "searchPatterns"
-          ? { results: [], candidates: 30 }
-          : { patterns: options.patterns ?? [] },
-      );
+      const body = await request.json() as {
+        fn: string;
+        body?: { patternId?: string };
+      };
+      if (body.fn === "searchPatterns") {
+        return Response.json({ results: [], candidates: 30 });
+      }
+      if (body.fn === "getPattern") {
+        const patternId = body.body?.patternId ?? "";
+        return Response.json({
+          patternId,
+          dependencies: options.dependencies?.[patternId] ?? [],
+        });
+      }
+      return Response.json({ patterns: options.patterns ?? [] });
     }
     return new Response("not found", { status: 404 });
   });
@@ -547,6 +561,59 @@ describe("run-measurement-batch", () => {
     });
   });
 
+  describe("classifyImportedPattern()", () => {
+    const seeded = new Set(["seed-a", "seed-b"]);
+
+    it("returns `seeded` for a pattern the suite named", () => {
+      expect(classifyImportedPattern("seed-a", seeded, [])).toEqual({
+        kind: "seeded",
+      });
+    });
+
+    it("returns `seeded-via-alias` for a pattern that depends on a seeded one", () => {
+      expect(classifyImportedPattern("alias", seeded, ["seed-b"])).toEqual({
+        kind: "seeded-via-alias",
+        through: ["seed-b"],
+      });
+    });
+
+    it("returns `pre-existing` for a pattern depending on nothing seeded", () => {
+      expect(classifyImportedPattern("other", seeded, ["unrelated"])).toEqual({
+        kind: "pre-existing",
+      });
+    });
+
+    it("returns `unresolved` rather than `pre-existing` when the index would not say", () => {
+      expect(classifyImportedPattern("other", seeded, undefined).kind)
+        .toBe("unresolved");
+    });
+  });
+
+  describe("resolveImportedPatternOrigins()", () => {
+    it("resolves each identifier once, one dependency hop deep", async () => {
+      const console_ = startFakeConsole({
+        streams: [completedStream()],
+        dependencies: { alias: ["pub-rating"], other: ["unrelated"] },
+      });
+      try {
+        const client = await ConsoleClient.open(console_.url);
+        expect(
+          await resolveImportedPatternOrigins(
+            client,
+            ["pub-rating", "alias", "other"],
+            ["pub-rating"],
+          ),
+        ).toEqual({
+          "pub-rating": { kind: "seeded" },
+          alias: { kind: "seeded-via-alias", through: ["pub-rating"] },
+          other: { kind: "pre-existing" },
+        });
+      } finally {
+        await console_.close();
+      }
+    });
+  });
+
   describe("preflightIndex()", () => {
     it("returns the result and candidate counts for an index that answered", async () => {
       const console_ = startFakeConsole({ streams: [completedStream()] });
@@ -803,16 +870,22 @@ describe("run-measurement-batch", () => {
       expect(logs[0]).toContain("usage: measure-batch <suite.json>");
     });
 
-    it("marks a composed pattern as seeded when the suite named it", async () => {
+    it("marks a composed pattern as seeded, and one that re-exports it as seeded via alias", async () => {
       const { dir } = await runMain({
         streams: [completedStream()],
         runId: "fixture-run",
         artifactRoot: FIXTURE_ROOT,
+        dependencies: { "pub-reading-shelf": ["pub-rating"] },
       }, { ...ONE_TASK, seededPatternIds: ["pub-rating"] });
       try {
-        expect(await Deno.readTextFile(`${dir}/out/report.md`)).toContain(
-          "`pub-rating` **(seeded)**",
+        const report = await Deno.readTextFile(`${dir}/out/report.md`);
+        expect(report).toContain("`pub-rating` **(seeded)**");
+        // The re-exporting entry carries its own identifier, so without the
+        // hop it would read as pre-existing and count against the seeding.
+        expect(report).toContain(
+          "`pub-reading-shelf` **(seeded, via alias of pub-rating)**",
         );
+        expect(report).toContain("Hops beyond the first are not resolved.");
       } finally {
         await Deno.remove(dir, { recursive: true });
       }
@@ -842,6 +915,7 @@ describe("run-measurement-batch", () => {
           indexUrl: "https://index.example",
           preflight: { kind: "answered", results: 3, candidates: 30 },
           posture: POSTURE,
+          importedPatternOrigins: {},
           startedAt: "2026-08-28T21:00:00.000Z",
           endedAt: "2026-08-28T23:00:00.000Z",
           indexBefore: {
@@ -894,6 +968,10 @@ describe("run-measurement-batch", () => {
             tasks: [result.task],
             seededPatternIds: ["pub-rating"],
           },
+          importedPatternOrigins: {
+            "pub-rating": { kind: "seeded" },
+            "pub-reading-shelf": { kind: "pre-existing" },
+          },
           consoleUrl: console_.url,
           indexUrl: null,
           startedAt: "2026-08-28T21:00:00.000Z",
@@ -921,6 +999,7 @@ describe("run-measurement-batch", () => {
         endedAt: "2026-08-28T21:00:01.000Z",
         preflight: { kind: "answered", results: 1 },
         posture: POSTURE,
+        importedPatternOrigins: {},
         indexBefore: { kind: "read", patterns: [] as never },
         indexAfter: { kind: "read", patterns: [] as never },
         results: [],
@@ -954,6 +1033,7 @@ describe("run-measurement-batch", () => {
         endedAt: "2026-08-28T21:00:01.000Z",
         preflight: { kind: "answered", results: 1 },
         posture: POSTURE,
+        importedPatternOrigins: {},
         indexBefore: {
           kind: "read",
           patterns: [
@@ -989,6 +1069,7 @@ describe("run-measurement-batch", () => {
         endedAt: "2026-08-28T21:00:01.000Z",
         preflight: refused,
         posture: POSTURE,
+        importedPatternOrigins: {},
         indexBefore: {
           kind: "unread",
           reason: "the pre-flight search was refused",
@@ -1028,6 +1109,7 @@ describe("run-measurement-batch", () => {
         endedAt: "2026-08-28T21:00:01.000Z",
         preflight: { kind: "answered", results: 1 },
         posture: POSTURE,
+        importedPatternOrigins: {},
         indexBefore: { kind: "unread", reason: "no index configured" },
         indexAfter: { kind: "unread", reason: "no index configured" },
         results: [{

@@ -401,6 +401,42 @@ export const preflightPosture = async (
   };
 };
 
+/**
+ * Where a composed pattern came from, one dependency hop deep.
+ *
+ * A bare re-export of a seeded atom is a different pattern with a different
+ * identifier, so it would read as pre-existing while being seeded work at one
+ * hop — and the current corpus holds exactly that shape, outranking the entry
+ * it re-exports. Resolving each imported pattern's own `dependencies` once
+ * closes it. Anything that could not be resolved says so rather than falling
+ * to `pre-existing`, which would count a composition of seeded work as
+ * evidence against the seeding.
+ */
+export type ImportedPatternOrigin =
+  | { kind: "seeded" }
+  | { kind: "seeded-via-alias"; through: readonly string[] }
+  | { kind: "pre-existing" }
+  | { kind: "unresolved"; reason: string };
+
+/** Where one imported pattern came from, given what the index says it needs. */
+export const classifyImportedPattern = (
+  patternId: string,
+  seeded: ReadonlySet<string>,
+  dependencies: readonly string[] | undefined,
+): ImportedPatternOrigin => {
+  if (seeded.has(patternId)) return { kind: "seeded" };
+  if (dependencies === undefined) {
+    return {
+      kind: "unresolved",
+      reason: "the index did not say what this pattern depends on",
+    };
+  }
+  const through = dependencies.filter((dependency) => seeded.has(dependency));
+  return through.length > 0
+    ? { kind: "seeded-via-alias", through }
+    : { kind: "pre-existing" };
+};
+
 /** What the console answered a started task with. */
 export interface StartedTask {
   sessionId: string;
@@ -685,6 +721,30 @@ export class ConsoleClient {
   }
 
   /**
+   * What the index says one pattern depends on, or `undefined` when it would
+   * not say. `getPattern` is called without source, exactly as the console's
+   * own proxy always calls it.
+   */
+  async dependenciesOf(
+    patternId: string,
+  ): Promise<readonly string[] | undefined> {
+    try {
+      const answer = await this.#json("/api/index/call", {
+        method: "POST",
+        body: JSON.stringify({ fn: "getPattern", body: { patternId } }),
+      }) as Record<string, unknown>;
+      const pattern = (answer.pattern ?? answer) as Record<string, unknown>;
+      return Array.isArray(pattern.dependencies)
+        ? pattern.dependencies.filter((entry): entry is string =>
+          typeof entry === "string"
+        )
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Waits for the turn to end, and returns how it ended.
    *
    * The stream is opened after the turn is started rather than before, which
@@ -847,6 +907,9 @@ export interface BatchResult {
   endedAt: string;
   preflight: IndexPreflight;
   posture: PosturePreflight;
+
+  /** Where each pattern the batch composed came from, one hop deep. */
+  importedPatternOrigins: Readonly<Record<string, ImportedPatternOrigin>>;
   indexBefore: IndexSnapshot;
   indexAfter: IndexSnapshot;
   results: readonly TaskResult[];
@@ -884,6 +947,29 @@ const readSkillRegistry = async (
     skillsRoot: registry.skillsRoot,
     skillsFound: Array.isArray(registry.skills) ? registry.skills.length : 0,
   };
+};
+
+/**
+ * Where each pattern the batch composed came from, resolved one hop through
+ * the index. Called once per distinct identifier, after the tasks have run.
+ */
+export const resolveImportedPatternOrigins = async (
+  client: ConsoleClient,
+  importedPatternIds: readonly string[],
+  seeded: readonly string[],
+): Promise<Readonly<Record<string, ImportedPatternOrigin>>> => {
+  const isSeeded = new Set(seeded);
+  const origins: Record<string, ImportedPatternOrigin> = {};
+  for (const patternId of importedPatternIds) {
+    origins[patternId] = classifyImportedPattern(
+      patternId,
+      isSeeded,
+      isSeeded.has(patternId)
+        ? undefined
+        : await client.dependenciesOf(patternId),
+    );
+  }
+  return origins;
 };
 
 /** Runs one task and measures the run it left behind. */
@@ -1207,14 +1293,28 @@ const renderPreflight = (preflight: IndexPreflight): string =>
 const renderComposition = (
   results: readonly TaskResult[],
   seeded: readonly string[] = [],
+  origins: Readonly<Record<string, ImportedPatternOrigin>> = {},
 ): readonly string[] => {
   const isSeeded = new Set(seeded);
-  const mark = (id: string): string =>
-    isSeeded.size === 0
-      ? `\`${id}\``
-      : isSeeded.has(id)
-      ? `\`${id}\` **(seeded)**`
-      : `\`${id}\` (pre-existing)`;
+  const mark = (id: string): string => {
+    if (isSeeded.size === 0) return `\`${id}\``;
+    const origin = origins[id] ?? {
+      kind: "unresolved" as const,
+      reason: "this batch resolved no origin for it",
+    };
+    switch (origin.kind) {
+      case "seeded":
+        return `\`${id}\` **(seeded)**`;
+      case "seeded-via-alias":
+        return `\`${id}\` **(seeded, via alias of ${
+          origin.through.join(", ")
+        })**`;
+      case "pre-existing":
+        return `\`${id}\` (pre-existing)`;
+      case "unresolved":
+        return `\`${id}\` (ORIGIN NOT RESOLVED — ${origin.reason})`;
+    }
+  };
   const composed = results
     .map((result) => ({
       id: result.task.id,
@@ -1251,6 +1351,11 @@ const renderComposition = (
     lines.push(
       "",
       "The suite named no seeded patterns, so nothing here separates composing a seeded atom from composing an entry an earlier run left behind.",
+    );
+  } else {
+    lines.push(
+      "",
+      "Each identifier is resolved one dependency hop, because a bare re-export of a seeded atom carries its own identifier and would otherwise read as pre-existing. Hops beyond the first are not resolved.",
     );
   }
   lines.push("");
@@ -1302,7 +1407,11 @@ export const renderBatchReport = (batch: BatchResult): string => {
       batch.results.filter((result) => result.measurement === undefined).length
     } were not measured.`,
     "",
-    ...renderComposition(batch.results, batch.suite.seededPatternIds),
+    ...renderComposition(
+      batch.results,
+      batch.suite.seededPatternIds,
+      batch.importedPatternOrigins,
+    ),
     "## The index, before and after",
     "",
     "How much of it a run could find, going in:",
@@ -1417,6 +1526,18 @@ export const main = async (
       results.push(await runTask(client, task, log));
     }
   }
+  const importedPatternIds = [
+    ...new Set(
+      results.flatMap((result) =>
+        result.measurement?.totals.importedPatternIds ?? []
+      ),
+    ),
+  ].sort();
+  const importedPatternOrigins = await resolveImportedPatternOrigins(
+    client,
+    importedPatternIds,
+    suite.seededPatternIds ?? [],
+  );
   const indexAfter = preflight.kind === "refused"
     ? indexBefore
     : await client.indexSnapshot();
@@ -1431,6 +1552,7 @@ export const main = async (
     endedAt: new Date().toISOString(),
     preflight,
     posture,
+    importedPatternOrigins,
     indexBefore,
     indexAfter,
     results,
