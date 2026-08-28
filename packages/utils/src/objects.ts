@@ -93,9 +93,10 @@ export function isInertPlainObject(
 }
 
 /**
- * Returns the constructor the given object is an instance of, or `undefined`
- * where there is none to read: a null-prototype object has no constructor to
- * find, and an exotic one may have a `constructor` that is not callable.
+ * Returns the constructor the given object is an instance of -- the class it
+ * already has, rather than anything derived from it -- or `undefined` where
+ * there is none to read: a null-prototype object has no constructor to find,
+ * and an exotic one may have a `constructor` that is not callable.
  *
  * The constructor is read from the object's _prototype_, deliberately, and not
  * from the object. What is being asked is which class the object is an
@@ -107,7 +108,7 @@ export function isInertPlainObject(
  *
  * @param value The object whose constructor is wanted.
  */
-export function constructorFromObject(
+export function constructorOfObject(
   value: object,
 ): { prototype: unknown } | undefined {
   const proto = Object.getPrototypeOf(value);

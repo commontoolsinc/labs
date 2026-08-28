@@ -16,7 +16,7 @@
  */
 
 import type { FabricNativeObject } from "./interface.ts";
-import { constructorFromObject } from "@commonfabric/utils/objects";
+import { constructorOfObject } from "@commonfabric/utils/objects";
 
 import { NATIVE_TAGS, type NativeTag } from "./native-tags.ts";
 
@@ -119,7 +119,7 @@ export function isValidFabricNativeObject(
   // may be.
   if (Array.isArray(value)) return false;
 
-  const ctor = constructorFromObject(value);
+  const ctor = constructorOfObject(value);
   const tag = (ctor !== undefined) ? tagFromNativeBuiltinClass(ctor) : null;
 
   switch (tag ?? (isNativeError(value) ? NATIVE_TAGS.Error : null)) {
