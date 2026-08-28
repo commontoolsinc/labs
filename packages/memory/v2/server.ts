@@ -251,8 +251,16 @@ export type SlowQuery = {
   outcome?: string;
 
   /** Query and watch operations: how many roots the request's evaluations
-   * visited across every branch group. Zero means the evaluation cache
-   * served it, so none of the elapsed time was traversal. */
+   * visited across every branch group. Zero means no root was traversed,
+   * which has two causes and the same consequence: the evaluation cache
+   * served the request, or the session's existing graph already covered
+   * every added root. Either way none of the elapsed time was traversal,
+   * so a slow entry reporting zero spent it somewhere else — assembling
+   * the response, or attaching operation fields.
+   *
+   * `session.watch.refresh` carries none of these fields. It re-evaluates
+   * by dirty document rather than by root, so it has no roots to
+   * attribute; absent is the honest answer there, not zero. */
   rootsVisited?: number;
 
   /** Query and watch operations: summed elapsed time of those root visits.
@@ -264,7 +272,11 @@ export type SlowQuery = {
   /** Query and watch operations: the costliest single root, which is what
    * a watch COUNT cannot say. A `watch.add` unions the roots of every
    * watch it carries, so 78 watches and 5,377 watches are the same
-   * measurement until this names which declaration spent the time. */
+   * measurement until this names which declaration spent the time.
+   *
+   * The root that paid, not necessarily the root to blame — see
+   * {@link SlowestQueryRoot} for why overlapping closures charge whichever
+   * root ran first, and what to check before calling one the cause. */
   slowestRoot?: SlowestQueryRoot;
 };
 

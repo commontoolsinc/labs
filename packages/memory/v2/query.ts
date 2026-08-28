@@ -90,10 +90,26 @@ export type TrackedGraphState = {
  * A query's roots are the union of every watch's roots on a branch, so a
  * slow `watch.add` reports its duration against a watch COUNT and says
  * nothing about which declaration spent it. This names the root that did.
+ *
+ * It names the root that PAID, which is not always the root to blame.
+ * Roots share coverage within an evaluation: the first to reach a document
+ * is charged for it, and a later root that would have reached the same
+ * document is skipped instead. So where several roots declare overlapping
+ * closures, the whole cost lands on whichever ran first, and bounding that
+ * one root moves the charge to the next rather than removing it. Read a
+ * large `slowestRoot` as "the cost is reachable from here", and confirm a
+ * suspected cause by checking that narrowing it lowers the request's own
+ * elapsed time — not merely that it lowers this root's.
  */
 export type SlowestQueryRoot = {
   id: string;
   scope: CellScope;
+
+  /** The explicit scope INSTANCE the root named, on the lease-holder reads
+   * that may name one. Roots alike in every other field but this one are
+   * different reads of different instances, so without it the record
+   * cannot say which instance cost the time. */
+  entityScopeKey?: ScopeKey;
 
   /** The selector's path, slash-joined; empty for a whole-document root. */
   path: string;
@@ -196,6 +212,9 @@ const chargeRootVisit = (
       stats.slowestRoot = {
         id: root.id,
         scope: root.scope ?? DEFAULT_SCOPE,
+        ...(root.entityScopeKey === undefined
+          ? {}
+          : { entityScopeKey: root.entityScopeKey }),
         path: root.selector.path.join("/"),
         ...(root.selector.schema === undefined ? {} : {
           schema: internSchemaAsTaggedHashString(root.selector.schema),

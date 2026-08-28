@@ -363,7 +363,8 @@ describe("v2 server slow queries", () => {
       expect(entry).toBeDefined();
       expect(entry!.watches).toBe(2);
       expect(entry!.rootsVisited).toBe(3);
-      expect(entry!.slowestRoot).toBeDefined();
+      expect(entry!.slowestRoot!.reads).toBeGreaterThan(0);
+      expect(entry!.slowestRoot!.walk.dagTraversals).toBeGreaterThan(0);
     } finally {
       connection.close();
     }
