@@ -60,8 +60,14 @@ export class WorkerController extends EventTarget {
     number,
     Task
   >();
-  // Promise that resolves when the worker is fully initialized
+
+  /**
+   * Settled when `startInitialize()` finishes: resolved once the worker is
+   * ready, rejected with the error that stopped it.
+   */
   #initializeDeferred = defer();
+
+  /** Promise that resolves when the worker is fully initialized. */
   public initializeResolve = this.#initializeDeferred.promise;
   #state = WorkerState.Uninitialized;
 
