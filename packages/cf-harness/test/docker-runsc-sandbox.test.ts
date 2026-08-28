@@ -181,8 +181,11 @@ Deno.test("DockerRunscSandboxRuntime describe preserves custom CFC runtime alias
   assertEquals(description.cfc.image, "sandbox:deno2");
 });
 
+//
 // The description is persisted into the CFC policy snapshot that the ops
 // dashboard reads, so the wording of these two tags is part of that output.
+//
+
 Deno.test("DockerRunscSandboxRuntime describe names the sandbox kind and the sidecar transport", () => {
   const description = new DockerRunscSandboxRuntime(
     resolveDockerRunscSandboxConfig({

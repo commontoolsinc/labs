@@ -238,7 +238,7 @@ export type {
 } from "./prepare.ts";
 export { readStoredCfcMetadata } from "./metadata.ts";
 export { cfcSchemaMergeIssue } from "./schema-merge.ts";
-export type { CfcSchemaMergeIssue } from "./schema-merge.ts";
+export type { CfcSchemaMergeIssue, IfcKey } from "./schema-merge.ts";
 export {
   createSinkRequestPolicyInput,
   recordSinkRequestPolicyInput,
@@ -313,3 +313,12 @@ export {
   validateAndSanitizeStructuredResultValue,
   validateStructuredResultValue,
 } from "./structured-result.ts";
+export {
+  type CfcRefusalAttribution,
+  type CfcRefusalDetail,
+  type CfcRefusalGate,
+  type CfcRefusalInput,
+  type ConsumedAtomSource,
+  describeRefusalInputs,
+  renderCfcAtom,
+} from "./refusal-detail.ts";

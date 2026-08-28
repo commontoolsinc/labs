@@ -57,9 +57,9 @@ function emailSpec(): RowLabelSpec {
   return schema.rowLabel as RowLabelSpec;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Builder -> AST
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("table(columns, rule) serializes the rule to a plain-JSON rowLabel AST", () => {
   const schema = table(EMAIL_COLUMNS, emailRule);
@@ -130,9 +130,9 @@ Deno.test("match() forces the global flag so split-on-match works", () => {
   assert(node.principal.of.match.flags.includes("g"));
 });
 
-// ---------------------------------------------------------------------------
+//
 // Fail-closed at authoring (table() throws)
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("any() builds and validates an OR-clause (Epic E1)", () => {
   // any() no longer throws at table() time — it produces an authored OR-clause
@@ -445,9 +445,9 @@ Deno.test("validateRowLabelSpec re-validates a wire-supplied spec (fail closed)"
   assert(typeof wrongCols === "string");
 });
 
-// ---------------------------------------------------------------------------
+//
 // evaluateRowLabel — happy paths
-// ---------------------------------------------------------------------------
+//
 
 const OWNER = "did:key:zOwner";
 
@@ -583,9 +583,9 @@ Deno.test("constant() injects a literal atom; intersect() meets integrity atom s
   assertEquals(res.integrity, ["b"]);
 });
 
-// ---------------------------------------------------------------------------
+//
 // evaluateRowLabel — fail-closed branches (each returns {error}, never partial)
-// ---------------------------------------------------------------------------
+//
 
 function expectError(
   spec: RowLabelSpec,
@@ -753,8 +753,8 @@ Deno.test("an unsupported spec version fails closed", () => {
   );
 });
 
-// endorsedBy variant mints the endorsed claim kind.
 Deno.test("endorsedBy mints claimed-endorsed-by", () => {
+  // endorsedBy variant mints the endorsed claim kind.
   const schema = table(
     { reviewer: "text" },
     (f) => ({
@@ -772,9 +772,9 @@ Deno.test("endorsedBy mints claimed-endorsed-by", () => {
   ]);
 });
 
-// Zero matches in an integrity position mints nothing (the claim simply is not
-// made) — distinct from >1 which is an error.
 Deno.test("zero matches in an integrity position mints no claim", () => {
+  // Zero matches in an integrity position mints nothing (the claim simply is
+  // not made) — distinct from >1 which is an error.
   const schema = table(
     { reviewer: "text" },
     (f) => ({
@@ -790,9 +790,9 @@ Deno.test("zero matches in an integrity position mints no claim", () => {
   assertEquals(res.integrity, []);
 });
 
-// ---------------------------------------------------------------------------
+//
 // Provenance gate predicates (shared server/runner — v2.ts)
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("dbNeedsColumnProvenance: rowLabel-only tables need origin capture too", () => {
   const ruleOnly = {
@@ -821,9 +821,9 @@ Deno.test("dbNeedsColumnProvenance: rowLabel-only tables need origin capture too
   assert(!dbNeedsColumnProvenance(undefined));
 });
 
-// ---------------------------------------------------------------------------
+//
 // Review-round fixes: validator/evaluator robustness on hostile wire specs
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("an unbalanced regex in a wire spec returns a reason (no lint crash)", () => {
   const spec: RowLabelSpec = {
@@ -841,7 +841,6 @@ Deno.test("an unbalanced regex in a wire spec returns a reason (no lint crash)",
   assert(typeof reason === "string");
 });
 
-// ---------------------------------------------------------------------------
 // Ambiguous dual-op nodes: a node carrying TWO recognized op keys must refuse
 // everywhere. The validator, the evaluator, and the static common-alternative
 // analysis each dispatch by their own key precedence, so a hand-crafted
@@ -849,7 +848,6 @@ Deno.test("an unbalanced regex in a wire spec returns a reason (no lint crash)",
 // the principal, and STATICALLY count the owner as a common reader — labeling
 // a COUNT(*) [owner] although the owner is not an alternative in any row's
 // label (CFC spec §8.17.4 violation).
-// ---------------------------------------------------------------------------
 
 const DUAL_PRINCIPAL_OWNER: RowLabelSpec = {
   version: 1,

@@ -15,10 +15,11 @@
 // (present:false) so the home→profile structure shows up here too, bounded.
 
 import type { SpaceDb } from "./db.ts";
-import { collectLinks } from "./decode.ts";
-import { reconstructDocument } from "./reconstruct.ts";
-import type { EntityDocument } from "./reconstruct.ts";
+import { linksWithPaths, type LinkWalkBounds } from "./decode.ts";
+import { reconstructOutcome } from "./reconstruct.ts";
+import type { EntityDocument, ReconstructOutcome } from "./reconstruct.ts";
 import {
+  absentEntity,
   classifyDocument,
   type EntityKind,
   isModuleValue,
@@ -74,6 +75,21 @@ export interface SpaceGraph {
   extent: ScanExtent;
 }
 
+/**
+ * How far the graph's data-link walk reaches. A graph is a rendering, and the
+ * value it walks is one an entity's document already decoded into memory, so
+ * twelve levels of nesting reaches past any value this tool has met.
+ *
+ * `maxNodes` is unbounded because `SpaceGraph` carries no field saying an
+ * entity's edges are only some of its edges, and a truncation nothing renders
+ * is the silence a bound is supposed to prevent. Giving it a finite value
+ * belongs with giving the graph that field.
+ */
+const GRAPH_LINK_WALK: LinkWalkBounds = {
+  maxDepth: 12,
+  maxNodes: Number.POSITIVE_INFINITY,
+};
+
 function shortPath(p?: readonly string[]): string | undefined {
   return p && p.length ? p.join("/") : undefined;
 }
@@ -109,20 +125,20 @@ export function buildSpaceGraph(
 
   // Pass 1: reconstruct + build the module index (identity → module entity).
   const docs = new Map<string, EntityDocument>();
+  // Why each unplaced entity has no document, so an edge into one can say which
+  // kind of absent it is rather than sharing a single "(absent)".
+  const outcomes = new Map<string, ReconstructOutcome>();
   const moduleIndex = new Map<string, ModuleEntry>();
   for (const r of scanned) {
-    let doc: EntityDocument | undefined;
-    try {
-      doc = reconstructDocument(space, { id: r.id, branch, scope });
-    } catch {
-      doc = undefined;
-    }
-    if (!doc) {
+    const outcome = reconstructOutcome(space, { id: r.id, branch, scope });
+    outcomes.set(r.id, outcome);
+    if (outcome.status !== "present") {
       // Enumerated but not placed in the graph: counted, never silently dropped, or a pass
       // that skipped it would report itself complete over a smaller set.
       unreadable++;
       continue;
     }
+    const doc = outcome.document;
     docs.set(r.id, doc);
     const v = doc.value;
     if (isModuleValue(v)) {
@@ -143,16 +159,26 @@ export function buildSpaceGraph(
   // External targets are keyed by `<space>/<id>` so they never collide with a
   // local entity of the same id (which would silently re-point the edge at the
   // local node and lose the target space). Returns the node key for the edge.
-  const ensureStub = (entityId: string, space?: string): string => {
-    const key = space ? `${space}/${entityId}` : entityId;
+  const ensureStub = (entityId: string, targetSpace?: string): string => {
+    const key = targetSpace ? `${targetSpace}/${entityId}` : entityId;
     if (!nodes.has(key)) {
+      // A local target absent from `nodes` has no readable document; say which
+      // of the reasons it is, so an edge into a tombstone reads differently
+      // from an edge into a corrupt entity. The enumeration drops tombstones,
+      // so a target it did not reach — deleted, past the limit, or owned by a
+      // parent branch — is resolved on demand rather than assumed absent.
+      const local = targetSpace ? undefined : outcomes.get(entityId) ??
+        reconstructOutcome(space, { id: entityId, branch, scope });
+      const absent = local && local.status !== "present"
+        ? absentEntity(local.status)
+        : undefined;
       nodes.set(key, {
         id: key,
         entityId,
-        kind: "unknown",
-        label: space ? "(external)" : "(absent)",
+        kind: absent?.kind ?? "unknown",
+        label: targetSpace ? "(external)" : absent?.label ?? "(absent)",
         present: false,
-        space,
+        space: targetSpace,
       });
     }
     return key;
@@ -197,7 +223,9 @@ export function buildSpaceGraph(
     }
     // link: data links inside the value
     if (includeLinks) {
-      for (const l of collectLinks(doc.value)) {
+      for (
+        const { link: l } of linksWithPaths(doc.value, GRAPH_LINK_WALK).links
+      ) {
         if (!l.id) continue;
         const external = !!l.space && l.space !== own &&
           l.space !== `did:key:${own}`;
@@ -316,6 +344,7 @@ const DOT_FILL: Record<string, string> = {
   schema: "#ddd6fe",
   "owned-cell": "#d1fae5",
   "free-cell": "#e5e7eb",
+  deleted: "#e4e4e7",
   unknown: "#f3f4f6",
 };
 

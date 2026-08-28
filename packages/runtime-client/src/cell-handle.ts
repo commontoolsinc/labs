@@ -9,6 +9,7 @@ import {
   type FabricValue,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { DID } from "@commonfabric/identity";
 import { type CfcCellLinkRefPayload } from "@commonfabric/runner/cfc";
 import {
@@ -34,13 +35,27 @@ import {
   type CfcLabelView,
   JSONValue,
   RequestType,
-  type WireCellValue,
+  type SqliteParams,
 } from "./protocol/mod.ts";
 import { $conn, type RuntimeClient } from "./runtime-client.ts";
+import { cellRefToIdentityKey } from "./shared/utils.ts";
 
 // Logger for schema warnings - disabled by default.
 // Enable via: globalThis.commonfabric.logger["cell-handle"].disabled = false
 const logger = getLogger("cell-handle", { enabled: false });
+
+interface CellOperationQueue {
+  tail: Promise<void> | undefined;
+  hasValue: boolean;
+  value: unknown;
+  // Changes when any equivalent handle receives an authoritative update.
+  authoritativeGeneration: number;
+}
+
+const operationQueues = new WeakMap<
+  RuntimeClient,
+  Map<string, CellOperationQueue>
+>();
 
 export const $onCellUpdate = Symbol("$onCellUpdate");
 
@@ -56,8 +71,11 @@ export const $onCellUpdate = Symbol("$onCellUpdate");
  * The container arms are here too, since theirs hold `FabricValue` where these
  * hold handles as well.
  *
- * That the connection cannot presently _carry_ all of it is a fact about
- * `WireCellValue`, not about this: see the note there.
+ * The connection's encoding carries this whole domain. The conversion walk
+ * that feeds it is narrower: `CellHandle.serialize()` refuses a
+ * `FabricInstance`, being a container it cannot descend to find a handle
+ * inside. So a value admitted here can still be refused on the way out, and
+ * the refusal names which.
  */
 export type ClientCellValue =
   | FabricValue
@@ -83,6 +101,11 @@ export class CellHandle<T = unknown> {
   >();
   #nextCallbackId = 0;
   #schemaWarned = false;
+  #updateGeneration = 0;
+  // Monotonic invocation order for local value mutations on this handle.
+  // Async read and strict-write responses use it to avoid replacing a later
+  // optimistic value while their remote operations remain FIFO-serialized.
+  #writeGeneration = 0;
 
   constructor(worker: RuntimeClient, cellRef: CellRef, value?: T) {
     this.#rt = worker;
@@ -151,23 +174,100 @@ export class CellHandle<T = unknown> {
   async set(value: T): Promise<void> {
     this.#requireSchema("set");
     // A plain set is a blind last-write-wins overwrite (CellSet).
-    await this.#applyLocalAndSend(value, RequestType.CellSet);
+    const serialized = this.#serializeWrite(value);
+    const snapshot = applyValue(
+      CellHandle.#serialize(value as ClientCellValue, "sigil"),
+      value,
+      this,
+    ) as T;
+    this.#writeGeneration++;
+    this.#publishValue(snapshot);
+    await this.#enqueueOperation(async (queue) => {
+      const updateGeneration = this.#updateGeneration;
+      const authoritativeGeneration = queue.authoritativeGeneration;
+      await this.#sendWrite(serialized);
+      if (
+        updateGeneration === this.#updateGeneration &&
+        authoritativeGeneration === queue.authoritativeGeneration
+      ) {
+        queue.value = snapshot;
+        queue.hasValue = true;
+      }
+    });
   }
 
-  // Optimistic local update (mirrors the old set()) plus the remote write. The
-  // request _type_ encodes the intent: CellSet is a blind overwrite, CellPush
-  // is a read-modify-write append that the runtime keeps as compare-and-set.
-  #applyLocalAndSend(
-    value: T,
-    type: RequestType.CellSet | RequestType.CellPush,
-  ): Promise<void> {
-    // Serialized _first_, because it can refuse. The local update below is
-    // optimistic about the _write_ -- it assumes a value the connection
-    // accepts will land -- and not about whether the value can be sent at all.
-    // Were the refusal to come after, a value the runtime is never going to
-    // see would already be this handle's cached value and would already have
-    // reached every subscriber, leaving the display showing state that does
-    // not exist.
+  /** Set the cell's value and reject when the runtime refuses the write. */
+  async setStrict(value: T): Promise<void> {
+    this.#requireSchema("setStrict");
+    const serialized = this.#serializeWrite(value);
+    const snapshot = applyValue(
+      CellHandle.#serialize(value as ClientCellValue, "sigil"),
+      value,
+      this,
+    ) as T;
+    const writeGeneration = this.#writeGeneration;
+    await this.#enqueueOperation(async (queue) => {
+      const updateGeneration = this.#updateGeneration;
+      const authoritativeGeneration = queue.authoritativeGeneration;
+      await this.#sendStrictWrite(
+        snapshot,
+        serialized,
+        writeGeneration,
+        queue,
+        authoritativeGeneration,
+      );
+      // Publication follows handle-local and identity-wide generations, but
+      // this shared queue follows committed operation order. A later queued
+      // append must start from this replacement even when a still-later
+      // mutation suppresses its direct publication on this handle.
+      if (
+        updateGeneration === this.#updateGeneration &&
+        authoritativeGeneration === queue.authoritativeGeneration
+      ) {
+        queue.value = snapshot;
+        queue.hasValue = true;
+      }
+    });
+  }
+
+  #enqueueOperation<R>(
+    operation: (queue: CellOperationQueue) => Promise<R>,
+  ): Promise<R> {
+    let queues = operationQueues.get(this.#rt);
+    if (!queues) {
+      queues = new Map();
+      operationQueues.set(this.#rt, queues);
+    }
+    const key = cellRefToIdentityKey(this.#ref);
+    let queue = queues.get(key);
+    if (!queue) {
+      queue = {
+        tail: undefined,
+        hasValue: false,
+        value: undefined,
+        authoritativeGeneration: 0,
+      };
+      queues.set(key, queue);
+    }
+    const previous = queue.tail;
+    const result = previous
+      ? previous.then(() => operation(queue))
+      : operation(queue);
+    const tail = result.then(() => {}, () => {});
+    queue.tail = tail;
+    void tail.then(() => {
+      if (queue.tail === tail) {
+        queues.delete(key);
+        if (queues.size === 0) operationQueues.delete(this.#rt);
+      }
+    });
+    return result;
+  }
+
+  #serializeWrite(value: T): FabricValue {
+    // Serialize before an optimistic local publication, because this can
+    // refuse. A value the runtime will never see must not become this handle's
+    // cached value or reach its subscribers.
     //
     // `T` is unconstrained, so this says what the write path requires rather
     // than what the class guarantees. Constraining `T` to `ClientCellValue` is
@@ -177,31 +277,18 @@ export class CellHandle<T = unknown> {
     // an identical type alias does.
     //
     // TODO(danfuzz): constrain `T`, once those types are assignable.
-    const serialized = CellHandle.serialize(value as ClientCellValue);
+    return CellHandle.serialize(value as ClientCellValue);
+  }
 
-    this.#value = value;
-
-    for (const callback of this.#callbacks.values()) {
-      try {
-        // Optimistic local update doesn't change the label; carry the current one.
-        callback(value as Readonly<T>, this.#cfcLabel);
-      } catch (error) {
-        console.error("[CellHandle] Callback error:", error);
-      }
-    }
-
+  #sendWrite(
+    serialized: FabricValue,
+  ): Promise<void> {
     const cell = this.ref();
-    const request = type === RequestType.CellPush
-      ? this.#conn.request<RequestType.CellPush>({
-        type: RequestType.CellPush,
-        cell,
-        value: serialized,
-      })
-      : this.#conn.request<RequestType.CellSet>({
-        type: RequestType.CellSet,
-        cell,
-        value: serialized,
-      });
+    const request = this.#conn.request<RequestType.CellSet>({
+      type: RequestType.CellSet,
+      cell,
+      value: serialized,
+    });
     return request.catch((error) => {
       if (!this.#conn.signal.aborted) {
         console.error("[CellHandle] Write failed:", error);
@@ -209,12 +296,62 @@ export class CellHandle<T = unknown> {
     });
   }
 
+  #sendStrictWrite(
+    value: T,
+    serialized: FabricValue,
+    writeGeneration: number,
+    queue: CellOperationQueue,
+    authoritativeGeneration: number,
+  ): Promise<boolean> {
+    const before = this.#value;
+    const updateGeneration = this.#updateGeneration;
+    return this.#conn.request<RequestType.CellSet>({
+      type: RequestType.CellSet,
+      cell: this.ref(),
+      value: serialized,
+      awaitCommit: true,
+    }).then(() => {
+      const publish = writeGeneration === this.#writeGeneration &&
+        updateGeneration === this.#updateGeneration &&
+        authoritativeGeneration === queue.authoritativeGeneration &&
+        this.#value === before;
+      if (publish) this.#publishValue(value);
+      return publish;
+    });
+  }
+
+  #publishValue(value: T): void {
+    this.#value = value;
+    for (const callback of this.#callbacks.values()) {
+      try {
+        // A local update does not change the label; carry the current one.
+        callback(value as Readonly<T>, this.#cfcLabel);
+      } catch (error) {
+        console.error("[CellHandle] Callback error:", error);
+      }
+    }
+  }
+
   async send(event: T): Promise<void> {
-    await this.#conn.request<RequestType.CellSend>({
+    const serialized = CellHandle.serialize(event as ClientCellValue);
+    await this.#enqueueOperation(() => this.#send(serialized));
+  }
+
+  /** Send a stream event and reject when the runtime refuses it. */
+  async sendStrict(event: T): Promise<void> {
+    const serialized = CellHandle.serialize(event as ClientCellValue);
+    await this.#enqueueOperation(() => this.#send(serialized, true));
+  }
+
+  #send(event: FabricValue, propagateFailure = false): Promise<void> {
+    const request = this.#conn.request<RequestType.CellSend>({
       type: RequestType.CellSend,
       cell: this.ref(),
-      event: CellHandle.serialize(event as ClientCellValue),
-    }).catch((error) => {
+      event,
+      ...(propagateFailure && { awaitCommit: true }),
+    });
+    if (propagateFailure) return request;
+    return request.catch((error) => {
       if (!this.#conn.signal.aborted) {
         console.error("[CellHandle] Send failed:", error);
       }
@@ -242,22 +379,92 @@ export class CellHandle<T = unknown> {
     return child;
   }
 
-  // A push is read-modify-write: build the appended array locally, then send it
-  // as a CellPush (not CellSet) so the runtime keeps the read-target as a commit
-  // precondition (compare-and-set) — a concurrent push aborts rather than being
-  // clobbered by a blind overwrite.
+  // A push publishes an invocation-time local snapshot, but sends only the
+  // appended members. The runtime owns the authoritative mergeable append, so
+  // an equivalent handle's stale private cache cannot replace committed data.
   push<U>(
     this: CellHandle<U[]>,
     ...values: T extends (infer U)[] ? U[] : never
   ): void {
-    const current = this.#value as unknown as unknown[];
-    if (!Array.isArray(current)) {
-      throw new Error("push() can only be used on array cells");
-    }
-    void this.#applyLocalAndSend(
-      [...current, ...values] as unknown as U[],
-      RequestType.CellPush,
+    void this.#pushValues(values).catch((error) => {
+      if (!this.#conn.signal.aborted) {
+        console.error("[CellHandle] Push failed:", error);
+      }
+    });
+  }
+
+  /** Append values and reject when the runtime refuses the mergeable write. */
+  pushStrict<U>(
+    this: CellHandle<U[]>,
+    ...values: T extends (infer U)[] ? U[] : never
+  ): Promise<void> {
+    return this.#pushValues(values);
+  }
+
+  #pushValues<U>(values: U[]): Promise<void> {
+    const serializedValues = values.map((value) =>
+      CellHandle.serialize(value as ClientCellValue)
     );
+    const snapshots = values.map((value) => {
+      const snapshot = CellHandle.#serialize(
+        value as ClientCellValue,
+        "sigil",
+      );
+      return applyValue(snapshot, value, this);
+    }) as U[];
+    const cached = this.#value;
+    const fallback = cached === undefined ? undefined : applyValue(
+      CellHandle.#serialize(cached as ClientCellValue, "sigil"),
+      cached,
+      this,
+    );
+    const writeGeneration = ++this.#writeGeneration;
+    const append = (queue: CellOperationQueue): Promise<void> => {
+      const authoritativeGeneration = queue.authoritativeGeneration;
+      const current = (queue.hasValue ? queue.value : fallback) as unknown[];
+      if (!Array.isArray(current)) {
+        throw new Error("push() can only be used on array cells");
+      }
+      const value = [...current, ...snapshots] as unknown as U[];
+      const updateGeneration = this.#updateGeneration;
+      queue.value = value;
+      queue.hasValue = true;
+      if (writeGeneration === this.#writeGeneration) {
+        this.#publishValue(value as unknown as T);
+      }
+      const rollback = () => {
+        if (
+          updateGeneration === this.#updateGeneration &&
+          authoritativeGeneration === queue.authoritativeGeneration
+        ) {
+          // Keep the restored base explicit in the shared queue. A later
+          // append may have captured this append's optimistic publication as
+          // its private fallback before the refusal arrived.
+          queue.hasValue = true;
+          queue.value = current;
+          if (writeGeneration === this.#writeGeneration) {
+            this.#publishValue(current as unknown as T);
+          }
+        }
+      };
+      let request: Promise<unknown>;
+      try {
+        request = this.#conn.request<RequestType.CellPush>({
+          type: RequestType.CellPush,
+          cell: this.ref(),
+          values: serializedValues,
+          awaitCommit: true,
+        });
+      } catch (error) {
+        rollback();
+        return Promise.reject(error);
+      }
+      return request.then(() => {}, (error) => {
+        rollback();
+        throw error;
+      });
+    };
+    return this.#enqueueOperation(append);
   }
 
   /** The cell's current display CFC label, for label-aware subscribers. */
@@ -351,15 +558,66 @@ export class CellHandle<T = unknown> {
    * If the value is itself a link, follows it to get the actual value.
    */
   async sync(): Promise<Readonly<T> | undefined> {
-    const response = await this.#conn.request<
-      RequestType.CellGet
-    >({
-      type: RequestType.CellGet,
-      cell: this.ref(),
-    });
+    const writeGeneration = this.#writeGeneration;
+    const updateGeneration = this.#updateGeneration;
+    const { value, authoritative } = await this.#enqueueOperation(
+      async (queue) => {
+        const authoritativeGeneration = queue.authoritativeGeneration;
+        const response = await this.#conn.request<RequestType.CellGet>({
+          type: RequestType.CellGet,
+          cell: this.ref(),
+        });
+        const value = CellHandle.deserialize<T>(this, response.value) as T;
+        const authoritative = updateGeneration === this.#updateGeneration &&
+          authoritativeGeneration === queue.authoritativeGeneration;
+        if (authoritative) {
+          queue.value = value;
+          queue.hasValue = true;
+        }
+        return { value, authoritative };
+      },
+    );
 
-    this.#value = CellHandle.deserialize<T>(this, response.value) as T;
-    return this.#value;
+    if (
+      writeGeneration === this.#writeGeneration &&
+      updateGeneration === this.#updateGeneration &&
+      authoritative
+    ) {
+      this.#value = value;
+    }
+    return value;
+  }
+
+  /** Demand lazy producers and their durable commits before fetching a value. */
+  async pull(): Promise<Readonly<T> | undefined> {
+    const writeGeneration = this.#writeGeneration;
+    const updateGeneration = this.#updateGeneration;
+    const { value, authoritative } = await this.#enqueueOperation(
+      async (queue) => {
+        const authoritativeGeneration = queue.authoritativeGeneration;
+        const response = await this.#conn.request<RequestType.CellPull>({
+          type: RequestType.CellPull,
+          cell: this.ref(),
+        });
+        const value = CellHandle.deserialize<T>(this, response.value) as T;
+        const authoritative = updateGeneration === this.#updateGeneration &&
+          authoritativeGeneration === queue.authoritativeGeneration;
+        if (authoritative) {
+          queue.value = value;
+          queue.hasValue = true;
+        }
+        return { value, authoritative };
+      },
+    );
+
+    if (
+      writeGeneration === this.#writeGeneration &&
+      updateGeneration === this.#updateGeneration &&
+      authoritative
+    ) {
+      this.#value = value;
+    }
+    return value;
   }
 
   /**
@@ -367,24 +625,72 @@ export class CellHandle<T = unknown> {
    * Returns a new CellHandle pointing to the resolved cell.
    */
   async resolveAsCell(): Promise<CellHandle<T>> {
-    const response = await this.#conn.request<
-      RequestType.CellResolveAsCell
-    >({
-      type: RequestType.CellResolveAsCell,
-      cell: this.ref(),
-    });
+    const response = await this.#enqueueOperation(() =>
+      this.#conn.request<RequestType.CellResolveAsCell>({
+        type: RequestType.CellResolveAsCell,
+        cell: this.ref(),
+      })
+    );
 
     return new CellHandle<T>(this.#rt, response.cell);
   }
 
   async getCfcLabel(): Promise<CfcLabelView | undefined> {
-    const response = await this.#conn.request<
-      RequestType.CellGetCfcLabel
-    >({
-      type: RequestType.CellGetCfcLabel,
-      cell: this.ref(),
-    });
+    const response = await this.#enqueueOperation(() =>
+      this.#conn.request<RequestType.CellGetCfcLabel>({
+        type: RequestType.CellGetCfcLabel,
+        cell: this.ref(),
+      })
+    );
     return response.cfcLabel;
+  }
+
+  /** Run a read-only query when this handle refers to a SQLite database. */
+  async querySqlite<Row = Record<string, unknown>>(
+    sql: string,
+    params?: ReadonlyArray<ClientCellValue> | Record<string, ClientCellValue>,
+  ): Promise<Row[]> {
+    const serializedParams = params === undefined
+      ? undefined
+      : CellHandle.serializeSqliteParams(params);
+    const response = await this.#enqueueOperation(() =>
+      this.#conn.request<RequestType.SqliteQuery>({
+        type: RequestType.SqliteQuery,
+        cell: this.ref(),
+        sql,
+        ...(serializedParams !== undefined && {
+          params: serializedParams,
+        }),
+      })
+    );
+    return response.rows.map((row) =>
+      Object.fromEntries(
+        Object.entries(row).map(([key, value]) => [
+          key,
+          CellHandle.deserialize(this, value),
+        ]),
+      ) as Row
+    );
+  }
+
+  /** Commit a SQL write when this handle refers to a SQLite database. */
+  async execSqlite(
+    sql: string,
+    params?: ReadonlyArray<ClientCellValue> | Record<string, ClientCellValue>,
+  ): Promise<void> {
+    const serializedParams = params === undefined
+      ? undefined
+      : CellHandle.serializeSqliteParams(params);
+    await this.#enqueueOperation(() =>
+      this.#conn.request<RequestType.SqliteExec>({
+        type: RequestType.SqliteExec,
+        cell: this.ref(),
+        sql,
+        ...(serializedParams !== undefined && {
+          params: serializedParams,
+        }),
+      })
+    );
   }
 
   equals(other: unknown): boolean {
@@ -465,11 +771,20 @@ export class CellHandle<T = unknown> {
     value: unknown,
     labelUpdate?: { cfcLabel: CfcLabelView | undefined },
   ): void {
+    this.#updateGeneration++;
     const applied = applyValue(
       value,
       this.#value,
       this as CellHandle<unknown>,
     ) as T;
+    const queue = operationQueues.get(this.#rt)?.get(
+      cellRefToIdentityKey(this.#ref),
+    );
+    if (queue) {
+      queue.authoritativeGeneration++;
+      queue.value = applied;
+      queue.hasValue = true;
+    }
     const valueChanged = !valuesOrCellsEqual(applied, this.#value);
     // A label-only change (value identical) still fires label-aware subscribers.
     // `labelUpdate` is present only on notifications that carried a label, so a
@@ -491,7 +806,10 @@ export class CellHandle<T = unknown> {
    * Recursively hydrate any object, converting any sigil links into
    * CellHandle instances. Legacy `$alias` records are plain data — they are
    * only meaningful as bindings inside Pattern objects, which the client
-   * never interprets.
+   * never interprets. A `FabricPrimitive` comes back as itself.
+   *
+   * @throws If the value holds a `FabricInstance`, which is a container this
+   *   walk cannot descend and so cannot hydrate a link inside.
    */
   static deserialize<T>(
     base: CellHandle<T>,
@@ -519,10 +837,12 @@ export class CellHandle<T = unknown> {
     // see it -- and a value handed back unhydrated would carry that link where
     // a `CellHandle` belongs.
     //
-    // Nothing reaches this today, de facto rather than by construction: the
-    // connection carries a value by structured cloning, which strips a fabric
-    // class before it arrives, and `CellHandle.serialize()` refuses one on the
-    // way out.
+    // Nothing reaches this today, de facto rather than by construction. The
+    // transport no longer helps: the envelope's encoding carries an instance
+    // across with its class, where structured cloning used to strip it. What
+    // keeps it unreachable is the refusal at each of the other ends of the
+    // crossing -- `convertCellsToLinks()` on the way out of the worker, and
+    // `serialize()` below on the way in.
     if (value instanceof FabricInstance) {
       refuseFabricInstance(value, "when hydrating a value off the connection");
     }
@@ -546,76 +866,115 @@ export class CellHandle<T = unknown> {
     return value;
   }
 
+  private static serializeSqliteParams(
+    params: ReadonlyArray<ClientCellValue> | Record<string, ClientCellValue>,
+  ): SqliteParams {
+    const serialize = (value: ClientCellValue) =>
+      CellHandle.sqliteFabricValue(value);
+    return Array.isArray(params)
+      ? { kind: "positional", values: params.map(serialize) }
+      : {
+        kind: "named",
+        entries: Object.entries(params).map(([key, value]) => [
+          key,
+          serialize(value),
+        ]),
+      };
+  }
+
+  private static sqliteFabricValue(value: ClientCellValue): FabricValue {
+    if (isCellHandle(value)) return value.ref();
+    if (value instanceof FabricBytes) return value;
+    if (value instanceof FabricSpecialObject) {
+      throw new TypeError(
+        `SQLite bind values support \`FabricBytes\` but not ` +
+          `\`${value.constructor.name}\`.`,
+      );
+    }
+    if (Array.isArray(value)) {
+      return value.map((member) => CellHandle.sqliteFabricValue(member));
+    }
+    if (isObjectOrArray(value)) {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, member]) => [
+          key,
+          CellHandle.sqliteFabricValue(member),
+        ]),
+      );
+    }
+    return value as FabricValue;
+  }
+
   /**
    * Converts a value the client holds into the one the connection carries,
    * which is the same data with a `CellRef` wherever a `CellHandle` sat.
    *
-   * Refuses a `FabricSpecialObject`, which the connection cannot carry.
+   * A `FabricPrimitive` crosses as itself, the envelope's encoding carrying it
+   * with its class, as it carries a `bigint` and a `symbol`.
    *
    * `CellHandle.deserialize()` is the inverse.
+   *
+   * @throws If the value holds a `FabricInstance`, which is a container this
+   *   walk cannot descend and so cannot convert a handle inside.
    */
-  static serialize(value: ClientCellValue): WireCellValue {
-    if (isCellHandle(value)) return value.ref();
+  static serialize(value: ClientCellValue): FabricValue {
+    return CellHandle.#serialize(value, "ref") as FabricValue;
+  }
 
-    if (Array.isArray(value)) {
-      return value.map((element) => CellHandle.serialize(element));
+  // The sigil form is the same canonical traversal with hydratable links. It
+  // snapshots local values through applyValue() without confusing an ordinary
+  // record that happens to resemble a CellRef or replacing a live CellHandle.
+  static #serialize(
+    value: ClientCellValue,
+    linkFormat: "ref" | "sigil" = "ref",
+  ): unknown {
+    if (isCellHandle(value)) {
+      return linkFormat === "sigil"
+        ? linkRefFrom<CfcCellLinkRefPayload>(value.ref())
+        : value.ref();
     }
 
-    // A `FabricSpecialObject` is a `ClientCellValue` -- a cell holds one like
-    // any other value -- but `WireCellValue` has no representation for it, so
-    // this refuses rather than converting. It goes _before_ the record test:
-    // such a value is also a record, and that branch would otherwise rebuild
+    if (Array.isArray(value)) {
+      return value.map((element) => CellHandle.#serialize(element, linkFormat));
+    }
+
+    // A `FabricPrimitive` crosses whole rather than being walked: it is a
+    // leaf, so stopping at it loses nothing. This goes _before_ the record
+    // test, since such a value is also a record and that branch would rebuild
     // it from enumerable own properties it is not supposed to have, putting
-    // `{}` on the wire in place of a `FabricBytes` and losing the bytes with
-    // nothing to show for it.
-    //
-    // A _de facto_ tripwire, in the sense of "Flag-gated tripwires" in
-    // `docs/development/EXPERIMENTAL_OPTIONS.md`: no flag gates this, and a
-    // `FabricBytes` is an ordinary shipped value, so what makes the refusal
-    // safe is that nothing writes one from the client today. The first thing
-    // that does will throw here, in the change that adds it.
-    //
-    // TODO(danfuzz): carry the whole `FabricValue` domain across this
-    // connection, at which point this becomes a conversion rather than a
-    // refusal. `codec-realm` is the mechanism, and the gap it closes is the
-    // one marked on `WireCellValue` in `protocol/types.ts`.
-    if (value instanceof FabricSpecialObject) {
-      throw new Error(
-        `Cannot yet handle \`${value.constructor.name}\` (a ` +
-          "`FabricSpecialObject`) on this connection.",
-      );
+    // `{}` on the wire in place of a `FabricBytes`.
+    if (value instanceof FabricPrimitive) return value;
+
+    // An instance is a container whose contents this walk cannot reach, so a
+    // `CellHandle` inside one would cross unconverted -- as a handle, which
+    // the wire has no representation for. Refused here rather than downstream:
+    // the worker's `mapCellRefsToSigilLinks()` refuses one as well, and a
+    // refusal there arrives as an error reply, after this handle has already
+    // cached the value and told its subscribers. Refused through the shared
+    // helper, as `deserialize()` above already does, so the two walks say the
+    // same thing about the same value.
+    if (value instanceof FabricInstance) {
+      refuseFabricInstance(value, "when sending a value over this connection");
     }
 
     if (isObjectOrArray(value)) {
       return Object.fromEntries(
         Object.entries(value).map((
           [key, member],
-        ) => [key, CellHandle.serialize(member)]),
+        ) => [key, CellHandle.#serialize(member, linkFormat)]),
       );
     }
 
-    if (
-      typeof value === "string" || typeof value === "number" ||
-      typeof value === "boolean" || value === undefined || value === null
-    ) {
-      return value;
-    }
-
-    // Reachable two ways. A `bigint` and a `symbol` are `FabricValue` arms, so
-    // a cell holds either and `ClientCellValue` admits either, while
-    // `WireCellValue` has neither -- the same gap the refusal above covers,
-    // for the two arms that are not objects. And `CellHandle<T>` does not
-    // constrain `T`, so `set()` and `send()` cast on the way in and a caller
-    // can arrive here with anything at all.
+    // Every remaining arm is a primitive the encoding carries as itself.
+    // `CellHandle<T>` does not constrain `T`, so a caller can arrive here with
+    // something `ClientCellValue` does not admit at all; that is the encode's
+    // to answer, per the input contract, and not worth a check on the way to
+    // it that every correct value would also pay.
     //
-    // `typeof` names the kind, since the value's own text rarely explains the
-    // refusal: a `1n` prints as `1`, which reads like a number that was
-    // rejected for no reason. `String()` rather than interpolation, a symbol
-    // throwing on implicit conversion and replacing this refusal with a
-    // `TypeError` naming nothing.
-    throw new Error(
-      `Cannot send a \`${typeof value}\` on this connection: ${String(value)}`,
-    );
+    // Cast because `Array.isArray()` does not narrow a `readonly` array out of
+    // the union, though it does catch one at run time -- so the arm TypeScript
+    // still sees here cannot actually reach it.
+    return value as FabricValue;
   }
 }
 
@@ -630,10 +989,10 @@ export function isCellHandle<T = unknown>(
  * Notably, this preserves `CellHandle` instances when encountering
  * a `CellRef` referencing the same `CellHandle`.
  */
-function applyValue(
+function applyValue<T>(
   current: unknown,
   previous: unknown,
-  base: CellHandle,
+  base: CellHandle<T>,
 ): unknown {
   const cellRef = parseAsCellRef(current as JSONValue, base.ref());
 

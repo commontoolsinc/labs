@@ -541,9 +541,54 @@ jobs:
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
 
+      # The co-presence endpoint the shell EMBEDDED IN THIS BINARY offers to
+      # collaborative editors. `SHELL_PRESENCE_URL` is the repository variable
+      # holding the value; `PRESENCE_URL` is the process variable
+      # packages/shell/felt.config.ts reads and bakes in as the
+      # `$PRESENCE_URL` define — the same mapping deploy-shell-staging makes
+      # for the bucket shell, from its own variable. This binary is the one
+      # both estuary and rapids deploy, so both carry whatever is baked here,
+      # and changing the variable takes a rebuild before it reaches either.
+      # Unset omits the define and co-presence stays disabled, which is why
+      # this does not fail the way an unset API URL does: a shell with no
+      # presence endpoint is a working shell. The job then succeeds either way,
+      # so which of the two shells a binary carries would leave no trace in it;
+      # the step says which, and the log is where that answer is.
+      - name: 🔎 Validate the embedded shell's presence endpoint
+        timeout-minutes: *work-timeout
+        env:
+          PRESENCE_URL: ${{ vars.SHELL_PRESENCE_URL }}
+        run: |
+          if [ -n "$PRESENCE_URL" ]; then
+            # `deno eval` holds every permission implicitly, so the module read
+            # and the environment lookup need no flags; the subcommand takes no
+            # `--allow-read` or `--allow-env` and fails on either as an unknown
+            # argument. What reaches GITHUB_ENV is `URL.href`, so it is the
+            # normalized spelling the bundle carries and the grep below matches.
+            PRESENCE_URL="$(deno eval '
+              import { optionalPresenceUrl } from "./packages/shell/src/lib/presence-url.ts";
+              console.log(optionalPresenceUrl(Deno.env.get("PRESENCE_URL"))?.href ?? "");
+            ')"
+            echo "PRESENCE_URL=$PRESENCE_URL" >> "$GITHUB_ENV"
+            echo "The embedded shell gets presence service $PRESENCE_URL."
+          else
+            echo "SHELL_PRESENCE_URL is unset: the embedded shell gets no presence endpoint, so editor co-presence is off in every deployment of this binary."
+          fi
+
       - name: 🏗️ Build toolshed binary
         timeout-minutes: *work-timeout
-        run: deno task build-binaries toolshed
+        run: |
+          deno task build-binaries toolshed
+
+          # shell-frontend is what the binary serves in production. An endpoint
+          # that was configured but did not reach the bundle would deploy a
+          # shell whose co-presence is silently off, and nothing downstream
+          # looks, so confirm the define landed before the binary is uploaded.
+          if [ -n "$PRESENCE_URL" ] && \
+            ! grep -rqF -e "$PRESENCE_URL" packages/toolshed/shell-frontend/scripts; then
+            echo "::error::The embedded shell does not reference $PRESENCE_URL."
+            exit 1
+          fi
         env:
           COMMIT_SHA: ${{ github.sha }}
 
@@ -944,15 +989,21 @@ jobs:
           # then returns, so the test steps never race a not-yet-listening
           # server. The server logs to --log-file, which the launcher prints on
           # success and dumps if the server exits before binding.
-          # Space-root ensure OFF for test lanes (OW45 arm-B stage 1,
-          # RULED 2026-08-24: production spaces always get a default
-          # pattern; tests may switch it off — the ensured root's
-          # content-addressed computed cells otherwise land in every
-          # fixture space's subscriptions).
+          # Space-root ensure ON — the production default (unset knob).
+          # The lanes opted out while OW61's crash class was open (the
+          # ensured root's content-addressed computed cells landed in
+          # fixture spaces' plain subscriptions and the arrival throw
+          # killed the consumers); with the arrival containment (#6223)
+          # and the client absorb fix (#6292) merged the lanes run the
+          # production posture again, and these ON lanes ARE the CI
+          # coverage of the ensure at the true topology (the OW45/OW61
+          # rows' flagged gap). `schema-doc-quarantine` log lines are
+          # expected to be ZERO here; a live one is contained (not a
+          # process kill) but is evidence that another client
+          # absorb/ordering defect remains — OW61's residual trigger.
           CFTS_AI_GATEWAY_URL="" \
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
           EXPERIMENTAL_SERVER_EXECUTION=true \
-          SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false \
           ./common-binaries/toolshed --port="$TOOLSHED_PORT" \
             --background --log-file="$RUNNER_TEMP/toolshed.log"
 
@@ -1009,7 +1060,6 @@ jobs:
           SX_ON_IGNORE=$(deno run --allow-read ../../tasks/server-execution-on-skips.ts ${{ matrix.suite_name }})
           API_URL="http://localhost:${TOOLSHED_PORT}/" \
           EXPERIMENTAL_SERVER_EXECUTION=true \
-          SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false \
           INTEGRATION_TEST_FLAGS="--junit-path=../../test-results/${JUNIT_NAME}.xml ${SX_ON_IGNORE}" \
           deno task integration
 
@@ -1394,10 +1444,11 @@ jobs:
   # browser shell (build-toolshed-on) — the FULL ON posture, verified by the
   # probe below before the shard runs. Skips happen only through the explicit
   # per-phase lists in tasks/server-execution-on-skips.ts, printed by the run
-  # step — never by silent filtering (TWO `patterns` entries today, both
-  # OW45 arm B: default-app's reload STEP — the read-side residue — and
-  # the lunch-poll-vote FILE, #5744's client-start re-skip; each with its
-  # loud reason; the flip PR needs every list EMPTY).
+  # step — never by silent filtering (ONE `patterns` entry today: the
+  # lunch-poll-vote FILE entry, RESTORED 2026-08-28 after the lift PR's
+  # three probe boards each went red at that surface — the OW45
+  # forever-park, three supplier geometries mapped, two fixed, the
+  # mid-flight-compile residue open; the flip PR needs every list EMPTY).
   # No coverage collection and no cache save-back: the default lane owns
   # both; the compile byte cache is restored read-only (compiled bytes do not
   # depend on the flag).
@@ -1447,12 +1498,12 @@ jobs:
           chmod +x ./common-binaries/toolshed
           # --background waits until the server has bound its port before it
           # returns, so the test steps never race a not-yet-listening server.
-          # Space-root ensure OFF for test lanes (see the package ON
-          # lane's note; RULED 2026-08-24).
+          # Space-root ensure ON — the production default (see the
+          # package ON lane's note: the opt-out retired with OW61's
+          # arrival containment (#6223) and client absorb fix (#6292)).
           CFTS_AI_GATEWAY_URL="" \
           CFTS_AI_LLM_ANTHROPIC_API_KEY=fake \
           EXPERIMENTAL_SERVER_EXECUTION=true \
-          SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false \
           ./common-binaries/toolshed \
             --background --log-file="$RUNNER_TEMP/toolshed.log"
 
@@ -1511,12 +1562,20 @@ jobs:
           HEADLESS=1 \
           API_URL=http://localhost:8000/ \
           EXPERIMENTAL_SERVER_EXECUTION=true \
-          SERVER_EXECUTION_ENSURE_SPACE_ROOTS=false \
           PATTERN_INTEGRATION_SHARD="${{ matrix.shard }}/${{ matrix.total }}" \
           CF_COMPILE_CACHE_FILE="${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json" \
           deno test --no-check --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
             --junit-path=../../test-results/patterns-server-execution-on-${{ matrix.shard }}.xml \
             "${TEST_FILES[@]}"
+
+      - name: 📋 Upload toolshed log on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: toolshed-log-pattern-integration-server-execution-on-${{ matrix.shard }}
+          path: ${{ runner.temp }}/toolshed.log
+          retention-days: 14
+          if-no-files-found: ignore
 
       - name: 📤 Upload test timing data
         if: always()

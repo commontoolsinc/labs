@@ -1817,7 +1817,13 @@ describe("setup/start", () => {
     const resultCell = runtime.getCell(space, "opaque replay result");
 
     await runtime.runSynced(resultCell, trusted, { myProfile: profile });
-    const expectedPatternIdentity = getPatternIdentityRef(resultCell);
+    // A hand-built (keyless) piece writes no durable pattern pointer (the
+    // never-durable contract); the expected-identity guard resolves the
+    // session mint through the runner's session-side map.
+    expect(getPatternIdentityRef(resultCell)).toBeUndefined();
+    const expectedPatternIdentity = runtime.patternManager.getArtifactEntryRef(
+      trusted as unknown as object,
+    );
     expect(expectedPatternIdentity).toBeDefined();
 
     // Both a live same-pattern update and a stopped-piece replay receive the
@@ -2024,10 +2030,12 @@ describe("setup/start", () => {
     const rawValue = resultCell.get();
     expect(rawValue).toMatchObjectIgnoringSymbols({ output: 10 });
 
-    // Verify the pattern identity pointer is present after setup without
-    // passing the pattern (it was reused from the stored pointer).
+    // A hand-built (keyless) pattern writes no durable pattern pointer (the
+    // never-durable contract; L3(a), RULED 2026-08-27) — the reuse above
+    // resolved through the runner's session-side pointer instead, which the
+    // fresh-argument read and the restart below are the evidence for.
     const patternValue = resultCell.getMetaRaw("patternIdentity");
-    expect(patternValue).toBeDefined();
+    expect(patternValue).toBeUndefined();
 
     // Also verify the argument metadata cell was updated
     await resultCell.pull();
@@ -2259,7 +2267,13 @@ describe("setup/start", () => {
     await runtime.runSynced(resultCell, trusted, { input: 1 });
     runtime.runner.stop(resultCell);
     const boundTx = runtime.edit();
-    const currentIdentity = getPatternIdentityRef(resultCell);
+    // The piece is keyless: no durable pointer (never-durable contract). Its
+    // current identity is the session mint on the pattern object, and the
+    // expected-identity guard resolves it through the runner's session map.
+    expect(getPatternIdentityRef(resultCell)).toBeUndefined();
+    const currentIdentity = runtime.patternManager.getArtifactEntryRef(
+      trusted as unknown as object,
+    );
     expect(currentIdentity).toBeDefined();
 
     try {

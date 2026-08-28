@@ -8,12 +8,13 @@ import { readOnlyCfcView } from "../src/storage/extended-storage-transaction.ts"
 
 const signer = await Identity.fromPassphrase("runner-cfc-tx-state-contracts");
 
-// Contracts of the transaction's CFC control surface that no other suite
-// pins directly: the flow-labels anti-downgrade pin, the write-once sink
-// ceiling, late-activity invalidation of a prepared transaction, and the
-// diagnostics seams. All are part of the audit-S3 posture the read-only
-// state view (#4517) completes.
 describe("CFC tx state contracts", () => {
+  // Contracts of the transaction's CFC control surface that no other suite pins
+  // directly: the flow-labels anti-downgrade pin, the write-once sink ceiling,
+  // late-activity invalidation of a prepared transaction, and the diagnostics
+  // seams. All are part of the audit-S3 posture the read-only state view
+  // (#4517) completes.
+
   const withTx = async (
     fn: (runtime: Runtime, tx: ExtendedStorageTransaction) => Promise<void>,
   ) => {

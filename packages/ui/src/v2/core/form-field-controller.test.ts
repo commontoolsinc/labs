@@ -345,6 +345,7 @@ describe("FormFieldController registration behavior", () => {
     };
 
     // Initial state
+
     expect(registration.getValue()).toBe("original");
     expect(registration.isDirty()).toBe(false);
 

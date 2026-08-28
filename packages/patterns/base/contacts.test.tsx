@@ -21,6 +21,7 @@ import {
   Writable,
 } from "commonfabric";
 import {
+  findElement,
   findElementByText,
   hasText,
   propsOf,
@@ -40,6 +41,16 @@ function clickButton(root: unknown, label: string): void {
   const onClick = propsOf(button)?.onClick;
   if (typeof onClick === "object" && onClick !== null && "send" in onClick) {
     (onClick as ClickStream).send({});
+  }
+}
+
+// A field bound with `oncf-change` is reached the same way a button is: walk
+// to the element and send its stream.
+function sendChange(root: unknown, element: string, detail: unknown): void {
+  const node = findElement(root, element);
+  const onChange = propsOf(node)?.["oncf-change"];
+  if (typeof onChange === "object" && onChange !== null && "send" in onChange) {
+    (onChange as { send: (event: unknown) => void }).send({ detail });
   }
 }
 
@@ -82,6 +93,29 @@ export default pattern(() => {
   });
   const member = FamilyMember({ member: memberCell });
 
+  // Person reads through the `Person` interface, which has no `relationship`.
+  // This cell stores one anyway, standing in for the every-day case of a
+  // record that carries more than the reader it is handed to declares.
+  const widerCell = new Writable({
+    firstName: "Ada",
+    lastName: "Lovelace",
+    middleName: "",
+    nickname: "",
+    prefix: "",
+    suffix: "",
+    pronouns: "",
+    birthday: { month: 12, day: 10, year: 1815 },
+    photo: "",
+    email: "ada@example.com",
+    phone: "",
+    notes: "",
+    tags: [],
+    addresses: [],
+    socialProfiles: [],
+    relationship: "cousin",
+  });
+  const widerPerson = Person({ person: widerCell });
+
   // ==========================================================================
   // Actions
   // ==========================================================================
@@ -92,6 +126,12 @@ export default pattern(() => {
 
   const action_add_family_member = action(() => {
     clickButton(contacts[UI], "+ Family");
+  });
+
+  // Editing tags writes one field. Everything the writer cannot see has to
+  // still be there afterwards.
+  const action_edit_wider_tags = action(() => {
+    sendChange(widerPerson[UI], "cf-tags", { tags: ["colleague"] });
   });
 
   const action_rename_person = action(() => {
@@ -131,6 +171,17 @@ export default pattern(() => {
     member.member.relationship === "cousin"
   );
 
+  const assert_wider_intact = assert(() =>
+    widerCell.get().relationship === "cousin"
+  );
+
+  const assert_tags_written_and_wider_intact = assert(() =>
+    widerCell.get().tags.length === 1 &&
+    widerCell.get().tags[0] === "colleague" &&
+    widerCell.get().relationship === "cousin" &&
+    widerCell.get().email === "ada@example.com"
+  );
+
   // Each record builds a form with the fields it holds.
   const assert_forms_render = assert(() =>
     hasText(person[UI], "First Name") &&
@@ -153,9 +204,14 @@ export default pattern(() => {
 
       { action: action_rename_person },
       { assertion: assert_person_renamed },
+
+      { assertion: assert_wider_intact },
+      { action: action_edit_wider_tags },
+      { assertion: assert_tags_written_and_wider_intact },
     ],
     contacts,
     person,
     member,
+    widerPerson,
   };
 });

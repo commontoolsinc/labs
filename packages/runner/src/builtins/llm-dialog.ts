@@ -67,6 +67,7 @@ import {
 import { createFrozenRequestSnapshot } from "../cfc/request-snapshot.ts";
 import { cfcSchemaToObject, resolveCfcSchemaRefs } from "../cfc/schema-refs.ts";
 import { enqueueSinkRequestPostCommitEffect } from "../cfc/sink-request.ts";
+import { settleAbandonedRequest } from "./abandoned-request.ts";
 import { markEffectCompletion } from "../executor/effect-completion.ts";
 import { createTrustResolver } from "../cfc/trust.ts";
 import {
@@ -163,9 +164,9 @@ function stripInjectedResult(
   return copy;
 }
 
-// --------------------
+//
 // Helper types + utils
-// --------------------
+//
 
 type ToolKind = "handler" | "cell" | "pattern";
 type LLMObservationSerializationResult = CfcObservationResult;
@@ -1209,9 +1210,10 @@ type PinnedCell = {
   name: string; // Human-readable name for display
 };
 
-// ============================================================================
+//
 // Path Utility Functions
-// ============================================================================
+//
+
 // These utilities handle the conversion between LLM-facing path format (/of:...)
 // and internal runtime format (of:...). The LLM sees paths with a leading slash
 // to make it clear that strings are links.
@@ -3582,6 +3584,40 @@ export function llmDialog(
                 }),
                 parentCell,
               );
+            },
+            {
+              onRejected: () => {
+                // The turn is not in the conversation: the user's message, the
+                // pending flag and the request id all rode the transaction
+                // that was abandoned, so appending an assistant error message
+                // here would answer a turn no reader can see. What is left to
+                // do is put the announcement back, since it rode that
+                // transaction too, and take the pending flag down so nothing
+                // waits on a turn that will not run. The seam reports the
+                // refusal itself.
+                runtime.trackAsyncWork(
+                  settleAbandonedRequest(
+                    runtime,
+                    "llmDialog",
+                    `llmDialog:${nextRequestId}`,
+                    (settleTx) => {
+                      // The announcement rode the abandoned transaction, so it
+                      // is made again whoever owns the turn now.
+                      sendResult(settleTx, result);
+                      // Decided here rather than when this callback ran: a
+                      // newer turn can start in between, and taking its
+                      // pending flag down would report it as finished.
+                      const claim = internal.withTx(settleTx).key("requestId")
+                        .get();
+                      if (claim !== undefined && claim !== nextRequestId) {
+                        return;
+                      }
+                      pending.withTx(settleTx).set(false);
+                    },
+                  ),
+                  parentCell,
+                );
+              },
             },
           );
         },

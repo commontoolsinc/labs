@@ -56,6 +56,15 @@ a record: archive it to `docs/history/plans/` following the procedure in
   collaborative-field substrate, the first CodeMirror codec and editor
   integration, and the checkpoints and review gates required before a future
   WordGard codec.
+- [Seed: pattern verbs as server calls](server-pattern-verbs-seed.md)
+  records the ruled 2026-08-24 serverize direction — upload-pattern /
+  instantiate / setsrc as server calls, client speculative-local with
+  server-state winning, and the thin-CLI end-state — for the arc that picks
+  it up.
+- [Seed: codeless graph rebuild](codeless-graph-rebuild-seed.md) records,
+  for a parked arc, the facts that make a running piece's graph durably
+  reconstructible from scheduler state and module-addressed code — the
+  recovery class the 2026-08-27 keyless close-out ruled out of contract.
 - [Server-primary execution v2](server-execution-v2.md) sequences the
   greenfield rebuild that executes the server-side-execution v2 spec, with
   per-phase task and success-criteria checkboxes. Its
@@ -65,12 +74,7 @@ a record: archive it to `docs/history/plans/` following the procedure in
   walk deleted — the structural walk demoted to fallback — the client
   intent listener, the ruled double-dispatch implementation, the
   acceptance and the owner ruling set); it archives beside the stage-C
-  closeout when that build lands. The arc's
-  [OW54 give-up design](server-execution-v2/ow54-give-up-design.md) proposes,
-  for owner ratification, the durable terminal cover and explicit retry for a
-  served event whose dispatch or proven-no-commit finalization failure cannot
-  recover; it is a design artifact only and changes no live contract before
-  those rulings.
+  closeout when that build lands.
 - [Retention and CFC execution provenance](retention-and-provenance.md)
   sequences how long an invocation record is kept and what the runtime knows
   about who caused it — the `AgentActor` mint, trusted ingress, and metadata
@@ -81,6 +85,10 @@ a record: archive it to `docs/history/plans/` following the procedure in
   repairing, and rolling back many pieces as one reviewable, resumable
   operation over a shared plan — with batching as an execution strategy
   underneath rather than the subject.
+- [The Topics verb surface](topics-verb-surface.md) sequences how the Topics
+  board and topic grow their verbs without breaking the pieces already holding
+  data: the shape the board demands of a stored topic, the one rehearsed break
+  that narrowing it needs, and the items waiting on platform work.
 - [Topics migration rehearsal](topics-migration-rehearsal.md) is the concrete,
   unexecuted script for `setsrc`-ing the Estuary Topics board against a clone
   and then live.

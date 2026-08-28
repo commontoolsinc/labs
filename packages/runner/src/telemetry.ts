@@ -2,6 +2,7 @@
 // to record events that can be subscribed to in other
 // contexts to visualize or log events inside the runtime.
 
+import type { CfcRefusalDetail } from "./cfc/refusal-detail.ts";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 
 import { IMemoryChange } from "./storage/interface.ts";
@@ -101,9 +102,9 @@ export type SchedulerEventPreflightActionSummary = {
   writeCount: number;
 };
 
-// ============================================================
+//
 // Diagnosis types for non-settling / non-idempotent detection
-// ============================================================
+//
 
 /**
  * Report for a single action detected as non-idempotent.
@@ -274,6 +275,23 @@ export type RuntimeTelemetryMarker = {
   busyRatio: number;
   deferredActions?: NonSettlingDeferredAction[];
   deferredActionCount?: number;
+} | {
+  // Emitted every time CFC prepare refuses a transaction, BEFORE the commit
+  // boundary decides what that refusal is worth. That ordering is the point:
+  // a refusal is terminal — and reaches the scheduler's error channel — only
+  // when every reason is a verdict (cfc/verdict-reason.ts), so a refusal
+  // mixing a verdict with an unevaluable input is retried instead, and the
+  // only trace it leaves upstream is a graph that stops converging. This
+  // marker is the trace it leaves either way, so a host can name the cause of
+  // a non-settling episode rather than guess at a reactive cycle.
+  //
+  // It reports; it decides nothing. `terminal` says which arm the commit
+  // boundary will take, so a consumer can tell the refusal that will also
+  // arrive on the error channel from the one that will not.
+  type: "cfc.prepare-reject";
+  reasons: string[];
+  refusals: CfcRefusalDetail[];
+  terminal: boolean;
 };
 
 /**

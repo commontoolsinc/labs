@@ -1,9 +1,11 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import { resolveScopeKey, type ScopeKey } from "@commonfabric/memory/v2";
+import type { CfcRefusalDetail } from "../cfc/refusal-detail.ts";
 import type { Runtime } from "../runtime.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type {
   ChangeGroup,
+  CommitError,
   IExtendedStorageTransaction,
   IMemorySpaceAddress,
 } from "../storage/interface.ts";
@@ -25,6 +27,7 @@ import {
   type DiagnosisRecord,
   runIdempotencyRecheck,
 } from "./diagnosis.ts";
+import { reportDroppedCfcRejectedWrite } from "./cfc-rejection-report.ts";
 import { RetryImmediately } from "./retry-immediately.ts";
 import {
   getSchedulerActionName,
@@ -301,6 +304,7 @@ export function watchReactiveActionCommit(state: {
           toTerminalRejectionError(error, state.action),
         );
       }
+      abandonAction(state, error);
       return;
     }
 
@@ -325,6 +329,14 @@ export function watchReactiveActionCommit(state: {
     } else {
       // WATCH(scheduler-v2): exhausted retries can leave a piece registered
       // against rolled-back data (accepted zombie — spec §15 decision 9).
+      // The counters stay set, unlike the success and permanent arms. A spent
+      // budget is spent until this action commits something: clearing it here
+      // would hand every later failure a fresh budget, which under a failure
+      // that persists is a retry loop with no bound at all. So a run that a
+      // later input change triggers gets one attempt, and abandoning here is
+      // what an action that has not committed through a whole budget has
+      // earned.
+      abandonAction(state, error);
     }
   };
   return state.commitPromise.then(
@@ -340,6 +352,32 @@ export function watchReactiveActionCommit(state: {
       error,
     );
   });
+}
+
+/**
+ * Tell the work staged on this run's transaction that no further attempt at it
+ * is coming, and report the write if CFC enforcement is what refused it.
+ *
+ * The scheduler is the only party that knows this. A rejection does not say
+ * whether another attempt would fare better — CFC enforcement refuses a commit
+ * both for a verdict on the data and for metadata this replica has not read
+ * yet, and only the second converges by re-running — so a builtin waiting on
+ * the commit cannot tell a pause from an ending. This is the ending.
+ */
+function abandonAction(
+  state: {
+    readonly action: Action;
+    readonly tx: IExtendedStorageTransaction;
+    readonly getActionId: (action: Action) => string;
+  },
+  error: unknown,
+): void {
+  const actionId = state.getActionId(state.action);
+  reportDroppedCfcRejectedWrite(
+    error as { name?: string; message?: string },
+    actionId,
+  );
+  state.tx.abandonStagedWork(error as CommitError);
 }
 
 export function appendActionRunTrace(state: {
@@ -837,6 +875,11 @@ function rescheduleActionForImmediateRetry(
     // it runs again on the node's next real invalidation, with a fresh
     // budget — the same "until its input data changes" shape as OFF's.
     state.retries.delete(args.action);
+    abandonAction({
+      action: args.action,
+      tx: args.tx,
+      getActionId: state.getActionId,
+    }, args.error);
     logger.error(
       "schedule-error",
       `Action ${args.actionId} exhausted retries resolving inSpace names`,
@@ -852,8 +895,9 @@ function normalizeThrownError(error: unknown): Error {
 /**
  * A commit rejection is a plain result object, not an Error, so the error
  * channel gets a constructed one preserving the rejection's name and, for a
- * CFC refusal, its structured `reasons` — the discriminants a consumer needs
- * to tell a policy refusal from a thrown computation. A thrown computation
+ * CFC refusal, its structured `reasons` and `refusals` — the discriminants a
+ * consumer needs to tell a policy refusal from a thrown computation, and the
+ * remedy detail that names the inputs behind it. A thrown computation
  * carries a pattern frame the error decoration reads piece attribution from;
  * a commit rejection has none, so the attribution comes from the action's own
  * observation identity, with the scope prefix stripped back to the result
@@ -864,6 +908,7 @@ function toTerminalRejectionError(error: unknown, action: Action): Error {
     name?: string;
     message?: string;
     reasons?: readonly string[];
+    refusals?: readonly CfcRefusalDetail[];
   };
   const surfaced = new Error(
     typeof rejection?.message === "string" ? rejection.message : String(error),
@@ -871,6 +916,10 @@ function toTerminalRejectionError(error: unknown, action: Action): Error {
   if (typeof rejection?.name === "string") surfaced.name = rejection.name;
   if (rejection?.reasons !== undefined) {
     (surfaced as { reasons?: readonly string[] }).reasons = rejection.reasons;
+  }
+  if (rejection?.refusals !== undefined) {
+    (surfaced as { refusals?: readonly CfcRefusalDetail[] }).refusals =
+      rejection.refusals;
   }
   const identity = (action as Partial<TelemetryAnnotations>)
     .schedulerObservationIdentity;

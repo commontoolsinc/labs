@@ -27,6 +27,7 @@ export const TransactionAborted = (
 ): IStorageTransactionAborted => ({
   name: "StorageTransactionAborted",
   message: "Transaction was aborted",
+  abortedBeforeStorage: true,
   reason,
 });
 

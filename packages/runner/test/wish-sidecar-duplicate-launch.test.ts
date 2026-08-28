@@ -250,6 +250,7 @@ describe("wish profile-create sidecar duplicate launch", () => {
   });
 });
 
+//
 // The discrimination itself, exhaustively — this is the shared decision both
 // the commit-error arm AND the thrown-error arm of runSidecarInOwnTx consume
 // (a thrown conflict carries the same object shape as a commit-refused one).
@@ -258,6 +259,8 @@ describe("wish profile-create sidecar duplicate launch", () => {
 // its own reads), so the semantics are pinned here and each arm reduces to a
 // mechanical consume of this function; the flow-level pin above covers the
 // commit arm end to end.
+//
+
 describe("sidecarRunFailureDisposition", () => {
   const conflict = { name: "ConflictError" };
   const inconsistent = { name: "StorageTransactionInconsistent" };
@@ -319,10 +322,11 @@ describe("sidecarRunFailureDisposition", () => {
   });
 });
 
-// The winner predicate itself (Cubic P2, review round): an error ACCOUNT
-// left by commitPatternErrorUI must NOT count as a racing winner — yielding
-// to it would leave the surface permanently red and defeat the heal path.
 describe("sidecarValueIsWinner", () => {
+  // The winner predicate itself (Cubic P2, review round): an error ACCOUNT left
+  // by commitPatternErrorUI must NOT count as a racing winner — yielding to it
+  // would leave the surface permanently red and defeat the heal path.
+
   it("an empty cell is no winner", () => {
     expect(sidecarValueIsWinner(undefined)).toBe(false);
   });

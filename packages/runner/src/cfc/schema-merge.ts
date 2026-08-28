@@ -14,6 +14,7 @@ import { normalizeClause } from "./clause.ts";
 import { CfcSchemaMigrationError } from "./migration-reason.ts";
 import { writerClaimFilesCorrespond } from "./writer-claim-correspondence.ts";
 
+/** Every `ifc` key the runtime understands. {@link IfcKey} names one of them. */
 const IFC_KEYS = [
   "confidentiality",
   "integrity",
@@ -32,6 +33,16 @@ const IFC_KEYS = [
   "flowPrecisionClaim",
   "uiContract",
 ] as const;
+
+/**
+ * One of the `ifc` keys the runtime understands.
+ *
+ * A consumer that has to treat the keys differently from one another states a
+ * decision for each of them, and a mapped type over this union does not compile
+ * until it has. Adding a key here is what tells such a consumer that a new one
+ * arrived.
+ */
+export type IfcKey = typeof IFC_KEYS[number];
 
 const asSchemaObject = (
   schema: JSONSchema,

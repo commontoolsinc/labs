@@ -406,6 +406,27 @@ export type ServingLoopStats = {
      * intent tx) fold into the refusal. Counted once per refused EVENT,
      * however many contributions folded. */
     orphanDeliveriesRefused: number;
+
+    /** Mark/effects atomicity at the DISPATCH layer (events.md §4's
+     * exactly-once, the a04 write-side member — RULED 2026-08-27): served
+     * dispatches whose handler body DID NOT RUN (the runner's
+     * argument-did-not-resolve skip) and whose transaction was therefore
+     * WITHDRAWN instead of sealed. The dispatch stamper writes the
+     * entry's `consequenced` mark into the handler tx BEFORE the body
+     * runs, so letting the skip seal committed a 1-op mark-only
+     * consequence — the entry permanently consumed with ZERO effects
+     * and no error (a04's seqs 53/56). Counted per withdrawn DRAIN
+     * dispatch — an LT1 in-process copy's withdrawal is uncounted (no
+     * failure hook; its entry lands unmarked and the drain's own later
+     * copy counts if still unresolvable). The entry stays pending and
+     * re-drains (the deferral threshold hardens a permanently
+     * unresolvable argument into the visible §5 DROP notice). The
+     * withdrawal carries events.md §2's arrival-order barrier
+     * (review-6459 F1): same-space followers it sweeps count into
+     * `loadParkDeferrals` as arrival-barrier work, not here. A count
+     * that grows without `processed` settling names a handler whose
+     * argument never resolves. */
+    handlerNotRunDeferrals: number;
     /** The pre-dispatch LOAD-PARK deferrals (verification-coverage.md's
      * OW45 residue member, fixed 2026-08-26): a served event's dispatch
      * preflight parked on an in-flight replica load its closure reads
@@ -413,12 +434,39 @@ export type ServingLoopStats = {
      * event behind it in the same space — deferred to a later drain
      * instead of being sealed `{status: "dropped"}`. Counted per
      * DEFERRAL, head and barrier alike, so a persistently failing load
-     * reads as a growing count rather than a single event. Nonzero is
+     * reads as a growing count rather than a single event. A barrier
+     * follower may also have been swept behind a handler-not-run
+     * withdrawal or a piece-start deferral (events.md §5: every
+     * deferral arm carries §2's barrier), so read a nonzero count with
+     * `handlerNotRunDeferrals` beside it. Nonzero is
      * not by itself a fault (a revoked-then-remounted session heals in
      * a cycle or two); a count that grows without `processed` moving
-     * names a load that never heals, and the WARN beside each deferral
-     * carries the failing doc key and the error. */
+     * names a load that never heals. The head's debug record carries the
+     * failing doc key and error; its durable checkpoint carries the state. */
     loadParkDeferrals: number;
+
+    /** Typed failures observed for the arrival-order head itself. Barrier
+     * followers remain work counted by `loadParkDeferrals` only. */
+    loadParkFailures: number;
+
+    /** Durable pending delivery checkpoints, split by whether confirmed
+     * failed-state time is currently accruing. */
+    deliveryDeferralsActive: number;
+    deliveryFailuresActive: number;
+    maxAccumulatedDeliveryFailureMs: number;
+
+    /** Durable terminal covers, counted only after the carrying wave commits. */
+    needsAttention: {
+      total: number;
+      byPhase: {
+        "dispatch-load": number;
+        "commit-preparation": number;
+        "commit-finalization": number;
+      };
+    };
+    needsAttentionSealFailures: number;
+    deliveryCheckpointWriteFailures: number;
+    explicitRetries: number;
     /** Terminal drop/error notices SEALED onto a durable entry
      * (events.md §5: the notice IS the consequence and the frontier
      * advances past it). DROPS ONLY — a handler that THREW seals an
@@ -451,8 +499,8 @@ export type ServingLoopStats = {
 
   /** OW45 arm-B server-ensure stage 1 (design PR #6209 §10): the
    * SpaceServer's space-root ensure — one lease-guarded owed step per
-   * tenure (existence + freshness, no start). Counting caveat (review
-   * F4, recorded): `created`/`reconciled` count at SEAL-ACCEPT — the
+   * tenure (existence, no start). Counting caveat (review
+   * F4, recorded): `created` counts at SEAL-ACCEPT — the
    * ensure's transactions resolve when the wave admits them, and the
    * engine write rides the wave commit — so a wave later dropped
    * whole (lease-lost abort, replay refusal) leaves a count with no
@@ -469,10 +517,6 @@ export type ServingLoopStats = {
 
     /** Runs whose creation transaction materialized the root. */
     created: number;
-
-    /** Runs whose freshness reconcile moved the root ("updated" or
-     * "repaired-provenance" from the awaited default-root check). */
-    reconciled: number;
 
     /** Fail-closed skips: the space's ACL resolved no concrete owner
      * (missing, invalid, retracted, ANYONE-only). The tenure serves
@@ -543,7 +587,23 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
     lt1LeftoversPurged: 0,
     lt1LateSealsRefused: 0,
     orphanDeliveriesRefused: 0,
+    handlerNotRunDeferrals: 0,
     loadParkDeferrals: 0,
+    loadParkFailures: 0,
+    deliveryDeferralsActive: 0,
+    deliveryFailuresActive: 0,
+    maxAccumulatedDeliveryFailureMs: 0,
+    needsAttention: {
+      total: 0,
+      byPhase: {
+        "dispatch-load": 0,
+        "commit-preparation": 0,
+        "commit-finalization": 0,
+      },
+    },
+    needsAttentionSealFailures: 0,
+    deliveryCheckpointWriteFailures: 0,
+    explicitRetries: 0,
     dropped: 0,
   },
   memo: { hits: 0, misses: 0, inflight: 0 },
@@ -552,11 +612,54 @@ export const emptyServingLoopStats = (): ServingLoopStats => ({
   rootEnsure: {
     runs: 0,
     created: 0,
-    reconciled: 0,
     skippedNoOwner: 0,
     failures: 0,
   },
 });
+
+type ActiveDeliveryCheckpointStat = {
+  state: "failed" | "recovering";
+  readSpentMs: () => number;
+};
+
+const activeDeliveryCheckpoints = new WeakMap<
+  ServingLoopStats,
+  Map<string, ActiveDeliveryCheckpointStat>
+>();
+
+/** Refreshes delivery gauges from the active durable checkpoints. Failed-state
+ * time is read now rather than frozen at the checkpoint's last transition. */
+export const refreshDeliveryCheckpointStats = (
+  stats: ServingLoopStats,
+): void => {
+  const rows = activeDeliveryCheckpoints.get(stats);
+  if (rows === undefined) return;
+  stats.events.deliveryDeferralsActive = rows.size;
+  stats.events.deliveryFailuresActive =
+    [...rows.values()].filter((row) => row.state === "failed").length;
+  stats.events.maxAccumulatedDeliveryFailureMs = [...rows.values()].reduce(
+    (max, row) => Math.max(max, row.readSpentMs()),
+    0,
+  );
+};
+
+/** Maintain the process-wide delivery gauges from the per-space servers that
+ * own the underlying durable checkpoints. The rows stay out of the serialized
+ * health shape; only the recomputed gauges above are exposed. */
+export const updateDeliveryCheckpointStats = (
+  stats: ServingLoopStats,
+  key: string,
+  checkpoint?: ActiveDeliveryCheckpointStat,
+): void => {
+  let rows = activeDeliveryCheckpoints.get(stats);
+  if (rows === undefined) {
+    rows = new Map();
+    activeDeliveryCheckpoints.set(stats, rows);
+  }
+  if (checkpoint === undefined) rows.delete(key);
+  else rows.set(key, checkpoint);
+  refreshDeliveryCheckpointStats(stats);
+};
 
 /** The `derivedCommitsBySpace` cap (the settle.series bounding
  * discipline, applied to a keyed map: oldest-inserted row evicted). A

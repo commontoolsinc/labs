@@ -14,6 +14,10 @@
     "./in-process": "./src/in-process.ts",
     "./worker": "./src/worker/mod.ts",
     "./vdom-ops": "./src/vdom-ops.ts",
+    // The DOM-event shapes, which the worker protocol re-exports rather than
+    // re-declaring. Narrow on purpose: `main/mod.ts` would bring the applicator
+    // with it, which nothing importing a message shape wants.
+    "./events": "./src/main/events.ts",
     "./debug": "./src/debug.ts"
   },
   "imports": {

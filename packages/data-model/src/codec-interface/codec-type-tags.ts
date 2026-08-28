@@ -5,11 +5,9 @@
  */
 export const CODEC_TYPE_TAGS = Object.freeze(
   {
-    //
     // Tags for JavaScript primitives that aren't representable in JSON. These
     // tags are for wire formats that are layered on top of JSON and so require
     // _some_ way of indicating non-JSON-compatible values.
-    //
 
     /** Constant representing JavaScript type `bigint`. */
     BigInt: "BigInt@1",
@@ -26,11 +24,9 @@ export const CODEC_TYPE_TAGS = Object.freeze(
     /** Constant representing JavaScript type `undefined`. */
     Undefined: "Undefined@1",
 
-    //
     // Tags for the built-in "primitive" `FabricPrimitive` classes. These tags
     // are for wire formats for which instances of (one or more of) these
     // classes do not have protocol-specific forms.
-    //
 
     /** Constant for class `FabricBytes`. */
     Bytes: "Bytes@1",
@@ -50,13 +46,11 @@ export const CODEC_TYPE_TAGS = Object.freeze(
     /** Constant for class `FabricRegExp`. */
     RegExp: "RegExp@1",
 
-    //
     // Tags for the primary versions built-in non-primitive `FabricInstance`
     // classes, specifically the tags used to _encode_ instances from a live
     // system. This is as opposed to the tags used for versions of the (in some
     // sense) "same" classes which are recognized for _decoding_ only (and which
     // get decoded into the corresponding primary versions).
-    //
 
     /** Constant for class `FabricError`. */
     Error: "Error@1",
@@ -73,7 +67,6 @@ export const CODEC_TYPE_TAGS = Object.freeze(
     /** Constant for class `FabricSet`. */
     Set: "Set@1",
 
-    //
     // Tags for non-primary versions of built-in non-primitive classes. These
     // generally correspond to _older_ encoded forms. The property names of
     // these constants encode the versions of the corresponding classes (e.g.,
@@ -82,7 +75,6 @@ export const CODEC_TYPE_TAGS = Object.freeze(
     // As of this writing, there are none of these, so this section is empty
     // except for an example, waiting patiently for a glorious future where this
     // system needs to support data migration.
-    //
 
     /** Example version-2 constant. */
     ExampleV2: "Example@2",

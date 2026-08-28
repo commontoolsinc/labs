@@ -177,7 +177,7 @@ export class CFChat extends BaseElement {
     `,
   ];
 
-  /* ---------- Cell controller for messages binding ---------- */
+  /** Cell controller for messages binding */
   private _cellController = createCellController<BuiltInLLMMessage[]>(this, {
     timing: { strategy: "immediate" },
     onChange: () => {

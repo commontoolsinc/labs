@@ -130,6 +130,13 @@ describe("cfc group chat demo integration test", () => {
       "#host-message-draft",
       "Fake hello from Alice",
     );
+    // Wait for the send button to ENABLE before clicking, exactly like the
+    // trusted sends below (S-G, rootcause §2b): `hostSendDisabled` derives
+    // from the draft, and under the server-execution ON arm that derivation
+    // is a served round trip — clicking an interim-disabled cf-button
+    // retargets the click to the host element and the send never fires.
+    // Correct under the OFF arm too (the enable is just immediate there).
+    await waitForDisabled(page, "#host-send-button", false);
     await clickCfButton(page, "#host-send-button");
     await waitForRuntimeIdle(page);
     await waitForTextAbsent(

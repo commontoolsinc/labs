@@ -226,6 +226,10 @@ const s = toSchema<C>({
   list: [1, "a", true, null],
   nested: { inner: 3, deep: { x: "y" } },
   constant: E.V,
+  wrappedParen: ("p"),
+  wrappedCast: "c" as string,
+  wrappedSatisfies: "t" satisfies string,
+  wrappedNonNull: "n"!,
 });
 export { s };
 `);
@@ -236,4 +240,11 @@ export { s };
   assertEquals(schema.nested, { inner: 3, deep: { x: "y" } });
   assertEquals(schema.constant, 5);
   assert(!("undef" in schema), "undefined option should be dropped");
+  // Each wrapper spelling a .tsx source can carry reaches the same value; the
+  // evaluator reads the shared set rather than a hand-written subset. The
+  // angle-bracket assertion is JSX in .tsx and so is not among them.
+  assertEquals(schema.wrappedParen, "p");
+  assertEquals(schema.wrappedCast, "c");
+  assertEquals(schema.wrappedSatisfies, "t");
+  assertEquals(schema.wrappedNonNull, "n");
 });

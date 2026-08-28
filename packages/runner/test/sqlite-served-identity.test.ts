@@ -29,7 +29,11 @@ import {
   sqliteQuery,
   sqliteRunActingPrincipal,
 } from "../src/builtins/sqlite-builtins.ts";
-import { stampWaveRunContext } from "../src/executor/wave.ts";
+import {
+  stampWaveRunContext,
+  WaveAccumulator,
+  waveSettlementOf,
+} from "../src/executor/wave.ts";
 
 const serviceSigner = await Identity.fromPassphrase("ow53 service");
 const aliceSigner = await Identity.fromPassphrase("ow53 alice");
@@ -181,7 +185,128 @@ describe("sqlite-served-identity", () => {
     }
   });
 
-  // ---- The cleared-read half (CFC Phase 3.b under served execution) ----
+  it("replays handle materialization when the first transaction does not commit", async () => {
+    const first = runtime.edit();
+    const parent = runtime.getCell(
+      space,
+      `ow53 retry parent ${crypto.randomUUID()}`,
+      undefined,
+      first,
+    );
+    const inputs = runtime.getImmutableCell(
+      space,
+      {
+        tables: {
+          notes: table({ id: "integer primary key", body: "text" }),
+        },
+      },
+      undefined,
+      first,
+    );
+    let handle: Cell<SqliteDbRef> | undefined;
+    let publications = 0;
+    const builtin = sqliteDatabase(
+      inputs as never,
+      (_tx, result) => {
+        handle = result as Cell<SqliteDbRef>;
+        publications++;
+      },
+      () => {},
+      [parent],
+      parent,
+      runtime,
+    );
+
+    builtin.action(first);
+    expect(handle!.withTx(first).get()).toBeDefined();
+    first.abort(new Error("reject the first scheduler attempt"));
+
+    const retry = runtime.edit();
+    builtin.action(retry);
+    expect(handle!.withTx(retry).get()).toBeDefined();
+    expect((await retry.commit()).error).toBeUndefined();
+
+    expect(handle!.get()).toBeDefined();
+    expect(publications).toBe(2);
+  });
+
+  it("replays handle materialization when a successful seal is withdrawn", async () => {
+    const setup = runtime.edit();
+    const parent = runtime.getCell(
+      space,
+      `ow53 wave retry parent ${crypto.randomUUID()}`,
+      undefined,
+      setup,
+    );
+    parent.withTx(setup).set({});
+    const inputs = runtime.getImmutableCell(
+      space,
+      {
+        tables: {
+          notes: table({ id: "integer primary key", body: "text" }),
+        },
+      },
+      undefined,
+      setup,
+    );
+    expect((await setup.commit()).error).toBeUndefined();
+
+    // This test abandons rather than commits the wave, so the basis sequence
+    // is not consulted.
+    const wave = new WaveAccumulator({
+      space,
+      basisSeq: 0,
+      scopeKeyIdentity: {
+        principal: serviceSigner.did(),
+        sessionId: "ow53-wave-retry",
+      },
+      replicaFor: (target) => storageManager.open(target).replica,
+    });
+    runtime.installSealDestination(wave);
+
+    let handle: Cell<SqliteDbRef> | undefined;
+    let publications = 0;
+    const builtin = sqliteDatabase(
+      inputs as never,
+      (_tx, result) => {
+        handle = result as Cell<SqliteDbRef>;
+        publications++;
+      },
+      () => {},
+      [parent],
+      parent,
+      runtime,
+    );
+
+    let settlement: ReturnType<typeof waveSettlementOf>;
+    try {
+      const first = runtime.edit();
+      stampWaveRunContext(first, {
+        actionId: "sqlite-database-withdrawal",
+        kind: "derivation",
+      });
+      builtin.action(first);
+      expect((await first.commit()).error).toBeUndefined();
+      settlement = waveSettlementOf(first);
+      expect(settlement).toBeDefined();
+    } finally {
+      runtime.clearSealDestination();
+      wave.abandon("test withdrawal");
+      await wave.settled();
+    }
+
+    expect((await settlement!).error).toBeDefined();
+    expect(handle!.get()).toBeUndefined();
+
+    const retry = runtime.edit();
+    builtin.action(retry);
+    expect(handle!.withTx(retry).get()).toBeDefined();
+    expect((await retry.commit()).error).toBeUndefined();
+    expect(handle!.get()).toBeDefined();
+    expect(publications).toBe(2);
+  });
+
+  // The cleared-read half (CFC Phase 3.b under served execution)
 
   const KEY = /z[1-9A-HJ-NP-Za-km-z]+/g;
 

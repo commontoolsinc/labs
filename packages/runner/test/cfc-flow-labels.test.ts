@@ -31,11 +31,12 @@ const replicaEntries = (
   return replica.getDocument(id)?.cfc?.labelMap?.entries ?? [];
 };
 
-// S16 default transition: a transaction's outputs are tainted by what it
-// read. Without this, "read labeled data, write a derived plain value to an
-// unlabeled cell" launders the label away (audit S16) — the acceptance
-// scenario for the cfcFlowLabels dial.
 describe("CFC flow labels (default transition)", () => {
+  // S16 default transition: a transaction's outputs are tainted by what it
+  // read. Without this, "read labeled data, write a derived plain value to an
+  // unlabeled cell" launders the label away (audit S16) — the acceptance
+  // scenario for the cfcFlowLabels dial.
+
   it("persists derived flow labels on laundered value copies and gates downstream egress", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({

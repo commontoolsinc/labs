@@ -28,7 +28,10 @@ export type Capabilities = {
   nativeModelToolIds?: LLMNativeModelToolId[];
 };
 
+//
 // Gateway /v1/models response types
+//
+
 type GatewayModelCapabilities = {
   type?: string;
   contextWindow?: number;

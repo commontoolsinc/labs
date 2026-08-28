@@ -7,12 +7,13 @@ rendering to the host. They live under `packages/patterns/primitives/` and
 form the `primitive` tier in
 [`packages/patterns/index.md`](../../../packages/patterns/index.md).
 
-**Status: the tier currently has no occupants.** The first candidate
-(`EditableList`) was built, proven against real callers, and retired — see
-[Lessons](#lessons-from-the-first-primitive) below, which is required reading
-before building the next one. This document records the composition contract
-that work validated (the contract holds; the candidate didn't) plus the entry
-bar a new primitive must clear.
+**Status: six occupants, all adopted by the pattern index** — see
+[`packages/patterns/index.md`](../../../packages/patterns/index.md). An earlier
+candidate (`EditableList`) was built, proven against real callers, and retired —
+see [Lessons](#lessons-from-the-first-primitive) below, which is required
+reading before building the next one. This document records the composition
+contract that work validated (the contract holds; the candidate didn't) plus the
+entry bar a new primitive must clear.
 
 ## Entry bar: adopter-first
 
@@ -21,6 +22,10 @@ Do not build a primitive from a duplication census alone. Before any code:
 1. **Name a real adopter** — an existing, non-fixture pattern whose concrete
    code shrinks or simplifies, agreed in advance. "Future patterns will want
    this" is the orphaned-`suggestable/` failure mode; it doesn't count.
+   A published pattern index counts as an adopter only on the same evidence: a
+   shape sessions have actually built for themselves, read off the corpus, not
+   a shape one might plausibly want. The six current primitives were each
+   chosen against an entry already in the index that rebuilt it from scratch.
 2. **Two callers from different families** before the primitive is considered
    proven (one caller just reproduces that caller's needs with the serial
    numbers filed off).
@@ -96,7 +101,9 @@ For primitives that own a list/set of items, core mutations address an item by
 Two things are explicitly **not** the identity model:
 
 - **Array indices.** Index-based selection/mutation breaks under reordering and
-  concurrent edits.
+  concurrent edits. Note also that a reordering has to be written into the cell
+  the default `[UI]` maps, not derived beside it, or the rows never move — see
+  [mapped-list-order-from-computed](../../development/debugging/gotchas/mapped-list-order-from-computed.md).
 - **User-land id fields.** NEVER mint `id` properties (UUIDs, counters,
   timestamps) on items. The reactive fabric is an object graph, not a keyed
   database; synthetic ids fight the reactivity system (in `.map()` callbacks an

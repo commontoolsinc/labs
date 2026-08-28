@@ -16,7 +16,9 @@ import {
   type StatOpts,
 } from "./platform.ts";
 
-// --- Library paths ---
+//
+// Library paths
+//
 
 /**
  * Candidate libfuse locations, in preference order. FUSE-T's installer
@@ -37,7 +39,9 @@ export function libfusePaths(
   return paths;
 }
 
-// --- Darwin-specific FFI symbols (FUSE v2) ---
+//
+// Darwin-specific FFI symbols (FUSE v2)
+//
 
 const DARWIN_SYMBOLS = {
   ...COMMON_SYMBOLS,
@@ -65,7 +69,7 @@ const DARWIN_SYMBOLS = {
 
 type DarwinLib = Deno.DynamicLibrary<typeof DARWIN_SYMBOLS>;
 
-// --- struct stat (macOS arm64, 144 bytes) ---
+// struct stat (macOS arm64, 144 bytes):
 //   dev_t st_dev      @ 0   (i32)
 //   mode_t st_mode    @ 4   (u16)
 //   nlink_t st_nlink  @ 6   (u16)
@@ -103,7 +107,9 @@ function writeStat(buf: ArrayBuffer, opts: StatOpts): void {
   view.setBigInt64(96, BigInt(opts.size), true); // st_size
 }
 
-// --- fuse_entry_param (176 bytes) ---
+//
+// fuse_entry_param (176 bytes)
+//
 
 const ENTRY_PARAM_SIZE = 176;
 const writeEntryParam = makeWriteEntryParam(
@@ -112,7 +118,7 @@ const writeEntryParam = makeWriteEntryParam(
   ENTRY_PARAM_SIZE,
 );
 
-// --- fuse_file_info (macOS 64-bit, 40 bytes) ---
+// fuse_file_info (macOS 64-bit, 40 bytes):
 //   int flags            @  0  (i32)
 //   unsigned long fh_old @  8  (u64, deprecated)
 //   int writepage        @ 16  (i32)
@@ -140,20 +146,26 @@ function writeFileInfo(ptr: Deno.PointerValue, fh: bigint): void {
   fiArr[FH_OFFSET / 8] = fh; // offset 24 = index 3
 }
 
-// --- O_* flags (macOS) ---
+//
+// O_* flags (macOS)
+//
 
 const O_CREAT = 0x0200;
 const O_TRUNC = 0x0400;
 const O_APPEND = 0x0008;
 
-// --- Errno constants (macOS) ---
+//
+// Errno constants (macOS)
+//
 
 const ENOTEMPTY = 66;
 const ENOSYS = 78;
 const ENODATA = 93; // macOS ENOATTR
 const ENOTSUP = 45;
 
-// --- fuse_lowlevel_ops offsets (v2) ---
+//
+// fuse_lowlevel_ops offsets (v2)
+//
 
 const OPS_SIZE = 320;
 const OPS_OFFSETS = {
@@ -192,12 +204,16 @@ const OPS_OFFSETS = {
 
 const FUSE_ARGS_STRUCT_SIZE = 24;
 
-// --- Module state ---
+//
+// Module state
+//
 
 let fullLib: DarwinLib | null = null;
 let loadedProvider: FuseProvider = "unknown";
 
-// --- Platform implementation ---
+//
+// Platform implementation
+//
 
 const darwinPlatform: FusePlatform = {
   provider() {

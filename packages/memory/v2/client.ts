@@ -1,5 +1,6 @@
 import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
+import { unsafeObjectKeyIn } from "@commonfabric/utils/types";
 
 import {
   type ClientCommit,
@@ -11,6 +12,7 @@ import {
   type EntityIdListResult,
   type EntityIdLookupResult,
   type EntitySnapshot,
+  type EventAttentionResolveResult,
   getMemoryProtocolFlags,
   type GraphQuery,
   type GraphQueryResult,
@@ -31,7 +33,9 @@ import {
   type SqliteDbRef,
   type SqliteParamsWire,
   type SqliteQueryResult,
+  type SqliteQueryWireResult,
   type SqliteRegisterDiskSourceResult,
+  sqliteRowFromWire,
   type WatchAddResult,
   type WatchSetResult,
   type WatchSpec,
@@ -314,6 +318,14 @@ export class Client {
       if (result.error.retriable !== undefined) {
         (error as Error & { retriable?: boolean }).retriable =
           result.error.retriable;
+      }
+      if (result.error.permanentEvidence === true) {
+        (error as Error & { permanentEvidence?: true }).permanentEvidence =
+          true;
+      }
+      if (result.error.aclRevision !== undefined) {
+        (error as Error & { aclRevision?: number }).aclRevision =
+          result.error.aclRevision;
       }
       throw error;
     }
@@ -780,6 +792,27 @@ export class SpaceSession {
     return result;
   }
 
+  async resolveEventAttention(
+    eventId: string,
+    seq: number,
+    sidecarId: string,
+    action: "retry" | "dismiss",
+  ): Promise<EventAttentionResolveResult> {
+    this.#assertOpen();
+    const result = await this.client.request<EventAttentionResolveResult>({
+      type: "event.attention.resolve",
+      requestId: crypto.randomUUID(),
+      space: this.space,
+      sessionId: this.#sessionId,
+      eventId,
+      seq,
+      sidecarId,
+      action,
+    });
+    this.noteResult(result.serverSeq);
+    return result;
+  }
+
   async listEntityIds(
     options: EntityIdListOptions = {},
   ): Promise<EntityIdListResult | undefined> {
@@ -831,15 +864,24 @@ export class SpaceSession {
     params?: SqliteParamsWire,
   ): Promise<SqliteQueryResult> {
     this.#assertOpen();
-    return await this.client.request<SqliteQueryResult>({
+    const paramFields = params === undefined
+      ? {}
+      : !Array.isArray(params) && unsafeObjectKeyIn(params) !== undefined
+      ? { namedParams: Object.entries(params) }
+      : { params };
+    const result = await this.client.request<SqliteQueryWireResult>({
       type: "sqlite.query",
       requestId: crypto.randomUUID(),
       space: this.space,
       sessionId: this.#sessionId,
       db,
       sql,
-      params,
+      ...paramFields,
     });
+    return {
+      rows: result.rows.map(sqliteRowFromWire),
+      columns: result.columns,
+    };
   }
 
   // No `sqliteExecute` write RPC: writes go through the commit fold (a `sqlite`

@@ -137,7 +137,7 @@ cell means none confirmed — check the component source before assuming.
 | `cf-hgroup` | Horizontal group with automatic gap management | |
 | `cf-hscroll` | Horizontal scroll container | |
 | `cf-hstack` | Horizontal stack layout (flexbox) (see [stacks](#cf-vstack--cf-hstack)) | |
-| `cf-iframe` | Iframe for executing arbitrary scripts | |
+| `cf-iframe` | Sandboxed guest with explicit cell, stream, SQLite, or service capabilities | |
 | `cf-image-input` | Image capture/upload with compression, EXIF, camera support | |
 | `cf-input` | Text input with validation and reactive binding | `$value` |
 | `cf-input-otp` | One-time-password input with individual digit fields | |

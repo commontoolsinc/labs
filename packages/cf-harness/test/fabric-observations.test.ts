@@ -7,6 +7,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { type Runtime, RuntimeTelemetry } from "@commonfabric/runner";
+import type { CfcRefusalDetail } from "@commonfabric/runner/cfc";
 import {
   comparableEntityHash,
   fabricRuntimeObservations,
@@ -15,8 +16,34 @@ import {
 type ErrorListener = (error: {
   pieceId?: string;
   patternId?: string;
+  name?: string;
   message: string;
+  refusals?: readonly CfcRefusalDetail[];
 }) => void;
+
+/** One writer-fit refusal, as the commit boundary mints it. */
+const WRITER_FIT_REFUSAL: CfcRefusalDetail = {
+  gate: "writer-fit",
+  target: {
+    space: "did:key:z6MkTest",
+    id: "of:fid1:target",
+    scope: "space",
+    path: [],
+  },
+  offendingAtoms: ['"secret"'],
+  inputs: [{
+    read: {
+      space: "did:key:z6MkTest",
+      id: "of:fid1:source",
+      scope: "space",
+      path: ["secret"],
+    },
+    labelPath: ["secret"],
+    atoms: ['"secret"'],
+  }],
+  attribution: "complete",
+  reason: 'writer-fit confidentiality misfit: "secret"',
+};
 
 // A stand-in carrying exactly the two surfaces the observer subscribes to.
 const stubRuntime = (): {
@@ -54,6 +81,30 @@ describe("fabric-observations", () => {
     expect(observations.errorsSince(start, "fid1:abc").map((e) => e.message))
       .toEqual(["boom"]);
     expect(observations.errorsSince(start, "fid1:other")).toEqual([]);
+  });
+
+  it("carries a commit refusal's structured refusals onto the record", () => {
+    const { runtime, emitError } = stubRuntime();
+    const observations = fabricRuntimeObservations(runtime);
+    const start = observations.sequence();
+    emitError({
+      pieceId: "of:fid1:abc",
+      name: "CfcCommitRefusalError",
+      message: "CFC enforcement rejected commit",
+      refusals: [WRITER_FIT_REFUSAL],
+    });
+    expect(observations.errorsSince(start, "fid1:abc")[0]!.refusals)
+      .toEqual([WRITER_FIT_REFUSAL]);
+  });
+
+  it("leaves `refusals` absent on an error that carries none", () => {
+    const { runtime, emitError } = stubRuntime();
+    const observations = fabricRuntimeObservations(runtime);
+    const start = observations.sequence();
+    emitError({ pieceId: "of:fid1:abc", message: "boom" });
+    expect(observations.errorsSince(start, "fid1:abc")[0]!).not.toHaveProperty(
+      "refusals",
+    );
   });
 
   it("drops an error without a piece id rather than throwing in the handler", () => {

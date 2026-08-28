@@ -207,7 +207,7 @@ Deno.test("worker reconciler - Cell<Props> handling", async (t) => {
       rootCell: MockCell,
     ): () => void => reconciler.mount(rootCell as any);
 
-    // --- Test cases ---
+    // Test cases
 
     await t.step("Cell<Props> renders primitive props", async () => {
       const collector = createOpsCollector();

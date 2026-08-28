@@ -190,13 +190,9 @@ function toDisplay(
   // from enumerable properties it does not have, so a `FabricBytes` in an
   // argument or result renders as `{}`. The guard wants to be a shape test
   // (`isPlainObject`) with the special objects named by
-  // `toCompactDebugString()` instead of descended.
-  //
-  // Note this is the second place such a value is lost, not the first: it
-  // reaches the client through `postMessage`, and structured clone drops the
-  // prototype and private fields on the way. Fixing this alone changes a `{}`
-  // into a `{}` until the wire carries one, which `codec-realm` is the
-  // mechanism for.
+  // `toCompactDebugString()` instead of descended. The value arrives intact --
+  // the connection carries it as a `codec-realm` encoding, class and all -- so
+  // this walk is the only place it is lost.
   if (typeof value === "object" && value !== null) {
     const out: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value)) {

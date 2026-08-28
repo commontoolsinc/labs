@@ -333,7 +333,10 @@ export class CFTextarea extends BaseElement {
   #internals: ElementInternals;
   private _generatedAriaLabel: string | null = null;
 
+  //
   // Cache + initial setup
+  //
+
   private _textarea: HTMLTextAreaElement | null = null;
   private _cellController = createStringCellController(this, {
     timing: {

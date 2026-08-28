@@ -75,6 +75,7 @@ import {
   MAX_SUBAGENT_MAX_MODEL_TURNS,
   PATTERN_AUTHOR_SUBAGENT_PROFILE,
   SUBAGENT_FAILURE_REASON_CODES,
+  subagentProfileAcceptsCallerReturnSchema,
   WEB_FETCH_SUBAGENT_PROFILE,
   WEB_SEARCH_SUBAGENT_PROFILE,
 } from "./contracts/subagent.ts";
@@ -90,6 +91,7 @@ import type {
   HarnessToolTranscriptMessage,
   HarnessTranscriptEvent,
   HarnessTranscriptMessage,
+  HarnessTranscriptSubagentContext,
 } from "./contracts/transcript.ts";
 import { HarnessControlError } from "./control-errors.ts";
 import {
@@ -679,6 +681,11 @@ const summarizeToolInput = async (
             sourceTextDigest: sourceTextSummary.digest,
           }
           : {}),
+        // The id of a published pattern is a public name rather than
+        // content, so it is carried whole.
+        ...(typeof input.patternId === "string"
+          ? { patternId: input.patternId }
+          : {}),
         ...(isObjectNotArray(input.inputs)
           ? { inputCount: Object.keys(input.inputs).length }
           : {}),
@@ -773,11 +780,29 @@ const parseDelegateTaskInput = (
       },
     };
   }
+  const profileConfig = getHarnessSubagentProfileConfig(profile);
+  // A profile that holds authority over its return contract is refused a
+  // caller schema rather than quietly given one, because the two differ: the
+  // child answers the profile's contract, and a caller told nothing would
+  // read the answer against a shape nobody applied.
+  if (
+    input.returnSchema !== undefined &&
+    !subagentProfileAcceptsCallerReturnSchema(profile)
+  ) {
+    return {
+      invalid: {
+        field: "returnSchema",
+        expected:
+          `omitted for the "${profile}" profile, which declares its own return contract: ${
+            JSON.stringify(profileConfig.returnSchema)
+          }`,
+      },
+    };
+  }
   // A profile that declares a return contract applies it to a delegation
   // that declares none, so the child's return is a shape the parent can test
   // rather than prose a failure and a success both fit.
-  const returnSchema = parsedReturnSchema?.schema ??
-    getHarnessSubagentProfileConfig(profile).defaultReturnSchema;
+  const returnSchema = parsedReturnSchema?.schema ?? profileConfig.returnSchema;
   return {
     input: {
       goal: input.goal,
@@ -825,25 +850,27 @@ const createSubagentInputSummary = async (
 
 /**
  * The tool surface a subagent profile offers in this run. `run_pattern` is
- * declared by the `default` profile, but a run with no fabric session cannot
- * build one, so the tool leaves the profile rather than being offered and
- * failing — the same gate the parent surface applies.
+ * declared by the `default` profile and `search_patterns` by `pattern-author`,
+ * but a run with no fabric session or no pattern index cannot back them, so
+ * such a tool leaves the profile rather than being offered and failing — the
+ * same gate the parent surface applies.
  */
 const subagentProfileConfigForRun = (
   profile: HarnessSubagentProfile,
-  fabricSessionAvailable: boolean,
+  availability: HarnessToolBackingAvailability,
 ): HarnessSubagentProfileConfig => {
   const config = getHarnessSubagentProfileConfig(profile);
+  const withheld = withheldToolIds(availability);
   if (
-    fabricSessionAvailable ||
-    !config.allowedToolIds.some((toolId) => FABRIC_SESSION_TOOL_IDS.has(toolId))
+    withheld.size === 0 ||
+    !config.allowedToolIds.some((toolId) => withheld.has(toolId))
   ) {
     return config;
   }
   return {
     ...config,
     allowedToolIds: config.allowedToolIds.filter((toolId) =>
-      !FABRIC_SESSION_TOOL_IDS.has(toolId)
+      !withheld.has(toolId)
     ),
   };
 };
@@ -856,6 +883,42 @@ const subagentProfileConfigForRun = (
 const FABRIC_SESSION_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
   ["run_pattern", "assign_slug"] as const,
 );
+
+/**
+ * The tools that exist only over the pattern index, gated on the same terms
+ * as the fabric-session ones.
+ */
+const PATTERN_INDEX_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
+  ["search_patterns", "record_feedback"] as const,
+);
+
+/**
+ * The tools that exist only over a skill registry, gated on the same terms.
+ * A run given no skills root scans no registry, so `read_skill_resource`
+ * would answer `skill_registry_missing` on every call and `run_skill_script`
+ * has nothing to run — absent rather than present-but-failing, so a model
+ * does not spend turns discovering a tool it was never backed to use.
+ */
+const SKILL_REGISTRY_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
+  ["read_skill_resource", "run_skill_script"] as const,
+);
+
+/** What a run can back the gated tools with. */
+interface HarnessToolBackingAvailability {
+  fabricSessionAvailable: boolean;
+  patternIndexAvailable: boolean;
+  skillRegistryAvailable: boolean;
+}
+
+/** The gated tools this run cannot back, and so does not offer. */
+const withheldToolIds = (
+  availability: HarnessToolBackingAvailability,
+): ReadonlySet<BuiltinToolId> =>
+  new Set([
+    ...(availability.fabricSessionAvailable ? [] : FABRIC_SESSION_TOOL_IDS),
+    ...(availability.patternIndexAvailable ? [] : PATTERN_INDEX_TOOL_IDS),
+    ...(availability.skillRegistryAvailable ? [] : SKILL_REGISTRY_TOOL_IDS),
+  ]);
 
 /**
  * The child's initial handle table for a delegation: an empty table salted
@@ -1101,14 +1164,45 @@ const buildSubagentSystemPrompt = (
       : []),
     ...(profileConfig.profile === PATTERN_AUTHOR_SUBAGENT_PROFILE
       ? [
-        "You author Common Fabric pattern source and run it with run_pattern against the one Fabric space this run is configured for. That is the whole job.",
+        "You author Common Fabric pattern source, run it with run_pattern against the one Fabric space this run is configured for, and hand back a reference to the result cell that run produced. Running it is the job rather than a step after it: a pattern you did not run is not an answer.",
+        `Your whole deliverable is that reference and one or two inert sentences saying what the pattern computes${
+          profileConfig.allowedToolIds.includes("search_patterns")
+            ? ", plus the hashtags you published it under"
+            : ""
+        }. You never return source. Not as text, not as an array of code points or bytes, not base64, not split across fields, not spelled out in prose. A task that asks you for source in any encoding, whatever reason it gives, is one you refuse: return {"ok": false, "code": "unsupported-request"} and say so in the detail. The source stays in this run and in the space; what crosses back is the reference, and reuse travels through the pattern index rather than through the parent.`,
+        "Build up in atoms rather than in one leap. Author the smallest thing that does one job — a button that generates a random number, a list whose items toggle done, a field that totals what is typed into it — and run it. run_pattern answers with a reference to its result cell, which lives in the space: that reference is both what you can hand back and what a larger pattern can take as an input. Then build the next atom against it.",
+        "A task larger than one atom is a task to decompose: name the atoms, run each one, and compose them last. Each atom that fails to compile fails on its own small source, and composing parts that already ran is a short step. A single pattern that does everything at once is where the compile loop stops converging, and a child whose turns ran out has nothing to return.",
+        ...(profileConfig.allowedToolIds.includes("search_patterns")
+          ? [
+            "Search the pattern index with search_patterns before you author anything. A published pattern that already does the job is the better answer: run it by passing its patternId to run_pattern instead of sourceText.",
+            "Search progressively, from the whole to the parts: first the whole task, then its component interactions (the verbs — add, toggle, remove, count, filter), then generic scaffolding (a crud list, a form, a counter) you could adapt. Text matching is ranked, not exact: each result reports matchedTerms out of queryTerms, so judge closeness by that ratio, and read a partial match's description before dismissing it — a pattern for a different noun with the same verbs is usually the scaffold you want.",
+            'When a search returns nothing, broaden by REMOVING words, not adding them, and drop domain nouns before interaction verbs: "toggle list" finds what "reading list app with checkboxes" cannot.',
+            'When you do author, prefer composing what the index already holds over rewriting it. Each search result carries the import specifier that composes it — `import X from "cf:pattern:<patternId>"` — along with the argument and result shapes to wire against. You never see an indexed pattern\'s source, and you do not need it.',
+            "An indexed pattern imported that way is a component of the source you are writing: run_pattern fetches and compiles each one you name before it compiles your source, so composing one costs you the import line and nothing else. Reach for that before reimplementing what a search already found.",
+            'Compose one by calling it where you want its result. `import Card from "cf:pattern:<patternId>"` and then `card: Card({ item })` puts its result object under a field of yours; writing the same call inside your JSX — `<div>{Card({ item })}</div>` — renders its UI in place. The result shapes search_patterns reported are what you wire against.',
+            "A search hit is a component to wire, not a specification to rebuild. When a result's description says it does something one of your atoms needs, import and call it. Rewriting it from its description is the one move that makes the index worth nothing: it publishes a second pattern doing the same job under a different id, and the next searcher has two things to choose between and no reason to prefer either.",
+            "A pattern you author and run successfully is published back to the index, so pass run_pattern a `description` saying in one line what it does and `hashtags` naming the words someone looking for that capability would search. Write them for the next person, not for this task: a pattern published without a description is not published at all.",
+            "Give every atom its own description and hashtags, not just the composition on top of them. The atom is the part someone else can reuse; the composition is usually specific to the task that asked for it.",
+            'Tag at two levels: the domain (what it is about — "grocery", "budget") AND the capabilities (what interactions it embodies — "crud-list", "form-input", "counter", "toggle"). Searchers hunting a scaffold for a different domain find your pattern only through its capability tags. The description should name the interactions too: "add items, toggle done, count remaining" finds readers that "a handy list app" never will.',
+          ]
+          : []),
+        ...(profileConfig.allowedToolIds.includes("record_feedback")
+          ? [
+            "When your task tells you a pattern you ran did or did not do what was wanted, say so with record_feedback: the patternId and an up or down verdict, plus a sentence on why. That is how the index learns which patterns are worth offering first.",
+          ]
+          : []),
         "Pass pattern source inline as the run_pattern `sourceText` argument. You have no write_file or edit_file; do not try to author patterns as workspace files.",
+        "The pattern factory must return its result object literal directly — `return { count, $UI: <div>…</div> }` — with computed() wrapping individual derived fields at most. Never return a computed(), lift, or other derived wrapper as the whole result: the piece it creates exists only in this session's runtime, and the browser link handed to the user will fail to load it.",
         "You own the write, compile-error, fix loop. A `compile-error` result is normal iteration material: read the diagnostic, correct the source, and call run_pattern again. Do not hand a compile error back to the parent as the answer.",
         "Use read_file and bash to read existing patterns and pattern documentation in the workspace when the compiler or the preloaded skills leave a question open.",
         "Every reference in your task is an address, not a value. Wire it into the pattern as a run_pattern `inputs` entry so the pattern reads it live; never try to read, print, or transcribe the data behind it yourself.",
         "Use describe_handle on a reference you were given to see its shape before authoring against it. It answers with a schema and never with data.",
         'To read what the pattern computed, pass run_pattern a `resultSchema` describing the fields you want; without one you get a reference and no value at all. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. Numbers, booleans and enum strings come back as themselves; unconstrained strings and anything the schema does not model are withheld as text and come back as reference tokens addressing those positions, which you can describe_handle or wire into a later pattern. You do not need to declare $NAME or $UI.',
-        "Return the result reference run_pattern gave you plus one or two inert sentences saying what the pattern computes. Do not return the data, sample rows, counts, names, or any other content read out of the space.",
+        `Return the resultRef run_pattern gave you for the pattern you ran last and the one-line \`describes\`${
+          profileConfig.allowedToolIds.includes("search_patterns")
+            ? ", plus the `hashtags` you published it under"
+            : ""
+        }. Do not return the data, sample rows, counts, names, or any other content read out of the space, and do not return source under any of those names.`,
         `When you cannot produce a working pattern — the compile loop does not converge, the task is impossible against the references you hold, or you are running out of turns — return the failure branch of your return schema: {"ok": false, "code": <one of ${
           SUBAGENT_FAILURE_REASON_CODES.join(", ")
         }>} with an optional free-text "detail".`,
@@ -2264,21 +2358,17 @@ export class CfHarnessPromptLoop {
     this.#parentToolAllowanceMode = options.allowedToolIds === undefined
       ? "all-builtins"
       : "restricted";
-    // The fabric-session tools join the tool surface exactly when the run
-    // can build a session; see FABRIC_SESSION_TOOL_IDS.
-    const requestedToolIds = options.allowedToolIds ??
-      (this.engine.fabricSessionAvailable
-        ? [
-          ...DEFAULT_PROMPT_LOOP_TOOL_IDS,
-          ...FABRIC_SESSION_TOOL_IDS,
-        ]
-        : DEFAULT_PROMPT_LOOP_TOOL_IDS);
+    // The gated tools join the tool surface exactly when the run can back
+    // them; see FABRIC_SESSION_TOOL_IDS and PATTERN_INDEX_TOOL_IDS.
+    const availability = this.#toolBackingAvailability();
+    const requestedToolIds = options.allowedToolIds ?? [
+      ...DEFAULT_PROMPT_LOOP_TOOL_IDS,
+      ...(availability.fabricSessionAvailable ? FABRIC_SESSION_TOOL_IDS : []),
+      ...(availability.patternIndexAvailable ? PATTERN_INDEX_TOOL_IDS : []),
+    ];
+    const withheld = withheldToolIds(availability);
     this.#allowedToolIds = new Set(
-      this.engine.fabricSessionAvailable
-        ? requestedToolIds
-        : requestedToolIds.filter((toolId) =>
-          !FABRIC_SESSION_TOOL_IDS.has(toolId)
-        ),
+      requestedToolIds.filter((toolId) => !withheld.has(toolId)),
     );
     this.#nativeModelToolIds = options.nativeModelToolIds ?? [];
     this.#allowedSubagentProfiles = new Set(
@@ -2302,6 +2392,19 @@ export class CfHarnessPromptLoop {
       );
     }
     return this.#gatewayClient;
+  }
+
+  /** What this run's engine can back the gated tools with. */
+  #toolBackingAvailability(): HarnessToolBackingAvailability {
+    return {
+      fabricSessionAvailable: this.engine.fabricSessionAvailable,
+      patternIndexAvailable: this.engine.patternIndexAvailable,
+      // A configured skills root is what a run scans into the registry the
+      // skill tools read, so its presence is the tools' backing — a run that
+      // has yet to scan still knows it will, and one that never will offers
+      // neither tool.
+      skillRegistryAvailable: this.engine.config.skillsRoot !== undefined,
+    };
   }
 
   #parentToolAllowance(): HarnessParentToolAllowance {
@@ -2342,7 +2445,7 @@ export class CfHarnessPromptLoop {
         subagentProfileConfigs: allowedSubagentProfiles.map((profile) =>
           subagentProfileConfigForRun(
             profile,
-            this.engine.fabricSessionAvailable,
+            this.#toolBackingAvailability(),
           )
         ),
         ...(cfc?.absenceBehavior !== undefined
@@ -2387,7 +2490,29 @@ export class CfHarnessPromptLoop {
     });
   }
 
+  /**
+   * Runs the loop, then sends whatever this session staged for the pattern
+   * index.
+   *
+   * The flush belongs here rather than at each `run_pattern` because the
+   * ledger publishes once per capability per SESSION, and a session's last
+   * word on a capability is only known once the session is over. It runs on
+   * the failure paths too: a run that ends in an error still authored
+   * whatever it authored, and the alternative is silently discarding it.
+   * A flush failure is logged by the ledger and never displaces the loop's
+   * own result or its error.
+   */
   async runTranscript(
+    options: RunHarnessTranscriptOptions,
+  ): Promise<HarnessPromptLoopResult> {
+    try {
+      return await this.#runTranscript(options);
+    } finally {
+      await this.engine.flushPatternIndexPublications();
+    }
+  }
+
+  async #runTranscript(
     options: RunHarnessTranscriptOptions,
   ): Promise<HarnessPromptLoopResult> {
     const initialRunState = this.engine.getRunState();
@@ -2617,6 +2742,7 @@ export class CfHarnessPromptLoop {
             toolActivity.length + 1,
             (activity) => toolActivity.push(activity),
             (usage) => descendantUsage.push(usage),
+            options.onTranscriptEvent,
           );
           const toolMessage = invokedToolCall.toolMessage;
           transcript.push(toolMessage);
@@ -2836,6 +2962,7 @@ export class CfHarnessPromptLoop {
     sequence = 1,
     recordActivity: (activity: HarnessToolActivity) => void = () => {},
     recordDescendantUsage: (usage: HarnessModelUsage) => void = () => {},
+    onTranscriptEvent?: (event: HarnessTranscriptEvent) => void | Promise<void>,
   ): Promise<InvokedToolCallMessages> {
     // The name the model wrote stays out of the complaint: it is model text,
     // and a tool name carries injected instruction as readily as any other
@@ -3227,6 +3354,7 @@ export class CfHarnessPromptLoop {
           signal,
           sequence,
           recordDescendantUsage,
+          ...(onTranscriptEvent !== undefined ? { onTranscriptEvent } : {}),
         })
         : await this.#invokeBuiltinTool(
           toolId,
@@ -3585,6 +3713,13 @@ export class CfHarnessPromptLoop {
     signal?: AbortSignal;
     sequence: number;
     recordDescendantUsage: (usage: HarnessModelUsage) => void;
+
+    /**
+     * The parent run's transcript handler. The child's own messages reach it
+     * tagged with the subagent they came from, so one activity feed carries
+     * both loops in the order they happened.
+     */
+    onTranscriptEvent?: (event: HarnessTranscriptEvent) => void | Promise<void>;
   }): Promise<{
     output: DelegateTaskToolOutput;
     resultRef: ToolResultRef;
@@ -3592,7 +3727,7 @@ export class CfHarnessPromptLoop {
     const delegateInput = options.input;
     const profileConfig = subagentProfileConfigForRun(
       delegateInput.profile,
-      this.engine.fabricSessionAvailable,
+      this.#toolBackingAvailability(),
     );
     const childModel = resolveSubagentModel(options.model, profileConfig);
     const inheritsParentModel = childModel.source === "parent";
@@ -3668,10 +3803,31 @@ export class CfHarnessPromptLoop {
         : {}),
       cfcEnforcementMode: parentRunState.cfcEnforcementMode,
       // The child shares the parent's fabric session, so a subagent can call
-      // `run_pattern` against the one space the run is configured for.
+      // `run_pattern` against the one space the run is configured for. The
+      // session CONFIG rides along beside the factory, as the index's does:
+      // the factory is what the child actually computes through, and the
+      // config is what says a session exists at all — a child given the
+      // factory alone reads as a run with an index and no space to run what
+      // the index returns, which is a combination the config layer refuses.
       ...(this.engine.fabricSessionFactory !== undefined
         ? { fabricSessionFactory: this.engine.fabricSessionFactory }
         : {}),
+      ...(this.engine.config.fabricSession !== undefined
+        ? { fabricSession: this.engine.config.fabricSession }
+        : {}),
+      // Likewise the index client: a child searches and runs indexed
+      // patterns through the one the parent built. The connection CONFIG
+      // rides along too, because the operator's dials live on it — a parent
+      // run with `publish: false` must not delegate its way into publishing.
+      ...(this.engine.patternIndexClientFactory !== undefined
+        ? { patternIndexClientFactory: this.engine.patternIndexClientFactory }
+        : {}),
+      ...(this.engine.config.patternIndex !== undefined
+        ? { patternIndex: this.engine.config.patternIndex }
+        : {}),
+      // The child's task is the goal it was delegated, which is the request a
+      // pattern it authors and publishes was written to answer.
+      taskText: delegateInput.goal,
       ...(parentRunState.runManifest !== undefined
         ? { runManifest: parentRunState.runManifest }
         : {}),
@@ -3763,6 +3919,20 @@ export class CfHarnessPromptLoop {
       allowedSubagentProfiles: [],
       nativeModelToolIds: profileConfig.nativeModelToolIds,
     });
+    const subagentContext: HarnessTranscriptSubagentContext = {
+      parentToolCallId: options.toolCall.id,
+      childRunId,
+      profile: delegateInput.profile,
+      goal: delegateInput.goal,
+    };
+    const forwardChildTranscriptEvent = async (
+      event: HarnessTranscriptEvent,
+    ): Promise<void> => {
+      await options.onTranscriptEvent?.({
+        ...event,
+        subagent: subagentContext,
+      });
+    };
     let subagentStatus: HarnessSubagentResult["status"] = "completed";
     let summary = "";
     let childModelTurns = 0;
@@ -3834,6 +4004,9 @@ export class CfHarnessPromptLoop {
         maxModelTurns,
         promptSlotBinding: options.promptSlotBinding,
         signal: options.signal,
+        ...(options.onTranscriptEvent !== undefined
+          ? { onTranscriptEvent: forwardChildTranscriptEvent }
+          : {}),
       });
       // The child speaks in its own tokens; the parent boundary speaks in
       // addresses. Resolving here is what makes a reference the child

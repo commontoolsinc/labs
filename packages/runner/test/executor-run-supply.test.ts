@@ -506,7 +506,6 @@ describe("stage P2-F per-(action × instance) run supply", () => {
     }
   });
 
-  // -------------------------------------------------------------------------
   // Fan-out stage B, independent review F1: `RetryImmediately` inside a
   // fanned-out instance run must be BOUNDED — the OFF arm's shape (one
   // queued retry per attempt, a macrotask apart, MAX_RETRIES_FOR_REACTIVE
@@ -515,7 +514,6 @@ describe("stage P2-F per-(action × instance) run supply", () => {
   // the set kept offering it): 501 invocations of a 500-throw action
   // inside ONE `run()`, and a never-resolving name spun the process's
   // microtask queue forever — no timer fired, `idle()` never resolved.
-  // -------------------------------------------------------------------------
 
   it("F1: a demanded action that keeps throwing RetryImmediately is bounded per pass — the loop DEFERS the instance instead of re-running it, the retry rides the queue (a timer fires between attempts), and the budget is MAX_RETRIES_FOR_REACTIVE", async () => {
     const rootId = "of:p2f-retry-root";
@@ -698,11 +696,9 @@ describe("stage P2-F per-(action × instance) run supply", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // F1 (RULED 2026-08-13, option c): the piece-start setup commit's
 // failure must SURFACE — loudly, counted — never be swallowed by the
 // fire-and-forget start path.
-// ---------------------------------------------------------------------------
 
 const V1_NO_HANDLER = [
   "import { Writable, pattern } from 'commonfabric';",
@@ -744,7 +740,6 @@ describe("stage P2-F piece-start commit failure surfacing (F1)", () => {
       servingPosture: true,
       experimental: {
         serverExecution: true,
-        systemPatternAutoUpdate: true,
       },
     });
   });

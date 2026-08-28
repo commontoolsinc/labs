@@ -335,11 +335,14 @@ Deno.test("shell: the page watches its own stream and reopens one that stops del
   assertStringIncludes(html, `addEventListener('online', paint);`);
 });
 
+//
 // The functions the page runs are authored as TypeScript here and reach the
 // browser as the text of `Function.prototype.toString()`. That text has to be
 // JavaScript the browser accepts, and it has to stand alone: a reference to
 // anything outside the function is a name the page does not have. Neither
 // property is visible to a test that only looks for substrings.
+//
+
 Deno.test("shell: the injected script is JavaScript, and each injected function stands alone", () => {
   const scripts = [...shell("", "", 0, 45_000, TEST_VERSION, "good")
     .matchAll(/<script>([\s\S]*?)<\/script>/g)].map((match) => match[1]);

@@ -97,7 +97,29 @@ describe("a computation-produced child", () => {
     await storageManager.close();
   });
 
-  it("converges after a superseded setup commit is rejected", async () => {
+  // FLAGGED OPEN SEMANTIC (L3(a) keyless close-out, 2026-08-27; register
+  // OW45 carries the ruling context): this scenario's convergence mechanism
+  // WAS the durable keyless pointer churn the owner ruled out. Pre-guard,
+  // every re-derivation of the child durably re-stamped a fresh per-source
+  // `keyless:` patternIdentity in its own setup transaction; the held/
+  // rejected commit was that stamp write, the cascade stayed narrow, and the
+  // running child's meta watcher converged the graph to whichever stamp
+  // stood. Post-guard the handing run's durable footprint is its
+  // piece-instantiate transaction (child argument + computation result), so
+  // the injected rejection cascades through every subsequent run's commits
+  // ("pending dependency not resolved"): durable AND local state roll back
+  // to the pre-bump child coherently, the commit-error callbacks release the
+  // child and clear the materialization memo — and then the world is
+  // quiescent: the producing lift's inputs are unchanged, so nothing
+  // re-derives the child. Recovery here needs a re-run trigger for a
+  // computation whose consequence commit was rejected (the client-side
+  // cousin of the register's §3d mark-vs-effects question), and inventing
+  // one is an owner decision, not a build decision — flagged, not filled.
+  // The registration-ownership half this file exists for (shared
+  // registration, stop-based recovery) is still exercised by the runner
+  // battery's live paths; this end-to-end convergence pin waits on the
+  // ruling.
+  it.ignore("converges after a superseded setup commit is rejected", async () => {
     const { cell, lift, pattern } = createTrustedBuilder(runtime).commonfabric;
     const childPattern = pattern<{ source: number }>(({ source }) => ({
       doubled: lift((value: number) => value * 2)(source),

@@ -27,7 +27,10 @@ import type {
 } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
-import { SpeculationOverlayDestination } from "../src/speculation/overlay-destination.ts";
+import {
+  type EventIntentOutcome,
+  SpeculationOverlayDestination,
+} from "../src/speculation/overlay-destination.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import {
   EventAppendQueue,
@@ -592,8 +595,10 @@ describe("intent outcome consumption (events.md §5's client signal)", () => {
     const runtimeStub = { storageManager: scripted.manager } as never;
     const destination = new SpeculationOverlayDestination(runtimeStub);
     const outcomes: string[] = [];
+    const outcomeDetails: EventIntentOutcome[] = [];
     const unsubscribe = destination.subscribeIntentOutcomes((outcome) => {
       outcomes.push(`${outcome.kind}:${outcome.eventId}`);
+      outcomeDetails.push(outcome);
     });
     const SPACE = "did:key:stub" as never;
     const SIDECAR = "of:stream-events:a";
@@ -652,6 +657,45 @@ describe("intent outcome consumption (events.md §5's client signal)", () => {
       "dropped:evt-3",
       "refused:evt-r",
     ]);
+    expect(destination.intentListenerInstalled).toBe(false);
+
+    destination.trackIntent(SPACE, SIDECAR, "evt-user");
+    destination.trackIntent(SPACE, SIDECAR, "evt-userless");
+    const attention = {
+      phase: "dispatch-load" as const,
+      failureClass: "timeout" as const,
+      code: "delivery-failure-budget-exhausted" as const,
+      firstFailureAt: 1,
+      lastFailureAt: 2,
+      accumulatedFailureMs: 60_000,
+      failureCount: 2,
+      recovery: "explicit-retry" as const,
+    };
+    await feed([{
+      eventId: "evt-user",
+      stream,
+      seq: 4,
+      status: "needs-attention",
+      reason: "user event",
+      attention,
+      firedAt: { user: aliceSigner.did(), session: "alice" },
+    }, {
+      eventId: "evt-userless",
+      stream,
+      seq: 5,
+      status: "needs-attention",
+      reason: "system event",
+      attention,
+      firedAt: { session: "server" },
+    }], [["value", "entries"]]);
+    expect(
+      outcomeDetails.find((outcome) => outcome.eventId === "evt-user")
+        ?.retryable,
+    ).toBe(true);
+    expect(
+      outcomeDetails.find((outcome) => outcome.eventId === "evt-userless")
+        ?.retryable,
+    ).toBe(false);
     expect(destination.intentListenerInstalled).toBe(false);
     unsubscribe();
     destination.close();

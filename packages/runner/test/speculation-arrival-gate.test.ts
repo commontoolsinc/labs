@@ -931,7 +931,6 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
     destination.close();
   });
 
-  // -------------------------------------------------------------------------
   // The ARRIVAL-WITNESS predicate (speculation.md §4, RULED 2026-08-22 —
   // candidate (B) of the OW33 fork memo): a confirmed cover witnesses
   // arrival only STRICTLY ABOVE the entry's floor (any commit class), or
@@ -950,7 +949,6 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
   // posture (cover below the floor stands), the legitimate at-floor
   // derived retirement, above-floor retirement regardless of class, and
   // the fail-closed unknown-class posture at the floor.
-  // -------------------------------------------------------------------------
 
   /** A scripted overlay over a fake replica with PER-DOC cover state
    * ({confirmedSeq, coverClass}), the predicate pins' harness — the same
@@ -1150,14 +1148,12 @@ describe("speculation arrival gate (speculation.md §4, RULED 2026-08-16)", () =
     scripted.destination.close();
   });
 
-  // -------------------------------------------------------------------------
   // The class THREADING (the predicate's plumbing): the replica records
   // the covering commit's class on its confirmed record — from the
   // frame's `coverClass` on integrate, preserved across a same-seq
   // re-upsert without one, dropped when the seq moves without one, and
   // `authored` for an own commit's promotion — and
   // `speculationRetirementView` surfaces it to the sweep.
-  // -------------------------------------------------------------------------
 
   it("class threading: applySessionSync records the frame's coverClass on the confirmed record, preserves it across a same-seq re-upsert without one, and drops it when the seq moves without one; the retirement view surfaces it", async () => {
     const manager = StorageManager.emulate({ as: aliceSigner });

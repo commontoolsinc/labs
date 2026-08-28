@@ -70,6 +70,7 @@ import {
   type CfcLabelMetadataProtectionMode,
   type CfcPolicyEvaluationMode,
   type CfcPrefixProvenanceSummary,
+  CfcRefusalDetail,
   type CfcTriggerReadGating,
   type CfcTrustConfig,
   type CfcTxState,
@@ -109,6 +110,7 @@ import {
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import { normalizeCellScope, scopeRank } from "../scope.ts";
 import type { MergeableOpDelta } from "./mergeable-ops.ts";
+import { CFC_ENFORCEMENT_REJECTION_PREFIX } from "./rejection.ts";
 import {
   clearSchemaRefusalTx,
   isInternalVerifierRead,
@@ -149,7 +151,19 @@ type CfcInstrumentationHooks = {
    * only. */
   onFlowLabelProbe?(outcome: "computed" | "memo"): void;
   onPreparedTx?(): void;
-  onPrepareReject?(reasons: readonly string[]): void;
+  /**
+   * CFC prepare refused this transaction. `reasons` are the PLAIN reason
+   * texts (the verdict tag is a classification channel and never leaves the
+   * boundary); `refusals` are the structured descriptions their producers
+   * recorded, paired to those texts; `terminal` is what the commit boundary
+   * will decide the refusal is worth — a verdict on the data, or a refusal a
+   * fresh attempt may resolve.
+   */
+  onPrepareReject?(refusal: {
+    reasons: readonly string[];
+    refusals: readonly CfcRefusalDetail[];
+    terminal: boolean;
+  }): void;
   onDigestInvalidation?(reason: string): void;
   onOutboxFlush?(effect: PostCommitSideEffect): void;
   onSinkDedupHit?(key: string): void;
@@ -306,11 +320,25 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     ) => void
   >();
   private verdictCallbacksDispatched = false;
+  // Post-commit effects this transaction staged and then discarded, held for
+  // the moment the code that owns its retries stops retrying it — a decision no
+  // rejection carries on its own, since a refusal one attempt cannot get past
+  // is often one a later attempt can. Effects handed to a seal destination are
+  // not here: that clears the outbox too, and it is a handover rather than an
+  // ending.
+  #abandonableEffects: PostCommitSideEffect[] = [];
+  private abandonDispatched = false;
+  // Set when a commit of this transaction succeeded. Abandonment is what the
+  // staged work hears instead of a commit, so a transaction that committed has
+  // nothing to abandon, and saying otherwise would report a request as never
+  // sent after the outbox flushed it.
+  private committed = false;
   // The verdict-time effect run of the current commit(): verdict callbacks
   // plus the CFC outbox flush. What settled()-style barriers wait on in
   // place of the commit promise, whose resolution additionally waits for
   // view coverage.
   #postCommitEffects?: Promise<void>;
+  #commitPreparationCrash: string | undefined;
   // The transaction's fate, resolved exactly when the verdict callbacks
   // dispatch — every fate path (commit verdict, rejection receipt, abort,
   // pre-storage rejection, internal commit rejection) funnels through that
@@ -351,6 +379,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     consultedGrants: [],
     consultedPolicyManifests: [],
     labelMetadataObservations: [],
+    refusalDetails: [],
   };
   private reportedCfcRelevant = false;
   private reportedCfcPrepared = false;
@@ -1335,6 +1364,14 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     }
   }
 
+  recordCfcRefusalDetail(detail: CfcRefusalDetail): void {
+    // Deliberately inert: no relevance mark, no digest invalidation, no
+    // prepare-state change. A detail DESCRIBES a decision another line of
+    // this transaction already made; letting it move the enforcement state
+    // would make the description part of the decision.
+    this.#cfcState.refusalDetails.push(deepFreeze(detail));
+  }
+
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {
     this.assertWritable("writeCfcGrant()");
     // The trusted policy-writer path (§8.12.7 route 2a, design §2.3
@@ -1778,6 +1815,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // code (audit S18). The runtime's own persistence is the one legitimate
     // writer, so it alone is exempt.
     let reasons: string[];
+    // Each pass describes its own verdict. Diagnostics are append-only
+    // history on purpose — an observe-mode rollout wants every divergence a
+    // transaction ever produced — but a detail is paired to a reason THIS
+    // pass recorded, so carrying one forward from a pass that a later prepare
+    // superseded would render the same refusal twice, or render one the
+    // current verdict no longer holds.
+    this.#cfcState.refusalDetails = [];
     try {
       // The schema-doc materialization is INSIDE the try on purpose: it is
       // part of commit-prep, and a crash in it must take the same modeled
@@ -1813,6 +1857,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // scheduler's failed-commit machinery, error surfacing) sees the real
       // cause.
       const message = error instanceof Error ? error.message : String(error);
+      this.#commitPreparationCrash = message;
       // Reported UNCONDITIONALLY, not through this module's opt-in logger
       // (disabled by default — utils/logger.ts early-returns): a crash here
       // is a bug in prep itself, and before this catch existed the class
@@ -1828,7 +1873,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       reasons = [`CFC commit-prep crashed: ${message}`];
     }
     if (reasons.length > 0) {
-      this.cfcInstrumentation.onPrepareReject?.(reasons);
+      const plainReasons = reasons.map(plainReason);
+      const refusedSet = new Set(plainReasons);
+      this.cfcInstrumentation.onPrepareReject?.({
+        reasons: plainReasons,
+        refusals: this.#cfcState.refusalDetails.filter((detail) =>
+          refusedSet.has(detail.reason)
+        ),
+        terminal: isTerminalRefusal(reasons),
+      });
       // A recorded reason makes the transaction CFC-relevant by definition.
       // Without this mark, a reasoned transaction whose reads/writes never
       // tripped an eager mark (e.g. a schema-less labeled flow feeding a
@@ -2263,8 +2316,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   abort(reason?: any): Result<any, InactiveTransactionError> {
     this.assertWritable("abort()");
     this.statusOverride = undefined;
-    this.#cfcState.outbox = [];
-    this.outboxIdempotencyKeys.clear();
+    this.clearPostCommitOutbox();
     this.#cfcState.prepare = { status: "unprepared" };
     this.#cfcState.dereferenceTraces = [];
     this.#cfcState.structureContainers = [];
@@ -2282,6 +2334,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     if (this.commitCallbacksDispatched) {
       return;
     }
+    if (!result.error) this.committed = true;
     // Verdict callbacks never fire after commit callbacks: on the async
     // path the effect chain dispatched them at the verdict already (this is
     // a no-op then); on synchronous fates (abort, pre-storage rejection)
@@ -2320,7 +2373,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     this.verdictCallbacks.clear();
   }
 
-  private clearPostCommitOutbox(): void {
+  /**
+   * Drop the staged effects. `handedOff` says another runner has taken them,
+   * so they are not held for abandonment: exactly one of `flush` and `abandon`
+   * runs per effect, and a handed-off effect will be flushed elsewhere.
+   */
+  private clearPostCommitOutbox(handedOff = false): void {
+    if (!handedOff) {
+      this.#abandonableEffects.push(...this.#cfcState.outbox);
+    }
     this.#cfcState.outbox = [];
     this.outboxIdempotencyKeys.clear();
   }
@@ -2423,12 +2484,23 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         this.#cfcState.enforcementMode !== "observe" &&
         this.#cfcState.prepare.status !== "prepared"
       ) {
+        if (this.#commitPreparationCrash !== undefined) {
+          return this.rejectCommitBeforeStorage({
+            error: {
+              name: "CommitPreparationError",
+              message: `CFC commit preparation crashed: ` +
+                this.#commitPreparationCrash,
+              failureClass: "unknown",
+              permanentEvidence: false,
+            },
+          });
+        }
         const reasons = this.#cfcState.prepare.status === "invalidated"
           ? this.#cfcState.prepare.reasons
           : [];
         const detail = reasons.length > 0 ? `: ${plainReason(reasons[0])}` : "";
         const message =
-          `CFC enforcement rejected commit: relevant transaction was not prepared${detail}`;
+          `${CFC_ENFORCEMENT_REJECTION_PREFIX}: relevant transaction was not prepared${detail}`;
         // WATCH(cfc-verdict): a refusal is terminal only when EVERY reason is
         // a VERDICT on this transaction's data. Anything else — an input
         // prepare could not evaluate, or a prepared state a caller disturbed
@@ -2445,11 +2517,21 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
             },
           });
         }
+        const plainReasons = reasons.map(plainReason);
+        // Pair each detail to a reason that actually refused. A gate records
+        // its detail when it decides, which is also how it records an
+        // observe-mode diagnostic and a reason a later resolution cleared —
+        // neither of those refused this commit, and neither may ride out on
+        // an error that says they did.
+        const refusedSet = new Set(plainReasons);
         return this.rejectCommitBeforeStorage({
           error: {
             name: "CfcCommitRefusalError",
             message,
-            reasons: reasons.map(plainReason),
+            reasons: plainReasons,
+            refusals: this.#cfcState.refusalDetails.filter((detail) =>
+              refusedSet.has(detail.reason)
+            ),
           },
         });
       }
@@ -2465,7 +2547,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
               error: {
                 name: "StorageTransactionAborted",
                 message:
-                  "CFC enforcement rejected commit: prepared digest changed",
+                  `${CFC_ENFORCEMENT_REJECTION_PREFIX}: prepared digest changed`,
                 reason: new Error("cfc-prepared-digest-mismatch"),
               },
             });
@@ -2533,7 +2615,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
                 [...this.#cfcState.outbox],
               ) === true;
           if (deferred) {
-            this.clearPostCommitOutbox();
+            this.clearPostCommitOutbox(true);
             return;
           }
           for (const effect of this.#cfcState.outbox) {
@@ -2628,6 +2710,29 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   ): void {
     this.assertWritable("addVerdictCallback()");
     this.verdictCallbacks.add(callback);
+  }
+
+  abandonStagedWork(error: CommitError): void {
+    if (this.committed || this.abandonDispatched) return;
+    this.abandonDispatched = true;
+    // Everything this transaction staged and did not flush: the effects a
+    // discard path moved aside, and any still on the outbox because the
+    // transaction ended without reaching one. A handover empties the outbox
+    // without adding to either, so handed-off effects are in neither.
+    const effects = [...this.#abandonableEffects, ...this.#cfcState.outbox];
+    this.#abandonableEffects = [];
+    this.#cfcState.outbox = [];
+    for (const effect of effects) {
+      try {
+        effect.abandon?.(error);
+      } catch (abandonError) {
+        logger.error(
+          "storage-error",
+          "Post-commit side effect's abandon failed:",
+          { effect, error: abandonError },
+        );
+      }
+    }
   }
 }
 
@@ -2894,6 +2999,10 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
     this.wrapped.recordCfcLabelMetadataObservation(observation);
   }
 
+  recordCfcRefusalDetail(detail: CfcRefusalDetail): void {
+    this.wrapped.recordCfcRefusalDetail(detail);
+  }
+
   writeCfcGrant(input: CfcGrantWriteInput): { space: MemorySpace; id: string } {
     return this.wrapped.writeCfcGrant(input);
   }
@@ -3115,6 +3224,14 @@ export class TransactionWrapper implements IExtendedStorageTransaction {
   ): void {
     if (this.options.discardSettleCallbacks === true) return;
     return this.wrapped.addVerdictCallback(callback);
+  }
+
+  abandonStagedWork(error: CommitError): void {
+    // A wrapper that discards settle callbacks stands for work whose outcome
+    // nobody acts on — duplicate work run only to compare its writes — so it
+    // does not end the staged work of the transaction it wraps.
+    if (this.options.discardSettleCallbacks === true) return;
+    return this.wrapped.abandonStagedWork(error);
   }
 }
 

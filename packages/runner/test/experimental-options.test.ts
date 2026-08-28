@@ -23,6 +23,10 @@ import { newSharedServer } from "./memory-v2-test-utils.ts";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 import { Runtime } from "../src/runtime.ts";
+import {
+  getReaderSchemaPrecedenceConfig,
+  resetReaderSchemaPrecedenceConfig,
+} from "../src/reader-schema-precedence-config.ts";
 
 const signer = await Identity.fromPassphrase("test experimental");
 
@@ -31,6 +35,7 @@ describe("ExperimentalOptions", () => {
     resetModernCellRepConfig();
     resetCommitPreconditionsConfig();
     resetServerExecutionConfig();
+    resetReaderSchemaPrecedenceConfig();
   });
 
   describe("Runtime construction", () => {
@@ -45,6 +50,7 @@ describe("ExperimentalOptions", () => {
           plainResultReceipts: false,
           computedCellIds: false,
           lazyMaterialization: false,
+          readerSchemaPrecedence: false,
         },
       });
       expect(runtime.experimental).toEqual({
@@ -54,6 +60,7 @@ describe("ExperimentalOptions", () => {
         plainResultReceipts: false,
         computedCellIds: false,
         lazyMaterialization: false,
+        readerSchemaPrecedence: false,
         serverExecution: false,
       });
       await runtime.dispose();
@@ -76,6 +83,7 @@ describe("ExperimentalOptions", () => {
         plainResultReceipts: true,
         computedCellIds: true,
         lazyMaterialization: true,
+        readerSchemaPrecedence: true,
         serverExecution: false,
       });
       await runtime.dispose();
@@ -96,6 +104,7 @@ describe("ExperimentalOptions", () => {
         plainResultReceipts: true,
         computedCellIds: true,
         lazyMaterialization: true,
+        readerSchemaPrecedence: true,
         serverExecution: false,
       });
       await runtime.dispose();
@@ -183,6 +192,25 @@ describe("ExperimentalOptions", () => {
       await sm.close();
     });
 
+    it("constructing Runtime with readerSchemaPrecedence false sets global config, and dispose leaves it", async () => {
+      const sm = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: sm,
+        experimental: { readerSchemaPrecedence: false },
+      });
+
+      expect(getReaderSchemaPrecedenceConfig()).toBe(false);
+      expect(runtime.experimental.readerSchemaPrecedence).toBe(false);
+
+      // Serving runtimes are per-space and idle-disposed; a dispose must
+      // not lift a live rollback (the ambient family below pins the rest).
+      await runtime.dispose();
+      await sm.close();
+
+      expect(getReaderSchemaPrecedenceConfig()).toBe(false);
+    });
+
     it("disposing Runtime resets global config to the default", async () => {
       const initial = getModernCellRepConfig();
       const sm = StorageManager.emulate({ as: signer });
@@ -206,16 +234,14 @@ describe("ExperimentalOptions", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// The serverExecution ambient-flag OWNERSHIP family (PR #5439 threads
-// r3731191424, r3731191435, r3731191451): the flag is a process-global
-// admission input, so its lifecycle must be reference-counted across ALL
-// owners (explicit-enabler Runtimes AND the ExecutorHost), survive
-// construction/dispose failures, and never be stomped by a co-hosted
-// non-serving runtime.
-// ---------------------------------------------------------------------------
-
 describe("serverExecution ambient-flag ownership", () => {
+  // The serverExecution ambient-flag OWNERSHIP family (PR #5439 threads
+  // r3731191424, r3731191435, r3731191451): the flag is a process-global
+  // admission input, so its lifecycle must be reference-counted across ALL
+  // owners (explicit-enabler Runtimes AND the ExecutorHost), survive
+  // construction/dispose failures, and never be stomped by a co-hosted
+  // non-serving runtime.
+
   afterEach(() => {
     resetModernCellRepConfig();
     resetCommitPreconditionsConfig();
@@ -323,5 +349,71 @@ describe("serverExecution ambient-flag ownership", () => {
     expect(threw).toBe(true);
     expect(getServerExecutionConfig()).toBe(false);
     await sm.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The readerSchemaPrecedence ambient-flag family: plain last-write-wins
+// module state like the other flags' ambient configs. Successive runtimes
+// in one test process may run different flag states; a real server
+// constructs one posture and never changes it mid-flight.
+// ---------------------------------------------------------------------------
+
+describe("readerSchemaPrecedence ambient flag", () => {
+  afterEach(() => {
+    resetModernCellRepConfig();
+    resetCommitPreconditionsConfig();
+    resetServerExecutionConfig();
+    resetReaderSchemaPrecedenceConfig();
+  });
+
+  it("sets the ambient state per construction; dispose leaves it standing", async () => {
+    const smRollback = StorageManager.emulate({ as: signer });
+    const rollback = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: smRollback,
+      experimental: { readerSchemaPrecedence: false },
+    });
+    expect(getReaderSchemaPrecedenceConfig()).toBe(false);
+    expect(rollback.experimental.readerSchemaPrecedence).toBe(false);
+
+    // A server runs one serving runtime per space and disposes idle ones
+    // while the rest live: a dispose must not lift the rollback out from
+    // under them.
+    await rollback.dispose();
+    await smRollback.close();
+    expect(getReaderSchemaPrecedenceConfig()).toBe(false);
+
+    // The next construction decides — an unset option sets the default.
+    const smDefault = StorageManager.emulate({ as: signer });
+    const plain = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: smDefault,
+    });
+    expect(getReaderSchemaPrecedenceConfig()).toBe(true);
+    expect(plain.experimental.readerSchemaPrecedence).toBe(true);
+    await plain.dispose();
+    await smDefault.close();
+  });
+
+  it("a THROWING construction also leaves the ambient to the next construction", async () => {
+    const smBad = StorageManager.emulate({ as: signer });
+    expect(() =>
+      new Runtime({
+        apiUrl: "::not a url::" as never,
+        storageManager: smBad,
+        experimental: { readerSchemaPrecedence: false },
+      })
+    ).toThrow();
+    await smBad.close();
+
+    const smNext = StorageManager.emulate({ as: signer });
+    const next = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: smNext,
+    });
+    expect(getReaderSchemaPrecedenceConfig()).toBe(true);
+    await next.dispose();
+    await smNext.close();
   });
 });

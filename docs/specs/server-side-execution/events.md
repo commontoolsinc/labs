@@ -165,6 +165,17 @@ handler fires
 - Ordering: per stream, events process in commit-seq order. Across
   streams in one space, wave order (arrival). No global ordering claim
   beyond the space's commit sequence — same as today.
+- **Terminal positions.** An error consequence, a T3 dropped notice,
+  and a `needs-attention` notice each complete processing at the event's
+  arrival position even when the handler produces no domain writes. A
+  terminal decision sealed into a wave does not release later events:
+  the arrival barrier opens only after the wave outcome confirms that
+  the authoritative consequence or notice durably committed. A notice
+  that fails before seal, resolves `{ error }`, is rebased out at
+  commit, or belongs to a refused wave leaves the earlier event pending
+  and later handlers blocked. This rule does not decide OW63's separate
+  question of whether the existing across-stream order binds across
+  pieces.
 - **Batching is at the COMMIT level only (D-v2-2, ruled 2026-08-02)**:
   the wave commits once, at scheduler idle, with `consequenceOf`
   listing every event processed. Handler-visible semantics are
@@ -227,7 +238,10 @@ ambient-state one.
   watermark instead — the replay rule above skips them, counted
   `skippedIdempotent`. Stream entries at or below `eventWatermark` MAY
   therefore compact (the store-growth lesson: a consumed intent needs
-  no eternal stream copy to keep dedupe sound).
+  no eternal stream copy to keep dedupe sound). This compaction allowance
+  does not apply while an entry carries an unresolved `needs-attention`
+  notice. Retry or Dismiss records its resolution; only a resolved entry
+  may compact under the ordinary watermark rule.
 - Cascade sends minted inside a handler attempt get fresh ids per
   attempt (`event-identity.ts:5-9`); harmless under exactly-once,
   because only the committing attempt's cascades escape the wave.
@@ -429,35 +443,134 @@ loop's duty).
   handler-error surface (same shape clients show today) as the derived
   commit for that event, advance `eventWatermark` past it (an error IS
   the consequence — else a poison event wedges the stream), push.
-- Handler commit refused PRE-STORAGE by CFC enforcement, server-side
-  (the deterministic "CFC enforcement rejected commit" class —
-  `rejectCommitBeforeStorage`, whose refusal re-running recomputes
-  identically): the same rule as the throw above — the refusal IS the
-  consequence. The entry carries the refusal message as its `error`,
-  `eventWatermark` advances past it, and the unconditional
-  dropped-write report still fires; the seal is the served give-up
-  arm's discriminated `served.onFailure` (scheduler/events.ts). Every
-  OTHER failed commit of a served event seals nothing, and its entry
-  — unconsequenced — is re-drained by a later wave. Two delivery
-  paths, one durable fate: a PRE-SEAL refusal (transport,
-  authorization, a handler abort — the non-CFC give-up classes)
-  settles the copy through the scheduler's commit disposition, which
-  drops it without scheduler-side commit retry (served copies opt out
-  of backoff; the wave IS their retry cadence, serving-loop.md §3d).
-  `RetryImmediately` after in-space name resolution is not a commit
-  failure: the scheduler requeues that copy with its served carriage,
-  and the current settle runs it against the warmed name cache unless
-  the flush deadline hands it back to the durable drain cadence. A
-  STORAGE-TIME commit-rule refusal (`RowLabelCommitError`) never
-  reaches that disposition on a served copy — the handler tx sealed
-  into the wave and its commit resolved at seal-accept — and instead
-  refuses the WAVE's store commit: the refused wave reports the
-  event's contributions as requeued (`aborted: "rejected"`,
-  executor/wave.ts), the drain guard releases, and the pending entry
-  re-drains. The terminal classification of `RowLabelCommitError`
-  (storage/rejection.ts) stops in-flight RETRYING on the
-  direct-commit path; it never stops the durable entry's
-  re-dispatch.
+- Handler commit refused PRE-STORAGE by a typed deterministic CFC
+  verdict (`CfcCommitRefusalError`): the same rule as the throw above
+  — the refusal IS the consequence. The entry carries its safe error
+  message, `eventWatermark` advances past it, and the unconditional
+  dropped-write report still fires. A crash while preparing the commit
+  is a distinct `CommitPreparationError`; it is a delivery failure,
+  not a CFC verdict. An explicit handler abort is a handler-error
+  consequence, not an infrastructure retry.
+- **Handler body DID NOT RUN — not a consequence (RULED 2026-08-27;
+  mark/effects atomicity, the a04 write-side member).** A served
+  dispatch whose handler body never executed — the runner's
+  argument-did-not-resolve skip ("action argument is undefined … not
+  running") — commits NOTHING: the dispatch's transaction, which
+  carries the entry's pre-stamped `consequenced` mark (§4), is
+  WITHDRAWN whole. The entry stays pending-unconsequenced, the
+  standard re-drain re-delivers it, and the retried handler's
+  cause-derived (idempotent) writes converge. Sealing the skip is the
+  defect this rule prevents: the mark committed ALONE — a 1-op derived
+  commit, the user's event permanently consumed with zero effects and
+  no error (the b1-lifts a04 red, seqs 53/56). Consequence atomicity
+  is contribution-level all-or-nothing: if ANY effect of a consequence
+  contribution is withdrawn or requeued by the wave, the mark goes
+  with it — §4's same-transaction carriage plus the wave's
+  whole-contribution requeue and same-eventId fold enforce that at the
+  wave; this rule closes the DISPATCH-side arm, where the effects
+  never entered the transaction at all. The drain treats the
+  withdrawal as a plain deferral (in-flight guard released, rescan
+  armed, counted `handlerNotRunDeferrals`, serving-loop.md §7), so a
+  PERMANENTLY unresolvable argument hardens through the bounded
+  deferral budget into the visible T3 drop notice instead of wedging
+  the stream. The withdrawal carries §2's per-space arrival-order
+  BARRIER with it, exactly as the load-park failure arm does — both
+  halves: every later-arrived durable served entry already QUEUED
+  behind the withdrawn dispatch in the same space defers too
+  (`cause: "arrival-barrier"`, counted with the other barrier
+  followers), and a withdrawal landing while a drain pass is mid-
+  iteration stops the pass before it queues later arrivals behind the
+  barrier's back — else a later arrival's consequence lands ahead of
+  the withdrawn entry's re-drain, the b01 inversion. The piece-start
+  deferral (a served entry whose piece could not be started) carries
+  the same in-queue sweep; cross-space neighbours and LT1 in-process
+  copies are excluded from the sweep,
+  as everywhere. (α) preserved: the mark still commits exactly once, only
+  never without its effects. An LT1 in-process copy takes the same
+  withdrawal through its abort alone — the batch marks only a
+  SURVIVING lt1 run (§4), so the durable entry lands unmarked and the
+  next drain delivers it once, with a `streamEntry`.
+- A served event's typed delivery failure records a server-owned
+  processing checkpoint on its stream entry. Dispatch-load and
+  commit-preparation failures accumulate only intervals in which the
+  failure is active. Waiting without positive recovery evidence spends
+  budget; a typed recovery signal closes that interval, persists a
+  `recovering` state, and wakes one retry. Its dependency
+  recomputation, continuations, and in-flight replica loads are
+  settlement and spend no budget. A repeat failure starts another
+  active interval without erasing the accumulated time. A served
+  `RetryImmediately` used for in-space name resolution is settlement
+  and never creates or ages this checkpoint. Only a committed handler
+  consequence or terminal notice clears it.
+- The failed-state budget is 60 seconds. This terminal-disposition
+  budget is an explicit exception to the repository's no-timeout rule:
+  it starts only after an observed failure, never cancels an in-flight
+  operation, and checks current recovery state before terminalizing.
+  `timeout`, `unknown`, and commit-preparation failures receive one
+  immediate clean reattempt while remaining in the failed state.
+  Attempt counts are observations, not the terminal predicate. A
+  persisted wall-clock delta is clamped at zero and capped at the budget.
+  A forward jump can therefore terminalize early, but remains visible in the
+  cover's first/last timestamps and capped accumulated failure time. A failed
+  checkpoint write leaves the event and its arrival barrier
+  pending; only committed checkpoint age survives restart or lease
+  handoff. A dispatch-load checkpoint names the failed document instance
+  independently of the storage-manager lifetime. Only successful settlement
+  of a new generation for that same document is positive recovery evidence;
+  starting the generation is not. A successful load after storage-manager
+  recreation can therefore wake one recovery attempt.
+- A current-ACL authorization denial is immediately permanent only when
+  its typed verdict carries the durable ACL revision and distinguishes the
+  denial from a revoked or missing session. A required-load denial uses the
+  `dispatch-load` phase; a proven-no-commit denial while finalizing a handler
+  commit uses `commit-finalization`. A `RowLabelCommitError` is a
+  proven-no-commit protocol verdict in `commit-finalization` and terminalizes
+  immediately. For a refused wave, the engine attaches
+  the failed operation index and the accumulator maps that operation to
+  its owning served event; an unattributed refusal remains an ordinary
+  requeue and cannot terminalize unrelated events in the same wave.
+  Authorization or protocol-shaped failures without positive evidence,
+  and ambiguous storage-time or transport outcomes, are not authorized
+  for explicit replay.
+- An event held only behind an earlier failed head preserves arrival
+  order but records no checkpoint and spends no budget. A load-park
+  observation neither increments nor clears the independent cold-view
+  T3 count.
+- Terminal delivery failure writes `{ consequenced: true, status:
+  "needs-attention", reason, attention }` on the event's own stream
+  entry. `attention` contains the failure phase and class, a stable
+  reason code, first and last failure times, accumulated failure time,
+  failed-head count, and `recovery: "explicit-retry"`; it contains no
+  payload, credential, document key, or raw backend error. The notice
+  is a terminal kind beside T3 `dropped`, names the event in
+  `consequenceOf`, and advances `eventWatermark` without claiming that
+  the handler ran.
+- An unresolved attention entry cannot compact. The same terminal
+  contribution adds a safe summary to the per-space unresolved
+  attention index, keyed first by prototype-safe encodings of the stream
+  sidecar and then the immutable `(eventId, seq)` entry identity. Equal event
+  IDs below one stream's watermark, or on different streams, remain separate
+  notices and resolve independently, while the stream entry remains
+  authoritative. Authored commits cannot
+  mutate this server-owned index. The
+  client retires the speculative echo, emits the complete safe
+  `needs-attention` outcome, and keeps a persistent Retry/Dismiss
+  surface for the active space; navigation clears the prior space's cards and
+  stale refresh results cannot restore them. The live notice, discovery result,
+  and resolution request carry the exact stamped sequence. Retry is one
+  authenticated same-space CAS: resolve the
+  original, append exactly one fresh event with `retryOf`, and remove
+  the unresolved index item while recording the resolution in a durable
+  server-owned tombstone. The server copies the exact captured stream, payload,
+  `rendererTrusted`, and `runtimeInjectedEventKeys`, and stamps the
+  original acting user's current session; a different user or a
+  userless event cannot be retried. A current writer may Dismiss a userless
+  event, resolving its otherwise permanent retention hold without inventing
+  delegated replay authority. Dismiss resolves and removes the index item
+  without appending. Concurrent or replayed resolution
+  requests return the recorded winner and append nothing else, even after the
+  original entry compacts. The original event identity never reopens; resolved
+  entries may compact under the ordinary watermark rule.
 - Client offline at fire time (RULED 2026-08-02): events accumulate
   client-side as unacked authored commits and discharge on reconnect
   in fired order — PER STREAM: a stream's sidecar carries only that

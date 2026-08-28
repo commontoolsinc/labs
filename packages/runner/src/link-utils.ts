@@ -171,6 +171,7 @@ export function areLinksSame(
   resolveBeforeComparing?: boolean,
   txForResolving?: IExtendedStorageTransaction,
   runtime?: Runtime,
+  markIfcCrossings?: boolean,
 ): boolean {
   if (value1 === undefined && value2 === undefined) return false;
 
@@ -193,11 +194,15 @@ export function areLinksSame(
     if (!runtime) {
       throw new Error("Provide runtime to resolve before comparing");
     }
+    // Content-reading callers (a candidate comparison reads through the
+    // links it resolves) opt into the ifc crossing seam; identity-only
+    // callers leave it off.
+    const options = markIfcCrossings ? { markIfcCrossings: true } : {};
     link1 = isNormalizedFullLink(link1)
-      ? resolveLink(runtime, tx, link1)
+      ? resolveLink(runtime, tx, link1, "value", options)
       : link1;
     link2 = isNormalizedFullLink(link2)
-      ? resolveLink(runtime, tx, link2)
+      ? resolveLink(runtime, tx, link2, "value", options)
       : link2;
   }
 

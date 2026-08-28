@@ -115,9 +115,12 @@ type CPUProfile = {
 
 Deno.writeTextFileSync(`${outPrefix}.cpuprofile`, JSON.stringify(profile));
 
-// ---- self-time report -------------------------------------------------
+//
+// self-time report
+//
 // Attribute sampled time per node via timeDeltas (more accurate than
 // hitCount * interval), then aggregate by frame and by file.
+//
 const nodeTime = new Map<number, number>();
 if (profile.samples && profile.timeDeltas) {
   for (let i = 0; i < profile.samples.length; i++) {

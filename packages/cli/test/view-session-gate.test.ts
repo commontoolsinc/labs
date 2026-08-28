@@ -47,16 +47,16 @@ function focusLastTarget(s: Session): number {
   return steps;
 }
 
-// ---------------------------------------------------------------------------
+//
 // findTargetIndex start-offset-only fallback (436, 437, 439).
-// ---------------------------------------------------------------------------
-// The pattern's card lists a dependency on `__cfLift_1` whose target carries a
-// definition start offset but no end offset (the dependency is found
-// syntactically, with no semantic service to pin the exact range). Following it
-// skips the exact (start + end) lookup and matches the lift node by its start
-// offset alone, landing the selection on that node.
+//
 
 Deno.test("gate: following the last card reference (a dependency, no end offset) matches by start offset", () => {
+  // The pattern's card lists a dependency on `__cfLift_1` whose target carries
+  // a definition start offset but no end offset (the dependency is found
+  // syntactically, with no semantic service to pin the exact range). Following
+  // it skips the exact (start + end) lookup and matches the lift node by its
+  // start offset alone, landing the selection on that node.
   const doc = parseDocument(SAMPLE);
   const s = new Session(
     doc,
@@ -95,10 +95,10 @@ Deno.test("gate: following the last card reference (a dependency, no end offset)
   );
 });
 
-// A second, independent route to the same fallback: opening (Enter) the focused
-// dependency reference resolves its node through `resolveTargetNode`, which
-// shares `findTargetIndex`, and opens that node's card in place.
 Deno.test("gate: Enter on the dependency reference opens the start-matched node's card", () => {
+  // A second, independent route to the same fallback: opening (Enter) the
+  // focused dependency reference resolves its node through `resolveTargetNode`,
+  // which shares `findTargetIndex`, and opens that node's card in place.
   const doc = parseDocument(SAMPLE);
   const s = new Session(
     doc,
@@ -120,15 +120,15 @@ Deno.test("gate: Enter on the dependency reference opens the start-matched node'
   );
 });
 
-// ---------------------------------------------------------------------------
+//
 // jumpToTarget nodeAtLine fallback (446).
-// ---------------------------------------------------------------------------
-// The lift's card ends with a plain "use" reference that carries a destination
-// line but no definition offset at all. `findTargetIndex` returns -1 for it, so
-// `jumpToTarget` falls back to `nodeAtLine` on the destination line to pick the
-// node to select.
+//
 
 Deno.test("gate: revealing the last lift reference (a use, no offset) resolves via nodeAtLine", () => {
+  // The lift's card ends with a plain "use" reference that carries a
+  // destination line but no definition offset at all. `findTargetIndex` returns
+  // -1 for it, so `jumpToTarget` falls back to `nodeAtLine` on the destination
+  // line to pick the node to select.
   const doc = parseDocument(SAMPLE);
   const s = new Session(
     doc,
@@ -153,9 +153,10 @@ Deno.test("gate: revealing the last lift reference (a use, no offset) resolves v
   );
 });
 
-// Opening (Enter) the offset-less use reference resolves a node through
-// `resolveTargetNode`/`nodeAtLine` and opens its card, the complementary route.
 Deno.test("gate: Enter on the offset-less use reference resolves a node via nodeAtLine", () => {
+  // Opening (Enter) the offset-less use reference resolves a node through
+  // `resolveTargetNode`/`nodeAtLine` and opens its card, the complementary
+  // route.
   const doc = parseDocument(SAMPLE);
   const s = new Session(
     doc,

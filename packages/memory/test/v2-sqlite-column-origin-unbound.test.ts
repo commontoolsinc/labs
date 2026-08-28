@@ -11,10 +11,10 @@ import {
   ensureColumnOriginAvailable,
 } from "../v2/sqlite/column-origin.ts";
 
-// Runs first, while nothing has bound the FFI and no reason has been recorded:
-// columnOrigins must refuse rather than read through a null library handle, and
-// the message names the call the caller skipped.
 Deno.test("columnOrigins throws before the FFI is bound", () => {
+  // Runs first, while nothing has bound the FFI and no reason has been
+  // recorded: columnOrigins must refuse rather than read through a null library
+  // handle, and the message names the call the caller skipped.
   assertThrows(
     () => columnOrigins(null, 1),
     Error,

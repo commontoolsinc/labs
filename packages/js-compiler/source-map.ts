@@ -5,9 +5,9 @@ import { SourceMap } from "./interface.ts";
 
 export type { MappedPosition };
 
-// ---------------------------------------------------------------------------
+//
 // VLQ-level composition (the fast path of `composeBundleSourceMap`)
-// ---------------------------------------------------------------------------
+//
 
 /**
  * A mappings stream the transcoder cannot compose: malformed VLQs, unsorted

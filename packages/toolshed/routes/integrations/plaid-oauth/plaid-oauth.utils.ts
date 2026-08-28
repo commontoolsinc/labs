@@ -77,7 +77,10 @@ export const PlaidAuthSchema = {
   required: ["items"],
 } as const satisfies JSONSchema;
 
+//
 // Types
+//
+
 export type PlaidAuthData = Mutable<Schema<typeof PlaidAuthSchema>>;
 
 export interface PlaidItem {

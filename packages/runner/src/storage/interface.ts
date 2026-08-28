@@ -12,6 +12,7 @@ import type {
   EntityDocument,
   EntityIdListOptions,
   EntityIdListResult,
+  EventAttentionResolveResult,
   OperationFieldQuery,
   OperationFieldSnapshot,
   PatchOp,
@@ -24,6 +25,7 @@ import type {
   SqliteQueryResult,
   SqliteRegisterDiskSourceResult,
 } from "@commonfabric/memory/v2";
+import type { DeliveryFailureClass } from "@commonfabric/memory/v2";
 import type { OutboxAppendRow } from "@commonfabric/memory/v2/execution-outbox";
 import type { Cancel } from "../cancel.ts";
 import type { EntityId } from "../create-ref.ts";
@@ -61,6 +63,7 @@ import type {
   CfcLabelMetadataObservation,
   CfcLabelMetadataProtectionMode,
   CfcPolicyEvaluationMode,
+  CfcRefusalDetail,
   CfcTriggerReadGating,
   CfcTxState,
   CfcWriteFloorMode,
@@ -86,6 +89,66 @@ export interface IStorageError {
   readonly name: string;
   readonly message: string;
 }
+
+/** Typed producer evidence for a required replica load that failed before an
+ * at-most-once handler could dispatch. The scheduler receives typed failure
+ * evidence; an error name may inform `failureClass`, but diagnostic text never
+ * constitutes policy evidence or durable `permanentEvidence`. */
+export type ReplicaLoadFailure = {
+  failureClass: DeliveryFailureClass;
+  recoveryEpoch: string;
+  permanentEvidence: boolean;
+};
+
+export class ReplicaLoadFailureError extends Error {
+  override readonly name = "ReplicaLoadFailureError";
+
+  constructor(
+    readonly failure: ReplicaLoadFailure,
+    cause: unknown,
+  ) {
+    super(
+      cause instanceof Error ? cause.message : String(cause),
+      { cause },
+    );
+  }
+}
+
+export const toReplicaLoadFailureError = (
+  cause: unknown,
+  recoveryEpoch: string,
+): ReplicaLoadFailureError => {
+  if (cause instanceof ReplicaLoadFailureError) return cause;
+  const named = cause as {
+    name?: unknown;
+    message?: unknown;
+    permanentEvidence?: unknown;
+    aclRevision?: unknown;
+  } | undefined;
+  const name = typeof named?.name === "string" ? named.name : "";
+  const failureClass: DeliveryFailureClass = name === "SessionRevokedError"
+    ? "session-revoked"
+    : name === "ConnectionError"
+    ? "connection"
+    : name === "AuthorizationError"
+    ? "authorization"
+    : name === "ProtocolError"
+    ? "protocol"
+    : name === "TimeoutError"
+    ? "timeout"
+    : "unknown";
+  const aclRevision = named?.aclRevision;
+  const permanentAclEvidence = failureClass === "authorization" &&
+    named?.permanentEvidence === true && typeof aclRevision === "number";
+  return new ReplicaLoadFailureError({
+    failureClass,
+    recoveryEpoch: permanentAclEvidence ? `acl:${aclRevision}` : recoveryEpoch,
+    // A name is not durable evidence. Authorization becomes permanent only
+    // when the memory server supplies the current ACL revision. Versioned
+    // protocol validators construct ReplicaLoadFailureError directly.
+    permanentEvidence: permanentAclEvidence,
+  }, cause);
+};
 
 /**
  * Metadata that can be attached to read operations
@@ -414,6 +477,36 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    * a replica whose required load failed.
    */
   loadsSettled?(keys: readonly string[]): Promise<void>;
+
+  /** A new generation of the SAME required load is a causal recovery wake.
+   * `failedEpoch` is stable for the document across manager recreation;
+   * `recoveryEpoch` uniquely names the replacement generation. Carrying both
+   * prevents an unrelated document recovery from authorizing a retry. */
+  loadRecoveryObserver?:
+    | ((recovery: {
+      failedEpoch: string;
+      recoveryEpoch: string;
+    }) => void)
+    | undefined;
+
+  /** Authenticated current-session recovery for one OW54 terminal notice. */
+  resolveEventAttention?(
+    space: MemorySpace,
+    eventId: string,
+    seq: number,
+    sidecarId: string,
+    action: "retry" | "dismiss",
+  ): Promise<EventAttentionResolveResult>;
+
+  /**
+   * THE SESSION REMOUNT's trigger: an admitted commit touched `space`'s ACL
+   * document. A space session this manager holds — revoked or denied by an
+   * EARLIER ACL verdict — is dropped so the next load re-opens it, because
+   * the ACL is the only input that decision has. Never widens authority: a
+   * genuine de-authorization is refused again at `session.open`. Implemented
+   * by the v2 StorageManager; the serving loop's host is its only caller.
+   */
+  noteSpaceAclChanged?(space: MemorySpace): void;
 
   /**
    * Load cell from storage. Will also subscribe to new changes.
@@ -1478,6 +1571,20 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   dispatchedEventTime?: number;
 
   /**
+   * The dispatched handler's BODY did not run (the runner's stream-path
+   * argument-did-not-resolve skip: `isValidArgument === false`, runner.ts).
+   * Set by the runner on the skip; consumed by the scheduler's event
+   * finalize for mark/effects atomicity (events.md §4, RULED 2026-08-27):
+   * a SERVED dispatch's transaction carries the entry's pre-stamped
+   * `consequenced` mark, so sealing a skipped run would commit the mark
+   * with ZERO effects and permanently consume the event (the a04 1-op
+   * shape). The finalize withdraws the whole transaction instead — the
+   * entry stays pending-unconsequenced and the drain re-delivers it.
+   * Client/OFF dispatches carry no mark and keep the silent skip.
+   */
+  dispatchedHandlerNotRun?: { reason: string };
+
+  /**
    * Commit-time preconditions attached to this transaction's commit in
    * the given space (scheduler-v2 §7.6). Violations surface as
    * IPreconditionFailedError (permanent — never retried).
@@ -1788,6 +1895,18 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
   ): void;
 
   /**
+   * Records a structured description of a refusal one of this transaction's
+   * CFC gates just decided (`cfc/refusal-detail.ts`): the boundary, the atoms
+   * outside it, and the reads that carried them.
+   *
+   * The prose reason remains the enforcement channel — a detail never decides
+   * anything, and recording one neither marks the transaction relevant nor
+   * invalidates a preparation. It exists so a refused caller can act: the
+   * detail names the INPUT to drop, which the reason alone cannot.
+   */
+  recordCfcRefusalDetail(detail: CfcRefusalDetail): void;
+
+  /**
    * The trusted policy-writer path for CFC grant documents (§8.12.7 route
    * 2a; cfc/grants.ts module doc). Requires the transaction's CURRENT
    * implementation identity to be a trusted builtin (the arm
@@ -1894,6 +2013,21 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
       result: Result<Unit, CommitError>,
     ) => void,
   ): void;
+
+  /**
+   * Tell the post-commit effects this transaction staged and lost that no
+   * further attempt at its commit is coming, by calling each one's `abandon`.
+   * Exactly one of an effect's `flush` and `abandon` runs.
+   *
+   * Called by whoever owns the retries for this transaction, because a commit
+   * rejection does not say whether another attempt would fare better and the
+   * effect cannot tell. CFC enforcement refuses a commit both for a verdict on
+   * the data — a shape its rules do not support — and for metadata this replica
+   * has not read yet, and only the second converges when a later attempt sees
+   * more. Dispatched at most once, and never after a commit of this
+   * transaction succeeded.
+   */
+  abandonStagedWork(error: CommitError): void;
 
   /**
    * Reads a value from a (local) memory address and throws on error, except for
@@ -2059,6 +2193,11 @@ export interface IExtendedStorageTransaction extends IStorageTransaction {
 export interface IStorageTransactionAborted extends IStorageError {
   readonly name: "StorageTransactionAborted";
 
+  /** Positive evidence that `abort()` discarded the transaction before a
+   * storage attempt. Commit-promise failures use the same error family but do
+   * not carry this marker because their storage outcome may be ambiguous. */
+  readonly abortedBeforeStorage?: true;
+
   /**
    * Reason provided when transaction was aborted.
    */
@@ -2104,6 +2243,23 @@ export interface IPreconditionFailedError extends Error {
 export interface ICfcCommitRefusalError extends IStorageError {
   readonly name: "CfcCommitRefusalError";
   readonly reasons: readonly string[];
+
+  /**
+   * Structured descriptions of the reasons whose producers could describe
+   * themselves (`cfc/refusal-detail.ts`), paired to `reasons` by their
+   * `reason` text. A refusal every producer left undescribed carries an
+   * empty list — the reasons still stand on their own.
+   */
+  readonly refusals: readonly CfcRefusalDetail[];
+}
+
+/** Commit preparation crashed before any storage attempt. This is typed apart
+ * from a deterministic CFC policy verdict so served delivery can apply OW54's
+ * bounded recovery policy without misreporting a handler error. */
+export interface ICommitPreparationError extends IStorageError {
+  readonly name: "CommitPreparationError";
+  readonly failureClass: "unknown";
+  readonly permanentEvidence: false;
 }
 
 /**
@@ -2124,6 +2280,7 @@ export type StorageTransactionRejected =
   | IConflictError
   | IPreconditionFailedError
   | ICfcCommitRefusalError
+  | ICommitPreparationError
   | IStoreError
   | TransactionError
   | IConnectionError
@@ -2438,6 +2595,13 @@ export interface ISpaceReplica extends ISpace {
     append: EventAppendRequest,
   ): Promise<EventAppendDeliveryOutcome>;
 
+  resolveEventAttention?(
+    eventId: string,
+    seq: number,
+    sidecarId: string,
+    action: "retry" | "dismiss",
+  ): Promise<EventAttentionResolveResult>;
+
   /** Pending (undischarged) event intents — the offline event queue's
    * live content (speculation.md §5), bounded by pending-intent count. */
   pendingEventAppends?(): readonly EventAppendRequest[];
@@ -2597,6 +2761,7 @@ export type PushError =
   | IConflictError
   | IPreconditionFailedError
   | ICfcCommitRefusalError
+  | ICommitPreparationError
   | TransactionError
   | IAuthorizationError;
 

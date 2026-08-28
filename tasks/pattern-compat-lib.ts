@@ -263,12 +263,12 @@ export function checkPattern(
   return findings;
 }
 
-// ---------------------------------------------------------------------------
+//
 // Baseline store
 //
 // Parameterized by directory so these are testable against a temp tree rather
 // than only against the real `packages/patterns` layout.
-// ---------------------------------------------------------------------------
+//
 
 /** Read every recorded contract for a pattern. Absent directory → none. */
 export async function readBaselines(

@@ -107,7 +107,7 @@ export class CFTabs extends BaseElement {
   // Track last known value to detect external cell changes
   private _lastKnownValue: string = "";
 
-  /* ---------- Cell controller for value binding ---------- */
+  /** Cell controller for value binding */
   private _cellController = createStringCellController(this, {
     timing: { strategy: "immediate" }, // Tab changes should be immediate
     onChange: (newValue: string, _oldValue: string) => {

@@ -40,8 +40,6 @@ Deno.test({
 
     expect(mod.EXPERIMENTAL).toEqual({
       modernCellRep: true,
-      // Default ON — one flag covers default-app and home roots alike.
-      systemPatternAutoUpdate: true,
       // Server-execution v2: the first-party default (the landed-dark
       // constant) when the build define is unset.
       serverExecution: SERVER_EXECUTION_DEFAULT_ENABLED,

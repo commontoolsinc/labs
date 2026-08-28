@@ -1,5 +1,6 @@
 import type { CellKind, LinkScope } from "@commonfabric/api";
 import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
+import { getLogger } from "@commonfabric/utils/logger";
 import {
   applyPieceSourceTransition,
   Cell,
@@ -70,6 +71,11 @@ import {
 } from "./piece-origin.ts";
 import type { PiecesController } from "./pieces-controller.ts";
 import { compileProgram } from "./utils.ts";
+
+const pieceUpdateLogger = getLogger("piece.update", {
+  enabled: true,
+  level: "warn",
+});
 
 interface PieceCellIo {
   get(path?: CellPath): Promise<unknown>;
@@ -417,6 +423,23 @@ export type PieceSourceAction =
   | { kind: "detach" }
   | { kind: "restore"; revisionId: string }
   | { kind: "follow"; revisionId: string };
+
+/** What one {@link PieceController.setPattern} write did beyond landing. */
+export interface PieceSourceSetResult {
+  /**
+   * The origin the write detached, and null when the piece was already
+   * detached.
+   *
+   * Taken from the snapshot the transition committed against, not from a
+   * read beside the call. `applyPieceSourceTransition` refuses inside the
+   * write transaction unless the piece's live origin still equals that
+   * snapshot's, so a write that committed detached exactly this — while a
+   * value any caller read before the call is a value the write may have
+   * moved off. A caller that records what it detached, so an operator can
+   * re-attach by hand, is right only with this one.
+   */
+  detachedOrigin: string | null;
+}
 
 export interface PreparedPieceSourceChange {
   action: PieceSourceAction;
@@ -3513,7 +3536,10 @@ export class PieceController<T = unknown> {
       if (options.copyData) {
         await restoreCloneInternals(clone.getCell(), internals);
       }
-      await destination.startPiece(clone.getCell());
+      // Opening rather than merely starting: a clone follows the piece it
+      // was taken from, and following begins with the subscription the open
+      // installs.
+      await destination.openPiece(clone.getCell());
     } catch (error) {
       const cleanupErrors: unknown[] = [];
       try {
@@ -3544,9 +3570,20 @@ export class PieceController<T = unknown> {
     return clone;
   }
 
+  /**
+   * The piece's pattern pointer: the durable meta, or — for a KEYLESS piece
+   * in the session that set it up — the runner's session-side pointer (the
+   * never-durable contract, L3(a) RULED 2026-08-27: a keyless piece stamps
+   * nothing durably; a fresh session correctly finds neither).
+   */
+  #patternPointer(): { identity: string; symbol: string } | undefined {
+    return getPatternIdentityRef(this.#cell) ??
+      this.#pieces.runtime.runner.sessionPatternPointerFor(this.#cell);
+  }
+
   /** Return a stable reference to the pattern currently running this piece. */
   async getPatternRef(): Promise<PiecePatternRef | undefined> {
-    const ref = getPatternIdentityRef(this.#cell);
+    const ref = this.#patternPointer();
     if (!ref) return undefined;
 
     const source: PiecePatternSourceRef = {
@@ -3663,7 +3700,7 @@ export class PieceController<T = unknown> {
     ref: { identity: string; symbol: string };
   }> {
     await this.#cell.sync();
-    const ref = getPatternIdentityRef(this.#cell);
+    const ref = this.#patternPointer();
     if (!ref) throw new Error("piece missing pattern identity");
     const runtime = this.#pieces.runtime;
     const pattern = await runtime.patternManager.loadPatternByIdentity(
@@ -3698,7 +3735,7 @@ export class PieceController<T = unknown> {
     }
     | undefined
   > {
-    const ref = getPatternIdentityRef(this.#cell);
+    const ref = this.#patternPointer();
     if (!ref) throw new Error("piece missing pattern identity");
     const program = await this.#pieces.runtime.patternManager
       .getPatternSourceProgramByIdentity(
@@ -3734,7 +3771,10 @@ export class PieceController<T = unknown> {
     }
     const { pattern: previousPattern, ref: previousRef } = await this
       .#loadCurrentPattern();
-    const expected = getPieceSourceSnapshot(this.#cell);
+    const expected = getPieceSourceSnapshot(
+      this.#cell,
+      this.#pieces.runtime.runner.sessionPatternPointerFor(this.#cell),
+    );
     if (expected === undefined) {
       throw new Error("piece missing source state");
     }
@@ -4061,7 +4101,9 @@ export class PieceController<T = unknown> {
   }
 
   /**
-   * Replace the piece's source with `program`.
+   * Replace the piece's source with `program`, detaching the piece from the
+   * origin it follows: what it runs afterwards is `program` and stays
+   * `program` until something writes it again.
    *
    * `expectedPattern` pins the reference this write may run over, exactly as
    * {@link changeSource}'s does and for the same window. The snapshot read
@@ -4079,6 +4121,11 @@ export class PieceController<T = unknown> {
    * execute-time validators remain the whole of enforcement, and
    * `dangerouslyAllowIncompatibleSchema` remains the only thing that opens
    * them.
+   *
+   * Returns the origin this write detached — see {@link PieceSourceSetResult}.
+   * A caller reporting what it detached has no other way to be right about
+   * it: the origin at the caller's own read is not the origin at the write,
+   * and only the snapshot this call commits against is.
    */
   async setPattern(
     program: RuntimeProgram,
@@ -4087,14 +4134,50 @@ export class PieceController<T = unknown> {
       dangerouslyAllowIncompatibleSchema?: boolean;
       expectedPattern?: { identity: string; symbol: string };
     },
-  ): Promise<void> {
+  ): Promise<PieceSourceSetResult> {
     const mutationVersion = ++this.#mutationVersion;
     let transition: PieceSourceTransition | undefined;
     try {
       await this.#runMutation(mutationVersion, async () => {
-        const { pattern: previousPattern, ref: previousRef } = await this
-          .#loadCurrentPattern();
-        const expected = getPieceSourceSnapshot(this.#cell);
+        // A piece whose current pattern cannot load is exactly the piece a
+        // source replacement rescues: a stored identity resolvable only from
+        // a retired bundle (a wish-minted sidecar with no in-space program)
+        // strands the piece otherwise. The loaded pattern feeds only the two
+        // checks the escape hatch already waives — the backward-compatibility
+        // assertion and retained-link validation — so under
+        // `dangerouslyAllowIncompatibleSchema` a failed load degrades to the
+        // stored identity ref alone. Without the flag the load failure stays
+        // fatal, unchanged.
+        //
+        // The degradation reaches two populations. A piece with no retained
+        // source takes the transition's displaced-identity arm below. A piece
+        // whose source IS retained but whose artifact will not load — a
+        // compile or evaluation failure under this runtime — keeps its
+        // retained baseline: the stored ref serves only as the concurrency
+        // guard and the candidate's predecessor entry, both of which name an
+        // identity without loading it.
+        let previousPattern: Pattern | undefined;
+        let previousRef: { identity: string; symbol: string };
+        try {
+          ({ pattern: previousPattern, ref: previousRef } = await this
+            .#loadCurrentPattern());
+        } catch (error) {
+          if (!options?.dangerouslyAllowIncompatibleSchema) throw error;
+          await this.#cell.sync();
+          const storedRef = getPatternIdentityRef(this.#cell);
+          if (!storedRef) throw error;
+          pieceUpdateLogger.warn("set-pattern-current-unloadable", () => [
+            "the current pattern failed to load; replacing source from the",
+            `stored identity ref ${storedRef.identity}#${storedRef.symbol}`,
+            `under dangerouslyAllowIncompatibleSchema (${this.#cell.space})`,
+            error,
+          ]);
+          previousRef = storedRef;
+        }
+        const expected = getPieceSourceSnapshot(
+          this.#cell,
+          this.#pieces.runtime.runner.sessionPatternPointerFor(this.#cell),
+        );
         if (expected === undefined) {
           throw new Error("piece missing source state");
         }
@@ -4142,8 +4225,14 @@ export class PieceController<T = unknown> {
         // Callers who want every reason at once run `checkPattern()`, which is
         // exactly what `--check` is for.
         if (!options?.dangerouslyAllowIncompatibleSchema) {
-          assertPatternSchemasBackwardCompatible(previousPattern, pattern);
+          // Reached only when the load above succeeded: a failed load
+          // without the flag rethrows there.
+          assertPatternSchemasBackwardCompatible(previousPattern!, pattern);
         }
+        // The `null` is the origin: this transition detaches. A caller
+        // supplying the source has chosen what the piece runs, and a piece
+        // still carrying its origin could be repointed afterwards to
+        // whatever that origin ships, which is not what this caller named.
         transition = pieceSourceTransition(
           expected,
           "edit",
@@ -4162,7 +4251,9 @@ export class PieceController<T = unknown> {
                 argumentCell,
                 this.#pieces,
                 {
-                  priorArgumentSchema: previousPattern.argumentSchema,
+                  // Same narrowing as the assertion above: this validator arm
+                  // exists only without the flag, where the load succeeded.
+                  priorArgumentSchema: previousPattern!.argumentSchema,
                   // `applySetupState` rewrites the argument from `getRaw()`, so
                   // every retained link's envelope is written back unchanged and
                   // nothing here is rebuilt as an alias. The validator verifies
@@ -4187,10 +4278,17 @@ export class PieceController<T = unknown> {
           "Piece source was saved, but refreshing the running piece failed:",
           error,
         );
-        return;
+        // The transition committed, so it detached what its precondition
+        // named, whatever happened to the refresh afterwards.
+        return { detachedOrigin: transition.expected.origin };
       }
       throw pinnedSourceMoved(error, options?.expectedPattern);
     }
+    // The mutation assigns `transition` before the write it belongs to, and
+    // every earlier exit from it throws — so a mutation that resolved has
+    // one, and a mutation that did not took the catch above. Asserted rather
+    // than guarded because a guard here could never fire.
+    return { detachedOrigin: transition!.expected.origin };
   }
 
   async #runMutation(

@@ -71,7 +71,10 @@ export const WEB_SEARCH_SUBAGENT_ALLOWED_TOOL_IDS =
  * documentation. `describe_handle` gives it the shape of a reference it was
  * handed, which is what it authors against — it cannot read the value.
  * `run_pattern` is gated on a configured fabric session exactly as it is for
- * the `default` profile.
+ * the `default` profile, and `search_patterns` and `record_feedback` on a
+ * configured pattern index: an author that can find an existing pattern for
+ * the job should compose it rather than write one, and say how the one it ran
+ * turned out.
  */
 export const PATTERN_AUTHOR_SUBAGENT_ALLOWED_TOOL_IDS = [
   "bash",
@@ -79,6 +82,8 @@ export const PATTERN_AUTHOR_SUBAGENT_ALLOWED_TOOL_IDS = [
   "read_skill_resource",
   "describe_handle",
   "run_pattern",
+  "search_patterns",
+  "record_feedback",
 ] as const satisfies readonly BuiltinToolId[];
 export const NO_HOST_TOOL_IDS = [] as const satisfies readonly BuiltinToolId[];
 export const BROWSER_SUBAGENT_HOST_TOOL_IDS = [
@@ -95,13 +100,17 @@ export const BROWSER_SUBAGENT_ALLOWED_SKILL_SCRIPTS = [
 /**
  * Skills preloaded into a `pattern-author` child when the run has a skill
  * registry. These are the documents a pattern author would otherwise spend its
- * whole turn budget rediscovering: the authoring guide and the schema-design
- * guide. Preload is best-effort — a run whose skills root does not carry them
+ * whole turn budget rediscovering: the authoring guide, the schema-design
+ * guide, and the UI guide. The UI guide carries the cf- component and
+ * two-way-binding idiom; without it an author reaches for raw HTML inputs
+ * and DOM-event handlers, which compile and render but never fire.
+ * Preload is best-effort — a run whose skills root does not carry them
  * gets a child with the same tools and no preloaded guidance.
  */
 export const PATTERN_AUTHOR_SUBAGENT_SKILL_NAMES = [
   "pattern-dev",
   "pattern-schema",
+  "pattern-ui",
 ] as const satisfies readonly string[];
 
 /**
@@ -187,6 +196,21 @@ export const asHarnessSubagentFailureReport = (
 };
 
 /**
+ * Who declares a delegation's return contract. `caller` lets a `returnSchema`
+ * the caller wrote replace the profile's, which is the ordinary case: the
+ * profile's contract is the shape a delegation that declares none falls back
+ * to. `profile` does not — the profile's contract IS the delegation's, and a
+ * caller that declares one is refused with the reason.
+ *
+ * A profile whose whole purpose is a narrow return channel keeps authority
+ * over it. A caller-written schema can widen that channel to any shape at
+ * all, including one that carries a value the profile's own contract admits
+ * no field for; the channel is only as narrow as the widest schema anyone may
+ * declare against it.
+ */
+export type HarnessSubagentReturnContractAuthority = "caller" | "profile";
+
+/**
  * Return contract of the `pattern-author` profile: a discriminated union, so
  * a success and a failure are different SHAPES rather than different prose.
  * A parent reading `ok` knows which it has without interpreting text, and a
@@ -198,6 +222,14 @@ export const asHarnessSubagentFailureReport = (
  * produce a working pattern returns the shared failure shape, whose `code`
  * names what stopped it from the fixed inert vocabulary — no data read out of
  * the space, no partial result dressed as a whole one.
+ *
+ * The success branch is a RUNNING pattern's result cell and nothing else: a
+ * reference, a line of prose about what it computes, and the hashtags it was
+ * published to the index under. There is no field for source, in any
+ * encoding, because a parent has no use for source it should not be
+ * compiling — the child ran the pattern, and reuse travels through the index,
+ * where a searcher finds an atom by its hashtags and composes it by its
+ * import specifier without the source passing through anyone's context.
  *
  * The free-form strings arrive at the parent as opaque links, the ordinary
  * treatment of unconstrained strings in a sanitized child return; `ok`, the
@@ -219,6 +251,12 @@ export const PATTERN_AUTHOR_RETURN_SCHEMA: JSONSchema = {
           type: "string",
           description:
             "One or two inert sentences saying what the pattern computes. No data read out of the space.",
+        },
+        hashtags: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "The hashtags the pattern was published to the index under, so a later search finds it by the same words. Omitted by a run with no pattern index, which publishes nothing.",
         },
       },
       required: ["ok", "resultRef", "describes"],
@@ -286,13 +324,19 @@ export interface HarnessSubagentProfileConfig {
   maxModelTurns: number;
 
   /**
-   * Return contract applied to a delegation to this profile that declares no
-   * `returnSchema` of its own. A profile that owns one leaves no delegation
-   * unstructured: the caller either declares the shape it wants or gets the
-   * profile's, never an open-ended summary a failure and a success can both
+   * Return contract of a delegation to this profile. A profile that owns one
+   * leaves no delegation unstructured: the return is a shape the parent can
+   * test rather than an open-ended summary a failure and a success both
    * satisfy.
    */
-  defaultReturnSchema?: JSONSchema;
+  returnSchema?: JSONSchema;
+
+  /**
+   * Whether a caller may replace {@link returnSchema} with one of its own.
+   * Absent reads as `caller`, the ordinary case; a profile that means to hold
+   * its channel says `profile`.
+   */
+  returnContractAuthority?: HarnessSubagentReturnContractAuthority;
   returnPolicy: HarnessSubagentReturnPolicy;
 }
 
@@ -356,7 +400,8 @@ export const PATTERN_AUTHOR_SUBAGENT_PROFILE_CONFIG:
     hostToolIds: NO_HOST_TOOL_IDS,
     skillNames: PATTERN_AUTHOR_SUBAGENT_SKILL_NAMES,
     maxModelTurns: PATTERN_AUTHOR_SUBAGENT_MAX_MODEL_TURNS,
-    defaultReturnSchema: PATTERN_AUTHOR_RETURN_SCHEMA,
+    returnSchema: PATTERN_AUTHOR_RETURN_SCHEMA,
+    returnContractAuthority: "profile",
     returnPolicy: DEFAULT_SUBAGENT_RETURN_POLICY,
   };
 
@@ -380,6 +425,19 @@ export const getHarnessSubagentProfileConfig = (
     case PATTERN_AUTHOR_SUBAGENT_PROFILE:
       return PATTERN_AUTHOR_SUBAGENT_PROFILE_CONFIG;
   }
+};
+
+/**
+ * Whether a delegation to `profile` may declare a `returnSchema` of its own.
+ * A profile with no contract of its own has nothing to protect, so a caller
+ * schema is the only structure such a delegation can have.
+ */
+export const subagentProfileAcceptsCallerReturnSchema = (
+  profile: HarnessSubagentProfile,
+): boolean => {
+  const config = getHarnessSubagentProfileConfig(profile);
+  return config.returnSchema === undefined ||
+    config.returnContractAuthority !== "profile";
 };
 
 export interface HarnessSubagentInputSummary {

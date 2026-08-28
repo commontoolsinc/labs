@@ -196,5 +196,36 @@ describe("extended-storage-transaction", () => {
         await tx.commit();
       }
     });
+
+    it("records a refusal detail on the transaction it wraps", async () => {
+      const { tx } = await seeded("wrapped-refusal-detail");
+      const wrapper = createNonReactiveTransaction(tx);
+      try {
+        wrapper.recordCfcRefusalDetail({
+          gate: "sink-ceiling",
+          sink: "fetchText",
+          offendingAtoms: ['"medical"'],
+          inputs: [],
+          attribution: "none",
+          reason: "sink-request confidentiality exceeds ceiling for " +
+            'fetchText: "medical"',
+        });
+
+        // The wrapper shares the inner transaction's CFC state, so a gate
+        // that refuses while running under a wrapper describes itself to the
+        // transaction that will be asked for the refusal.
+        expect(tx.getCfcState().refusalDetails).toEqual([{
+          gate: "sink-ceiling",
+          sink: "fetchText",
+          offendingAtoms: ['"medical"'],
+          inputs: [],
+          attribution: "none",
+          reason: "sink-request confidentiality exceeds ceiling for " +
+            'fetchText: "medical"',
+        }]);
+      } finally {
+        await tx.commit();
+      }
+    });
   });
 });

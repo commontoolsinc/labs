@@ -469,6 +469,16 @@ async function executeWithToolsLoop(params: {
 }
 
 /**
+ * Announce the builtin's result cell again, in a transaction of its own.
+ *
+ * The announcement rides the same transaction as the request it belongs to, so
+ * a refused request takes the announcement with it and the pattern is left
+ * pointing at nothing — including at the error the refusal is about to record.
+ * Writing it again puts the result cell back where a reader looks for it. The
+ * value is the one the refused transaction carried, so on the runs that kept
+ * their announcement this writes what is already there.
+ */
+/**
  * Common error handler for LLM requests.
  * Resets state and allows retry on next invocation.
  */
@@ -490,24 +500,51 @@ async function handleLLMError<T, P>(
    * (server-execution v2 stage G, serving-loop.md §4's error-shaped
    * results); inert everywhere else. */
   effectKey?: string,
+  /** Announces the builtin's result cell, for the caller whose announcement
+   * rode a transaction that was abandoned. It runs whether or not a newer
+   * request has taken over, because the announcement says where the answer
+   * appears and is the same either way, and the run that took over will not
+   * make it again. */
+  announce?: (tx: IExtendedStorageTransaction) => void,
 ): Promise<void> {
-  if (thisRun !== getCurrentRun()) return;
+  if (thisRun !== getCurrentRun() && announce === undefined) return;
 
   const message = error instanceof Error ? error.message : String(error);
-  console.warn(`[LLM Error] ${message}`);
-  logger.warn("llm", "Error in LLM request", { error });
+  if (thisRun === getCurrentRun()) {
+    console.warn(`[LLM Error] ${message}`);
+    logger.warn("llm", "Error in LLM request", { error });
+  }
 
   await runtime.idle();
 
-  await runtime.editWithRetry((tx) => {
+  let wrote = false;
+  const { error: writeError } = await runtime.editWithRetry((tx) => {
     if (effectKey !== undefined) markEffectCompletion(tx, effectKey);
+    announce?.(tx);
+    // Read at write time rather than from a decision taken before the wait
+    // above: a newer request can start while this one waits for the
+    // scheduler, and from then on the answer is that request's to give. The
+    // announcement still stands, because it says where the answer appears and
+    // is the same either way.
+    if (thisRun !== getCurrentRun()) return;
+    wrote = true;
     pendingCell.withTx(tx).set(false);
     errorCell.withTx(tx).set(message);
     resultCell.withTx(tx).set(undefined as T);
     partialCell.withTx(tx).set(undefined as P);
     requestHashCell.withTx(tx).set(requestHash);
   });
+  if (writeError) {
+    // The error had nowhere to land, so a reader of this result cell sees
+    // something other than this failure. Report it here, since nothing
+    // downstream can.
+    console.error(
+      "[LLM] Writing the request's error to its result cell was rejected.",
+      { requestHash, cause: message, rejection: writeError.message },
+    );
+  }
 
+  if (!wrote) return;
   resetPreviousHash();
 }
 
@@ -575,6 +612,18 @@ function buildContextDocumentation(
     );
 }
 
+/**
+ * Start `start` once the transaction staging this request commits, and call
+ * `onRefused` instead when the commit is rejected in a way that re-running
+ * cannot resolve. A refused request never reaches the model, so the builtin
+ * settles on the refusal rather than leaving `pending` true forever.
+ *
+ * The settled error is recorded against the request hash, so this request is
+ * over and the builtin waits for a different one. A refusal that turns on
+ * something other than the request — the ceiling its result store declares,
+ * say — outlives the change that resolves it, because that change leaves the
+ * hash where it was. Editing the pattern is what moves it.
+ */
 function enqueuePostCommitLLMWork(
   tx: IExtendedStorageTransaction,
   sink: string,
@@ -586,6 +635,7 @@ function enqueuePostCommitLLMWork(
   kind: string,
   request: any,
   start: () => void,
+  onRefused: (error: Error) => void,
 ): void {
   enqueueSinkRequestPostCommitEffect(
     tx,
@@ -596,7 +646,7 @@ function enqueuePostCommitLLMWork(
     () => {
       start();
     },
-    { idempotencyKey },
+    { idempotencyKey, onRejected: onRefused },
   );
 }
 
@@ -818,9 +868,59 @@ export function llm(
         thisRun,
       );
 
+    const effectKey = effectTargetKey(`llm:${hash}`, resultCell);
+
+    // The one way this request ends badly, whether the model call failed or the
+    // request never went out at all.
+    const settleWithError = (error: unknown) =>
+      handleLLMError(
+        error,
+        runtime,
+        resultCell.key("pending"),
+        resultCell.key("result"),
+        resultCell.key("error"),
+        resultCell.key("partial"),
+        resultCell.key("requestHash"),
+        hash,
+        getRunForCancellation,
+        thisRun,
+        () => {
+          // Only clear if this is still the current request; a newer request
+          // may have already set previousCallHash to its own hash.
+          if (hash === previousCallHash) previousCallHash = undefined;
+        },
+        effectKey,
+      );
+
+    // This request's own result cell. A later run that finds a different output
+    // scope builds a new one and leaves this variable pointing at that, so the
+    // ending below has to write the cell this request announced.
+    const requestResultCell = resultCell;
+
+    // The abandoned request's ending. It carries the announcement because the
+    // one this run made rode the transaction that was abandoned, and the
+    // `cellsInitialized` latch means no later run makes it again.
+    const settleAbandoned = (error: unknown) =>
+      handleLLMError(
+        error,
+        runtime,
+        requestResultCell.key("pending"),
+        requestResultCell.key("result"),
+        requestResultCell.key("error"),
+        requestResultCell.key("partial"),
+        requestResultCell.key("requestHash"),
+        hash,
+        () => currentRun,
+        thisRun,
+        () => {
+          if (hash === previousCallHash) previousCallHash = undefined;
+        },
+        effectKey,
+        (announceTx) => sendResult(announceTx, requestResultCell),
+      );
+
     // Build tool catalog if tools are present, then start execution after the
     // transaction commits.
-    const effectKey = effectTargetKey(`llm:${hash}`, resultCell);
     enqueuePostCommitLLMWork(
       tx,
       "llm",
@@ -907,28 +1007,13 @@ export function llm(
         // `runtime.settledFor(parentCell)` both wait for the result to land;
         // `idle()` does not, so the handler never blocks on the LLM call.
         runtime.trackAsyncWork(
-          resultPromise.catch((e) =>
-            handleLLMError(
-              e,
-              runtime,
-              resultCell.key("pending"),
-              resultCell.key("result"),
-              resultCell.key("error"),
-              resultCell.key("partial"),
-              resultCell.key("requestHash"),
-              hash,
-              getRunForCancellation,
-              thisRun,
-              () => {
-                // Only clear if this is still the current request; a newer request
-                // may have already set previousCallHash to its own hash.
-                if (hash === previousCallHash) previousCallHash = undefined;
-              },
-              effectKey,
-            )
-          ),
+          resultPromise.catch(settleWithError),
           parentCell,
         );
+      },
+      (error) => {
+        cleanupPartial();
+        runtime.trackAsyncWork(settleAbandoned(error), parentCell);
       },
     );
   };
@@ -1196,6 +1281,56 @@ export function generateText(
       );
 
     const effectKey = effectTargetKey(`generateText:${hash}`, resultCell);
+
+    // The one way this request ends badly, whether the model call failed or the
+    // request never went out at all.
+    const settleWithError = (error: unknown) =>
+      handleLLMError(
+        error,
+        runtime,
+        resultCell.key("pending"),
+        resultCell.key("result"),
+        resultCell.key("error"),
+        resultCell.key("partial"),
+        resultCell.key("requestHash"),
+        hash,
+        getRunForCancellation,
+        thisRun,
+        () => {
+          // Only clear if this is still the current request; a newer request
+          // may have already set previousCallHash to its own hash.
+          if (hash === previousCallHash) previousCallHash = undefined;
+        },
+        effectKey,
+      );
+
+    // This request's own result cell. A later run that finds a different output
+    // scope builds a new one and leaves this variable pointing at that, so the
+    // ending below has to write the cell this request announced.
+    const requestResultCell = resultCell;
+
+    // The abandoned request's ending. It carries the announcement because the
+    // one this run made rode the transaction that was abandoned, and the
+    // `cellsInitialized` latch means no later run makes it again.
+    const settleAbandoned = (error: unknown) =>
+      handleLLMError(
+        error,
+        runtime,
+        requestResultCell.key("pending"),
+        requestResultCell.key("result"),
+        requestResultCell.key("error"),
+        requestResultCell.key("partial"),
+        requestResultCell.key("requestHash"),
+        hash,
+        () => currentRun,
+        thisRun,
+        () => {
+          if (hash === previousCallHash) previousCallHash = undefined;
+        },
+        effectKey,
+        (announceTx) => sendResult(announceTx, requestResultCell),
+      );
+
     enqueuePostCommitLLMWork(
       tx,
       "generateText",
@@ -1277,28 +1412,13 @@ export function generateText(
         // `runtime.settledFor(parentCell)` both wait for the result to land;
         // `idle()` does not, so the handler never blocks on the LLM call.
         runtime.trackAsyncWork(
-          resultPromise.catch((e) =>
-            handleLLMError(
-              e,
-              runtime,
-              resultCell.key("pending"),
-              resultCell.key("result"),
-              resultCell.key("error"),
-              resultCell.key("partial"),
-              resultCell.key("requestHash"),
-              hash,
-              getRunForCancellation,
-              thisRun,
-              () => {
-                // Only clear if this is still the current request; a newer request
-                // may have already set previousCallHash to its own hash.
-                if (hash === previousCallHash) previousCallHash = undefined;
-              },
-              effectKey,
-            )
-          ),
+          resultPromise.catch(settleWithError),
           parentCell,
         );
+      },
+      (error) => {
+        cleanupPartial();
+        runtime.trackAsyncWork(settleAbandoned(error), parentCell);
       },
     );
   };
@@ -1632,6 +1752,59 @@ export function generateObject<T extends Record<string, unknown>>(
         ? () => false
         : () => thisRun !== currentRun;
 
+      // The one way this request ends badly, whether the tools loop failed or
+      // the request never went out at all.
+      const settleWithError = (error: unknown) => {
+        logGenerateObject("error", {
+          ...toolsRequestSummary,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return handleLLMError(
+          error,
+          runtime,
+          resultCell.key("pending"),
+          resultCell.key("result"),
+          resultCell.key("error"),
+          resultCell.key("partial"),
+          resultCell.key("requestHash"),
+          hash,
+          queueName ? () => thisRun : () => currentRun,
+          thisRun,
+          () => {
+            previousCallHash = undefined;
+          },
+          effectKey,
+        );
+      };
+
+      // This request's own result cell. A later run that finds a different
+      // output scope builds a new one and leaves this variable pointing at
+      // that, so the ending below has to write the cell this request
+      // announced.
+      const requestResultCell = resultCell;
+
+      // The abandoned request's ending. It carries the announcement because
+      // the one this run made rode the transaction that was abandoned, and the
+      // `cellsInitialized` latch means no later run makes it again.
+      const settleAbandoned = (error: unknown) =>
+        handleLLMError(
+          error,
+          runtime,
+          requestResultCell.key("pending"),
+          requestResultCell.key("result"),
+          requestResultCell.key("error"),
+          requestResultCell.key("partial"),
+          requestResultCell.key("requestHash"),
+          hash,
+          () => currentRun,
+          thisRun,
+          () => {
+            previousCallHash = undefined;
+          },
+          effectKey,
+          (announceTx) => sendResult(announceTx, requestResultCell),
+        );
+
       logGenerateObject("enqueue", toolsRequestSummary);
 
       enqueuePostCommitLLMWork(
@@ -1868,30 +2041,13 @@ export function generateObject<T extends Record<string, unknown>>(
           // both span it; `idle()` does not, so the handler never blocks on the
           // LLM call.
           runtime.trackAsyncWork(
-            resultPromise.catch((e) => {
-              logGenerateObject("error", {
-                ...toolsRequestSummary,
-                error: e instanceof Error ? e.message : String(e),
-              });
-              return handleLLMError(
-                e,
-                runtime,
-                resultCell.key("pending"),
-                resultCell.key("result"),
-                resultCell.key("error"),
-                resultCell.key("partial"),
-                resultCell.key("requestHash"),
-                hash,
-                queueName ? () => thisRun : () => currentRun,
-                thisRun,
-                () => {
-                  previousCallHash = undefined;
-                },
-                effectKey,
-              );
-            }),
+            resultPromise.catch(settleWithError),
             parentCell,
           );
+        },
+        (error) => {
+          cleanupPartial();
+          runtime.trackAsyncWork(settleAbandoned(error), parentCell);
         },
       );
     } else {
@@ -1997,6 +2153,59 @@ export function generateObject<T extends Record<string, unknown>>(
       const isRunCancelled = queueName
         ? () => false
         : () => thisRun !== currentRun;
+
+      // The one way this request ends badly, whether the model call failed or
+      // the request never went out at all.
+      const settleWithError = (error: unknown) => {
+        logGenerateObject("error", {
+          ...directRequestSummary,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return handleLLMError(
+          error,
+          runtime,
+          resultCell.key("pending"),
+          resultCell.key("result"),
+          resultCell.key("error"),
+          resultCell.key("partial"),
+          resultCell.key("requestHash"),
+          hash,
+          queueName ? () => thisRun : () => currentRun,
+          thisRun,
+          () => {
+            previousCallHash = undefined;
+          },
+          effectKey,
+        );
+      };
+
+      // This request's own result cell. A later run that finds a different
+      // output scope builds a new one and leaves this variable pointing at
+      // that, so the ending below has to write the cell this request
+      // announced.
+      const requestResultCell = resultCell;
+
+      // The abandoned request's ending. It carries the announcement because
+      // the one this run made rode the transaction that was abandoned, and the
+      // `cellsInitialized` latch means no later run makes it again.
+      const settleAbandoned = (error: unknown) =>
+        handleLLMError(
+          error,
+          runtime,
+          requestResultCell.key("pending"),
+          requestResultCell.key("result"),
+          requestResultCell.key("error"),
+          requestResultCell.key("partial"),
+          requestResultCell.key("requestHash"),
+          hash,
+          () => currentRun,
+          thisRun,
+          () => {
+            previousCallHash = undefined;
+          },
+          effectKey,
+          (announceTx) => sendResult(announceTx, requestResultCell),
+        );
 
       logGenerateObject("enqueue", directRequestSummary);
 
@@ -2137,30 +2346,12 @@ export function generateObject<T extends Record<string, unknown>>(
                 });
                 logGenerateObject("write-complete", directRequestSummary);
               })
-              .catch((e) => {
-                logGenerateObject("error", {
-                  ...directRequestSummary,
-                  error: e instanceof Error ? e.message : String(e),
-                });
-                return handleLLMError(
-                  e,
-                  runtime,
-                  resultCell.key("pending"),
-                  resultCell.key("result"),
-                  resultCell.key("error"),
-                  resultCell.key("partial"),
-                  resultCell.key("requestHash"),
-                  hash,
-                  queueName ? () => thisRun : () => currentRun,
-                  thisRun,
-                  () => {
-                    previousCallHash = undefined;
-                  },
-                  effectKey,
-                );
-              }),
+              .catch(settleWithError),
             parentCell,
           );
+        },
+        (error) => {
+          runtime.trackAsyncWork(settleAbandoned(error), parentCell);
         },
       );
     }

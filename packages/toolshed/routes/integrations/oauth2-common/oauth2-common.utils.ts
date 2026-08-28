@@ -17,9 +17,9 @@ import {
 
 const logger = getLogger("oauth2-common");
 
-// ---------------------------------------------------------------------------
+//
 // OAuth2 Client
-// ---------------------------------------------------------------------------
+//
 
 export function createOAuth2Client(
   config: OAuth2ProviderConfig,
@@ -40,9 +40,9 @@ export function createOAuth2Client(
   });
 }
 
-// ---------------------------------------------------------------------------
+//
 // URL helpers
-// ---------------------------------------------------------------------------
+//
 
 export function getBaseUrl(url: string): string {
   try {
@@ -56,9 +56,9 @@ export function getBaseUrl(url: string): string {
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // Callback HTML
-// ---------------------------------------------------------------------------
+//
 
 function escapeHtml(str: string): string {
   return str
@@ -108,9 +108,9 @@ export function generateCallbackHtml(result: Record<string, unknown>): string {
   `;
 }
 
-// ---------------------------------------------------------------------------
+//
 // User info
-// ---------------------------------------------------------------------------
+//
 
 export async function fetchUserInfo(
   accessToken: string,
@@ -136,9 +136,9 @@ export async function fetchUserInfo(
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // Auth cell CRUD
-// ---------------------------------------------------------------------------
+//
 
 export async function getAuthCell(docLink: string, schema: JSONSchema) {
   try {
@@ -210,9 +210,9 @@ export async function clearAuthData(
   }
 }
 
-// ---------------------------------------------------------------------------
+//
 // Token mapping (generic: uses accessToken field)
-// ---------------------------------------------------------------------------
+//
 
 export function tokenToGenericAuthData(
   token: Tokens | OAuth2Tokens,
@@ -229,9 +229,9 @@ export function tokenToGenericAuthData(
   };
 }
 
-// ---------------------------------------------------------------------------
+//
 // Response helpers
-// ---------------------------------------------------------------------------
+//
 
 export function createCallbackResponse(
   result: Record<string, unknown>,
@@ -297,9 +297,9 @@ export function createBackgroundIntegrationErrorResponse(
   return c.json({ success: false, error: errorMessage }, status);
 }
 
-// ---------------------------------------------------------------------------
+//
 // Provider metadata discovery (RFC 8414 / OIDC)
-// ---------------------------------------------------------------------------
+//
 
 // In-memory cache: metadataUrl → discovered endpoints
 const metadataCache = new Map<string, {

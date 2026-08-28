@@ -32,7 +32,9 @@ function nameOffsetOf(doc: Document, name: string): number {
   return node.nameOffset;
 }
 
-// --- createSemantics: build success path that the !program guard backstops ----
+//
+// createSemantics: build success path that the !program guard backstops
+//
 
 Deno.test("semantics: a healthy build returns a Program (the !program guard is a backstop)", () => {
   // build() runs createLanguageService + getProgram and returns a real Program,
@@ -62,7 +64,9 @@ const y = x;`;
   assertEquals(sem.definitionOf(nameOffsetOf(doc, "y")), []);
 });
 
-// --- createSemantics: the host file cache (populated once, never re-hit) -------
+//
+// createSemantics: the host file cache (populated once, never re-hit)
+//
 
 Deno.test("semantics: the host reads each real file once (cache populated, not re-hit)", () => {
   // Under Bundler resolution the host loads each resolved file a single time;
@@ -98,7 +102,9 @@ const b = ext();`;
   }
 });
 
-// --- within()/realDir: a child resolves => its ancestor root resolves too ------
+//
+// within()/realDir: a child resolves => its ancestor root resolves too
+//
 
 Deno.test("semantics: within() resolves a real child under a real root (realDir succeeds)", () => {
   // realDir(root) is only reached after the child's realPathSync succeeds; the
@@ -136,7 +142,9 @@ const x = 1;`;
   }
 });
 
-// --- createDiffSemantics: build success path the failure guards backstop ------
+//
+// createDiffSemantics: build success path the failure guards backstop
+//
 
 const FILE_TEXT = `export function double(n: number): number {
     return n * 2;
@@ -209,11 +217,11 @@ Deno.test("diff semantics: no in-workspace root file means no service (not a fai
   assertEquals(sem, undefined);
 });
 
-// lazyProgram is the shared build/cache/latch both factories use. The
-// configured host never makes it fail, so its failure isolation is exercised
-// directly: a build is cached after the first success, and a throwing or
-// program-less build latches so it is not retried.
 Deno.test("lazyProgram: caches a success and latches a failed build", () => {
+  // lazyProgram is the shared build/cache/latch both factories use. The
+  // configured host never makes it fail, so its failure isolation is exercised
+  // directly: a build is cached after the first success, and a throwing or
+  // program-less build latches so it is not retried.
   const fake = {} as unknown as ts.Program;
 
   let okCalls = 0;
@@ -244,9 +252,12 @@ Deno.test("lazyProgram: caches a success and latches a failed build", () => {
   assertEquals(nullCalls, 1, "a program-less build latches and is not retried");
 });
 
+//
 // makeHost's readReal memoizes real-file reads. Under the pager's module
 // resolution TypeScript reads each file once, so the cache hit never fires
 // there; reading the same path twice through the host exercises it directly.
+//
+
 Deno.test("makeHost: a repeated read of the same file is served from the cache", () => {
   const dir = Deno.makeTempDirSync();
   try {

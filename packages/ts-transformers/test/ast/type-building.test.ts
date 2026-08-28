@@ -13,6 +13,7 @@ import {
   createCaptureTreeNode,
 } from "../../src/utils/capture-tree.ts";
 
+//
 // The printer extracts literal text by source position from the file it is
 // printing. A declaration member's type node reused in ANOTHER file therefore
 // emits garbage tokens for literal types (e.g. the `"n/a"` in
@@ -20,6 +21,8 @@ import {
 // emit file). cloneTypeNodeDeepForEmission strips positions throughout so
 // literals print from their own `.text`. (Same guarantee as the helper of
 // this name on the #4078 branch.)
+//
+
 Deno.test("cloneTypeNodeDeepForEmission prints cross-file literal types from their own text", () => {
   const declarationFile = ts.createSourceFile(
     "declaration.ts",

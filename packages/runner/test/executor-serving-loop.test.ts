@@ -122,12 +122,6 @@ describe("stage F serving loop", () => {
     | ((input: RequestInfo | URL, init?: RequestInit) => Promise<Response>)
     | undefined;
   // serving-loop.md §3e: the pattern-update posture flips server-side.
-  // The updater's source CHECK fetches over the network, which this
-  // fully-local harness cannot serve — the posture flip is asserted by
-  // its own test below; the loop tests run with the check off so idle()
-  // is not at the mercy of a network timeout.
-  let autoUpdate = false;
-
   const newHost = (
     policy?: ConstructorParameters<typeof ExecutorHost>[0]["policy"],
   ): ExecutorHost =>
@@ -145,7 +139,6 @@ describe("stage F serving loop", () => {
           ...(servingFetch !== undefined ? { fetch: servingFetch } : {}),
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: autoUpdate,
           },
         });
         servingRuntime = runtime;
@@ -166,7 +159,6 @@ describe("stage F serving loop", () => {
     servingRuntime = undefined;
     onServingRuntime = undefined;
     servingFetch = undefined;
-    autoUpdate = false;
   });
 
   afterEach(async () => {
@@ -916,14 +908,8 @@ describe("stage F serving loop", () => {
     // The SWAP half — the patternIdentity sink reacting to a pointer
     // write, teardown + reinstantiation included — is what this test
     // drives, and it is installed with the piece (gated only by
-    // doNotUpdateOnPatternChange), independent of the
-    // systemPatternAutoUpdate CHECK half. The check half (network source
-    // polling + roll-forward) is enabled by the production wiring
-    // (toolshed's serving-runtime factory) and needs a real patterns
-    // route to poll; in this fully-local fixture its source probe syncs
-    // docs that never resolve and would wedge the settle — the flagged
-    // stage-F residual.
-    autoUpdate = false;
+    // doNotUpdateOnPatternChange). Following an origin is separate and
+    // belongs to whoever opens a piece; a serving tenure opens none.
 
     let v2Ref: { identity: string; symbol: string } | undefined;
     onServingRuntime = async (runtime) => {
@@ -1301,7 +1287,6 @@ describe("stage F serving loop", () => {
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: false,
           },
         });
         created.push({ runtime, manager });
@@ -1422,7 +1407,6 @@ describe("stage F serving loop", () => {
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: false,
           },
         });
         return {

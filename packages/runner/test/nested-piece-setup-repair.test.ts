@@ -17,11 +17,10 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 // instantiation re-runs the pinned pattern's OWN setup on that failure and
 // retries — the same repair the home ROOT gets in startEnsuredDefaultPattern,
 // here for the nested pieces that never pass through the PieceController.
-// The repair is not gated by `systemPatternAutoUpdate`: that flag governs
-// updates which move the durable identity pointer, while this setup replays
-// the pattern the pointer already names. The root itself is excluded because
-// its controller owns the repair; a nested piece is never a space's
-// `.defaultPattern`, so it heals here.
+// The repair moves no durable identity pointer; it replays the pattern the
+// pointer already names. The root itself is excluded because its controller
+// owns the repair; a nested piece is never a space's `.defaultPattern`, so it
+// heals here.
 
 const signer = await Identity.fromPassphrase("nested-piece-setup-repair");
 const space = signer.did();
@@ -62,10 +61,13 @@ const programOf = (contents: string): RuntimeProgram => ({
   files: [{ name: "/main.tsx", contents }],
 });
 
+//
 // The repair keys on ONE variant of the handler-stream failure — the
 // setup-missing "marker was never written" case. Its two siblings are NOT
 // setup-missing (re-running setup would not fix them), so they must not trigger
 // a repair. These messages mirror `describeHandlerStreamFailure`'s three shapes.
+//
+
 describe("isMissingStreamMarkerFailure discriminates the setup-missing variant", () => {
   it("matches the marker-never-written variant", () => {
     expect(
@@ -113,11 +115,10 @@ describe("isMissingStreamMarkerFailure discriminates the setup-missing variant",
 describe("nested-piece cold-start setup repair", () => {
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
-  const newRuntime = (systemPatternAutoUpdate: boolean) =>
+  const newRuntime = () =>
     new Runtime({
       apiUrl: new URL(import.meta.url),
       storageManager,
-      experimental: { systemPatternAutoUpdate },
     });
 
   beforeEach(() => {
@@ -162,33 +163,8 @@ describe("nested-piece cold-start setup repair", () => {
     return { cell, v3Ref };
   };
 
-  it("heals with systemPatternAutoUpdate off (repair is not update)", async () => {
-    // Disabling pattern auto-update proves the same-identity repair is
-    // independent of the host's update posture.
-    const rt = newRuntime(false);
-    try {
-      const { cell, v3Ref } = await brickedNestedPiece(rt);
-      const started = await rt.start(cell);
-      expect(started).toBe(true);
-      await cell.pull();
-      // Same-identity self-repair, not an update: the pin stays at V3…
-      const idRaw = (cell as unknown as {
-        getMetaRaw: (k: string) => unknown;
-      }).getMetaRaw("patternIdentity") as { identity?: string } | undefined;
-      expect(idRaw?.identity).toBe(v3Ref.identity);
-      // …and the once-missing handler stream fires end to end.
-      const before = (cell.getAsQueryResult() as { count: number }).count;
-      (cell.key("bump") as unknown as { send: (e: unknown) => void }).send({});
-      await cell.pull();
-      const after = (cell.getAsQueryResult() as { count: number }).count;
-      expect(after).toBe(before + 1);
-    } finally {
-      await rt.dispose();
-    }
-  });
-
-  it("heals a nested piece by re-running its setup on start (flag ON)", async () => {
-    const rt = newRuntime(true);
+  it("heals a nested piece by re-running its setup on start", async () => {
+    const rt = newRuntime();
     try {
       const { cell, v3Ref } = await brickedNestedPiece(rt);
       // Starts WITHOUT throwing: the setup repair materializes the missing

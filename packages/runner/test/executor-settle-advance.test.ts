@@ -111,7 +111,6 @@ describe("S1 drain-settle quiescence advance (RULED 2026-08-19)", () => {
           servingPosture: true,
           experimental: {
             serverExecution: true,
-            systemPatternAutoUpdate: false,
           },
         });
         await onServingRuntime?.(runtime);

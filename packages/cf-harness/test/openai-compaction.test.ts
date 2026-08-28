@@ -69,9 +69,9 @@ const registry = (models: Array<Record<string, unknown>>) => ({
   data: models,
 });
 
-// ---------------------------------------------------------------------------
+//
 // Threshold policy
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("the threshold is 75% of the input budget, not of context window", () => {
   // gpt-5.6 family: 1,050,000 total - 128,000 output = 922,000 input.
@@ -132,9 +132,9 @@ Deno.test("a per-request threshold overrides, and 0 disables", async () => {
   assertEquals(captured[2].body.context_management, undefined);
 });
 
-// ---------------------------------------------------------------------------
+//
 // Retention and pruning
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("a compaction item is retained rather than dropped", async () => {
   const captured: Captured[] = [];
@@ -303,9 +303,9 @@ Deno.test("a compaction from another model is not replayed", async () => {
   assert(JSON.stringify(input).includes("early contents"));
 });
 
-// ---------------------------------------------------------------------------
+//
 // The default must work on the normal run path, with no primed catalog.
-// ---------------------------------------------------------------------------
+//
 
 const toolHeavyTranscript = (): HarnessTranscriptMessage[] => [
   { role: "user", content: "Go." },
@@ -501,9 +501,9 @@ Deno.test("a later turn retries after an unreachable registry", async () => {
   }]);
 });
 
-// ---------------------------------------------------------------------------
+//
 // Unsupported paths must fail loudly rather than ignore the option.
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("a positive threshold on a chat-routed model is rejected", async () => {
   const client = clientWith([], [completed([])]);

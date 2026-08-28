@@ -34,7 +34,10 @@ export interface DragState {
  */
 export type DragListener = (state: DragState | null) => void;
 
+//
 // Module-level singleton state
+//
+
 let currentDrag: DragState | null = null;
 const listeners: Set<DragListener> = new Set();
 

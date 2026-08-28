@@ -799,7 +799,9 @@ function lineEq(a: Line, b: Line): boolean {
   return true;
 }
 
-// --- Tokenisation ------------------------------------------------------------
+//
+// Tokenisation
+//
 
 function collectLeafTokens(sf: ts.SourceFile): RawToken[] {
   const tokens: RawToken[] = [];
@@ -1176,7 +1178,9 @@ function isFunctionLike(node: ts.Node): boolean {
     ts.isSetAccessorDeclaration(node);
 }
 
-// --- Structure tree ----------------------------------------------------------
+//
+// Structure tree
+//
 
 interface BuildCtx {
   sf: ts.SourceFile;
@@ -1512,7 +1516,7 @@ function registerDefinition(
 function classify(node: ts.Node, ctx: BuildCtx): Desc | null {
   const { sf } = ctx;
 
-  // --- declarations (also statements) ---
+  // declarations (also statements)
   if (ts.isImportDeclaration(node)) {
     return {
       kind: "import",
@@ -1616,11 +1620,11 @@ function classify(node: ts.Node, ctx: BuildCtx): Desc | null {
     };
   }
 
-  // --- variable statements & declarations ---
-  // A single binding is represented by the whole statement (so the `variable`
-  // node covers `export const … ;`); a multi-declarator statement stays generic
-  // and each declaration becomes its own binding node. The single declaration
-  // itself stays generic to avoid labeling one binding at two nesting levels.
+  // variable statements & declarations: A single binding is represented by the
+  // whole statement (so the `variable` node covers `export const … ;`); a
+  // multi-declarator statement stays generic and each declaration becomes its
+  // own binding node. The single declaration itself stays generic to avoid
+  // labeling one binding at two nesting levels.
   if (ts.isVariableStatement(node)) {
     const decls = node.declarationList.declarations;
     if (decls.length === 1) return bindingDesc(decls[0], ctx);
@@ -1634,7 +1638,7 @@ function classify(node: ts.Node, ctx: BuildCtx): Desc | null {
     return bindingDesc(node, ctx);
   }
 
-  // --- other statements ---
+  // other statements
   if (ts.isExpressionStatement(node)) {
     return expressionStatementDesc(node.expression, ctx);
   }
@@ -1687,7 +1691,7 @@ function classify(node: ts.Node, ctx: BuildCtx): Desc | null {
     };
   }
 
-  // --- significant expressions (in argument / body / return position) ---
+  // significant expressions (in argument / body / return position)
   if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
     return {
       kind: "closure",
@@ -1918,7 +1922,9 @@ function calleeName(call: ts.CallExpression, sf: ts.SourceFile): string {
   return nodeFirstLine(e, sf, 16);
 }
 
-// --- Metadata extraction (best-effort; never throws) -------------------------
+//
+// Metadata extraction (best-effort; never throws)
+//
 
 type FnLike =
   | ts.ArrowFunction
@@ -2411,7 +2417,9 @@ function nodeFirstLine(node: ts.Node, sf: ts.SourceFile, max: number): string {
   return firstLine(text.slice(start, stop), max);
 }
 
-// --- Sections ----------------------------------------------------------------
+//
+// Sections
+//
 
 interface SectionMark {
   name: string;
@@ -2472,7 +2480,9 @@ function attachSections(
   return sectionNodes;
 }
 
-// --- Lines -------------------------------------------------------------------
+//
+// Lines
+//
 
 function spansToLines(
   text: string,

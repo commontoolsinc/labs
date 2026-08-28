@@ -162,7 +162,7 @@ describe("startServerExecutionHost OFF witness", () => {
     } as unknown as Identity;
 
     it("adds nothing while the serving loop is off", () => {
-      publishExperimentalPosture({ systemPatternAutoUpdate: false });
+      publishExperimentalPosture({ modernCellRep: false });
       try {
         startServerExecutionHost({
           server: untouchable<MemoryServer>("server"),
@@ -170,9 +170,7 @@ describe("startServerExecutionHost OFF witness", () => {
           apiUrl: new URL("http://toolshed.test"),
           envGet: () => undefined,
         });
-        expect(experimentalPosture()).toEqual({
-          systemPatternAutoUpdate: false,
-        });
+        expect(experimentalPosture()).toEqual({ modernCellRep: false });
       } finally {
         publishExperimentalPosture(null);
       }
@@ -182,7 +180,6 @@ describe("startServerExecutionHost OFF witness", () => {
       publishExperimentalPosture({
         modernCellRep: true,
         serverExecution: false,
-        systemPatternAutoUpdate: false,
       });
       try {
         expect(
@@ -194,12 +191,11 @@ describe("startServerExecutionHost OFF witness", () => {
               name === "EXPERIMENTAL_SERVER_EXECUTION" ? "true" : undefined,
           }),
         ).toBeDefined();
-        // The two the serving runtime factory forces, over a base that says
+        // The one the serving runtime factory forces, over a base that says
         // the opposite; everything else rides the base through untouched.
         expect(experimentalPosture()).toEqual({
           modernCellRep: true,
           serverExecution: true,
-          systemPatternAutoUpdate: true,
         });
       } finally {
         await stopServerExecutionHost();
@@ -227,12 +223,13 @@ describe("startServerExecutionHost OFF witness", () => {
   });
 });
 
-// The RULED test switch's env parsing (OW45 arm-B stage 1, RULED
-// 2026-08-24): unset and "true" are the production posture (ensure ON);
-// only the literal "false" switches the space-root ensure off; garbage
-// FAILS TO PRODUCTION (ON, with a warning) — a typo must never silently
-// strip production spaces of their roots.
 describe("ensureSpaceRootsFromEnv", () => {
+  // The RULED test switch's env parsing (OW45 arm-B stage 1, RULED 2026-08-24):
+  // unset and "true" are the production posture (ensure ON); only the literal
+  // "false" switches the space-root ensure off; garbage FAILS TO PRODUCTION
+  // (ON, with a warning) — a typo must never silently strip production spaces
+  // of their roots.
+
   const envOf2 =
     (values: Record<string, string | undefined>) => (name: string) =>
       values[name];

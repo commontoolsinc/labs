@@ -25,6 +25,7 @@ on the Common Fabric runtime.
 | Task | Read |
 |------|------|
 | Build a pattern | [ai/pattern-development-guide.md](ai/pattern-development-guide.md) |
+| Build an iframe-first pattern | [ai/iframe-pattern-guide.md](ai/iframe-pattern-guide.md) |
 | Write tests | [ai/pattern-testing-guide.md](ai/pattern-testing-guide.md) (mechanics: [workflows/pattern-testing.md](workflows/pattern-testing.md)) |
 | Review / critique a pattern | [ai/pattern-critique-guide.md](ai/pattern-critique-guide.md) |
 | Manual / runtime testing | [ai/manual-testing-guide.md](ai/manual-testing-guide.md) |
@@ -89,6 +90,7 @@ on the Common Fabric runtime.
 - [workflows/development.md](workflows/development.md) — `cf` CLI loop: check, deploy, setsrc, inspect, link
 - [workflows/pattern-testing.md](workflows/pattern-testing.md) — writing and running pattern tests
 - [workflows/handlers-cli-testing.md](workflows/handlers-cli-testing.md) — invoking mounted callables from the CLI
+- [workflows/reading-and-writing.md](workflows/reading-and-writing.md) — the tour of reading a piece's cells and writing them: the two cells one piece has and the flag that chooses between them, the shaped read, and why a write recomputes nothing until `cf piece step` observes the piece
 - [workflows/bulk-operations.md](workflows/bulk-operations.md) — the tour of surveying, repairing and retargeting a collection of deployed pieces, walked act by act against the demo that runs it; the contract these operations hold is [features/piece-bulk-operations.md](../features/piece-bulk-operations.md)
 
 ### verbs/ — driving a deployed piece through `cf`

@@ -148,6 +148,7 @@ The toolshed-embedded memory service has two modes:
 | `MEMORY_DIR` | `./cache/memory/` (as a `file://` URL) | **Directory mode** — one SQLite file per space. Default; backwards-compatible. |
 | `DB_PATH` | _(unset)_ | **Single-file mode** — absolute path to one SQLite database holding every space, instead of a file per space. Takes precedence over `MEMORY_DIR`. Validated as an absolute path. |
 | `MEMORY_URL` | `http://localhost:8000` | Where other components reach the memory service. |
+| `MEMORY_WS_IDLE_TIMEOUT_SECONDS` | `300` | Pong deadline for memory WebSockets, in seconds. Set to `0` to disable it. Size it above the longest legitimate synchronous memory-server stretch, not as a network round-trip timeout. |
 | `MEMORY_ACL_MODE` | `enforce` | Space ACL policy: `off`, `observe`, or `enforce`. `observe` logs ordinary access shortfalls, while malformed ACLs and fresh-space genesis violations still fail closed. |
 | `RATE_LIMIT_TRUST_FORWARDED_FOR` | `false` | Set to `true` ONLY when a trusted reverse proxy that overwrites `X-Forwarded-For` sits in front of toolshed. Control-plane rate limiting keys on the real TCP peer by default. Enabling it without such a proxy makes the header client-controlled and the limiter a no-op; leaving it off behind a proxy collapses every caller onto one bucket. |
 | `MEMORY_SERVICE_DIDS` | _(empty)_ | Comma-separated DIDs with implicit OWNER on every space. These identities may initialize ACLs but still cannot make an ordinary first write before genesis. |
@@ -254,14 +255,29 @@ default, its planned end state, and its removal path, plus the propagation paths
 (server / shell / bg-piece / CLI) and verification steps. Briefly:
 
 - Server-side toggles take effect on restart.
-- Shell-side toggles are baked at build time — toggling requires a rebuild.
-- The same env var must be set everywhere the flag is read.
+- Server-authoritative flags propagate to clients not built alongside the
+  server (cf among them) on their own: the server publishes its resolved
+  posture on `/api/meta` and those clients adopt it at boot. An explicit
+  `EXPERIMENTAL_*` still wins per flag, and `CF_ADOPT_SERVER_FLAGS=false`
+  turns adoption off wholesale.
+- Everywhere else — the shell included — the same env var must be set
+  wherever the flag is read; shell-side that means a build-time define, so
+  toggling requires a rebuild.
 
-The environment-backed flags (the only ones settable without editing code) are:
+The environment-backed flags (the only ones settable without editing code) are
+declared once in `EXPERIMENTAL_ENV_VARS`
+(`packages/runner/src/runtime-presets.ts`), which is the authority; today
+that is:
 
 | Flag | Env var |
 |---|---|
 | `modernCellRep` | `EXPERIMENTAL_MODERN_CELL_REP` |
+| `contentAddressedSchemas` | `EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS` |
+| `plainResultReceipts` | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` |
+| `computedCellIds` | `EXPERIMENTAL_COMPUTED_CELL_IDS` |
+| `lazyMaterialization` | `EXPERIMENTAL_LAZY_MATERIALIZATION` |
+| `readerSchemaPrecedence` | `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` |
+| `serverExecution` | `EXPERIMENTAL_SERVER_EXECUTION` |
 
 The runtime-only flags (`commitPreconditions`, the CFC enforcement dials) and the
 storage, memory-protocol, and shell flags are documented in the registry. See it
@@ -279,9 +295,9 @@ Most shell config is **build-time**: esbuild injects defines in
 |---|---|---|---|
 | `PRODUCTION` | `$ENVIRONMENT` (`"production"` if set, else `"development"`) | _(unset = dev)_ | Triggers minified bundle and disables sourcemaps. |
 | `API_URL` | `$API_URL` | falls back to `location.origin` | Backend the shell calls. |
-| `PRESENCE_URL` | `$PRESENCE_URL` | _(unset)_ | WebSocket endpoint provided to collaborative editors for ephemeral co-presence. When unset, editor co-presence stays disabled unless a component supplies its own endpoint. |
+| `PRESENCE_URL` | `$PRESENCE_URL` | _(unset)_ | WebSocket endpoint provided to collaborative editors for ephemeral co-presence. Must be a credential-free `ws:`/`wss:` URL; `packages/shell/src/lib/presence-url.ts` rejects anything else and fails the build. When unset, editor co-presence stays disabled unless a component supplies its own endpoint. Both deployed shells take it from a repository variable — see [Deploying a commit](./deploying.md). |
 | `COMMIT_SHA` | `$COMMIT_SHA` | _(unset)_ | Surfaced for diagnostics and used by deployed shells to select the immutable `/builds/<sha>` worker asset graph. In development the explicit worker URL remains `/scripts/worker-runtime.js`. It does not authorize system-pattern updates. |
-| `EXPERIMENTAL_MODERN_CELL_REP` | `EXPERIMENTAL.modernCellRep` | _(unset)_ | See experimental flags. |
+| `EXPERIMENTAL_*` (`MODERN_CELL_REP`, `COMPUTED_CELL_IDS`, `SERVER_EXECUTION`, `CONTENT_ADDRESSED_SCHEMAS`, `READER_SCHEMA_PRECEDENCE`) | `EXPERIMENTAL.<flag>` | _(unset)_ | Per-flag build-time values; changing one requires a rebuild. See experimental flags. |
 | `SHELL_PORT` | _(server-only)_ | `5173` (from `ports.json`) | Dev server port. |
 
 ---

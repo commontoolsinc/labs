@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-run --allow-read --allow-write
+#!/usr/bin/env -S deno run --allow-read --allow-write --allow-env --allow-ffi --allow-net=github.com,release-assets.githubusercontent.com
 
 /**
  * Export every topic's authored content from a Topics space snapshot,
@@ -12,7 +12,8 @@
  *
  * The snapshot is a `VACUUM INTO` copy of the space store (the acquisition
  * step of docs/development/space-clone-rehearsal.md); everything here reads
- * it through `cf inspect`, so no server is involved. With no identity flags,
+ * it directly through `@commonfabric/state-inspector`, so no server is
+ * involved and no subprocess is spawned per entity. With no identity flags,
  * topics are selected by verb shape — a piece whose result offers
  * `addComment`, `addLink`, and `setBody` — and the board by `addTopic`; the
  * selected pattern identities are printed so an operator can confirm them
@@ -22,10 +23,33 @@
  * own, so the export resolves each element. Any deeper link inside a content
  * field aborts the export: recording a reference as if it were content is
  * exactly the silent corruption this tool exists to rule out.
+ *
+ * The permissions in the shebang are the complete set the store read needs,
+ * and the omission is as deliberate as the inclusions. Opening the snapshot
+ * loads SQLite over FFI and reads its configuration from the environment, so
+ * `--allow-ffi --allow-env`. The library is not shipped with `@db/sqlite`
+ * either: on a cold cache `plug` fetches it at RUNTIME from the two hosts
+ * named — the release URL and the target it redirects to — which is an
+ * ordinary `fetch` and so wants `--allow-net`. Only `--allow-run` is absent,
+ * because nothing here starts a process.
+ *
+ * `scripts/topics-export.test.ts` asserts this exact list, so changing it is
+ * a deliberate act rather than a drift. Verify any change against an empty
+ * `DENO_DIR`, never the cache this machine happens to be carrying: a warm
+ * cache makes the SQLite download disappear, and with it the evidence that
+ * the program ever reached the network at all.
  */
 
 import {
-  cfJson,
+  annotate,
+  getValueAt,
+  isCompleteScan,
+  listEntityModels,
+  openSpace,
+  resolveSpace,
+} from "@commonfabric/state-inspector";
+
+import {
   findLink,
   LINKED_ARRAY_FIELDS,
   SCALAR_CONTENT_FIELDS,
@@ -34,20 +58,13 @@ import {
   type TopicsExport,
 } from "./topics-rehearsal-lib.ts";
 
-interface EntityRow {
-  id: string;
-}
+import { argumentIdOf } from "./topics-snapshot-lib.ts";
 
 interface PieceInfo {
   id: string;
   pattern?: { identity?: string };
   input?: { id?: string };
   resultKeys?: string[];
-}
-
-interface ValueAt {
-  exists: boolean;
-  value?: unknown;
 }
 
 function usage(): never {
@@ -76,32 +93,78 @@ if (!snapshot || positional.length > 1 || !outPath) usage();
 const didMatch = /(did:key:[A-Za-z0-9]+)\.sqlite$/.exec(snapshot);
 const spaceDid = didMatch ? didMatch[1] : null;
 
-// A capped listing would hand the export a subset of the space's pieces, and a
-// rollback payload missing topics reads exactly like a complete one. The limit
-// is named past any plausible piece count so the cap never bites in practice —
-// but a finite cap is still a cliff, and `cfJson` reads only stdout, so the
-// notice `cf` writes to stderr would go by unseen. `--require-complete` turns
-// the same condition into a nonzero exit, which `cf()` DOES raise: the export
-// either covers every piece in the space or it does not get written.
+// Named past any plausible piece count so the cap never bites in practice. A
+// finite cap is still a cliff, so the scan's own extent is checked below
+// rather than trusted.
 const PIECE_LIMIT = 1_000_000;
 
-const pieces = await cfJson<EntityRow[]>([
-  "inspect",
-  "entities",
-  snapshot,
-  "--kind",
-  "piece",
-  "--limit",
-  String(PIECE_LIMIT),
-  "--require-complete",
-  "--json",
-]);
+// Every read below goes through this ONE handle. The obvious spelling — shell
+// out to `cf` per entity — costs a `deno task` resolution and a fresh open of
+// a multi-gigabyte database for each of several thousand reads, which is hours
+// for a board this size. Same answers, one process.
+//
+// `annotate` at unbounded depth is not decoration either: it is what
+// `cf inspect value-at --json --full-depth` returns, and `findLink` below
+// reads the `$link` shape that annotation produces. Reading the raw value
+// instead would quietly change what the export records.
+const space = openSpace(await resolveSpace(snapshot));
+const annotateFully = (value: unknown) =>
+  annotate(value, Number.POSITIVE_INFINITY);
 
-const infos: PieceInfo[] = [];
-for (const row of pieces) {
-  infos.push(
-    await cfJson<PieceInfo>(["inspect", "piece", snapshot, row.id, "--json"]),
+const listing = listEntityModels(space, { limit: PIECE_LIMIT, kind: "piece" });
+// An incomplete listing would hand the export a subset of the space's pieces,
+// and a rollback payload missing topics reads exactly like a complete one. A
+// `kind` scan falls short two ways — it can hit the cap, and it drops any
+// entity it could not reconstruct well enough to classify — so the refusal
+// names which one happened, because only the first is answered by a larger
+// limit.
+if (!isCompleteScan(listing.extent)) {
+  const { limit, total, truncated, unreadable } = listing.extent;
+  console.error(
+    "refusing: the piece listing does not cover the space, so this export " +
+      "would be a subset of it with nothing to say so" +
+      (truncated ? `; capped at ${limit} of ${total} entities` : "") +
+      (unreadable > 0
+        ? `; ${unreadable} of ${total} entities could not be reconstructed`
+        : ""),
   );
+  Deno.exit(1);
+}
+
+// Selection reads each piece's DOCUMENT, not its description. `describePiece`
+// additionally resolves owned cells and lineage, which is what an operator
+// wants when inspecting one piece and ruinous across every piece in a space:
+// measured at ~22s each here against ~1.7ms for the document, which is the
+// difference between this export finishing in under a minute and not finishing
+// at all. Everything selection needs is in the document — the pattern identity
+// it carries, the argument it links, and its result keys, which are exactly the
+// keys of `value` (verified against `describePiece` on a topic).
+//
+// The space holds far more pieces than the board's children: 14807 in the
+// 2026-08-27 snapshot, of which about 126 are the board and its topics. The
+// sweep is what makes finding them affordable.
+const infos: PieceInfo[] = [];
+for (const row of listing.entities) {
+  const document = getValueAt(space, { id: row.id }).document as
+    | Record<string, unknown>
+    | undefined;
+  if (!document) continue;
+  const value = document.value as Record<string, unknown> | undefined;
+  const identity = document.patternIdentity as
+    | { identity?: string }
+    | string
+    | undefined;
+  infos.push({
+    id: row.id,
+    pattern: {
+      identity: typeof identity === "string" ? identity : identity?.identity,
+    },
+    input: { id: argumentIdOf(document) },
+    resultKeys: value ? Object.keys(value) : [],
+  });
+  if (infos.length % 2000 === 0) {
+    console.error(`  swept ${infos.length}/${listing.entities.length} pieces`);
+  }
 }
 
 const hasVerbs = (info: PieceInfo, verbs: string[]) =>
@@ -130,39 +193,25 @@ if (topicInfos.length === 0) {
   Deno.exit(1);
 }
 
-async function argumentValue(info: PieceInfo): Promise<unknown> {
+function argumentValue(info: PieceInfo): unknown {
   const argumentId = info.input?.id;
   if (!argumentId) {
     throw new Error(`piece ${info.id} reports no argument entity`);
   }
-  const at = await cfJson<ValueAt>([
-    "inspect",
-    "value-at",
-    snapshot!,
-    argumentId,
-    "--json",
-    "--full-depth",
-  ]);
+  const at = getValueAt(space, { id: argumentId });
   if (!at.exists) throw new Error(`argument ${argumentId} does not exist`);
-  return at.value;
+  return annotateFully(at.value);
 }
 
-async function resolveElement(
+function resolveElement(
   topicFid: string,
   field: string,
   index: number,
   element: unknown,
-): Promise<unknown> {
+): unknown {
   const link = (element as { $link?: { id?: string } })?.$link;
   const resolved = link?.id
-    ? (await cfJson<ValueAt>([
-      "inspect",
-      "value-at",
-      snapshot!,
-      link.id,
-      "--json",
-      "--full-depth",
-    ])).value
+    ? annotateFully(getValueAt(space, { id: link.id }).value)
     : element;
   const deeper = findLink(resolved);
   if (deeper) {
@@ -190,7 +239,7 @@ const unclassified = new Set<string>();
 let commentTotal = 0;
 let linkTotal = 0;
 for (const info of topicInfos) {
-  const raw = await argumentValue(info) as Record<string, unknown>;
+  const raw = argumentValue(info) as Record<string, unknown>;
   const content = { comments: [], links: [] } as TopicContent;
   for (const field of SCALAR_CONTENT_FIELDS) {
     const value = raw[field];
@@ -207,7 +256,7 @@ for (const info of topicInfos) {
     const elements = Array.isArray(raw[field]) ? raw[field] as unknown[] : [];
     const resolved: unknown[] = [];
     for (let i = 0; i < elements.length; i++) {
-      resolved.push(await resolveElement(info.id, field, i, elements[i]));
+      resolved.push(resolveElement(info.id, field, i, elements[i]));
     }
     content[field] = resolved;
   }
@@ -228,7 +277,7 @@ for (const info of topicInfos) {
 let board: TopicsExport["board"] = null;
 if (boardInfos.length === 1) {
   const info = boardInfos[0];
-  const raw = await argumentValue(info) as Record<string, unknown>;
+  const raw = argumentValue(info) as Record<string, unknown>;
   board = {
     fid: info.id,
     patternIdentity: info.pattern?.identity ?? "",

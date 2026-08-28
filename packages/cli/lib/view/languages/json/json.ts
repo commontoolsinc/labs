@@ -308,7 +308,9 @@ export function jsonLinesDocument(text: string): Document {
   };
 }
 
-// --- structure ---------------------------------------------------------------
+//
+// structure
+//
 
 /** The significant tokens (no whitespace, no comments), which the structure
  * pass walks as a recursive-descent value grammar. */

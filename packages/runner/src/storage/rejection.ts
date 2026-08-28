@@ -218,8 +218,12 @@ export function isStorageTransactionInconsistent(
  * re-established session its convergence argument needs never arrives. Nothing
  * between two `editWithRetry` attempts clears or remounts one:
  *  - `SpaceReplica.sessionHandle()` (storage/v2.ts) memoizes the mount and drops
- *    it only in `close()`/`closeNow()`, so every attempt reuses the very handle
- *    the server just refused;
+ *    it only in `close()`/`closeNow()` — and, since 2026-08-26, when an admitted
+ *    commit touches the space's ACL doc (`consumeOwedSessionRemount`, the READ
+ *    path's fix for the profile-starvation fifth face). Nothing an `editWithRetry`
+ *    ATTEMPT does clears it, so every attempt still reuses the very handle the
+ *    server just refused: the remount is driven by the ACL changing, not by the
+ *    retry, which is exactly why it does not make this class retryable;
  *  - `SpaceSession.reopen()` (memory/v2/client.ts) runs only from `restore()`,
  *    which only the client's `reconnect()` calls — i.e. only after a TRANSPORT
  *    close;
@@ -249,12 +253,60 @@ export function isStorageTransactionInconsistent(
  * would have seen on attempt 1. Move it back into the allow-list the day the
  * retry path clears `#sessionHandle`, or the client reopens on `SessionError`:
  * the convergence argument is sound, only the remount is missing.
+ * (2026-08-26 — the READ path's half of that gap is now closed, and it is
+ * worth being precise about which half. `consumeOwedSessionRemount` remounts
+ * when the ACL CHANGES, which is the only event that can change this verdict;
+ * a commit RETRY is not that event, so the sentence above still stands for
+ * this predicate. What would move `SessionError` into the allow-list is a
+ * retry path that waits for the remount rather than one that re-fires
+ * immediately.)
  */
 export function isTransientCommitRejection(
   error: { name?: string } | undefined | null,
 ): boolean {
   return error?.name === "ConnectionError" ||
     error?.name === "InvalidMessageError";
+}
+
+/**
+ * The opening words of the message on every commit CFC enforcement refuses
+ * before the transaction reaches storage (`rejectCommitBeforeStorage` in
+ * extended-storage-transaction.ts). The refusal travels as a
+ * `StorageTransactionAborted` whose message carries the detail, so the prefix
+ * is what tells one apart from an ordinary `tx.abort()`. Minted and matched
+ * from this one constant.
+ */
+export const CFC_ENFORCEMENT_REJECTION_PREFIX =
+  "CFC enforcement rejected commit";
+
+/**
+ * CFC enforcement refused this commit before it reached storage: the
+ * transaction was relevant to enforcement and did not come out of prepare in a
+ * prepared state, or the prepared digest changed under it. The refusal names
+ * the rule that produced it — a writer-fit confidentiality misfit, a
+ * writeAuthorizedBy failure, an egress ceiling violation.
+ *
+ * A refusal does not say whether another attempt would fare better, and the
+ * reasons behind one differ on exactly that. A rule's verdict on the data — a
+ * shape its rules do not support — recurs on every attempt. A reason naming
+ * metadata prepare could not read, a `cid:` schema document or a link source
+ * this replica does not hold yet, is answered by the attempt that reads it.
+ * So this classifies the refusal and not its prospects: it says CFC enforcement
+ * refused the commit, which is what makes a dropped write worth reporting, and
+ * the decision to stop attempting belongs to whoever owns the retries.
+ *
+ * The refusal travels as a `StorageTransactionAborted` whose message opens with
+ * the prefix, and the prefix is what the test reads. A commit error normalized
+ * on its way here can lose its class and keep its message, so testing the
+ * message is what covers both shapes of the same refusal.
+ */
+export function isCfcEnforcementRejection<
+  T extends { message?: string },
+>(
+  error: T | undefined | null,
+): error is T & { message: string } {
+  return typeof error?.message === "string" &&
+    error.message.startsWith(CFC_ENFORCEMENT_REJECTION_PREFIX);
 }
 
 /**

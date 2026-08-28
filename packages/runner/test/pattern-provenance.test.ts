@@ -8,13 +8,14 @@ import {
 } from "../src/builder/pattern-metadata.ts";
 import { freezeVerifiedPlainData } from "../src/sandbox/plain-data.ts";
 
-// `isPattern` is a purely structural check, so an attacker can forge the shape
-// via `__cf_data({...})` (a frozen plain object). Trust-granting sites use
-// `isTrustedPattern`, which additionally requires the value to carry the
-// provenance brand stamped only by the trusted `pattern()` builder — so a forged
-// pattern-shaped export cannot launder program / verified-load-id metadata.
-
 describe("pattern provenance brand", () => {
+  // `isPattern` is a purely structural check, so an attacker can forge the
+  // shape via `__cf_data({...})` (a frozen plain object). Trust-granting sites
+  // use `isTrustedPattern`, which additionally requires the value to carry the
+  // provenance brand stamped only by the trusted `pattern()` builder — so a
+  // forged pattern-shaped export cannot launder program / verified-load-id
+  // metadata.
+
   const patternShape = {
     argumentSchema: {},
     resultSchema: {},

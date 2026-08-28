@@ -1,6 +1,7 @@
 import type { LLMNativeModelToolResult } from "@commonfabric/llm/types";
 
 import type { HarnessImageAttachment } from "./image.ts";
+import type { HarnessSubagentProfile } from "./subagent.ts";
 import type { ToolResultRef } from "./tool-result.ts";
 
 export interface HarnessToolCall {
@@ -52,9 +53,29 @@ export type HarnessTranscriptMessage =
   | HarnessAssistantTranscriptMessage
   | HarnessToolTranscriptMessage;
 
+/**
+ * Which `delegate_task` child a forwarded transcript event came from. The
+ * parent's tool call identifies the child the way the parent already names it,
+ * so a consumer can nest the child's activity under the entry that started it
+ * without holding a second index.
+ */
+export interface HarnessTranscriptSubagentContext {
+  parentToolCallId: string;
+  childRunId: string;
+  profile: HarnessSubagentProfile;
+  goal: string;
+}
+
 export interface HarnessTranscriptEvent {
   message: HarnessTranscriptMessage;
   transcript: readonly HarnessTranscriptMessage[];
+
+  /**
+   * Set when the message belongs to a `delegate_task` child loop rather than
+   * to the loop the handler was passed to. The transcript is then the child's
+   * own, whose length is unrelated to the parent's.
+   */
+  subagent?: HarnessTranscriptSubagentContext;
 }
 
 /** A way a transcript fails to be valid resumable model history. */

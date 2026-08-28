@@ -32,9 +32,9 @@ was last checked against the code.
 | [`contentAddressedSchemas`](#contentaddressedschemas)                       | `EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS` env / shell build define, or `RuntimeOptions.experimental`                                                                  | on                                                                                   | Robin McCollum (PR #5833)                             | finish the spec's Phase 3 (retire transport schema compression for link positions), then delete flag                                                                                                                              | implemented, on by default                                                      |
 | [`commitPreconditions`](#commitpreconditions)                               | `RuntimeOptions.experimental` only (mapped `null` — programmatic rollback override — in the canonical env registry)                             | on                                                                                   | Bernhard Seefeld (#4090)                              | fold into base scheduler semantics, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`plainResultReceipts`](#plainresultreceipts)                               | `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS` env, or `RuntimeOptions.experimental`                                                                      | on                                                                                   | Mike Salisbury (verb contract WS-C)                   | fold into receipt semantics and delete flag after a bake period                                                                                                                                                                   | implemented, on by default                                                      |
-| [`systemPatternAutoUpdate`](#systempatternautoupdate)                       | `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` env / shell build define, or `RuntimeOptions.experimental`                                             | on in the shell (same-toolshed system sources, including all roots); ALSO on server-side under server-execution (`SERVING_RUNTIME_EXPERIMENTAL` in `toolshed/lib/server-execution.ts` forces it true for every serving runtime, and `/api/meta` publishes it — serving-loop.md §3e; both runtimes then race the update, OCC-guarded and content-addressed — verification-coverage.md OW56 finding 2) | Bernhard Seefeld (#4611; shell default-on #4619)      | graduate to always-on, then delete flag                                                                                                                                                                                           | implemented, on in the shell                                                    |
 | [`computedCellIds`](#computedcellids)                                       | `EXPERIMENTAL_COMPUTED_CELL_IDS` env, or `RuntimeOptions.experimental`                                                                          | on                                                                                   | Robin McCollum (#4659)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`lazyMaterialization`](#lazymaterialization)                               | `EXPERIMENTAL_LAZY_MATERIALIZATION` env, or `RuntimeOptions.experimental`                                                                       | on                                                                                   | Bernhard Seefeld                                      | fold into base read semantics, then delete flag                                                             | implemented, on by default                                         |
+| [`readerSchemaPrecedence`](#readerschemaprecedence)                         | `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` env, or `RuntimeOptions.experimental`                                                                   | on                                                                                   | Robin McCollum (#6338)                                | graduate to unconditional behavior, then delete flag                                                                                                                                                                              | implemented, on by default                                                      |
 | [`serverExecution`](#serverexecution) | `EXPERIMENTAL_SERVER_EXECUTION` env, or `RuntimeOptions.experimental` | off (`SERVER_EXECUTION_DEFAULT_ENABLED = false` — the ONE first-party default; Phase 7 landed flip-READY, DARK; explicit `true` = the ON arm) | Bernhard Seefeld (#5339, server-execution v2 plan Phase 1 stage A; Phase 7 flip-ready #5849) | the flip is its OWN one-line PR after the plan's Phase-7 ordered gates; then soak on main, then delete the flag and the OFF path (the split-out post-soak PR) | Phases 1–6 landed; Phase 7 flip-READY landed dark (owner ruling 2026-08-16): OFF by default everywhere, the ON arm fully selectable and CI-tested on an ON-built binary |
 | [`cfcEnforcementMode`](#cfcenforcementmode)                                 | `RuntimeOptions.cfcEnforcementMode` (`CF_CFC_MODE` in the cf-harness / fuse)                                                                    | `enforce-explicit`                                                                   | Bernhard Seefeld (#3263)                              | tighten default toward `enforce-strict`                                                                                                                                                                                           | active; ladder is permanent                                                     |
 | [`cfcFlowLabels`](#cfcflowlabels)                                           | `RuntimeOptions.cfcFlowLabels`                                                                                                                  | `off`                                                                                | Bernhard Seefeld (#4011)                              | move toward `persist`                                                                                                                                                                                                             | implemented, staged rollout                                                     |
@@ -67,7 +67,8 @@ These flags make up the `ExperimentalOptions` interface in
 [`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts). They
 are passed as `new Runtime({ experimental: { ... } })`. Each flag defaults to
 `undefined`, which means "take the built-in default". `commitPreconditions`,
-`plainResultReceipts`, `computedCellIds` and `lazyMaterialization` default on;
+`contentAddressedSchemas`, `plainResultReceipts`, `computedCellIds`,
+`lazyMaterialization` and `readerSchemaPrecedence` default on;
 `serverExecution` resolves an unset flag to the ONE first-party default
 `SERVER_EXECUTION_DEFAULT_ENABLED` in the deployed-topology presets — `false`
 today, Phase 7 having landed flip-ready DARK (its section); the other flags in
@@ -76,9 +77,11 @@ this category default off unless their section says otherwise.
 The mapping from environment variable to flag is defined once, canonically, as
 `EXPERIMENTAL_ENV_VARS` in
 [`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts),
-and read by `experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and
-the background piece service all go through that one mapping, so their wirings
-cannot drift; the shell reads the same variables from its build-time defines.
+and read by
+`experimentalOptionsFromEnv(envReader)`. The toolshed, the CLI, and the
+background piece service all go through that one mapping, so their wirings
+cannot drift; the shell reads the same variables from its build-time defines
+through the same canonical parser.
 `EXPERIMENTAL_ENV_VARS` itself is the authority on which flags are
 env-reachable — a flag that deliberately is not, `commitPreconditions` today,
 is mapped to `null` there, which records the decision rather than leaving an
@@ -257,81 +260,6 @@ server](#clients-that-are-not-built-alongside-their-server).
   server-side precondition check in the memory engine. The single-use grant path
   then drops its availability check (`cfcGrantReceiptsAvailable` in
   `packages/runner/src/cfc/grants.ts`), not the receipts themselves.
-
-### `systemPatternAutoUpdate`
-
-- **Toggle via.** `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` environment variable
-  (through the canonical mapping) server-side, the shell build define of the
-  same name (injected by
-  [`packages/shell/felt.config.ts`](../../packages/shell/felt.config.ts) via
-  [`packages/shell/src/lib/env.ts`](../../packages/shell/src/lib/env.ts))
-  browser-side, or `RuntimeOptions.experimental.systemPatternAutoUpdate`.
-- **Added by.** Bernhard Seefeld, in "system-pattern auto-update (in-place
-  rollforward, flag-gated)" (#4611, 2026-07-08); defaulted on for the shell in
-  #4619 (2026-07-09).
-- **Purpose.** Rolls same-toolshed system-source patterns forward in place when
-  their source serves a newer content identity. Persisted default-app and home
-  roots reconcile before bootstrap. Every other watched pattern starts first;
-  its successful instantiation commit launches a background check, so network
-  and compilation never delay its current graph. An unstamped non-root recovers
-  its verified authored entry filename and becomes tracked only when that
-  same-origin route implements `?identity`. Missing/failing identity routes are
-  ordinary non-system sources and remain untouched. Every accepted move
-  downloads and compiles the complete authored closure and permits an in-place
-  `patternIdentity` swap only when the compiler-produced entry has exactly the
-  advertised identity and selected export symbol. Ordinary patterns preserve
-  their selected export; default-pattern routes select the official source's
-  `default` export. Fetch, compile, evaluation, identity-mismatch, and commit
-  failures leave the original pointer and running graph untouched. Equal
-  identities let ordinary patterns stop immediately (and persist newly proven
-  source provenance); roots take the fast path only after the persisted artifact
-  loads, so an unloadable root can rebuild through the same identity-authorized
-  source path before bootstrap. Persisted roots are resolved without starting. A
-  pre-provenance root may be back-filled only when its stored
-  `{ identity, symbol }` exactly equals the current official entry's advertised
-  content identity; stale, custom, and repository-pinned sourceless roots remain
-  pinned — except a stale sourceless root whose stored pattern the current
-  runtime explicitly cannot load (probe resolves `undefined`; a probe error
-  stays pinned, and `cfcEnforcementMode: "disabled"` — where the probe is
-  unsupported — stays pinned too): that root is replaced with the official
-  system root for the space kind (home.tsx / default-app.tsx), recording the
-  displaced ref under `displacedPattern` meta (see pattern-updates.md for the
-  full exception semantics). URL-based root creation and recreation stamp
-  provenance; custom `RuntimeProgram` recreation does not. Repository-pinned
-  sourceless patterns, cross-origin sources, default roots reached by the
-  generic post-start hook, and starts that intentionally install no pattern
-  watcher remain excluded. The check remains best-effort; if identity lookup or
-  replacement compilation is unavailable, an ordinary pattern keeps running and
-  the subsequent root start retains its normal loud failure behavior. The update
-  path does not consult build SHA metadata; a rolling deployment that mixes
-  identity/source/import revisions fails closed at the compiled-identity
-  comparison. See
-  [`docs/specs/pattern-imports/pattern-updates.md`](../specs/pattern-imports/pattern-updates.md).
-
-  **Current behavior.** Before a release, the existing golden replay tests load
-  representative state written by the previous pattern version. They verify that
-  the new version preserves the state's intended meaning and behavior. The
-  updater itself does not infer stable-key, stable-cause, migration, or
-  behavioral compatibility during deployment.
-
-  **Planned behavior.** The general piece-source lifecycle will reject known
-  structural schema incompatibilities before applying an unattended source
-  transition. Semantic compatibility will continue to be checked before release
-  rather than inferred by the runtime.
-- **Current default and planned end state.** The runner built-in default is off
-  like every flag in this category; the shell build injects `true` unless the
-  define is set to `"false"`, so the deployed product (and local shell dev
-  builds) run it on for roots and other same-toolshed system-source patterns.
-  Server-side processes (toolshed, CLI, background piece service) leave it off
-  unless the env var is set. End state: graduate to always-on for system sources
-  once golden-replay coverage has soaked, then delete the flag.
-- **Status on 2026-07-22.** Implemented; on in the shell for all tracked system
-  roots, home included
-  ([`systemPatternAutoUpdateHome`](#appendix-a-removed-and-never-shipped-flags)
-  removed), and for other patterns whose verified source path exposes
-  `?identity`; off elsewhere. Root reconciliation and broken-root repair run
-  before bootstrap, while ordinary-pattern checks run after instantiation.
-- **Path to removal.** Make the check unconditional and remove the flag.
 
 ### `computedCellIds`
 
@@ -551,6 +479,65 @@ rely on keeps tracking current state.
 
 Still unbuilt, and recorded in the plan: handlers materialize eagerly.
 
+### `readerSchemaPrecedence`
+
+- **Toggle via.** `EXPERIMENTAL_READER_SCHEMA_PRECEDENCE` environment variable
+  (through the canonical env registry) or
+  `RuntimeOptions.experimental.readerSchemaPrecedence`; browser-side, the
+  build define of the same name
+  ([`packages/shell/felt.config.ts`](../../packages/shell/felt.config.ts) /
+  [`packages/shell/src/lib/env.ts`](../../packages/shell/src/lib/env.ts),
+  parsed by the one canonical parser) — baked at build time, so a browser
+  rollback ships with a redeploy. The ambient control point is
+  [`packages/runner/src/reader-schema-precedence-config.ts`](../../packages/runner/src/reader-schema-precedence-config.ts).
+  Server-authoritative in `EXPERIMENTAL_FLAG_AUTHORITY`: a server publishes
+  its resolved posture at `/api/meta` and a deployed CLI adopts it (an
+  explicit `EXPERIMENTAL_*` override still wins), because the server's
+  traversal decides what a subscription ships and both sides must resolve
+  hops under the same combine rule.
+- **Added by.** Robin McCollum, in #6338.
+- **Purpose.** Resolves the schema at a link crossing by reader precedence
+  (`combineSchemaForLink` in
+  [`packages/runner/src/traverse.ts`](../../packages/runner/src/traverse.ts)):
+  the reader's schema is used as it stands, and the link's stored schema is
+  adopted only where the reader is agnostic — a true or empty reader adopts it
+  under the reader's own `asCell` wrapper, and a false reader stays false. A
+  link routinely describes (and requires) more of its target than the reader
+  asked for; under the legacy strict pseudo-intersection those extras widened
+  what a read loaded and tracked, and a link-only `required` entry could void
+  the reader's narrower view. `default` is the exception that crosses the
+  precedence line: a value's default is inherited from the last crossed
+  schema that declares one. Spec:
+  [`docs/specs/link-schema-precedence.md`](../specs/link-schema-precedence.md)
+  (consolidated), with
+  [`docs/specs/memory-v2/05-queries.md`](../specs/memory-v2/05-queries.md)
+  §5.3.4 for the query-pipeline context.
+- **Current default and planned end state.** On by default; an explicit
+  `false` restores the strict pseudo-intersection (`combineSchema`) at link
+  crossings as a rollback override. The rollback is plain ambient
+  last-construction-wins state: each Runtime construction sets it from its
+  resolved option, and dispose deliberately does NOT reset it — a server
+  runs one serving runtime per space and disposes idle ones while the rest
+  live, so a teardown reset would lift a rollback out from under them.
+  Successive runtimes in one test process still get differing flag states,
+  because every construction sets (an unset option setting the default). Compatibility: a server
+  posture that DECLARES no `readerSchemaPrecedence` predates the flag and
+  necessarily runs the strict combine, so adoption treats absence as the
+  legacy `false` until the compatibility window closes
+  (`parseServerExperimentalOptions`); an unreachable server leaves the
+  built-in default. The flag gates only the combine rule: the cfc relevance
+  marking off link schemas (`schemaHasIfc` at the read entry point and at
+  traversal hops) is unconditional in both arms.
+- **Status on 2026-08-27.** Landed on by default in #6338; the rollback arm,
+  the ambient lifecycle (construction set, no teardown reset, throwing
+  construction), and the default inheritance are covered by unit tests in
+  `packages/runner/test/combine-schema.test.ts` and
+  `packages/runner/test/experimental-options.test.ts`.
+- **Path to removal.** Soak the default; then remove the env mapping, the
+  runtime option and its authority entry, the ambient config module, the
+  rollback branch in `combineSchemaForLink` and its unit tests, and the
+  combine-mode bit in the link-hop selector memo key.
+
 ## Category 2: Contextual Flow Control enforcement rollout dials
 
 Contextual Flow Control (CFC) is the label-propagation and egress-gating layer
@@ -601,7 +588,11 @@ raise), and leaves `cfcDecomposedEnvelopes`, `cfcTrustConfig`, and
 flip: cf-harness exposes it for its fabric session as `--fabric-cfc-posture`
 (`CF_HARNESS_FABRIC_CFC_POSTURE`); toolshed publishes whatever CFC posture its
 Runtime resolved on `/api/meta` (`lib/cfc-posture.ts`), so a deployment's
-enforcement is readable rather than indistinguishable from the default.
+enforcement is readable rather than indistinguishable from the default. The
+cf-harness console is the one surface that opts in by default — it exists to
+show CFC working, so its fabric session takes the bundle unless
+`--fabric-cfc-posture none` says otherwise, and it prints the posture it
+resolved at startup.
 The interactive `cf-harness` and the `fuse` mount expose the enforcement mode
 through `CF_CFC_MODE` for testing. Because these dials are keys of
 `RuntimeOptions`, the exhaustive `RUNTIME_OPTION_KEYS` registry in the same file
@@ -1185,10 +1176,10 @@ site has:
   something a flag was deliberately turned on to reach.
 - **De facto**, where the value is shipped and ungated and simply has no
   production caller yet. A `FabricError` is exposed to pattern authors
-  (`builder/factory.ts`) and reaches these throws with every flag off; a
-  `FabricBytes` written from the client reaches `CellHandle.serialize()`'s
-  refusal the same way. Nothing stops such a call being written tomorrow. What
-  makes the tripwire safe today is that none exists.
+  (`builder/factory.ts`) and reaches these throws with every flag off; the same
+  value written from the client reaches `CellHandle.serialize()`'s refusal of a
+  `FabricInstance` the same way. Nothing stops such a call being written
+  tomorrow. What makes the tripwire safe today is that none exists.
 
 The second is the weaker claim, but it does not fail quietly, and that is the
 point. Add a production use of one of these values and the throw fires — at the
@@ -1224,10 +1215,11 @@ useful part of the remaining work for that flag.
 ## How flags propagate
 
 The environment-backed flags (`EXPERIMENTAL_MODERN_CELL_REP`,
+`EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS`,
 `EXPERIMENTAL_PLAIN_RESULT_RECEIPTS`,
-`EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE`,
 `EXPERIMENTAL_COMPUTED_CELL_IDS`,
 `EXPERIMENTAL_LAZY_MATERIALIZATION`,
+`EXPERIMENTAL_READER_SCHEMA_PRECEDENCE`,
 `EXPERIMENTAL_SERVER_EXECUTION`) reach the runtime through the
 deployed processes. The runtime-only flags (`commitPreconditions`, the CFC
 dials) reach it only through the `RuntimeOptions` passed to `new Runtime(...)`.
@@ -1236,7 +1228,8 @@ All first-party processes build their `RuntimeOptions` through a construction
 preset in
 [`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts),
 and the environment-backed flags reach the runtime through the one canonical
-mapping, `experimentalOptionsFromEnv`, in that same file. That mapping accepts
+mapping, `experimentalOptionsFromEnv`, in
+[`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts). That mapping accepts
 exactly `"true"` and `"false"`: an unset variable stays `undefined`, which the
 runtime reads as "use the built-in default", and any other value is ignored with
 a warning. (The distinction between unset and an explicit `false` matters,
@@ -1249,7 +1242,7 @@ Server Process (Deno)
   |
   +-- ENV: EXPERIMENTAL_* = "true" | "false"
   |
-  +-- runner/runtime-presets.ts  --> experimentalOptionsFromEnv(Deno.env.get)
+  +-- runner/runtime-presets.ts --> experimentalOptionsFromEnv(Deno.env.get)
   +-- toolshed/runtime-options.ts --> runtimePresets.productionServer({ experimental, ... })
   +-- toolshed/index.ts           --> new Runtime(toolshedRuntimeOptions(...))
 ```
@@ -1267,21 +1260,22 @@ LOCAL modes (`cf test`, `cf dev`) run against emulated storage, have no
 deployment to ask, and do read the environment alone, through this same
 mapping.
 
-### Browser-side (build-time injection)
+### Browser-side (build-time defines)
 
-Browser-side flags are injected at build time and carried to the web worker that
-hosts the runtime.
+Browser-side flags are baked at build time and carried to the web worker
+that hosts the runtime; changing one means rebuilding and redeploying the
+shell.
 
 ```
 Build Time (shell)
   |
   +-- ENV: EXPERIMENTAL_* = <value>
   +-- felt.config.ts   --> esbuild define: $EXPERIMENTAL_*
-  +-- src/lib/env.ts   --> EXPERIMENTAL.<flag> = <value>
+  +-- src/lib/env.ts   --> EXPERIMENTAL (parsed via the canonical parser)
   |
 Browser (main thread)
-  +-- shell/runtime.ts --> reads EXPERIMENTAL from env.ts
-  +-- RuntimeClient.initialize(transport, { ..., experimental: EXPERIMENTAL })
+  +-- views/RootView.ts --> RuntimeInternals.create({ ..., experimental: EXPERIMENTAL })
+  +-- RuntimeClient.initialize(transport, { ..., experimental })
         |  postMessage (IPC), InitializationData carries experimental + CFC dials
         v
 Browser web worker
@@ -1289,17 +1283,15 @@ Browser web worker
         --> new Runtime(runtimePresets.browserWorker({ experimental, cfcEnforcementMode, cfcFlowLabels, ... }))
 ```
 
-Because the shell bakes the flags into the bundle at build time, changing a
-browser-side flag requires rebuilding the shell. Server-side flags take effect
-on restart without a rebuild. The browser is also the one place a CFC dial is
-host-controlled at construction: the `browserWorker` preset takes
-`cfcEnforcementMode` and `cfcFlowLabels` from the shell's initialization data.
+The browser is also the one place a CFC dial is host-controlled at
+construction: the `browserWorker` preset takes `cfcEnforcementMode` and
+`cfcFlowLabels` from the shell's initialization data.
 
 ### Clients that are not built alongside their server
 
-The shell cannot disagree with its server: toolshed bakes the defines and
-serves the bundle, so a browser runs the posture of the deployment it loaded
-from. Every other client is installed, deployed, or checked out on its own
+The shell disagrees with its server only by explicit define: toolshed bakes
+the defines and serves the bundle, so the two ship one posture per deploy.
+Every other client is installed, deployed, or checked out on its own
 schedule — the `cf` binary, the pieces controller a FUSE mount opens, the
 agents host, the background-piece admin CLI — and the environment they read
 belongs to whoever launched them, not to the deployment they talk to. Left
@@ -1324,21 +1316,29 @@ cf / pieces controller / agents host / cast-admin
 
 What the server publishes is the posture its constructed `Runtime` resolved —
 built-in defaults and preset resolution included, not a second reading of its
-own environment that could disagree with the first. A flag the server left
-unresolved is omitted, and a server that has no `Runtime` yet publishes
-`null`; a client reads either as "this deployment said nothing" and keeps its
-own default. Absence of a declaration is never a declaration of `false`, which
-is what lets a client of an older server behave exactly as it did before the
-server published anything.
+own environment that could disagree with the first — flattened at
+publish. A flag the server left unresolved is omitted, and a server
+that has no `Runtime` yet publishes `experimental: null`; a client reads
+either as "this deployment said nothing" and keeps its own default. The one
+exception rides on the pre-flag document shapes specifically: a fetched
+posture RECORD that declares no `readerSchemaPrecedence`, or a meta document
+with no `experimental` field at all, is a pre-flag server necessarily
+running the strict combine, and adoption reads that absence as the legacy
+`false` (its section has the detail) — while `experimental: null` is a
+current server with no posture yet, so it stays with the built-in default
+(`parseServerExperimentalOptions` draws the line). With that one exception,
+absence of a declaration is never a declaration of `false`, which is what
+lets a client of an older server behave exactly as it did before the server
+published anything.
 
 A serving toolshed runs two kinds of runtime, and what it publishes is the
 posture it SERVES at. The generic runtime it constructs for webhook pattern
 execution supplies the base; under server-execution the per-space serving
-runtimes force `serverExecution` and `systemPatternAutoUpdate` on top of it
-(`SERVING_RUNTIME_EXPERIMENTAL` in
+runtimes force `serverExecution` on top of it (`SERVING_RUNTIME_EXPERIMENTAL`
+in
 [`packages/toolshed/lib/server-execution.ts`](../../packages/toolshed/lib/server-execution.ts),
-the one place those two are written), and those override the base for as long
-as the serving loop runs. Every other flag reaches both runtimes from the same
+the one place it is written), and that overrides the base for as long as the
+serving loop runs. Every other flag reaches both runtimes from the same
 environment, so the base already carries it.
 
 Three rules govern what a client does with a declaration:
@@ -1464,19 +1464,19 @@ design docs).
 
 The Category 1 flags are declared as the `ExperimentalOptions` interface in
 [`packages/runner/src/runtime.ts`](../../packages/runner/src/runtime.ts). The
-`Runtime` constructor merges the provided flags with the built-in defaults
-(`commitPreconditions`, `plainResultReceipts`, and `computedCellIds` true, the
-other Category 1 flags false), propagates each one to its ambient control point,
-and then reads the effective state back so that `runtime.experimental.*`
-reflects what is actually in effect.
+`Runtime` constructor merges the provided flags with the built-in defaults —
+the per-flag defaults live in the summary table above and each flag's
+section, not in a second list here — propagates each one to its ambient
+control point, and then reads the effective state back so that
+`runtime.experimental.*` reflects what is actually in effect.
 
 First-party construction config is centralized in
 [`packages/runner/src/runtime-presets.ts`](../../packages/runner/src/runtime-presets.ts),
 which is the place to touch when adding or changing a flag that construction
 config reaches:
 
-- `EXPERIMENTAL_ENV_VARS` is the single environment-variable mapping for
-  `ExperimentalOptions`, typed as
+- `EXPERIMENTAL_ENV_VARS` is
+  the single environment-variable mapping for `ExperimentalOptions`, typed as
   `Record<keyof ExperimentalOptions, string |
   null>`, so every flag must be
   listed there (a real env var name, or `null` for "programmatic-only").
@@ -1498,8 +1498,13 @@ server](#clients-that-are-not-built-alongside-their-server).
 - Only one set of experimental flags is active per JavaScript context at a time.
 - In the browser the web worker is a separate JavaScript context, so its flags
   are independent of the main thread.
-- Creating a new `Runtime` overwrites the ambient config; disposing it resets to
-  the defaults.
+- For most flags, creating a new `Runtime` overwrites the ambient config and
+  disposing it resets to the defaults. Two exceptions: `serverExecution`'s
+  enabler is an OWNED refcounted claim — acquired at construction, released
+  by that runtime's dispose (or its throwing construction) — so a co-hosted
+  runtime's dispose cannot lift another's live claim; and
+  `readerSchemaPrecedence` is construction-set only — dispose leaves it
+  standing, since serving runtimes are per-space and idle-disposed.
 
 ---
 
@@ -1547,19 +1552,27 @@ defaulted on in shell development builds, so those values outlive the code.
 Once that has aged out, this entry is pure history and belongs in neither this
 document nor any other.
 
+### `systemPatternAutoUpdate` / `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` (removed)
+
+The gate on rolling a same-toolshed system-source pattern forward in place.
+Following a piece's source origin is no longer a deployment posture: it is what
+opening a piece does, for every piece, described by
+[`docs/specs/piece-source-lifecycle.md`](../specs/piece-source-lifecycle.md).
+Nothing reconciles a piece nobody opened, so there is no fleet-wide behavior
+left for a flag to select. `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE` is ignored
+wherever it is still set.
+
 ### `systemPatternAutoUpdateHome` / `EXPERIMENTAL_SYSTEM_PATTERN_AUTOUPDATE_HOME` (removed)
 
-The second gate that held the **home** root (home.tsx) out of
-[`systemPatternAutoUpdate`](#systempatternautoupdate) while the
-stable-addressing question was open: the home root carries real user data
-(favorites, journal, the spaces list), and an in-place roll had to be proven
-state-preserving first. `home-golden-replay.test.ts` pins exactly that (seed
-representative home data, roll N→N+1 in place, prove every list survives), and
-the 2026-07-21 estuary incident — a runtime migration bricking every
-old-generation home root with no self-repair path because this flag was off —
-made the cost of the extra gate concrete. Removed at the flag owner's direction;
-home roots now ride `systemPatternAutoUpdate` like every other tracked system
-root.
+The second gate that held the **home** root (home.tsx) out of the system-pattern
+update while the stable-addressing question was open: the home root carries real
+user data (favorites, journal, the spaces list), and an in-place roll had to be
+proven state-preserving first. `home-golden-replay.test.ts` pins exactly that
+(seed representative home data, roll N→N+1 in place, prove every list
+survives), and the 2026-07-21 estuary incident — a runtime migration bricking
+every old-generation home root with no self-repair path because this flag was
+off — made the cost of the extra gate concrete. Removed at the flag owner's
+direction; the home root follows its origin like every other piece.
 
 ### `schedulerHistoricalMightWrite` (removed)
 

@@ -16,7 +16,9 @@
     // which is a different binary whenever the shell's Deno is not the pinned
     // one. A task line runs the Deno running the task, so asking that Deno for
     // its own path allows exactly the one binary the tests start.
-    "test": "deno test --frozen=true --allow-env=CF_COMPILE_CACHE_FILE,CF_TEST_RECORDS_DIR --allow-read --allow-write --allow-run=$(deno eval \"console.log(Deno.execPath())\") src/*.test.ts src/records/*.test.ts test/records/*.test.ts",
+    // Repository tools are outside the workspace, so list their regression
+    // tests here to keep them in the normal workspace test suite.
+    "test": "deno test --frozen=true --allow-env=CF_COMPILE_CACHE_FILE,CF_TEST_RECORDS_DIR --allow-read --allow-write --allow-run=$(deno eval \"console.log(Deno.execPath())\") src/*.test.ts src/records/*.test.ts test/records/*.test.ts ../../tools/write-iframe-wrapper.test.ts",
     "check": "deno check src/**/*.ts test/clock-preload.ts",
     "fmt": "deno fmt src/ test/",
     "lint": "deno lint src/ test/"

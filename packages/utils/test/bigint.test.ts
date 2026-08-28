@@ -228,10 +228,10 @@ const referenceFixtures: readonly Fixture[] = [
 // Tests to validate reference encoder
 //
 
-// A small set of explicit byte-level assertions that pin `referenceEncode`
-// against the spec. The rest of the suite trusts it as an oracle, so it
-// matters that these can't both be wrong in the same way.
 describe("`referenceEncode()` (test oracle)", () => {
+  // A small set of explicit byte-level assertions that pin `referenceEncode`
+  // against the spec. The rest of the suite trusts it as an oracle, so it
+  // matters that these can't both be wrong in the same way.
   it("encodes all reference fixtures as expected", () => {
     for (const { value, encoded, label } of referenceFixtures) {
       try {

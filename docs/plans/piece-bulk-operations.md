@@ -378,7 +378,8 @@ that would otherwise have no mechanism:
   row's `expect` holds the `{identity, symbol}` reference the piece runs —
   the pair, because two patterns one module exports share an identity and
   differ only in symbol — whether the source behind it is still retained in
-  the space, and, for a piece that already keeps a revision log, the revision
+  the space, the origin the piece follows when it follows one, and, for a
+  piece that already keeps a revision log, the revision
   it is at; its `op` holds the source to apply and the reference that source
   produces, computed from the source without compiling it (a source that
   mounts other patterns over fabric imports is the exception, and a compile

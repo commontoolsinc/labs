@@ -170,6 +170,12 @@ const clearAll = handler<void, { items: Writable<Item[]> }>(
 clearAll({ items }).send();
 ```
 
+An event arrives deeply frozen: neither it nor anything nested inside it can be
+modified. Derive a new value rather than editing one in place. Sorting an array
+the event carries is the case that catches people out, because the method that
+reads most naturally is the one that mutates: `event.items.sort()` throws a
+`TypeError`, where `[...event.items].sort()` sorts a copy and hands it back.
+
 ## CLI Testing
 
 Export handlers to test them via CLI during development:

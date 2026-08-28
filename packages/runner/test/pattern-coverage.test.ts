@@ -1095,11 +1095,12 @@ Deno.test("pattern coverage records a piece resumed by identity", async () => {
   }
 });
 
-// The integration scenario: a non-coverage realm authored the piece, so the
-// coverage-keyed compiled closure the resuming runtime looks for does not exist.
-// The resume then falls back to cold recovery — a recompile from the stored
-// source closure — which is the only place the instrumentation can come from.
 Deno.test("pattern coverage records a piece authored without coverage and resumed with it", async () => {
+  // The integration scenario: a non-coverage realm authored the piece, so the
+  // coverage-keyed compiled closure the resuming runtime looks for does not
+  // exist. The resume then falls back to cold recovery — a recompile from the
+  // stored source closure — which is the only place the instrumentation can
+  // come from.
   const signer = await Identity.fromPassphrase(
     "cold-recovery pattern coverage",
   );

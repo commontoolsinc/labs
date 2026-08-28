@@ -87,7 +87,10 @@ export class CFChart extends BaseElement {
   declare padding: number | [number, number, number, number] | undefined;
   declare crosshair: boolean;
 
+  //
   // Internal state
+  //
+
   private _width = 0;
   private _childMarks: MarkElement[] = [];
   private _resizeObserver: ResizeObserver | null = null;
@@ -217,7 +220,9 @@ export class CFChart extends BaseElement {
     `;
   }
 
-  // === Chart content rendering ===
+  //
+  // Chart content rendering
+  //
 
   private _renderChartContent(
     allMarks: CollectedMarkData[],
@@ -254,7 +259,9 @@ export class CFChart extends BaseElement {
     return svg`<g transform="translate(${tx}, ${ty})">${marks}${xAxisSvg}${yAxisSvg}${crosshairSvg}<rect class="interaction-overlay" width="${plotWidth}" height="${plotHeight}" @mousemove=${onMove} @click=${onClick} @mouseleave=${this._handleMouseLeave} /></g>`;
   }
 
-  // === Mark rendering ===
+  //
+  // Mark rendering
+  //
 
   private _renderAllMarks(
     allMarks: CollectedMarkData[],
@@ -286,7 +293,9 @@ export class CFChart extends BaseElement {
     return svg`${groups}`;
   }
 
-  // === Tooltip rendering ===
+  //
+  // Tooltip rendering
+  //
 
   private _renderTooltip(padding: ChartPadding) {
     if (!this._tooltipInfo) return html``;
@@ -307,7 +316,9 @@ export class CFChart extends BaseElement {
     `;
   }
 
-  // === Event handlers ===
+  //
+  // Event handlers
+  //
 
   private _handleMouseMove(
     e: MouseEvent,
@@ -359,7 +370,9 @@ export class CFChart extends BaseElement {
     this.emit("cf-leave", {});
   };
 
-  // === Slot management ===
+  //
+  // Slot management
+  //
 
   private _onSlotChange = (): void => {
     this._discoverChildMarks();
@@ -383,13 +396,17 @@ export class CFChart extends BaseElement {
     );
   }
 
-  // === Config marks ===
+  //
+  // Config marks
+  //
 
   private _getConfigMarks(): readonly MarkConfig[] {
     return this._marksController.getValue() || [];
   }
 
-  // === Padding computation ===
+  //
+  // Padding computation
+  //
 
   private _computePadding(): ChartPadding {
     if (this.padding !== undefined) {
@@ -416,7 +433,9 @@ export class CFChart extends BaseElement {
     };
   }
 
-  // === Cleanup ===
+  //
+  // Cleanup
+  //
 
   private _cleanup(): void {
     if (this._resizeTimeoutId !== null) {

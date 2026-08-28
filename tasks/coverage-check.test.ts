@@ -508,7 +508,7 @@ Deno.test("writeCoverageResolved omits groups the PR did not change", async () =
   ];
   // No changed files map to a coverage group, so there is no per-group summary.
   const payload = await payloadFrom(() =>
-    writeCoverageResolved(4211, rows, [{ filename: "README.md" }])
+    writeCoverageResolved(4211, rows, [{ filename: "README.md" }], "")
   );
 
   assertEquals(payload?.state, "resolved");
@@ -524,7 +524,7 @@ Deno.test("writeCoverageResolved flags a changed group whose debt was overridden
     coverageRow("coverage-debt: tasks uncovered lines", 15, 12, "ovrd"),
   ];
   const payload = await payloadFrom(() =>
-    writeCoverageResolved(4211, rows, [{ filename: "tasks/foo.ts" }])
+    writeCoverageResolved(4211, rows, [{ filename: "tasks/foo.ts" }], "")
   );
 
   assertEquals(payload?.state, "resolved");
@@ -534,6 +534,89 @@ Deno.test("writeCoverageResolved flags a changed group whose debt was overridden
   assertEquals(payload?.groups, [
     { group: "tasks", baseline: 12, current: 15 },
   ]);
+  // The changed file carries no patch, so no line can be attributed to it.
+  assertEquals(payload?.files, []);
+});
+
+Deno.test("writeCoverageResolved names the files an accepted debt stands in for", async () => {
+  const rows = [
+    coverageRow("coverage-debt: workspace uncovered lines", 2948, 2953, "excl"),
+    coverageRow("coverage-debt: tasks uncovered lines", 15, 12, "ovrd"),
+  ];
+  // Lines 10 and 11 are uncovered and added; 12 is added but covered, and 20 is
+  // uncovered but not added. Only the overlap is the PR's new uncovered debt.
+  const lcov = [
+    `SF:${path.join(Deno.cwd(), "tasks/foo.ts")}`,
+    "DA:10,0",
+    "DA:11,0",
+    "DA:12,4",
+    "DA:20,0",
+    "end_of_record",
+  ].join("\n");
+  const payload = await payloadFrom(() =>
+    writeCoverageResolved(4211, rows, [{
+      filename: "tasks/foo.ts",
+      patch: ["@@ -9,0 +10,3 @@", "+one", "+two", "+three"].join("\n"),
+    }], lcov)
+  );
+
+  assertEquals(payload?.overridden, true);
+  assertEquals(payload?.files, [
+    { relativePath: "tasks/foo.ts", group: "tasks", uncoveredCount: 2 },
+  ]);
+});
+
+Deno.test("writeCoverageResolved preserves an accepted unchanged-file attribution", async () => {
+  await withFlakyLineCheckout(async ({ rootDir, lcov, baselineLcov }) => {
+    const rows: Row[] = [{ ...unattributedFailure(), status: "ovrd" }];
+    const payload = await payloadFrom(() =>
+      writeCoverageResolved(
+        4211,
+        rows,
+        // The PR changed this coverage group, but not the file whose coverage
+        // moved between otherwise comparable runs.
+        [{ filename: "packages/example/src/changed.ts" }],
+        lcov,
+        {
+          rootDir,
+          readBaselineLcov: (runId) => {
+            assertEquals(runId, 900);
+            return Promise.resolve(baselineLcov);
+          },
+        },
+      )
+    );
+
+    assertEquals(payload?.overridden, true);
+    // The resolved payload replaces the detailed failing comment, so it must
+    // carry the unchanged-file diagnosis forward rather than erase it.
+    assertEquals(payload?.files, [{
+      relativePath: "packages/example/src/racy.ts",
+      group: "packages/example",
+      uncoveredCount: 1,
+    }]);
+  });
+});
+
+Deno.test("writeCoverageResolved leaves the file list empty when nothing was overridden", async () => {
+  const rows = [
+    coverageRow("coverage-debt: tasks uncovered lines", 4, 9),
+  ];
+  const lcov = [
+    `SF:${path.join(Deno.cwd(), "tasks/foo.ts")}`,
+    "DA:10,0",
+    "end_of_record",
+  ].join("\n");
+  const payload = await payloadFrom(() =>
+    writeCoverageResolved(4211, rows, [{
+      filename: "tasks/foo.ts",
+      patch: ["@@ -9,0 +10,1 @@", "+one"].join("\n"),
+    }], lcov)
+  );
+
+  // The group passed on its own, so there is no acceptance to account for.
+  assertEquals(payload?.overridden, false);
+  assertEquals(payload?.files, []);
 });
 
 Deno.test("writeCoverageResolved sums gated groups and ignores workspace and overrides", async () => {
@@ -545,7 +628,7 @@ Deno.test("writeCoverageResolved sums gated groups and ignores workspace and ove
     coverageRow("coverage-debt: identity uncovered lines", 50, 60, "ovrd"),
   ];
   const payload = await payloadFrom(() =>
-    writeCoverageResolved(4211, rows, [])
+    writeCoverageResolved(4211, rows, [], "")
   );
 
   assertEquals(payload?.state, "resolved");
@@ -561,7 +644,7 @@ Deno.test("writeCoverageResolved reports zero improvement when gated groups sit 
     coverageRow("coverage-debt: tasks uncovered lines", 4, 4),
   ];
   const payload = await payloadFrom(() =>
-    writeCoverageResolved(4211, rows, [])
+    writeCoverageResolved(4211, rows, [], "")
   );
 
   assertEquals(payload?.state, "resolved");
@@ -572,7 +655,7 @@ Deno.test("writeCoverageResolved reports zero improvement when gated groups sit 
 Deno.test("writeCoverageResolved reports zero improvement without a workspace baseline", async () => {
   const rows = [coverageRow("coverage-debt: workspace uncovered lines", 100)];
   const payload = await payloadFrom(() =>
-    writeCoverageResolved(4211, rows, [])
+    writeCoverageResolved(4211, rows, [], "")
   );
 
   assertEquals(payload?.state, "resolved");

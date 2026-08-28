@@ -298,4 +298,129 @@ describe("scheduler event identity", () => {
     expect(callbackCount).toBe(1);
     expect(queued.handlerLoadPending).toBe(true);
   });
+
+  it("a served piece-start deferral carries the arrival-order barrier (events.md §2; review-6459 F1's sibling arm): later-arrived same-space durable served entries defer behind the failed head instead of staying queued to overtake it — cross-space entries and LT1 in-process copies stay queued", async () => {
+    // Both piece-load failure modes take the same deferral disposition
+    // (`started === false`, and the start THROWING); the barrier must
+    // ride both.
+    for (
+      const loadFailure of [
+        () => Promise.reject(new Error("start failed")),
+        () => Promise.resolve(false),
+      ]
+    ) {
+      const eventQueue: QueuedEvent[] = [];
+      const backgroundTasks = new Set<Promise<unknown>>();
+      const headOutcomes: unknown[] = [];
+      const followerOutcomes: unknown[] = [];
+      const crossSpaceOutcomes: unknown[] = [];
+      const lt1Outcomes: unknown[] = [];
+      const droppedTx = {
+        abort: () => {},
+        status: () => ({ status: "error" }),
+      } as unknown as IExtendedStorageTransaction;
+      const followerLink: NormalizedFullLink = {
+        ...eventLink,
+        id: "of:follower-stream",
+      };
+      const crossSpaceLink: NormalizedFullLink = {
+        ...eventLink,
+        id: "of:cross-space-stream",
+        space: "did:key:z6MkOtherEventIdentity" as MemorySpace,
+      };
+      const lt1Link: NormalizedFullLink = { ...eventLink, id: "of:lt1-stream" };
+      const handler = () => {};
+      const state = {
+        runtime: { edit: () => droppedTx } as unknown as Runtime,
+        // No handler for the HEAD's link — it takes the piece-load path;
+        // the three later arrivals are all ready-queued.
+        eventHandlers: [
+          [followerLink, handler],
+          [crossSpaceLink, handler],
+          [lt1Link, handler],
+        ] as [NormalizedFullLink, typeof handler][],
+        eventQueue,
+        backgroundTasks,
+        loadPieceForEvent: loadFailure,
+        queueExecution: () => {},
+        recordLineageEvent: () => {},
+        releaseLineageEvent: () => {},
+      };
+      queueSchedulerEvent(state, {
+        eventLink,
+        event: "head",
+        retries: true,
+        doNotLoadPieceIfNotRunning: false,
+        eventId: "evt:barrier-head",
+        served: {
+          streamEntry: { sidecarId: "of:stream-events:head", index: 0, seq: 1 },
+          onFailure: (outcome) => headOutcomes.push(outcome),
+        },
+      });
+      queueSchedulerEvent(state, {
+        eventLink: followerLink,
+        event: "follower",
+        retries: true,
+        doNotLoadPieceIfNotRunning: false,
+        eventId: "evt:barrier-follower",
+        served: {
+          streamEntry: {
+            sidecarId: "of:stream-events:follower",
+            index: 0,
+            seq: 2,
+          },
+          onFailure: (outcome) => followerOutcomes.push(outcome),
+        },
+      });
+      queueSchedulerEvent(state, {
+        eventLink: crossSpaceLink,
+        event: "cross-space",
+        retries: true,
+        doNotLoadPieceIfNotRunning: false,
+        eventId: "evt:barrier-cross-space",
+        served: {
+          streamEntry: {
+            sidecarId: "of:stream-events:cross-space",
+            index: 0,
+            seq: 3,
+          },
+          onFailure: (outcome) => crossSpaceOutcomes.push(outcome),
+        },
+      });
+      queueSchedulerEvent(state, {
+        eventLink: lt1Link,
+        event: "lt1-copy",
+        retries: true,
+        doNotLoadPieceIfNotRunning: false,
+        eventId: "evt:barrier-lt1",
+        // An LT1 in-process copy: served, but NO durable streamEntry —
+        // a same-wave cascade child, not a later arrival; never swept.
+        served: {
+          onFailure: (outcome) => lt1Outcomes.push(outcome),
+        },
+      });
+
+      await Promise.all([...backgroundTasks]);
+
+      // The head deferred (no consequence; a later drain re-delivers)…
+      expect(headOutcomes.length).toBe(1);
+      expect((headOutcomes[0] as { kind: string }).kind).toBe("deferred");
+      // THE PIN: …and the later-arrived same-space durable entry
+      // deferred BEHIND it, instead of staying queued to dispatch — and
+      // seal — ahead of the head's re-drain.
+      expect(followerOutcomes).toEqual([{
+        kind: "deferred",
+        cause: "arrival-barrier",
+        blockedBy: "evt:barrier-head",
+      }]);
+      // The exclusions hold: cross-space neighbours (§2's order is
+      // per-space) and LT1 copies stay queued, untouched.
+      expect(crossSpaceOutcomes).toEqual([]);
+      expect(lt1Outcomes).toEqual([]);
+      expect(eventQueue.map((queued) => queued.id)).toEqual([
+        "evt:barrier-cross-space",
+        "evt:barrier-lt1",
+      ]);
+    }
+  });
 });

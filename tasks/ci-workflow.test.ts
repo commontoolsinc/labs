@@ -160,6 +160,7 @@ function workflowTriggers(contents: string): string {
   return contents.slice(0, concurrencyStart);
 }
 
+//
 // Every other check in this file reads the workflow files as TEXT (regex over
 // job and step blocks), so none of them can notice that a file has stopped
 // being valid YAML — and a workflow that does not parse produces ZERO jobs on
@@ -167,6 +168,8 @@ function workflowTriggers(contents: string): string {
 // unquoted `default: ` inside two step names turned deno.yml into a nested
 // mapping the runner refused, and CI silently ran nothing for a whole stack of
 // pushes. This is the one check that would have caught it.
+//
+
 Deno.test("every workflow and composite action is valid YAML", async () => {
   const broken: string[] = [];
   for await (const path of githubYamlPaths()) {
@@ -615,6 +618,84 @@ Deno.test("Deploy steps call the bastion wrapper the way it accepts", async () =
   }
 });
 
+//
+// Both shells CI builds take their co-presence endpoint from a repository
+// variable, and an unset variable is a supported state that builds a working
+// shell. Every check the wiring performs therefore sits inside an
+// `if [ -n "$PRESENCE_URL" ]` that a repository without the variable never
+// enters, so those checks cannot report on the wiring itself: remove the
+// wiring and the same runs stay green. The properties a configured value
+// depends on are checked here instead, against the workflow text, where
+// repository configuration does not get to decide whether the check runs.
+//
+
+Deno.test("a configured presence URL reaches every shell bundle CI builds", async () => {
+  const deno = await workflow("deno.yml");
+
+  // Each job that builds a shell, and the directory its build leaves the
+  // bundle in. Both are named so the shell embedded in the toolshed binary and
+  // the one published to the bucket are held to a single shape.
+  const bundles = new Map([
+    ["build-toolshed", "packages/toolshed/shell-frontend/scripts"],
+    ["deploy-shell-staging", "dist/scripts"],
+  ]);
+
+  // Membership is checked both ways. A job that starts carrying a presence URL
+  // without being named above would go unchecked, and a job that stops
+  // carrying one is a shell that quietly lost co-presence.
+  const carriers = jobIds(deno).filter((id) =>
+    jobBlock(deno, id).includes('PRESENCE_URL=$PRESENCE_URL" >> "$GITHUB_ENV"')
+  );
+  assertEquals(carriers.sort(), [...bundles.keys()].sort());
+
+  for (const [id, bundle] of bundles) {
+    const steps = stepBlocks(jobBlock(deno, id));
+
+    const exporter = steps.findIndex((step) =>
+      step.body.includes('PRESENCE_URL=$PRESENCE_URL" >> "$GITHUB_ENV"')
+    );
+    assert(exporter >= 0, `${id}: no step exports PRESENCE_URL`);
+
+    // Read from `vars`, never `secrets`: the value ships inside a bundle any
+    // reader can open, so hiding it would cost review and buy nothing.
+    assertStringIncludes(steps[exporter].body, "PRESENCE_URL: ${{ vars.");
+
+    // What the bundle carries is `URL.href`, which is not always the spelling
+    // the variable holds — a host written without a path gains a trailing
+    // slash. Exporting the normalized form is what makes the check below an
+    // equality on the value that shipped rather than a prefix match.
+    assertStringIncludes(
+      steps[exporter].body,
+      "packages/shell/src/lib/presence-url.ts",
+    );
+    assertStringIncludes(steps[exporter].body, "?.href");
+
+    // A configured endpoint that did not reach the bundle is a deployment
+    // whose co-presence is off with nothing downstream to notice, so the build
+    // is not allowed to pass until the URL is found in what it produced.
+    const verifier = steps.findIndex((step) =>
+      step.body.includes(`grep -rqF -e "$PRESENCE_URL" ${bundle}`)
+    );
+    assert(
+      verifier >= 0,
+      `${id}: nothing greps ${bundle} for the presence URL`,
+    );
+    assertStringIncludes(
+      steps[verifier].body,
+      'does not reference $PRESENCE_URL."\n            exit 1\n',
+    );
+
+    // GITHUB_ENV reaches the steps after the one that writes it, and not that
+    // step itself. An exporter placed after the build it configures would
+    // export a value no later step reads, and the guarded check above would
+    // then skip on an empty variable instead of failing.
+    assert(
+      exporter < verifier,
+      `${id}: PRESENCE_URL is exported after the build that has to read it`,
+    );
+  }
+});
+
 Deno.test("every test-records artifact name is store-safe and unique", async () => {
   // The relay derives each store object's name from the artifact's name
   // through objectNameSlug, which collapses characters unsafe in object
@@ -748,4 +829,23 @@ Deno.test("server-execution ON jobs ship records under their variant", async () 
     const ship = stepBlock(jobBlock(contents, jobId), "📤 Ship test records");
     assertStringIncludes(ship, "variant: server-execution");
   }
+});
+
+Deno.test("server-execution ON pattern failures upload the toolshed log", async () => {
+  const contents = await workflow("deno.yml");
+  const patternJob = jobBlock(
+    contents,
+    "pattern-integration-test-server-execution-on",
+  );
+  const upload = stepBlock(patternJob, "📋 Upload toolshed log on failure");
+
+  assertStringIncludes(upload, "if: failure()");
+  assertStringIncludes(upload, "uses: actions/upload-artifact@v7");
+  assertStringIncludes(
+    upload,
+    "name: toolshed-log-pattern-integration-server-execution-on-${{ matrix.shard }}",
+  );
+  assertStringIncludes(upload, "path: ${{ runner.temp }}/toolshed.log");
+  assertStringIncludes(upload, "retention-days: 14");
+  assertStringIncludes(upload, "if-no-files-found: ignore");
 });

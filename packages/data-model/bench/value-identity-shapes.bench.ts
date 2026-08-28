@@ -23,10 +23,8 @@
 import { hashOf } from "@/value-hash.ts";
 import { deepFreeze, isDeepFrozen } from "@/deep-freeze.ts";
 
-//
 // Doc-shaped test data, mirroring the default-app integration:
 // a note doc (~30 nodes) and a home-list doc holding N note entries.
-//
 
 function makeNoteDoc(i: number): Record<string, unknown> {
   return {

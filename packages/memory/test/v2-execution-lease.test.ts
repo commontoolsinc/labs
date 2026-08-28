@@ -427,11 +427,13 @@ Deno.test("admission: a holder smuggled into the client payload is inert", async
   }
 });
 
+//
 // The C7 pair, against the real engine. The model's `sealProbe` /
 // `deliverProbe` steps become: capture the cycle's tenure when work seals,
 // and gate the commit on `isCurrentTenure` at delivery time — the in-process
 // discipline a SpaceServer's commit step will implement (serving-loop.md §2's
 // stop-committing MUST, enforced before any reacquire).
+//
 
 Deno.test("discipline (C7a): a probe sealed before an expiry never commits — renewal failure ends the tenure before the reacquire", async () => {
   const { engine } = await createEngine();
@@ -533,6 +535,7 @@ Deno.test("discipline (C7b): without the in-process check the same-process stale
   }
 });
 
+//
 // Idempotent replay vs. the lease (owner review on #5349, 2026-08-12): a
 // byte-identical retry of an ALREADY-ACCEPTED derived commit — same
 // session, same localSeq, same class + holder envelope — answers from the
@@ -546,6 +549,7 @@ Deno.test("discipline (C7b): without the in-process check the same-process stale
 // `sessionId === holder` (no principal): stage F's envelope-session rule
 // (protocol.md §2, RULED 2026-08-05) admits a fresh derived commit only
 // from the lease holder's own service session.
+//
 
 Deno.test("replay: a byte-identical retry answers from the store after the lease is RELEASED — fresh commits stay rejected", async () => {
   const { engine } = await createEngine();

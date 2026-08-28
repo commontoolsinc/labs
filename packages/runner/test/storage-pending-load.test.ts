@@ -1,6 +1,8 @@
 import { expect } from "@std/expect";
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import type { NormalizedLink } from "../src/link-types.ts";
+import { ReplicaLoadFailureError } from "../src/storage/interface.ts";
+import { StorageManager } from "../src/storage/v2.ts";
 import {
   createSchedulerTestRuntime,
   disposeSchedulerTestRuntime,
@@ -17,6 +19,22 @@ describe("storage pending-load generations", () => {
 
   afterEach(async () => {
     await disposeSchedulerTestRuntime(env);
+  });
+
+  it("rejects event attention resolution when the replica lacks the capability", async () => {
+    const storage = {
+      open: () => ({ replica: {} }),
+    };
+    await expect(
+      StorageManager.prototype.resolveEventAttention.call(
+        storage,
+        space,
+        "of:event",
+        1,
+        "of:sidecar",
+        "retry",
+      ),
+    ).rejects.toThrow("storage replica does not support event attention");
   });
 
   it("keeps the document pending until its CFC schema load settles", async () => {
@@ -242,17 +260,67 @@ describe("storage pending-load generations", () => {
     const storage = env.runtime.storageManager as any;
     const address = { space, scope: "space", id: "of:generation" };
     const key = `${address.space}/${address.scope}/${address.id}`;
+    const recoveries: Array<{
+      failedEpoch: string;
+      recoveryEpoch: string;
+    }> = [];
+    storage.loadRecoveryObserver = (recovery: typeof recoveries[number]) => {
+      recoveries.push(recovery);
+    };
 
     const releaseFirst = storage.registerPendingLoad(address);
     const firstGeneration = storage.pendingLoadGeneration(key);
+    expect(recoveries).toEqual([]);
     const firstSettled = storage.loadsSettled([key]);
     releaseFirst(new Error("transport failed"));
     await expect(firstSettled).rejects.toThrow("transport failed");
+    expect(recoveries).toEqual([]);
 
     const releaseSecond = storage.registerPendingLoad(address);
     const secondGeneration = storage.pendingLoadGeneration(key);
     expect(secondGeneration).toBeGreaterThan(firstGeneration);
+    expect(recoveries).toEqual([]);
     releaseSecond();
     await storage.loadsSettled([key]);
+    expect(recoveries).toEqual([{
+      failedEpoch: `load-key:${key}`,
+      recoveryEpoch: expect.stringContaining(`:${secondGeneration}`),
+    }]);
+  });
+
+  it("matches a failed load after the storage manager is recreated", async () => {
+    const first = env.runtime.storageManager as any;
+    const address = { space, scope: "space", id: "of:recreated-generation" };
+    const key = `${address.space}/${address.scope}/${address.id}`;
+    const releaseFirst = first.registerPendingLoad(address);
+    const firstSettled = first.loadsSettled([key]);
+    releaseFirst(new Error("transport failed before recreation"));
+
+    let failedEpoch: string | undefined;
+    try {
+      await firstSettled;
+    } catch (error) {
+      expect(error).toBeInstanceOf(ReplicaLoadFailureError);
+      failedEpoch = (error as ReplicaLoadFailureError).failure.recoveryEpoch;
+    }
+    expect(failedEpoch).toBeDefined();
+
+    const replacementEnv = createSchedulerTestRuntime(import.meta.url);
+    try {
+      const replacement = replacementEnv.runtime.storageManager as any;
+      let recovery:
+        | { failedEpoch: string; recoveryEpoch: string }
+        | undefined;
+      replacement.loadRecoveryObserver = (value: typeof recovery) => {
+        recovery = value;
+      };
+      const releaseReplacement = replacement.registerPendingLoad(address);
+      expect(recovery).toBeUndefined();
+      releaseReplacement();
+      expect(recovery?.failedEpoch).toBe(failedEpoch);
+      expect(recovery?.recoveryEpoch).not.toBe(failedEpoch);
+    } finally {
+      await disposeSchedulerTestRuntime(replacementEnv);
+    }
   });
 });

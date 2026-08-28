@@ -4,9 +4,12 @@ import { checkTripwire, main, TRIPWIRES } from "./check-tripwires.ts";
 
 const REPO_ROOT = dirname(dirname(fromFileUrl(import.meta.url)));
 
+//
 // The check is only as good as its manifest: a typo'd path would make it pass
 // vacuously while reporting "intact", which is the failure mode that matters
 // most for a guard nobody looks at until the day it fires.
+//
+
 Deno.test("every tripwire's test file exists and carries its sentinel", async () => {
   assert(
     TRIPWIRES.length > 0,
@@ -32,9 +35,12 @@ Deno.test("every tripwire's weakness is currently present", async () => {
   }
 });
 
+//
 // The obligation text IS the deliverable — it is the only thing the person who
 // trips this will read. A tripwire whose instructions have gone stale is a
 // reminder that fires and then wastes the moment it bought.
+//
+
 Deno.test("every obligation names concrete, runnable next steps", () => {
   for (const tripwire of TRIPWIRES) {
     const text = tripwire.obligation.join("\n");
@@ -50,7 +56,8 @@ Deno.test("the real manifest passes end to end", async () => {
   assertEquals(await main(), 0);
 });
 
-// --- the evasion paths -----------------------------------------------------
+//
+// the evasion paths
 //
 // Each of these is a way someone silences the reminder without meaning to.
 // They were originally verified by hand, once; a guard whose failure modes are
@@ -59,6 +66,7 @@ Deno.test("the real manifest passes end to end", async () => {
 // Each case writes its own fixture file rather than pointing at a real one.
 // Self-reference bites here: a literal ".ignore(" anywhere in this file would
 // make the healthy case trip the DISABLED branch.
+//
 
 const SENTINEL = "@tripwire:probe-sentinel";
 

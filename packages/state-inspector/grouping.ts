@@ -24,8 +24,8 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 // DB).
 
 import { openSpace, type SpaceDb } from "./db.ts";
-import { collectLinks } from "./decode.ts";
-import { reconstructDocument } from "./reconstruct.ts";
+import { linksWithPaths, type LinkWalkBounds } from "./decode.ts";
+import { candidatesMatching, reconstructDocument } from "./reconstruct.ts";
 import type { DiscoveredSpace } from "./discover.ts";
 
 export type SpaceRole =
@@ -54,6 +54,22 @@ export interface SpaceSignals {
   commits: number;
   entities: number;
 }
+
+/**
+ * How far the space-signal walks reach. A signal here is "which other spaces
+ * does this one name", and the answer is a claim about a whole space, so the
+ * walk wants every link a document holds — twelve levels of nesting reaches
+ * past any value this tool has met.
+ *
+ * `maxNodes` is unbounded because `SpaceSignals` carries no field saying its
+ * DID lists are partial, and a space silently missing from the group is worse
+ * than a walk that does not stop early. Giving it a finite value belongs with
+ * giving `SpaceSignals` that field.
+ */
+const SPACE_SIGNAL_WALK: LinkWalkBounds = {
+  maxDepth: 12,
+  maxNodes: Number.POSITIVE_INFINITY,
+};
 
 const SESSION_RE = /^session:(did:key:[^:]+):/i;
 
@@ -94,7 +110,7 @@ export function analyzeSpaceSignals(
     )
     .get<{ commits: number; entities: number }>();
 
-  // --- Session principals (owners who wrote here) ------------------------
+  // Session principals (owners who wrote here)
   const principalCounts = new Map<string, number>();
   for (
     const r of space.db
@@ -116,17 +132,15 @@ export function analyzeSpaceSignals(
     }
   }
 
-  // --- Home detection + profiles[] edges ---------------------------------
+  // Home detection + profiles[] edges
   let isHome = false;
   const profileDids = new Set<string>();
-  const homeCandidates = space.db
-    .prepare(
-      `SELECT DISTINCT id FROM revision
-       WHERE branch = ? AND scope_key = ?
-         AND data LIKE '%createProfile%' AND data LIKE '%"profiles"%'`,
-    )
-    .all<{ id: string }>(branch, scope);
-  for (const { id } of homeCandidates) {
+  const homeCandidates = candidatesMatching(space, {
+    branch,
+    scope,
+    like: ["%createProfile%", '%"profiles"%'],
+  });
+  for (const id of homeCandidates) {
     let doc;
     try {
       doc = reconstructDocument(space, { id, branch, scope });
@@ -138,7 +152,8 @@ export function analyzeSpaceSignals(
     isHome = true;
     // `profiles` is a link to the profiles cell; follow it and read the array.
     const profilesField = (value as Record<string, unknown>).profiles;
-    const link = collectLinks(profilesField)[0];
+    const link = linksWithPaths(profilesField, SPACE_SIGNAL_WALK)
+      .links[0]?.link;
     if (!link?.id) continue;
     let pdoc;
     try {
@@ -146,20 +161,21 @@ export function analyzeSpaceSignals(
     } catch {
       continue;
     }
-    for (const l of collectLinks(pdoc?.value)) {
+    for (
+      const { link: l } of linksWithPaths(pdoc?.value, SPACE_SIGNAL_WALK).links
+    ) {
       if (l.space && l.space !== own) profileDids.add(l.space);
     }
   }
 
-  // --- All cross-space link targets (cheap candidate query) --------------
+  // All cross-space link targets (cheap candidate query)
   const crossSpaceDids = new Set<string>();
   for (
-    const { id } of space.db
-      .prepare(
-        `SELECT DISTINCT id FROM revision
-         WHERE branch = ? AND scope_key = ? AND data LIKE '%"space":"did:key:%'`,
-      )
-      .all<{ id: string }>(branch, scope)
+    const id of candidatesMatching(space, {
+      branch,
+      scope,
+      like: ['%"space":"did:key:%'],
+    })
   ) {
     let doc;
     try {
@@ -167,7 +183,7 @@ export function analyzeSpaceSignals(
     } catch {
       continue;
     }
-    for (const l of collectLinks(doc)) {
+    for (const { link: l } of linksWithPaths(doc, SPACE_SIGNAL_WALK).links) {
       if (l.space && l.space !== own) crossSpaceDids.add(l.space);
     }
   }

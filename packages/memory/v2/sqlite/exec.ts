@@ -4,7 +4,10 @@
 // the client (runner) before/after these calls.
 
 import { type BindValue, Database } from "@db/sqlite";
-import type { FabricPlainObject } from "@commonfabric/api";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
+import { isPlainObject } from "@commonfabric/utils/types";
+import type { SqliteNativeRow } from "../../v2.ts";
 import { assertReadOnly, assertWriteSafe } from "./guard.ts";
 import { columnOrigins } from "./column-origin.ts";
 import { createTableSQL, type TableSchema } from "./schema.ts";
@@ -71,23 +74,65 @@ export type WriteResult = {
 };
 
 // @db/sqlite binds positional values as a rest list and named values as a single
-// record argument. Our values are already SQLite scalars (cf_link params are
-// pre-encoded to strings by the client), so the cast to BindValue is safe.
+// record argument. Top-level binary values stay as FabricBytes over the memory
+// protocol and become Uint8Array only at this native database edge. Binary
+// values nested in JSON structures become byte arrays before SQLite encodes
+// the surrounding value.
 // (Exported for the commit-time row-label evaluator, which prepares the same
 // wire params against its RETURNING-instrumented statement.)
 export function bindArgs(params?: SqliteParams): BindValue[] {
   if (params === undefined) return [];
-  return (Array.isArray(params) ? [...params] : [params]) as BindValue[];
+  const bindValue = (value: unknown, nested = false): unknown => {
+    if (value instanceof FabricBytes) {
+      return nested ? [...value.slice()] : value.slice();
+    }
+    if (Array.isArray(value)) {
+      return value.map((member) => bindValue(member, true));
+    }
+    if (isPlainObject(value)) {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, member]) => [
+          key,
+          bindValue(member, true),
+        ]),
+      );
+    }
+    return value;
+  };
+  return (Array.isArray(params)
+    ? params.map((value) => bindValue(value))
+    : [Object.fromEntries(
+      Object.entries(params).map(([key, value]) => [key, bindValue(value)]),
+    )]) as BindValue[];
+}
+
+function rowFromNative<Row extends SqliteNativeRow>(
+  names: string[],
+  values: unknown[],
+): Row {
+  return Object.fromEntries(
+    names.map((key, index) => [
+      key,
+      fabricFromNativeValue(values[index]),
+    ]),
+  ) as Row;
 }
 
 /** Run a single guarded read-only SELECT and return all rows. */
-export function runQuery<Row extends FabricPlainObject = FabricPlainObject>(
+export function runQuery<Row extends SqliteNativeRow = SqliteNativeRow>(
   db: Database,
   sql: string,
   params?: SqliteParams,
 ): Row[] {
   assertReadOnly(sql);
-  return db.prepare(sql).all(...bindArgs(params)) as Row[];
+  const stmt = db.prepare(sql);
+  try {
+    const names = stmt.columnNames();
+    return stmt.values<unknown[]>(...bindArgs(params))
+      .map((values) => rowFromNative<Row>(names, values));
+  } finally {
+    stmt.finalize();
+  }
 }
 
 /** A result column's output name plus its TRUE source `(table, column)` origin
@@ -106,7 +151,7 @@ export type QueryColumn = {
  * declares per-column `ifc` (zero overhead otherwise — callers use `runQuery`).
  */
 export function runQueryWithOrigins<
-  Row extends FabricPlainObject = FabricPlainObject,
+  Row extends SqliteNativeRow = SqliteNativeRow,
 >(
   db: Database,
   sql: string,
@@ -117,7 +162,8 @@ export function runQueryWithOrigins<
   try {
     const names = stmt.columnNames();
     const origins = columnOrigins(stmt.unsafeHandle, names.length);
-    const rows = stmt.all(...bindArgs(params)) as Row[];
+    const rows = stmt.values<unknown[]>(...bindArgs(params))
+      .map((values) => rowFromNative<Row>(names, values));
     return {
       rows,
       columns: names.map((output, i) => ({

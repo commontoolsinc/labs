@@ -420,6 +420,12 @@ export interface WaveSpaceCommit {
   /** Owning contribution index per precondition — home batch only; lets a
    * reported precondition failure resolve per write class. */
   preconditionOwners?: number[];
+
+  /** Owning contribution index per operation — home batch only. The sink
+   * returns the failed operation for a proven-no-commit row-label refusal,
+   * letting the accumulator identify the one event whose deterministic write
+   * was refused without terminalizing unrelated events in the same wave. */
+  operationOwners?: number[];
   annotations: WaveWriteAnnotation[];
 
   /** Every eventId whose handler consequences ride this commit. */
@@ -475,10 +481,12 @@ export interface WaveSpaceCommit {
  * array. A rejection naming neither is terminal for the wave.
  */
 export interface WaveCommitRejection {
-  name: "WaveCommitRejected";
+  name: "WaveCommitRejected" | "RowLabelCommitError";
   message: string;
   conflictedDocs?: readonly string[];
   failedPreconditions?: readonly number[];
+  /** Operation index for a deterministic RowLabelCommitError. */
+  failedOperation?: number;
 }
 
 /**
@@ -616,6 +624,17 @@ export interface WaveCommitOutcome {
 
   /** Events whose consequences committed (the commit's `consequenceOf`). */
   committedEventIds: string[];
+
+  /** Refused handler runs for which the sink positively proved that no wave
+   * commit occurred. The serving loop persists their commit-finalization
+   * checkpoint in a later wave; ambiguous rejections never enter this list. */
+  provenNoCommitDeliveryFailures: Array<{
+    eventId: string;
+    streamEntry: { sidecarId: string; index: number; seq: number };
+    failureClass: "protocol";
+    recoveryEpoch: string;
+    permanentEvidence: true;
+  }>;
 
   /** Event-handler contributions REFUSED as orphans (server-execution v2
    * stage C build W3, (α3); events.md §4's third clause): runs of an
@@ -1534,6 +1553,7 @@ export class WaveAccumulator
       dependencyDroppedWrites: 0,
       requeuedEventIds: [],
       committedEventIds: [],
+      provenNoCommitDeliveryFailures: [],
       orphanDeliveriesRefused: 0,
       dispositions: this.#contributions.map(() => ({ kind: "committed" })),
       foreignCommits: [],
@@ -1571,7 +1591,7 @@ export class WaveAccumulator
       return outcome;
     }
 
-    // ---- per-doc conflict resolution, per write class (§3d) ----
+    // per-doc conflict resolution, per write class (§3d)
 
     const homeWrites = this.#contributions.map((contribution) =>
       this.#homeDocInstances(contribution)
@@ -1932,7 +1952,7 @@ export class WaveAccumulator
 
     await resolveConflicts();
 
-    // ---- foreign provisioning commits FIRST (protocol.md §2b) ----
+    // foreign provisioning commits FIRST (protocol.md §2b)
     //
     // Committed exactly once, before the home commit loop below: a home
     // re-attempt never re-sends them. A contribution that requeues AFTER
@@ -1987,7 +2007,7 @@ export class WaveAccumulator
       });
     }
 
-    // ---- the home commit, re-resolving on sink-reported races ----
+    // the home commit, re-resolving on sink-reported races
     while (true) {
       const batch = this.#buildHomeBatch(
         requeued,
@@ -2121,6 +2141,38 @@ export class WaveAccumulator
               : { kind: "dropped" };
         }
         this.#reportRequeuedEvents(outcome, () => true);
+        if (
+          rejection.name === "RowLabelCommitError" &&
+          Number.isInteger(rejection.failedOperation)
+        ) {
+          const owner = batch.operationOwners?.[rejection.failedOperation!];
+          const context = owner === undefined
+            ? undefined
+            : this.#contributions[owner]?.context;
+          const streamEntry = context?.streamEntry ??
+            (context?.eventId === undefined
+              ? undefined
+              : this.#contributions.find((contribution) =>
+                contribution.context.eventId === context.eventId &&
+                contribution.context.streamEntry !== undefined
+              )?.context.streamEntry);
+          if (
+            context?.kind === "event-handler" &&
+            context.eventId !== undefined &&
+            streamEntry !== undefined &&
+            !outcome.provenNoCommitDeliveryFailures.some((failure) =>
+              failure.eventId === context.eventId
+            )
+          ) {
+            outcome.provenNoCommitDeliveryFailures.push({
+              eventId: context.eventId,
+              streamEntry,
+              failureClass: "protocol",
+              recoveryEpoch: "row-label-verdict",
+              permanentEvidence: true,
+            });
+          }
+        }
         outcome.aborted = "rejected";
         return outcome;
       }
@@ -2137,7 +2189,9 @@ export class WaveAccumulator
     }
   }
 
-  // ---- helpers ----
+  //
+  // helpers
+  //
 
   #homeSealed(
     contribution: WaveContribution,
@@ -2350,6 +2404,7 @@ export class WaveAccumulator
     const annotations: WaveWriteAnnotation[] = [];
     const preconditions: CommitPrecondition[] = [];
     const preconditionOwners: number[] = [];
+    const operationOwners: number[] = [];
     const consequenceOf: string[] = [];
     const sqliteScopeKeys: Array<{ op: number; scopeKey: ScopeKey }> = [];
     const outboxAppends: OutboxAppendRow[] = [];
@@ -2394,6 +2449,7 @@ export class WaveAccumulator
         }
         const opIndex = operations.length;
         operations.push(operation);
+        operationOwners.push(contribution.index);
         if (operation.op === "sqlite") {
           // The sqlite bound's discharge (stage G): the db file a folded
           // op targets is keyed per scope INSTANCE, resolved against the
@@ -2626,6 +2682,7 @@ export class WaveAccumulator
       operations,
       preconditions,
       preconditionOwners,
+      operationOwners,
       annotations,
       consequenceOf,
       basisInstances: [...basisInstances.values()],

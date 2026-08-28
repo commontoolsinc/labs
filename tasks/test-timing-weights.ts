@@ -17,10 +17,10 @@ export const AGENTS_HOST_TEST_WEIGHTS: Readonly<Record<string, number>> = {
 };
 
 export const RUNNER_TEST_WEIGHTS: Readonly<Record<string, number>> = {
+  "source-reconciler.test.ts": 20.6,
   "profile-owner-cfc.test.ts": 19.0,
   "engine-ses.test.ts": 14.3,
   "fabric-imports-engine.test.ts": 13.7,
-  "pattern-auto-update.test.ts": 13.2,
   "pattern-update-argument-validation.test.ts": 12.8,
   "engine-evaluate-record-graph.test.ts": 12.6,
   "home-add-favorite.test.ts": 11.8,

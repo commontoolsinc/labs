@@ -41,9 +41,9 @@ import {
 } from "./annotations.ts";
 import { encodeFuseComponent } from "./path-codec.ts";
 
-// ---------------------------------------------------------------------------
+//
 // Shared helpers
-// ---------------------------------------------------------------------------
+//
 
 const decoder = new TextDecoder();
 
@@ -1995,9 +1995,9 @@ Deno.test("CellBridge fails closed without paginated identifier listing", async 
   assertEquals(pieceListRequests, 0);
 });
 
-// ---------------------------------------------------------------------------
+//
 // Group 1: loadPieceTree — initial tree structure
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("CellBridge.loadPieceTree creates meta.json with a pattern reference", async () => {
   const tree = new FsTree();
@@ -3556,9 +3556,9 @@ Deno.test("CellBridge.hydratePieceProp labels void handlers as no-arg callables 
   );
 });
 
-// ---------------------------------------------------------------------------
+//
 // Group 2: addPieceToSpace — name collision
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("CellBridge.addPieceToSpace assigns -2 suffix on name collision", async () => {
   const tree = new FsTree();
@@ -3597,12 +3597,15 @@ Deno.test("CellBridge.addPieceToSpace assigns -2 suffix on name collision", asyn
   assertEquals(tree.lookup(state.piecesIno, "My-Note-2") !== undefined, true);
 });
 
+//
 // Regression: on a cold runtime the piece list doesn't load the linked piece
 // docs, so a synchronous piece.name() read returns undefined until the NAME
 // doc is synced. addPieceToSpace must await that sync before choosing the
 // directory name — otherwise the piece mounts under the opaque id-derived
 // fallback name, permanently if no later change event fires (CI fuse-exec
 // "Timed out waiting for path: pieces/Fuse-Exec-Fixture").
+//
+
 Deno.test("CellBridge.addPieceToSpace syncs a late-loading name before naming the directory", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/cf-exec");
@@ -3680,9 +3683,9 @@ Deno.test("CellBridge.addPieceToSpace assigns -2 and -3 suffixes for three colli
   assertEquals(tree.lookup(state.piecesIno, "Standup-3") !== undefined, true);
 });
 
-// ---------------------------------------------------------------------------
+//
 // Group 3: updateIndexJson
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("CellBridge.updateIndexJson writes .index.json mapping names to entity IDs", async () => {
   const tree = new FsTree();
@@ -4338,9 +4341,9 @@ Deno.test("CellBridge decodes encoded space directory names for source write pat
   assertEquals(patternRefReads, 1);
 });
 
-// ---------------------------------------------------------------------------
+//
 // Group 4: syncPieceListOnce — add/remove
-// ---------------------------------------------------------------------------
+//
 
 Deno.test("CellBridge.syncPieceListOnce adds a new piece to the tree", async () => {
   const tree = new FsTree();
@@ -4444,9 +4447,9 @@ Deno.test("CellBridge.syncPieceListOnce removes a deleted piece from the tree", 
   assertEquals(state.pieceMap.size, 0);
 });
 
-// ---------------------------------------------------------------------------
+//
 // Group 5: subscribePiece — rename on cell change
-// ---------------------------------------------------------------------------
+//
 
 Deno.test({
   name: "CellBridge.subscribePiece renames directory when piece name changes",

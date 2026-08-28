@@ -350,8 +350,7 @@ const confirmMember = handler<
   unknown,
   { member: Writable<HouseholdMember> }
 >((_event, { member }) => {
-  const current = member.get();
-  member.set({ ...current, isConfirmed: true });
+  member.update({ isConfirmed: true });
 });
 
 // Handler to delete a household member

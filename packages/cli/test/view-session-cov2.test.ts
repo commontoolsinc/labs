@@ -22,7 +22,9 @@ import { parseDiff } from "../lib/view/diff.ts";
 import { buildDiffDocument, type DiffWorkspace } from "../lib/view/diffdoc.ts";
 import { diffSource } from "../lib/view/diffedit.ts";
 
-// --- key helpers ------------------------------------------------------------
+//
+// key helpers
+//
 
 function press(s: Session, ...names: string[]): void {
   for (const name of names) {
@@ -49,15 +51,15 @@ function selectByLabel(s: Session, label: string): void {
   throw new Error(`node not reached: ${label}`);
 }
 
-// ===========================================================================
+//
 // 663 — Enter on an in-blob reference that resolves to no node.
-// ===========================================================================
-// A "use" reference carries a destination line but no definition offset. When
-// that line falls outside every structure node's range, both findTargetIndex
-// (no offset) and nodeAtLine (no containing node) fail, so resolveTargetNode
-// returns null and Enter reports there is nothing to open.
+//
 
 Deno.test("session: Enter on a reference whose line is in no node reports nothing to open", () => {
+  // A "use" reference carries a destination line but no definition offset. When
+  // that line falls outside every structure node's range, both findTargetIndex
+  // (no offset) and nodeAtLine (no containing node) fail, so resolveTargetNode
+  // returns null and Enter reports there is nothing to open.
   // Real card with real targets, but the structure tree is trimmed to just the
   // subject node — placed so the use site sits below its range, outside every
   // node — so following the use reference resolves to no node.
@@ -101,14 +103,16 @@ const useB = base;`;
   assert(s.view().overlay, "the card stays open");
 });
 
-// ===========================================================================
+//
 // Behavioral anchor near revealMatch (580).
-// ===========================================================================
-// revealMatch reads matches[currentMatch] and guards `!m`. Every public caller
-// (runSearch, refreshSearchMatches, stepMatch) checks for an empty match set
-// before reaching it, so the no-match return is unreachable from the public
-// API; this test asserts the surrounding reveal behavior stays correct.
+//
+
 Deno.test("session: a committed search reveals its single match", () => {
+  // revealMatch reads matches[currentMatch] and guards `!m`. Every public
+  // caller (runSearch, refreshSearchMatches, stepMatch) checks for an empty
+  // match set before reaching it, so the no-match return is unreachable from
+  // the public API; this test asserts the surrounding reveal behavior stays
+  // correct.
   const doc = parseDocument("// transformed: /m.ts\nconst tokenz = 1;");
   const s = new Session(
     doc,
@@ -122,9 +126,10 @@ Deno.test("session: a committed search reveals its single match", () => {
   assertEquals(s.view().currentMatch, 0, "the only match is focused");
 });
 
-// ===========================================================================
+//
 // 1152 / 1156 — adjustHunkCounts walks above a hunk it cannot find or parse.
-// ===========================================================================
+//
+
 // adjustHunkCounts climbs from the edited row to the nearest "@@ " header. If
 // it reaches the top of the buffer with no header and no diff/---/+++ marker,
 // `h < 0` returns (1152). If it stops on a line that begins "@@ " but does not
@@ -267,9 +272,10 @@ Deno.test("diffcov2: adjustHunkCounts rejects a malformed explicit hunk header",
   }
 });
 
-// ===========================================================================
+//
 // 1705 — ensurePickerVisible clamps a negative overlay scroll back to zero.
-// ===========================================================================
+//
+
 // When the picker selection moves up to an entry above the current scroll,
 // ensurePickerVisible sets the scroll to the selection's index. A selection of
 // 0 with a stale negative scroll would be clamped by the final guard. We reach
@@ -341,11 +347,14 @@ Deno.test("filepickercov2: paging the picker up to the top keeps the scroll non-
   assertEquals(s.view().overlay!.scroll, 0, "scroll reset to the top");
 });
 
-// ===========================================================================
+//
 // Behavioral anchors for the reachable structure-tree edges near 288/377/380.
-// ===========================================================================
+//
+
+//
 // These do not force the unreachable defensive returns, but assert the
 // surrounding navigation/card behavior stays correct from a real session.
+//
 
 Deno.test("session: card down then up across a multi-target card stays consistent", () => {
   const doc = parseDocument(SAMPLE);

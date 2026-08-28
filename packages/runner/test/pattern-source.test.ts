@@ -9,11 +9,25 @@ import {
   getPatternSource,
   getPieceSourceRevisions,
   getPieceSourceSnapshot,
+  PIECE_SOURCE_MOVED,
   preparePieceSourceTransitionBaseline,
   setPatternSource,
 } from "../src/runner.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
+
+// A hand-built (keyless) pattern; `marker` differentiates the structure so
+// two versions mint DIFFERENT session identities (the mint content-hashes
+// the pattern object).
+const handBuiltPattern = (marker: string) => ({
+  argumentSchema: {},
+  resultSchema: {
+    type: "object",
+    properties: { marker: { type: "string" } },
+  },
+  result: { marker },
+  nodes: [],
+});
 
 describe("patternSource meta accessors", () => {
   let runtime: Runtime;
@@ -410,5 +424,101 @@ describe("patternSource meta accessors", () => {
     ).rejects.toThrow(
       "piece source changed while the source transition was being prepared",
     );
+  });
+
+  // A KEYLESS piece stamps no durable pointer (L3(a), RULED 2026-08-27), so
+  // a concurrent keyless re-setup moves NEITHER the durable meta NOR the
+  // source revisions — the only supersession signal is the runner's live
+  // session pointer. The moved-guard must read that pointer: falling back to
+  // the transition's own expected pattern compares expected against itself,
+  // and the prepared transition applies over the NEWER setup (pre-guard, the
+  // durable stamp aborted exactly this with PIECE_SOURCE_MOVED).
+  const stageSupersededKeylessPiece = async (id: string) => {
+    const cell = runtime.getCell<Record<string, unknown>>(
+      signer.did(),
+      id,
+    );
+    const tx = runtime.edit();
+    const running = runtime.run(
+      tx,
+      // deno-lint-ignore no-explicit-any
+      handBuiltPattern("first") as any,
+      {},
+      cell,
+    );
+    await tx.commit();
+    await running.pull();
+    const stale = getPieceSourceSnapshot(
+      cell,
+      runtime.runner.sessionPatternPointerFor(cell),
+    )!;
+    expect(stale.pattern.identity).toMatch(/^keyless:/);
+
+    // The concurrent keyless re-setup: the session pointer moves, durable
+    // pattern meta and source revisions stay untouched.
+    runtime.runner.stop(cell);
+    const tx2 = runtime.edit();
+    const rerun = runtime.run(
+      tx2,
+      // deno-lint-ignore no-explicit-any
+      handBuiltPattern("second") as any,
+      {},
+      cell,
+    );
+    await tx2.commit();
+    await rerun.pull();
+    const moved = runtime.runner.sessionPatternPointerFor(cell);
+    expect(moved).toBeDefined();
+    expect(moved!.identity).toMatch(/^keyless:/);
+    expect(moved!.identity).not.toBe(stale.pattern.identity);
+    return { cell, stale };
+  };
+
+  it("rejects a keyless transition superseded by a newer keyless setup", async () => {
+    const { cell, stale } = await stageSupersededKeylessPiece(
+      "keyless-transition-superseded",
+    );
+    const compiled = await runtime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents:
+          "import { pattern } from 'commonfabric'; export default pattern(() => ({}));",
+      }],
+    }, { space: signer.did() });
+    const nextPattern = runtime.patternManager.getArtifactEntryRef(compiled)!;
+
+    const transition = runtime.edit();
+    expect(() =>
+      applyPieceSourceTransition(
+        runtime,
+        cell,
+        transition,
+        nextPattern,
+        {
+          revisionId: "superseded-revision",
+          baseline: { kind: "unavailable" },
+          timestamp: 42,
+          operation: "repoint",
+          origin: null,
+          expected: stale,
+        },
+      )
+    ).toThrow(PIECE_SOURCE_MOVED);
+    transition.abort();
+
+    // Nothing of the superseded transition landed.
+    expect(getPieceSourceRevisions(cell)).toEqual([]);
+  });
+
+  it("rejects a keyless baseline prepared against a superseded setup", async () => {
+    const { cell, stale } = await stageSupersededKeylessPiece(
+      "keyless-baseline-superseded",
+    );
+    await expect(
+      preparePieceSourceTransitionBaseline(runtime, cell, stale, {
+        allowUnavailable: true,
+      }),
+    ).rejects.toThrow(PIECE_SOURCE_MOVED);
   });
 });

@@ -167,12 +167,14 @@ import type {
   ReactivityLog,
   SchedulerObservationIdentity,
   ServedEventDispatch,
+  ServedEventFailureOutcome,
   SettleStats,
   SettleStatsHistoryEntry,
   SpaceScopeAndURI,
   TelemetryAnnotations,
   TriggerTraceEntry,
 } from "./types.ts";
+import { ReplicaLoadFailureError } from "../storage/interface.ts";
 ensureNotRenderThread();
 
 const logger = getLogger("scheduler", {
@@ -441,9 +443,9 @@ export class Scheduler {
   // `servingYieldObserver` seam — the SpaceServer's mid-wave lease renew.
   private readonly cooperativeYield: CooperativeYield | undefined;
 
-  // ============================================================
+  //
   // Public API
-  // ============================================================
+  //
 
   constructor(
     readonly runtime: Runtime,
@@ -1002,8 +1004,12 @@ export class Scheduler {
    * node-level preflight (`collectInvalidUpstreamForLog`) asks only
    * whether the NODE is invalid, so the actor's own per-user derivation
    * was never materialized and her handler read an empty instance —
-   * refused as a schema mismatch and marked consequenced with no error
-   * (silent event loss). This is the arrival re-arm applied to the
+   * refused as a schema mismatch and, until the mark/effects-atomicity
+   * fix (events.ts's finalize withdrawal, RULED 2026-08-27), sealed
+   * consequenced with no error: silent event loss. A skipped served
+   * dispatch now withdraws and re-drains, so a miss here costs a
+   * deferral cycle rather than the event — this preflight remains what
+   * makes the FIRST delivery succeed. This is the arrival re-arm applied to the
    * event's transient demander (already folded into the demanders by
    * `transientEventDemandersFor`, pinned by (j)): mark the node invalid
    * KEEPING the sibling instances clean, so its next run derives the
@@ -1053,14 +1059,12 @@ export class Scheduler {
     return rearmed;
   }
 
-  // ============================================================
   // The (d′) standing `demandedWriters` root kind and the
   // per-(instance, demander) currency check (stage-C design §2.2 / §2.4;
   // serving-loop.md §1). The SpaceServer's demand pass calls these on
   // registry DELTAS; nothing here is reached off the serving posture (the
   // registration hook installs lazily on the first `enterDemandedEntity`,
   // so a plain client runtime's `demandedWriters` set stays empty — T9′).
-  // ============================================================
 
   /** Refcount per demanded ENTITY (scope-NAME keyed, `entityNameKey` —
    * the writer index's vocabulary: two instances of one doc, `user:alice`
@@ -1495,9 +1499,9 @@ export class Scheduler {
     return this.eventPreflightTelemetryEnabled;
   }
 
-  // ============================================================
+  //
   // Debounce infrastructure for throttling slow actions
-  // ============================================================
+  //
 
   /**
    * Sets a debounce delay for an action.
@@ -1544,9 +1548,9 @@ export class Scheduler {
     this.gates.setNoDebounce(action, optOut);
   }
 
-  // ============================================================
+  //
   // Throttle infrastructure - "value may be outdated by T ms"
-  // ============================================================
+  //
 
   /**
    * Sets a throttle period for an action.
@@ -1576,7 +1580,7 @@ export class Scheduler {
   /**
    * Set action IDs that should trigger a debugger breakpoint before execution.
    */
-  setBreakpoints(actionIds: string[]): void {
+  setBreakpoints(actionIds: readonly string[]): void {
     this.breakpoints.clear();
     for (const id of actionIds) {
       this.breakpoints.add(id);
@@ -1645,9 +1649,9 @@ export class Scheduler {
     return buildSchedulerGraphSnapshot(this.graphSnapshotState);
   }
 
-  // ============================================================
+  //
   // Push-triggered filtering
-  // ============================================================
+  //
 
   /**
    * Returns the action's static write surface.
@@ -1656,9 +1660,9 @@ export class Scheduler {
     return this.writeIndex.getSchedulingWrites(action);
   }
 
-  // ============================================================
+  //
   // Compute time tracking for cycle-aware scheduling
-  // ============================================================
+  //
 
   /**
    * Returns the execution statistics for an action, if available.
@@ -1754,9 +1758,9 @@ export class Scheduler {
     return [...this.triggerTrace];
   }
 
-  // ============================================================
+  //
   // Non-settling detection API
-  // ============================================================
+  //
 
   /**
    * Returns whether the scheduler has detected a non-settling condition.
@@ -1783,7 +1787,9 @@ export class Scheduler {
     return runSchedulerDiagnosis(this.diagnosisControlState, durationMs);
   }
 
-  // ── Inline idempotency check mode ──────────────────────────────────
+  //
+  // Inline idempotency check mode
+  //
 
   enableIdempotencyCheck(): void {
     this.idempotencyCheckMode = true;
@@ -1862,9 +1868,9 @@ export class Scheduler {
     this.diagnosisEnabled = false;
   }
 
-  // ============================================================
+  //
   // Execution orchestration
-  // ============================================================
+  //
 
   private handleError(error: Error, action: any) {
     handleSchedulerError(
@@ -2067,9 +2073,9 @@ export class Scheduler {
     }
   }
 
-  // ============================================================
+  //
   // Idempotency diagnosis API (Phase 2 + 3)
-  // ============================================================
+  //
 
   /**
    * Starts diagnosis mode: captures read/write values and causal edges.
@@ -2105,9 +2111,9 @@ export class Scheduler {
     });
   }
 
-  // ============================================================
+  //
   // State wiring
-  // ============================================================
+  //
 
   // Keep state-bundle wiring explicit without making the field declarations
   // read like one large object graph.
@@ -2659,9 +2665,9 @@ export class Scheduler {
     };
   }
 
-  // ============================================================
+  //
   // Private forwarding helpers
-  // ============================================================
+  //
 
   /**
    * Gets a stable identifier for an action based on its source location.
@@ -2851,11 +2857,24 @@ export class Scheduler {
    * shape (verification-coverage.md's OW45 residue member, store-proven
    * on CI run 32929764230) is a serving session revoked by the genesis
    * ACL landing after activation — `unauthorized` on a cross-space read
-   * of a doc the server itself wrote one second earlier, healing by
-   * design on the next mount. Sealing §5's dropped-event notice for
-   * that DISCHARGED at-least-once on a healthy trusted user action and
-   * advanced the watermark past it, so nothing ever re-ran it: the
-   * click was silently lost.
+   * of a doc the server itself wrote one second earlier. Sealing §5's
+   * dropped-event notice for that DISCHARGED at-least-once on a healthy
+   * trusted user action and advanced the watermark past it, so nothing
+   * ever re-ran it: the click was silently lost.
+   *
+   * CORRECTED 2026-08-26. This docstring used to add "healing by design
+   * on the next mount", and that was FALSE: nothing remounted. Run
+   * 33021643751 (the same board's shards 2 and 6) measured 350 deferrals
+   * over 5m47s off one revoked session, zero successful loads — the
+   * deferral below waiting for a heal that did not exist, exactly as
+   * `storage/rejection.ts`'s SessionError note had said ("the
+   * convergence argument is sound, only the remount is missing"). The
+   * remount now exists: an admitted commit touching the space's ACL doc
+   * re-arms the session (storage/v2.ts `consumeOwedSessionRemount`,
+   * triggered by executor/host.ts), so the deferral's convergence
+   * argument holds. What has NOT changed is the persistent-failure
+   * posture spelled out below: a load whose ACL never changes — or whose
+   * re-open is denied — defers indefinitely, which is OW54's territory.
    *
    * A SERVED event therefore DEFERS — no consequence written, the
    * durable entry left pending and UNCONSEQUENCED, a later drain
@@ -2879,6 +2898,11 @@ export class Scheduler {
     this.headEventLoadPark = null;
     this.headEventLoadParkHistory = null;
     const detail = error instanceof Error ? error.message : String(error);
+    const failure = error instanceof ReplicaLoadFailureError ? error.failure : {
+      failureClass: "unknown" as const,
+      recoveryEpoch: "untyped",
+      permanentEvidence: false,
+    };
     if (event.served === undefined) {
       this.dropEvent(
         event,
@@ -2887,15 +2911,24 @@ export class Scheduler {
       this.queueExecution();
       return;
     }
-    // WARN per deferral, naming the failing doc keys and the error: a
-    // deferral that never clears is a user action that never lands, and
-    // `events.loadParkDeferrals` counts what the log spells out.
+    // The head's debug record names the failing doc keys and error;
+    // `events.loadParkDeferrals` counts every head and barrier deferral, while
+    // the durable checkpoint and terminal attention surface persistent failure.
     this.dropEvent(
       event,
       `Event deferred: required replica load failed before dispatch ` +
         `(${keys}: ${detail}); the entry stays pending and a later drain ` +
         `re-delivers it`,
-      { servedKind: "deferred", cause: "load-park" },
+      {
+        servedKind: "deferred",
+        quiet: true,
+        servedOutcome: {
+          kind: "deferred",
+          cause: "load-park",
+          role: "failed-head",
+          failure,
+        },
+      },
     );
     for (const later of [...this.eventQueue]) {
       if (later.eventLink.space !== event.eventLink.space) continue;
@@ -2905,7 +2938,15 @@ export class Scheduler {
         `Event deferred: held behind ${event.id}, whose required replica ` +
           `load failed before dispatch (${keys}); later-arrived events wait ` +
           `behind it`,
-        { servedKind: "deferred", cause: "load-park" },
+        {
+          servedKind: "deferred",
+          quiet: true,
+          servedOutcome: {
+            kind: "deferred",
+            cause: "arrival-barrier",
+            blockedBy: event.id,
+          },
+        },
       );
     }
     this.queueExecution();
@@ -2920,7 +2961,7 @@ export class Scheduler {
        * durable entry UNCONSEQUENCED for a later drain (events.md §5);
        * only meaningful for a served event. */
       servedKind?: "dropped" | "deferred";
-      cause?: "load-park";
+      servedOutcome?: ServedEventFailureOutcome;
     } = {},
   ): void {
     if (this.headEventLoadPark?.eventId === event.id) {

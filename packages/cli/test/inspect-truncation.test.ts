@@ -300,9 +300,10 @@ describe("cf inspect capped listings", () => {
       ).run();
       db.close();
 
-      // The shape `scripts/topics-export.ts` runs to guard a rollback payload.
       // A filtered scan drops what it cannot classify, so the omission has to
-      // reach the exit code — the notice alone never reaches `cfJson`.
+      // reach the exit code: the notice goes to stderr, and a `--json`
+      // consumer reads stdout, where a subset parses exactly like the whole
+      // set.
       const refused = await cf(
         `inspect entities ${path} --kind piece --require-complete --json`,
       );
@@ -329,6 +330,54 @@ describe("cf inspect capped listings", () => {
       const result = await cf(`inspect entities ${path} --limit 1.5`);
       expect(result.code).not.toBe(0);
       expect(stripAnsi(result.stderr.join("\n"))).toContain("--limit");
+    });
+  });
+
+  it("rejects a fractional `--limit` on the row listings, and lets a negative mean every row", async () => {
+    await withStore(async (path) => {
+      // `conflicts` reports an entity only with TWO writer sessions, and the
+      // seed uses one — without this the negative-limit half of the assertion
+      // compares zero against zero and cannot fail.
+      const db = new Database(path);
+      const other = "session:did%3Akey%3AzBob:s9";
+      for (const [i, id] of ["of:cell-1", "of:cell-2"].entries()) {
+        db.prepare(
+          `INSERT INTO "commit" (seq, session_id, local_seq, original, resolution)
+           VALUES (?, ?, 1, '{}', '{"seq":0}')`,
+        ).run(9100 + i, other);
+        db.prepare(
+          `INSERT INTO revision (id, seq, op_index, op, data, commit_seq)
+           VALUES (?, ?, 0, 'set', '{"value":"bob"}', ?)`,
+        ).run(id, 9100 + i, 9100 + i);
+      }
+      db.close();
+
+      // These were SQL `LIMIT ?` clauses: SQLite answered a fractional or
+      // non-finite limit with a datatype mismatch and read a NEGATIVE as
+      // unlimited. Moving the bound into a JS `slice` silently turned the first
+      // into a rounded row count and the second into "drop the last".
+      const rows = (out: string[]) => JSON.parse(out.join("\n")).length;
+      for (const command of ["hot", "conflicts"]) {
+        const bad = await cf(`inspect ${command} ${path} --limit 1.5`);
+        expect(bad.code).not.toBe(0);
+        // The CLI's own message, not the library's fallback — the guard has to
+        // fire before the space is opened, or the failure arrives as a stack.
+        expect(stripAnsi(bad.stderr.join("\n"))).toContain(
+          "`--limit` must be a whole number of rows",
+        );
+
+        const capped = await cf(`inspect ${command} ${path} --limit 1 --json`);
+        expect(capped.code).toBe(0);
+        expect(rows(capped.stdout)).toBe(1);
+
+        const unlimited = await cf(
+          `inspect ${command} ${path} --limit -1 --json`,
+        );
+        expect(unlimited.code).toBe(0);
+        // Strictly more than the cap — `slice(0, -1)` would give one FEWER
+        // than uncapped, and both stores hold more than one row here.
+        expect(rows(unlimited.stdout)).toBeGreaterThan(1);
+      }
     });
   });
 

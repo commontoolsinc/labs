@@ -24,7 +24,10 @@ The runtime has four main boundaries:
    configured space.
 4. The artifact store records run state, transcript, reports, capability and
    policy snapshots, tool outputs, child references, skills provenance, and
-   optional product run manifests.
+   optional product run manifests. It also records the per-cell CFC labels the
+   run's space holds for the cells the run touched — the one artifact a run does
+   not write out of its own knowledge, read back from the space so a reader
+   working from the tree alone can see what a cell is labelled.
 
 The Common Fabric runner or another trusted mediator owns authoritative CFC
 meaning. The harness transports prompt-slot and invocation evidence, applies the
@@ -172,27 +175,85 @@ The current package provides:
   resolved posture (each dial's value and whether the operator, the named
   bundle, or the default supplied it) is recorded as `fabricSessionCfc` in run
   state and the run report, and printed in the operator summary;
+- an opt-in pattern index (`--pattern-index-url`, or its
+  `CF_HARNESS_PATTERN_INDEX_URL` environment fallback), which needs the fabric
+  session configuration: index requests are signed with the session identity
+  under the CF1 first-party scheme, and an indexed pattern runs in the session's
+  space. It adds the `search_patterns` tool, which finds published patterns by
+  hashtag or free text and reports each hit's description, hashtags, usage
+  signals, declared argument and result shapes, and the `cf:pattern:<patternId>`
+  import specifier that composes it. It also extends `run_pattern`, which takes
+  exactly one of `sourceText` and `patternId`: with a `patternId` the published
+  program is fetched host-side and compiled down the same path, and neither its
+  source nor a compile diagnostic quoting it reaches model context — the
+  diagnostic is retained in the run artifact instead. The run reports
+  `instantiated` and then `run_succeeded` or `run_failed` back to the index,
+  best-effort, so a reporting failure never bears on the tool result. It adds
+  the `record_feedback` tool, which votes a pattern up or down with an optional
+  note, so the index learns which of the patterns it holds were worth offering.
+  And it closes the loop the other way: source the model authored and ran
+  successfully is published back under the identity the compile recorded for it,
+  carrying the `description` and `hashtags` the call named, the run's own task
+  as the request the pattern answers, the compiled argument and result schemas,
+  and the published patterns the source imports. That publication is best-effort
+  in the same way — never awaited, never a failure of a run that worked — and a
+  run that names no `description` publishes nothing, since a pattern nobody can
+  read the purpose of is a pattern nobody finds. `--no-pattern-index-publish`,
+  or `CF_HARNESS_PATTERN_INDEX_PUBLISH=0`, makes the run a reader and voter
+  only. Without the index configuration `search_patterns` and `record_feedback`
+  are absent from the tool surface, for a `pattern-author`-profile subagent as
+  much as for the parent — a child searches through the one client the parent
+  built — and `run_pattern` refuses a `patternId`;
+- composition over that index: source the model authors may import a published
+  pattern by the specifier a search reported,
+  `import Sub from "cf:pattern:<patternId>"`, and `run_pattern` makes it
+  compile. Before it compiles the source it was given, it reads the imported ids
+  off it, fetches each one's program from the index host-side, and compiles it
+  into the session's space, so the closure a `cf:pattern:` import resolves from
+  is durable by the time the importer asks for it. Materialization recurses
+  through what each fetched pattern imports and through the dependencies the
+  index recorded for it, deepest first, and a pattern the space already holds is
+  left alone. The same happens for a `patternId` the run names directly, so an
+  indexed pattern that composes others runs. A composition is refused, with
+  nothing of any fetched source in the message, if the run has no index, if the
+  runtime has CFC enforcement disabled (an imported pattern resolves from the
+  content-addressed source cache, which only an enforcing runtime writes and
+  trusts), if the index holds no program for an imported id, if the recorded
+  dependencies form a cycle, or if the graph draws in more than sixteen
+  patterns. A composed pattern publishes like any other, carrying the ids it
+  imports as its dependencies and stored under the identity its compile recorded
+  — which is the identity the imported patterns are folded into, and not one the
+  source alone determines;
 - a `pattern-author` child profile that authors and runs Common Fabric pattern
   source: `run_pattern` under the same fabric-session gate, plus `read_file`,
   `bash`, and `read_skill_resource`, and no workspace writes, so its deliverable
   is a result reference rather than a file. It preloads whichever of
-  `pattern-dev` and `pattern-schema` the run's skill registry carries — a run
-  without them still gets the same child, without the guidance — and it is told
-  that the references its delegation hands it are addresses to wire in as
-  pattern inputs, that it owns the write/compile-error/fix loop, and that it
-  returns the result reference plus an inert description rather than data. This
-  is the division of labour a data question wants: the root orchestrates and
-  never pays for pattern syntax or reads the data, and the child computes over
-  references it cannot read out. It runs on its own turn budget of 24 rather
-  than the default subagent cap of 8, since each compile-error iteration costs a
-  turn, and it carries a return contract — a discriminated union of
-  `{ ok: true, resultRef, describes }` and `{ ok: false, code, detail? }` —
-  applied to any `pattern-author` delegation that declares no `returnSchema` of
-  its own, so a failure and a success are different shapes and only the success
-  branch carries a reference. The failure `code` comes from a fixed inert
-  vocabulary, so a parent learns why without declassifying anything, and any
-  child return saying `ok: false` reaches the parent as a coded failure rather
-  than as a schema complaint.
+  `pattern-dev`, `pattern-schema`, and `pattern-ui` the run's skill registry
+  carries — a run without them still gets the same child, without the guidance —
+  and it is told that the references its delegation hands it are addresses to
+  wire in as pattern inputs, that it owns the write/compile-error/fix loop, and
+  that it returns the result reference plus an inert description rather than
+  data. It is told to build in atoms — the smallest thing that does one job,
+  run, then the next piece built against the reference that run produced — and
+  to treat a `search_patterns` hit as a `cf:pattern:` import to wire rather than
+  a specification to rebuild. It is also told to refuse source: a task asking
+  for pattern source in any encoding is answered with the `unsupported-request`
+  failure code, because reuse travels through the index rather than through the
+  parent. This is the division of labour a data question wants: the root
+  orchestrates and never pays for pattern syntax or reads the data, and the
+  child computes over references it cannot read out. It runs on its own turn
+  budget of 24 rather than the default subagent cap of 8, since each
+  compile-error iteration costs a turn, and it carries a return contract — a
+  discriminated union of `{ ok: true, resultRef, describes, hashtags? }` and
+  `{ ok: false, code, detail? }` — which is the profile's own rather than a
+  default: a `pattern-author` delegation that declares a `returnSchema` of its
+  own is refused, naming the field, because a channel this narrow cannot be left
+  caller-writable. A failure and a success are different shapes, and only the
+  success branch carries a reference; there is no field on it for source under
+  any name. The failure `code` comes from a fixed inert vocabulary, so a parent
+  learns why without declassifying anything, and any child return saying
+  `ok: false` reaches the parent as a coded failure rather than as a schema
+  complaint.
 
 Run the capability probe instead of copying this list into adapters:
 

@@ -9,10 +9,10 @@ import { clickPierce, pierce } from "./shadow-dom.ts";
 
 const { FRONTEND_URL } = env;
 
-// Tests the manual logging in via passphrase.
-// Other tests should use the `shell.login(identity)`
-// utility to directly provide an identity.
 describe("shell login tests", () => {
+  // Tests the manual logging in via passphrase. Other tests should use the
+  // `shell.login(identity)` utility to directly provide an identity.
+
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 

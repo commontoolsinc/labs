@@ -24,8 +24,11 @@ import type {
   MapValue,
 } from "./types.ts";
 
-// === Type Structure Tests ===
+//
+// Type Structure Tests
+//
 // These tests verify that the type definitions are correctly structured
+//
 
 describe("CFMap Types - LatLng", () => {
   it("should define lat and lng as numbers", () => {
@@ -271,7 +274,9 @@ describe("CFMap Types - MapValue", () => {
   });
 });
 
-// === Event Detail Type Tests ===
+//
+// Event Detail Type Tests
+//
 
 describe("CFMap Types - CfClickDetail", () => {
   it("should contain lat and lng", () => {
@@ -340,7 +345,9 @@ describe("CFMap Types - CfCircleClickDetail", () => {
   });
 });
 
-// === Coordinate Validation Tests ===
+//
+// Coordinate Validation Tests
+//
 
 describe("CFMap coordinate validation scenarios", () => {
   it("should handle edge case latitudes", () => {
@@ -382,7 +389,9 @@ describe("CFMap coordinate validation scenarios", () => {
   });
 });
 
-// === Data Structure Tests ===
+//
+// Data Structure Tests
+//
 
 describe("CFMap data structure scenarios", () => {
   it("should handle large marker collections", () => {
@@ -440,7 +449,9 @@ describe("CFMap data structure scenarios", () => {
   });
 });
 
-// === Schema Binding Data Shape Tests ===
+//
+// Schema Binding Data Shape Tests
+//
 
 describe("CFMap schema binding data shapes", () => {
   it("should define marker structure compatible with JSON schema", () => {
@@ -503,7 +514,9 @@ describe("CFMap schema binding data shapes", () => {
   });
 });
 
-// === Edge Cases ===
+//
+// Edge Cases
+//
 
 describe("CFMap edge cases", () => {
   it("should handle zero radius circles", () => {

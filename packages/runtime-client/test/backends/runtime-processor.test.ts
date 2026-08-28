@@ -17,7 +17,13 @@ import { taggedHashStringOf } from "@commonfabric/data-model/value-hash";
 import { getLogger } from "@commonfabric/utils/logger";
 import { Identity } from "@commonfabric/identity";
 import type { MemorySpace, URI } from "@commonfabric/memory/interface";
-import { decodeMemoryBoundary } from "@commonfabric/memory/v2";
+import {
+  decodeMemoryBoundary,
+  eventAttentionEntryKey,
+  eventAttentionIndexKey,
+  SERVER_EXECUTION_ATTENTION_DOC_ID,
+  type SqliteDbRef,
+} from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import { siteTableCause, siteTableSchema } from "@commonfabric/home-schemas";
@@ -25,13 +31,19 @@ import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import {
   type Cell,
   entityIdFrom,
+  popFrame,
+  pushFrame,
   Runtime,
   type RuntimeFetch,
   runtimePresets,
   RuntimeTelemetry,
 } from "@commonfabric/runner";
-import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
+import {
+  atomsOutsideCeiling,
+  cfcLabelViewForCell,
+} from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
+import { StorageManager as WorkerStorageManager } from "@commonfabric/runner/storage/cache";
 
 import { parseLink } from "@commonfabric/runner";
 import * as V2Storage from "@commonfabric/runner/storage/v2";
@@ -40,6 +52,7 @@ import {
   type CfcLabelView,
   ClientNotificationType,
   type GetPatternSourcesRequest,
+  NotificationType,
   RequestType,
 } from "@/protocol/mod.ts";
 import {
@@ -48,12 +61,13 @@ import {
   renderConfidentialityResolverFor,
   renderMembershipProviderFor,
   RuntimeProcessor,
+  subscribeEventAttentionNotifications,
   toConsoleDebugValue,
-  toConsoleWireValue,
 } from "@/backends/runtime-processor.ts";
 import {
   assertFabricLoggerFlags,
   cellRefToSigilLink,
+  createCellRef,
   getCell,
   mapCellRefsToSigilLinks,
 } from "@/backends/utils.ts";
@@ -603,6 +617,105 @@ describe("runtime-processor", () => {
         await runtime.dispose();
         await storageManager.close();
       }
+    });
+  });
+
+  describe("piece creation", () => {
+    it("names the rejected argument rather than its type", async () => {
+      // A piece's input is a record, and the guard turns away everything else.
+      // `typeof` is not what says which: it renders an array and `null` alike,
+      // as `object`, and those are two of the three kinds that get here. The
+      // message exists to explain the refusal, so it names the value.
+      const space = "did:key:z6Mk-runtime-processor-create" as const;
+      const processor = { getSpaceCtx: () => ({}) };
+      const refusalFor = async (argument: unknown) => {
+        try {
+          // deno-lint-ignore no-explicit-any
+          await (RuntimeProcessor.prototype as any).handlePieceCreate.call(
+            processor,
+            {
+              type: RequestType.PageCreate,
+              space,
+              source: { program: { main: "/main.tsx", files: [] } },
+              argument,
+            },
+          );
+        } catch (error) {
+          return (error as Error).message;
+        }
+        throw new Error("handlePieceCreate returned instead of refusing");
+      };
+
+      expect(await refusalFor([1, 2]))
+        .toBe("A piece's argument must be a record, not: [1,2]");
+      expect(await refusalFor(null))
+        .toBe("A piece's argument must be a record, not: null");
+      expect(await refusalFor("a bare string"))
+        .toBe('A piece\'s argument must be a record, not: "a bare string"');
+    });
+
+    it("refuses a fabric class instance as the whole argument", async () => {
+      // The arm that separates `isPlainObject()` from the looser
+      // `isObjectNotArray()`, which admits any class instance. The connection
+      // carries a `FabricBytes` whole, so one reaches this guard as itself
+      // rather than as the `{}` a shape-blind copy would leave -- and a piece's
+      // entire input is not one value, whatever that value is.
+      const space = "did:key:z6Mk-runtime-processor-create" as const;
+      const processor = { getSpaceCtx: () => ({}) };
+
+      await expect(
+        // deno-lint-ignore no-explicit-any
+        (RuntimeProcessor.prototype as any).handlePieceCreate.call(processor, {
+          type: RequestType.PageCreate,
+          space,
+          source: { program: { main: "/main.tsx", files: [] } },
+          argument: new FabricBytes(new Uint8Array([1, 2, 3])),
+        }),
+      ).rejects.toThrow("A piece's argument must be a record, not:");
+
+      // The other branch of the fabric class hierarchy, which reaches the
+      // guard by the same route.
+      await expect(
+        // deno-lint-ignore no-explicit-any
+        (RuntimeProcessor.prototype as any).handlePieceCreate.call(processor, {
+          type: RequestType.PageCreate,
+          space,
+          source: { program: { main: "/main.tsx", files: [] } },
+          argument: new FabricError({
+            type: "Error",
+            message: "not a set of inputs",
+            stack: undefined,
+            cause: undefined,
+          }),
+        }),
+      ).rejects.toThrow("A piece's argument must be a record, not:");
+    });
+
+    it("admits a record that holds a fabric class instance", async () => {
+      // The other side of the same line, and the case that has to keep
+      // working: the guard asks what the argument *is*, not what it holds.
+      const space = "did:key:z6Mk-runtime-processor-create" as const;
+      const created: unknown[] = [];
+      const processor = {
+        getSpaceCtx: () => ({
+          create: (_program: unknown, options: { input?: unknown }) => {
+            created.push(options.input);
+            throw new Error("stop after the guard");
+          },
+        }),
+      };
+      const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+
+      await expect(
+        // deno-lint-ignore no-explicit-any
+        (RuntimeProcessor.prototype as any).handlePieceCreate.call(processor, {
+          type: RequestType.PageCreate,
+          space,
+          source: { program: { main: "/main.tsx", files: [] } },
+          argument: { image: bytes },
+        }),
+      ).rejects.toThrow("stop after the guard");
+      expect(created).toEqual([{ image: bytes }]);
     });
   });
 
@@ -1213,12 +1326,15 @@ describe("runtime-processor", () => {
 
     describe("what the transport accepts", () => {
       /**
-       * Puts `value` through the two ends the notification actually uses: the
-       * producer's `toConsoleWireValue()`, `postMessage`'s structured clone, and
-       * the `fabricFromRealmValue()` that `client/connection.ts` decodes with.
+       * Puts `value` through the ends the notification actually uses: the
+       * producer's `toConsoleDebugValue()`, the envelope's encode,
+       * `postMessage`'s structured clone, and the decode the transport does on
+       * arrival. There is one encode, the envelope's.
        */
       function acrossTheWire(value: unknown): unknown {
-        return fabricFromRealmValue(structuredClone(toConsoleWireValue(value)));
+        return fabricFromRealmValue(
+          structuredClone(realmFromFabricValue(toConsoleDebugValue(value))),
+        );
       }
 
       it("returns a value the realm encoding carries, for each shape it renders", () => {
@@ -1443,27 +1559,16 @@ describe("runtime-processor", () => {
           .toEqual({ a: Symbol.for("tag") });
       });
 
-      it("returns a forged `FabricPrimitive` as `/unconvertible`, not a throw", () => {
+      it("leaves a forged `FabricPrimitive` for the encode to refuse", () => {
         // An object on a `FabricPrimitive`'s prototype passes every membership
         // check and has no encoding: `isValidFabricValue()` says true and the
-        // encode refuses. The handler must not throw over it, since the throw
-        // would abort the pattern's own `console.log()`. Nothing is said about
-        // what the value was -- it was built to defeat exactly this.
+        // encode refuses. Producing one takes deliberate effort, so it is not
+        // worth a second walk of every console argument to find early; it is
+        // left to fail where the encoding is actually done.
         const forged = Object.create(FabricBytes.prototype);
         expect(isValidFabricValue(toConsoleDebugValue(forged))).toBe(true);
         expect(() => realmFromFabricValue(toConsoleDebugValue(forged)))
           .toThrow();
-        expect(fabricFromRealmValue(toConsoleWireValue(forged)))
-          .toEqual({ "/unconvertible": "no encoding for value" });
-      });
-
-      it("returns `/unconvertible` for the whole argument a forgery is buried in", () => {
-        // The failure is the argument's, not the position's: nothing of the
-        // surrounding value survives, which is the price of not sifting a
-        // hostile graph for the piece that broke.
-        const forged = Object.create(FabricBytes.prototype);
-        expect(fabricFromRealmValue(toConsoleWireValue({ a: 1, forged })))
-          .toEqual({ "/unconvertible": "no encoding for value" });
       });
 
       it("returns a unique symbol as its marker", () => {
@@ -1881,11 +1986,9 @@ describe("runtime-processor", () => {
         },
       } as unknown as RuntimeProcessor;
 
-      // Freshly encoded, as the transport's clone delivers it: the handler owns
+      // The bytes as the transport's decode delivers them: the handler owns
       // its request's payload. Kept here so the test can check what became of it.
-      const payload = realmFromFabricValue(
-        new FabricBytes(new Uint8Array([1, 2, 3])),
-      );
+      const payload = new FabricBytes(new Uint8Array([1, 2, 3]));
 
       try {
         await expect(
@@ -1904,11 +2007,9 @@ describe("runtime-processor", () => {
         globalThis.fetch = originalFetch;
       }
 
-      // The handler CONSUMES its payload -- `BaseRequest` entitles it to, and it
-      // does, which is what makes the transport's ownership guarantee load-
-      // bearing rather than decorative. A spent tree is what a second decode
-      // reports.
-      expect(() => fabricFromRealmValue(payload)).toThrow("detached buffer");
+      // The handler no longer decodes, so the ceding that `BaseRequest`'s
+      // ownership rule turns on happens at the envelope rather than here: the
+      // bytes arrive already decoded and are handed on as they are.
 
       expect(requestedUrl).toBe(
         "http://toolshed.test/did:key:test-space/blobs/upload.png",
@@ -2021,6 +2122,50 @@ describe("runtime-processor", () => {
           });
         expect(result.page.cell).toEqual(ref);
       });
+    });
+  });
+
+  describe("RuntimeProcessor cell pull IPC", () => {
+    it("waits for producer commit durability before returning a cell value", async () => {
+      const ref: CellRef = {
+        id: "of:lazy-cell" as CellRef["id"],
+        space: "did:key:test" as CellRef["space"],
+        scope: "session",
+        path: [],
+      };
+      const calls: string[] = [];
+      let durable = false;
+      const processor = Object.assign(
+        Object.create(
+          RuntimeProcessor.prototype,
+        ),
+        {
+          runtime: {
+            getCellFromLink: () => ({
+              pull: () => {
+                calls.push("pull");
+                return Promise.resolve();
+              },
+              get: () => durable ? { ready: true } : undefined,
+            }),
+            scheduler: {
+              idleWithPendingCommits: () => {
+                calls.push("commits");
+                durable = true;
+                return Promise.resolve();
+              },
+            },
+          },
+        },
+      ) as RuntimeProcessor;
+
+      await expect(
+        processor.handleRequest({
+          type: RequestType.CellPull,
+          cell: ref,
+        }),
+      ).resolves.toEqual({ value: { ready: true } });
+      expect(calls).toEqual(["pull", "commits"]);
     });
   });
 
@@ -2380,7 +2525,10 @@ describe("runtime-processor", () => {
       const orig = self.postMessage;
       (self as { postMessage: unknown }).postMessage = (
         m: { value?: unknown },
-      ) => posted.push(m);
+      ) =>
+        posted.push(
+          fabricFromRealmValue(m as never) as { value?: unknown },
+        );
       try {
         RuntimeProcessor.prototype.handleCellSubscribe.call(processor, {
           type: RequestType.CellSubscribe,
@@ -2536,6 +2684,55 @@ describe("runtime-processor", () => {
               label: { integrity: ["authored-by-bob"] },
             }],
           },
+        },
+      });
+    });
+
+    it("describes a resolved SQLite cell as a SQLite capability", () => {
+      const sourceRef: CellRef = {
+        id: "of:sqlite-source" as CellRef["id"],
+        space: "did:key:test" as CellRef["space"],
+        scope: "space",
+        path: [],
+      };
+      const resolvedRef: CellRef = {
+        id: "of:sqlite-database" as CellRef["id"],
+        space: "did:key:test" as CellRef["space"],
+        scope: "space",
+        path: [],
+        schema: { type: "object", properties: {} },
+      };
+      const resolvedCell = {
+        getAsLink: () => ({ "/": { "link@1": resolvedRef } }),
+        getAsNormalizedFullLink: () => resolvedRef,
+        getRaw: () => ({
+          id: "fid1:sqlite-database",
+          tables: { notes: { type: "object" } },
+          scope: "space",
+        }),
+        runtime: {
+          readTx: () => ({
+            readOrThrow: () => ({ value: { id: "fid1:sqlite-database" } }),
+          }),
+        },
+      };
+      const processor = {
+        runtime: {
+          getCellFromLink: () => ({ resolveAsCell: () => resolvedCell }),
+        },
+      } as unknown as RuntimeProcessor;
+
+      const response = RuntimeProcessor.prototype.handleCellResolveAsCell.call(
+        processor,
+        { type: RequestType.CellResolveAsCell, cell: sourceRef },
+      );
+
+      expect(response.cell).toEqual({
+        ...resolvedRef,
+        schema: {
+          type: "object",
+          properties: {},
+          asCell: ["sqlite"],
         },
       });
     });
@@ -2965,36 +3162,42 @@ describe("runtime-processor", () => {
       },
     };
 
-    const createProcessor = () => {
+    const createProcessor = (
+      commitResult: { ok?: object; error?: { message: string } } = { ok: {} },
+      commitFailure?: Error,
+    ) => {
+      const calls: Array<{
+        cell: unknown;
+        value: unknown;
+        options: { blind: boolean; supersedeKey?: string };
+      }> = [];
       let prepared = false;
       const tx = {
         commit: () => {
           expect(prepared).toBe(true);
-          return Promise.resolve({ ok: {} });
+          if (commitFailure) return Promise.reject(commitFailure);
+          return Promise.resolve(commitResult);
         },
       };
       const cellWithTx = {
-        set: (value: unknown) => {
-          expect(value).toBe("new value");
+        push: (...values: unknown[]) => {
+          expect(values).toEqual(["new value"]);
         },
         send: (value: unknown) => {
           expect(value).toBe("new value");
         },
-        // A blind `set` resolves the write target to thread its parent as the
-        // structural precondition (see applyCellWrite).
-        resolveAsCell: () => ({
-          getAsNormalizedFullLink: () => ({
-            id: ref.id,
-            space: ref.space,
-            scope: ref.scope,
-            path: ref.path,
-          }),
-        }),
+      };
+      const resolvedCell = {
+        marker: "resolved-cell",
+        withTx: (candidateTx: unknown) => {
+          expect(candidateTx).toBe(tx);
+          return cellWithTx;
+        },
       };
       return {
-        processor: {
-          // handleCellSet/handleCellPush delegate to the shared applyCellWrite.
-          applyCellWrite: RuntimeProcessor.prototype.applyCellWrite,
+        calls,
+        resolvedCell,
+        processor: Object.assign(Object.create(RuntimeProcessor.prototype), {
           runtime: {
             edit: () => tx,
             prepareTxForCommit: (candidate: unknown) => {
@@ -3003,35 +3206,53 @@ describe("runtime-processor", () => {
             },
             getCellFromLink: (candidate: unknown) => {
               expect(candidate).toBe(ref);
-              return {
-                withTx: (candidateTx: unknown) => {
-                  expect(candidateTx).toBe(tx);
-                  return cellWithTx;
-                },
-              };
+              return resolvedCell;
+            },
+            commitUiCellWrite: (
+              cell: unknown,
+              value: unknown,
+              options: { blind: boolean; supersedeKey?: string },
+            ) => {
+              calls.push({ cell, value, options });
+              if (commitFailure) return Promise.reject(commitFailure);
+              return Promise.resolve(commitResult);
             },
           },
-        } as unknown as RuntimeProcessor,
+        }) as RuntimeProcessor,
       };
     };
 
-    it("prepares cell set transactions before committing", async () => {
-      const { processor } = createProcessor();
+    it("routes a cell set through the blind supersede lane", () => {
+      const { processor, calls, resolvedCell } = createProcessor();
 
-      await RuntimeProcessor.prototype.handleCellSet.call(processor, {
+      RuntimeProcessor.prototype.handleCellSet.call(processor, {
         type: RequestType.CellSet,
         cell: ref,
         value: "new value",
       });
+
+      expect(calls).toEqual([{
+        cell: resolvedCell,
+        value: "new value",
+        options: {
+          blind: true,
+          supersedeKey: JSON.stringify([
+            ref.space,
+            ref.id,
+            ref.scope,
+            ref.path,
+          ]),
+        },
+      }]);
     });
 
-    it("prepares cell push transactions before committing (non-blind path)", async () => {
+    it("prepares mergeable cell append transactions before committing", async () => {
       const { processor } = createProcessor();
 
       await RuntimeProcessor.prototype.handleCellPush.call(processor, {
         type: RequestType.CellPush,
         cell: ref,
-        value: "new value",
+        values: ["new value"],
       });
     });
 
@@ -3043,6 +3264,199 @@ describe("runtime-processor", () => {
         cell: ref,
         event: "new value",
       });
+    });
+
+    it("observes rejected fire-and-forget cell commits", async () => {
+      const calls: unknown[][] = [];
+      const original = console.error;
+      console.error = (...args: unknown[]) => calls.push(args);
+      try {
+        const set = createProcessor(
+          { ok: {} },
+          new Error("set commit rejected"),
+        );
+        const push = createProcessor(
+          { ok: {} },
+          new Error("push commit rejected"),
+        );
+        const send = createProcessor(
+          { ok: {} },
+          new Error("send commit rejected"),
+        );
+
+        RuntimeProcessor.prototype.handleCellSet.call(set.processor, {
+          type: RequestType.CellSet,
+          cell: ref,
+          value: "new value",
+        });
+        RuntimeProcessor.prototype.handleCellPush.call(push.processor, {
+          type: RequestType.CellPush,
+          cell: ref,
+          values: ["new value"],
+        });
+        RuntimeProcessor.prototype.handleCellSend.call(send.processor, {
+          type: RequestType.CellSend,
+          cell: ref,
+          event: "new value",
+        });
+        await Promise.resolve();
+
+        expect(calls.map(([message]) => message)).toEqual([
+          "[RuntimeProcessor] Cell set commit failed:",
+          "[RuntimeProcessor] Cell push commit failed:",
+          "[RuntimeProcessor] Cell send commit failed:",
+        ]);
+      } finally {
+        console.error = original;
+      }
+    });
+
+    it("observes resolved fire-and-forget cell commit refusals", async () => {
+      const calls: unknown[][] = [];
+      const original = console.error;
+      console.error = (...args: unknown[]) => calls.push(args);
+      try {
+        const set = createProcessor({ error: { message: "set refused" } });
+        const push = createProcessor({ error: { message: "push refused" } });
+        const send = createProcessor({ error: { message: "send refused" } });
+
+        RuntimeProcessor.prototype.handleCellSet.call(set.processor, {
+          type: RequestType.CellSet,
+          cell: ref,
+          value: "new value",
+        });
+        RuntimeProcessor.prototype.handleCellPush.call(push.processor, {
+          type: RequestType.CellPush,
+          cell: ref,
+          values: ["new value"],
+        });
+        RuntimeProcessor.prototype.handleCellSend.call(send.processor, {
+          type: RequestType.CellSend,
+          cell: ref,
+          event: "new value",
+        });
+        await Promise.resolve();
+
+        expect(calls.map(([message]) => message)).toEqual([
+          "[RuntimeProcessor] Cell push commit failed:",
+          "[RuntimeProcessor] Cell send commit failed:",
+        ]);
+      } finally {
+        console.error = original;
+      }
+    });
+
+    it("returns a strict set commit refusal to the caller", async () => {
+      const { processor } = createProcessor({
+        error: { message: "set refused" },
+      });
+
+      await expect(RuntimeProcessor.prototype.handleCellSet.call(processor, {
+        type: RequestType.CellSet,
+        cell: ref,
+        value: "new value",
+        awaitCommit: true,
+      })).rejects.toThrow("set refused");
+    });
+
+    it("returns a confirmed append commit refusal to the caller", async () => {
+      const { processor } = createProcessor({
+        error: { message: "push refused" },
+      });
+
+      await expect(
+        RuntimeProcessor.prototype.handleCellPush.call(processor, {
+          type: RequestType.CellPush,
+          cell: ref,
+          values: ["new value"],
+          awaitCommit: true,
+        }),
+      ).rejects.toThrow("push refused");
+    });
+
+    it("returns a strict send commit refusal to the caller", async () => {
+      const { processor } = createProcessor({
+        error: { message: "send refused" },
+      });
+
+      await expect(RuntimeProcessor.prototype.handleCellSend.call(processor, {
+        type: RequestType.CellSend,
+        cell: ref,
+        event: "new value",
+        awaitCommit: true,
+      })).rejects.toThrow("send refused");
+    });
+  });
+
+  describe("direct cell appends", () => {
+    it("keeps object members distinct across independent callers", async () => {
+      const signer = await Identity.fromPassphrase(
+        `direct-cell-push-${crypto.randomUUID()}`,
+      );
+      const space = signer.did();
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("http://localhost/"),
+        storageManager,
+      });
+      try {
+        const schema = {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              optionId: { type: "string" },
+            },
+            required: ["optionId"],
+          },
+          default: [],
+        } as const;
+        const cell = runtime.getCell<Array<{ optionId: string }>>(
+          space,
+          `direct-cell-push-${crypto.randomUUID()}`,
+          schema,
+        );
+        await cell.sync();
+        const seed = runtime.edit();
+        cell.withTx(seed).set([]);
+        expect((await seed.commit()).error).toBeUndefined();
+
+        const processor = Object.assign(
+          Object.create(RuntimeProcessor.prototype),
+          { runtime },
+        ) as RuntimeProcessor;
+        const append = async (value: { optionId: string }) => {
+          const callerFrame = pushFrame({
+            runtime,
+            generatedIdCounter: 0,
+          });
+          try {
+            await processor.handleCellPush({
+              type: RequestType.CellPush,
+              cell: createCellRef(cell),
+              values: [value],
+              awaitCommit: true,
+            });
+          } finally {
+            popFrame(callerFrame);
+          }
+        };
+
+        await append({ optionId: "library" });
+        await append({ optionId: "studio" });
+        await cell.pull();
+
+        expect(cell.get()).toEqual([
+          { optionId: "library" },
+          { optionId: "studio" },
+        ]);
+        const first = cell.key(0).resolveAsCell().getAsNormalizedFullLink();
+        const second = cell.key(1).resolveAsCell().getAsNormalizedFullLink();
+        expect(first.id).not.toBe(second.id);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
     });
   });
 
@@ -3390,6 +3804,337 @@ describe("runtime-processor", () => {
           type: RequestType.GetPatternCoverage,
         }),
       ).toEqual({ data: report });
+    });
+  });
+
+  describe("RuntimeProcessor event attention IPC", () => {
+    const space = "did:key:z6Mk-runtime-processor-attention" as never;
+    const sidecarId = "of:stream-events:runtime-processor-attention";
+    const attention = {
+      phase: "dispatch-load" as const,
+      failureClass: "session-revoked" as const,
+      code: "permanent-delivery-failure" as const,
+      firstFailureAt: 10,
+      lastFailureAt: 10,
+      accumulatedFailureMs: 0,
+      failureCount: 1,
+      recovery: "explicit-retry" as const,
+    };
+
+    it("forwards only complete terminal-attention outcomes", () => {
+      let subscriber: ((outcome: never) => void) | undefined;
+      const cancel = () => {};
+      const posted: unknown[] = [];
+      const returned = subscribeEventAttentionNotifications({
+        subscribeEventIntentOutcomes(callback: (outcome: never) => void) {
+          subscriber = callback as (outcome: never) => void;
+          return cancel;
+        },
+      } as never, (notification) => posted.push(notification));
+
+      expect(returned).toBe(cancel);
+      subscriber!({
+        kind: "dropped",
+        space,
+        eventId: "evt-dropped",
+        reason: "dropped",
+      } as never);
+      subscriber!({
+        kind: "needs-attention",
+        space,
+        eventId: "evt-incomplete",
+        reason: "incomplete",
+      } as never);
+      subscriber!({
+        kind: "needs-attention",
+        space,
+        eventId: "evt-complete",
+        seq: 40,
+        sidecarId,
+        retryable: false,
+        reason: "complete",
+        attention,
+      } as never);
+
+      expect(posted).toEqual([{
+        type: NotificationType.EventNeedsAttention,
+        space,
+        eventId: "evt-complete",
+        seq: 40,
+        sidecarId,
+        retryable: false,
+        reason: "complete",
+        attention,
+      }]);
+    });
+
+    it("installs and cancels the runtime notification subscription", async () => {
+      const server = new MemoryV2Server.Server({
+        authorizeSessionOpen: () => cfcSigner.did(),
+        sessionOpenAuth: { audience: testSessionOpenAudience },
+      });
+      const storageManager = new SharedV2StorageManager({
+        as: cfcSigner,
+        memoryHost: new URL("memory://"),
+      }, server);
+      const originalOpen = WorkerStorageManager.open;
+      const originalHealthCheck = Runtime.prototype.healthCheck;
+      const originalWatchSiteTable = RuntimeProcessor.prototype.watchSiteTable;
+      const originalSubscribe = Runtime.prototype.subscribeEventIntentOutcomes;
+      let subscribed = false;
+      let cancelled = 0;
+      WorkerStorageManager.open = () => storageManager;
+      Runtime.prototype.healthCheck = () => Promise.resolve(true);
+      RuntimeProcessor.prototype.watchSiteTable = () => {};
+      Runtime.prototype.subscribeEventIntentOutcomes = () => {
+        subscribed = true;
+        return () => cancelled++;
+      };
+      try {
+        const processor = await RuntimeProcessor.initialize({
+          apiUrl: "http://worker.test/",
+          identity: cfcSigner.keyPair,
+          spaceDid: space,
+        });
+        expect(subscribed).toBe(true);
+        await processor.dispose();
+        expect(cancelled).toBe(1);
+      } finally {
+        WorkerStorageManager.open = originalOpen;
+        Runtime.prototype.healthCheck = originalHealthCheck;
+        RuntimeProcessor.prototype.watchSiteTable = originalWatchSiteTable;
+        Runtime.prototype.subscribeEventIntentOutcomes = originalSubscribe;
+        await storageManager.close();
+        await server.close();
+      }
+    });
+
+    it("lists only authoritative unresolved notices and dispatches resolution", async () => {
+      const summaries = {
+        [eventAttentionEntryKey("evt-valid", 41)]: {
+          eventId: "evt-valid",
+          seq: 41,
+          sidecarId,
+          phase: attention.phase,
+          failureClass: attention.failureClass,
+          code: attention.code,
+          firstFailureAt: attention.firstFailureAt,
+        },
+        [eventAttentionEntryKey("evt-resolved", 42)]: {
+          eventId: "evt-resolved",
+          seq: 42,
+          sidecarId,
+          phase: attention.phase,
+          failureClass: attention.failureClass,
+          code: attention.code,
+          firstFailureAt: attention.firstFailureAt,
+        },
+        [eventAttentionEntryKey("evt-legacy", 0)]: {
+          eventId: "evt-legacy",
+          seq: 0,
+          sidecarId,
+          phase: attention.phase,
+          failureClass: attention.failureClass,
+          code: attention.code,
+          firstFailureAt: attention.firstFailureAt,
+        },
+        [eventAttentionEntryKey("evt-userless", 43)]: {
+          eventId: "evt-userless",
+          seq: 43,
+          sidecarId,
+          phase: attention.phase,
+          failureClass: attention.failureClass,
+          code: attention.code,
+          firstFailureAt: attention.firstFailureAt,
+        },
+      };
+      const provider = {
+        sync: () => Promise.resolve({}),
+        replica: {
+          getDocument(id: string) {
+            if (id === SERVER_EXECUTION_ATTENTION_DOC_ID) {
+              return {
+                value: {
+                  entries: {
+                    [eventAttentionIndexKey(sidecarId)]: summaries,
+                  },
+                },
+              };
+            }
+            return {
+              value: {
+                entries: [{
+                  eventId: "evt-valid",
+                  seq: 41,
+                  status: "needs-attention",
+                  reason: "safe reason",
+                  attention,
+                  firedAt: { user: cfcSigner.did() },
+                }, {
+                  eventId: "evt-resolved",
+                  seq: 42,
+                  status: "needs-attention",
+                  attention,
+                  resolution: { kind: "dismissed" },
+                  firedAt: { user: cfcSigner.did() },
+                }, {
+                  eventId: "evt-legacy",
+                  status: "needs-attention",
+                  reason: "legacy reason",
+                  attention,
+                  firedAt: { user: cfcSigner.did() },
+                }, {
+                  eventId: "evt-userless",
+                  seq: 43,
+                  status: "needs-attention",
+                  reason: "system event reason",
+                  attention,
+                  firedAt: { session: "server" },
+                }],
+              },
+            };
+          },
+        },
+      };
+      const resolveCalls: unknown[] = [];
+      const processor = {
+        runtime: {
+          storageManager: {
+            open: () => provider,
+            resolveEventAttention(
+              requestSpace: unknown,
+              eventId: unknown,
+              seq: unknown,
+              requestSidecarId: unknown,
+              action: unknown,
+            ) {
+              resolveCalls.push([
+                requestSpace,
+                eventId,
+                seq,
+                requestSidecarId,
+                action,
+              ]);
+              return Promise.resolve({ resolution: { kind: "dismissed" } });
+            },
+          },
+        },
+        identity: cfcSigner,
+        handleListEventAttention:
+          RuntimeProcessor.prototype.handleListEventAttention,
+        handleResolveEventAttention:
+          RuntimeProcessor.prototype.handleResolveEventAttention,
+      } as unknown as RuntimeProcessor;
+
+      expect(
+        await RuntimeProcessor.prototype.handleRequest.call(processor, {
+          type: RequestType.ListEventAttention,
+          space,
+        }),
+      ).toEqual({
+        notices: [{
+          space,
+          eventId: "evt-valid",
+          seq: 41,
+          sidecarId,
+          retryable: true,
+          reason: "safe reason",
+          attention,
+        }, {
+          space,
+          eventId: "evt-legacy",
+          seq: 0,
+          sidecarId,
+          retryable: true,
+          reason: "legacy reason",
+          attention,
+        }, {
+          space,
+          eventId: "evt-userless",
+          seq: 43,
+          sidecarId,
+          retryable: false,
+          reason: "system event reason",
+          attention,
+        }],
+      });
+      expect(
+        await RuntimeProcessor.prototype.handleRequest.call(processor, {
+          type: RequestType.ResolveEventAttention,
+          space,
+          eventId: "evt-valid",
+          seq: 41,
+          sidecarId,
+          action: "dismiss",
+        }),
+      ).toEqual({ resolution: { kind: "dismissed" } });
+      expect(resolveCalls).toEqual([[
+        space,
+        "evt-valid",
+        41,
+        sidecarId,
+        "dismiss",
+      ]]);
+    });
+
+    it("surfaces attention index and sidecar synchronization failures", async () => {
+      const indexError = new Error("index failed");
+      const sidecarError = new Error("sidecar failed");
+      const summary = {
+        eventId: "evt-failed",
+        seq: 43,
+        sidecarId,
+        phase: attention.phase,
+        failureClass: attention.failureClass,
+        code: attention.code,
+        firstFailureAt: attention.firstFailureAt,
+      };
+      const invoke = (provider: unknown) =>
+        RuntimeProcessor.prototype.handleListEventAttention.call({
+          runtime: { storageManager: { open: () => provider } },
+          identity: cfcSigner,
+        } as never, { type: RequestType.ListEventAttention, space });
+
+      await expect(invoke({
+        sync: () => Promise.resolve({ error: indexError }),
+      })).rejects.toBe(indexError);
+      await expect(invoke({
+        sync: () => Promise.resolve({}),
+      })).rejects.toThrow("does not expose an attention replica");
+      let syncCount = 0;
+      await expect(invoke({
+        sync: () =>
+          Promise.resolve(
+            ++syncCount === 1 ? {} : { error: sidecarError },
+          ),
+        replica: {
+          getDocument: () => ({
+            value: {
+              entries: {
+                [eventAttentionIndexKey(sidecarId)]: {
+                  [eventAttentionEntryKey(summary.eventId, summary.seq)]:
+                    summary,
+                },
+              },
+            },
+          }),
+        },
+      })).rejects.toBe(sidecarError);
+    });
+
+    it("rejects resolution when the storage capability is absent", async () => {
+      await expect(
+        RuntimeProcessor.prototype.handleResolveEventAttention.call({
+          runtime: { storageManager: {} },
+        } as never, {
+          type: RequestType.ResolveEventAttention,
+          space,
+          eventId: "evt-unsupported",
+          seq: 44,
+          sidecarId,
+          action: "retry",
+        }),
+      ).rejects.toThrow("does not support event attention");
     });
   });
 
@@ -4149,6 +4894,636 @@ describe("runtime-processor", () => {
         processorOver({ "cf:module/abc": undefined }),
       );
       expect(patterns).toEqual([]);
+    });
+  });
+
+  describe("RuntimeProcessor SQLite IPC", () => {
+    const ref: CellRef = {
+      id: "of:database" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+
+    const processorWith = (
+      db: Record<string, unknown>,
+      sqliteQuery: (...args: unknown[]) => Promise<unknown>,
+    ) => {
+      let pulled = false;
+      const cell = {
+        pull: () => {
+          pulled = true;
+          return Promise.resolve(db);
+        },
+        getRaw: () => pulled ? db : undefined,
+        asSchema: () => ({ get: () => db }),
+      };
+      const runtime = {
+        getCellFromLink: () => cell,
+        storageManager: { open: () => ({ sqliteQuery }) },
+      };
+      return Object.assign(Object.create(RuntimeProcessor.prototype), {
+        runtime,
+      }) as RuntimeProcessor;
+    };
+
+    it("queries an unlabeled database through its storage provider", async () => {
+      const calls: unknown[][] = [];
+      const processor = processorWith(
+        { id: "db-1", tables: { notes: {} }, scope: "user" },
+        (...args) => {
+          calls.push(args);
+          return Promise.resolve({ rows: [{ title: "One" }] });
+        },
+      );
+
+      await expect(processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT title FROM notes WHERE id = ?",
+        params: {
+          kind: "positional",
+          values: [1],
+        },
+      })).resolves.toEqual({
+        rows: [{ title: "One" }],
+      });
+      expect(calls).toEqual([[
+        { id: "db-1", tables: { notes: {} }, scope: "user" },
+        "SELECT title FROM notes WHERE id = ?",
+        [1],
+      ]]);
+    });
+
+    it("waits for a scoped database factory commit before loading its handle", async () => {
+      const calls: string[] = [];
+      const db = { id: "db-1", tables: { notes: {} }, scope: "user" };
+      let committed = false;
+      let loaded = false;
+      const cell = {
+        pull: () => {
+          calls.push("pull");
+          return Promise.resolve();
+        },
+        sync: () => {
+          calls.push("sync");
+          loaded = committed;
+          return Promise.resolve(loaded ? db : undefined);
+        },
+        getRaw: () => loaded ? db : {},
+        asSchema: () => ({ get: () => loaded ? db : undefined }),
+      };
+      const processor = Object.assign(
+        Object.create(RuntimeProcessor.prototype),
+        {
+          runtime: {
+            getCellFromLink: () => cell,
+            scheduler: {
+              idleWithPendingCommits: () => {
+                calls.push("commits");
+                committed = true;
+                return Promise.resolve();
+              },
+            },
+            storageManager: {
+              open: () => ({
+                sqliteQuery: () => {
+                  calls.push("query");
+                  return Promise.resolve({ rows: [] });
+                },
+              }),
+            },
+          },
+        },
+      ) as RuntimeProcessor;
+
+      await processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT * FROM notes",
+      });
+
+      expect(calls).toEqual(["pull", "commits", "sync", "query"]);
+    });
+
+    it("keeps SQLite BLOB parameters encoded across the storage boundary", async () => {
+      const calls: unknown[][] = [];
+      const processor = processorWith(
+        { id: "db-1", tables: { blobs: {} } },
+        (...args) => {
+          calls.push(args);
+          return Promise.resolve({
+            rows: [{
+              payload: new FabricBytes(new Uint8Array([1, 2, 3])),
+            }],
+          });
+        },
+      );
+      const input = new FabricBytes(new Uint8Array([4, 5, 6]));
+
+      const result = await processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT payload FROM blobs WHERE payload = ?",
+        params: {
+          kind: "positional",
+          values: [input],
+        },
+      });
+
+      const output = result.rows[0]!.payload;
+      expect(output).toBeInstanceOf(FabricBytes);
+      expect((output as FabricBytes).slice()).toEqual(
+        new Uint8Array([1, 2, 3]),
+      );
+      const parameter = (calls[0]?.[2] as unknown[])[0];
+      expect(parameter).toBeInstanceOf(FabricBytes);
+      expect((parameter as FabricBytes).slice()).toEqual(
+        new Uint8Array([4, 5, 6]),
+      );
+    });
+
+    it("lowers linked and nested SQLite bind values for storage", async () => {
+      const calls: unknown[][] = [];
+      const created = createRuntime();
+      try {
+        const linkedCell = created.runtime.getCell(
+          cfcSigner.did(),
+          `sqlite-linked-${crypto.randomUUID()}`,
+        );
+        const linked = createCellRef(linkedCell);
+        const db = { id: "db-1", tables: { notes: {} } };
+        let pulled = false;
+        const source = {
+          pull: () => {
+            pulled = true;
+            return Promise.resolve(db);
+          },
+          getRaw: () => pulled ? db : undefined,
+          asSchema: () => ({ get: () => db }),
+        };
+        const runtime = {
+          getCellFromLink: (cellRef: CellRef) =>
+            cellRef.id === ref.id
+              ? source
+              : created.runtime.getCellFromLink(cellRef),
+          storageManager: {
+            open: () => ({
+              sqliteQuery: (...args: unknown[]) => {
+                calls.push(args);
+                return Promise.resolve({ rows: [] });
+              },
+            }),
+          },
+        };
+        const processor = Object.assign(
+          Object.create(RuntimeProcessor.prototype),
+          { runtime },
+        ) as RuntimeProcessor;
+        const bytes = new FabricBytes(new Uint8Array([7, 8, 9]));
+
+        await processor.handleSqliteQuery({
+          type: RequestType.SqliteQuery,
+          cell: ref,
+          sql: "SELECT :linked_cf_link, :nested",
+          params: {
+            kind: "named",
+            entries: [
+              ["linked_cf_link", linked],
+              [
+                "nested",
+                {
+                  bytes,
+                  links: [linked],
+                },
+              ],
+            ],
+          },
+        });
+
+        const params = calls[0]?.[2] as Record<string, unknown>;
+        const nested = params.nested as {
+          bytes: FabricBytes;
+          links: unknown[];
+        };
+        expect(JSON.parse(params.linked_cf_link as string)).toEqual(
+          nested.links[0],
+        );
+        expect(nested.bytes).toBeInstanceOf(FabricBytes);
+        expect(nested.bytes.slice()).toEqual(new Uint8Array([7, 8, 9]));
+      } finally {
+        await created.runtime.dispose();
+        await created.storageManager.close();
+      }
+    });
+
+    it("preserves reserved SQLite column names in query rows", async () => {
+      const row = Object.fromEntries([
+        ["constructor", "constructor-value"],
+        ["__proto__", "proto-value"],
+      ]);
+      const processor = processorWith(
+        { id: "db-1", tables: { notes: {} } },
+        () => Promise.resolve({ rows: [row] }),
+      );
+
+      const result = await processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: 'SELECT 1 AS "constructor", 2 AS "__proto__"',
+      });
+
+      expect(Object.hasOwn(result.rows[0]!, "constructor")).toBe(true);
+      expect(Object.hasOwn(result.rows[0]!, "__proto__")).toBe(true);
+      const resultRow = result.rows[0]!;
+      const constructorValue = Object.getOwnPropertyDescriptor(
+        resultRow,
+        "constructor",
+      )!.value;
+      const prototypeValue = Object.getOwnPropertyDescriptor(
+        resultRow,
+        "__proto__",
+      )!.value;
+      expect(constructorValue).toBe("constructor-value");
+      expect(prototypeValue).toBe("proto-value");
+    });
+
+    it("refuses a direct query whose result needs CFC provenance", async () => {
+      let queried = false;
+      const processor = processorWith({
+        id: "db-1",
+        tables: {
+          notes: {
+            properties: {
+              secret: { ifc: { confidentiality: ["private"] } },
+            },
+          },
+        },
+      }, () => {
+        queried = true;
+        return Promise.resolve({ rows: [] });
+      });
+
+      await expect(processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT secret FROM notes",
+      })).rejects.toThrow("query them inside a pattern");
+      expect(queried).toBe(false);
+    });
+
+    it("rejects queries when the storage provider has no SQLite support", async () => {
+      const processor = processorWith(
+        { id: "db-1", tables: { notes: {} } },
+        () => Promise.resolve({ rows: [] }),
+      );
+      (processor as unknown as {
+        runtime: { storageManager: { open(): object } };
+      }).runtime.storageManager.open = () => ({});
+
+      await expect(processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT 1",
+      })).rejects.toThrow("sqliteQuery unavailable");
+    });
+
+    it("rejects queries through a cell without a database reference", async () => {
+      const processor = processorWith(
+        { tables: { notes: {} } },
+        () => Promise.resolve({ rows: [] }),
+      );
+
+      await expect(processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT 1",
+      })).rejects.toThrow("valid SqliteDb cell handle");
+    });
+
+    it("rejects a database reference with an unknown scope", async () => {
+      const db = { id: "db-1", tables: { notes: {} }, scope: "tenant" };
+      const processor = processorWith(
+        db,
+        () => Promise.resolve({ rows: [] }),
+      );
+
+      await expect(processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT 1",
+      })).rejects.toThrow("Invalid SQLite database scope: tenant");
+
+      let edited = false;
+      const cell = {
+        pull: () => Promise.resolve(db),
+        getRaw: () => db,
+        asSchema: () => ({ get: () => db }),
+      };
+      const execProcessor = Object.assign(
+        Object.create(RuntimeProcessor.prototype),
+        {
+          runtime: {
+            getCellFromLink: () => cell,
+            editWithRetry: () => {
+              edited = true;
+              return Promise.resolve({ ok: undefined });
+            },
+          },
+        },
+      ) as RuntimeProcessor;
+      await expect(execProcessor.handleSqliteExec({
+        type: RequestType.SqliteExec,
+        cell: ref,
+        sql: "DELETE FROM notes",
+      })).rejects.toThrow("Invalid SQLite database scope: tenant");
+      expect(edited).toBe(false);
+    });
+
+    it("rejects a database reference with a non-string owner", async () => {
+      const processor = processorWith(
+        { id: "db-1", tables: { notes: {} }, owner: { id: "not-a-did" } },
+        () => Promise.resolve({ rows: [] }),
+      );
+
+      await expect(processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT 1",
+      })).rejects.toThrow("Invalid SQLite database owner");
+    });
+
+    it("commits writes through the database cell's transactional exec", async () => {
+      const calls: unknown[][] = [];
+      const db = { id: "db-1", tables: { notes: {} } };
+      const cell = {
+        pull: () => {
+          calls.push(["pull"]);
+          return Promise.resolve(db);
+        },
+        getRaw: () => db,
+        asSchema: () => ({ get: () => db }),
+        withTx: (tx: unknown) => ({
+          getRaw: () => db,
+          exec: (sql: string, params: unknown) => calls.push([tx, sql, params]),
+        }),
+      };
+      const tx = { id: "transaction" };
+      const runtime = {
+        getCellFromLink: () => cell,
+        editWithRetry: (edit: (tx: unknown) => void) => {
+          edit(tx);
+          return Promise.resolve({ ok: undefined });
+        },
+      };
+      const processor = Object.assign(
+        Object.create(RuntimeProcessor.prototype),
+        { runtime },
+      ) as RuntimeProcessor;
+
+      await processor.handleSqliteExec({
+        type: RequestType.SqliteExec,
+        cell: ref,
+        sql: "INSERT INTO notes (title) VALUES (:title)",
+        params: {
+          kind: "named",
+          entries: [["title", "New"]],
+        },
+      });
+
+      expect(calls).toEqual([[
+        "pull",
+      ], [
+        tx,
+        "INSERT INTO notes (title) VALUES (:title)",
+        { title: "New" },
+      ]]);
+    });
+
+    it("uses durable labels for Cells bound to direct SQLite writes", async () => {
+      const signer = await Identity.fromPassphrase(
+        `sqlite-durable-label-${crypto.randomUUID()}`,
+      );
+      const space = signer.did();
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("http://localhost/"),
+        storageManager,
+        experimental: { serverExecution: true },
+      });
+
+      try {
+        const secret = runtime.getCell(
+          space,
+          "sqlite-durable-secret",
+          { type: "string", ifc: { confidentiality: ["secret"] } },
+        );
+        await secret.sync();
+        {
+          const tx = runtime.edit();
+          secret.withTx(tx).set("classified");
+          runtime.prepareTxForCommit(tx);
+          expect((await tx.commit()).error).toBeUndefined();
+        }
+
+        const dbRef: SqliteDbRef = {
+          id: `of:sqlite-durable-label-${crypto.randomUUID()}`,
+          tables: {
+            documents: {
+              type: "object",
+              properties: {
+                id: {
+                  type: "integer",
+                  sqlType: "integer primary key",
+                },
+                target_cf_link: {
+                  type: "string",
+                  sqlType: "text",
+                  ifc: { maxConfidentiality: [] },
+                },
+              },
+              required: [],
+            },
+          },
+        };
+        const database = runtime.getCell(space, "sqlite-durable-db");
+        await database.sync();
+        {
+          const tx = runtime.edit();
+          database.withTx(tx).set(dbRef);
+          expect((await tx.commit()).error).toBeUndefined();
+        }
+        await storageManager.synced();
+
+        const processor = Object.assign(
+          Object.create(RuntimeProcessor.prototype),
+          { runtime },
+        ) as RuntimeProcessor;
+        const exec = (id: number) =>
+          processor.handleSqliteExec({
+            type: RequestType.SqliteExec,
+            cell: createCellRef(database),
+            sql: "INSERT INTO documents (id, target_cf_link) VALUES (?, ?)",
+            params: {
+              kind: "positional",
+              values: [
+                id,
+                createCellRef(secret),
+              ],
+            },
+          });
+
+        await expect(exec(1)).rejects.toThrow("exceeds its maxConfidentiality");
+
+        const replica = storageManager.open(space).replica;
+        const link = secret.getAsNormalizedFullLink();
+        const durableDocument = replica.getDocument(link.id, link.scope);
+        expect(durableDocument).toBeDefined();
+        const verdict = Promise.withResolvers<{
+          withdrawn: { message: string };
+        }>();
+        const sealed = replica.sealNative!(
+          {
+            operations: [{
+              op: "set",
+              id: link.id,
+              type: "application/json",
+              value: {
+                ...(durableDocument as Record<string, unknown>),
+                cfc: { version: 1, labelMap: { version: 1, entries: [] } },
+              } as never,
+            }],
+          },
+          undefined,
+          verdict.promise,
+          { speculative: true },
+        );
+        try {
+          expect(cfcLabelViewForCell(secret)).toBeUndefined();
+          await expect(exec(2)).rejects.toThrow(
+            "exceeds its maxConfidentiality",
+          );
+          const rows = await storageManager.open(space).sqliteQuery!(
+            dbRef,
+            "SELECT id FROM documents ORDER BY id",
+          );
+          expect(rows.rows).toEqual([]);
+        } finally {
+          verdict.resolve({ withdrawn: { message: "test complete" } });
+          await sealed.settled;
+        }
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("materializes a scoped database handle in the same direct transaction as its first write", async () => {
+      const calls: unknown[][] = [];
+      const db = {
+        id: "db-user",
+        tables: { notes: {} },
+        scope: "user" as const,
+        owner: "did:key:alice",
+      };
+      const cell = {
+        pull: () => Promise.resolve(db),
+        getRaw: () => db,
+        asSchema: () => ({ get: () => db }),
+        withTx: (tx: unknown) => ({
+          getRaw: () => undefined,
+          asSchema: () => ({
+            set: (value: unknown) => calls.push([tx, "set", value]),
+          }),
+          exec: (sql: string, params: unknown) =>
+            calls.push([
+              tx,
+              "exec",
+              sql,
+              params,
+            ]),
+        }),
+      };
+      const tx = { id: "transaction" };
+      const processor = Object.assign(
+        Object.create(RuntimeProcessor.prototype),
+        {
+          runtime: {
+            getCellFromLink: () => cell,
+            editWithRetry: (edit: (tx: unknown) => void) => {
+              edit(tx);
+              return Promise.resolve({ ok: undefined });
+            },
+          },
+        },
+      ) as RuntimeProcessor;
+
+      await processor.handleSqliteExec({
+        type: RequestType.SqliteExec,
+        cell: ref,
+        sql: "INSERT INTO notes (title) VALUES (?)",
+        params: {
+          kind: "positional",
+          values: ["First"],
+        },
+      });
+
+      expect(calls).toEqual([
+        [tx, "set", db],
+        [
+          tx,
+          "exec",
+          "INSERT INTO notes (title) VALUES (?)",
+          ["First"],
+        ],
+      ]);
+    });
+
+    it("reports a transactional SQLite write failure", async () => {
+      const db = { id: "db-1", tables: { notes: {} } };
+      const cell = {
+        pull: () => Promise.resolve(db),
+        getRaw: () => db,
+        asSchema: () => ({ get: () => db }),
+        withTx: () => ({ getRaw: () => db, exec: () => {} }),
+      };
+      const processor = Object.assign(
+        Object.create(RuntimeProcessor.prototype),
+        {
+          runtime: {
+            getCellFromLink: () => cell,
+            editWithRetry: () =>
+              Promise.resolve({ error: { message: "write refused" } }),
+          },
+        },
+      ) as RuntimeProcessor;
+
+      await expect(processor.handleSqliteExec({
+        type: RequestType.SqliteExec,
+        cell: ref,
+        sql: "DELETE FROM notes",
+      })).rejects.toThrow("write refused");
+    });
+
+    it("routes SQLite requests through the processor dispatch", async () => {
+      const processor = Object.assign(
+        Object.create(RuntimeProcessor.prototype),
+        {
+          handleSqliteQuery: () => Promise.resolve({ rows: [{ value: 1 }] }),
+          handleSqliteExec: () => Promise.resolve(),
+        },
+      ) as RuntimeProcessor;
+
+      await expect(processor.handleRequest({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT 1 AS value",
+      })).resolves.toEqual({ rows: [{ value: 1 }] });
+      await expect(processor.handleRequest({
+        type: RequestType.SqliteExec,
+        cell: ref,
+        sql: "DELETE FROM notes",
+      })).resolves.toBeUndefined();
     });
   });
 });

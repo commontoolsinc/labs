@@ -25,6 +25,7 @@ export type {
   RuntimeOptions,
   SpaceCellContents,
 } from "./runtime.ts";
+export type { EventIntentOutcome } from "./speculation/overlay-destination.ts";
 export {
   ADOPT_SERVER_FLAGS_ENV,
   type BrowserWorkerPresetParams,
@@ -91,6 +92,7 @@ export {
 export {
   type CellLinkInput,
   convertCellsToLinks,
+  encodeSqliteParams,
   isCell,
   isReadableCell,
   isStream,
@@ -109,6 +111,7 @@ export {
   type ConsoleEvent,
   ConsoleMethod,
   Engine,
+  ensureCompilerStack,
   type EntryIdentityOptions,
   resolveEntryIdentity,
   type RuntimeProgram,
@@ -131,6 +134,7 @@ export {
 export {
   type BlindStructuralTarget,
   isRendererInputTx,
+  markDurableReadTx,
   markRendererInputTx,
   markUiInputBlindWriteTx,
   setBlindStructuralTarget,
@@ -156,7 +160,6 @@ export * from "./pattern-manager.ts";
 export {
   createSpaceRootIfAbsent,
   DEFAULT_APP_PATTERN_SOURCE,
-  DEFAULT_ROOT_RUN_OPTIONS,
   ensureSpaceRootPattern,
   type EnsureSpaceRootResult,
   HOME_PATTERN_SOURCE,
@@ -171,12 +174,15 @@ export {
   resolveSystemPatternSource,
   SYSTEM_PATTERN_SOURCE_SCHEME,
   systemPatternSource,
-  systemPatternSourceForModuleName,
 } from "./pattern-source-scheme.ts";
 export {
-  type PatternUpdateOutcome,
-  PatternUpdater,
-} from "./pattern-updater.ts";
+  classifyPieceOriginString,
+  type PieceOriginKind as PieceOriginClassification,
+} from "./piece-origin-kind.ts";
+export {
+  type ReconcileOutcome,
+  SourceReconciler,
+} from "./source-reconciler.ts";
 export {
   applyPieceSourceTransition,
   asPatternIdentityRef,
@@ -276,6 +282,7 @@ export {
   CFC_RUNTIME_SUBJECT,
   cfcAtom,
   ContextualFlowControl,
+  resolveExternalRootRefForStructure,
 } from "./cfc.ts";
 export type { Mutable } from "@commonfabric/utils/types";
 export {

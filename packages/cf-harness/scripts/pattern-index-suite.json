@@ -1,0 +1,62 @@
+{
+  "label": "pattern index discovery and composition",
+  "notes": "The standing suite named by docs/pattern-index-measurement.md. No task names the pattern index, names a published pattern, or says the word \"reuse\". Each is a thing a person would ask for, worded so that a part the index already holds would answer part of it. Edit a task's text and the runs before and after are no longer comparable; add a task rather than reword one. Seeded atoms this batch is measured against: amount-ledger = DRCFljoU1NSWQ8pt8dvVa-mG5cld1tj5J46iq7L7-VE; check-list = dZt8I5yIWD2g6NeftbKv-3ZouzZ2LGCSEhT8ij7wGV0; counter = 6gKBAa1h7f4mlD6AFkKws59l-TQECHWyFjw9BI7DqUg; dice-roller = bcj98b4SbCLZPtHmCJ2AIP7vQzUFQ_rR0iZxQu2qv9o; option-picker = wZDg6zeEezVWIrOPhhV6mJ794Uys1USogIG_c_C_SIY; sortable-table = M4P9ijx47oHLW60ES54oZrNAgXPgyB86k68EcUYQas8. Ten superseded copies are archived discovery-only and marked apart in the report, four superseded by a formatter rewriting bytes and six by defects being fixed \u2014 composing one of the six is composing a known-defective atom, which is a different finding from composing one of the four. The six seeded atoms ship with CT-2126 open: a reviewer raised an identity finding against them that the seeder could neither confirm nor refute \u2014 the proposed remedy produced an identical failure, and controls showed the test cannot tell the defect from its absence. So these atoms are published with a question about them recorded rather than answered, which is context for anything odd a composition of one of them does.",
+  "tasks": [
+    {
+      "id": "counter",
+      "text": "Build me a simple counter with an increment button and a reset button."
+    },
+    {
+      "id": "reading-list",
+      "text": "Make me a page where I can keep the books I'm reading, and give each one a star rating."
+    },
+    {
+      "id": "friends-birthdays",
+      "text": "I want a page listing my friends with their birthdays, so I can see whose is coming up next."
+    },
+    {
+      "id": "project-notes",
+      "text": "Build me a page for my project notes where I can put labels on each note and filter down to one label."
+    },
+    {
+      "id": "trip-timeline",
+      "text": "Make a page that lays the days of a trip out in order so I can see what happens when."
+    },
+    {
+      "id": "monthly-expenses",
+      "text": "Give me a page where I can enter my monthly expenses and sort them by amount."
+    }
+  ],
+  "seededPatternIds": [
+    "DRCFljoU1NSWQ8pt8dvVa-mG5cld1tj5J46iq7L7-VE",
+    "dZt8I5yIWD2g6NeftbKv-3ZouzZ2LGCSEhT8ij7wGV0",
+    "6gKBAa1h7f4mlD6AFkKws59l-TQECHWyFjw9BI7DqUg",
+    "bcj98b4SbCLZPtHmCJ2AIP7vQzUFQ_rR0iZxQu2qv9o",
+    "wZDg6zeEezVWIrOPhhV6mJ794Uys1USogIG_c_C_SIY",
+    "M4P9ijx47oHLW60ES54oZrNAgXPgyB86k68EcUYQas8"
+  ],
+  "supersededPatternIds": [
+    "SvS30JCaGf2JsTXeLgd77F40GG0vJmGTaK7TCJjDhLg",
+    "AUIdfFdRbRcwyjms_C50_gndz4NP5pTuHPEZhn3OFRA",
+    "zyovq-u-j6X3gxU2ZTChMwhTx4IvjoBickAoGy4_MEk",
+    "1iaNBnIVU-vBRC3u01ciyrLjGM3YzH9xN4GYbUUMuLU",
+    "qNOJxo0JnozXU0KT-pw5UH1bVuevwfOOvImvFCkeyuM",
+    "7bhoBrtm6fN1AaQ6N6tOFz7nYsYxrjBkXiuZiWIZ-tM",
+    "docnE_YXUkal8R92pI4Lz7zAg0w_3J_6_RQmLYLUT2o",
+    "jOu9chUAHXuvnrJriemFp7qC-CvMfsmrqLD66xGimig",
+    "KEL-gKzWRo32qpOtnjjjeKX1DvvUTeLfHHvSSn93WyY",
+    "aP_glqGPYxIxzr3_YzmG4moxQtqa4aRr0iUJmPs0J3g"
+  ],
+  "supersededReasons": {
+    "SvS30JCaGf2JsTXeLgd77F40GG0vJmGTaK7TCJjDhLg": "amount-ledger: superseded when a formatter rewrote its bytes; behaviourally identical to its replacement, and the committed source cannot rebuild it",
+    "AUIdfFdRbRcwyjms_C50_gndz4NP5pTuHPEZhn3OFRA": "check-list: superseded when a formatter rewrote its bytes; behaviourally identical to its replacement, and the committed source cannot rebuild it",
+    "zyovq-u-j6X3gxU2ZTChMwhTx4IvjoBickAoGy4_MEk": "dice-roller: superseded when a formatter rewrote its bytes; behaviourally identical to its replacement, and the committed source cannot rebuild it",
+    "1iaNBnIVU-vBRC3u01ciyrLjGM3YzH9xN4GYbUUMuLU": "sortable-table: superseded when a formatter rewrote its bytes; behaviourally identical to its replacement, and the committed source cannot rebuild it",
+    "qNOJxo0JnozXU0KT-pw5UH1bVuevwfOOvImvFCkeyuM": "amount-ledger: superseded when a defect in it was fixed, so this program is known to be wrong",
+    "7bhoBrtm6fN1AaQ6N6tOFz7nYsYxrjBkXiuZiWIZ-tM": "check-list: superseded when a defect in it was fixed, so this program is known to be wrong",
+    "docnE_YXUkal8R92pI4Lz7zAg0w_3J_6_RQmLYLUT2o": "counter: superseded when a defect in it was fixed, so this program is known to be wrong",
+    "jOu9chUAHXuvnrJriemFp7qC-CvMfsmrqLD66xGimig": "dice-roller: superseded when a defect in it was fixed, so this program is known to be wrong",
+    "KEL-gKzWRo32qpOtnjjjeKX1DvvUTeLfHHvSSn93WyY": "option-picker: superseded when a defect in it was fixed, so this program is known to be wrong",
+    "aP_glqGPYxIxzr3_YzmG4moxQtqa4aRr0iUJmPs0J3g": "sortable-table: superseded when a defect in it was fixed, so this program is known to be wrong"
+  }
+}

@@ -1,10 +1,11 @@
 import { assertEquals } from "@std/assert";
 import { EnvSchema } from "@/env.ts";
 
-// Regression guard for the z.coerce.boolean() footgun: Boolean("false") === true,
-// which would silently enable telemetry (and, with the all-span exporter, ship
-// every HTTP request span) when an operator set OTEL_ENABLED=false to disable it.
 Deno.test("OTEL_ENABLED parses strictly: only 'true'/'1' enable telemetry", () => {
+  // Regression guard for the z.coerce.boolean() footgun: Boolean("false") ===
+  // true, which would silently enable telemetry (and, with the all-span
+  // exporter, ship every HTTP request span) when an operator set
+  // OTEL_ENABLED=false to disable it.
   const otel = (v: string | undefined) =>
     EnvSchema.parse(v === undefined ? {} : { OTEL_ENABLED: v }).OTEL_ENABLED;
 
@@ -20,8 +21,11 @@ Deno.test("OTEL_ENABLED parses strictly: only 'true'/'1' enable telemetry", () =
   assertEquals(otel(undefined), false);
 });
 
+//
 // The sibling boolean flags shared the same z.coerce.boolean() trap and now use
 // the strict boolFlag() parse. Guard them so they can't silently regress.
+//
+
 Deno.test("DISABLE_LOG_REQ_RES / PLAID_SYNC_ALL_TRANSACTIONS parse strictly", () => {
   const flag = (key: string, v: string | undefined) =>
     (EnvSchema.parse(v === undefined ? {} : { [key]: v }) as Record<
@@ -75,4 +79,28 @@ Deno.test("INGEST_SELF_SERVE_ENABLED is off unless explicitly enabled", () => {
 
   assertEquals(flag("true"), true);
   assertEquals(flag("1"), true);
+});
+
+Deno.test("MEMORY_WS_IDLE_TIMEOUT_SECONDS defaults to 300 and accepts overrides", () => {
+  // The memory websocket pong deadline has to be tunable per deployment: it
+  // must exceed the memory server's longest synchronous busy stretch, which an
+  // operator observes in production, and 0 must disable the timeout entirely
+  // (Deno.upgradeWebSocket's contract for idleTimeout).
+  const idle = (value: string | undefined) =>
+    EnvSchema.parse(
+      value === undefined ? {} : { MEMORY_WS_IDLE_TIMEOUT_SECONDS: value },
+    ).MEMORY_WS_IDLE_TIMEOUT_SECONDS;
+
+  assertEquals(idle(undefined), 300);
+  assertEquals(idle(""), 300);
+  assertEquals(idle("   "), 300);
+  assertEquals(idle("45"), 45);
+  assertEquals(idle("0"), 0);
+
+  // A negative deadline has no meaning for a pong window; reject rather
+  // than hand Deno an invalid option at upgrade time.
+  assertEquals(
+    EnvSchema.safeParse({ MEMORY_WS_IDLE_TIMEOUT_SECONDS: "-5" }).success,
+    false,
+  );
 });
