@@ -82,6 +82,27 @@ const labelSnapshot = (entityId = "of:fid1:abc"): HarnessCellLabels => ({
   ],
 });
 
+/** The same cell, under a reader that ran out of nodes partway through it. */
+const truncatedLabelSnapshot = (
+  entityId = "of:fid1:abc",
+): HarnessCellLabels => ({
+  ...labelSnapshot(entityId),
+  cells: [
+    {
+      entityId,
+      ref: `/${entityId}`,
+      entries: [],
+      truncationReason: "node-budget-exhausted",
+    },
+  ],
+});
+
+/** The same cell, read through and found to carry no label. */
+const bareLabelSnapshot = (entityId = "of:fid1:abc"): HarnessCellLabels => ({
+  ...labelSnapshot(entityId),
+  cells: [{ entityId, ref: `/${entityId}`, entries: [] }],
+});
+
 /** A snapshot taken on a host that holds no copy of the run's space. */
 const unreadSnapshot = (): HarnessCellLabels => ({
   type: HARNESS_CELL_LABELS_TYPE,
@@ -489,6 +510,72 @@ describe("console/runs", () => {
         expect(await familyCellLabels(root, "r1")).toMatchObject({
           status: "read",
           cellsRead: 1,
+        });
+      });
+    });
+
+    it("counts a cell as partial when the root did not finish reading it", async () => {
+      await withArtifactRoot(async (root) => {
+        await writeMember(root, "r1", {
+          refs: ["/of:fid1:abc"],
+          cellLabels: truncatedLabelSnapshot("of:fid1:abc"),
+        });
+        await writeMember(root, "r1.subagent.0", {
+          refs: ["/of:fid1:abc"],
+          cellLabels: labelSnapshot("of:fid1:abc"),
+        });
+
+        // The child read the cell whole; the root did not finish it. Counting
+        // the child's reading alone would state the cell as fully read.
+        expect(await familyCellLabels(root, "r1")).toMatchObject({
+          status: "read",
+          cellsRead: 1,
+          cellsLabelled: 1,
+          cellsPartial: 1,
+        });
+      });
+    });
+
+    it("counts a cell as partial when a child did not finish reading it", async () => {
+      await withArtifactRoot(async (root) => {
+        await writeMember(root, "r1", {
+          refs: ["/of:fid1:abc"],
+          cellLabels: labelSnapshot("of:fid1:abc"),
+        });
+        await writeMember(root, "r1.subagent.0", {
+          refs: ["/of:fid1:abc"],
+          cellLabels: truncatedLabelSnapshot("of:fid1:abc"),
+        });
+
+        // The same two readings, met in the other order, and the same answer:
+        // the fold is a union, so which member arrives first cannot matter.
+        expect(await familyCellLabels(root, "r1")).toMatchObject({
+          status: "read",
+          cellsRead: 1,
+          cellsLabelled: 1,
+          cellsPartial: 1,
+        });
+      });
+    });
+
+    it("reports a cell no member found a label for as unlabelled", async () => {
+      await withArtifactRoot(async (root) => {
+        await writeMember(root, "r1", {
+          refs: ["/of:fid1:abc"],
+          cellLabels: bareLabelSnapshot("of:fid1:abc"),
+        });
+        await writeMember(root, "r1.subagent.0", {
+          refs: ["/of:fid1:abc"],
+          cellLabels: bareLabelSnapshot("of:fid1:abc"),
+        });
+
+        // Both read it through and neither found an entry, which is a cell
+        // the space holds no label for rather than one nobody finished.
+        expect(await familyCellLabels(root, "r1")).toMatchObject({
+          status: "read",
+          cellsRead: 1,
+          cellsLabelled: 0,
+          cellsPartial: 0,
         });
       });
     });

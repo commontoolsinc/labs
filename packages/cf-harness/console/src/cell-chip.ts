@@ -120,6 +120,23 @@ export const cellLabelView = (cell: ConsoleCellFacts): ConsoleCellLabelView => {
  * `derived` is the space saying the value was computed, which no count of
  * atoms establishes.
  */
+/**
+ * Whether the card may say the space holds no label for this cell.
+ *
+ * The one positive claim the card makes about the space, and the only state
+ * entitled to make it: a reading that covered the whole of the cell and found
+ * nothing. Every other state — a cell no reading recorded, one whose reading
+ * stopped at a path, one whose reading ran out — knows less than that, and
+ * saying it would turn what nobody established into what the space asserts.
+ *
+ * It is a conjunction, which is what makes it worth naming and pinning: a
+ * later edit that drops one term widens the claim silently, and the card goes
+ * on reading as though it had been established.
+ */
+export const spaceHoldsNoLabel = (view: ConsoleCellLabelView): boolean =>
+  view.recorded && !view.partial &&
+  view.confidentiality.length === 0 && view.integrity.length === 0;
+
 export const cellChipClasses = (cell: ConsoleCellFacts): string => {
   const view = cellLabelView(cell);
   const labelled = view.onCall.length > 0 || view.confidentiality.length > 0 ||
@@ -300,12 +317,12 @@ export class ConsoleCell extends LitElement {
             ? html`<span class="cell-none">
               no label read for this cell; the map heads with what this run read
             </span>`
+            : spaceHoldsNoLabel(view)
+            ? html`<span class="cell-none">
+              the space holds no label for this cell
+            </span>`
             : view.confidentiality.length === 0 && view.integrity.length === 0
-            ? view.partial
-              ? html`<span class="cell-none">no label read for this cell</span>`
-              : html`<span class="cell-none">
-                the space holds no label for this cell
-              </span>`
+            ? html`<span class="cell-none">no label read for this cell</span>`
             : html`
               ${view.confidentiality.map((name) =>
                 html`<span class="atom conf">${name}</span>`
@@ -316,6 +333,14 @@ export class ConsoleCell extends LitElement {
             `}
         </span>
       </span>
+      <!--
+        A partial reading is stated whether or not the cell carries atoms, and
+        the cell that carries them is the one that needs it most: atoms read as
+        an answer, so a reader who sees them stops asking. A cell showing
+        nothing at least invites the question of why; a cell showing something
+        invites none, and the labels it shows are some of what the space holds
+        rather than all of it.
+      -->
       ${!view.partial ? nothing : html`
         <span class="cell-row">
           <span class="cell-label">reading</span>

@@ -4,8 +4,10 @@ import { expect } from "@std/expect";
 import {
   cellLabelsAt,
   consoleCellLabelIndex,
+  type ConsoleCellLabels,
   consoleCellLabels,
   consoleCellLabelsSummary,
+  foldCellLabels,
 } from "../../console/cell-labels.ts";
 import {
   HARNESS_CELL_LABELS_TYPE,
@@ -445,6 +447,84 @@ describe("console/cell-labels", () => {
         configured: "demo-space",
         dbPath: "/spaces/demo.sqlite",
       });
+    });
+  });
+
+  describe("foldCellLabels()", () => {
+    /** Three readings of one cell, no two of them stating the same thing. */
+    const whole: ConsoleCellLabels = {
+      confidentiality: ["Secret"],
+      integrity: [],
+      derived: false,
+      transformedBy: [],
+      entries: [{ path: [], confidentiality: ["Secret"], integrity: [] }],
+    };
+    const truncated: ConsoleCellLabels = {
+      confidentiality: [],
+      integrity: [],
+      derived: false,
+      transformedBy: [],
+      entries: [],
+      truncationReason: "node-budget-exhausted",
+    };
+    const unread: ConsoleCellLabels = {
+      confidentiality: [],
+      integrity: [],
+      derived: false,
+      transformedBy: [],
+      entries: [],
+      unreadPaths: [["theirs"]],
+    };
+
+    const fold = (
+      readings: readonly ConsoleCellLabels[],
+    ): ConsoleCellLabels => readings.reduce(foldCellLabels);
+
+    it("folds three readings to one answer in every order they arrive in", () => {
+      // Every field is a set union or a disjunction, so the fold is
+      // associative as well as commutative: a family is a root and any
+      // number of children, and reassociating three is what commutativity
+      // alone would not settle.
+      const orders = [
+        [whole, truncated, unread],
+        [whole, unread, truncated],
+        [truncated, whole, unread],
+        [truncated, unread, whole],
+        [unread, whole, truncated],
+        [unread, truncated, whole],
+      ];
+      for (const order of orders) {
+        expect(fold(order)).toEqual(fold(orders[0]));
+      }
+    });
+
+    it("keeps the atoms of the reading that found them", () => {
+      expect(fold([truncated, whole]).confidentiality).toEqual(["Secret"]);
+      expect(fold([truncated, whole]).entries).toEqual(whole.entries);
+    });
+
+    it("keeps the truncation of a reading that did not finish", () => {
+      expect(fold([whole, truncated]).truncationReason).toBe(
+        "node-budget-exhausted",
+      );
+    });
+
+    it("keeps the unread paths of every reading that named one", () => {
+      expect(fold([whole, unread]).unreadPaths).toEqual([["theirs"]]);
+    });
+
+    it("names no truncation where neither reading stopped short", () => {
+      expect(fold([whole, unread]).truncationReason).toBe(undefined);
+    });
+
+    it("holds no entry where no reading found one", () => {
+      const folded = fold([truncated, unread]);
+      expect(folded.entries).toEqual([]);
+      expect(folded.confidentiality).toEqual([]);
+    });
+
+    it("states one entry both readings hold once", () => {
+      expect(fold([whole, whole]).entries).toEqual(whole.entries);
     });
   });
 

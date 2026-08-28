@@ -16,7 +16,7 @@
 import type { ConsoleDisclosure, ConsoleHandle, ConsoleStep } from "./steps.ts";
 import { matchLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { HANDLE_TOKEN_PATTERN } from "../src/contracts/handle-table.ts";
-import type { ConsoleCellLabels } from "./cell-labels.ts";
+import { type ConsoleCellLabels, foldCellLabels } from "./cell-labels.ts";
 
 /** A pattern that ran, or a cell in the space. */
 export type ConsoleGraphNodeKind = "pattern" | "cell";
@@ -387,6 +387,17 @@ export const consoleRunFamilyGraph = (
         nodes.set(node.id, dated);
         continue;
       }
+      // Two runs' readings of one cell are two partial views of it, folded
+      // conservatively rather than chosen between: a run that read the cell
+      // whole does not answer for one that stopped partway through it, so
+      // the fold keeps the truncation and the unread paths of either. A
+      // sighting with no reading at all is a run that never covered the
+      // cell, which the other run's reading stands for on its own.
+      const labels = held.labels === undefined
+        ? dated.labels
+        : dated.labels === undefined
+        ? held.labels
+        : foldCellLabels(held.labels, dated.labels);
       // One cell reached from two runs: keep the earliest sighting, and take
       // whichever facts either run established about it.
       nodes.set(node.id, {
@@ -399,12 +410,7 @@ export const consoleRunFamilyGraph = (
         confidentiality: [
           ...new Set([...held.confidentiality, ...dated.confidentiality]),
         ],
-        // Both runs read the same space for the same cell, so a sighting
-        // that carries labels is the one to keep, and two that carry them
-        // agree.
-        ...(held.labels ?? dated.labels) !== undefined
-          ? { labels: held.labels ?? dated.labels }
-          : {},
+        ...(labels !== undefined ? { labels } : {}),
       });
     }
     for (const edge of graph.edges) {

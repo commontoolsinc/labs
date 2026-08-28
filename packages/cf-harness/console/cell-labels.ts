@@ -262,28 +262,143 @@ export const consoleCellLabelIndex = (
 };
 
 /**
- * Whether a record holds either of the two facts that make its entries some
+ * The identity of one entry: the whole of what it states, canonically
+ * written. It is what {@link foldCellLabels} calls "the same entry".
+ *
+ * Keying on the path alone and merging the atom lists beneath it would have
+ * to answer for `origin`, `observes` and `transformedBy` wherever two
+ * readings differed — and any answer there is one neither reading recorded.
+ * Two readings of one space's stored label at one path state the same thing,
+ * so identical entries collapse and the union is the list either of them
+ * held; where they are not identical, each stands as its reader wrote it
+ * rather than being averaged into a third entry nobody saw.
+ *
+ * The atom lists are sorted first, because they are sets: two readings that
+ * hold the same atoms in different orders hold the same entry, and the
+ * canonical order is what lets the union say so.
+ */
+const canonicalEntry = (
+  entry: ConsoleCellLabelEntry,
+): ConsoleCellLabelEntry => ({
+  ...entry,
+  confidentiality: [...entry.confidentiality].sort(),
+  integrity: [...entry.integrity].sort(),
+});
+
+const entryIdentity = (entry: ConsoleCellLabelEntry): string =>
+  JSON.stringify([
+    entry.path,
+    entry.confidentiality,
+    entry.integrity,
+    entry.origin ?? null,
+    entry.observes ?? null,
+    entry.transformedBy ?? null,
+  ]);
+
+const pathIdentity = (path: readonly string[]): string => JSON.stringify(path);
+
+/** The union of two keyed sets, in the canonical order of their keys. */
+const unionBy = <T>(
+  left: readonly T[],
+  right: readonly T[],
+  key: (value: T) => string,
+): T[] =>
+  [...new Map([...left, ...right].map((value) => [key(value), value]))]
+    .sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+    .map(([, value]) => value);
+
+/**
+ * Two readings of one cell, folded into the reading that claims no more than
+ * both of them together support.
+ *
+ * A family reads one space from several runs, so one address can arrive twice
+ * — a root that ran out of nodes partway through a cell and a child that read
+ * the same cell whole. They are two partial views of one cell, and choosing
+ * between them can choose the more flattering: the whole reading would bury
+ * the root's truncation, and a cell one reader did not finish would be
+ * counted as fully read.
+ *
+ * **The fold is a commutative monoid, and every field is an OR or a union.**
+ * Its identity is a reading with no entries, no unread paths and no
+ * truncation, which returns its partner in the canonical order the fold
+ * writes — an order, and not part of what a reading states, because each of
+ * these fields is a set. `unreadPaths` and `entries` are set unions;
+ * `truncationReason`
+ * is the disjunction of two options, taken in a fixed order so that it does
+ * not depend on which member is seen first. Boolean OR and set union are both
+ * commutative and associative, which is what makes folding a family of any
+ * size independent of the order its members are visited in — commutativity
+ * alone would only settle a family of two. A field that picks a winner rather
+ * than merging would destroy that silently, so a new field belongs here only
+ * if it is an OR or a union too.
+ *
+ * `entries` is the one field whose union is a judgement rather than an
+ * algebra: what makes two entries the same is decided by
+ * {@link entryIdentity}, above. Given that identity it is an ordinary set
+ * union, so the property above holds of it as well.
+ *
+ * The cell-level readings — the atoms, `derived`, `transformedBy` — are
+ * recomputed from the folded entries rather than folded beside them, so they
+ * cannot state anything the entries do not.
+ */
+export const foldCellLabels = (
+  a: ConsoleCellLabels,
+  b: ConsoleCellLabels,
+): ConsoleCellLabels =>
+  labelsOfEntries(
+    unionBy(
+      a.entries.map(canonicalEntry),
+      b.entries.map(canonicalEntry),
+      entryIdentity,
+    ),
+    unionBy(a.unreadPaths ?? [], b.unreadPaths ?? [], pathIdentity),
+    [a.truncationReason, b.truncationReason]
+      .filter((reason) => reason !== undefined)
+      .sort()[0],
+  );
+
+/**
+ * Whether a reading holds either of the two facts that make its entries some
  * of what the space holds rather than all of it — a path nothing was read at,
  * or a read that stopped before it finished.
  */
-const readInPart = (record: HarnessCellLabelRecord): boolean =>
-  record.truncationReason !== undefined ||
-  (record.unreadPaths ?? []).length > 0;
+const readingInPart = (labels: ConsoleCellLabels): boolean =>
+  labels.truncationReason !== undefined ||
+  (labels.unreadPaths ?? []).length > 0;
+
+/**
+ * The run-level fact the map and the run header state, counted over cells
+ * already reduced to one reading each.
+ *
+ * A cell is read where any member read it, labelled where any member found an
+ * entry, and partial where any member's reading was partial — which is the
+ * fold above, carried up into the counting. Counting is where the invariant
+ * hides best: a header that says a cell was fully read misrepresents it just
+ * as a card would.
+ */
+export const cellLabelsSummaryOf = (
+  reading: Omit<ConsoleCellLabelIndex, "byAddress">,
+  cells: Iterable<ConsoleCellLabels>,
+): ConsoleCellLabelsSummary => {
+  const folded = [...cells];
+  return {
+    status: reading.status,
+    ...(reading.detail !== undefined ? { detail: reading.detail } : {}),
+    ...(reading.space !== undefined ? { space: reading.space } : {}),
+    cellsRead: folded.length,
+    cellsLabelled: folded.filter((labels) => labels.entries.length > 0).length,
+    cellsPartial: folded.filter(readingInPart).length,
+  };
+};
 
 /** The run-level fact the map and the run header state. */
 export const consoleCellLabelsSummary = (
   index: ConsoleCellLabelIndex,
-): ConsoleCellLabelsSummary => {
-  const cells = [...index.byAddress.values()];
-  return {
-    status: index.status,
-    ...(index.detail !== undefined ? { detail: index.detail } : {}),
-    ...(index.space !== undefined ? { space: index.space } : {}),
-    cellsRead: cells.length,
-    cellsLabelled: cells.filter((record) => record.entries.length > 0).length,
-    cellsPartial: cells.filter(readInPart).length,
-  };
-};
+): ConsoleCellLabelsSummary =>
+  cellLabelsSummaryOf(
+    index,
+    [...index.byAddress.values()].map(consoleCellLabels),
+  );
 
 /** The entity a reference names, and the path inside it the reference walks. */
 interface ConsoleCellAddress {

@@ -4,7 +4,9 @@ import {
   cellChipClasses,
   cellLabelView,
   cellName,
+  type ConsoleCellLabelView,
   schemaSummary,
+  spaceHoldsNoLabel,
 } from "../../../console/src/cell-chip.ts";
 
 describe("console/src/cell-chip", () => {
@@ -218,6 +220,53 @@ describe("console/src/cell-chip", () => {
         },
       });
       expect(carried).not.toBe(derived);
+    });
+  });
+
+  describe("spaceHoldsNoLabel()", () => {
+    const view = (over: Partial<ConsoleCellLabelView> = {}) =>
+      ({
+        onCall: [],
+        confidentiality: [],
+        integrity: [],
+        derived: false,
+        transformedBy: [],
+        paths: [],
+        unreadPaths: [],
+        unfinished: false,
+        partial: false,
+        recorded: true,
+        ...over,
+      }) as ConsoleCellLabelView;
+
+    it("lets a reading that covered the whole of a bare cell say so", () => {
+      expect(spaceHoldsNoLabel(view())).toBe(true);
+    });
+
+    // The negative half, stated state by state. The claim is a conjunction,
+    // so an edit that drops one of its terms widens it without failing
+    // anything that only checks the positive case.
+    it("refuses a cell no reading recorded", () => {
+      expect(spaceHoldsNoLabel(view({ recorded: false }))).toBe(false);
+    });
+
+    it("refuses a cell whose reading stopped at a path", () => {
+      expect(
+        spaceHoldsNoLabel(
+          view({ partial: true, unreadPaths: [["inner"]] }),
+        ),
+      ).toBe(false);
+    });
+
+    it("refuses a cell whose reading ran out", () => {
+      expect(spaceHoldsNoLabel(view({ partial: true, unfinished: true })))
+        .toBe(false);
+    });
+
+    it("refuses a cell the space labelled", () => {
+      expect(spaceHoldsNoLabel(view({ confidentiality: ["secret"] })))
+        .toBe(false);
+      expect(spaceHoldsNoLabel(view({ integrity: ["signed"] }))).toBe(false);
     });
   });
 });

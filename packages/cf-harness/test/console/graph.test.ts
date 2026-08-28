@@ -54,6 +54,65 @@ const secretLabels: ConsoleCellLabels = {
   entries: [{ path: [], confidentiality: ["Secret"], integrity: [] }],
 };
 
+/** What a reader that ran out of nodes partway through that cell says. */
+const truncatedLabels: ConsoleCellLabels = {
+  confidentiality: [],
+  integrity: [],
+  derived: false,
+  transformedBy: [],
+  entries: [],
+  unreadPaths: [["theirs"]],
+  truncationReason: "node-budget-exhausted",
+};
+
+/** The reading the two above together support, in either order. */
+const foldedLabels: ConsoleCellLabels = {
+  confidentiality: ["Secret"],
+  integrity: [],
+  derived: false,
+  transformedBy: [],
+  entries: [{ path: [], confidentiality: ["Secret"], integrity: [] }],
+  unreadPaths: [["theirs"]],
+  truncationReason: "node-budget-exhausted",
+};
+
+/**
+ * A parent and one child that both touch `/of:same`, each carrying its own
+ * reading of it, reduced to what the coalesced cell node says.
+ */
+const familyCellLabels = (
+  rootLabels: ConsoleCellLabels,
+  childLabels: ConsoleCellLabels,
+): ConsoleCellLabels | undefined => {
+  const parentSteps = consoleRunSteps([
+    call("c1", "delegate_task", { goal: "build it" }),
+    result("c1", "delegate_task", {
+      subagent: { childRunId: "r.subagent.1", status: "completed" },
+    }),
+    call("c2", "assign_slug", { token: "cfh:a:ppppp", slug: "books" }),
+    result("c2", "assign_slug", { status: "ok", slug: "books" }),
+  ]);
+  const childSteps = consoleRunSteps([
+    call("d1", "run_pattern", { sourceText: "x" }),
+    result("d1", "run_pattern", { status: "ok", resultRef: "cfh:a:kkkkk" }),
+  ]);
+  const graph = consoleRunFamilyGraph(
+    {
+      runId: "r",
+      steps: parentSteps,
+      handles: [{ ...handle("cfh:a:ppppp", "/of:same"), labels: rootLabels }],
+    },
+    [{
+      runId: "r.subagent.1",
+      steps: childSteps,
+      handles: [{ ...handle("cfh:a:kkkkk", "/of:same"), labels: childLabels }],
+    }],
+  );
+  const cells = graph.nodes.filter((node) => node.kind === "cell");
+  expect(cells).toHaveLength(1);
+  return cells[0].labels;
+};
+
 describe("console/graph", () => {
   describe("consoleRunGraph()", () => {
     it("draws a pattern producing the cell its result addressed", () => {
@@ -259,6 +318,22 @@ describe("console/graph", () => {
       // One cell, and the child is the run that read the space for it.
       expect(cells).toHaveLength(1);
       expect(cells[0].labels?.confidentiality).toEqual(["Secret"]);
+    });
+
+    it("keeps a cell partial when the root did not finish reading it", () => {
+      // The child read the cell whole. Taking its reading alone would drop
+      // the root's truncation and show the cell as fully read.
+      expect(familyCellLabels(truncatedLabels, secretLabels)).toEqual(
+        foldedLabels,
+      );
+    });
+
+    it("keeps a cell partial when a child did not finish reading it", () => {
+      // The same two readings, met in the other order. Every field of the
+      // fold is an OR or a union, so the answer cannot depend on the order.
+      expect(familyCellLabels(secretLabels, truncatedLabels)).toEqual(
+        foldedLabels,
+      );
     });
 
     it("visits a run once when a delegation points back at an ancestor", () => {

@@ -30,16 +30,17 @@ import {
 } from "./graph.ts";
 import { type ConsoleFlow, consoleRunFlow } from "./flow.ts";
 import {
+  cellLabelsSummaryOf,
   type ConsoleCellLabelIndex,
   consoleCellLabelIndex,
+  type ConsoleCellLabels,
+  consoleCellLabels,
   type ConsoleCellLabelsStatus,
   type ConsoleCellLabelsSummary,
   consoleCellLabelsSummary,
+  foldCellLabels,
 } from "./cell-labels.ts";
-import type {
-  HarnessCellLabelRecord,
-  HarnessCellLabels,
-} from "../src/contracts/cell-labels.ts";
+import type { HarnessCellLabels } from "../src/contracts/cell-labels.ts";
 
 /**
  * A single path segment of the characters the artifact store itself writes.
@@ -419,15 +420,22 @@ const statusTally = (
  * A member that minted no handle had no cell to snapshot, and its missing
  * snapshot is that rather than a gap, so it is left out of the reckoning.
  * The cells themselves are merged by address, so a cell a parent and its
- * child both hold is one cell of the family rather than two.
+ * child both hold is one cell of the family rather than two — and merged by
+ * {@link foldCellLabels}, so that a cell one member did not finish reading is
+ * counted as partial however whole another member's reading of it was.
  */
 const familyCellLabels = (
   members: readonly FamilyLabelReading[],
 ): ConsoleCellLabelsSummary => {
-  const byAddress = new Map<string, HarnessCellLabelRecord>();
+  const byAddress = new Map<string, ConsoleCellLabels>();
   for (const member of members) {
     for (const [address, record] of member.labels.byAddress) {
-      byAddress.set(address, record);
+      const held = byAddress.get(address);
+      const reading = consoleCellLabels(record);
+      byAddress.set(
+        address,
+        held === undefined ? reading : foldCellLabels(held, reading),
+      );
     }
   }
   const speaking = members.filter((member) =>
@@ -438,14 +446,13 @@ const familyCellLabels = (
   if (new Set(statuses).size > 1) {
     const space = members.find((member) => member.labels.space !== undefined)
       ?.labels.space;
-    return consoleCellLabelsSummary({
+    return cellLabelsSummaryOf({
       status: "unavailable",
       detail: `the runs in this family disagree: ${statusTally(statuses)}`,
       ...(space !== undefined ? { space } : {}),
-      byAddress,
-    });
+    }, byAddress.values());
   }
-  return consoleCellLabelsSummary({ ...agreed.labels, byAddress });
+  return cellLabelsSummaryOf(agreed.labels, byAddress.values());
 };
 
 /**
