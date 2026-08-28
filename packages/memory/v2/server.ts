@@ -2903,10 +2903,10 @@ export class Server {
         : null;
       // A resumed session is registered before catch-up, and catch-up awaits
       // graph evaluation. An ACL commit (or takeover) can remove or replace it
-      // during that await, before Connection.receiveOrdered has added its local
-      // handle. In active ACL modes, never return catch-up data or let the
-      // connection add a ghost handle unless this exact token is still owned
-      // by this connection. Off mode preserves the legacy session timing.
+      // during that await, before Connection.#receiveOrdered has added its
+      // local handle. In active ACL modes, never return catch-up data or let
+      // the connection add a ghost handle unless this exact token is still
+      // owned by this connection. Off mode preserves the legacy session timing.
       const current = this.#sessions.get(message.space, opened.sessionId);
       if (
         this.isAclActive() &&

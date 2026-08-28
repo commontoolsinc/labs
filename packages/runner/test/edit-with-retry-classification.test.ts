@@ -388,8 +388,8 @@ Deno.test("a server ProtocolError reaches editWithRetry by name, once", async ()
 // session could land it. It fails on a fact about the RETRY PATH, not about the
 // error: nothing between two `editWithRetry` attempts remounts the session.
 // `SpaceReplica.sessionHandle()` memoizes the mount and clears it only in
-// `close()`/`closeNow()` (storage/v2.ts), and `SpaceSession.reopen()` runs only
-// from `restore()`, which only the client's transport `reconnect()` calls
+// `close()`/`closeNow()` (storage/v2.ts), and `SpaceSession.#reopen()` runs
+// only from `restore()`, which only the client's transport `reconnect()` calls
 // (memory/v2/client.ts). So every attempt re-sends over the very handle the
 // server just refused.
 //

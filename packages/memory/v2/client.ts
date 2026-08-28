@@ -516,7 +516,7 @@ export class Client {
       return;
     }
     await this.#reconnect();
-    // reconnect() resolves without connecting when it gives up on a permanent
+    // #reconnect() resolves without connecting when it gives up on a permanent
     // handshake failure; surface it here rather than returning as if connected.
     if (this.#fatalError) {
       throw this.#fatalError;
