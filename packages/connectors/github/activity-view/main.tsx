@@ -213,6 +213,45 @@ function shortOid(value: string | null): string {
   return value ? value.slice(0, 8) : "—";
 }
 
+/** Render public repository commits returned by the GitHub API. */
+export function renderGithubCommits(
+  commitList: CommitResponse | undefined,
+) {
+  if (!commitList || commitList.length === 0) {
+    return (
+      <div style="padding: 16px; text-align: center; color: #666;">
+        No commits found
+      </div>
+    );
+  }
+  return (
+    <div style="max-height: 500px; overflow-y: auto;">
+      {commitList.slice(0, 20).map((commit) => (
+        <cf-card style="margin-bottom: 8px;">
+          <div style="padding: 12px;">
+            <div style="font-weight: 500; margin-bottom: 4px;">
+              {commit.commit.message.split("\n")[0]}
+            </div>
+            <div style="font-size: 13px; color: #666; margin-bottom: 8px;">
+              {commit.commit.author.name} • {formatDate(
+                commit.commit.author.date,
+              )}
+            </div>
+            <a
+              href={commit.html_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              style="font-size: 13px; color: #0969da;"
+            >
+              View commit →
+            </a>
+          </div>
+        </cf-card>
+      ))}
+    </div>
+  );
+}
+
 /** Present synchronized pull requests or public repository activity. */
 export default pattern<GithubActivityInput, GithubActivityOutput>((state) => {
   const activeTab = new Writable.perSession<SyncedTab>("pull-requests");
@@ -661,42 +700,7 @@ export default pattern<GithubActivityInput, GithubActivityOutput>((state) => {
             )
             : null}
 
-          {computed(() => {
-            const commitList = commits;
-            if (!commitList || commitList.length === 0) {
-              return (
-                <div style="padding: 16px; text-align: center; color: #666;">
-                  No commits found
-                </div>
-              );
-            }
-            return (
-              <div style="max-height: 500px; overflow-y: auto;">
-                {commitList.slice(0, 20).map((commit) => (
-                  <cf-card style="margin-bottom: 8px;">
-                    <div style="padding: 12px;">
-                      <div style="font-weight: 500; margin-bottom: 4px;">
-                        {commit.commit.message.split("\n")[0]}
-                      </div>
-                      <div style="font-size: 13px; color: #666; margin-bottom: 8px;">
-                        {commit.commit.author.name} • {formatDate(
-                          commit.commit.author.date,
-                        )}
-                      </div>
-                      <a
-                        href={commit.html_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style="font-size: 13px; color: #0969da;"
-                      >
-                        View commit →
-                      </a>
-                    </div>
-                  </cf-card>
-                ))}
-              </div>
-            );
-          })}
+          {computed(() => renderGithubCommits(commits))}
         </div>
       ),
     pullRequests,

@@ -9,7 +9,22 @@ import GithubActivity, {
   type GithubPullRequestFields,
   type GithubPullRequestIndex,
   type PullRequestDetail,
+  renderGithubCommits,
 } from "./main.tsx";
+
+const publicCommits = [
+  {
+    sha: "abc123",
+    html_url: "https://github.com/example/widget/commit/abc123",
+    commit: {
+      message: "Ship the synchronized dashboard\n\nMore detail",
+      author: {
+        name: "Ada",
+        date: "2026-08-28T10:00:00.000Z",
+      },
+    },
+  },
+];
 
 const PullRequestDetailFixture = pattern<void, PullRequestDetail>(() => ({
   schema: "commonfabric.github-connector.pull-request.v1",
@@ -172,7 +187,6 @@ export default pattern(() => {
     repoUrl: "https://github.com/example/widget",
     pullRequestIndex: emptyPullRequestIndex,
   });
-
   const assert_keeps_every_synced_pull_request = assert(() =>
     subject.pullRequestCount === 4 && subject.pullRequests.length === 4
   );
@@ -208,6 +222,14 @@ export default pattern(() => {
     emptySubject.repositoryCount === 0 &&
     emptySubject.pullRequests.length === 0
   );
+  const assert_renders_public_repository_commits = assert(() => {
+    const text = textContent(renderGithubCommits(publicCommits));
+    return text.includes("Ship the synchronized dashboard") &&
+      text.includes("Ada") && text.includes("View commit →");
+  });
+  const assert_renders_empty_public_repository = assert(() =>
+    textContent(renderGithubCommits([])).includes("No commits found")
+  );
 
   return {
     [TESTS]: [
@@ -220,6 +242,8 @@ export default pattern(() => {
       { assertion: assert_stopped_host_is_neutral },
       { assertion: assert_renders_sync_metadata },
       { assertion: assert_supports_empty_generations },
+      { assertion: assert_renders_public_repository_commits },
+      { assertion: assert_renders_empty_public_repository },
     ],
   };
 });
