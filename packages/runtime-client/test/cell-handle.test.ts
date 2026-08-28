@@ -324,12 +324,10 @@ describe("cell-handle", () => {
       }]);
     });
 
-    // Inv-12 Stage 0: toJSON output is what JSON.stringify emits when a handle
-    // lands in CustomEvent.detail (drag/drop sourceCell) — a raw sigil link
-    // that re-enters the worker through the VDOM event path, bypassing
-    // getCell/cellRefToSigilLink. The ref's display view must not ride it
-    // (codex/cubic review on the Stage 0 PR); like toWireString, only
-    // addressing fields (+schema) serialize.
+    // Inv-12 Stage 0: the link a handle names itself by re-enters the worker
+    // without passing getCell/cellRefToSigilLink, so the ref's display view
+    // must not ride it (codex/cubic review on the Stage 0 PR). Like
+    // toWireString, only addressing fields (+schema) go.
     it("does not serialize the ref-carried label view into sigil links", () => {
       const runtime = {
         [$conn]: () => ({
@@ -362,6 +360,28 @@ describe("cell-handle", () => {
           },
         },
       });
+    });
+
+    it("names the same link whichever of the two names asks for it", () => {
+      // `toSigilLink()` is for a caller that has recognized the handle, and
+      // `toJSON()` for the protocol that reaches one without recognizing it.
+      // They are two names, not two answers.
+      const runtime = {
+        [$conn]: () => ({
+          request: () => Promise.resolve({}),
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, {
+        id: "of:two-names" as CellRef["id"],
+        space: "did:key:test" as CellRef["space"],
+        scope: "space",
+        path: ["value"],
+      } as CellRef);
+
+      expect(cell.toSigilLink()).toEqual(cell.toJSON());
+      expect(JSON.parse(JSON.stringify(cell))).toEqual(cell.toSigilLink());
     });
 
     it("encodes its link to an fcl1: wire string with only addressing fields", () => {

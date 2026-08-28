@@ -38,7 +38,7 @@ function cellKind(schema: JSONSchema | undefined): string | undefined {
 }
 
 function bridgeValue(value: unknown): FabricValue {
-  if (isCellHandle(value)) return value.toJSON();
+  if (isCellHandle(value)) return value.toSigilLink();
   if (Array.isArray(value)) return value.map(bridgeValue);
   if (value && typeof value === "object") {
     if (Object.getPrototypeOf(value) !== Object.prototype) {
