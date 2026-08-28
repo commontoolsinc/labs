@@ -262,6 +262,10 @@ What is not done yet:
 - [src/contracts/](src/contracts/)
   - prompt-slot, run-manifest, observation, policy, run-report, subagent, skill,
     transcript, tool-result, and handle-table contracts
+- [console/](console/)
+  - the console: a localhost page that starts a session, watches it live, and
+    reads any run back as a map of its cells, calls and CFC verdicts. See
+    [console/README.md](console/README.md)
 - [integration/](integration/)
   - environment-gated real `runsc-cfc` integration tests
 - [docs/SKILLS_SUPPORT_SPEC.md](docs/SKILLS_SUPPORT_SPEC.md)
@@ -278,6 +282,9 @@ From [packages/cf-harness](.):
 - `deno task run -- ...`
 - `deno task test`
 - `deno task test:integration`
+- `deno task console` — build the console page and serve it on `127.0.0.1:8100`
+- `deno task console:build`, `deno task console:watch` — the build on its own,
+  and a rebuild on save while changing the page
 
 ## CLI Example
 
