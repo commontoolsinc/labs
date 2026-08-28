@@ -61,7 +61,14 @@ export interface PatternIndexPublicationLedger {
    */
   stage(request: PatternIndexPublishRequest): void;
 
-  /** Publishes everything still held, in staging order. */
+  /**
+   * Publishes everything still held, ordered so that a held entry another
+   * held entry names among its `dependencies` goes first. A request whose
+   * turn never comes is still published, after everything that could be
+   * ordered — nothing here produces a cycle, since a dependency is the
+   * content-addressed identity of something that already compiled, but the
+   * ordering does not assume it.
+   */
   flush(): Promise<void>;
 }
 

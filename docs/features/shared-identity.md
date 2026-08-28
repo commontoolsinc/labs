@@ -91,11 +91,14 @@ BIP-39 phrase fails with `Invalid mnemonic`, so a passphrase in the ordinary
 sense cannot be typed there at all, whatever the field says. The CLI equivalent
 of that field is `cf id from-mnemonic`, not `cf id derive`.
 
-**It must be 24 words.** A 12-word phrase is valid BIP-39 and still fails, with
-`RangeError: expected Uint8Array of length 32, got length=16`: twelve words
-carry 128 bits of entropy and the Ed25519 signer seeds from 32 bytes. The same
-error comes out of `cf id from-mnemonic`, so a phrase that works in one works
-in the other, and a 12-word phrase works in neither.
+**It must be 24 words.** A 12-word phrase is valid BIP-39 and still fails:
+twelve words carry 128 bits of entropy and an Ed25519 signer seeds from 32
+bytes. The failure surfaces from the Ed25519 dependency rather than from
+anything in this repository, so its wording is not ours to promise — observed
+on 2026-08-28 it was `expected Uint8Array of length 32, got length=16`, in the
+browser console and identically from `cf id from-mnemonic`. What holds
+regardless of the wording is the shape: a phrase that works in one works in
+the other, and a 12-word phrase works in neither.
 
 > Use `deno run -A packages/cli/mod.ts`, not `deno task cf`, when redirecting to
 > a key file: the `deno task` wrapper prints colored preamble to stdout that

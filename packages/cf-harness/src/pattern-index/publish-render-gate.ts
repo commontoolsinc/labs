@@ -434,14 +434,19 @@ export const syntheticArgument = (
         if (additional !== undefined && additional !== false) {
           incomplete();
           for (let i = 0; i < SYNTHETIC_ARRAY_LENGTH; i++) {
+            // A name the object already declares is left alone: that property
+            // was generated from its own schema, and a synthetic string
+            // written over it would be the wrong type for whatever reads it.
+            const key = syntheticName(i);
+            if (Object.hasOwn(out, key)) continue;
             // `true` admits any value and describes none, so the bag gets a
             // name from the same vocabulary rather than no key at all — a bag
             // with no keys exercises an indexed renderer exactly as an absent
             // bag does, which is what this branch exists to avoid.
             const value = additional === true
-              ? syntheticName(i)
+              ? key
               : build(additional, depth + 1, seen, i);
-            if (value !== undefined) out[syntheticName(i)] = value;
+            if (value !== undefined) out[key] = value;
           }
         } else if (Object.keys(properties).length === 0) {
           incomplete();

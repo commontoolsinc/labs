@@ -1551,6 +1551,7 @@ export const runPatternTool: HarnessToolDefinition<
         }
         const probeResult = await new PieceController(pieces, probeCell)
           .result.getCell();
+        if (signal?.aborted === true) return "cancelled";
         let rendered: Awaited<ReturnType<typeof renderPatternUiToHtml>>;
         const render = (async () => {
           rendered = await renderPatternUiToHtml(
@@ -1579,11 +1580,21 @@ export const runPatternTool: HarnessToolDefinition<
         if (rendered.errors.length > 0) return recorded("probe-failed", html);
         if (reason === "ui-rendered-empty") return recorded(reason, html);
         return discoverable(reason, html);
-      } catch {
+      } catch (error) {
+        // An abort can land inside an await this function does not race —
+        // starting the probe, or loading its result cell — and arrives here
+        // as an ordinary throw. Reading that as "no verdict" would publish
+        // under a run that was cancelled, which is the defect the raced
+        // aborts above exist to prevent, so the signal is consulted before
+        // the throw is interpreted.
+        if (signal?.aborted === true) return "cancelled";
         // What a probe throws is the pattern's own text, which the artifact
         // keeps for the run's own failure paths and which has no reading here
-        // beyond "no verdict".
-        return recorded("probe-failed");
+        // beyond "no verdict". A defect in the GATE lands here too and reads
+        // identically from outside, so its text goes to the artifact rather
+        // than nowhere — a check that fails silently for its own reasons is
+        // the failure this gate exists to remove.
+        return recorded("probe-failed", errorMessage(error));
       } finally {
         if (probeCell !== undefined) {
           try {
