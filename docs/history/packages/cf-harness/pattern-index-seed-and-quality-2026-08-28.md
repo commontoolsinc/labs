@@ -177,6 +177,59 @@ the raw data. Each is now pinned by a test.
   disclosed in the index repository's `docs/gardening.md`; nothing was deleted,
   and reversing a wrong call costs one API call.
 
+## The failure this pass kept finding, including in itself
+
+One shape recurred often enough during the pass to be worth stating on its own,
+because the corpus defect and the tooling defects turned out to be the same
+thing:
+
+> A check that does no work reports the same thing as a check that ran and
+> found nothing. Only a case where you already know the answer separates them.
+
+Every instance below passed inspection first, and each was caught by
+re-deriving a result from its source rather than by reading the code that
+produced it.
+
+- A search that returned `403: DID is not allowlisted` counted as a search that
+  returned no results, so a run family that never reached the index at all
+  recorded as an empty corpus.
+- Twenty `read_skill_resource` calls that all returned
+  `skill_registry_missing` were counted as twenty successful reads, which
+  inverted the health of the one input surface that was working.
+- A composition proof run in the space that already held its dependencies
+  returned `materialized: []`: three ids requested, zero fetched, everything
+  rendering, nothing exercised.
+- The rendering gate tested for `$UI` on an unschema'd read, which does not
+  follow the link that reaches it, so twenty of twenty-four patterns recorded
+  as "nothing to check" while the run looked like a pass.
+- A blanket `catch` in that same gate converted a defect in its own code into
+  the gate's ordinary "probe failed" outcome.
+- A test asserting only a refusal's header — printed for every refusal — stayed
+  green while the code beneath it was failing for an unrelated reason. It was
+  written to satisfy a coverage gate, which is the pressure that produces
+  exactly this.
+- One reported figure ("no empty searches across six runs") was contradicted by
+  the tool's own printed output, and lost in a total summed by eye.
+- The sandbox transport guard checked that two directories were *named* in a
+  runtime's configuration, never that the runtime read them, and then reported
+  `invocationContextTransport: "sidecar"` into the run's policy snapshot on the
+  strength of that name. A test asserted the same claim from a bare
+  configuration with no runtime present, so the behavior was pinned rather than
+  merely unnoticed.
+
+The seeded atoms mattered here beyond the corpus. The rendering gate's
+`no-ui` result had an alibi: the pre-existing corpus genuinely is full of
+entries with no meaningful UI, so "nothing to check" was a plausible reading of
+real data. A set of entries whose UI is known to work removed that alibi. The
+same is true of the composition proof: only a space known not to hold the
+dependencies could distinguish a fetch that succeeded from a fetch that never
+ran.
+
+The practical rule this leaves: when a check reports an absence, establish that
+the check would have reported a presence. That takes a case whose answer is
+known independently, which is a different and more expensive thing than a test
+that passes.
+
 ## Conditions worth knowing about the environment of this pass
 
 - The local toolshed serving `:8000` was running a commit that is not an
