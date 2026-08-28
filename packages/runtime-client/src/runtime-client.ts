@@ -454,12 +454,24 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
   // operation against that space's piece context over the same
   // connection.
 
-  async getSpaceRootPattern(space: DID): Promise<PageHandle<NameSchema>> {
+  /**
+   * The space's root pattern.
+   *
+   * `start` defaults to true, which is what a view that renders the root
+   * needs. Pass false to read what the root exported without running it —
+   * far cheaper on a space whose root reaches a large piece, and enough for
+   * a caller that only wants an exported sub-page or listing.
+   */
+  async getSpaceRootPattern(
+    space: DID,
+    options: { start?: boolean } = {},
+  ): Promise<PageHandle<NameSchema>> {
     const response = await this.#conn.request<
       RequestType.GetSpaceRootPattern
     >({
       type: RequestType.GetSpaceRootPattern,
       space,
+      ...(options.start === undefined ? {} : { start: options.start }),
     });
     return new PageHandle<NameSchema>(this, response.page);
   }

@@ -1942,6 +1942,14 @@ export class RuntimeProcessor {
     request: PatternGetSpaceRoot,
   ): Promise<PageResponse> {
     const cc = this.getSpaceCtx(request.space);
+    if (request.start === false) {
+      // The caller reads the root's exports rather than rendering it, so
+      // resolving what is stored answers it. Only a space with no root yet
+      // falls through — a root has to exist before it can have exported
+      // anything, and creating one is not the cost this avoids.
+      const stored = await cc.getDefaultPattern(false);
+      if (stored) return { page: createPageRef(stored) };
+    }
     const piece = await cc.ensureDefaultPattern();
     return {
       page: createPageRef(piece.getCell()),

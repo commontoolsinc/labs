@@ -1955,6 +1955,19 @@ export type PageGetSpaceDefault = BaseRequest & {
    * The space whose root pattern to read.
    */
   space: DID;
+
+  /**
+   * Whether the root is wanted RUNNING. Defaults to true, which is what a
+   * view that renders the root needs — the space home, where running the
+   * root is the page.
+   *
+   * A caller that only reads what the root exported passes false. Starting
+   * a root materializes everything its result reaches, which on a space
+   * whose root reaches a large piece is the dominant cost of opening
+   * anything; a stored export costs a read. Either way an absent root is
+   * still created, since a space needs one before it can have exports.
+   */
+  start?: boolean;
 };
 
 /** The {@link RequestType.RecreateSpaceRootPattern} request. */
