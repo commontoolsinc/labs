@@ -2490,7 +2490,29 @@ export class CfHarnessPromptLoop {
     });
   }
 
+  /**
+   * Runs the loop, then sends whatever this session staged for the pattern
+   * index.
+   *
+   * The flush belongs here rather than at each `run_pattern` because the
+   * ledger publishes once per capability per SESSION, and a session's last
+   * word on a capability is only known once the session is over. It runs on
+   * the failure paths too: a run that ends in an error still authored
+   * whatever it authored, and the alternative is silently discarding it.
+   * A flush failure is logged by the ledger and never displaces the loop's
+   * own result or its error.
+   */
   async runTranscript(
+    options: RunHarnessTranscriptOptions,
+  ): Promise<HarnessPromptLoopResult> {
+    try {
+      return await this.#runTranscript(options);
+    } finally {
+      await this.engine.flushPatternIndexPublications();
+    }
+  }
+
+  async #runTranscript(
     options: RunHarnessTranscriptOptions,
   ): Promise<HarnessPromptLoopResult> {
     const initialRunState = this.engine.getRunState();

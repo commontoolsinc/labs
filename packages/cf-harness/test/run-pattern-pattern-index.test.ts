@@ -431,6 +431,21 @@ describe("run-pattern over the pattern index", () => {
       }),
     });
 
+  /**
+   * Runs the tool and then sends what the session staged for the index, which
+   * is what the prompt loop does when a session ends. A publication is held
+   * until then so a session that iterates offers search one entry per
+   * capability rather than one per successful run.
+   */
+  const runAndFlush = async (
+    engine: CfHarnessEngine,
+    input: Record<string, unknown>,
+  ) => {
+    const result = await engine.invokeBuiltinTool("run_pattern", input);
+    await engine.flushPatternIndexPublications();
+    return result;
+  };
+
   describe("runtimeProgramFromIndex()", () => {
     it("carries every field a published program declares", () => {
       expect(runtimeProgramFromIndex({
@@ -683,12 +698,12 @@ describe("run-pattern over the pattern index", () => {
 
     it("publishes the program, meta and schemas of a pattern that ran", async () => {
       const index = stubIndex({}, { publish: { created: true } });
-      const result = await createEngine(index, {
-        taskText: "double the tally for me",
-      }).invokeBuiltinTool("run_pattern", publishInput);
+      const result = await runAndFlush(
+        createEngine(index, { taskText: "double the tally for me" }),
+        publishInput,
+      );
       expect((result.output as RunPatternToolSuccessOutput).status).toBe("ok");
 
-      await index.settled("publishPattern", 1);
       const publish = index.calls.find((call) => call.fn === "publishPattern");
       expect(publish?.body.program).toEqual({
         main: "/main.tsx",
@@ -716,9 +731,8 @@ describe("run-pattern over the pattern index", () => {
 
     it("publishes under the compiled pattern's content-addressed identity", async () => {
       const index = stubIndex({}, { publish: { created: true } });
-      await createEngine(index).invokeBuiltinTool("run_pattern", publishInput);
+      await runAndFlush(createEngine(index), publishInput);
 
-      await index.settled("publishPattern", 1);
       const publish = index.calls.find((call) => call.fn === "publishPattern");
       // The identity the compile itself recorded for the entry, which is what
       // a later `run_pattern` by patternId resolves against.
@@ -729,9 +743,8 @@ describe("run-pattern over the pattern index", () => {
 
     it("describes the pattern to the index in its own words when the run has no task text", async () => {
       const index = stubIndex({}, { publish: { created: true } });
-      await createEngine(index).invokeBuiltinTool("run_pattern", publishInput);
+      await runAndFlush(createEngine(index), publishInput);
 
-      await index.settled("publishPattern", 1);
       const publish = index.calls.find((call) => call.fn === "publishPattern");
       expect(publish?.body.meta).toEqual({
         directQuery: "Doubles a number",
@@ -742,9 +755,8 @@ describe("run-pattern over the pattern index", () => {
 
     it("records a created event for an entry the index did not already hold", async () => {
       const index = stubIndex({}, { publish: { created: true } });
-      await createEngine(index).invokeBuiltinTool("run_pattern", publishInput);
+      await runAndFlush(createEngine(index), publishInput);
 
-      await index.settled("recordEvent", 1);
       const events = index.calls.filter((call) => call.fn === "recordEvent");
       expect(events.map((event) => event.body.eventType)).toEqual(["created"]);
       expect(events[0].body.patternId).toBe(
@@ -754,9 +766,8 @@ describe("run-pattern over the pattern index", () => {
 
     it("records no created event for an entry the index already held", async () => {
       const index = stubIndex({}, { publish: { created: false } });
-      await createEngine(index).invokeBuiltinTool("run_pattern", publishInput);
+      await runAndFlush(createEngine(index), publishInput);
 
-      await index.settled("publishPattern", 1);
       expect(index.calls.filter((call) => call.fn === "recordEvent")).toEqual(
         [],
       );
@@ -764,15 +775,14 @@ describe("run-pattern over the pattern index", () => {
 
     it("returns the run's result when the publication fails", async () => {
       const index = stubIndex({});
-      const result = await createEngine(index).invokeBuiltinTool(
-        "run_pattern",
+      const result = await runAndFlush(
+        createEngine(index),
         { ...publishInput, resultSchema: DOUBLED_RESULT_SCHEMA },
       );
       const output = result.output as RunPatternToolSuccessOutput;
       expect(output.status).toBe("ok");
       expect((output.value as { doubled: number }).doubled).toBe(42);
 
-      await index.settled("publishPattern", 1);
       expect(index.calls.filter((call) => call.fn === "recordEvent")).toEqual(
         [],
       );
@@ -1134,18 +1144,14 @@ describe("run-pattern over the pattern index", () => {
       const index = stubIndex({
         [doublerId]: indexRecord(doublerId, DOUBLER_SOURCE),
       }, { publish: { created: true } });
-      const result = await createEngine(index).invokeBuiltinTool(
-        "run_pattern",
-        {
-          sourceText: quadruplerSource(doublerId),
-          inputs: { n: 3 },
-          description: "Quadruples a number",
-          hashtags: ["math"],
-        },
-      );
+      const result = await runAndFlush(createEngine(index), {
+        sourceText: quadruplerSource(doublerId),
+        inputs: { n: 3 },
+        description: "Quadruples a number",
+        hashtags: ["math"],
+      });
       expect((result.output as RunPatternToolSuccessOutput).status).toBe("ok");
 
-      await index.settled("publishPattern", 1);
       const publish = index.calls.find((call) => call.fn === "publishPattern");
       expect(publish?.body.dependencies).toEqual([doublerId]);
       // The identity the compile recorded, which folds each imported

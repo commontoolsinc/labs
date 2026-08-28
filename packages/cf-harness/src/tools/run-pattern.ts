@@ -21,7 +21,10 @@ import {
   type NormalizedFullLink,
   parseLLMFriendlyLink,
 } from "@commonfabric/runner/shared";
-import { PieceController } from "@commonfabric/piece/ops";
+import {
+  PieceController,
+  type PiecesController,
+} from "@commonfabric/piece/ops";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import { keylessInstantiation } from "../fabric-instantiations.ts";
@@ -42,6 +45,16 @@ import type {
   PatternIndexPublishRequest,
 } from "../pattern-index/client.ts";
 import { PatternIndexError } from "../pattern-index/client.ts";
+import {
+  classifyRenderedHtml,
+  PATTERN_DISCOVERABILITY_REASONS,
+  PATTERN_PUBLICATION_MESSAGES,
+  type PatternPublicationReason,
+  type PatternPublicationStatus,
+  renderPatternUiToHtml,
+  syntheticArgument,
+} from "../pattern-index/publish-render-gate.ts";
+import { openProbeRuntime } from "../pattern-index/probe-runtime.ts";
 import {
   composedPatternIds,
   materializeComposedPatterns,
@@ -118,6 +131,55 @@ export interface RunPatternToolSuccessOutput {
    * `value` reaches model context.
    */
   rawValue?: unknown;
+
+  /**
+   * What became of this run's contribution to the pattern index, when the
+   * run had one to make. Absent when the run published nothing at all — it
+   * named a `patternId`, it gave no description, or the run has no index.
+   */
+  patternPublication?: RunPatternPublicationReport;
+
+  /**
+   * What the render gate's probe THREW, when one did — never what it
+   * rendered. Retained for the persisted artifact and stripped from the
+   * model-facing rendering, on the same terms as every other thrown message
+   * this tool withholds: a computation over data the model cannot read can
+   * carry that data in what it throws.
+   *
+   * **The artifact root is not a confidentiality boundary.** `bash` does not
+   * reserve it the way `read_file`, `write_file`, `edit_file` and
+   * `view_image` do, and its stdout is model-facing, so a later turn — or a
+   * delegated child sharing the workspace — can read this back. Two
+   * reviewers walked that route independently and one reproduced it with a
+   * planted marker; CT-2117 carries the structural fix. Thrown text is here
+   * because it is the class this artifact already holds and cannot be
+   * recovered any other way. Rendered DOM is NOT, because it can: the
+   * synthetic instance is a deterministic function of the argument schema
+   * and the index records the program, so the render is reproducible rather
+   * than needing to be kept.
+   */
+  rawCauseMessage?: string;
+}
+
+/**
+ * What the render gate decided about this run's contribution to the index.
+ *
+ * Every field is pinned to a fixed set — the two unions and a boolean, with
+ * `message` drawn from `PATTERN_PUBLICATION_MESSAGES` and never composed. See
+ * `pattern-index/publish-render-gate.ts` for why nothing derived from the
+ * rendered DOM may join them.
+ */
+export interface RunPatternPublicationReport {
+  status: PatternPublicationStatus;
+  reason: PatternPublicationReason;
+  message: string;
+
+  /**
+   * Whether the synthetic instance the probe was driven with covers the
+   * pattern's whole argument schema. `false` where the schema declares no
+   * shape, or where generating it hit a depth or node bound.
+   */
+  syntheticInputsComplete: boolean;
 }
 
 /**
@@ -282,6 +344,36 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
         linkedStringCount: { type: "integer", minimum: 0 },
         valueError: { type: "string" },
         rawValue: {},
+        patternPublication: {
+          type: "object",
+          properties: {
+            status: {
+              type: "string",
+              enum: ["discoverable", "recorded"],
+            },
+            reason: {
+              type: "string",
+              enum: [
+                "ui-rendered",
+                "no-ui",
+                "ui-default-tostring",
+                "ui-rendered-empty",
+                "probe-failed",
+                "superseded",
+              ],
+            },
+            message: { type: "string" },
+            syntheticInputsComplete: { type: "boolean" },
+          },
+          required: [
+            "status",
+            "reason",
+            "message",
+            "syntheticInputsComplete",
+          ],
+          additionalProperties: false,
+        },
+        rawCauseMessage: { type: "string" },
       },
       required: [
         "outputId",
@@ -387,35 +479,6 @@ const recordPatternIndexEvent = (
     } catch (error) {
       console.error(
         `run_pattern could not record the ${eventType} event for pattern index entry "${patternId}": ${
-          errorMessage(error)
-        }`,
-      );
-    }
-  })();
-};
-
-/**
- * Publishes an authored pattern to the index, without letting the publication
- * bear on the run that authored it. Like the usage events, this is a
- * contribution to a shared catalog rather than part of the tool's result: it
- * is not awaited, and a failure is logged. A publication the index answers as
- * already held (`created: false`) records nothing further — the entry was
- * created once, by whoever got there first.
- */
-const publishPatternToIndex = (
-  getClient: HarnessPatternIndexClientFactory,
-  request: PatternIndexPublishRequest,
-): void => {
-  void (async () => {
-    try {
-      const client = await getClient();
-      const response = await client.publishPattern(request);
-      if (response.created) {
-        recordPatternIndexEvent(getClient, response.patternId, "created");
-      }
-    } catch (error) {
-      console.error(
-        `run_pattern could not publish the pattern it ran to the pattern index: ${
           errorMessage(error)
         }`,
       );
@@ -1200,11 +1263,11 @@ export const runPatternTool: HarnessToolDefinition<
     recordOutcome("instantiated");
     // Stops the created piece without the usual `stopPiece` idle wait: an
     // abort path must not wait on the very scheduler the signal is escaping.
-    const stopPieceForAbort = () => {
+    const stopPiece = (cell: Cell<unknown>) => {
       try {
-        pieces.runtime.runner.stop(piece.getCell());
+        pieces.runtime.runner.stop(cell);
       } catch {
-        // Best-effort: the cancelled output stands either way.
+        // Best-effort: whatever outcome the caller reached stands either way.
       }
     };
     const barrier = (async () => {
@@ -1212,7 +1275,7 @@ export const runPatternTool: HarnessToolDefinition<
       await pieces.synced();
     })();
     if (await raceWithAbort(barrier, signal) === "aborted") {
-      stopPieceForAbort();
+      stopPiece(piece.getCell());
       return cancelledOutput();
     }
     const resultCell = await piece.result.getCell();
@@ -1407,14 +1470,160 @@ export const runPatternTool: HarnessToolDefinition<
     if (valueError === undefined) {
       recordOutcome("run_succeeded");
     }
+    /**
+     * The render gate: what the pattern's own `$UI` does before the pattern
+     * is contributed to the index.
+     *
+     * The render runs against a PROBE — a second, detached instance of the
+     * same compiled pattern, built from a synthetic instance of the pattern's
+     * own argument schema rather than from this run's inputs. The run's own
+     * piece is never rendered, so no labeled data reaches the render through
+     * the argument path. A pattern that reaches the space for itself is the
+     * case that argument does not cover; `pattern-index/publish-render-gate.ts`
+     * carries the whole of the reasoning, including what the verdict may say.
+     *
+     * The probe is unregistered like the run's own piece, and its `cause` is
+     * left to default, so each check gets a piece with no state carried over
+     * from an earlier one.
+     *
+     * A verdict never bears on the run: every path returns a verdict, and the
+     * caller's only use for it is whether to publish.
+     */
+    const renderGateVerdict = async (): Promise<
+      {
+        status: PatternPublicationStatus;
+        reason: PatternPublicationReason;
+        syntheticInputsComplete: boolean;
+        thrown?: string;
+      } | "cancelled"
+    > => {
+      const synthetic = syntheticArgument(pattern.argumentSchema);
+      const recorded = (reason: PatternPublicationReason, thrown?: string) => ({
+        status: "recorded" as const,
+        reason,
+        syntheticInputsComplete: synthetic.complete,
+        ...(thrown !== undefined ? { thrown } : {}),
+      });
+      const discoverable = (reason: PatternPublicationReason) => ({
+        status: "discoverable" as const,
+        reason,
+        syntheticInputsComplete: synthetic.complete,
+      });
+      // The probe runs in an isolated, in-memory runtime — never the
+      // session's space. `probe-runtime.ts` carries the whole reason; the
+      // short version is that a probe in the live space persists its inputs
+      // and its result graph there, `stop()` does not delete them, and the
+      // orphan is reachable from the sandbox's Fabric mount.
+      const probe = async () => {
+        const opened = await openProbeRuntime(
+          session.identity,
+          pieces.runtime.apiUrl,
+          context.cfcEnforcementMode,
+        );
+        // No identity, no isolated runtime, and therefore no probe. Falling
+        // back to the live space would re-enter the leak this exists to close
+        // through the error path, so the gate abstains instead.
+        if (opened === undefined) return recorded("probe-failed");
+        try {
+          return await runProbe(opened.pieces);
+        } finally {
+          // Owned here rather than by the caller, because cancellation can
+          // return from the race while this is still opening, and a runtime
+          // opened after the caller stopped waiting would never be closed by
+          // anything the caller can still see.
+          await opened.close().catch(() => {});
+        }
+      };
+      const runProbe = async (probePieces: PiecesController) => {
+        // A composed source needs its imports in the probe's space too, or
+        // the compile below cannot resolve them. Same helper the live path
+        // uses, pointed at the isolated runtime — which is why composed
+        // patterns still get a verdict instead of degrading to "no verdict".
+        const composed = composedPatternIds(program);
+        if (composed.length > 0 && getPatternIndexClient !== undefined) {
+          await materializeComposedPatterns({
+            runtime: probePieces.runtime,
+            space: probePieces.getSpace(),
+            patternIds: composed,
+            getClient: getPatternIndexClient,
+          });
+        }
+        const probePattern = await compileAndSavePattern(
+          probePieces.runtime,
+          program,
+          { space: probePieces.getSpace() },
+        );
+        const probeCell = await probePieces.runPersistent(
+          probePattern,
+          synthetic.value,
+          undefined,
+          { start: true },
+        );
+        await probePieces.runtime.settled();
+        await probePieces.synced();
+        const probeResult = await new PieceController(probePieces, probeCell)
+          .result.getCell();
+        const rendered = await renderPatternUiToHtml(
+          probeResult,
+          () => probePieces.runtime.idle(),
+        );
+        if (rendered === undefined) return discoverable("no-ui");
+        // What the render means is decided by `classifyRenderedHtml`; what
+        // that meaning costs is decided here. Only a default-`toString` is
+        // positive evidence of a defect — the rest are absences, recorded
+        // uncertified rather than condemned. The DOM itself is read and
+        // discarded, and the runtime that produced it is discarded with it.
+        const reason = classifyRenderedHtml(rendered.html, rendered.errors);
+        return reason === "ui-rendered"
+          ? discoverable(reason)
+          : recorded(reason);
+      };
+      // One consultation of the signal, at the single exit. An abort reaches
+      // this function three ways — the race interrupts it, an await it does
+      // not interrupt throws, or it lands after a verdict — and all three
+      // mean the same thing: the run was cancelled, so nothing is recorded.
+      // Deciding that once is why there is no arm here that only one of the
+      // three orderings can take.
+      let outcome: Awaited<ReturnType<typeof probe>> = recorded("probe-failed");
+      try {
+        const work = (async () => {
+          outcome = await probe();
+        })();
+        // Raced rather than awaited so a probe that never settles cannot hold
+        // the run open; the value is not branched on, since the check below
+        // covers every way the abort could have arrived.
+        await raceWithAbort(work, signal);
+      } catch (error) {
+        // What a probe throws is the pattern's own text, which the artifact
+        // keeps for the run's own failure paths and which has no reading here
+        // beyond "no verdict". A defect in the GATE lands here too and reads
+        // identically from outside, so its text goes to the artifact rather
+        // than nowhere — a check that fails silently for its own reasons is
+        // the failure this gate exists to remove.
+        outcome = recorded("probe-failed", errorMessage(error));
+      }
+      return signal?.aborted === true ? "cancelled" : outcome;
+    };
     // Source the model wrote and successfully ran is contributed back to the
-    // index, so the next run that needs this capability finds it instead of
-    // writing it again. A run naming a `patternId` publishes nothing: it ran
-    // what the index already holds.
+    // index, so the next run that needs this capability can find it instead
+    // of writing it again — CAN, because recording and being offered to
+    // search are separate here. Everything that ran is recorded; the render
+    // gate below decides discoverability, and the session's ledger gives one
+    // discoverable entry per capability. A run naming a `patternId` records
+    // nothing: it ran what the index already holds.
     const description = input.description?.trim();
+    let publication: RunPatternPublicationReport | undefined;
+    let probeThrown: string | undefined;
+    // The engine hands the ledger over with the index client, in one spread,
+    // so requiring it here is the same condition as requiring the client —
+    // spelled twice because the type cannot say they arrive together. There is
+    // deliberately no second publish path: one that skipped the ledger would
+    // put back the per-iteration duplicates the ledger exists to prevent.
+    const publications = context.patternIndexPublications;
     if (
       patternId === undefined &&
       getPatternIndexClient !== undefined &&
+      publications !== undefined &&
       context.patternIndexPublishEnabled === true &&
       description !== undefined && description !== ""
     ) {
@@ -1436,26 +1645,60 @@ export const runPatternTool: HarnessToolDefinition<
           "run_pattern could not publish the pattern it ran: the compiled pattern carries no durable content-addressed entry identity",
         );
       } else {
-        publishPatternToIndex(getPatternIndexClient, {
-          patternId: entryIdentity,
-          program: {
-            main: program.main,
-            files: program.files.map((file) => ({
-              name: file.name,
-              contents: file.contents,
-            })),
-          },
-          description,
-          hashtags: input.hashtags ?? [],
-          // What the pattern was written to answer. The run's own task is
-          // that request; a run carrying no task text has only the model's
-          // description of what it wrote, which is the same claim in the
-          // model's words.
-          directQuery: context.taskText ?? description,
-          argumentSchema: pattern.argumentSchema,
-          resultSchema: pattern.resultSchema,
-          dependencies: patternIndexDependencies(program.files),
-        });
+        const verdict = await renderGateVerdict();
+        // A cancelled gate is a cancelled run. Nothing is staged: an index
+        // entry is a claim about a run that finished, and this one did not.
+        if (verdict === "cancelled") {
+          return cancelledOutput(
+            `the pattern ran and created piece ${piece.id}, which is not undone; it was not contributed to the pattern index`,
+          );
+        }
+        publication = {
+          status: verdict.status,
+          reason: verdict.reason,
+          message: PATTERN_PUBLICATION_MESSAGES[verdict.reason],
+          syntheticInputsComplete: verdict.syntheticInputsComplete,
+        };
+        // The rendered DOM is kept only for a verdict someone may have to
+        // adjudicate — why an entry is not offered to search. A pass has
+        // What a probe THREW, and never what it rendered: the rendered DOM
+        // is read, classified and discarded. The artifact root is readable
+        // through `bash` (CT-2117), so the only defensible amount of rendered
+        // content to put there is none; thrown text stays because it is the
+        // class that root already holds and cannot be recovered any other way.
+        probeThrown = verdict.thrown;
+        {
+          const request: PatternIndexPublishRequest = {
+            patternId: entryIdentity,
+            program: {
+              main: program.main,
+              files: program.files.map((file) => ({
+                name: file.name,
+                contents: file.contents,
+              })),
+            },
+            description,
+            hashtags: input.hashtags ?? [],
+            // What the pattern was written to answer. The run's own task is
+            // that request; a run carrying no task text has only the model's
+            // description of what it wrote, which is the same claim in the
+            // model's words.
+            directQuery: context.taskText ?? description,
+            argumentSchema: pattern.argumentSchema,
+            resultSchema: pattern.resultSchema,
+            dependencies: patternIndexDependencies(program.files),
+            // Recording and surfacing are separate. Everything that ran is
+            // recorded; the gate decides only whether search offers it.
+            ...(verdict.status === "recorded"
+              ? {
+                nonDiscoverable: {
+                  reason: PATTERN_DISCOVERABILITY_REASONS[verdict.reason],
+                },
+              }
+              : {}),
+          };
+          publications.stage(request);
+        }
       }
     }
     return {
@@ -1468,6 +1711,8 @@ export const runPatternTool: HarnessToolDefinition<
       ...(linkedStringCount !== undefined ? { linkedStringCount } : {}),
       ...(valueError !== undefined ? { valueError } : {}),
       ...(rawValue !== undefined ? { rawValue } : {}),
+      ...(publication !== undefined ? { patternPublication: publication } : {}),
+      ...(probeThrown !== undefined ? { rawCauseMessage: probeThrown } : {}),
     };
   },
 };

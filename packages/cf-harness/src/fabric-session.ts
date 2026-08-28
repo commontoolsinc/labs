@@ -18,6 +18,18 @@ export interface HarnessFabricSession {
   pieces: PiecesController;
 
   /**
+   * The identity this session acts as, when the session was built from one.
+   *
+   * The render gate needs it to stand up an isolated, in-memory runtime for
+   * its probe: a probe run in the session's own space persists its inputs and
+   * its result graph there, and neither `stop()` nor staying out of the piece
+   * registry deletes them. A session that carries no identity gets no
+   * isolated runtime and therefore no probe — the gate abstains rather than
+   * quietly probing in the live space.
+   */
+  identity?: Identity;
+
+  /**
    * What this session's runtime materialized, when the session was built with
    * an instantiation observer. A session without one answers no question about
    * pattern pointers, and the checks that read it are skipped rather than
@@ -81,7 +93,7 @@ async () => {
     identity,
     onPatternInstantiated: recorder.observe,
   });
-  return { pieces, instantiations: recorder.instantiations };
+  return { pieces, identity, instantiations: recorder.instantiations };
 };
 
 /**

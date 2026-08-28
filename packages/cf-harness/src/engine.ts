@@ -82,6 +82,10 @@ import {
   createHarnessPatternIndexClientFactory,
   type HarnessPatternIndexClientFactory,
 } from "./pattern-index/client.ts";
+import {
+  createPatternIndexPublicationLedger,
+  type PatternIndexPublicationLedger,
+} from "./pattern-index/publish-ledger.ts";
 import type { HandleValueResolutionContext } from "./tools/handle-values.ts";
 import type { HarnessWellKnownGrant } from "./contracts/well-known-grants.ts";
 import {
@@ -392,6 +396,7 @@ export class CfHarnessEngine {
   readonly #now: () => string;
   readonly #fabricSessionFactory?: HarnessFabricSessionFactory;
   readonly #patternIndexClientFactory?: HarnessPatternIndexClientFactory;
+  #patternIndexPublications?: PatternIndexPublicationLedger;
   readonly #taskText?: string;
   readonly #inputCells: readonly HarnessInputCellSpec[];
   readonly #spaceDbPath?: string;
@@ -747,6 +752,31 @@ export class CfHarnessEngine {
   get patternIndexPublishEnabled(): boolean {
     return this.patternIndexAvailable &&
       this.config.patternIndex?.publish !== false;
+  }
+
+  /**
+   * Where this run's authored patterns wait to be published. One ledger per
+   * engine, and therefore one per session: a delegating parent and its child
+   * each publish once per capability of their own, which is the grain the
+   * duplicates were being produced at. Created on first use and only when the
+   * run can reach an index at all.
+   */
+  get patternIndexPublications(): PatternIndexPublicationLedger | undefined {
+    const factory = this.#patternIndexClientFactory;
+    if (factory === undefined) return undefined;
+    this.#patternIndexPublications ??= createPatternIndexPublicationLedger(
+      factory,
+    );
+    return this.#patternIndexPublications;
+  }
+
+  /**
+   * Sends everything this session's ledger still holds. Called once, when the
+   * session's prompt loop finishes; a session that never reaches it publishes
+   * nothing, which `publish-ledger.ts` states as the cost it is.
+   */
+  async flushPatternIndexPublications(): Promise<void> {
+    await this.#patternIndexPublications?.flush();
   }
 
   /**
@@ -1738,6 +1768,7 @@ export class CfHarnessEngine {
         ? {
           getPatternIndexClient: this.#patternIndexClientFactory,
           patternIndexPublishEnabled: this.patternIndexPublishEnabled,
+          patternIndexPublications: this.patternIndexPublications,
         }
         : {}),
       ...(this.#taskText !== undefined ? { taskText: this.#taskText } : {}),
