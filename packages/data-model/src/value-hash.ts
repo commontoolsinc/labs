@@ -20,7 +20,8 @@ import { utf8SortedKeysOf } from "@commonfabric/utils/utf8";
 
 import { isDeepFrozen } from "./deep-freeze.ts";
 import { shallowFabricFromNativeValue } from "./native-conversion.ts";
-import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
+import { VALUE_TAGS } from "./VALUE_TAGS.ts";
+import { tagFromNativeValue } from "./native-type-tags.ts";
 import { BaseFabricInstance } from "@/fabric-bases/BaseFabricInstance.ts";
 import { codecOf, NULL_LIVE_ENVIRONMENT } from "@/codec-common/index.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
@@ -253,7 +254,7 @@ function feedValue(hasher: IncrementalHasher, value: unknown): void {
 /**
  * Feed an object-typed value (`FabricPrimitive`, `FabricInstance`, `Array`,
  * or plain object) into the hasher. Dispatches via `tagFromNativeValue()` /
- * `NATIVE_TAGS` for recognized types. The `null` case is handled by the
+ * `VALUE_TAGS` for recognized types. The `null` case is handled by the
  * caller (`feedValue()`).
  */
 function feedObjectValue(
@@ -263,7 +264,7 @@ function feedObjectValue(
   const nativeTag = tagFromNativeValue(value);
 
   switch (nativeTag) {
-    case NATIVE_TAGS.EpochNsec: {
+    case VALUE_TAGS.EpochNsec: {
       hasher.update(TAG_EPOCH_NSEC_BYTES);
       const bytes = bigintToMinimalTwosComplement(
         (value as { value: bigint }).value,
@@ -273,7 +274,7 @@ function feedObjectValue(
       return;
     }
 
-    case NATIVE_TAGS.EpochDay: {
+    case VALUE_TAGS.EpochDay: {
       hasher.update(TAG_EPOCH_DAY_BYTES);
       const bytes = bigintToMinimalTwosComplement(
         (value as { value: bigint }).value,
@@ -283,7 +284,7 @@ function feedObjectValue(
       return;
     }
 
-    case NATIVE_TAGS.Hash: {
+    case VALUE_TAGS.Hash: {
       const cid = value as FabricHash;
       hasher.update(TAG_HASH_BYTES);
       hasher.update(getStringRep(cid.tag));
@@ -295,15 +296,15 @@ function feedObjectValue(
       return;
     }
 
-    case NATIVE_TAGS.Array:
+    case VALUE_TAGS.Array:
       feedArray(hasher, value as unknown[]);
       return;
 
-    case NATIVE_TAGS.Object:
+    case VALUE_TAGS.Object:
       feedPlainObject(hasher, value as Record<string, unknown>);
       return;
 
-    case NATIVE_TAGS.FabricBytes: {
+    case VALUE_TAGS.FabricBytes: {
       hasher.update(TAG_BYTES_BYTES);
       const fab = value as FabricBytes;
       feedLength(hasher, fab.length);
@@ -311,7 +312,7 @@ function feedObjectValue(
       return;
     }
 
-    case NATIVE_TAGS.FabricInstance: {
+    case VALUE_TAGS.FabricInstance: {
       const fabInst = value as BaseFabricInstance;
       hasher.update(TAG_INSTANCE_BYTES);
       const codec = codecOf(fabInst);
@@ -321,7 +322,7 @@ function feedObjectValue(
       return;
     }
 
-    case NATIVE_TAGS.FabricKeyPair: {
+    case VALUE_TAGS.FabricKeyPair: {
       const fab = value as FabricKeyPair;
       if (!fab.hasMaterial) {
         // A pair holding handles has no content to hash: its material is
@@ -338,7 +339,7 @@ function feedObjectValue(
       return;
     }
 
-    case NATIVE_TAGS.FabricRegExp: {
+    case VALUE_TAGS.FabricRegExp: {
       const fab = value as FabricRegExp;
       hasher.update(TAG_REGEXP_BYTES);
       feedValue(hasher, fab.source);
@@ -347,9 +348,9 @@ function feedObjectValue(
       return;
     }
 
-    case NATIVE_TAGS.Date:
-    case NATIVE_TAGS.RegExp:
-    case NATIVE_TAGS.Uint8Array: {
+    case VALUE_TAGS.Date:
+    case VALUE_TAGS.RegExp:
+    case VALUE_TAGS.Uint8Array: {
       // Native instances that have a well-defined `FabricValue` conversion.
       // Convert on-the-fly and hash the converted value.
       const converted = shallowFabricFromNativeValue(value, false);

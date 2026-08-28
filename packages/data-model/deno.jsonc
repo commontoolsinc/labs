@@ -40,6 +40,7 @@
   },
   "exports": {
     "./api": "./src/api.ts",
+    "./VALUE_TAGS": "./src/VALUE_TAGS.ts",
     "./cell-rep": "./src/cell-rep.ts",
     "./codec-common": "./src/codec-common/index.ts",
     "./codec-json": "./src/codec-json/index.ts",
