@@ -166,6 +166,25 @@ stage.
   evaluation cache's diagnostics; revisit evaluation-cache retention with
   those numbers.
 
+## What stages 1–2 do not reach
+
+The memo is consulted where a whole evaluation begins: new-branch watch
+establishment, full watch-set re-establishment, and one-shot graph
+queries. `extendTrackedGraph` and the per-session refresh paths are
+excluded, exactly as they are from the query evaluation cache — their
+effects entangle with per-session tracker state, and sharing them is the
+canonical-graph work. So extending an already-tracked branch walks its
+added reach unmemoized, and a space whose sessions mostly extend rather
+than establish sees correspondingly less of the benefit.
+
+Two other boundaries worth stating, both enforced in code: an evaluation
+whose query names an explicit scope instance (a lease-holder read)
+bypasses the memo entirely, because memo keys resolve their instance from
+the evaluating identity; and while a walk is capturing, coverage skips
+and cross-frame reuse of the traverser's own DAG memo are disabled, since
+either would make a frame's recorded effects depend on what the rest of
+the walk covered first.
+
 ## Non-goals
 
 - **Scope-frontier stitching** (a shared walk prefix with per-identity
