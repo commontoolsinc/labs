@@ -101,7 +101,9 @@ For primitives that own a list/set of items, core mutations address an item by
 Two things are explicitly **not** the identity model:
 
 - **Array indices.** Index-based selection/mutation breaks under reordering and
-  concurrent edits.
+  concurrent edits. Note also that a reordering has to be written into the cell
+  the default `[UI]` maps, not derived beside it, or the rows never move — see
+  [mapped-list-order-from-computed](../../development/debugging/gotchas/mapped-list-order-from-computed.md).
 - **User-land id fields.** NEVER mint `id` properties (UUIDs, counters,
   timestamps) on items. The reactive fabric is an object graph, not a keyed
   database; synthetic ids fight the reactivity system (in `.map()` callbacks an
