@@ -242,7 +242,20 @@ produced it.
   question carried sixty-three checks, and the unqualified request returned
   half — with every conclusion in the missing half reading as absent rather
   than as unread. Comparing the returned count against `total_count` is what
-  makes the truncation say so.
+  makes the truncation say so. And a check that has not been *created* is
+  likewise indistinguishable from one that passed, if the reader counts only
+  what exists: the coverage gate — the one that failed twice during this pass —
+  is not created as a check run until the jobs it depends on finish, so a
+  waiter that stops when every visible check run is complete declares success
+  while the decisive gate has never started. The workflow run is the level at
+  which "complete" means complete.
+
+  All four are one failure at different joints, and it is the invariant CT-2100
+  established, reappearing in the reporting layer rather than in the code:
+  *anything not read must be recorded as not read.* That was written for a cell
+  nobody read rendering as a cell with no label. The same sentence covers
+  thirty-three checks nobody fetched rendering as thirty-three checks that are
+  not there.
 - The sandbox transport guard checked that two directories were *named* in a
   runtime's configuration, never that the runtime read them, and then reported
   `invocationContextTransport: "sidecar"` into the run's policy snapshot on the
