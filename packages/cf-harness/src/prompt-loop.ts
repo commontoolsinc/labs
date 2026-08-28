@@ -3777,9 +3777,17 @@ export class CfHarnessPromptLoop {
         : {}),
       cfcEnforcementMode: parentRunState.cfcEnforcementMode,
       // The child shares the parent's fabric session, so a subagent can call
-      // `run_pattern` against the one space the run is configured for.
+      // `run_pattern` against the one space the run is configured for. The
+      // session CONFIG rides along beside the factory, as the index's does:
+      // the factory is what the child actually computes through, and the
+      // config is what says a session exists at all — a child given the
+      // factory alone reads as a run with an index and no space to run what
+      // the index returns, which is a combination the config layer refuses.
       ...(this.engine.fabricSessionFactory !== undefined
         ? { fabricSessionFactory: this.engine.fabricSessionFactory }
+        : {}),
+      ...(this.engine.config.fabricSession !== undefined
+        ? { fabricSession: this.engine.config.fabricSession }
         : {}),
       // Likewise the index client: a child searches and runs indexed
       // patterns through the one the parent built. The connection CONFIG

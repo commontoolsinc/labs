@@ -2235,6 +2235,89 @@ Deno.test("CfHarnessPromptLoop withholds the pattern-index tools from the patter
   ]);
 });
 
+Deno.test("CfHarnessPromptLoop delegates in a run configured with a pattern index", async () => {
+  await using fixture = await createPatternSkillsFixture();
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedSubagentProfiles: ["pattern-author"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "pattern-index-delegation",
+      model: "gpt-5.4",
+      skillsRoot: fixture.skillsRoot,
+      // The shape a console or CLI run has: a session and an index together,
+      // which is the pair the config layer requires of anything holding an
+      // index. The child is configured from the same pair rather than from
+      // the factory alone.
+      fabricSession: {
+        apiUrl: "http://localhost:8000",
+        identityKeyPath: "/dev/null",
+        space: "index-demo",
+      },
+      patternIndex: { baseUrl: "https://index.example/" },
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+      patternIndexClientFactory: () =>
+        Promise.reject(new Error("index client is never built in this test")),
+    }),
+    fetchFn: (() => {
+      let turn = 0;
+      const assistant = (message: Record<string, unknown>) => ({
+        choices: [{ index: 0, message: { role: "assistant", ...message } }],
+      });
+      return () => {
+        turn += 1;
+        const payload = turn === 1
+          ? assistant({
+            content: "",
+            tool_calls: [{
+              id: "call-delegate",
+              type: "function",
+              function: {
+                name: "delegate_task",
+                arguments: JSON.stringify({
+                  goal: "Author a counter.",
+                  profile: "pattern-author",
+                }),
+              },
+            }],
+          })
+          : turn === 2
+          ? assistant({
+            content: JSON.stringify({
+              ok: true,
+              resultRef: `of:fid1:${"A".repeat(43)}`,
+              describes: "Counts things.",
+              hashtags: ["counter"],
+            }),
+          })
+          : assistant({ content: "Parent done." });
+        return Promise.resolve(
+          new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+            status: 200,
+          }),
+        );
+      };
+    })(),
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Delegate the authoring.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  // The delegation reached a child rather than failing the run: a child given
+  // an index and no session is a configuration the config layer refuses.
+  assertEquals(result.runState.status, "completed");
+  assertEquals(result.runState.subagentRuns?.length, 1);
+  assertEquals(
+    result.runState.subagentRuns?.[0]?.manifest.allowedToolIds.includes(
+      "search_patterns",
+    ),
+    true,
+  );
+});
+
 Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summary-only result", async () => {
   await using fixture = await createPatternSkillsFixture();
   const requestBodies: Array<{
