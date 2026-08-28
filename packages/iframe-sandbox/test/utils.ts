@@ -31,7 +31,7 @@ export class ContextShim {
       resources: new Proxy<Record<string, BridgeResource>>({}, {
         get: (_target, key) =>
           typeof key === "string" && this.resourceNames.has(key)
-            ? this.resource(key)
+            ? this.#resource(key)
             : undefined,
         ownKeys: () => [...this.resourceNames],
         getOwnPropertyDescriptor: (_target, key) =>
@@ -39,21 +39,21 @@ export class ContextShim {
             ? {
               configurable: true,
               enumerable: true,
-              value: this.resource(key),
+              value: this.#resource(key),
             }
             : undefined,
       }),
     };
   }
 
-  private resource(key: string): BridgeResource {
+  #resource(key: string): BridgeResource {
     return {
       kind: "cell",
-      cell: this.cell(key),
+      cell: this.#cell(key),
     };
   }
 
-  private cell(key: string, path: Array<string | number> = []): BridgeCell {
+  #cell(key: string, path: Array<string | number> = []): BridgeCell {
     const get = (): FabricValue | undefined => {
       let value: unknown = this.get({} as CommonIframeSandboxElement, key);
       for (const part of path) {
@@ -106,7 +106,7 @@ export class ContextShim {
         return () =>
           this.unsubscribe({} as CommonIframeSandboxElement, receipt);
       },
-      key: (part) => this.cell(key, [...path, part]),
+      key: (part) => this.#cell(key, [...path, part]),
     };
   }
   set(_element: CommonIframeSandboxElement, key: string, value: FabricValue) {

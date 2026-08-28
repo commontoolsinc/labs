@@ -73,7 +73,7 @@ export class CompilationError {
     messageTransformer?: DiagnosticMessageTransformer,
   ) {
     const { file, start } = diagnostic;
-    const { message, type } = this.parseMessage(
+    const { message, type } = this.#parseMessage(
       diagnostic.messageText,
       messageTransformer,
     );
@@ -93,7 +93,7 @@ export class CompilationError {
     }
   }
 
-  private parseMessage(
+  #parseMessage(
     input: string | DiagnosticMessageChain,
     messageTransformer?: DiagnosticMessageTransformer,
   ): { type: CompilationErrorType; message: string } {

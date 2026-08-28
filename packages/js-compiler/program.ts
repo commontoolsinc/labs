@@ -34,23 +34,23 @@ function groundedSourceName(relativePath: string): string {
 }
 
 export class InMemoryProgram implements ProgramResolver {
-  private modules: Record<string, string>;
-  private _main: string;
+  #modules: Record<string, string>;
+  #_main: string;
   constructor(main: string, modules: Record<string, string>) {
-    this.modules = modules;
-    this._main = main;
+    this.#modules = modules;
+    this.#_main = main;
   }
 
   main(): Promise<Source> {
-    const main = this.modules[this._main];
+    const main = this.#modules[this.#_main];
     if (main === undefined) {
-      throw new Error(`${this._main} not in modules.`);
+      throw new Error(`${this.#_main} not in modules.`);
     }
-    return Promise.resolve({ name: this._main, contents: main });
+    return Promise.resolve({ name: this.#_main, contents: main });
   }
 
   resolveSource(identifier: string): Promise<Source | undefined> {
-    const contents = this.modules[identifier];
+    const contents = this.#modules[identifier];
     if (contents === undefined) return Promise.resolve(undefined);
     return Promise.resolve({ contents, name: identifier });
   }
@@ -116,33 +116,33 @@ export function decodeDataFile(bytes: Uint8Array, name: string): string {
 // Resolve a program using the file system.
 // Deno-only.
 export class FileSystemProgramResolver implements ProgramResolver {
-  private fsRoot: string;
-  private realFsRoot: string;
-  private _main: Source;
+  #fsRoot: string;
+  #realFsRoot: string;
+  #_main: Source;
   constructor(mainPath: string, rootPath?: string) {
-    this.fsRoot = normalize(rootPath ?? dirname(mainPath));
+    this.#fsRoot = normalize(rootPath ?? dirname(mainPath));
     const normalizedMainPath = normalize(mainPath);
-    const relativeMainPath = relative(this.fsRoot, normalizedMainPath);
+    const relativeMainPath = relative(this.#fsRoot, normalizedMainPath);
     if (rootPath && isOutsideRoot(relativeMainPath)) {
       throw new Error(
-        `Main file "${mainPath}" must be within root directory "${this.fsRoot}".`,
+        `Main file "${mainPath}" must be within root directory "${this.#fsRoot}".`,
       );
     }
-    this.realFsRoot = this.#realPath(this.fsRoot);
+    this.#realFsRoot = this.#realPath(this.#fsRoot);
     const realMainPath = this.#realPath(normalizedMainPath);
-    if (isOutsideRoot(relative(this.realFsRoot, realMainPath))) {
+    if (isOutsideRoot(relative(this.#realFsRoot, realMainPath))) {
       throw new Error(
-        `Main file "${mainPath}" must be within root directory "${this.fsRoot}".`,
+        `Main file "${mainPath}" must be within root directory "${this.#fsRoot}".`,
       );
     }
-    this._main = {
+    this.#_main = {
       name: groundedSourceName(relativeMainPath),
       contents: this.#readFile(realMainPath),
     };
   }
 
   main(): Promise<Source> {
-    return Promise.resolve(this._main);
+    return Promise.resolve(this.#_main);
   }
 
   resolveSource(specifier: string): Promise<Source | undefined> {
@@ -188,19 +188,19 @@ export class FileSystemProgramResolver implements ProgramResolver {
     if (!specifier || specifier[0] !== "/") return undefined;
     const absPath = normalize(
       join(
-        this.fsRoot,
+        this.#fsRoot,
         specifier.substring(1, specifier.length).replaceAll("/", SEPARATOR),
       ),
     );
-    if (isOutsideRoot(relative(this.fsRoot, absPath))) {
+    if (isOutsideRoot(relative(this.#fsRoot, absPath))) {
       throw new Error(
-        `${kind} "${specifier}" resolves outside of root directory "${this.fsRoot}".`,
+        `${kind} "${specifier}" resolves outside of root directory "${this.#fsRoot}".`,
       );
     }
     const realPath = this.#realPath(absPath);
-    if (isOutsideRoot(relative(this.realFsRoot, realPath))) {
+    if (isOutsideRoot(relative(this.#realFsRoot, realPath))) {
       throw new Error(
-        `${kind} "${specifier}" resolves outside of root directory "${this.fsRoot}".`,
+        `${kind} "${specifier}" resolves outside of root directory "${this.#fsRoot}".`,
       );
     }
     return realPath;
