@@ -252,6 +252,63 @@ describe("stored-link-schema-precedence", () => {
       expect(projectionOf(elementByPath(holder))).toEqual({ title: "seeded" });
     });
 
+    it("carries a trivial stored default onto a boolean-true reader at resolution", () => {
+      const target = runtime.getCell(
+        space,
+        `row-${seq}-truecarry`,
+        undefined,
+        tx,
+      );
+      const holder = runtime.getCell<Holder>(
+        space,
+        `holder-${seq}-truecarry`,
+        holderSchema,
+        tx,
+      );
+      holder.setRaw(
+        {
+          rows: [linkCarrying(target, { default: { title: "seeded" } })],
+        } as never,
+      );
+      const readerLink = {
+        ...holder.getAsNormalizedFullLink(),
+        path: ["rows", "0"],
+        schema: true as JSONSchema,
+      };
+
+      expect(resolveLink(runtime, tx, readerLink).schema).toEqual({
+        default: { title: "seeded" },
+      });
+    });
+
+    it("keeps a false reader false across a defaulted trivial stored schema", () => {
+      const target = runtime.getCell(
+        space,
+        `row-${seq}-falsecarry`,
+        undefined,
+        tx,
+      );
+      const holder = runtime.getCell<Holder>(
+        space,
+        `holder-${seq}-falsecarry`,
+        holderSchema,
+        tx,
+      );
+      holder.setRaw(
+        {
+          rows: [linkCarrying(target, { default: { title: "seeded" } })],
+        } as never,
+      );
+      const readerLink = {
+        ...holder.getAsNormalizedFullLink(),
+        path: ["rows", "0"],
+        schema: false as JSONSchema,
+      };
+
+      // The reader selected nothing; no default stands in.
+      expect(resolveLink(runtime, tx, readerLink).schema).toBe(false);
+    });
+
     it("inherits a default the narrowing reduced the stored schema to", () => {
       const storedSchema = {
         type: "object",

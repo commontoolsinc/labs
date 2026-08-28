@@ -153,9 +153,10 @@ function _schemaHasIfcUncached(
  * Closure documents travel WITH the documents that refer to them, so
  * every reachable ref of a well-formed stored schema resolves from the
  * local store. Returns whether they all did: `false` names a corrupt or
- * deliberately malformed declaration — a ref to a document that never
- * arrived, a document that is not a schema document, or one whose content
- * does not hash to its id — which is logged, after which the declaration
+ * deliberately malformed declaration — a ref to a document the referrer
+ * space does not hold, a document that is not a schema document, or one
+ * whose content does not hash to its id — which is logged, after which the
+ * declaration
  * SELECTS NOTHING: the traversal narrows it to `false` and a caller about
  * to walk the schema (narrowing among them) skips it instead of throwing
  * on the dangling ref.

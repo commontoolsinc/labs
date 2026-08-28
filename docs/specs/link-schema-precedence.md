@@ -190,10 +190,11 @@ broken-declaration arms.
 `packages/runner/test/stored-link-schema-precedence.test.ts` pins the
 cell-level reads, including the asCell handle regression and the inherited
 default. `packages/runner/test/reader-schema-precedence-config.test.ts`
-and the ownership families in
-`packages/runner/test/experimental-options.test.ts` pin the claim
-lifecycle; `packages/runner/test/runtime-presets.test.ts` pins adoption
-and the legacy-absent rule. The traverse-replay goldens carry the
+and the ambient-flag family in
+`packages/runner/test/experimental-options.test.ts` pin the
+construction-set ambient lifecycle (no teardown reset);
+`packages/runner/test/runtime-presets.test.ts` pins adoption and the
+legacy-absent rule. The traverse-replay goldens carry the
 serving-behavior consequences.
 
 ## Related documents

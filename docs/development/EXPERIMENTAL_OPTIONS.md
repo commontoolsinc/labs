@@ -1238,7 +1238,7 @@ Server Process (Deno)
   |
   +-- ENV: EXPERIMENTAL_* = "true" | "false"
   |
-  +-- runner/experimental-posture.ts --> experimentalOptionsFromEnv(Deno.env.get)
+  +-- runner/runtime-presets.ts --> experimentalOptionsFromEnv(Deno.env.get)
   +-- toolshed/runtime-options.ts --> runtimePresets.productionServer({ experimental, ... })
   +-- toolshed/index.ts           --> new Runtime(toolshedRuntimeOptions(...))
 ```
@@ -1304,7 +1304,7 @@ cf / pieces controller / agents host / cast-admin
   +-- GET <apiUrl>/api/meta  --> { experimental: { <flag>: <boolean>, ... } }
   |     the posture the SERVER runs at
   |
-  +-- runner/experimental-posture.ts --> experimentalOptionsForDeployedClient()
+  +-- runner/runtime-presets.ts --> experimentalOptionsForDeployedClient()
   |     explicit EXPERIMENTAL_* > server declaration > built-in default
   |
   +-- runtimePresets.remoteClient({ experimental, ... })
