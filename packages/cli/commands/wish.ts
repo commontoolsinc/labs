@@ -184,6 +184,9 @@ export const wish = new Command()
     prefix: "CF_",
   })
   .option("-i,--identity <path:string>", "Path to an identity keyfile.")
+  .env("CF_SPACE=<space:string>", "The space name or DID.", {
+    prefix: "CF_",
+  })
   .option(
     "-s,--space <space:string>",
     "Space name or DID to connect to. Defaults to the identity's home space " +

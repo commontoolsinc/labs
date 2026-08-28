@@ -1497,6 +1497,7 @@ export function targetOptions(
   option("-a,--api-url <url:string>", "URL of the fabric server instance.");
   env("CF_IDENTITY=<path:string>", "Path to an identity keyfile.");
   option("-i,--identity <path:string>", "Path to an identity keyfile.");
+  env("CF_SPACE=<space:string>", "The space name or DID.");
   option("-s,--space <space:string>", "The space name or DID");
   return cmd;
 }
