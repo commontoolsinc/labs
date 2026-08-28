@@ -146,8 +146,59 @@ describe("cfc group chat demo integration test", () => {
     console.log(`PROBE host-draft fillDiag: ${fillDiag}`);
     await waitForRuntimeIdle(page);
     console.log("PROBE runtime idle returned after host-draft fill");
-    await waitForDisabled(page, "#host-send-button", false);
-    console.log("PROBE host-send-button ENABLED");
+    try {
+      await waitForDisabled(page, "#host-send-button", false);
+      console.log("PROBE host-send-button ENABLED");
+    } catch (err) {
+      // The served enable never came (the wedge). Census the worker's logger
+      // counts — the silent drop classes (e.g. commit-conflict) are counted
+      // even when they do not log — then refill the draft to discriminate a
+      // one-shot loss (fresh write lands, button enables) from a standing
+      // poison (every subsequent write dies too, §2b's Bob shape).
+      const counts = await page.evaluate(async () => {
+        const rt = (globalThis as unknown as {
+          commonfabric?: {
+            rt?: { getLoggerCounts?: () => Promise<unknown> };
+          };
+        }).commonfabric?.rt;
+        const all = await rt?.getLoggerCounts?.();
+        return JSON.stringify(
+          (all as { counts?: unknown })?.counts ?? all ?? null,
+        );
+      });
+      console.log(`PROBE loggerCounts at hang: ${counts}`);
+      await fillCfInput(page, "#host-message-draft", "Fake hello retry");
+      const refill = await page.evaluate(() => {
+        const findHost = (root: Document | ShadowRoot): Element | undefined => {
+          for (const element of root.querySelectorAll("*")) {
+            if (element.id === "host-send-button") return element;
+            if (element.shadowRoot) {
+              const match = findHost(element.shadowRoot);
+              if (match) return match;
+            }
+          }
+          return undefined;
+        };
+        return new Promise<string>((resolve) => {
+          const deadline = Date.now() + 15_000;
+          const check = () => {
+            const host = findHost(document);
+            const button = host?.shadowRoot?.querySelector("button");
+            const disabled = button instanceof HTMLButtonElement
+              ? button.disabled
+              : undefined;
+            if (disabled === false) return resolve("ENABLED");
+            if (Date.now() > deadline) {
+              return resolve(`still-disabled (${String(disabled)})`);
+            }
+            setTimeout(check, 250);
+          };
+          check();
+        });
+      });
+      console.log(`PROBE after refill: ${String(refill)}`);
+      throw err;
+    }
     await clickCfButton(page, "#host-send-button");
     await waitForRuntimeIdle(page);
     await waitForTextAbsent(
