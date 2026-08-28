@@ -21,13 +21,13 @@ export class EmptyArrayOfValidationTransformer extends HelpersOnlyTransformer {
       if (ts.isCallExpression(node)) {
         const callKind = detectCallKind(node, checker);
         if (callKind?.kind === "cell-factory") {
-          this.validateNotEmptyArray(node, callKind.factoryName, context);
+          this.#validateNotEmptyArray(node, callKind.factoryName, context);
         }
       }
       if (ts.isNewExpression(node)) {
         const callKind = detectNewExpressionKind(node, checker);
         if (callKind?.kind === "cell-factory") {
-          this.validateNotEmptyArray(node, callKind.factoryName, context);
+          this.#validateNotEmptyArray(node, callKind.factoryName, context);
         }
       }
 
@@ -37,7 +37,7 @@ export class EmptyArrayOfValidationTransformer extends HelpersOnlyTransformer {
     return ts.visitNode(context.sourceFile, visit) as ts.SourceFile;
   }
 
-  private validateNotEmptyArray(
+  #validateNotEmptyArray(
     call: ts.CallExpression | ts.NewExpression,
     factoryName: string,
     context: TransformationContext,
