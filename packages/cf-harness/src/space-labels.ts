@@ -27,6 +27,7 @@ import {
   type HarnessCellLabelEntry,
   type HarnessCellLabelRecord,
   type HarnessCellLabels,
+  type HarnessCellLabelUnreadPath,
   type HarnessCellLabelUnreadReason,
   type HarnessCfcAtom,
 } from "./contracts/cell-labels.ts";
@@ -93,6 +94,13 @@ interface StoredCellLabels {
    * reached it says so rather than reading as a document with no label.
    */
   unread?: HarnessCellLabelUnreadReason;
+
+  /**
+   * The paths of this document nothing was looked for at, where the document
+   * itself was read: one per link the walk could not follow. The same
+   * distinction as `unread`, held per path rather than per document.
+   */
+  unreadPaths?: readonly HarnessCellLabelUnreadPath[];
 }
 
 /**
@@ -211,49 +219,66 @@ const spaceDidOfDbPath = (dbPath: string): string | undefined => {
 };
 
 /**
- * Whether an address is one the opened store can answer. A reference naming
- * no space names the store it came from, and is read. A reference naming a
- * space is read only where the opened store's own DID is known and is that
- * space: an entity id names a document within its space, so reading a foreign
- * id here would answer with whatever local document shares the id and graft
- * its labels onto the foreign cell. An unknown DID proves nothing, so it
- * fails closed.
+ * Why an address is one the opened store cannot answer, or `undefined` where
+ * it can. A reference naming no space names the store it came from, and is
+ * read. A reference naming a space is read only where the opened store's own
+ * DID is known and is that space: an entity id names a document within its
+ * space, so reading a foreign id here would answer with whatever local
+ * document shares the id and graft its labels onto the foreign cell. An
+ * unknown DID proves nothing, so it fails closed — and says which of the two
+ * it was, because a store that cannot name itself is a fact about this host
+ * rather than about the reference.
  */
-const addressesOpenedSpace = (
+const unreadReasonOf = (
   space: string | undefined | null,
   did: string | undefined,
-): boolean =>
-  space === undefined || space === null ||
-  (did !== undefined && space === did);
+): HarnessCellLabelUnreadReason | undefined => {
+  if (space === undefined || space === null) {
+    return undefined;
+  }
+  if (did === undefined) {
+    return "space-unproven";
+  }
+  return space === did ? undefined : "cross-space";
+};
 
 /**
- * The cells one document links to, by the key that names each. A pattern's
- * results are their own cells rather than paths inside the piece that names
- * them, so following these one hop is what puts a derived label where a
- * reader looks for it.
+ * The cells one document links to, by the key that names each, and the keys
+ * whose links were not followed. A pattern's results are their own cells
+ * rather than paths inside the piece that names them, so following these one
+ * hop is what puts a derived label where a reader looks for it.
+ *
+ * A link this store cannot answer for is returned as an unread path rather
+ * than dropped. Dropped, it would leave the key holding no entry, which is
+ * how a path the space holds no label for reads — so the cell nobody looked
+ * at and the cell the space says nothing about would render alike.
  */
 const linkedCellsOf = (
   document: Record<string, unknown> | undefined,
   space: string | undefined,
-): { key: string; id: string }[] => {
+): {
+  linked: { key: string; id: string }[];
+  unreadPaths: HarnessCellLabelUnreadPath[];
+} => {
   const value = document?.value;
   if (!isRecord(value)) {
-    return [];
+    return { linked: [], unreadPaths: [] };
   }
   const linked: { key: string; id: string }[] = [];
+  const unreadPaths: HarnessCellLabelUnreadPath[] = [];
   for (const [key, held] of Object.entries(value)) {
     const link = decodedLinkOf(held as never);
     if (link?.id === undefined || link.id === null) {
       continue;
     }
-    // A link naming another space addresses a store this reader did not open,
-    // and one naming a space against an unknown DID cannot be shown to be
-    // this one. Only a link naming this space, or naming none, is a cell here.
-    if (addressesOpenedSpace(link.space, space)) {
+    const reason = unreadReasonOf(link.space, space);
+    if (reason === undefined) {
       linked.push({ key, id: link.id });
+    } else {
+      unreadPaths.push({ path: [key], reason });
     }
   }
-  return linked;
+  return { linked, unreadPaths };
 };
 
 /** A space DB opened for reading labels, and the space it was resolved from. */
@@ -279,6 +304,8 @@ export interface SpaceLabelReader {
    *
    * An address in another space is not looked up at all: the answer comes
    * back `unread`, which is a different fact from a document with no labels.
+   * A link into another space is the same fact one level down, and comes
+   * back as an `unreadPaths` entry at the key that held it.
    */
   read(address: CellAddress): StoredCellLabels & {
     linked: { key: string; id: string }[];
@@ -306,8 +333,9 @@ export const openSpaceLabelReader = async (
     dbPath,
     ...(did !== undefined ? { did } : {}),
     read: (address) => {
-      if (!addressesOpenedSpace(address.space, did)) {
-        return { entries: [], linked: [], unread: "cross-space" };
+      const unread = unreadReasonOf(address.space, did);
+      if (unread !== undefined) {
+        return { entries: [], linked: [], unread };
       }
       // The named scope, then the base scope it inherits from: a reference
       // carries a scope kind rather than a principal, so a scoped one
@@ -320,7 +348,7 @@ export const openSpaceLabelReader = async (
         return { entries: [], linked: [] };
       }
       const own = labelsOf(outcome.document);
-      const linked = linkedCellsOf(outcome.document, did);
+      const { linked, unreadPaths } = linkedCellsOf(outcome.document, did);
       const entries = [...own.entries];
       for (const { key, id } of linked) {
         const target = reconstructOutcome(opened, { id, scope: "space" });
@@ -331,7 +359,12 @@ export const openSpaceLabelReader = async (
           entries.push({ ...entry, path: [key, ...entry.path], source: id });
         }
       }
-      return { ...own, entries, linked };
+      return {
+        ...own,
+        entries,
+        linked,
+        ...(unreadPaths.length > 0 ? { unreadPaths } : {}),
+      };
     },
     close: () => opened.close(),
   };
@@ -360,8 +393,10 @@ export interface SpaceLabelSnapshotRequest {
  * read as a cell the space holds no label for. A reference into another
  * space does address a cell, so it is recorded and marked unread instead of
  * dropped: the run held it, and a reader that saw it vanish would take the
- * snapshot to cover every cell the run touched. Every other failure lands on
- * the snapshot as a whole, so a reader can tell "no labels" from "not read".
+ * snapshot to cover every cell the run touched. A link the walk could not
+ * follow is the same, held as an unread path at the key it sat at. Every
+ * other failure lands on the snapshot as a whole, so a reader can tell "no
+ * labels" from "not read".
  */
 export const readSpaceCellLabels = async (
   request: SpaceLabelSnapshotRequest,
@@ -415,6 +450,9 @@ export const readSpaceCellLabels = async (
           ? { schemaHash: read.schemaHash }
           : {}),
         ...(read.unread !== undefined ? { unreadReason: read.unread } : {}),
+        ...(read.unreadPaths !== undefined
+          ? { unreadPaths: read.unreadPaths }
+          : {}),
         entries: read.entries,
       });
     }

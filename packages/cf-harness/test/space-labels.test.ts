@@ -408,13 +408,13 @@ describe("space-labels", () => {
       expect(read.entries).toEqual([]);
     });
 
-    it("returns no labels for an address naming any space when the opened file proves none", () => {
+    it("returns no labels and `space-unproven` for an address naming any space when the opened file proves none", () => {
       const read = reader.read({
         id: COLLIDING,
         space: OWN_DID,
         scope: "space",
       });
-      expect(read.unread).toBe("cross-space");
+      expect(read.unread).toBe("space-unproven");
       expect(read.entries).toEqual([]);
     });
 
@@ -450,10 +450,30 @@ describe("space-labels", () => {
       );
     });
 
+    it("returns the path of a link into another space as unread rather than dropping it", () => {
+      const read = didReader.read({ id: LINKER, scope: "space" });
+      expect(read.unreadPaths).toEqual([
+        { path: ["theirs"], reason: "cross-space" },
+      ]);
+    });
+
     it("returns only the link naming no space when the opened file proves no DID", () => {
       const read = reader.read({ id: LINKER, scope: "space" });
       expect(read.linked).toEqual([{ key: "mine", id: COLLIDING }]);
       expect(read.entries.map((entry) => entry.path)).toEqual([["mine"]]);
+    });
+
+    it("returns every spaced link as unread when the opened file proves no DID", () => {
+      const read = reader.read({ id: LINKER, scope: "space" });
+      expect(read.unreadPaths).toEqual([
+        { path: ["ours"], reason: "space-unproven" },
+        { path: ["theirs"], reason: "space-unproven" },
+      ]);
+    });
+
+    it("returns no unread path for a document whose links were all followed", () => {
+      expect(didReader.read({ id: DECLARED, scope: "space" }).unreadPaths)
+        .toBe(undefined);
     });
   });
 
@@ -536,6 +556,27 @@ describe("space-labels", () => {
       ]);
       expect(snapshot.cells[0].entries.map((entry) => entry.confidentiality))
         .toEqual([[{ type: "foreign-secret", name: "foreign-secret" }]]);
+    });
+
+    it("records the path of a link the walk could not follow", async () => {
+      const snapshot = await readAgainstDid([`/${LINKER}`]);
+      expect(snapshot.cells[0].unreadPaths).toEqual([
+        { path: ["theirs"], reason: "cross-space" },
+      ]);
+      expect(snapshot.cells[0].unreadReason).toBe(undefined);
+    });
+
+    it("records every spaced link of a cell as unread against a database naming no space", async () => {
+      const snapshot = await read([`/${LINKER}`]);
+      expect(snapshot.cells[0].unreadPaths).toEqual([
+        { path: ["ours"], reason: "space-unproven" },
+        { path: ["theirs"], reason: "space-unproven" },
+      ]);
+    });
+
+    it("records no unread path for a cell whose links were all followed", async () => {
+      const snapshot = await readAgainstDid([`/${DECLARED}`]);
+      expect(snapshot.cells[0].unreadPaths).toBe(undefined);
     });
 
     it("returns an unavailable snapshot naming the space when no database is found", async () => {

@@ -32,12 +32,14 @@ import { type ConsoleFlow, consoleRunFlow } from "./flow.ts";
 import {
   type ConsoleCellLabelIndex,
   consoleCellLabelIndex,
-  type ConsoleCellLabels,
   type ConsoleCellLabelsStatus,
   type ConsoleCellLabelsSummary,
   consoleCellLabelsSummary,
 } from "./cell-labels.ts";
-import type { HarnessCellLabels } from "../src/contracts/cell-labels.ts";
+import type {
+  HarnessCellLabelRecord,
+  HarnessCellLabels,
+} from "../src/contracts/cell-labels.ts";
 
 /**
  * A single path segment of the characters the artifact store itself writes.
@@ -422,10 +424,10 @@ const statusTally = (
 const familyCellLabels = (
   members: readonly FamilyLabelReading[],
 ): ConsoleCellLabelsSummary => {
-  const byAddress = new Map<string, ConsoleCellLabels>();
+  const byAddress = new Map<string, HarnessCellLabelRecord>();
   for (const member of members) {
-    for (const [address, labels] of member.labels.byAddress) {
-      byAddress.set(address, labels);
+    for (const [address, record] of member.labels.byAddress) {
+      byAddress.set(address, record);
     }
   }
   const speaking = members.filter((member) =>

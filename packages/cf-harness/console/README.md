@@ -182,12 +182,17 @@ the piece that names them, and the derived label sits on the cell — so the
 labels of the cells a run's own cells link to are read too, under the key that
 named them.
 
-It reaches one space. A reference or a link naming a space other than the one
-opened is recorded as unread rather than resolved, because the id it names may
-also exist here and would answer with the wrong cell's labels; such a cell reads
-as nothing known, which is what it is. The database is opened read-only, and it
-is found by the space the fabric session names; `--space-db` points at the file
-instead, for a host whose store is not where the search looks.
+It reaches one space. A reference or a link naming a space the opened file
+cannot be shown to be — another space, or any space at all where the file's own
+name proves no DID — is recorded as unread rather than resolved, because the id
+it names may also exist here and would answer with the wrong cell's labels. A
+reference is recorded unread as a whole cell; a link is recorded unread at the
+path it sits at, so the cells beneath it read as nothing known rather than as
+cells the space holds no label for. The database is opened read-only, and it is
+found by the space the fabric session names; `--space-db` points at the file
+instead, for a host whose store is not where the search looks — and a file named
+for anything but its space proves no DID, so every spaced reference and link
+goes unread against one.
 
 ## Reading a run
 

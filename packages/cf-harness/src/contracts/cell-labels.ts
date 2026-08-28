@@ -96,12 +96,32 @@ export interface HarnessCellLabelEntry {
 }
 
 /**
- * Why one cell of a read snapshot holds no labels because none were looked
- * for. `cross-space` is a reference into a space other than the one opened:
- * an entity id addresses a document within its own space, so asking the
- * opened store for it answers with whatever local document shares that id.
+ * Why a cell or a path of a read snapshot holds no labels because none were
+ * looked for. Both reasons are the same hazard: an entity id addresses a
+ * document within its own space, so asking the opened store for an id that
+ * belongs to another answers with whatever local document shares it.
+ *
+ * `cross-space` is an address in a space the opened store is known not to
+ * be. `space-unproven` is an address in a space the opened store cannot be
+ * shown to be either way, which is every spaced address against a file whose
+ * name is not a DID — a fixture, or a copy taken by hand.
  */
-export type HarnessCellLabelUnreadReason = "cross-space";
+export type HarnessCellLabelUnreadReason = "cross-space" | "space-unproven";
+
+/**
+ * One path inside a cell whose labels were not looked for, and why.
+ *
+ * A link one hop out of a cell is followed only where the store it addresses
+ * is the opened one, and the path the unfollowed link sits at holds no entry
+ * as a result. Recording that path is what keeps it readable as a cell
+ * nobody asked about: an entry list carries no gaps of its own, so a path
+ * missing from one is otherwise a path the space holds no label for.
+ */
+export interface HarnessCellLabelUnreadPath {
+  /** The path inside the document, as an entry at it would be written. */
+  path: readonly string[];
+  reason: HarnessCellLabelUnreadReason;
+}
 
 /** Every label the space holds for one cell. */
 export interface HarnessCellLabelRecord {
@@ -133,9 +153,19 @@ export interface HarnessCellLabelRecord {
   unreadReason?: HarnessCellLabelUnreadReason;
 
   /**
+   * The paths of this cell that were not looked for, where the cell itself
+   * was. It is the same separation as `unreadReason` one level down, and a
+   * reader owes it the same reading: a reference the run held that lands at
+   * or under one of these paths is a cell nothing is known about, not a cell
+   * with no label.
+   */
+  unreadPaths?: readonly HarnessCellLabelUnreadPath[];
+
+  /**
    * The labels, one entry per labelled path. An empty list is a positive
    * finding — the space was read and holds no label for this cell — except
-   * where `unreadReason` is set, which says nothing was asked.
+   * where `unreadReason` is set, which says nothing was asked, and at the
+   * paths `unreadPaths` names, which say the same of one path each.
    */
   entries: readonly HarnessCellLabelEntry[];
 }

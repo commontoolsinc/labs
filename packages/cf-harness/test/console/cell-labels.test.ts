@@ -149,6 +149,70 @@ const wildSnapshot = snapshot([
   ]),
 ]);
 
+const VALUED = entity("valued");
+
+/**
+ * A document whose label path is written with the `value` segment an envelope
+ * holds its content under. A reference reaches the same cell with the segment
+ * or without it, so the two spellings are one path.
+ */
+const valuedSnapshot = snapshot([
+  record(VALUED, `/${VALUED}`, [{
+    path: ["value", "secret"],
+    confidentiality: [atom("stored-under-value")],
+    integrity: [],
+    origin: "declared",
+  }]),
+]);
+
+const OBSERVED = entity("observed");
+
+/**
+ * A container labelled twice over: once for what its shape gives away, and
+ * once for what it holds. The two reach differently — a label on a
+ * container's shape is about the container, while a label on its content
+ * covers everything under it.
+ */
+const observedSnapshot = snapshot([
+  record(OBSERVED, `/${OBSERVED}`, [
+    {
+      path: ["container"],
+      confidentiality: [atom("shape-secret")],
+      integrity: [],
+      origin: "declared",
+      observes: "shape",
+    },
+    {
+      path: ["container"],
+      confidentiality: [atom("content-secret")],
+      integrity: [],
+      origin: "declared",
+    },
+  ]),
+]);
+
+const LINKER = entity("linker");
+
+/**
+ * A cell holding three links: one the snapshot followed, one into another
+ * space, and one whose space the opened store could not be shown to be.
+ */
+const linkerSnapshot = snapshot([{
+  entityId: LINKER,
+  ref: `/${LINKER}`,
+  schemaHash: SCHEMA_HASH,
+  unreadPaths: [
+    { path: ["theirs"], reason: "cross-space" },
+    { path: ["ours"], reason: "space-unproven" },
+  ],
+  entries: [{
+    path: ["mine"],
+    confidentiality: [atom("linked-secret")],
+    integrity: [],
+    origin: "declared",
+  }],
+}]);
+
 describe("console/cell-labels", () => {
   describe("consoleCellLabels()", () => {
     it("returns every atom of every path, deduplicated", () => {
@@ -218,6 +282,11 @@ describe("console/cell-labels", () => {
         ]),
       );
       expect(labels.transformedBy).toEqual(["cf:module/abc"]);
+    });
+
+    it("returns the paths the snapshot left unread on the cell that holds them", () => {
+      expect(consoleCellLabels(linkerSnapshot.cells[0]).unreadPaths)
+        .toEqual([["theirs"], ["ours"]]);
     });
   });
 
@@ -306,8 +375,8 @@ describe("console/cell-labels", () => {
     });
 
     it("strips the scope suffix of a scoped id to find the document", () => {
-      expect(cellLabelsAt(index, `/${LABELLED}@user`)).toBe(
-        index.byAddress.get(LABELLED),
+      expect(cellLabelsAt(index, `/${LABELLED}@user`)).toEqual(
+        consoleCellLabels(record(LABELLED, `/${LABELLED}`, [declared])),
       );
     });
 
@@ -322,8 +391,8 @@ describe("console/cell-labels", () => {
         ...readSnapshot,
         space: { configured: "demo-space", did: OWN_DID },
       });
-      expect(cellLabelsAt(inSpace, `/@${OWN_DID}/${LABELLED}`)).toBe(
-        inSpace.byAddress.get(LABELLED),
+      expect(cellLabelsAt(inSpace, `/@${OWN_DID}/${LABELLED}`)).toEqual(
+        consoleCellLabels(record(LABELLED, `/${LABELLED}`, [declared])),
       );
     });
 
@@ -389,6 +458,67 @@ describe("console/cell-labels", () => {
         const labels = cellLabelsAt(piece, `/${PIECE}/briefing`);
         expect(labels?.derived).toBe(true);
         expect(labels?.transformedBy).toEqual(["llm"]);
+      });
+
+      it("returns the atom at a path the reference reaches through a `value` segment", () => {
+        expect(cellLabelsAt(piece, `/${PIECE}/value/secret`)?.confidentiality)
+          .toEqual(["demo-secret"]);
+      });
+
+      it("returns the atom of an entry stored under `value` for a reference spelling no such segment", () => {
+        const valued = consoleCellLabelIndex(valuedSnapshot);
+        const labels = cellLabelsAt(valued, `/${VALUED}/secret`);
+        expect(labels?.confidentiality).toEqual(["stored-under-value"]);
+        expect(labels?.entries.map((entry) => entry.path)).toEqual([[]]);
+      });
+    });
+
+    describe("reaching down from an entry above the reference", () => {
+      const observed = consoleCellLabelIndex(observedSnapshot);
+
+      it("returns both atoms for a reference naming the path the entries sit at", () => {
+        expect(
+          cellLabelsAt(observed, `/${OBSERVED}/container`)?.confidentiality,
+        )
+          .toEqual(["shape-secret", "content-secret"]);
+      });
+
+      it("returns no atom of a `shape` entry on a strict ancestor of the reference", () => {
+        const labels = cellLabelsAt(observed, `/${OBSERVED}/container/public`);
+        expect(labels?.confidentiality).toEqual(["content-secret"]);
+        expect(labels?.entries.map((entry) => entry.observes)).toEqual([
+          undefined,
+        ]);
+      });
+    });
+
+    describe("a path the snapshot could not read", () => {
+      const linker = consoleCellLabelIndex(linkerSnapshot);
+
+      it("returns `undefined` for a reference at the path an unfollowed link sits at", () => {
+        expect(cellLabelsAt(linker, `/${LINKER}/theirs`)).toBe(undefined);
+      });
+
+      it("returns `undefined` for a reference beneath the path an unfollowed link sits at", () => {
+        expect(cellLabelsAt(linker, `/${LINKER}/theirs/summary`)).toBe(
+          undefined,
+        );
+      });
+
+      it("returns `undefined` for a reference under a link whose space the store could not be shown to be its own", () => {
+        expect(cellLabelsAt(linker, `/${LINKER}/ours`)).toBe(undefined);
+      });
+
+      it("returns the labels of a path beside the links it could not follow", () => {
+        const labels = cellLabelsAt(linker, `/${LINKER}/mine`);
+        expect(labels?.confidentiality).toEqual(["linked-secret"]);
+        expect(labels?.unreadPaths).toBe(undefined);
+      });
+
+      it("names the unread paths on the cell that holds the links", () => {
+        const labels = cellLabelsAt(linker, `/${LINKER}`);
+        expect(labels?.unreadPaths).toEqual([["theirs"], ["ours"]]);
+        expect(labels?.confidentiality).toEqual(["linked-secret"]);
       });
     });
 

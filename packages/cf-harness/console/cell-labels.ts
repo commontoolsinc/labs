@@ -12,7 +12,9 @@
  *
  * - **Read against unread.** A cell with no atoms under a snapshot that was
  *   taken is a cell the space holds no label for. The same cell under a run
- *   whose space could not be read is a cell nobody asked about.
+ *   whose space could not be read is a cell nobody asked about. It holds per
+ *   path as well as per run: a link the snapshot could not follow leaves the
+ *   path it sat at unread, and every cell at or under that path with it.
  * - **Derived against carried.** A value's label may be the join of the
  *   fields it was built from, so a plain input reached through a labelled
  *   object carries a confidentiality atom without having been derived from
@@ -21,6 +23,14 @@
  *   report a plain input as tainted.
  */
 
+import {
+  canonicalizeCfcLogicalPath,
+  cfcLabelPathPrefixMatches,
+  type CfcLabelView,
+  type IFCLabel,
+  type LabelObservationClass,
+  rebaseCfcLabelView,
+} from "@commonfabric/runner/cfc/label-view-core";
 import { parseLLMFriendlyLink } from "@commonfabric/runner/shared";
 
 import type {
@@ -69,6 +79,16 @@ export interface ConsoleCellLabels {
 
   /** The labels path by path, for a reader that wants the whole of it. */
   entries: readonly ConsoleCellLabelEntry[];
+
+  /**
+   * The paths beneath this cell that nothing was read for, each a link the
+   * snapshot could not follow, and absent where it followed every one. A
+   * reference landing at or under one of them has no answer here at all —
+   * {@link cellLabelsAt} returns nothing for it — and the cell itself keeps
+   * them so that what is missing from `entries` is on the record rather than
+   * inferred from its absence.
+   */
+  unreadPaths?: readonly (readonly string[])[];
 }
 
 /** Why a run shows no labels on any cell, when it shows none. */
@@ -77,9 +97,11 @@ export type ConsoleCellLabelsStatus = "read" | "unavailable" | "absent";
 /**
  * The run's labels, indexed by the cell they belong to.
  *
- * `byAddress` is keyed by entity, because that is what a label is stored per.
+ * `byAddress` is keyed by entity, because that is what a label is stored per,
+ * and holds the artifact's own record rather than the names a badge writes.
  * A reference names a path inside a document as well as the document, and
- * `cellLabelsAt` is what turns one into the other.
+ * `cellLabelsAt` is what turns one into the other — narrowing over the
+ * structural labels the space stored, and reducing to names after.
  */
 export interface ConsoleCellLabelIndex {
   status: ConsoleCellLabelsStatus;
@@ -90,7 +112,7 @@ export interface ConsoleCellLabelIndex {
   /** The space the labels were read from, once a run finally names one. */
   space?: { configured: string; did?: string; dbPath?: string };
 
-  byAddress: ReadonlyMap<string, ConsoleCellLabels>;
+  byAddress: ReadonlyMap<string, HarnessCellLabelRecord>;
 }
 
 /** The run-level fact, without the index — what crosses to the page. */
@@ -144,6 +166,7 @@ const entryOf = (entry: HarnessCellLabelEntry): ConsoleCellLabelEntry => {
 /** The cell-level facts a set of entries adds up to. */
 const labelsOfEntries = (
   entries: readonly ConsoleCellLabelEntry[],
+  unreadPaths: readonly (readonly string[])[],
 ): ConsoleCellLabels => ({
   confidentiality: dedupe(entries.flatMap((entry) => entry.confidentiality)),
   integrity: dedupe(entries.flatMap((entry) => entry.integrity)),
@@ -154,12 +177,22 @@ const labelsOfEntries = (
     ),
   ),
   entries,
+  ...(unreadPaths.length > 0 ? { unreadPaths } : {}),
 });
+
+/** The paths of one record nothing was read for, as the page compares them. */
+const unreadPathsOf = (
+  record: HarnessCellLabelRecord,
+): readonly string[][] =>
+  (record.unreadPaths ?? []).map((unread) =>
+    canonicalizeCfcLogicalPath(unread.path)
+  );
 
 /** One recorded cell, reduced to what a chip and a card show. */
 export const consoleCellLabels = (
   record: HarnessCellLabelRecord,
-): ConsoleCellLabels => labelsOfEntries(record.entries.map(entryOf));
+): ConsoleCellLabels =>
+  labelsOfEntries(record.entries.map(entryOf), unreadPathsOf(record));
 
 /**
  * The whole snapshot, indexed. A run that wrote no snapshot is `absent`
@@ -177,7 +210,7 @@ export const consoleCellLabelIndex = (
   // document as well as the document, and two references into one document
   // narrow to different cells. Keying a whole document's labels under one of
   // its references would hand every cell of it the same answer.
-  const byAddress = new Map<string, ConsoleCellLabels>();
+  const byAddress = new Map<string, HarnessCellLabelRecord>();
   for (const record of snapshot.cells) {
     // A cell nothing was asked about is left out of the index rather than
     // entered with no labels. Absent, it reads as a cell this run says
@@ -187,7 +220,7 @@ export const consoleCellLabelIndex = (
     if (record.unreadReason !== undefined) {
       continue;
     }
-    byAddress.set(record.entityId, consoleCellLabels(record));
+    byAddress.set(record.entityId, record);
   }
   return {
     status: snapshot.status === "read" ? "read" : "unavailable",
@@ -209,7 +242,7 @@ export const consoleCellLabelsSummary = (
     ...(index.detail !== undefined ? { detail: index.detail } : {}),
     ...(index.space !== undefined ? { space: index.space } : {}),
     cellsRead: cells.length,
-    cellsLabelled: cells.filter((labels) => labels.entries.length > 0).length,
+    cellsLabelled: cells.filter((record) => record.entries.length > 0).length,
   };
 };
 
@@ -279,24 +312,37 @@ const addressOf = (ref: string): ConsoleCellAddress | undefined => {
 };
 
 /**
- * Whether `prefix` covers `path`, over the segments a stored label path is
- * written in: `*` stands for every member of a container, so it matches any
- * concrete segment and any concrete segment matches it.
+ * One stored entry as a label view of its own, which is the form
+ * {@link rebaseCfcLabelView} narrows. One entry per view rather than the
+ * whole set in one: the canonical rebase merges the labels of entries that
+ * land on one path, and `origin` and the provenance beside it belong to the
+ * entry that carried them, so a merged label could no longer say which of
+ * them was computed and which was declared.
  *
- * Mirrors `cfcLabelPathPrefixMatches` in
- * `packages/runner/src/cfc/label-view-core.ts`, which is the definition of
- * this relation and of the re-rooting below it in `rebaseCfcLabelView`. It is
- * not exported from `@commonfabric/runner/cfc`, so it is restated here; the
- * two are one rule and a change to that one belongs here too.
+ * The atoms are the ones the space stored. The contract widens them to carry
+ * fields no reader has a name for, which the atom types do not describe, and
+ * the rebase reads no atom's interior — only whether a label carries any. So
+ * they cross as they are, rather than as the names a badge writes: reducing
+ * first would rebase over the last segment of a type URL, which is a display
+ * string and not the atom.
  */
-const pathPrefixMatches = (
-  prefix: readonly string[],
-  path: readonly string[],
-): boolean =>
-  prefix.length <= path.length &&
-  prefix.every((segment, index) =>
-    segment === path[index] || segment === "*" || path[index] === "*"
-  );
+const labelViewOfEntry = (entry: HarnessCellLabelEntry): CfcLabelView => ({
+  version: 1,
+  entries: [{
+    path: entry.path,
+    label: {
+      confidentiality: [...entry.confidentiality],
+      integrity: [...entry.integrity],
+    } as unknown as IFCLabel,
+    // The space is the authority on what it observed, so the recorded class
+    // crosses as it stands. One it named that CFC has no rule for is not a
+    // content observation, and the rebase treats it as one it cannot inherit
+    // down — which is the reading that grafts no label onto a cell beneath.
+    ...(entry.observes !== undefined
+      ? { observes: entry.observes as LabelObservationClass }
+      : {}),
+  }],
+});
 
 /**
  * The labels of one document, narrowed to a path inside it.
@@ -305,31 +351,42 @@ const pathPrefixMatches = (
  * cells of one piece are two references into one document. Handing both the
  * document's whole label set would put one cell's atom on the other, which is
  * the same mistake as coloring a plain input by the label of the object it
- * was reached through. So an entry counts for a reference only where the
- * reference's path reaches it: an entry at or under that path, re-rooted to
- * it, or an entry above it, which governs everything beneath.
+ * was reached through. So an entry counts for a reference only where CFC's
+ * own re-rooting says it reaches: `rebaseCfcLabelView` is the definition of
+ * that relation, and the page answers by it so that what the console shows at
+ * a path is what the runtime enforces there.
+ *
+ * A reference at or under a path nothing was read for has no answer at all.
+ * That is the read-against-unread distinction one level down from the
+ * snapshot: a link the walk could not follow leaves its key holding no entry,
+ * and an empty label set there would read as a cell the space holds no label
+ * for.
  */
 const narrow = (
-  labels: ConsoleCellLabels,
+  record: HarnessCellLabelRecord,
   path: readonly string[],
-): ConsoleCellLabels => {
-  if (path.length === 0) {
-    return labels;
+): ConsoleCellLabels | undefined => {
+  const unread = unreadPathsOf(record);
+  const logical = canonicalizeCfcLogicalPath(path);
+  if (unread.some((each) => cfcLabelPathPrefixMatches(each, logical))) {
+    return undefined;
   }
   const entries: ConsoleCellLabelEntry[] = [];
-  for (const entry of labels.entries) {
-    if (pathPrefixMatches(path, entry.path)) {
-      entries.push({ ...entry, path: entry.path.slice(path.length) });
-      continue;
-    }
-    // An entry above the reference covers it: a label on the document itself,
-    // or on anything the reference is reached through, reaches every cell
-    // beneath it, and re-roots to the reference's own path.
-    if (pathPrefixMatches(entry.path, path)) {
-      entries.push({ ...entry, path: [] });
+  for (const entry of record.entries) {
+    const rebased = rebaseCfcLabelView(labelViewOfEntry(entry), path)
+      ?.entries[0];
+    if (rebased !== undefined) {
+      entries.push({ ...entryOf(entry), path: [...rebased.path] });
     }
   }
-  return labelsOfEntries(entries);
+  return labelsOfEntries(
+    entries,
+    unread.flatMap((each) =>
+      cfcLabelPathPrefixMatches(logical, each)
+        ? [each.slice(logical.length)]
+        : []
+    ),
+  );
 };
 
 /**
@@ -341,7 +398,8 @@ const narrow = (
  * own space, so a reference naming a space other than the one the snapshot
  * was taken in has no answer here: the id it carries would find whichever
  * cell of the read space happens to share it. Such a reference reads as a
- * cell nothing is known about, the same as one the snapshot never covered.
+ * cell nothing is known about, the same as one the snapshot never covered —
+ * and so does one landing at or under a path the snapshot left unread.
  */
 export const cellLabelsAt = (
   index: ConsoleCellLabelIndex,
@@ -352,7 +410,8 @@ export const cellLabelsAt = (
   }
   const address = addressOf(ref);
   if (address === undefined) {
-    return index.byAddress.get(ref);
+    const keyed = index.byAddress.get(ref);
+    return keyed === undefined ? undefined : consoleCellLabels(keyed);
   }
   if (address.space !== undefined && address.space !== index.space?.did) {
     return undefined;
