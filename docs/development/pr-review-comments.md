@@ -63,6 +63,64 @@ Take the feedback into account and leave a comment if you disagree, as
 [the contributing section of the root `README.md`](../../README.md#contributing)
 requires.
 
+## Who a finding is posted by
+
+Three accounts leave findings on this repository, and a query that names one of
+them hides the other two:
+
+- `cubic-dev-ai[bot]` — cubic, on nearly every pull request.
+- `chatgpt-codex-connector[bot]` — the Codex connector, on a minority.
+- **the invoking user's own account** — a Codex review started by hand, through
+  the `review` script in a checkout, posts as whoever ran it. On a pull request
+  reviewed that way the findings are indistinguishable by author from the
+  author's own replies, and are told apart by `in_reply_to_id`.
+
+The third is the one that catches people, because a query selecting on `cubic`
+looks complete and returns a shorter list without saying so.
+
+## Filters that drop findings
+
+Every narrowing below looks reasonable and answers a different question than
+the one being asked. Enumerate with no predicate but the endpoint, and triage
+by reading; a pull request's whole population is usually small enough to read
+in a couple of minutes.
+
+- **By timestamp** — "what is new since I last looked" is not "what is
+  outstanding". A finding raised on an earlier push, about code the later
+  pushes did not touch, is still open and will not be re-posted.
+- **By `commit_id`** — this field is re-anchored as the code moves, so it is
+  not the commit the finding was raised against. Selecting on the head hides
+  everything anchored elsewhere.
+- **By `line`** — a comment whose line has changed comes back with `line`
+  null, as does a file-level comment. Any numeric comparison drops them.
+- **By author** — see above.
+
+## A review body describes the reviews before it
+
+A summary body is written against the state carried into its review, not
+against what that review is in the process of raising. The two can be one
+second apart: a body reading "all reported issues were addressed" has been
+observed timestamped one second before an inline comment of the same review
+raising a new one.
+
+The blocking state lives here too — a body can carry "auto-approval blocked
+because this review re-detected an unresolved issue" — and it is per review, so
+it needs reading in sequence. The newest body alone can miss that it ever
+fired; a search across all bodies can report a state three reviews stale.
+
+## Where else a pull request carries a verdict
+
+Two surfaces sit outside the inline list, and neither appears in it:
+
+```bash
+gh api --paginate repos/commontoolsinc/labs/pulls/<n>/reviews   # summary bodies
+gh api --paginate repos/commontoolsinc/labs/issues/<n>/comments # issue timeline
+```
+
+The issue timeline is where the coverage-debt bot posts, including the line
+that settles a coverage argument authoritatively — "Code coverage regression
+resolved", with the baseline and the pull request's number beside it.
+
 ## Why `gh pr view` shows nothing
 
 Neither of these returns inline review comments:
