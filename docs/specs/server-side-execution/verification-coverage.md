@@ -5290,13 +5290,20 @@ supply; OW29/OW32/OW34 closed):
   step) and was held only by a co-resident file's red in the same shard,
   while lunch-poll-vote passed its local half 8/8 and its probe went red at
   the probed surface for the second campaign running. **The current census
-  (2026-08-28, after the geometry-3 close PR's probe 5) is ONE patterns
-  entry: lunch-poll-vote's FILE entry, RESTORED a second time — the
-  geometry-3 close landed (the mid-flight-supplier once-await, red-first)
-  and its lift attempt's own probe went red at the surface with the
-  PRE-DECLARED geometry-3b signature (the GEOMETRY-3 CLOSE,
-  LIFT-ATTEMPT, and PROBE 5 blocks at the end of this row); the 3b
-  close is an owner-court fork.** default-app's reload
+  (2026-08-28, the ruled-3b-close PR) is EMPTY — every suite's list: the
+  owner ruled the 3b fork ("go with (1) plus the (2-D) kick"), both
+  mechanisms landed red-first, and lunch-poll-vote's FILE entry is
+  LIFTED a third time under the ruled local-plus-CI-probe bar with THIS
+  PR's own ON-lane board as the direct-CI unskip probe (the RULING and
+  RULED-CLOSE LIFT blocks at the end of this row; a red at the probed
+  surface restores the entry per the arc's standing method).** The
+  superseded 2026-08-28 census (after the geometry-3 close PR's probe 5)
+  was ONE patterns entry: lunch-poll-vote's FILE entry, RESTORED a
+  second time — the geometry-3 close landed (the mid-flight-supplier
+  once-await, red-first) and its lift attempt's own probe went red at
+  the surface with the PRE-DECLARED geometry-3b signature (the
+  GEOMETRY-3 CLOSE, LIFT-ATTEMPT, and PROBE 5 blocks at the end of this
+  row); the 3b close was an owner-court fork, since ruled. default-app's reload
   STEP LIFTED 2026-08-28 — the owner ruled the SURFACE reading of the
   probe bar, under which its evidence was already complete (the LIFT block
   at the end of this row). lunch-poll-vote's lift was ATTEMPTED the same
@@ -7891,6 +7898,30 @@ supply; OW29/OW32/OW34 closed):
     every step, and strictly smaller than the pre-ruling residue).
     Where truly nothing ever records, the loud one-shot behavior stands
     — the correct floor under the wedge-loudly ruling.
+    **RULED-CLOSE LIFT (2026-08-28, this PR — the THIRD lift; the
+    ON-skip registry is EMPTY across all four suites and B1's
+    list-EMPTY precondition is met again):** the entry's lift condition
+    — "the owner-ruled 3b close … plus the ruled bar" — is met at this
+    head: the ruling is taken (the RULING block above), both mechanisms
+    are landed red-first with the full mutation ladder clean, and the
+    ruled local-plus-CI-probe bar's two halves are (1) campaign R, 8
+    counted runs quiet-and-loaded interleaved at the lift head (fresh
+    store + own 97xx port + posture probe per run, ensure defaulting
+    ON, toolshed self-sourced and sha-verified per ledger, LLM masked)
+    — the per-run ledgers, logs, and stores on the measuring box under
+    `/Users/berni/labs-worktrees/ruled-close-evidence/`, with the
+    ruled-close accounting per run (every closure-replication-* line
+    class counted; failed allowed only when followed by its heal) — and
+    (2) THIS PR's own ON-lane board as the DIRECT-CI UNSKIP PROBE
+    (PROBE 6 of the arc): ON shard 7 RUNS lunch-poll-vote, and the
+    probed surface's verdict decides under the ruled SURFACE reading.
+    A red at that surface WITHDRAWS this lift exactly per the arc's
+    standing clause — the entry is restored carrying the accumulated
+    map plus the new red's classification against the residue table
+    (which interleaving? the healed-too-late class? something new?),
+    and this block converts to a LIFT-ATTEMPT — the #6484 and #6502
+    precedent. The flip PR's list-EMPTY precondition is met; its bar
+    remains a green ON lane, not merely the empty registry.
 
     **OBSERVATION, not owed by this row and NOT one of the two entries —
     `cfc-group-chat-demo.test.ts` is failing ON at current main, 4/6, and
