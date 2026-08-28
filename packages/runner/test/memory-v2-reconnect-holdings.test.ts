@@ -15,9 +15,11 @@ import { defer, type Deferred } from "@commonfabric/utils/defer";
 import type { URI } from "@commonfabric/memory/interface";
 import {
   decodeMemoryBoundary,
+  DEFAULT_BRANCH,
   encodeMemoryBoundary,
   type EntityDocument,
   type SessionHolding,
+  type SessionSyncUpsert,
 } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
@@ -35,6 +37,7 @@ const space = signer.did();
 type Sent = {
   type?: string;
   requestId?: string;
+  space?: string;
   holdings?: SessionHolding[];
 };
 
@@ -66,8 +69,35 @@ class DroppableTransport implements MemoryV2Client.Transport {
   #waiting: Deferred<SessionHolding[]> | null = null;
   #verdictWaiting: Deferred<void> | null = null;
   #transactRequestId: string | null = null;
+  #space: string | null = null;
+  #sessionId: string | null = null;
+  #serverSeq = 0;
 
   constructor(private readonly server: MemoryV2Server.Server) {}
+
+  /** Hands the client a crafted fan-out frame, as though the server had
+   * pushed it: the way a test reaches frame shapes — a foreign branch, an
+   * explicit instance key, a tombstone — that the runner's own watches
+   * never request. */
+  inject(upserts: SessionSyncUpsert[]): void {
+    if (this.#space === null || this.#sessionId === null) {
+      throw new Error("inject before a session opened");
+    }
+    const toSeq = this.#serverSeq + 1;
+    this.#receiver(encodeMemoryBoundary({
+      type: "session/effect",
+      space: this.#space,
+      sessionId: this.#sessionId,
+      effect: {
+        type: "sync",
+        fromSeq: this.#serverSeq,
+        toSeq,
+        upserts,
+        removes: [],
+      },
+    } as never));
+    this.#serverSeq = toSeq;
+  }
 
   /** Resolves once the next `transact` request is answered, correlated by
    * requestId so no other response — a reconnect's `session.open` among
@@ -81,9 +111,12 @@ class DroppableTransport implements MemoryV2Client.Transport {
 
   async send(payload: string): Promise<void> {
     const message = decodeMemoryBoundary(payload) as Sent;
-    if (message.type === "session.open" && message.holdings !== undefined) {
-      this.#waiting?.resolve(message.holdings);
-      this.#waiting = null;
+    if (message.type === "session.open") {
+      this.#space = message.space ?? this.#space;
+      if (message.holdings !== undefined) {
+        this.#waiting?.resolve(message.holdings);
+        this.#waiting = null;
+      }
     }
     if (message.type === "transact" && this.#verdictWaiting !== null) {
       this.#transactRequestId = message.requestId ?? null;
@@ -124,18 +157,32 @@ class DroppableTransport implements MemoryV2Client.Transport {
   private connection(): ReturnType<MemoryV2Server.Server["connect"]> {
     if (this.#connection === null) {
       this.#connection = this.server.connect((message) => {
-        const framed = message as { type?: string; requestId?: string };
+        const framed = message as {
+          type?: string;
+          requestId?: string;
+          ok?: { sessionId?: string; serverSeq?: number };
+          effect?: { toSeq?: number };
+        };
         if (this.dropEffects && framed.type === "session/effect") {
           return;
         }
-        if (
-          framed.type === "response" &&
-          framed.requestId !== undefined &&
-          framed.requestId === this.#transactRequestId
-        ) {
-          this.#transactRequestId = null;
-          this.#verdictWaiting?.resolve();
-          this.#verdictWaiting = null;
+        if (framed.type === "response") {
+          if (framed.ok?.sessionId !== undefined) {
+            this.#sessionId = framed.ok.sessionId;
+          }
+          if (framed.ok?.serverSeq !== undefined) {
+            this.#serverSeq = Math.max(this.#serverSeq, framed.ok.serverSeq);
+          }
+          if (
+            framed.requestId !== undefined &&
+            framed.requestId === this.#transactRequestId
+          ) {
+            this.#transactRequestId = null;
+            this.#verdictWaiting?.resolve();
+            this.#verdictWaiting = null;
+          }
+        } else if (framed.effect?.toSeq !== undefined) {
+          this.#serverSeq = Math.max(this.#serverSeq, framed.effect.toSeq);
         }
         this.#receiver(encodeMemoryBoundary(message));
       });
@@ -228,5 +275,54 @@ describe("memory-v2 reconnect holdings", () => {
     await storageManager.synced();
     expect((provider.get(held) as { value?: { held?: number } })?.value?.held)
       .toBe(2);
+  });
+
+  it("declares a tombstone as deleted and a foreign branch by name, and leaves a keyed instance unstated", async () => {
+    const server = new MemoryV2Server.Server({
+      ...TEST_MEMORY_SERVER_AUTH,
+      store: new URL(`memory://runner-v2-holdings-${crypto.randomUUID()}`),
+    });
+    const transport = new DroppableTransport(server);
+    const storageManager = TestStorageManager.create({
+      as: signer,
+      memoryHost: new URL("memory://runner-v2-holdings"),
+    }, new SingleSessionFactory(transport));
+    cleanups.push(() => storageManager.close(), () => server.close());
+    const held = `of:memory-v2-held-${crypto.randomUUID()}` as URI;
+    const branched = `of:memory-v2-branched-${crypto.randomUUID()}` as URI;
+    const keyed = `of:memory-v2-keyed-${crypto.randomUUID()}` as URI;
+    const tomb = `of:memory-v2-tomb-${crypto.randomUUID()}` as URI;
+    const provider = storageManager.open(space) as TestProvider;
+    await provider.sync(held);
+    await storageManager.synced();
+
+    // Frame shapes the runner's own watches never request, delivered as
+    // the server would push them: a document on another branch, one under
+    // an explicit foreign instance key (a lease-holder frame), and a
+    // tombstone. The declaration must name the branch and the deletion,
+    // and must leave the keyed instance unstated — the wire declares
+    // instances by scope name, so claiming it would claim the session's
+    // own instance instead.
+    transport.inject([
+      { branch: "b", id: branched, seq: 1, doc: { value: { b: 1 } } },
+      {
+        branch: DEFAULT_BRANCH,
+        id: keyed,
+        scope: "user",
+        scopeKey: "user:foreign",
+        seq: 1,
+        doc: { value: { k: 1 } },
+      },
+      { branch: DEFAULT_BRANCH, id: tomb, seq: 1, deleted: true },
+    ] as SessionSyncUpsert[]);
+
+    const declared = await transport.reconnectDeclaring();
+    const branchHolding = declared.find((holding) => holding.id === branched);
+    assert(branchHolding !== undefined, "the branched document is declared");
+    expect(branchHolding.branch).toBe("b");
+    const tombHolding = declared.find((holding) => holding.id === tomb);
+    assert(tombHolding !== undefined, "the tombstone is declared");
+    expect(tombHolding.deleted).toBe(true);
+    expect(declared.some((holding) => holding.id === keyed)).toBe(false);
   });
 });

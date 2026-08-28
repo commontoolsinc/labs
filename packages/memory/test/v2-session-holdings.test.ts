@@ -282,6 +282,26 @@ describe("session holdings", () => {
     expect(ids(sync.upserts)).toEqual(["of:holdings-a"]);
   });
 
+  it("fails a watch.set whose declared holdings do not parse", async () => {
+    // A declaration the server cannot spell — here a non-string branch —
+    // fails the whole message as unparseable rather than silently
+    // degrading to full delivery.
+    const reader = await connect(server);
+    const session = (await open(reader, READER)).sessionId;
+    await reader.connection.receive(encodeMemoryBoundary({
+      type: "session.watch.set",
+      requestId: nextRequestId("watch"),
+      space: SPACE,
+      sessionId: session,
+      watches,
+      holdings: [{ id: "of:holdings-a", branch: 7, seq: 3 }],
+    } as never));
+    const response = shiftMessage(reader.messages) as ResponseMessage<
+      WatchSetResult
+    >;
+    expect(response.error?.name).toBe("InvalidMessageError");
+  });
+
   it("retracts a declaration resumed onto a session with no watches", async () => {
     // Zero watches cover nothing: the declared holdings are removed and
     // nothing lingers as delivery memory or tracked demand — a following
