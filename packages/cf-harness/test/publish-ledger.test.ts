@@ -16,22 +16,45 @@ interface RecordedCall {
   body: Record<string, unknown>;
 }
 
+/**
+ * A stub index whose `settled` resolves when a function has ANSWERED, not
+ * when a wall-clock delay has passed. The ledger deliberately does not await
+ * its own publications, so the call answering is the only event a test can
+ * hang on for one — and it is a real event, which is what
+ * `docs/development/waiting-in-tests.md` asks for in place of a sleep.
+ */
 const stubClient = (options: { fail?: boolean; created?: boolean } = {}) => {
   const calls: RecordedCall[] = [];
+  const waiters: { fn: string; count: number; resolve: () => void }[] = [];
+  const answered: Record<string, number> = {};
+  const announce = (fn: string) => {
+    answered[fn] = (answered[fn] ?? 0) + 1;
+    for (let index = waiters.length - 1; index >= 0; index -= 1) {
+      const waiter = waiters[index];
+      if (waiter.fn === fn && answered[fn] >= waiter.count) {
+        waiters.splice(index, 1);
+        waiter.resolve();
+      }
+    }
+  };
   const fetchFn: HarnessFetch = (input, init) => {
     const fn = String(input).split("/").pop() ?? "";
     const body = JSON.parse(
       typeof init?.body === "string" ? init.body : "{}",
     ) as Record<string, unknown>;
     calls.push({ fn, body });
+    const answer = (response: Response): Promise<Response> => {
+      announce(fn);
+      return Promise.resolve(response);
+    };
     if (fn === "publishPattern" && options.fail === true) {
-      return Promise.resolve(
+      return answer(
         new Response(JSON.stringify({ error: "index is down" }), {
           status: 500,
         }),
       );
     }
-    return Promise.resolve(
+    return answer(
       new Response(
         JSON.stringify(
           fn === "publishPattern"
@@ -47,7 +70,16 @@ const stubClient = (options: { fail?: boolean; created?: boolean } = {}) => {
     fetchFn,
     signer,
   });
-  return { calls, getClient: () => Promise.resolve(client) };
+  return {
+    calls,
+    getClient: () => Promise.resolve(client),
+    settled(fn: string, count: number): Promise<void> {
+      if ((answered[fn] ?? 0) >= count) return Promise.resolve();
+      return new Promise<void>((resolve) => {
+        waiters.push({ fn, count, resolve });
+      });
+    },
+  };
 };
 
 const request = (
@@ -130,13 +162,15 @@ describe("pattern index publication ledger", () => {
       // Only the latest of each capability is at risk if the session dies, so
       // the displaced one has to be gone BEFORE the flush — measured before
       // it, since after it the two sends are indistinguishable.
-      const { calls, getClient } = stubClient();
+      const { calls, getClient, settled } = stubClient();
       const ledger = createPatternIndexPublicationLedger(getClient);
       ledger.stage(request("first"));
       ledger.stage(request("second"));
-      // `stage` does not await, so the send is on the ledger's own chain;
-      // draining it is what a session dying mid-way would not do.
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      // `stage` does not await, so the displaced send rides the ledger's own
+      // chain. Waiting on that call ANSWERING is the event; a wall-clock
+      // delay would be guessing at how long the chain takes, which is how
+      // this test first failed in CI and passed here.
+      await settled("publishPattern", 1);
       expect(publishes(calls).map((call) => call.body.patternId)).toEqual([
         "first",
       ]);
