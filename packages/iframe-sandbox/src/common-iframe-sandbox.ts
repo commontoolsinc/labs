@@ -60,10 +60,14 @@ export class CommonIframeSandboxElement extends LitElement {
 
   /** The capability session belonging to the currently loaded guest. */
   #guestHost: FabricBridgeHost | undefined;
-  // Reached into by `test/iframe.test.ts`, which asserts the outer-ready
-  // refusal where it is made: a frame reports itself ready once, and that
-  // message cannot be sent from anywhere else. `#` would make the assertion
-  // unreachable, so these three stay TypeScript-private.
+  /**
+   * The frame this element renders, held so the guest can be reached through
+   * it. TypeScript-private rather than `#`, as `readyWindow` and
+   * `onOuterReady` also are, because `test/iframe.test.ts` reaches for all
+   * three: it asserts the outer-ready refusal where the refusal is made, and
+   * a frame reports itself ready exactly once, from a window nothing outside
+   * this element can speak for.
+   */
   private iframeRef: Ref<HTMLIFrameElement> = createRef();
 
   /**

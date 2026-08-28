@@ -4,7 +4,7 @@ import { serveDir } from "@std/http/file-server";
 const DEV_SOCKET = "DEV_SOCKET.js";
 
 export class DevServer {
-  #_server: Deno.HttpServer;
+  #server: Deno.HttpServer;
   #outDir: string;
   #sockets: WebSocket[] = [];
   #html: string;
@@ -36,7 +36,7 @@ export class DevServer {
     this.#staticDirs = staticDirs;
     this.#html = this.#getHtml({ useReloadSocket, outDir });
     this.#socketScript = this.#getSocketScript({ hostname, port });
-    this.#_server = Deno.serve(
+    this.#server = Deno.serve(
       {
         port,
         hostname,

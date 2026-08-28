@@ -35,18 +35,18 @@ function groundedSourceName(relativePath: string): string {
 
 export class InMemoryProgram implements ProgramResolver {
   #modules: Record<string, string>;
-  #_main: string;
+  #main: string;
   constructor(main: string, modules: Record<string, string>) {
     this.#modules = modules;
-    this.#_main = main;
+    this.#main = main;
   }
 
   main(): Promise<Source> {
-    const main = this.#modules[this.#_main];
+    const main = this.#modules[this.#main];
     if (main === undefined) {
-      throw new Error(`${this.#_main} not in modules.`);
+      throw new Error(`${this.#main} not in modules.`);
     }
-    return Promise.resolve({ name: this.#_main, contents: main });
+    return Promise.resolve({ name: this.#main, contents: main });
   }
 
   resolveSource(identifier: string): Promise<Source | undefined> {
@@ -118,7 +118,7 @@ export function decodeDataFile(bytes: Uint8Array, name: string): string {
 export class FileSystemProgramResolver implements ProgramResolver {
   #fsRoot: string;
   #realFsRoot: string;
-  #_main: Source;
+  #main: Source;
   constructor(mainPath: string, rootPath?: string) {
     this.#fsRoot = normalize(rootPath ?? dirname(mainPath));
     const normalizedMainPath = normalize(mainPath);
@@ -135,14 +135,14 @@ export class FileSystemProgramResolver implements ProgramResolver {
         `Main file "${mainPath}" must be within root directory "${this.#fsRoot}".`,
       );
     }
-    this.#_main = {
+    this.#main = {
       name: groundedSourceName(relativeMainPath),
       contents: this.#readFile(realMainPath),
     };
   }
 
   main(): Promise<Source> {
-    return Promise.resolve(this.#_main);
+    return Promise.resolve(this.#main);
   }
 
   resolveSource(specifier: string): Promise<Source | undefined> {
