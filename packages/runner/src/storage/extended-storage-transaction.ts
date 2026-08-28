@@ -1815,6 +1815,13 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // code (audit S18). The runtime's own persistence is the one legitimate
     // writer, so it alone is exempt.
     let reasons: string[];
+    // Each pass describes its own verdict. Diagnostics are append-only
+    // history on purpose — an observe-mode rollout wants every divergence a
+    // transaction ever produced — but a detail is paired to a reason THIS
+    // pass recorded, so carrying one forward from a pass that a later prepare
+    // superseded would render the same refusal twice, or render one the
+    // current verdict no longer holds.
+    this.#cfcState.refusalDetails = [];
     try {
       // The schema-doc materialization is INSIDE the try on purpose: it is
       // part of commit-prep, and a crash in it must take the same modeled
