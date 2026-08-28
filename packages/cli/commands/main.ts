@@ -37,7 +37,13 @@ function envStatus(): string {
     lines.push(`  CF_API_URL  = ${apiUrl} (set, no need to pass --api-url)`);
   }
   if (space) {
-    lines.push(`  CF_SPACE    = ${space} (set, no need to pass --space)`);
+    // Named rather than promised generally: `ingest`, `fuse` and `check` take
+    // a space and do not read this, so a blanket "no need to pass --space"
+    // would be wrong exactly where a caller is most surprised to be asked.
+    lines.push(
+      `  CF_SPACE    = ${space} (set, no need to pass --space on piece, ` +
+        `get/set/call, wish, acl, deps)`,
+    );
   }
   return lines.join("\n");
 }

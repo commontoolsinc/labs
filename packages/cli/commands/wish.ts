@@ -189,8 +189,9 @@ export const wish = new Command()
   })
   .option(
     "-s,--space <space:string>",
-    "Space name or DID to connect to. Defaults to the identity's home space " +
-      "(where profile targets resolve regardless).",
+    "Space name or DID to connect to, overriding CF_SPACE. Falls back to " +
+      "CF_SPACE, then to the identity's home space (where profile targets " +
+      "resolve regardless).",
   )
   .option(
     "-p,--path <path:string>",

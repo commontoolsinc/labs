@@ -7,6 +7,7 @@ import {
 } from "@commonfabric/memory/acl";
 import { loadPieces, type SpaceConfig } from "./piece.ts";
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
+import { noteWroteTo } from "./write-receipt.ts";
 
 // Open the space and hand an ACLManager to `run`. The ACL document is
 // addressed by the space DID and read through the ACLManager, so the space
@@ -34,6 +35,7 @@ export async function setAclEntry(
 ): Promise<void> {
   const userDid = userToACLUser(user);
   await withAcl(config, (acl) => acl.set(userDid, capability));
+  noteWroteTo(config.space);
 }
 
 // Remove an ACL entry for a DID
@@ -43,6 +45,7 @@ export async function removeAclEntry(
 ): Promise<void> {
   const userDid = userToACLUser(user);
   await withAcl(config, (acl) => acl.remove(userDid));
+  noteWroteTo(config.space);
 }
 
 // Get the current ACL for a space

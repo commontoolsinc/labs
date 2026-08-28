@@ -1424,6 +1424,10 @@ export async function newPiece(
       clearTimeout(timer)
     );
   });
+  // Here rather than after the registry add below: the piece now exists in
+  // the space, and a slug or registry step that throws afterwards leaves a
+  // partial write that the operator is owed the location of.
+  noteWroteTo(config.space);
 
   if (options?.slug) {
     await timeCliPhase(
@@ -1438,7 +1442,6 @@ export async function newPiece(
     () => pieces.add([piece.getCell()]),
   );
 
-  noteWroteTo(config.space);
   return piece.id;
 }
 
@@ -3589,6 +3592,9 @@ export async function linkSqliteDiskSource(
     handle.withTx(tx).set({ id, tables: {}, rev: 0 });
   });
   if (writeRes.error) throw writeRes.error;
+  // The handle is committed, so the space has been written to whether or not
+  // the registration and link below succeed.
+  noteWroteTo(config.space);
 
   // 2. Register the on-disk source with the server (read-only attach for `id`).
   const provider = pieces.runtime.storageManager.open(space);
@@ -3609,7 +3615,6 @@ export async function linkSqliteDiskSource(
     targetScope: options?.targetScope,
   });
   await pieces.synced();
-  noteWroteTo(config.space);
 }
 
 export class LinkValidationError extends Error {

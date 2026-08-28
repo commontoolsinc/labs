@@ -1439,7 +1439,8 @@ const PIECE_REGISTRY_LINK_EXAMPLE = [
 function pieceEnvStatus(): string {
   const identity = Deno.env.get("CF_IDENTITY");
   const apiUrl = Deno.env.get("CF_API_URL");
-  if (!identity && !apiUrl) return "";
+  const space = Deno.env.get("CF_SPACE");
+  if (!identity && !apiUrl && !space) return "";
   const lines: string[] = ["", "ENVIRONMENT:"];
   if (identity) {
     lines.push(
@@ -1449,6 +1450,11 @@ function pieceEnvStatus(): string {
   if (apiUrl) {
     lines.push(
       `  CF_API_URL  = ${apiUrl} (set, no need to pass --api-url)`,
+    );
+  }
+  if (space) {
+    lines.push(
+      `  CF_SPACE    = ${space} (set, no need to pass --space)`,
     );
   }
   return lines.join("\n");
@@ -4644,7 +4650,16 @@ export function readCallTarget(
 export function parseSpaceOptions(
   input: PieceCLIOptions,
 ): SpaceConfig {
-  if (input.url && input.space) {
+  // The refusal is about two explicit spellings of one target, not about an
+  // ambient default a more specific spelling overrides: a caller who exports
+  // `CF_SPACE` for a session must still be able to paste a URL. `--url`
+  // supplies the space itself below, so the ambient value is replaced rather
+  // than reconciled. Cliffy merges an environment value into the option and
+  // keeps no record of which it was, so comparing against the variable is how
+  // that provenance is recovered.
+  const spaceIsAmbient = input.space !== undefined &&
+    input.space === Deno.env.get("CF_SPACE");
+  if (input.url && input.space && !spaceIsAmbient) {
     throw new ValidationError(
       `"--space" cannot be provided when using "--url".`,
       { exitCode: 1 },

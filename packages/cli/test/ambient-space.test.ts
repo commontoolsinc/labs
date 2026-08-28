@@ -83,6 +83,28 @@ describe("an ambient space", () => {
     );
   });
 
+  it("leaves the --url spelling working, rather than reading as a conflict", async () => {
+    // `--url` carries its own space and refuses an explicit `--space` beside
+    // it. An ambient one is not a second spelling of the target, so exporting
+    // CF_SPACE for a session must not take the URL form away.
+    const { stderr } = await cf("piece ls --url http://localhost:9999/aspace", {
+      env: { ...FABRIC, CF_SPACE: AMBIENT },
+    });
+    expect(errorText(stderr)).not.toContain(
+      '"--space" cannot be provided when using "--url"',
+    );
+  });
+
+  it("still refuses an explicit --space beside --url", async () => {
+    const { stderr } = await cf(
+      `piece ls --url http://localhost:9999/aspace --space ${EXPLICIT}`,
+      { env: FABRIC },
+    );
+    expect(errorText(stderr)).toContain(
+      '"--space" cannot be provided when using "--url"',
+    );
+  });
+
   it("loses to the flag, which is what makes it safe to leave set", async () => {
     // A guard against a future precedence change rather than a test of this
     // one: the flag decided the space before the variable existed, so removing
