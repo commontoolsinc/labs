@@ -618,18 +618,16 @@ type RuntimeOperationSession = {
   subscriptions: Set<string>;
 };
 
-/**
- * Serves one runtime's requests on behalf of a client.
- *
- * Its members stay TypeScript-private rather than becoming `#` names, which is
- * the convention elsewhere. `test/backends/runtime-processor.test.ts` drives
- * this class by calling methods off `RuntimeProcessor.prototype` against a
- * stand-in receiver — in places a plain object literal holding just the one
- * field a handler reads. A `#` name is scoped to real instances, so every such
- * call would throw `Receiver must be an instance of class RuntimeProcessor`.
- * Converting the class means rewriting that suite to build real instances.
- */
 export class RuntimeProcessor {
+  // These members stay TypeScript-private rather than becoming `#` names, which
+  // is the convention elsewhere. `test/backends/runtime-processor.test.ts`
+  // drives this class by calling methods off `RuntimeProcessor.prototype`
+  // against a stand-in receiver — in places a plain object literal holding just
+  // the one field a handler reads. A `#` name is scoped to real instances, so
+  // every such call would throw `Receiver must be an instance of class
+  // RuntimeProcessor`. Converting the class means rewriting that suite to build
+  // real instances.
+
   private runtime: Runtime;
   private cc: PiecesController;
   private spaces = new Map<DID, PiecesController>();
