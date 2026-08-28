@@ -1,0 +1,100 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "IframeInputData": {
+        "properties": {
+          "options": {
+            "items": {
+              "$ref": "#/$defs/PollOption"
+            },
+            "type": "array"
+          },
+          "question": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "options"
+        ],
+        "type": "object"
+      },
+      "IframeOutputData": {
+        "properties": {},
+        "type": "object"
+      },
+      "PollOption": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "input": {
+        "$ref": "#/$defs/IframeInputData"
+      },
+      "output": {
+        "$ref": "#/$defs/IframeOutputData",
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "user"
+          }
+        ]
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "iframe-team-poll/main.tsx",
+  "resultSchema": {
+    "$defs": {
+      "IframeOutputData": {
+        "properties": {},
+        "type": "object"
+      },
+      "IframeStateData": {
+        "properties": {
+          "ballots": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "properties": {},
+            "type": "object"
+          }
+        },
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "output": {
+        "$ref": "#/$defs/IframeOutputData"
+      },
+      "state": {
+        "$ref": "#/$defs/IframeStateData"
+      }
+    },
+    "required": [
+      "state",
+      "output",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}

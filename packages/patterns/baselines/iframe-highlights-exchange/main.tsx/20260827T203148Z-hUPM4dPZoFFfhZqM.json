@@ -1,0 +1,145 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "IframeInputData": {
+        "properties": {
+          "prompt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "type": "object"
+      },
+      "IframeStateData": {
+        "properties": {
+          "notes": {
+            "items": {
+              "$ref": "#/$defs/PrivateNote"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "notes"
+        ],
+        "type": "object"
+      },
+      "PrivateNote": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "input": {
+        "$ref": "#/$defs/IframeInputData"
+      },
+      "state": {
+        "$ref": "#/$defs/IframeStateData",
+        "asCell": [
+          {
+            "kind": "cell",
+            "scope": "user"
+          }
+        ]
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "iframe-highlights-exchange/main.tsx",
+  "resultSchema": {
+    "$defs": {
+      "IframeOutputData": {
+        "properties": {
+          "highlights": {
+            "items": {
+              "$ref": "#/$defs/SharedHighlight"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "highlights"
+        ],
+        "type": "object"
+      },
+      "IframeStateData": {
+        "properties": {
+          "notes": {
+            "items": {
+              "$ref": "#/$defs/PrivateNote"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "notes"
+        ],
+        "type": "object"
+      },
+      "PrivateNote": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text"
+        ],
+        "type": "object"
+      },
+      "SharedHighlight": {
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "text"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "output": {
+        "$ref": "#/$defs/IframeOutputData"
+      },
+      "state": {
+        "$ref": "#/$defs/IframeStateData"
+      }
+    },
+    "required": [
+      "state",
+      "output",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}
