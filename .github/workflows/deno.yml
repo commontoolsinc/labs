@@ -8,8 +8,17 @@ on:
     branches:
       - main
 
+# Runs of a pull request are grouped by the pull request, and a new push to the
+# branch cancels the run already going. Runs of a push to main are grouped by
+# the commit that was pushed, and a push run is never cancelled: it may be
+# part-way through deploying that commit to staging. Main can receive the same
+# head commit twice, which starts two runs of one commit, and the commit as the
+# group makes the second of them wait for the first. Each run publishes a
+# release artifact named after the commit, and two runs publishing at once
+# leave one run's tarball beside the other run's checksum. See "One commit, one
+# set of artifacts" in docs/development/deploying.md.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # The bounds the jobs below are built from. They are YAML anchors, used as
@@ -2127,12 +2136,31 @@ jobs:
       - name: ⚙️ Setup Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
 
+      # A release artifact is named after the commit it was built from, and a
+      # host keeps whatever it has already downloaded under that name. So the
+      # first build of a commit publishes the artifact and a later build of the
+      # same commit leaves it alone. Two builds of one commit do not produce the
+      # same bytes: the binaries are compiled again, and `tar` records
+      # modification times.
+      #
+      # The tarball and its checksum are published as a pair. A commit that has
+      # one of them and not the other was published by a build that stopped
+      # between the two copies, and this publishes both of them again. See "One
+      # commit, one set of artifacts" in docs/development/deploying.md.
       - name: 📤 Upload artifacts to Google Cloud Storage
         run: |
-          gsutil cp release/labs-${{ github.sha }}.tar.gz gs://commontools-build-artifacts/workspace-artifacts/
-          gsutil cp release/labs-${{ github.sha }}.hash.txt gs://commontools-build-artifacts/workspace-artifacts/
+          BUCKET=gs://commontools-build-artifacts/workspace-artifacts
+          TARBALL=labs-${{ github.sha }}.tar.gz
+          CHECKSUM=labs-${{ github.sha }}.hash.txt
 
-          # Print clickable links to the uploaded files
+          if gsutil -q stat "$BUCKET/$TARBALL" && gsutil -q stat "$BUCKET/$CHECKSUM"; then
+            echo "An earlier build of ${{ github.sha }} published its artifacts; leaving them as they are."
+          else
+            gsutil cp "release/$TARBALL" "$BUCKET/"
+            gsutil cp "release/$CHECKSUM" "$BUCKET/"
+          fi
+
+          # Print clickable links to the published files
           echo "::group::📦 Artifact Links"
           echo "Tarball URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.tar.gz"
           echo "Hash URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.hash.txt"
@@ -2141,7 +2169,7 @@ jobs:
           # combine step produced it. To download it for a given commit:
           #   gsutil cp gs://commontools-build-artifacts/workspace-artifacts/labs-<commit-sha>.lcov .
           if [ -f release/labs-${{ github.sha }}.lcov ]; then
-            gsutil cp release/labs-${{ github.sha }}.lcov gs://commontools-build-artifacts/workspace-artifacts/
+            gsutil cp "release/labs-${{ github.sha }}.lcov" "$BUCKET/"
             echo "Coverage LCOV URL: https://storage.cloud.google.com/commontools-build-artifacts/workspace-artifacts/labs-${{ github.sha }}.lcov"
           fi
           echo "::endgroup::"
