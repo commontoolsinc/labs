@@ -256,6 +256,41 @@ describe("pattern index publication ledger", () => {
       expect(second?.body.priorPatternId).toBe("first");
     });
 
+    it("publishes a request whose dependency it does not hold", async () => {
+      // Nothing here produces a cycle — a dependency is the content-addressed
+      // identity of something that already compiled — but a request naming a
+      // dependency this session never staged must still be sent rather than
+      // held forever waiting for its turn.
+      const { calls, getClient } = stubClient();
+      const ledger = createPatternIndexPublicationLedger(getClient);
+      ledger.stage(
+        request("composite", { dependencies: ["never-staged-here"] }),
+      );
+      await ledger.flush();
+      expect(publishes(calls).map((call) => call.body.patternId)).toEqual([
+        "composite",
+      ]);
+    });
+
+    it("publishes requests that name each other rather than holding them forever", async () => {
+      // Content-addressed identities cannot form a cycle — a dependency
+      // compiled before the thing that imports it — so this shape does not
+      // arise. The ordering does not assume that: what it cannot order it
+      // still sends, because holding a contribution forever is worse than
+      // sending it in an order the index may refuse.
+      const { calls, getClient } = stubClient();
+      const ledger = createPatternIndexPublicationLedger(getClient);
+      ledger.stage(
+        request("one", { description: "One", dependencies: ["two"] }),
+      );
+      ledger.stage(
+        request("two", { description: "Two", dependencies: ["one"] }),
+      );
+      await ledger.flush();
+      expect(publishes(calls).map((call) => call.body.patternId).sort())
+        .toEqual(["one", "two"]);
+    });
+
     it("reports a failed publication without throwing it at the session", async () => {
       const errors: string[] = [];
       const { getClient } = stubClient({ fail: true });

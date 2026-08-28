@@ -506,6 +506,15 @@ export const syntheticArgument = (
  * Handlers the reconciler registers are never invoked: nothing dispatches
  * events at a document nobody is looking at.
  *
+ * `mount` defaults to the real reconciler-and-applicator pair. It is a
+ * parameter because the error channel `renderInProcess` offers cannot
+ * otherwise be exercised: no `$UI` a pattern can express reaches it — a child
+ * that is not a node, a tag name that is not a tag, a style that is not an
+ * object, a cyclic tree and a bare string all render without a complaint —
+ * and a verdict drawn from a channel nobody has seen fire is a check that
+ * reports the same thing whether or not it ran. Supplying the mount is how
+ * the arm that reads those errors is tested rather than assumed.
+ *
  * Returns `undefined` when the result carries no `$UI` at all. That test goes
  * through `uiSchema` rather than reading the raw result, and the difference is
  * not cosmetic: a pattern that DECLARES its result type — `pattern<Io, Io>`,
@@ -522,6 +531,7 @@ export const syntheticArgument = (
 export const renderPatternUiToHtml = async (
   resultCell: Cell<unknown>,
   idle: () => Promise<void>,
+  mount: typeof renderInProcess = renderInProcess,
 ): Promise<
   { html: string; errors: readonly string[]; truncated: boolean } | undefined
 > => {
@@ -537,12 +547,12 @@ export const renderPatternUiToHtml = async (
     '<!DOCTYPE html><html><body><div id="root"></div></body></html>',
   );
   const { document, renderOptions } = mock;
-  const container = document.getElementById("root");
-  if (container === null) {
-    throw new Error("the mock document has no render container");
-  }
+  // The container is the div this function just parsed into the document a
+  // line above, so there is no case where it is absent — the assertion is on
+  // the literal, not on anything a caller supplies.
+  const container = document.getElementById("root") as HTMLElement;
   const errors: string[] = [];
-  const render = renderInProcess(container, uiCell.key(UI), {
+  const render = mount(container, uiCell.key(UI), {
     document,
     setProp: renderOptions.setProp,
     onError: (error) => {
@@ -567,7 +577,10 @@ export const renderPatternUiToHtml = async (
  * whether it dropped anything. Counting walks the tree without building a
  * string, so a runaway render costs the walk rather than the serialization.
  */
-const cutTreeToNodeBudget = (container: Element): boolean => {
+export const cutTreeToNodeBudget = (
+  container: Element,
+  budget: number = PROBE_MAX_NODES,
+): boolean => {
   // The mock document's nodes are `domhandler` nodes carrying only the small
   // surface the renderer needs — `children`, `remove()`, `innerHTML` — so the
   // walk uses that and nothing more. `children` on a text node is undefined,
@@ -581,12 +594,12 @@ const cutTreeToNodeBudget = (container: Element): boolean => {
     return seen;
   };
   const node = container as unknown as { children?: unknown[] };
-  if (size(node, PROBE_MAX_NODES) < PROBE_MAX_NODES) return false;
+  if (size(node, budget) < budget) return false;
   let kept = 0;
   for (const child of [...(node.children ?? [])]) {
     const typed = child as { children?: unknown[]; remove?: () => void };
-    if (kept >= PROBE_MAX_NODES) typed.remove?.();
-    else kept += 1 + size(typed, PROBE_MAX_NODES);
+    if (kept >= budget) typed.remove?.();
+    else kept += 1 + size(typed, budget);
   }
   return true;
 };
@@ -612,8 +625,18 @@ const cutTreeToNodeBudget = (container: Element): boolean => {
  */
 export const classifyRenderedHtml = (
   html: string,
-): "ui-rendered" | "ui-default-tostring" | "ui-rendered-empty" => {
+  errors: readonly string[] = [],
+):
+  | "ui-rendered"
+  | "ui-default-tostring"
+  | "ui-rendered-empty"
+  | "probe-failed" => {
   if (DEFAULT_TO_STRING.test(html)) return "ui-default-tostring";
+  // A render the reconciler complained about is no evidence either way: the
+  // tree read back is whatever got applied before the complaint. The marker
+  // above outranks it, because a marker is positive evidence about what the
+  // pattern does regardless of how complete the render was.
+  if (errors.length > 0) return "probe-failed";
   // Text alone is the wrong test, and measurably so: a form of labelled
   // fields with placeholders — `<cf-field label="Email"><cf-input
   // placeholder="email@example.com">` — renders correctly and carries no

@@ -168,32 +168,26 @@ export const createPatternIndexPublicationLedger = (
     async flush() {
       // Dependency order, not staging order. Staging order happens to be
       // right whenever a dependency was authored before the entry composing
-      // it — which is what a `cf:pattern:` import needing to resolve at
-      // compile time forces — but the index rejects a publication whose
-      // dependency it does not hold, so the ordering is made rather than
-      // relied upon. A cycle cannot arise from content-addressed identities,
-      // and any request whose turn never comes is still sent, after the ones
-      // that could be ordered.
+      // it — which a `cf:pattern:` import needing to resolve at compile time
+      // forces — but the index rejects a publication whose dependency it does
+      // not hold, so the ordering is made rather than relied upon.
+      //
+      // A pass rather than a loop-until-no-progress: `stage()` already sends
+      // any held entry a later request names among its dependencies, so no
+      // two held entries can name each other and the ordering has no residue
+      // case to fall back on. Counting each entry's held dependencies and
+      // sending in that order cannot leave anything unsent, which is a
+      // property of the shape rather than a claim about the input.
       const pending = [...held];
       held.clear();
-      const sent = new Set<string>();
-      let progress = true;
-      while (pending.length > 0 && progress) {
-        progress = false;
-        for (let i = 0; i < pending.length; i++) {
-          const [key, request] = pending[i];
-          const waiting = (request.dependencies ?? []).some((dependency) =>
-            !sent.has(dependency) &&
-            pending.some(([, other]) => other.patternId === dependency)
-          );
-          if (waiting) continue;
-          pending.splice(i--, 1);
-          sent.add(request.patternId);
-          send(key, request, false);
-          progress = true;
-        }
+      const heldIds = new Set(pending.map(([, request]) => request.patternId));
+      const depth = ([, request]: [string, PatternIndexPublishRequest]) =>
+        (request.dependencies ?? []).filter((id) => heldIds.has(id)).length;
+      for (
+        const [key, request] of pending.sort((a, b) => depth(a) - depth(b))
+      ) {
+        send(key, request, false);
       }
-      for (const [key, request] of pending) send(key, request, false);
       await chain;
     },
   };

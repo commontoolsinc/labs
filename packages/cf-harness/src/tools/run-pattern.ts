@@ -479,35 +479,6 @@ const recordPatternIndexEvent = (
 };
 
 /**
- * Publishes an authored pattern to the index, without letting the publication
- * bear on the run that authored it. Like the usage events, this is a
- * contribution to a shared catalog rather than part of the tool's result: it
- * is not awaited, and a failure is logged. A publication the index answers as
- * already held (`created: false`) records nothing further — the entry was
- * created once, by whoever got there first.
- */
-const publishPatternToIndex = (
-  getClient: HarnessPatternIndexClientFactory,
-  request: PatternIndexPublishRequest,
-): void => {
-  void (async () => {
-    try {
-      const client = await getClient();
-      const response = await client.publishPattern(request);
-      if (response.created) {
-        recordPatternIndexEvent(getClient, response.patternId, "created");
-      }
-    } catch (error) {
-      console.error(
-        `run_pattern could not publish the pattern it ran to the pattern index: ${
-          errorMessage(error)
-        }`,
-      );
-    }
-  })();
-};
-
-/**
  * The entry path `compileAndSavePattern` wraps bare source under. Written out
  * here because the published program has to be the one the compile consumed,
  * down to the name its single file carries into the content hash.
@@ -1284,11 +1255,11 @@ export const runPatternTool: HarnessToolDefinition<
     recordOutcome("instantiated");
     // Stops the created piece without the usual `stopPiece` idle wait: an
     // abort path must not wait on the very scheduler the signal is escaping.
-    const stopPieceForAbort = () => {
+    const stopPiece = (cell: Cell<unknown>) => {
       try {
-        pieces.runtime.runner.stop(piece.getCell());
+        pieces.runtime.runner.stop(cell);
       } catch {
-        // Best-effort: the cancelled output stands either way.
+        // Best-effort: whatever outcome the caller reached stands either way.
       }
     };
     const barrier = (async () => {
@@ -1296,7 +1267,7 @@ export const runPatternTool: HarnessToolDefinition<
       await pieces.synced();
     })();
     if (await raceWithAbort(barrier, signal) === "aborted") {
-      stopPieceForAbort();
+      stopPiece(piece.getCell());
       return cancelledOutput();
     }
     const resultCell = await piece.result.getCell();
@@ -1535,75 +1506,68 @@ export const runPatternTool: HarnessToolDefinition<
         ...(html !== undefined ? { html } : {}),
       });
       let probeCell: Cell<unknown> | undefined;
-      try {
+      // One race over the whole probe rather than a check between each await.
+      // Cancellation has a single meaning here and therefore a single place
+      // that says so; an abort landing inside an await it does not interrupt
+      // arrives at the catch as an ordinary throw, which is why the catch
+      // consults the signal too.
+      const probe = async () => {
         probeCell = await pieces.runPersistent(
           pattern,
           synthetic.value,
           undefined,
           { start: true },
         );
-        const settle = (async () => {
-          await pieces.runtime.settled();
-          await pieces.synced();
-        })();
-        if (await raceWithAbort(settle, signal) === "aborted") {
-          return "cancelled";
-        }
+        await pieces.runtime.settled();
+        await pieces.synced();
         const probeResult = await new PieceController(pieces, probeCell)
           .result.getCell();
-        if (signal?.aborted === true) return "cancelled";
-        let rendered: Awaited<ReturnType<typeof renderPatternUiToHtml>>;
-        const render = (async () => {
-          rendered = await renderPatternUiToHtml(
-            probeResult,
-            () => pieces.runtime.idle(),
-          );
-        })();
-        if (await raceWithAbort(render, signal) === "aborted") {
-          return "cancelled";
-        }
-        if (rendered === undefined) {
-          return discoverable("no-ui");
-        }
+        const rendered = await renderPatternUiToHtml(
+          probeResult,
+          () => pieces.runtime.idle(),
+        );
+        if (rendered === undefined) return discoverable("no-ui");
         const html = rendered.html.length > PROBE_HTML_MAX_CHARS
           ? `${
             rendered.html.slice(0, PROBE_HTML_MAX_CHARS)
           }\n[truncated at ${PROBE_HTML_MAX_CHARS} characters]`
           : rendered.html;
-        const reason = classifyRenderedHtml(rendered.html);
-        // A default-`toString` in the output is positive evidence of a
-        // defect, and keeps the entry out of search however thin the
-        // synthetic instance was or whatever else the render reported. A
-        // render the reconciler complained about is no evidence either way,
-        // and is recorded as such rather than read as a pass.
-        if (reason === "ui-default-tostring") return recorded(reason, html);
-        if (rendered.errors.length > 0) return recorded("probe-failed", html);
-        if (reason === "ui-rendered-empty") return recorded(reason, html);
-        return discoverable(reason, html);
+        // What the render means is decided by `classifyRenderedHtml`; what
+        // that meaning costs is decided here. Only a default-`toString` is
+        // positive evidence of a defect — the rest are absences, recorded
+        // uncertified rather than condemned.
+        const reason = classifyRenderedHtml(rendered.html, rendered.errors);
+        return reason === "ui-rendered"
+          ? discoverable(reason, html)
+          : recorded(reason, html);
+      };
+      // One consultation of the signal, at the single exit. An abort reaches
+      // this function three ways — the race interrupts it, an await it does
+      // not interrupt throws, or it lands after a verdict — and all three
+      // mean the same thing: the run was cancelled, so nothing is recorded.
+      // Deciding that once is why there is no arm here that only one of the
+      // three orderings can take.
+      let outcome: Awaited<ReturnType<typeof probe>> = recorded("probe-failed");
+      try {
+        const work = (async () => {
+          outcome = await probe();
+        })();
+        // Raced rather than awaited so a probe that never settles cannot hold
+        // the run open; the value is not branched on, since the check below
+        // covers every way the abort could have arrived.
+        await raceWithAbort(work, signal);
       } catch (error) {
-        // An abort can land inside an await this function does not race —
-        // starting the probe, or loading its result cell — and arrives here
-        // as an ordinary throw. Reading that as "no verdict" would publish
-        // under a run that was cancelled, which is the defect the raced
-        // aborts above exist to prevent, so the signal is consulted before
-        // the throw is interpreted.
-        if (signal?.aborted === true) return "cancelled";
         // What a probe throws is the pattern's own text, which the artifact
         // keeps for the run's own failure paths and which has no reading here
         // beyond "no verdict". A defect in the GATE lands here too and reads
         // identically from outside, so its text goes to the artifact rather
         // than nowhere — a check that fails silently for its own reasons is
         // the failure this gate exists to remove.
-        return recorded("probe-failed", errorMessage(error));
+        outcome = recorded("probe-failed", errorMessage(error));
       } finally {
-        if (probeCell !== undefined) {
-          try {
-            pieces.runtime.runner.stop(probeCell);
-          } catch {
-            // Best-effort: the verdict stands either way.
-          }
-        }
+        if (probeCell !== undefined) stopPiece(probeCell);
       }
+      return signal?.aborted === true ? "cancelled" : outcome;
     };
     // Source the model wrote and successfully ran is contributed back to the
     // index, so the next run that needs this capability can find it instead
@@ -1615,9 +1579,16 @@ export const runPatternTool: HarnessToolDefinition<
     const description = input.description?.trim();
     let publication: RunPatternPublicationReport | undefined;
     let probeHtml: string | undefined;
+    // The engine hands the ledger over with the index client, in one spread,
+    // so requiring it here is the same condition as requiring the client —
+    // spelled twice because the type cannot say they arrive together. There is
+    // deliberately no second publish path: one that skipped the ledger would
+    // put back the per-iteration duplicates the ledger exists to prevent.
+    const publications = context.patternIndexPublications;
     if (
       patternId === undefined &&
       getPatternIndexClient !== undefined &&
+      publications !== undefined &&
       context.patternIndexPublishEnabled === true &&
       description !== undefined && description !== ""
     ) {
@@ -1691,14 +1662,7 @@ export const runPatternTool: HarnessToolDefinition<
               }
               : {}),
           };
-          // The session's ledger publishes once per capability, at the end of
-          // the session. A run invoked without one — a direct call rather
-          // than one through the engine — publishes as it goes.
-          if (context.patternIndexPublications !== undefined) {
-            context.patternIndexPublications.stage(request);
-          } else {
-            publishPatternToIndex(getPatternIndexClient, request);
-          }
+          publications.stage(request);
         }
       }
     }

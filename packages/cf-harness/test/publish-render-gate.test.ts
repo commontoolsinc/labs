@@ -1,8 +1,12 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import type { JSONSchema } from "@commonfabric/api";
+import { MockDoc } from "@commonfabric/html/mock-doc";
 import {
   classifyRenderedHtml,
+  cutTreeToNodeBudget,
   PATTERN_PUBLICATION_MESSAGES,
+  renderPatternUiToHtml,
   syntheticArgument,
 } from "../src/pattern-index/publish-render-gate.ts";
 
@@ -149,6 +153,194 @@ describe("publish-render-gate", () => {
     });
   });
 
+  describe("syntheticArgument() bounds", () => {
+    // Every arm below reports the instance as incomplete. That is the whole
+    // point of the flag: an empty render under a bounded instance is evidence
+    // about the bound, not about the pattern, and the gate must be able to
+    // tell those apart.
+
+    it("stops at the depth bound and says so", () => {
+      let schema: JSONSchema = { type: "string" };
+      for (let depth = 0; depth < 12; depth++) {
+        schema = { type: "object", properties: { next: schema } };
+      }
+      const { value, complete } = syntheticArgument(schema);
+      expect(complete).toBe(false);
+      // It built what it could reach before the stop rather than nothing.
+      expect(value).toHaveProperty("next");
+    });
+
+    it("stops at the node budget and says so", () => {
+      // Wide rather than deep: 400 properties of 4 fields each outruns the
+      // 256-node budget without ever approaching the depth bound.
+      const properties: Record<string, JSONSchema> = {};
+      for (let i = 0; i < 400; i++) {
+        properties[`p${i}`] = {
+          type: "object",
+          properties: {
+            a: { type: "string" },
+            b: { type: "string" },
+            c: { type: "string" },
+            d: { type: "string" },
+          },
+        };
+      }
+      expect(syntheticArgument({ type: "object", properties }).complete).toBe(
+        false,
+      );
+    });
+
+    it("reports a property the schema forbids outright", () => {
+      const { value, complete } = syntheticArgument({
+        type: "object",
+        properties: { nothing: false, name: { type: "string" } },
+      });
+      expect(complete).toBe(false);
+      // `name` is the second declared property, so it takes the second name
+      // in the vocabulary — the slot is positional, which is what makes an
+      // open bag's keys line up with a sibling list of strings.
+      expect(value).toEqual({ name: "beta" });
+    });
+
+    it("reports a schema node that is not a schema", () => {
+      const { value, complete } = syntheticArgument({
+        type: "object",
+        properties: {
+          nonsense: 42 as unknown as JSONSchema,
+          named: { type: "string" },
+        },
+      });
+      expect(complete).toBe(false);
+      expect(value).toEqual({ named: "beta" });
+    });
+
+    it("reports a $ref it cannot resolve", () => {
+      for (
+        const ref of ["#/definitions/Row", "#/$defs/Missing", "external.json"]
+      ) {
+        const { value, complete } = syntheticArgument({
+          type: "object",
+          properties: { row: { $ref: ref } },
+          $defs: { Row: { type: "string" } },
+        });
+        expect(complete).toBe(false);
+        expect(value).toEqual({});
+      }
+    });
+
+    it("reports an array that does not say what it holds", () => {
+      const { value, complete } = syntheticArgument({
+        type: "object",
+        properties: { items: { type: "array" } },
+      });
+      expect(complete).toBe(false);
+      expect(value).toEqual({ items: [] });
+    });
+
+    it("reports a position that constrains nothing", () => {
+      const { value, complete } = syntheticArgument({
+        type: "object",
+        properties: { anything: {}, named: { type: "string" } },
+      });
+      expect(complete).toBe(false);
+      expect(value).toEqual({ named: "beta" });
+    });
+
+    it("fills a declared null", () => {
+      expect(
+        syntheticArgument({
+          type: "object",
+          properties: { nothing: { type: "null" } },
+        }).value,
+      ).toEqual({ nothing: null });
+    });
+
+    it("leaves a declared property alone when an open bag would take its name", () => {
+      // `alpha` is the first synthetic name. The declared number must survive:
+      // a synthetic string written over it is the wrong type for whatever
+      // reads it, and would fail a pattern that is behaving correctly.
+      const { value } = syntheticArgument({
+        type: "object",
+        properties: {
+          row: {
+            type: "object",
+            properties: { alpha: { type: "integer" } },
+            additionalProperties: { type: "string" },
+          },
+        },
+      });
+      const row = (value as { row: Record<string, unknown> }).row;
+      expect(row.alpha).toBe(1);
+      expect(row.beta).toBe("beta");
+    });
+  });
+
+  describe("cutTreeToNodeBudget()", () => {
+    const treeOf = (count: number) => {
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root">${
+          "<p><span>x</span></p>".repeat(count)
+        }</div></body></html>`,
+      );
+      const container = mock.document.getElementById("root");
+      if (container === null) throw new Error("no container");
+      return container;
+    };
+
+    it("leaves a tree inside the budget untouched", () => {
+      const container = treeOf(3);
+      expect(cutTreeToNodeBudget(container, 100)).toBe(false);
+      expect(container.innerHTML.match(/<p>/g)).toHaveLength(3);
+    });
+
+    it("cuts a tree past the budget and says it did", () => {
+      // Serializing first and truncating after would build the whole string;
+      // what a pattern renders is bounded by nothing but the pattern.
+      const container = treeOf(20);
+      expect(cutTreeToNodeBudget(container, 6)).toBe(true);
+      const kept = container.innerHTML.match(/<p>/g) ?? [];
+      expect(kept.length).toBeGreaterThan(0);
+      expect(kept.length).toBeLessThan(20);
+    });
+  });
+
+  describe("renderPatternUiToHtml() error channel", () => {
+    it("collects what the reconciler reports", async () => {
+      // Nothing a pattern can express reaches this channel — see the doc
+      // comment — so the mount is supplied to exercise it. Without this the
+      // arm that reads `errors` would be a check nobody had seen run.
+      const cell = {
+        asSchema: () => ({
+          sync: () => Promise.resolve(),
+          get: () => ({ $UI: { type: "vnode" } }),
+          key: () => ({}),
+        }),
+      } as unknown as Parameters<typeof renderPatternUiToHtml>[0];
+      const rendered = await renderPatternUiToHtml(
+        cell,
+        () => Promise.resolve(),
+        ((_container: unknown, _vdom: unknown, options: {
+          onError?: (error: Error) => void;
+        }) => {
+          options.onError?.(new Error("reconciler complained"));
+          return { flush: () => {}, cancel: () => {} };
+        }) as unknown as Parameters<typeof renderPatternUiToHtml>[2],
+      );
+      expect(rendered?.errors).toEqual(["reconciler complained"]);
+    });
+
+    it("reports no $UI when the result declares none", async () => {
+      const cell = {
+        asSchema: () => ({
+          sync: () => Promise.resolve(),
+          get: () => ({}),
+        }),
+      } as unknown as Parameters<typeof renderPatternUiToHtml>[0];
+      expect(await renderPatternUiToHtml(cell, () => Promise.resolve()))
+        .toBeUndefined();
+    });
+  });
+
   describe("classifyRenderedHtml()", () => {
     it("refuses output carrying a default-toString marker", () => {
       expect(classifyRenderedHtml("<td>[object Object]</td>")).toBe(
@@ -188,6 +380,21 @@ describe("publish-render-gate", () => {
           '<cf-vstack gap="3"><cf-field label="Email"><cf-input value="[binding]" placeholder="email@example.com" type="email"></cf-input></cf-field></cf-vstack>',
         ),
       ).toBe("ui-rendered");
+    });
+
+    it("reports a render the reconciler complained about as no verdict", () => {
+      expect(classifyRenderedHtml("<p>half a tree</p>", ["reconciler said no"]))
+        .toBe("probe-failed");
+    });
+
+    it("lets a marker outrank a complaint", () => {
+      // A marker is positive evidence about what the pattern does, however
+      // incomplete the render that surfaced it.
+      expect(
+        classifyRenderedHtml("<td>[object Object]</td>", [
+          "reconciler said no",
+        ]),
+      ).toBe("ui-default-tostring");
     });
 
     it("passes output that rendered content", () => {

@@ -241,6 +241,66 @@ describe("run_pattern publish render gate", () => {
   const published = (index: IndexStub) =>
     index.calls.filter((call) => call.fn === "publishPattern");
 
+  it("has no publication ledger when the run has no index", async () => {
+    // The engine hands the ledger over with the index client, so a run
+    // without a client has neither — and `run_pattern` then records nothing
+    // rather than reaching for a second publish path.
+    const engine = new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: `publish-gate-${crypto.randomUUID()}`,
+      cfcEnforcementMode: "disabled",
+      fabricSessionFactory: () => Promise.resolve({ pieces }),
+    });
+    expect(engine.patternIndexPublications).toBeUndefined();
+    await engine.flushPatternIndexPublications();
+
+    const result = await engine.invokeBuiltinTool("run_pattern", {
+      sourceText: DOUBLER,
+      inputs: { n: 21 },
+      description: "Doubles a number",
+    });
+    const output = result.output as RunPatternToolSuccessOutput;
+    expect(output.status).toBe("ok");
+    expect(output.patternPublication).toBeUndefined();
+  });
+
+  it("reports the run's outcome even when the index refuses the event", async () => {
+    // Usage events are a contribution to a shared catalog, not part of the
+    // tool's result: a rejected one is logged and the run stands.
+    const calls: { fn: string }[] = [];
+    const failingFetch: HarnessFetch = (input) => {
+      const fn = String(input).split("/").pop() ?? "";
+      calls.push({ fn });
+      return Promise.resolve(
+        new Response(JSON.stringify({ error: "index is down" }), {
+          status: 500,
+        }),
+      );
+    };
+    const engine = new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: `publish-gate-${crypto.randomUUID()}`,
+      cfcEnforcementMode: "disabled",
+      fabricSessionFactory: () => Promise.resolve({ pieces }),
+      patternIndexClientFactory: () =>
+        Promise.resolve(
+          new PatternIndexClient({
+            baseUrl: "https://index.test",
+            fetchFn: failingFetch,
+            signer,
+          }),
+        ),
+    });
+    const result = await engine.invokeBuiltinTool("run_pattern", {
+      sourceText: DOUBLER,
+      inputs: { n: 21 },
+      description: "Doubles a number",
+    });
+    await engine.flushPatternIndexPublications();
+    expect((result.output as RunPatternToolSuccessOutput).status).toBe("ok");
+    expect(calls.some((call) => call.fn === "publishPattern")).toBe(true);
+  });
+
   it("keeps the sortable table that is live in the index out of search", async () => {
     const index = stubIndex();
     const output = await runAndFlush(index, {
@@ -417,6 +477,128 @@ describe("run_pattern publish render gate", () => {
     // The piece the run created is not undone, and the output says so.
     expect(output.message).toContain("not undone");
     expect(published(index)).toEqual([]);
+  });
+
+  /**
+   * The session's pieces controller with `runPersistent` intercepted on the
+   * PROBE — its second call — so a test can decide what happens at the joint
+   * the gate runs through, without waiting on a clock.
+   */
+  const piecesWithProbe = (
+    onProbe: (probe: () => Promise<unknown>) => Promise<unknown>,
+  ): PiecesController => {
+    let calls = 0;
+    return new Proxy(pieces, {
+      get(target, property) {
+        if (property === "runPersistent") {
+          return (...args: unknown[]) => {
+            const run = () =>
+              (target.runPersistent as (...a: unknown[]) => Promise<unknown>)
+                .apply(target, args);
+            return ++calls === 2 ? onProbe(run) : run();
+          };
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as PiecesController;
+  };
+
+  const engineWith = (index: IndexStub, own: PiecesController) =>
+    new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: `publish-gate-${crypto.randomUUID()}`,
+      cfcEnforcementMode: "disabled",
+      fabricSessionFactory: () => Promise.resolve({ pieces: own }),
+      patternIndexClientFactory: () =>
+        Promise.resolve(
+          new PatternIndexClient({
+            baseUrl: "https://index.test",
+            fetchFn: index.fetchFn,
+            signer,
+          }),
+        ),
+    });
+
+  const cancelledRun = async (
+    index: IndexStub,
+    own: PiecesController,
+    signal: AbortSignal,
+  ) => {
+    const engine = engineWith(index, own);
+    const result = await engine.invokeBuiltinTool("run_pattern", {
+      sourceText: WORKING_SORTABLE_TABLE,
+      inputs: { rows: [{ name: "Avery", score: 12 }] },
+      description: "Sortable table that reads its cells",
+    }, { signal });
+    await engine.flushPatternIndexPublications();
+    return result.output as unknown as { status: string; message: string };
+  };
+
+  it("publishes nothing when the abort lands after the probe's result loads", async () => {
+    // The joint between the settle race and the render race. An abort here
+    // does not throw and is not raced, so it is checked for explicitly.
+    const index = stubIndex();
+    const controller = new AbortController();
+    const output = await cancelledRun(
+      index,
+      piecesWithProbe(async (run) => {
+        const cell = await run();
+        controller.abort();
+        return cell;
+      }),
+      controller.signal,
+    );
+    expect(output.status).toBe("cancelled");
+    expect(published(index)).toEqual([]);
+  });
+
+  it("publishes nothing when the probe fails to start under an abort", async () => {
+    // An abort inside an await the gate does not race arrives as an ordinary
+    // throw. Reading it as "no verdict" would record an entry for a run that
+    // was cancelled.
+    const index = stubIndex();
+    const controller = new AbortController();
+    const output = await cancelledRun(
+      index,
+      piecesWithProbe(() => {
+        controller.abort();
+        return Promise.reject(new Error("probe start interrupted"));
+      }),
+      controller.signal,
+    );
+    expect(output.status).toBe("cancelled");
+    expect(published(index)).toEqual([]);
+  });
+
+  it("records without a verdict when the probe throws for its own reasons", async () => {
+    // No abort: the throw is the pattern's or the gate's, and either way it
+    // is no evidence about the rendering. The text is kept for the artifact.
+    const index = stubIndex();
+    const engine = engineWith(
+      index,
+      piecesWithProbe(() =>
+        Promise.reject(new Error("probeExplodedForItsOwnReasons"))
+      ),
+    );
+    const result = await engine.invokeBuiltinTool("run_pattern", {
+      sourceText: WORKING_SORTABLE_TABLE,
+      inputs: { rows: [{ name: "Avery", score: 12 }] },
+      description: "Sortable table that reads its cells",
+    });
+    await engine.flushPatternIndexPublications();
+    const output = result.output as RunPatternToolSuccessOutput;
+
+    expect(output.status).toBe("ok");
+    expect(output.patternPublication?.status).toBe("recorded");
+    expect(output.patternPublication?.reason).toBe("probe-failed");
+    // Artifact-only, and not in what the model reads.
+    expect(output.rawCauseMessage).toContain("probeExplodedForItsOwnReasons");
+    expect(JSON.stringify(output.patternPublication)).not.toContain(
+      "probeExplodedForItsOwnReasons",
+    );
+    expect(published(index)).toHaveLength(1);
+    expect(published(index)[0].body.discoverable).toBe(false);
   });
 
   it("offers only the last iteration of a capability a session authored", async () => {
