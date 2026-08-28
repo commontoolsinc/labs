@@ -317,6 +317,23 @@ recorded uncertified rather than treated as a pass. The same distinction
 settles a missing check run (absent because not yet created — unknown) against
 a missing runtime argument (absent because nothing registered it — known).
 
+A third rule follows from the second, and it decides what to *do* about an
+unexercised branch. **"This cannot be reached" and "this cannot be reached by
+anything I can construct" are different claims, and only the first justifies
+deletion.** Several branches were removed during this pass on the strong claim,
+each demonstrated from the call path: a guard the caller's own validation made
+unreachable, a fallback the constructor made unreachable, a publish path the
+engine made unreachable. One resisted. Five malformed `$UI` shapes — a
+non-node child, an invalid tag, a non-object style, a cyclic tree, a bare
+string — all rendered with zero errors, so the arm reading those errors was a
+verdict drawn from a channel nobody had seen fire.
+
+The remedy for the weaker claim is not deletion but a **seam that makes the
+claim checkable**, plus a written record of what was tried, so the next person
+holding a case that does error knows what did not. Deleting on the weaker claim
+would be the same error as accepting a coverage marker: disposing of an unknown
+by asserting it.
+
 The practical rule this leaves: when a check reports an absence, establish that
 the check would have reported a presence. That takes a case whose answer is
 known independently, which is a different and more expensive thing than a test
