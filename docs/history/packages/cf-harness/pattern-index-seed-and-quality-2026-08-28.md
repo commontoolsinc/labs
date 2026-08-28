@@ -115,6 +115,12 @@ discoverable set. The seeded atoms sit in `unproven` — demoted in ranking,
 never excluded, which is the intended treatment of an entry with no evidence
 either way.
 
+The total reconciles as 29 entries going in, plus the six seeded atoms, plus
+one self-describing row published as `discoverable: false` to exercise the
+publish-time discoverability path against the deployed service. The withheld 17
+are the 16 gardened entries and that verification row; the discoverable 19 are
+the 13 surviving originals and the six seeded.
+
 The query that had returned two `[object Object]` tables:
 
 ```
