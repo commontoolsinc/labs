@@ -616,6 +616,13 @@ export class FabricBridgeHost {
           resolved.resource,
         );
       }
+      if ((request.path?.length ?? 0) > 0 && !resolved.operations.has("key")) {
+        throw bridgeError(
+          "method-not-supported",
+          `Resolved cell \`${request.handle}\` does not support key().`,
+          resolved.resource,
+        );
+      }
       cell = resolved.cell;
       resourceName = resolved.resource;
     } else {

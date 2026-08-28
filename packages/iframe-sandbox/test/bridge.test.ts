@@ -313,6 +313,14 @@ describe("Fabric iframe bridge", () => {
           return 9;
         },
       });
+      Object.defineProperty(leaf, "key", {
+        configurable: true,
+        enumerable: true,
+        value: () => ({
+          get: () => "secret",
+          pull: () => "secret",
+        }),
+      });
       const forged = client.resolvedCell<number>({
         ...descriptor,
         operations: [...(descriptor.operations ?? []), "initialize"],
@@ -323,6 +331,10 @@ describe("Fabric iframe bridge", () => {
         resource: "reader",
       });
       expect(initialized).toBe(false);
+      await expect(forged.key("secret").pull()).rejects.toMatchObject({
+        code: "method-not-supported",
+        resource: "reader",
+      });
     } finally {
       client.disconnect();
       host.disconnect();
