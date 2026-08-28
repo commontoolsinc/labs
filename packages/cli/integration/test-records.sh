@@ -40,7 +40,9 @@ cf_test_record_line() {
 
 # Records the script's one test with the given exit status. For a script
 # whose own EXIT trap must stay in place, call this from that trap instead
-# of registering cf_test_record_script's.
+# of registering cf_test_record_script's; such a script sets
+# CF_TEST_RECORD_NAME and CF_TEST_RECORD_START_MS itself, and the name it
+# sets is also the prefix its steps record under.
 cf_test_record_with_status() {
   local status="$1"
   local end_ms
@@ -71,10 +73,11 @@ cf_test_step_begin() {
     return 0
   fi
   cf_test_step_close 0
-  # The step's identity carries no section: which section scheduled a step
-  # is run context, and the same step must join across a CI section leg
-  # and a local `all` run.
-  CF_TEST_STEP_NAME="integration.sh $1"
+  # A step's identity is the script's own name and the step's, so two
+  # scripts using the same step label stay apart. It carries no section:
+  # which section scheduled a step is run context, and the same step must
+  # join across a CI section leg and a local `all` run.
+  CF_TEST_STEP_NAME="$CF_TEST_RECORD_NAME $1"
   CF_TEST_STEP_START_MS=$(cf_test_now_ms || echo 0)
 }
 

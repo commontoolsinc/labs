@@ -8,10 +8,20 @@ export CF_FUSE_DEBUG=1
 
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
 
-# This sectionless script is one recorded test. The record is written from
-# the existing cleanup trap, which owns EXIT; registering a second trap
-# would replace it. With recording off this initializes nothing, so the
-# suite carries no dependency on the timing helper.
+# The phases to run. A CI leg or a lane asks for one; a bare run does all of
+# them. The variable is this suite's own: CF_CLI_INTEGRATION_SECTION names
+# integration.sh's sections, which are a different set, and neither script
+# accepts the other's.
+SECTION="${CF_FUSE_INTEGRATION_SECTION:-${1:-all}}"
+
+# The script records as one test named "fuse-exec.sh", and each phase below
+# records as its own test named "fuse-exec.sh <step>". The script's record is
+# written from the existing cleanup trap, which owns EXIT; registering a
+# second trap would replace it. Neither name carries the dispatched section:
+# which section scheduled a step is run context, and the same step joins
+# across a CI section leg and a local `all` run. With recording off this
+# initializes nothing, so the suite carries no dependency on the timing
+# helper.
 source "$SCRIPT_DIR/test-records.sh"
 CF_TEST_RECORD_NAME="fuse-exec.sh"
 CF_TEST_RECORD_START_MS=0
@@ -573,6 +583,10 @@ cleanup() {
   # whether the test has already failed.
   local exit_code=$?
   set +e
+  # Close the step that was running with the body's own status, before the
+  # teardown below adds its time to the clock. A wedged teardown lands on
+  # the script's record further down.
+  cf_test_step_close "$exit_code"
   local can_remove_mountpoint=true
   local wedge_confirmed=false
   # Gate on MOUNTPOINT being set, not on '[ -d "$MOUNTPOINT" ]': that is a getattr
@@ -660,403 +674,531 @@ if [ -z "${API_URL:-}" ]; then
   error "API_URL must be defined."
 fi
 
-SPACE=$(mktemp -u XXXXXXXXXX)
-IDENTITY=$(mktemp)
-MOUNTPOINT=$(mktemp -d)
-# Resolve the mountpoint's physical path now, while it is still an empty plain
-# directory. After 'cf fuse mount' it is the mount root, and resolving it then
-# would 'cd' across the mount and block on a wedged daemon. The resolved path does
-# not move when the mount appears over it, and it is what 'mount' output and the
-# unmount tools use, so cleanup can test and detach against it without ever
-# touching the mount.
-MOUNTPOINT_REAL=$(cd -P -- "$MOUNTPOINT" 2>/dev/null && pwd)
-SPACE_ARGS="--api-url=$API_URL --identity=$IDENTITY --space=$SPACE"
-PATTERN_SRC="$SCRIPT_DIR/pattern/fuse-exec.tsx"
-CUSTOM_EXPORT="customPatternExport"
+# What every phase runs against: an identity, a stepped piece, the memory
+# proxy that records what the daemon transfers, and a background FUSE mount
+# over a fresh space.
+setup_mount() {
+  SPACE=$(mktemp -u XXXXXXXXXX)
+  IDENTITY=$(mktemp)
+  MOUNTPOINT=$(mktemp -d)
+  # Resolve the mountpoint's physical path now, while it is still an empty plain
+  # directory. After 'cf fuse mount' it is the mount root, and resolving it then
+  # would 'cd' across the mount and block on a wedged daemon. The resolved path does
+  # not move when the mount appears over it, and it is what 'mount' output and the
+  # unmount tools use, so cleanup can test and detach against it without ever
+  # touching the mount.
+  MOUNTPOINT_REAL=$(cd -P -- "$MOUNTPOINT" 2>/dev/null && pwd)
+  SPACE_ARGS="--api-url=$API_URL --identity=$IDENTITY --space=$SPACE"
+  PATTERN_SRC="$SCRIPT_DIR/pattern/fuse-exec.tsx"
+  CUSTOM_EXPORT="customPatternExport"
+  ENTITY_DEEP_PROBE="${FUSE_DEEP_ENTITY_PROBE:-0}"
 
-# The deadline for every wait that fails the test (see wait_deadline_reached).
-# The default overall bound matches the CI step's 'timeout' in
-# .github/workflows/deno.yml, which sets FUSE_EXEC_OVERALL_TIMEOUT_SECONDS to keep
-# the two in step; the waits give up a few minutes before it so error() can print
-# the daemon's state before the step is cancelled. The floor guards a
-# misconfigured tiny outer bound from making every wait fire at once.
-OVERALL_TIMEOUT_SECONDS="${FUSE_EXEC_OVERALL_TIMEOUT_SECONDS:-480}"
-WAIT_BUDGET_SECONDS=$((OVERALL_TIMEOUT_SECONDS - 300))
-[ "$WAIT_BUDGET_SECONDS" -ge 30 ] || WAIT_BUDGET_SECONDS=$((OVERALL_TIMEOUT_SECONDS / 2 + 1))
-WAIT_DEADLINE_EPOCH=$(($(date +%s) + WAIT_BUDGET_SECONDS))
+  # The deadline for every wait that fails the test (see wait_deadline_reached).
+  # The default overall bound matches the CI step's 'timeout' in
+  # .github/workflows/deno.yml, which sets FUSE_EXEC_OVERALL_TIMEOUT_SECONDS to keep
+  # the two in step; the waits give up a few minutes before it so error() can print
+  # the daemon's state before the step is cancelled. The floor guards a
+  # misconfigured tiny outer bound from making every wait fire at once.
+  OVERALL_TIMEOUT_SECONDS="${FUSE_EXEC_OVERALL_TIMEOUT_SECONDS:-480}"
+  WAIT_BUDGET_SECONDS=$((OVERALL_TIMEOUT_SECONDS - 300))
+  [ "$WAIT_BUDGET_SECONDS" -ge 30 ] || WAIT_BUDGET_SECONDS=$((OVERALL_TIMEOUT_SECONDS / 2 + 1))
+  WAIT_DEADLINE_EPOCH=$(($(date +%s) + WAIT_BUDGET_SECONDS))
 
-echo "API_URL=$API_URL"
-echo "SPACE=$SPACE"
-echo "IDENTITY=$IDENTITY"
-echo "MOUNTPOINT=$MOUNTPOINT"
+  echo "API_URL=$API_URL"
+  echo "SPACE=$SPACE"
+  echo "IDENTITY=$IDENTITY"
+  echo "MOUNTPOINT=$MOUNTPOINT"
 
-cf id new >"$IDENTITY"
+  cf id new >"$IDENTITY"
 
-PIECE_ID=$(cf piece new --main-export "$CUSTOM_EXPORT" $SPACE_ARGS "$PATTERN_SRC")
-echo "Created piece: $PIECE_ID"
-cf piece step $SPACE_ARGS --piece "$PIECE_ID"
-echo "Stepped piece: $PIECE_ID"
-ENTITY_PAYLOAD_MARKER="FUSE_ENTITY_LIST_PAYLOAD_50c21a1f"
-printf '{"lastMessage":"%s","messageCount":0,"legacyCount":0,"messages":[]}\n' \
-  "$ENTITY_PAYLOAD_MARKER" |
-  cf set $SPACE_ARGS --piece "$PIECE_ID" "" --input
+  PIECE_ID=$(cf piece new --main-export "$CUSTOM_EXPORT" $SPACE_ARGS "$PATTERN_SRC")
+  echo "Created piece: $PIECE_ID"
+  cf piece step $SPACE_ARGS --piece "$PIECE_ID"
+  echo "Stepped piece: $PIECE_ID"
+  ENTITY_PAYLOAD_MARKER="FUSE_ENTITY_LIST_PAYLOAD_50c21a1f"
+  printf '{"lastMessage":"%s","messageCount":0,"legacyCount":0,"messages":[]}\n' \
+    "$ENTITY_PAYLOAD_MARKER" |
+    cf set $SPACE_ARGS --piece "$PIECE_ID" "" --input
 
-MEMORY_PROXY_STATE=$(mktemp -d)
-MEMORY_TRACE="$MEMORY_PROXY_STATE/frames"
-MEMORY_PROXY_READY="$MEMORY_PROXY_STATE/ready"
-mkfifo "$MEMORY_PROXY_READY"
-deno run --allow-net --allow-write="$MEMORY_TRACE" \
-  "$SCRIPT_DIR/fuse-memory-proxy.ts" "$API_URL" "$MEMORY_TRACE" \
-  >"$MEMORY_PROXY_READY" &
-MEMORY_PROXY_PID=$!
-if ! IFS= read -r FUSE_API_URL <"$MEMORY_PROXY_READY"; then
-  error "FUSE memory proxy exited before reporting its listening address."
-fi
-rm -f "$MEMORY_PROXY_READY"
-MEMORY_PROXY_READY=""
+  MEMORY_PROXY_STATE=$(mktemp -d)
+  MEMORY_TRACE="$MEMORY_PROXY_STATE/frames"
+  MEMORY_PROXY_READY="$MEMORY_PROXY_STATE/ready"
+  mkfifo "$MEMORY_PROXY_READY"
+  deno run --allow-net --allow-write="$MEMORY_TRACE" \
+    "$SCRIPT_DIR/fuse-memory-proxy.ts" "$API_URL" "$MEMORY_TRACE" \
+    >"$MEMORY_PROXY_READY" &
+  MEMORY_PROXY_PID=$!
+  if ! IFS= read -r FUSE_API_URL <"$MEMORY_PROXY_READY"; then
+    error "FUSE memory proxy exited before reporting its listening address."
+  fi
+  rm -f "$MEMORY_PROXY_READY"
+  MEMORY_PROXY_READY=""
 
-MOUNT_OUTPUT=$(cf fuse mount "$MOUNTPOINT" --api-url="$FUSE_API_URL" --identity="$IDENTITY" --space="$SPACE" --background --dangerously-allow-incompatible-schema)
-echo "$MOUNT_OUTPUT"
+  MOUNT_OUTPUT=$(cf fuse mount "$MOUNTPOINT" --api-url="$FUSE_API_URL" --identity="$IDENTITY" --space="$SPACE" --background --dangerously-allow-incompatible-schema)
+  echo "$MOUNT_OUTPUT"
 
-MOUNT_PID="${MOUNT_OUTPUT#*PID }"
-if [ "$MOUNT_PID" = "$MOUNT_OUTPUT" ]; then
-  error "Could not parse fuse daemon PID from mount output."
-fi
-
-MOUNT_PID="${MOUNT_PID%%)*}"
-case "$MOUNT_PID" in
-  ''|*[!0-9]*)
+  MOUNT_PID="${MOUNT_OUTPUT#*PID }"
+  if [ "$MOUNT_PID" = "$MOUNT_OUTPUT" ]; then
     error "Could not parse fuse daemon PID from mount output."
+  fi
+
+  MOUNT_PID="${MOUNT_PID%%)*}"
+  case "$MOUNT_PID" in
+    ''|*[!0-9]*)
+      error "Could not parse fuse daemon PID from mount output."
+      ;;
+  esac
+
+  # The background mount prints a 'log:' line pointing at the daemon's log file (see
+  # packages/cli/commands/fuse.ts). That file lives off the mount, so it stays
+  # readable even when the mount itself is wedged, and the trace assertions and the
+  # failure-path daemon dump both read it. It is required, so a parse miss is fatal.
+  DAEMON_LOG=$(printf '%s\n' "$MOUNT_OUTPUT" | sed -n 's/^[[:space:]]*log:[[:space:]]*//p')
+  if [ -z "$DAEMON_LOG" ]; then
+    error "Could not parse fuse daemon log path from mount output."
+  fi
+
+  # 'cf fuse mount --background' returns only after the daemon has reported the
+  # 'mounted' supervisor state and been confirmed alive. The daemon reports that
+  # just before it enters its FUSE session loop, and mounted paths hydrate lazily,
+  # so the wait_for_path calls below cover the rest.
+  if ! kill -0 "$MOUNT_PID" >/dev/null 2>&1; then
+    error "Fuse daemon exited immediately after reporting mount readiness."
+  fi
+
+  # The layout of the mounted tree, named once so every phase addresses the
+  # same paths whichever section reached it.
+  ENTITIES_DIR="$MOUNTPOINT/$SPACE/entities"
+  STATUS_FILE="$MOUNTPOINT/.status"
+  PIECE_NAME="Fuse-Exec-Fixture"
+  PIECE_DIR="$MOUNTPOINT/$SPACE/pieces/$PIECE_NAME"
+  INPUT_DIR="$PIECE_DIR/input"
+  INPUT_LAST_MESSAGE="$INPUT_DIR/lastMessage"
+  RESULT_DIR="$PIECE_DIR/result"
+  RESULT_JSON="$PIECE_DIR/result.json"
+  META_JSON="$PIECE_DIR/meta.json"
+  HANDLER_FILE="$RESULT_DIR/recordMessage.handler"
+  LEGACY_HANDLER_FILE="$RESULT_DIR/legacyWrite.handler"
+  TOOL_FILE="$RESULT_DIR/search.tool"
+
+  wait_for_path "$ENTITIES_DIR"
+}
+
+# Runs before any phase reads a piece: the assertion is that nothing but
+# identifiers has crossed the memory proxy, and reading a piece transfers
+# its payload. Every section runs it, ahead of the phases it selected.
+run_entity_listing() {
+  MOUNTED_ENTITY_DIRS=$(find "$ENTITIES_DIR" -mindepth 1 -maxdepth 1 -type d -print)
+  if [ -z "$MOUNTED_ENTITY_DIRS" ]; then
+    error "Mounted entities directory did not contain any entity directories."
+  fi
+  if ! grep -Fq "$PIECE_ID" "$MEMORY_TRACE"; then
+    error "Listing mounted entity directories did not transfer the known entity identifier."
+  fi
+  if grep -Fq "$ENTITY_PAYLOAD_MARKER" "$MEMORY_TRACE"; then
+    error "Listing mounted entity directories transferred entity payload bytes."
+  fi
+  success "Listing every mounted entity directory transfers identifiers without entity payload bytes"
+}
+
+run_piece_paths() {
+  wait_for_path "$MOUNTPOINT/$SPACE/pieces"
+  wait_for_path "$PIECE_DIR"
+  wait_for_path "$RESULT_DIR"
+  wait_for_path "$RESULT_JSON"
+  wait_for_path "$META_JSON"
+
+  ENTITY_ID=$(jq -r '.entityId' "$META_JSON")
+  if [ -z "$ENTITY_ID" ] || [ "$ENTITY_ID" = "null" ]; then
+    error "Mounted meta.json did not include an entityId."
+  fi
+}
+
+run_entities_entry() {
+  ENTITY_DIR=$(resolve_entity_dir "$ENTITIES_DIR" "$ENTITY_ID" || true)
+  if [ -z "$ENTITY_DIR" ]; then
+    error "Timed out waiting for entity directory entry for $ENTITY_ID."
+  fi
+  success "Entities namespace exposes matching entry for mounted piece"
+}
+
+run_status_document() {
+  # A single read is enough to prove the generated file is served as one coherent
+  # document through a real getattr and read. That the counters it carries are
+  # fresh and advance is settled deterministically by the CellBridge.status unit
+  # tests; asserting it here would mean polling out the macOS NFS attribute cache,
+  # and this suite adds no waits it can avoid.
+  path_exists "$STATUS_FILE" || error ".status was not mounted at the mount root."
+  cat "$STATUS_FILE" | jq -e . >/dev/null ||
+    error ".status did not read back as a whole JSON document."
+  success ".status reads as a whole JSON document"
+}
+
+# The waits here are what puts the callable files in place for the phases
+# that run them, so every section using one runs this phase first.
+run_callable_entries() {
+  wait_for_path "$HANDLER_FILE"
+  wait_for_path "$LEGACY_HANDLER_FILE"
+  wait_for_path "$TOOL_FILE"
+
+  path_exists "$HANDLER_FILE" || error "recordMessage.handler was not mounted."
+  path_exists "$LEGACY_HANDLER_FILE" || error "legacyWrite.handler was not mounted."
+  path_exists "$TOOL_FILE" || error "search.tool was not mounted."
+  success "Mounted callable entries exist"
+}
+
+run_callable_json_surface() {
+  assert_not_exists "$RESULT_DIR/search" "Pattern tool internals should not be exposed as a directory."
+  wait_for_json "$RESULT_JSON" '.recordMessage == {"/handler":"recordMessage"}' \
+    "result.json should render recordMessage as a handler sigil"
+  wait_for_json "$RESULT_JSON" '.legacyWrite == {"/handler":"legacyWrite"}' \
+    "result.json should render legacyWrite as a handler sigil"
+  wait_for_json "$RESULT_JSON" '.search == {"/tool":"search"}' \
+    "result.json should render search as a tool sigil"
+  success "Mounted JSON surface hides callable internals"
+}
+
+run_callable_shebangs() {
+  HANDLER_FIRST_LINE=$(head -n 1 "$HANDLER_FILE")
+  TOOL_FIRST_LINE=$(head -n 1 "$TOOL_FILE")
+  test -x "$HANDLER_FILE" || error "Handler file should be executable."
+  test -x "$TOOL_FILE" || error "Tool file should be executable."
+  assert_contains "$HANDLER_FIRST_LINE" "#!" "Handler file should start with a shebang."
+  assert_contains "$HANDLER_FIRST_LINE" " exec" "Handler shebang should invoke cf exec."
+  assert_contains "$TOOL_FIRST_LINE" "#!" "Tool file should start with a shebang."
+  assert_contains "$TOOL_FIRST_LINE" " exec" "Tool shebang should invoke cf exec."
+  success "Callable files are executable and expose cf exec shebangs"
+}
+
+run_callable_help() {
+  COUNT_BEFORE_HELP=$(read_piece_value_or_default "messageCount" "0")
+  HANDLER_HELP=$(cf exec "$HANDLER_FILE" --help)
+  TOOL_HELP=$(cf exec "$TOOL_FILE" --help)
+  TOOL_HELP_JSON=$(cf exec "$TOOL_FILE" --help --json)
+  DIRECT_HANDLER_HELP=$("$HANDLER_FILE" --help)
+  assert_contains "$HANDLER_HELP" "cf exec" "cf exec help should describe the cf exec call form."
+  assert_contains "$HANDLER_HELP" "[invoke] --message <string>" "Handler help should show the optional invoke verb."
+  assert_contains "$HANDLER_HELP" "--message <string>" "Handler help should expand schema-derived flags."
+  assert_contains "$HANDLER_HELP" "Required." "Handler help should mark required flags."
+  # A handler's help says nothing about output rather than asserting there is
+  # none: a verb declared `Stream<E, R>` does return a result, and this page
+  # cannot see the declaration.
+  assert_not_contains "$HANDLER_HELP" "Output:" "Handler help should carry no Output section."
+  assert_contains "$HANDLER_HELP" "Alternatively, write JSON to this file to invoke the handler." "Handler help should mention write-through invocation."
+  assert_contains "$TOOL_HELP" "[run] --query <string>" "Tool help should show the optional run verb."
+  assert_contains "$TOOL_HELP" "--query <string>" "Tool help should expand schema-derived flags."
+  assert_contains "$TOOL_HELP" "JSON on success:" "Tool help should show JSON output."
+  assert_contains "$TOOL_HELP" "--help --json" "Tool help should mention machine-readable schema help."
+  assert_contains "$DIRECT_HANDLER_HELP" "[invoke] --message <string>" "Direct help should show the optional invoke verb."
+  assert_contains "$DIRECT_HANDLER_HELP" "$HANDLER_FILE" "Direct help should mention the mounted file path."
+  assert_contains "$DIRECT_HANDLER_HELP" "--message <string>" "Direct help should show the mounted file call form."
+  if [[ "$DIRECT_HANDLER_HELP" == *"cf exec $HANDLER_FILE"* ]]; then
+    error "Direct help should hide the cf exec call form."
+  fi
+  printf '%s\n' "$TOOL_HELP_JSON" | jq -e '.inputSchema.required == ["query"]' >/dev/null ||
+    error "Machine-readable help should include the input schema."
+  printf '%s\n' "$TOOL_HELP_JSON" | jq -e '.outputSchema.properties.summary.type == "string"' >/dev/null ||
+    error "Machine-readable help should include the output schema."
+  COUNT_AFTER_HELP=$(read_piece_value_or_default "messageCount" "0")
+  if [ "$COUNT_AFTER_HELP" != "$COUNT_BEFORE_HELP" ]; then
+    error "Top-level cf exec --help should not mutate messageCount. Expected: $COUNT_BEFORE_HELP, got: $COUNT_AFTER_HELP"
+  fi
+  success "Top-level and direct --help print agent-oriented callable help without invoking callables"
+}
+
+# This phase and the three handler phases after it read messageCount as an
+# absolute count, from the zero the piece starts at, so the four run together
+# and in this order. The tool phases between them leave the count alone.
+run_handler_direct_exec() {
+  "$HANDLER_FILE" --message "piece-direct"
+  wait_for_piece_value "lastMessage" '"piece-direct"'
+  wait_for_piece_value "messageCount" "1"
+  DIRECT_TOOL=$("$TOOL_FILE" --query "direct" --help "via-shebang")
+  assert_json_eq \
+    "$DIRECT_TOOL" \
+    '{"help":"via-shebang","query":"direct","source":"bound-source","summary":"bound-source:direct:via-shebang"}' \
+    "Direct tool execution returned unexpected JSON"
+  success "Mounted callables can be executed directly through their shebangs"
+}
+
+run_handler_stdin() {
+  printf '{"message":"stdin-handler"}' | cf exec "$HANDLER_FILE" --json
+  wait_for_piece_value "lastMessage" '"stdin-handler"'
+  wait_for_piece_value "messageCount" "2"
+  success "cf exec reads handler JSON input from stdin"
+}
+
+run_tool_stdin() {
+  DIRECT_TOOL_STDIN=$(printf '{"query":"stdin-tool","help":"stdin-help"}' | "$TOOL_FILE" --json)
+  assert_json_eq \
+    "$DIRECT_TOOL_STDIN" \
+    '{"help":"stdin-help","query":"stdin-tool","source":"bound-source","summary":"bound-source:stdin-tool:stdin-help"}' \
+    "Direct tool execution with stdin JSON returned unexpected JSON"
+  success "Mounted tools read JSON input from stdin"
+}
+
+run_handler_flags() {
+  cf exec "$HANDLER_FILE" --message "piece-explicit"
+  wait_for_piece_value "lastMessage" '"piece-explicit"'
+  wait_for_piece_value "messageCount" "3"
+  success "cf exec invokes mounted handlers with schema-derived flags"
+}
+
+run_handler_implicit_verb() {
+  cf exec "$HANDLER_FILE" --message "piece-implicit"
+  wait_for_piece_value "lastMessage" '"piece-implicit"'
+  wait_for_piece_value "messageCount" "4"
+  success "cf exec invokes mounted handlers without an explicit verb"
+}
+
+run_tool_flags() {
+  TOOL_EXPLICIT=$(cf exec "$TOOL_FILE" --query "explicit" --help "schema-field")
+  assert_json_eq \
+    "$TOOL_EXPLICIT" \
+    '{"help":"schema-field","query":"explicit","source":"bound-source","summary":"bound-source:explicit:schema-field"}' \
+    "Explicit tool execution returned unexpected JSON"
+  success "cf exec runs mounted tools with schema-derived flags"
+}
+
+run_tool_help_field() {
+  HELP_FIELD_OUTPUT=$(cf exec "$TOOL_FILE" --help "literal-help" --query "help-field")
+  assert_json_eq \
+    "$HELP_FIELD_OUTPUT" \
+    '{"help":"literal-help","query":"help-field","source":"bound-source","summary":"bound-source:help-field:literal-help"}' \
+    "Top-level --help with a value should be parsed as the tool schema field"
+  success "Top-level --help with a value is parsed as the schema field when present"
+}
+
+run_tool_implicit_verb() {
+  TOOL_IMPLICIT=$(cf exec "$TOOL_FILE" --query "implicit" --help "")
+  assert_json_eq \
+    "$TOOL_IMPLICIT" \
+    '{"help":"","query":"implicit","source":"bound-source","summary":"bound-source:implicit:"}' \
+    "Implicit tool execution returned unexpected JSON"
+  success "cf exec runs mounted tools without an explicit verb"
+}
+
+run_empty_object_handler() {
+  LEGACY_COUNT_BEFORE_EXEC=$(read_piece_value_or_default "legacyCount" "0")
+  cf exec "$LEGACY_HANDLER_FILE"
+  wait_for_piece_value "legacyCount" "$((LEGACY_COUNT_BEFORE_EXEC + 1))"
+  cf exec "$LEGACY_HANDLER_FILE" invoke
+  wait_for_piece_value "legacyCount" "$((LEGACY_COUNT_BEFORE_EXEC + 2))"
+  success "Empty-object handlers run without an explicit verb, and invoke still works"
+}
+
+# The deep probe compares the two namespaces and is off by default. The
+# phase is one step whichever way FUSE_DEEP_ENTITY_PROBE is set, so it
+# records the same identity in both configurations.
+run_shared_backing_cell() {
+  COUNT_BEFORE_PIECES_SHARED=$(read_piece_value_or_default "messageCount" "0")
+  cf exec "$HANDLER_FILE" --message "shared-message"
+  wait_for_piece_value "lastMessage" '"shared-message"'
+  wait_for_piece_value "messageCount" "$((COUNT_BEFORE_PIECES_SHARED + 1))"
+
+  if [ "$ENTITY_DEEP_PROBE" = "1" ]; then
+    ENTITY_RESULT_DIR="$ENTITY_DIR/result"
+    ENTITY_HANDLER_FILE="$ENTITY_RESULT_DIR/recordMessage.handler"
+    ENTITY_TOOL_FILE="$ENTITY_RESULT_DIR/search.tool"
+
+    wait_for_path "$ENTITY_HANDLER_FILE"
+    wait_for_path "$ENTITY_TOOL_FILE"
+
+    COUNT_BEFORE_ENTITIES_SHARED=$(read_piece_value_or_default "messageCount" "0")
+    cf exec "$ENTITY_HANDLER_FILE" --message "shared-message"
+    wait_for_piece_value "lastMessage" '"shared-message"'
+    wait_for_piece_value "messageCount" "$((COUNT_BEFORE_ENTITIES_SHARED + 1))"
+    success "Handler execution through pieces/ and entities/ reaches the same backing cell"
+
+    PIECES_TOOL_SHARED=$(cf exec "$TOOL_FILE" --query "shared-tool" --help "entity-compare")
+    ENTITIES_TOOL_SHARED=$(cf exec "$ENTITY_TOOL_FILE" --query "shared-tool" --help "entity-compare")
+    assert_json_eq \
+      "$PIECES_TOOL_SHARED" \
+      "$ENTITIES_TOOL_SHARED" \
+      "Tool output should match between pieces/ and entities/ paths"
+    success "Tool execution through pieces/ and entities/ is identical"
+  else
+    success "Deep entities callable probe skipped"
+  fi
+}
+
+run_legacy_write_through() {
+  LEGACY_COUNT_BEFORE=$(read_piece_value_or_default "legacyCount" "0")
+  echo '{}' > "$LEGACY_HANDLER_FILE"
+  wait_for_piece_value "legacyCount" "$((LEGACY_COUNT_BEFORE + 1))"
+  success "Legacy handler write-through still works"
+}
+
+run_truncate_disarm() {
+  wait_for_path "$INPUT_LAST_MESSAGE"
+
+  # `handles.write` overlays the buffer the open seeded from the file, so the
+  # stale value is this content over whatever tail of the old value outlives it.
+  # The assertions below read the daemon's trace and do not depend on which.
+  STALE_CONTENT="open-stale-descriptor"
+  STALE_TRACE_MARK=$(trace_line_count)
+
+  # Write and truncate under one sustained redirect of fd 9. On Linux the kernel
+  # sends FUSE flush on every close(), and `printf >&9` closes a dup of fd 9 when
+  # the redirect ends — which would flush the descriptor's buffered write before
+  # the truncate ever runs, defeating the point of the test. Redirecting the whole
+  # group keeps fd 9's buffered write on the handle until the group ends, so every
+  # flush of it happens after the truncate has disarmed it.
+  exec 9<> "$INPUT_LAST_MESSAGE"
+  {
+    printf '%s' "$STALE_CONTENT"
+    : > "$INPUT_LAST_MESSAGE"
+  } >&9
+  exec 9>&-
+
+  # The write above leaves fd 9's handle holding the stale content and marked
+  # dirty. The truncate empties the buffer of every descriptor open on this inode
+  # and clears `dirty` on all of them, and leaves `truncatePending` set only on
+  # the truncating handle. `dirty || truncatePending` is what `flushHandle`,
+  # `flushCb` and `releaseCb` gate on, so clearing both is what makes fd 9's
+  # handle inert.
+  #
+  # `releaseCb` traces the handle's state before deciding anything, so its line
+  # reports whether close() found the descriptor armed, on either truncate path
+  # and whichever callback does the flushing. The cell value cannot report that;
+  # `docs/development/waiting-in-tests-rationale.md` records why.
+  STALE_FH=$(resolve_traced_write_fh "$STALE_TRACE_MARK" "${#STALE_CONTENT}") ||
+    error "Could not resolve the handle the daemon assigned to fd 9."
+
+  wait_for_trace_line "$STALE_TRACE_MARK" "[write-trace] release fh=$STALE_FH "
+  STALE_RELEASE_LINE=$(trace_release_line "$STALE_TRACE_MARK" "$STALE_FH")
+
+  if [[ "$STALE_RELEASE_LINE" != *" pending="* ]] ||
+    [[ "$STALE_RELEASE_LINE" != *" flushing="* ]]; then
+    error "Daemon release trace no longer reports flushing/pending: $STALE_RELEASE_LINE"
+  fi
+
+  # `pending` is `dirty || truncatePending`, the pair every flush path gates on.
+  if [[ "$STALE_RELEASE_LINE" != *" pending=false"* ]]; then
+    error "Truncate left the open descriptor armed at close(). Daemon traced: $STALE_RELEASE_LINE"
+  fi
+
+  # A flush already in flight carries the buffer it copied when it started, which
+  # the truncate cannot recall.
+  if [[ "$STALE_RELEASE_LINE" != *" flushing=false"* ]]; then
+    error "A flush was already in flight for the descriptor at close(). Daemon traced: $STALE_RELEASE_LINE"
+  fi
+
+  # The release line alone would miss a descriptor whose flush had already
+  # finished by the time release arrived, which clears the same fields the disarm
+  # does. `flushCb` traces `flush-fire` only for a handle that got past the gate,
+  # so its absence rules that out. close() sends flush before release and the
+  # daemon runs its callbacks on one thread, so a traced release means the flush
+  # decision is already traced too.
+  assert_trace_line_absent "$STALE_TRACE_MARK" \
+    "[write-trace] flush-fire fh=$STALE_FH" \
+    "Truncate left the open descriptor armed: the daemon flushed fh=$STALE_FH on close()"
+  success "Path truncate disarms an already-open descriptor's buffered write"
+}
+
+# Reads the cell through the value run_truncate_disarm emptied, so it runs
+# after that phase rather than on its own.
+run_truncate_clears() {
+  wait_for_piece_value "lastMessage" '""'
+  success "Path truncate clears stale open write handles"
+}
+
+# The closing assertion is that the update leaves lastMessage as the empty
+# string run_truncate_clears saw, so this phase runs after that one rather
+# than on its own.
+run_source_update() {
+  FUSE_PATTERN_SRC="$PIECE_DIR/.src/fuse-exec.tsx"
+  wait_for_path "$FUSE_PATTERN_SRC"
+  PATTERN_IDENTITY_BEFORE_SOURCE_WRITE=$(piece_pattern_identity)
+  if [ -z "$PATTERN_IDENTITY_BEFORE_SOURCE_WRITE" ]; then
+    error "Could not read the piece pattern identity before the FUSE source update."
+  fi
+
+  INCOMPATIBLE_PATTERN_SRC=$(mktemp)
+  awk '
+    /^interface Output \{/ { in_output = 1 }
+    in_output && /^  lastMessage: string;$/ {
+      print "  lastMessage: string | number;"
+      in_output = 0
+      next
+    }
+    { print }
+  ' "$PATTERN_SRC" >"$INCOMPATIBLE_PATTERN_SRC"
+  if ! grep -q '^  lastMessage: string | number;$' "$INCOMPATIBLE_PATTERN_SRC"; then
+    error "Failed to build the incompatible FUSE source update fixture."
+  fi
+
+  tee "$FUSE_PATTERN_SRC" <"$INCOMPATIBLE_PATTERN_SRC" >/dev/null
+  PATTERN_IDENTITY_AFTER_SOURCE_WRITE=$(
+    wait_for_pattern_identity_change "$PATTERN_IDENTITY_BEFORE_SOURCE_WRITE"
+  )
+  if [ "$PATTERN_IDENTITY_AFTER_SOURCE_WRITE" = "$PATTERN_IDENTITY_BEFORE_SOURCE_WRITE" ]; then
+    error "Dangerously authorized FUSE source write did not update the piece."
+  fi
+  wait_for_piece_value "lastMessage" '""'
+  success "FUSE source writes can explicitly authorize an incompatible schema update"
+}
+
+# The phases each section runs, in the order `all` runs them. A section is a
+# group of phases over one mount: the mount, the daemon and the piece cost
+# more than every phase together, and each section needs all three. What a
+# section can assume is what the prelude below leaves behind — a mounted
+# space holding one stepped piece, with the piece's paths named and its
+# entity directory resolved.
+case "$SECTION" in
+  all)
+    PHASES=(
+      status-document callable-entries callable-json-surface
+      callable-shebangs callable-help handler-direct-exec handler-stdin
+      tool-stdin handler-flags handler-implicit-verb tool-flags
+      tool-help-field tool-implicit-verb empty-object-handler
+      shared-backing-cell legacy-write-through truncate-disarm
+      truncate-clears source-update
+    )
+    ;;
+  mount)
+    PHASES=(status-document)
+    ;;
+  callables)
+    PHASES=(
+      callable-entries callable-json-surface callable-shebangs callable-help
+    )
+    ;;
+  exec)
+    PHASES=(
+      callable-entries handler-direct-exec handler-stdin tool-stdin
+      handler-flags handler-implicit-verb tool-flags tool-help-field
+      tool-implicit-verb empty-object-handler shared-backing-cell
+    )
+    ;;
+  writes)
+    PHASES=(
+      callable-entries legacy-write-through truncate-disarm truncate-clears
+      source-update
+    )
+    ;;
+  *)
+    error "Unknown FUSE integration section: $SECTION"
     ;;
 esac
 
-# The background mount prints a 'log:' line pointing at the daemon's log file (see
-# packages/cli/commands/fuse.ts). That file lives off the mount, so it stays
-# readable even when the mount itself is wedged, and the trace assertions and the
-# failure-path daemon dump both read it. It is required, so a parse miss is fatal.
-DAEMON_LOG=$(printf '%s\n' "$MOUNT_OUTPUT" | sed -n 's/^[[:space:]]*log:[[:space:]]*//p')
-if [ -z "$DAEMON_LOG" ]; then
-  error "Could not parse fuse daemon log path from mount output."
-fi
+# Each step records as its own test, named "fuse-exec.sh <step>"; the begin
+# markers close the previous step's record and the cleanup trap closes the
+# last one, so a failing step is recorded with the failure. A phase's step
+# name is its function's name without the `run_` prefix, with dashes where
+# that name has underscores.
+cf_test_step_begin mount
+setup_mount
+cf_test_step_begin entity-listing
+run_entity_listing
+cf_test_step_begin piece-paths
+run_piece_paths
+cf_test_step_begin entities-entry
+run_entities_entry
 
-# 'cf fuse mount --background' returns only after the daemon has reported the
-# 'mounted' supervisor state and been confirmed alive. The daemon reports that
-# just before it enters its FUSE session loop, and mounted paths hydrate lazily,
-# so the wait_for_path calls below cover the rest.
-if ! kill -0 "$MOUNT_PID" >/dev/null 2>&1; then
-  error "Fuse daemon exited immediately after reporting mount readiness."
-fi
-
-ENTITIES_DIR="$MOUNTPOINT/$SPACE/entities"
-wait_for_path "$ENTITIES_DIR"
-MOUNTED_ENTITY_DIRS=$(find "$ENTITIES_DIR" -mindepth 1 -maxdepth 1 -type d -print)
-if [ -z "$MOUNTED_ENTITY_DIRS" ]; then
-  error "Mounted entities directory did not contain any entity directories."
-fi
-if ! grep -Fq "$PIECE_ID" "$MEMORY_TRACE"; then
-  error "Listing mounted entity directories did not transfer the known entity identifier."
-fi
-if grep -Fq "$ENTITY_PAYLOAD_MARKER" "$MEMORY_TRACE"; then
-  error "Listing mounted entity directories transferred entity payload bytes."
-fi
-success "Listing every mounted entity directory transfers identifiers without entity payload bytes"
-
-wait_for_path "$MOUNTPOINT/$SPACE/pieces"
-
-PIECE_NAME="Fuse-Exec-Fixture"
-PIECE_DIR="$MOUNTPOINT/$SPACE/pieces/$PIECE_NAME"
-INPUT_DIR="$PIECE_DIR/input"
-INPUT_LAST_MESSAGE="$INPUT_DIR/lastMessage"
-RESULT_DIR="$PIECE_DIR/result"
-RESULT_JSON="$PIECE_DIR/result.json"
-META_JSON="$PIECE_DIR/meta.json"
-wait_for_path "$PIECE_DIR"
-wait_for_path "$RESULT_DIR"
-wait_for_path "$RESULT_JSON"
-wait_for_path "$META_JSON"
-
-ENTITY_ID=$(jq -r '.entityId' "$META_JSON")
-if [ -z "$ENTITY_ID" ] || [ "$ENTITY_ID" = "null" ]; then
-  error "Mounted meta.json did not include an entityId."
-fi
-
-ENTITY_BARE_ID="${ENTITY_ID#of:}"
-ENTITY_DEEP_PROBE="${FUSE_DEEP_ENTITY_PROBE:-0}"
-ENTITY_DIR=$(resolve_entity_dir "$ENTITIES_DIR" "$ENTITY_ID" || true)
-if [ -z "$ENTITY_DIR" ]; then
-  error "Timed out waiting for entity directory entry for $ENTITY_ID."
-fi
-
-# A single read is enough to prove the generated file is served as one coherent
-# document through a real getattr and read. That the counters it carries are
-# fresh and advance is settled deterministically by the CellBridge.status unit
-# tests; asserting it here would mean polling out the macOS NFS attribute cache,
-# and this suite adds no waits it can avoid.
-STATUS_FILE="$MOUNTPOINT/.status"
-path_exists "$STATUS_FILE" || error ".status was not mounted at the mount root."
-cat "$STATUS_FILE" | jq -e . >/dev/null ||
-  error ".status did not read back as a whole JSON document."
-success ".status reads as a whole JSON document"
-
-HANDLER_FILE="$RESULT_DIR/recordMessage.handler"
-LEGACY_HANDLER_FILE="$RESULT_DIR/legacyWrite.handler"
-TOOL_FILE="$RESULT_DIR/search.tool"
-
-wait_for_path "$HANDLER_FILE"
-wait_for_path "$LEGACY_HANDLER_FILE"
-wait_for_path "$TOOL_FILE"
-
-path_exists "$HANDLER_FILE" || error "recordMessage.handler was not mounted."
-path_exists "$LEGACY_HANDLER_FILE" || error "legacyWrite.handler was not mounted."
-path_exists "$TOOL_FILE" || error "search.tool was not mounted."
-success "Mounted callable entries exist"
-success "Entities namespace exposes matching entry for mounted piece"
-
-assert_not_exists "$RESULT_DIR/search" "Pattern tool internals should not be exposed as a directory."
-wait_for_json "$RESULT_JSON" '.recordMessage == {"/handler":"recordMessage"}' \
-  "result.json should render recordMessage as a handler sigil"
-wait_for_json "$RESULT_JSON" '.legacyWrite == {"/handler":"legacyWrite"}' \
-  "result.json should render legacyWrite as a handler sigil"
-wait_for_json "$RESULT_JSON" '.search == {"/tool":"search"}' \
-  "result.json should render search as a tool sigil"
-success "Mounted JSON surface hides callable internals"
-
-HANDLER_FIRST_LINE=$(head -n 1 "$HANDLER_FILE")
-TOOL_FIRST_LINE=$(head -n 1 "$TOOL_FILE")
-test -x "$HANDLER_FILE" || error "Handler file should be executable."
-test -x "$TOOL_FILE" || error "Tool file should be executable."
-assert_contains "$HANDLER_FIRST_LINE" "#!" "Handler file should start with a shebang."
-assert_contains "$HANDLER_FIRST_LINE" " exec" "Handler shebang should invoke cf exec."
-assert_contains "$TOOL_FIRST_LINE" "#!" "Tool file should start with a shebang."
-assert_contains "$TOOL_FIRST_LINE" " exec" "Tool shebang should invoke cf exec."
-success "Callable files are executable and expose cf exec shebangs"
-
-COUNT_BEFORE_HELP=$(read_piece_value_or_default "messageCount" "0")
-HANDLER_HELP=$(cf exec "$HANDLER_FILE" --help)
-TOOL_HELP=$(cf exec "$TOOL_FILE" --help)
-TOOL_HELP_JSON=$(cf exec "$TOOL_FILE" --help --json)
-DIRECT_HANDLER_HELP=$("$HANDLER_FILE" --help)
-assert_contains "$HANDLER_HELP" "cf exec" "cf exec help should describe the cf exec call form."
-assert_contains "$HANDLER_HELP" "[invoke] --message <string>" "Handler help should show the optional invoke verb."
-assert_contains "$HANDLER_HELP" "--message <string>" "Handler help should expand schema-derived flags."
-assert_contains "$HANDLER_HELP" "Required." "Handler help should mark required flags."
-# A handler's help says nothing about output rather than asserting there is
-# none: a verb declared `Stream<E, R>` does return a result, and this page
-# cannot see the declaration.
-assert_not_contains "$HANDLER_HELP" "Output:" "Handler help should carry no Output section."
-assert_contains "$HANDLER_HELP" "Alternatively, write JSON to this file to invoke the handler." "Handler help should mention write-through invocation."
-assert_contains "$TOOL_HELP" "[run] --query <string>" "Tool help should show the optional run verb."
-assert_contains "$TOOL_HELP" "--query <string>" "Tool help should expand schema-derived flags."
-assert_contains "$TOOL_HELP" "JSON on success:" "Tool help should show JSON output."
-assert_contains "$TOOL_HELP" "--help --json" "Tool help should mention machine-readable schema help."
-assert_contains "$DIRECT_HANDLER_HELP" "[invoke] --message <string>" "Direct help should show the optional invoke verb."
-assert_contains "$DIRECT_HANDLER_HELP" "$HANDLER_FILE" "Direct help should mention the mounted file path."
-assert_contains "$DIRECT_HANDLER_HELP" "--message <string>" "Direct help should show the mounted file call form."
-if [[ "$DIRECT_HANDLER_HELP" == *"cf exec $HANDLER_FILE"* ]]; then
-  error "Direct help should hide the cf exec call form."
-fi
-printf '%s\n' "$TOOL_HELP_JSON" | jq -e '.inputSchema.required == ["query"]' >/dev/null ||
-  error "Machine-readable help should include the input schema."
-printf '%s\n' "$TOOL_HELP_JSON" | jq -e '.outputSchema.properties.summary.type == "string"' >/dev/null ||
-  error "Machine-readable help should include the output schema."
-COUNT_AFTER_HELP=$(read_piece_value_or_default "messageCount" "0")
-if [ "$COUNT_AFTER_HELP" != "$COUNT_BEFORE_HELP" ]; then
-  error "Top-level cf exec --help should not mutate messageCount. Expected: $COUNT_BEFORE_HELP, got: $COUNT_AFTER_HELP"
-fi
-success "Top-level and direct --help print agent-oriented callable help without invoking callables"
-
-"$HANDLER_FILE" --message "piece-direct"
-wait_for_piece_value "lastMessage" '"piece-direct"'
-wait_for_piece_value "messageCount" "1"
-DIRECT_TOOL=$("$TOOL_FILE" --query "direct" --help "via-shebang")
-assert_json_eq \
-  "$DIRECT_TOOL" \
-  '{"help":"via-shebang","query":"direct","source":"bound-source","summary":"bound-source:direct:via-shebang"}' \
-  "Direct tool execution returned unexpected JSON"
-success "Mounted callables can be executed directly through their shebangs"
-
-printf '{"message":"stdin-handler"}' | cf exec "$HANDLER_FILE" --json
-wait_for_piece_value "lastMessage" '"stdin-handler"'
-wait_for_piece_value "messageCount" "2"
-success "cf exec reads handler JSON input from stdin"
-
-DIRECT_TOOL_STDIN=$(printf '{"query":"stdin-tool","help":"stdin-help"}' | "$TOOL_FILE" --json)
-assert_json_eq \
-  "$DIRECT_TOOL_STDIN" \
-  '{"help":"stdin-help","query":"stdin-tool","source":"bound-source","summary":"bound-source:stdin-tool:stdin-help"}' \
-  "Direct tool execution with stdin JSON returned unexpected JSON"
-success "Mounted tools read JSON input from stdin"
-
-cf exec "$HANDLER_FILE" --message "piece-explicit"
-wait_for_piece_value "lastMessage" '"piece-explicit"'
-wait_for_piece_value "messageCount" "3"
-success "cf exec invokes mounted handlers with schema-derived flags"
-
-cf exec "$HANDLER_FILE" --message "piece-implicit"
-wait_for_piece_value "lastMessage" '"piece-implicit"'
-wait_for_piece_value "messageCount" "4"
-success "cf exec invokes mounted handlers without an explicit verb"
-
-TOOL_EXPLICIT=$(cf exec "$TOOL_FILE" --query "explicit" --help "schema-field")
-assert_json_eq \
-  "$TOOL_EXPLICIT" \
-  '{"help":"schema-field","query":"explicit","source":"bound-source","summary":"bound-source:explicit:schema-field"}' \
-  "Explicit tool execution returned unexpected JSON"
-success "cf exec runs mounted tools with schema-derived flags"
-
-HELP_FIELD_OUTPUT=$(cf exec "$TOOL_FILE" --help "literal-help" --query "help-field")
-assert_json_eq \
-  "$HELP_FIELD_OUTPUT" \
-  '{"help":"literal-help","query":"help-field","source":"bound-source","summary":"bound-source:help-field:literal-help"}' \
-  "Top-level --help with a value should be parsed as the tool schema field"
-success "Top-level --help with a value is parsed as the schema field when present"
-
-TOOL_IMPLICIT=$(cf exec "$TOOL_FILE" --query "implicit" --help "")
-assert_json_eq \
-  "$TOOL_IMPLICIT" \
-  '{"help":"","query":"implicit","source":"bound-source","summary":"bound-source:implicit:"}' \
-  "Implicit tool execution returned unexpected JSON"
-success "cf exec runs mounted tools without an explicit verb"
-
-LEGACY_COUNT_BEFORE_EXEC=$(read_piece_value_or_default "legacyCount" "0")
-cf exec "$LEGACY_HANDLER_FILE"
-wait_for_piece_value "legacyCount" "$((LEGACY_COUNT_BEFORE_EXEC + 1))"
-cf exec "$LEGACY_HANDLER_FILE" invoke
-wait_for_piece_value "legacyCount" "$((LEGACY_COUNT_BEFORE_EXEC + 2))"
-success "Empty-object handlers run without an explicit verb, and invoke still works"
-
-COUNT_BEFORE_PIECES_SHARED=$(read_piece_value_or_default "messageCount" "0")
-cf exec "$HANDLER_FILE" --message "shared-message"
-wait_for_piece_value "lastMessage" '"shared-message"'
-wait_for_piece_value "messageCount" "$((COUNT_BEFORE_PIECES_SHARED + 1))"
-
-if [ "$ENTITY_DEEP_PROBE" = "1" ]; then
-  ENTITY_RESULT_DIR="$ENTITY_DIR/result"
-  ENTITY_HANDLER_FILE="$ENTITY_RESULT_DIR/recordMessage.handler"
-  ENTITY_TOOL_FILE="$ENTITY_RESULT_DIR/search.tool"
-
-  wait_for_path "$ENTITY_HANDLER_FILE"
-  wait_for_path "$ENTITY_TOOL_FILE"
-
-  COUNT_BEFORE_ENTITIES_SHARED=$(read_piece_value_or_default "messageCount" "0")
-  cf exec "$ENTITY_HANDLER_FILE" --message "shared-message"
-  wait_for_piece_value "lastMessage" '"shared-message"'
-  wait_for_piece_value "messageCount" "$((COUNT_BEFORE_ENTITIES_SHARED + 1))"
-  success "Handler execution through pieces/ and entities/ reaches the same backing cell"
-
-  PIECES_TOOL_SHARED=$(cf exec "$TOOL_FILE" --query "shared-tool" --help "entity-compare")
-  ENTITIES_TOOL_SHARED=$(cf exec "$ENTITY_TOOL_FILE" --query "shared-tool" --help "entity-compare")
-  assert_json_eq \
-    "$PIECES_TOOL_SHARED" \
-    "$ENTITIES_TOOL_SHARED" \
-    "Tool output should match between pieces/ and entities/ paths"
-  success "Tool execution through pieces/ and entities/ is identical"
-else
-  success "Deep entities callable probe skipped"
-fi
-
-LEGACY_COUNT_BEFORE=$(read_piece_value_or_default "legacyCount" "0")
-echo '{}' > "$LEGACY_HANDLER_FILE"
-wait_for_piece_value "legacyCount" "$((LEGACY_COUNT_BEFORE + 1))"
-success "Legacy handler write-through still works"
-
-wait_for_path "$INPUT_LAST_MESSAGE"
-
-# `handles.write` overlays the buffer the open seeded from the file, so the
-# stale value is this content over whatever tail of the old value outlives it.
-# The assertions below read the daemon's trace and do not depend on which.
-STALE_CONTENT="open-stale-descriptor"
-STALE_TRACE_MARK=$(trace_line_count)
-
-# Write and truncate under one sustained redirect of fd 9. On Linux the kernel
-# sends FUSE flush on every close(), and `printf >&9` closes a dup of fd 9 when
-# the redirect ends — which would flush the descriptor's buffered write before
-# the truncate ever runs, defeating the point of the test. Redirecting the whole
-# group keeps fd 9's buffered write on the handle until the group ends, so every
-# flush of it happens after the truncate has disarmed it.
-exec 9<> "$INPUT_LAST_MESSAGE"
-{
-  printf '%s' "$STALE_CONTENT"
-  : > "$INPUT_LAST_MESSAGE"
-} >&9
-exec 9>&-
-
-# The write above leaves fd 9's handle holding the stale content and marked
-# dirty. The truncate empties the buffer of every descriptor open on this inode
-# and clears `dirty` on all of them, and leaves `truncatePending` set only on
-# the truncating handle. `dirty || truncatePending` is what `flushHandle`,
-# `flushCb` and `releaseCb` gate on, so clearing both is what makes fd 9's
-# handle inert.
-#
-# `releaseCb` traces the handle's state before deciding anything, so its line
-# reports whether close() found the descriptor armed, on either truncate path
-# and whichever callback does the flushing. The cell value cannot report that;
-# `docs/development/waiting-in-tests-rationale.md` records why.
-STALE_FH=$(resolve_traced_write_fh "$STALE_TRACE_MARK" "${#STALE_CONTENT}") ||
-  error "Could not resolve the handle the daemon assigned to fd 9."
-
-wait_for_trace_line "$STALE_TRACE_MARK" "[write-trace] release fh=$STALE_FH "
-STALE_RELEASE_LINE=$(trace_release_line "$STALE_TRACE_MARK" "$STALE_FH")
-
-if [[ "$STALE_RELEASE_LINE" != *" pending="* ]] ||
-  [[ "$STALE_RELEASE_LINE" != *" flushing="* ]]; then
-  error "Daemon release trace no longer reports flushing/pending: $STALE_RELEASE_LINE"
-fi
-
-# `pending` is `dirty || truncatePending`, the pair every flush path gates on.
-if [[ "$STALE_RELEASE_LINE" != *" pending=false"* ]]; then
-  error "Truncate left the open descriptor armed at close(). Daemon traced: $STALE_RELEASE_LINE"
-fi
-
-# A flush already in flight carries the buffer it copied when it started, which
-# the truncate cannot recall.
-if [[ "$STALE_RELEASE_LINE" != *" flushing=false"* ]]; then
-  error "A flush was already in flight for the descriptor at close(). Daemon traced: $STALE_RELEASE_LINE"
-fi
-
-# The release line alone would miss a descriptor whose flush had already
-# finished by the time release arrived, which clears the same fields the disarm
-# does. `flushCb` traces `flush-fire` only for a handle that got past the gate,
-# so its absence rules that out. close() sends flush before release and the
-# daemon runs its callbacks on one thread, so a traced release means the flush
-# decision is already traced too.
-assert_trace_line_absent "$STALE_TRACE_MARK" \
-  "[write-trace] flush-fire fh=$STALE_FH" \
-  "Truncate left the open descriptor armed: the daemon flushed fh=$STALE_FH on close()"
-success "Path truncate disarms an already-open descriptor's buffered write"
-
-wait_for_piece_value "lastMessage" '""'
-success "Path truncate clears stale open write handles"
-
-FUSE_PATTERN_SRC="$PIECE_DIR/.src/fuse-exec.tsx"
-wait_for_path "$FUSE_PATTERN_SRC"
-PATTERN_IDENTITY_BEFORE_SOURCE_WRITE=$(piece_pattern_identity)
-if [ -z "$PATTERN_IDENTITY_BEFORE_SOURCE_WRITE" ]; then
-  error "Could not read the piece pattern identity before the FUSE source update."
-fi
-
-INCOMPATIBLE_PATTERN_SRC=$(mktemp)
-awk '
-  /^interface Output \{/ { in_output = 1 }
-  in_output && /^  lastMessage: string;$/ {
-    print "  lastMessage: string | number;"
-    in_output = 0
-    next
-  }
-  { print }
-' "$PATTERN_SRC" >"$INCOMPATIBLE_PATTERN_SRC"
-if ! grep -q '^  lastMessage: string | number;$' "$INCOMPATIBLE_PATTERN_SRC"; then
-  error "Failed to build the incompatible FUSE source update fixture."
-fi
-
-tee "$FUSE_PATTERN_SRC" <"$INCOMPATIBLE_PATTERN_SRC" >/dev/null
-PATTERN_IDENTITY_AFTER_SOURCE_WRITE=$(
-  wait_for_pattern_identity_change "$PATTERN_IDENTITY_BEFORE_SOURCE_WRITE"
-)
-if [ "$PATTERN_IDENTITY_AFTER_SOURCE_WRITE" = "$PATTERN_IDENTITY_BEFORE_SOURCE_WRITE" ]; then
-  error "Dangerously authorized FUSE source write did not update the piece."
-fi
-wait_for_piece_value "lastMessage" '""'
-success "FUSE source writes can explicitly authorize an incompatible schema update"
+for PHASE in "${PHASES[@]}"; do
+  cf_test_step_begin "$PHASE"
+  "run_${PHASE//-/_}"
+done
 
 echo "FUSE exec integration passed."
