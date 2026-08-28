@@ -1,3 +1,8 @@
+import type {
+  IExtendedStorageTransaction,
+  MemorySpace,
+} from "@commonfabric/runner";
+
 /**
  * The receipt a write leaves behind: the space it landed in, named on stderr
  * once a write has actually happened.
@@ -45,4 +50,22 @@ export function noteWroteTo(space: string): void {
 /** Forget what has been receipted. For tests that drive several writes. */
 export function resetWriteReceipts(): void {
   receipted.clear();
+}
+
+/**
+ * Did `tx` write anything to `space`?
+ *
+ * A resolved `commit()` is not the answer and neither is a `done` status: an
+ * empty transaction commits successfully. The journal's novelty for the space
+ * is what the transaction actually contributed, so an empty one reports no
+ * write and earns no receipt.
+ */
+export function transactionWroteTo(
+  tx: IExtendedStorageTransaction,
+  space: MemorySpace,
+): boolean {
+  const status = tx.status();
+  if (status.status === "error") return false;
+  for (const _ of status.journal.novelty(space)) return true;
+  return false;
 }

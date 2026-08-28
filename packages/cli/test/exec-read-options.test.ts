@@ -122,7 +122,7 @@ describe("cf exec read options", () => {
         storageManager: { synced: () => Promise.resolve() },
         edit: () => ({
           commit: () => Promise.resolve(),
-          status: () => ({ status: "done" }),
+          status: () => ({ status: "done", journal: { novelty: () => [] } }),
         }),
         prepareTxForCommit: () => {},
         getCell: () => resultCell,
@@ -180,7 +180,7 @@ describe("cf exec read options", () => {
       asSchemaFromLinks: () => cell,
       send: (_value: unknown, onCommit?: (tx: unknown) => void) => {
         onCommit?.({
-          status: () => ({ status: "done" }),
+          status: () => ({ status: "done", journal: { novelty: () => [] } }),
           handlingReceiptLink: {
             id: "of:receipt-cell",
             space: "did:key:test-home",

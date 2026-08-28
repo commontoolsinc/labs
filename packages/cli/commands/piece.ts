@@ -4692,8 +4692,10 @@ export function spaceWasWritten(
 // "required" with cliffy. Ensure that all required values are
 // available after parsing both args and env vars.
 //
-// The space can arrive three ways: `--url` embeds it, `--space` names it, and
-// a canonical `--piece` reference may carry it as a `/@did:.../` prefix. A
+// The space can arrive four ways: `--url` embeds it, `--space` names it,
+// `CF_SPACE` supplies it when the flag is absent, and a canonical `--piece`
+// reference may carry it as a `/@did:.../` prefix. Only a written `--space`
+// refuses `--url`; an ambient one yields to the space the URL carries. A
 // reference's space fills an absent `--space`; a present one must agree —
 // checked at parse time when the target space is a DID, and at session open
 // through `validateEmbeddedSpaces` when it is a name still to be resolved.

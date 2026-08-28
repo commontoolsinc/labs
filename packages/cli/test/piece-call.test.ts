@@ -1666,7 +1666,7 @@ function createPieceCallableHarness(options: {
         commit: async () => {},
         // The real transaction reports one, and the write receipt reads it
         // rather than treating a resolved `commit()` as proof of a write.
-        status: () => ({ status: "done" }),
+        status: () => ({ status: "done", journal: { novelty: () => [] } }),
       }),
       prepareTxForCommit: () => {},
       settled: () => Promise.resolve(),
@@ -3995,7 +3995,7 @@ describe("piece call over a live runtime", () => {
           onCommit?: (tx: unknown) => void,
         ) =>
           onCommit?.({
-            status: () => ({ status: "done" }),
+            status: () => ({ status: "done", journal: { novelty: () => [] } }),
             handlingReceiptLink,
           }),
       } as unknown as Cell<any>,

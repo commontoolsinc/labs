@@ -47,7 +47,7 @@ import {
 } from "./cell-selection.ts";
 import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 import type { ExecCommandSpec } from "./exec-schema.ts";
-import { noteWroteTo } from "./write-receipt.ts";
+import { noteWroteTo, transactionWroteTo } from "./write-receipt.ts";
 
 export const CF_RUNTIME_ERROR_LOG = Symbol.for("cf.cli.runtimeErrorLog");
 
@@ -1801,11 +1801,12 @@ export async function executeResolvedCallable(
     await runtime.idle();
     runtime.prepareTxForCommit(tx);
     await tx.commit();
-    // A tool's result cell is durable, so a committed transaction is a write
-    // to the space like a handler's is. `commit()` resolving is not proof of
-    // one — the handler branch above reads `status()` for the same reason —
-    // so the receipt follows the status rather than the call returning.
-    if (tx.status().status !== "error") noteWroteTo(resolved.space);
+    // A tool's result cell is durable, so a transaction that wrote one is a
+    // write to the space like a handler's is. Neither `commit()` resolving
+    // nor a `done` status proves that: an empty transaction commits
+    // successfully too. The journal's novelty for this space is what was
+    // actually written, so the receipt follows it.
+    if (transactionWroteTo(tx, resolved.space)) noteWroteTo(resolved.space);
 
     // Drain the tool to a fully settled state — scheduler idle, storage synced,
     // and every in-flight async builtin finished — so the result is final by the
