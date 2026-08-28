@@ -91,6 +91,9 @@ import {
 } from "../src/sandbox/docker-runsc.ts";
 import type { CreateHarnessPromptLoopOptions } from "../src/prompt-loop.ts";
 import type { HarnessChatSessionStore } from "../src/session-store.ts";
+import { FileSystemHarnessArtifactStore } from "../src/artifacts.ts";
+import type { HarnessRunState } from "../src/run-state.ts";
+import { readSpaceCellLabels } from "../src/space-labels.ts";
 import {
   listConsoleRuns,
   readConsoleRun,
@@ -307,6 +310,13 @@ interface ConsoleConfig {
   fabricSession: HarnessFabricSessionConfig;
   patternIndex?: HarnessPatternIndexConfig;
   sessionDbPath?: string;
+
+  /**
+   * The space database the per-cell label snapshot reads, for a host whose
+   * store is not where the discovery walk looks. Absent, the space the
+   * fabric session names is resolved against the caches on this host.
+   */
+  spaceDbPath?: string;
   maxModelTurns?: number;
   skillsRoot?: string;
 }
@@ -353,6 +363,7 @@ export const resolveConsoleConfig = (
       "fabric-space",
       "pattern-index-url",
       "session-db",
+      "space-db",
       "max-model-turns",
       "fabric-cfc-enforcement-mode",
       "fabric-cfc-flow-labels",
@@ -478,6 +489,9 @@ export const resolveConsoleConfig = (
   const maxModelTurns = flag("max-model-turns") ??
     nonEmpty(env.CF_HARNESS_CONSOLE_MAX_MODEL_TURNS) ?? "32";
 
+  const spaceDb = flag("space-db") ?? nonEmpty(env.CF_HARNESS_SPACE_DB);
+  const spaceDbPath = spaceDb === undefined ? undefined : resolve(cwd, spaceDb);
+
   return {
     port,
     workspacePath,
@@ -490,6 +504,7 @@ export const resolveConsoleConfig = (
     ),
     model: flag("model") ?? nonEmpty(env.CF_HARNESS_MODEL) ?? DEFAULT_MODEL,
     fabricSession,
+    ...(spaceDbPath !== undefined ? { spaceDbPath } : {}),
     ...(patternIndexUrl !== undefined
       ? {
         patternIndex: {
@@ -679,6 +694,22 @@ export class ConsoleServer {
 
   /** Writes one envelope to every stream that has not already seen it. */
   broadcast(envelope: HarnessChatEventEnvelope): void {
+    if (
+      envelope.event.kind === "turn_completed" ||
+      envelope.event.kind === "turn_failed" ||
+      envelope.event.kind === "turn_canceled"
+    ) {
+      // The run's cells are settled once its turn is, and the page re-reads
+      // the run on the same event, so the snapshot is taken here rather than
+      // on the read that wants it. A failure to read the space is a snapshot
+      // that says so; a failure to write one leaves the run as it stands.
+      this.#recordCellLabels(envelope.sessionId).catch((error: unknown) => {
+        console.error(
+          `cell label snapshot failed for session ${envelope.sessionId}:`,
+          error,
+        );
+      });
+    }
     for (const client of this.#clients) {
       if (
         client.sessionId !== undefined &&
@@ -691,6 +722,62 @@ export class ConsoleServer {
         continue;
       }
       this.#write(client, envelope);
+    }
+  }
+
+  /**
+   * Reads the run's space for what it holds about the cells a finished turn
+   * touched, and records it beside the run.
+   *
+   * The run's own artifacts say which cells it made and read; the space says
+   * what each of them is labelled, and nothing else joins the two. A turn is
+   * its own run, so this runs once per turn, over that run and the
+   * `delegate_task` children beneath it — a parent commonly names a cell its
+   * child produced, and a snapshot of the parent alone would leave that cell
+   * unlabelled in the family map.
+   *
+   * The space is read read-only and best-effort: a host holding no copy of it
+   * writes a snapshot that says so, which is a different page from a run whose
+   * cells carry no label.
+   */
+  async #recordCellLabels(sessionId: string): Promise<void> {
+    const [session] = this.#service.status(sessionId).sessions;
+    const runId = session?.harnessRunId;
+    if (runId === undefined) {
+      return;
+    }
+    const artifactRoot = session.artifactRoot ?? this.#config.artifactRoot;
+    // The harness ids a child `<parent>.subagent.N`, so the family is a
+    // directory listing rather than a walk of every run's state.
+    const family: string[] = [];
+    for await (const entry of Deno.readDir(artifactRoot)) {
+      if (
+        entry.isDirectory &&
+        (entry.name === runId || entry.name.startsWith(`${runId}.`))
+      ) {
+        family.push(entry.name);
+      }
+    }
+    for (const name of family) {
+      const runState = JSON.parse(
+        await Deno.readTextFile(join(artifactRoot, name, "run-state.json")),
+      ) as HarnessRunState;
+      const refs = (runState.handleTable?.entries ?? []).map((entry) =>
+        entry.ref
+      );
+      if (refs.length === 0) {
+        continue;
+      }
+      const labels = await readSpaceCellLabels({
+        space: this.#config.fabricSession.space,
+        ...(this.#config.spaceDbPath !== undefined
+          ? { dbPath: this.#config.spaceDbPath }
+          : {}),
+        refs,
+        generatedAt: new Date().toISOString(),
+      });
+      await new FileSystemHarnessArtifactStore({ artifactRoot, runId: name })
+        .persistCellLabels(labels);
     }
   }
 

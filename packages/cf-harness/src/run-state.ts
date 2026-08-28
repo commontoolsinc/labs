@@ -5,6 +5,7 @@ import {
   type HarnessCfcModelContext,
   type HarnessCfcModelContextObservationInput,
 } from "./contracts/cfc-model-context.ts";
+import type { HarnessCellLabels } from "./contracts/cell-labels.ts";
 import type { HarnessCfcPolicySnapshot } from "./contracts/cfc-policy-snapshot.ts";
 import type { HarnessHandleTable } from "./contracts/handle-table.ts";
 import type { HarnessWellKnownGrant } from "./contracts/well-known-grants.ts";
@@ -122,6 +123,15 @@ export interface HarnessRunState {
   policyTracePath?: string;
   cfcModelContext?: HarnessCfcModelContext;
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
+
+  /**
+   * The per-cell CFC labels the run's space holds for the cells it touched.
+   * Every other artifact a run writes is the run's own record of itself; this
+   * one is read out of the space, and it is the only place a reader working
+   * from the tree can learn what a cell is labelled.
+   */
+  cellLabels?: HarnessCellLabels;
+  cellLabelsPath?: string;
   handleTable?: HarnessHandleTable;
   wellKnownGrants?: HarnessWellKnownGrant[];
   inputCells?: HarnessInputCell[];
@@ -170,6 +180,8 @@ export interface CreateHarnessRunStateOptions {
   policyTracePath?: string;
   cfcModelContext?: HarnessCfcModelContext;
   cfcInvocationContexts?: HarnessCfcInvocationContext[];
+  cellLabels?: HarnessCellLabels;
+  cellLabelsPath?: string;
   handleTable?: HarnessHandleTable;
   wellKnownGrants?: HarnessWellKnownGrant[];
   inputCells?: HarnessInputCell[];
@@ -278,6 +290,12 @@ export const createHarnessRunState = (
       : {}),
     ...(options.cfcInvocationContexts !== undefined
       ? { cfcInvocationContexts: [...options.cfcInvocationContexts] }
+      : {}),
+    ...(options.cellLabels !== undefined
+      ? { cellLabels: structuredClone(options.cellLabels) }
+      : {}),
+    ...(options.cellLabelsPath !== undefined
+      ? { cellLabelsPath: options.cellLabelsPath }
       : {}),
     ...(options.handleTable !== undefined
       ? { handleTable: structuredClone(options.handleTable) }
