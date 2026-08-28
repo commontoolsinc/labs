@@ -127,6 +127,13 @@ import { snapshotQueryResult } from "./query-result-proxy.ts";
 import { AsyncSemaphoreQueue, type QueueConfig } from "./queue.ts";
 import { type PieceSourceTransition, Runner } from "./runner.ts";
 import { ExtendedStorageTransaction } from "./storage/extended-storage-transaction.ts";
+import { getLogger } from "@commonfabric/utils/logger";
+import {
+  markRendererInputTx,
+  markUiInputBlindWriteTx,
+  setBlindStructuralTarget,
+  unmarkUiInputBlindWriteTx,
+} from "./storage/reactivity-log.ts";
 import { isRetryableCommitRejection } from "./storage/rejection.ts";
 import { isCellScope, normalizeCellScope, scopeRank } from "./scope.ts";
 import { toURI } from "./uri-utils.ts";
@@ -176,6 +183,15 @@ const WriteDebugContextStorage = (isDeno()
 Error.stackTraceLimit = 500;
 
 export const DEFAULT_MAX_RETRIES = 5;
+
+// Loud, counted channel for UI writes that are finally lost — see
+// `Runtime.commitUiCellWrite`. Error level so a dropped user input is
+// visible in any console, and counted regardless of level so a run's
+// census (`getLoggerCounts`) can see it even where consoles are off.
+const uiCellWriteLogger = getLogger("runtime.ui-cell-write", {
+  enabled: true,
+  level: "error",
+});
 
 export type { IExtendedStorageTransaction, MemorySpace };
 
@@ -2513,6 +2529,159 @@ export class Runtime {
         );
       } catch {
         // Pull failed — the retry's commit decides.
+      }
+    }
+  }
+
+  /**
+   * Per-lane state for UI writes (one lane per UI control's cell address):
+   * the NEWEST requested value and how many write loops are still in
+   * flight. A conflict retry writes the lane's newest value — never its
+   * own — so a delayed retry can only ever re-assert the user's latest
+   * input; the entry lives until every loop that might still write settles
+   * (deleting it earlier would hand a late retry a stale fallback). See
+   * {@link commitUiCellWrite}.
+   */
+  #uiWriteLanes = new Map<string, { value: unknown; inFlight: number }>();
+
+  /**
+   * Commit a UI-originated cell write — the renderer `$value`/input path
+   * (handleCellSet/handleCellPush in the runtime-client backends) — with
+   * the commit-retry protocol every other consumer of the retryable
+   * rejection classes already uses ({@link editWithRetry}; the event
+   * path's conflict catch-up-then-requeue in scheduler/events.ts; the
+   * reactive path's re-queue).
+   *
+   * Why this exists (the cfc-group-chat-demo `:133` stall —
+   * verification-coverage.md OW45's PHASE-3 groupchat observation,
+   * rootcause §2b): a blind UI-input write threads a SHAPE precondition at
+   * its cell's PARENT (`setBlindStructuralTarget`). Under server execution
+   * a serving wave routinely lands structure on the same document
+   * concurrently with typing — the first `/cfc` labelMap stamp, a sibling
+   * key add on the piece argument doc — and the engine then rejects the
+   * input's commit as `stale confirmed read`: a ConflictError the ruled
+   * vocabulary classifies RETRYABLE (storage/rejection.ts — catch-up, then
+   * a fresh read converges). The previous call sites fired `tx.commit()`
+   * and dropped the result, so the rejection's `readyToRetry` gate had no
+   * consumer and the USER'S INPUT was silently, permanently lost — while
+   * the served derivations over it (a send button's `disabled`) stayed
+   * correctly stale forever.
+   *
+   * Semantics:
+   * - `blind: true` is the LWW leaf-overwrite class (every renderer
+   *   `$value` input write). The blind marking and the structural target
+   *   are re-threaded PER ATTEMPT on the attempt's own fresh transaction,
+   *   so a retry re-resolves the cell and bases its shape read on the
+   *   caught-up state ("the retry's write carries its true version" —
+   *   {@link awaitCommitRetryReadiness}).
+   * - `blind: false` is the CAS class (`CellHandle.push`): the value was
+   *   resolved by the caller (read-modify-write on the main thread) and
+   *   the value-equality reads stay in place. A conflicted CAS write takes
+   *   ONE attempt and surfaces the loss loudly — re-running `set` with the
+   *   same already-resolved value against fresh state could erase an
+   *   intervening writer's append (cubic/codex P1 on #6477); the modify
+   *   step is not re-runnable here, so retrying is the caller's decision.
+   *   CAS writes also never join a supersede lane: a blind set's retry
+   *   must never write a push's resolved value or vice versa.
+   * - `supersedeKey` makes writes to one UI control one LANE, and each
+   *   attempt writes the lane's NEWEST requested value rather than the
+   *   value this call was issued with. That closes both failure shapes at
+   *   once: a delayed retry can never re-assert an older input over a
+   *   newer one (the LWW-inversion hazard the OW47 report recorded
+   *   against unguarded auto-retry), and a newer same-lane call that
+   *   resolves VACUOUSLY — its `set` no-ops against the older write's
+   *   still-standing optimistic layer, so it holds no ops of its own —
+   *   cannot strand the value when that older layer is reverted: the
+   *   older call's retry is still live and re-issues the newest value on
+   *   the repaired base (the d05-diagnosed remainder of the :133 stall,
+   *   where token-based decline left the value owned by a no-op).
+   * - a write that exhausts the budget or is refused non-retryably resolves
+   *   `{ error }` and is LOUD: `ui-cell-write.lost` is logged at error
+   *   level and counted, so a run's census can see dropped user input (the
+   *   silent-loss detectability lesson of OW46/S-D). Callers that must not
+   *   block (cell IPC) fire-and-forget the returned promise; the loss
+   *   report does not depend on them.
+   */
+  async commitUiCellWrite(
+    cell: Cell<unknown>,
+    value: unknown,
+    options: { blind: boolean; supersedeKey?: string },
+  ): Promise<
+    | { ok: "committed"; error?: undefined }
+    | { ok?: undefined; error: CommitError }
+  > {
+    const { blind, supersedeKey } = options;
+    let lane: { value: unknown; inFlight: number } | undefined;
+    if (blind && supersedeKey !== undefined) {
+      lane = this.#uiWriteLanes.get(supersedeKey);
+      if (lane === undefined) {
+        lane = { value, inFlight: 0 };
+        this.#uiWriteLanes.set(supersedeKey, lane);
+      } else {
+        // This call is now the lane's newest input; every still-running
+        // loop's next attempt writes this value.
+        lane.value = value;
+      }
+      lane.inFlight++;
+    }
+    try {
+      const result = await this.editWithRetry<"committed">(
+        (tx) => {
+          // (retry budget: blind writes only — see the CAS bullet above.)
+          // Per attempt: write the lane's NEWEST requested value (see the
+          // supersedeKey semantics above). Without a lane, this call's own
+          // value.
+          const attemptValue = lane === undefined ? value : lane.value;
+          if (blind) {
+            markUiInputBlindWriteTx(tx);
+            // Renderer-input provenance that survives to commit, so the
+            // scheduler can shape the resulting subscriber wake (timing
+            // side-channel mitigation, channels 4/5).
+            markRendererInputTx(tx);
+            // The resolved storage address of the write target; its parent
+            // is the structural existence/shape precondition for the blind
+            // write. Resolved on THIS attempt's transaction, so a retry
+            // bases on the caught-up state.
+            const link = cell.withTx(tx).resolveAsCell()
+              .getAsNormalizedFullLink();
+            setBlindStructuralTarget(tx, {
+              id: link.id,
+              space: link.space,
+              scope: link.scope,
+              path: link.path.slice(0, -1),
+            });
+          }
+          cell.withTx(tx).set(attemptValue);
+          if (blind) unmarkUiInputBlindWriteTx(tx);
+          return "committed";
+        },
+        blind ? DEFAULT_MAX_RETRIES : 0,
+      );
+      if (result.error !== undefined) {
+        uiCellWriteLogger.error("lost", () => [
+          "a UI cell write was refused and its retries are spent — the " +
+          "user's input is dropped",
+          {
+            blind,
+            supersedeKey,
+            error: {
+              name: (result.error as { name?: string }).name,
+              message: (result.error as { message?: string }).message,
+            },
+          },
+        ]);
+        return { error: result.error };
+      }
+      return { ok: "committed" };
+    } finally {
+      if (blind && supersedeKey !== undefined && lane !== undefined) {
+        lane.inFlight--;
+        if (
+          lane.inFlight <= 0 &&
+          this.#uiWriteLanes.get(supersedeKey) === lane
+        ) {
+          this.#uiWriteLanes.delete(supersedeKey);
+        }
       }
     }
   }

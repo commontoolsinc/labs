@@ -3062,7 +3062,85 @@ describe("runtime-processor", () => {
       },
     };
 
+    // Set/push route through Runtime.commitUiCellWrite now (the :133
+    // retry seam), which owns the marks, the structural precondition, and
+    // the prepare-before-commit ordering (structurally, inside
+    // editWithRetry — pinned by the runner's
+    // ui-cell-write-conflict-retry suite). What is the PROCESSOR's to get
+    // right — and what these pins hold — is the routing contract: the
+    // resolved cell, the mapped value, the blind flag by METHOD, and the
+    // per-address supersede lane (blind writes only; a CAS push must
+    // never share a lane with blind sets, or a delayed set retry could
+    // overwrite a push's compare-and-set semantics).
     const createProcessor = () => {
+      const calls: Array<{
+        cell: unknown;
+        value: unknown;
+        options: { blind: boolean; supersedeKey?: string };
+      }> = [];
+      const resolvedCell = { marker: "resolved-cell" };
+      return {
+        calls,
+        processor: {
+          // handleCellSet/handleCellPush delegate to the shared applyCellWrite.
+          applyCellWrite: RuntimeProcessor.prototype.applyCellWrite,
+          operationSessionKey: (RuntimeProcessor.prototype as unknown as {
+            operationSessionKey: (cell: CellRef) => string;
+          }).operationSessionKey,
+          runtime: {
+            getCellFromLink: (candidate: unknown) => {
+              expect(candidate).toBe(ref);
+              return resolvedCell;
+            },
+            commitUiCellWrite: (
+              cell: unknown,
+              value: unknown,
+              options: { blind: boolean; supersedeKey?: string },
+            ) => {
+              calls.push({ cell, value, options });
+              return Promise.resolve({ ok: "committed" });
+            },
+          },
+        } as unknown as RuntimeProcessor,
+        resolvedCell,
+      };
+    };
+
+    it("routes a cell set as a BLIND laned write through commitUiCellWrite", () => {
+      const { processor, calls, resolvedCell } = createProcessor();
+
+      RuntimeProcessor.prototype.handleCellSet.call(processor, {
+        type: RequestType.CellSet,
+        cell: ref,
+        value: "new value",
+      });
+
+      expect(calls.length).toBe(1);
+      expect(calls[0].cell).toBe(resolvedCell);
+      expect(calls[0].value).toBe("new value");
+      expect(calls[0].options.blind).toBe(true);
+      expect(calls[0].options.supersedeKey).toBe(
+        JSON.stringify([ref.space, ref.id, ref.scope, ref.path]),
+      );
+    });
+
+    it("routes a cell push as a NON-blind, lane-free write (CAS keeps its own fate)", () => {
+      const { processor, calls, resolvedCell } = createProcessor();
+
+      RuntimeProcessor.prototype.handleCellPush.call(processor, {
+        type: RequestType.CellPush,
+        cell: ref,
+        value: "new value",
+      });
+
+      expect(calls.length).toBe(1);
+      expect(calls[0].cell).toBe(resolvedCell);
+      expect(calls[0].value).toBe("new value");
+      expect(calls[0].options.blind).toBe(false);
+      expect(calls[0].options.supersedeKey).toBeUndefined();
+    });
+
+    it("prepares cell send transactions before committing", async () => {
       let prepared = false;
       const tx = {
         commit: () => {
@@ -3070,70 +3148,28 @@ describe("runtime-processor", () => {
           return Promise.resolve({ ok: {} });
         },
       };
-      const cellWithTx = {
-        set: (value: unknown) => {
-          expect(value).toBe("new value");
-        },
-        send: (value: unknown) => {
-          expect(value).toBe("new value");
-        },
-        // A blind `set` resolves the write target to thread its parent as the
-        // structural precondition (see applyCellWrite).
-        resolveAsCell: () => ({
-          getAsNormalizedFullLink: () => ({
-            id: ref.id,
-            space: ref.space,
-            scope: ref.scope,
-            path: ref.path,
-          }),
-        }),
-      };
-      return {
-        processor: {
-          // handleCellSet/handleCellPush delegate to the shared applyCellWrite.
-          applyCellWrite: RuntimeProcessor.prototype.applyCellWrite,
-          runtime: {
-            edit: () => tx,
-            prepareTxForCommit: (candidate: unknown) => {
-              expect(candidate).toBe(tx);
-              prepared = true;
-            },
-            getCellFromLink: (candidate: unknown) => {
-              expect(candidate).toBe(ref);
-              return {
-                withTx: (candidateTx: unknown) => {
-                  expect(candidateTx).toBe(tx);
-                  return cellWithTx;
-                },
-              };
-            },
+      const processor = {
+        runtime: {
+          edit: () => tx,
+          prepareTxForCommit: (candidate: unknown) => {
+            expect(candidate).toBe(tx);
+            prepared = true;
           },
-        } as unknown as RuntimeProcessor,
-      };
-    };
-
-    it("prepares cell set transactions before committing", async () => {
-      const { processor } = createProcessor();
-
-      await RuntimeProcessor.prototype.handleCellSet.call(processor, {
-        type: RequestType.CellSet,
-        cell: ref,
-        value: "new value",
-      });
-    });
-
-    it("prepares cell push transactions before committing (non-blind path)", async () => {
-      const { processor } = createProcessor();
-
-      await RuntimeProcessor.prototype.handleCellPush.call(processor, {
-        type: RequestType.CellPush,
-        cell: ref,
-        value: "new value",
-      });
-    });
-
-    it("prepares cell send transactions before committing", async () => {
-      const { processor } = createProcessor();
+          getCellFromLink: (candidate: unknown) => {
+            expect(candidate).toBe(ref);
+            return {
+              withTx: (candidateTx: unknown) => {
+                expect(candidateTx).toBe(tx);
+                return {
+                  send: (value: unknown) => {
+                    expect(value).toBe("new value");
+                  },
+                };
+              },
+            };
+          },
+        },
+      } as unknown as RuntimeProcessor;
 
       await RuntimeProcessor.prototype.handleCellSend.call(processor, {
         type: RequestType.CellSend,
