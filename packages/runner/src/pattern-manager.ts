@@ -390,6 +390,58 @@ export class PatternManager {
   // origin space. Tracked separately because the replication promise also
   // lives in `compileCacheWrites` and cannot await itself.
   private pendingCacheWriteBacks = new Set<Promise<unknown>>();
+  // In-flight replications keyed by TARGET space, ordered by a monotonic
+  // ticket. A replication's origin may itself be mid-supply by an earlier
+  // replication INTO it (e.g. the content-cache hit's fire-and-forget
+  // sibling ahead of the runner's cross-space child replication in one
+  // handler run); a one-shot origin read would then fail with nothing
+  // ever re-issuing it, and the target space's demanded roots park
+  // `pattern-unloadable` forever (verification-coverage.md OW45, the
+  // lunch forever-park — the incident evidence lives there). The sibling
+  // lives in `compileCacheWrites`, the one set the origin read must NOT
+  // await wholesale (it would await itself), so replications also
+  // register HERE and the read awaits only the STRICTLY OLDER entries
+  // targeting its origin — registration order keeps the await graph
+  // acyclic (no from/to mutual wait), and genuine absence still throws
+  // loudly after the awaited siblings settle.
+  private replicationsIntoSpace = new Map<
+    MemorySpace,
+    Set<{ ticket: number; settled: Promise<unknown> }>
+  >();
+  private nextReplicationTicket = 0;
+  // Spaces this manager DURABLY persisted an entry's closure into
+  // (recorded at the two tracked persists' success; session-lifetime,
+  // record-only — a later slot invalidation forces a re-verify on read,
+  // and the fallback read below re-verifies fail-closed anyway, so a
+  // stale record costs one failed read, never a wrong copy). These are
+  // `replicateClosures`' FALLBACK ORIGINS: the caller-named origin is a
+  // provenance heuristic — the in-memory artifact index serves patterns
+  // with no per-space persist, so a running piece's space can lack the
+  // closure entirely — while the closure is content-addressed, so any
+  // recorded persist target holds byte-identical, integrity-gated docs
+  // (verification-coverage.md OW45 carries the incident evidence).
+  private persistedClosureSpaces = new Map<string, Set<MemorySpace>>();
+
+  /** Record a durable closure persist's target for
+   * {@link replicateClosures}' fallback-origin read — under EVERY module
+   * identity of the persisted set, not just the persist call's entry: the
+   * write functions persist one addressable doc per module, and the
+   * replicated entry is routinely a MODULE of a larger compiled closure
+   * (a pattern served from the in-memory index carries its own module's
+   * identity while the space was supplied by its importer's persist). */
+  private recordPersistedClosureSpaces(
+    identities: Iterable<string>,
+    space: MemorySpace,
+  ): void {
+    for (const identity of identities) {
+      let spaces = this.persistedClosureSpaces.get(identity);
+      if (spaces === undefined) {
+        spaces = new Set();
+        this.persistedClosureSpaces.set(identity, spaces);
+      }
+      spaces.add(space);
+    }
+  }
   // Maps each storage slot written during this PatternManager session to its
   // complete module set. One slot can hold only one closure shape at a time.
   private persistedCompileCacheClosures = new Map<string, string>();
@@ -639,12 +691,17 @@ export class PatternManager {
 
     const entryRef = this.getArtifactEntryRef(pattern);
     if (!entryRef) return;
+    // Ticket + registration BEFORE the async body starts, so a replication
+    // issued later in the same synchronous stretch observes this entry
+    // when it awaits its origin's suppliers (see `replicationsIntoSpace`).
+    const ticket = this.nextReplicationTicket++;
     const replication = this.replicateClosures(
       entryRef.identity,
       fromSpace,
       toSpace,
       undefined,
       delegated,
+      ticket,
     ).catch((error) => {
       logger.error("closure-replication-failed", () => [
         `entry=${entryRef.identity}`,
@@ -652,6 +709,19 @@ export class PatternManager {
         `to=${toSpace}`,
         String(error),
       ]);
+    });
+    let intoTarget = this.replicationsIntoSpace.get(toSpace);
+    if (intoTarget === undefined) {
+      intoTarget = new Set();
+      this.replicationsIntoSpace.set(toSpace, intoTarget);
+    }
+    const registration = { ticket, settled: replication };
+    intoTarget.add(registration);
+    replication.finally(() => {
+      const entries = this.replicationsIntoSpace.get(toSpace);
+      if (entries === undefined) return;
+      entries.delete(registration);
+      if (entries.size === 0) this.replicationsIntoSpace.delete(toSpace);
     });
     this.compileCacheWrites.add(replication);
     replication.finally(() => this.compileCacheWrites.delete(replication));
@@ -673,6 +743,7 @@ export class PatternManager {
     toSpace: MemorySpace,
     visited = new Set<string>(),
     delegated?: WritebackDelegation,
+    ticket?: number,
   ): Promise<void> {
     const visitKey = `${fromSpace}\0${toSpace}\0${entryIdentity}`;
     if (visited.has(visitKey)) return;
@@ -684,6 +755,18 @@ export class PatternManager {
     // not flushCompileCacheWrites: this replication promise is tracked there and
     // would await itself.
     await Promise.allSettled([...this.pendingCacheWriteBacks]);
+    // Then the SIBLING suppliers (see `replicationsIntoSpace`): the origin
+    // may itself be mid-supply by an earlier-registered replication INTO
+    // it. Await strictly older tickets only — acyclic by construction —
+    // then read; genuine absence still throws loudly below. Event-driven
+    // (the siblings' own completion), never a timer.
+    const intoOrigin = this.replicationsIntoSpace.get(fromSpace);
+    if (intoOrigin !== undefined) {
+      const older = [...intoOrigin]
+        .filter((entry) => ticket === undefined || entry.ticket < ticket)
+        .map((entry) => entry.settled);
+      if (older.length > 0) await Promise.allSettled(older);
+    }
     // Replicate the same cached variant the compile path uses — the coverage
     // suffix keeps an instrumented closure from being served under an ordinary
     // key (and vice versa).
@@ -691,47 +774,113 @@ export class PatternManager {
       await getCompileCacheRuntimeVersion(),
       { patternCoverage: this.runtime.patternCoverage !== undefined },
     );
-    const readTx = this.runtime.edit();
-    let sourceDocs;
-    let compiledDocs;
-    try {
-      // Verification recomputes module identities with the default ("")
-      // runtimeFingerprint — the same default every compile path in the tree
-      // uses today. If a non-empty fingerprint is ever threaded into
-      // compilation, it must be threaded here too or verification will
-      // reject every closure (logged as replication failures).
-      sourceDocs = await loadVerifiedSourceClosure(
-        this.runtime,
-        fromSpace,
-        entryIdentity,
-        readTx,
-      );
-      if (runtimeVersion === undefined) {
-        compiledDocs = undefined;
-      } else {
-        const cacheOpts = { runtimeVersion };
-        compiledDocs = await loadCompiledClosure(
+    /** One origin's verified closure read, complete or classified.
+     * Verification recomputes module identities with the default ("")
+     * runtimeFingerprint — the same default every compile path in the
+     * tree uses today. If a non-empty fingerprint is ever threaded into
+     * compilation, it must be threaded here too or verification will
+     * reject every closure (logged as replication failures). */
+    const readOrigin = async (origin: MemorySpace): Promise<
+      | {
+        complete: true;
+        sourceDocs: NonNullable<
+          Awaited<ReturnType<typeof loadVerifiedSourceClosure>>
+        >;
+        compiledDocs:
+          | Awaited<ReturnType<typeof loadCompiledClosure>>
+          | undefined;
+      }
+      | { complete: false; reason: string }
+    > => {
+      const readTx = this.runtime.edit();
+      let sourceDocs;
+      let compiledDocs;
+      try {
+        sourceDocs = await loadVerifiedSourceClosure(
           this.runtime,
-          fromSpace,
+          origin,
           entryIdentity,
-          cacheOpts,
           readTx,
         );
+        if (runtimeVersion === undefined) {
+          compiledDocs = undefined;
+        } else {
+          const cacheOpts = { runtimeVersion };
+          compiledDocs = await loadCompiledClosure(
+            this.runtime,
+            origin,
+            entryIdentity,
+            cacheOpts,
+            readTx,
+          );
+        }
+      } finally {
+        readTx.abort?.("closure-replication read complete");
       }
-    } finally {
-      readTx.abort?.("closure-replication read complete");
+      if (!sourceDocs?.has(entryIdentity)) {
+        return {
+          complete: false,
+          reason: "source closure unavailable in origin space",
+        };
+      }
+      if (
+        runtimeVersion !== undefined &&
+        isPatternCoverageCacheRuntimeVersion(runtimeVersion) &&
+        (compiledDocs === undefined ||
+          !cacheEntriesIncludePatternCoverage(compiledDocs.values()))
+      ) {
+        return {
+          complete: false,
+          reason: "coverage spans unavailable in origin space",
+        };
+      }
+      if (runtimeVersion !== undefined) {
+        for (const identity of sourceDocs.keys()) {
+          if (!compiledDocs?.has(identity)) {
+            return {
+              complete: false,
+              reason: `compiled doc missing for ${identity}`,
+            };
+          }
+        }
+      }
+      return { complete: true, sourceDocs, compiledDocs };
+    };
+    let origin = await readOrigin(fromSpace);
+    if (!origin.complete) {
+      // FALLBACK ORIGINS (see `persistedClosureSpaces`): the caller-named
+      // origin is a provenance heuristic and can be closure-less through
+      // no fault of any writer — `loadPatternByIdentity` serves patterns
+      // from the in-memory artifact index with no per-space persist. The
+      // closure is CONTENT-ADDRESSED: any space this manager durably
+      // persisted this entry into holds byte-identical docs (the verified
+      // read recomputes identities and the CFC integrity gate stays
+      // fail-closed), so retry the read against the recorded persist
+      // targets before failing. Loud on use: the lane log shows when the
+      // heuristic origin was dry.
+      const primaryReason = origin.reason;
+      for (
+        const fallback of this.persistedClosureSpaces.get(entryIdentity) ?? []
+      ) {
+        if (fallback === fromSpace || fallback === toSpace) continue;
+        const read = await readOrigin(fallback);
+        if (read.complete) {
+          logger.warn("closure-replication-fallback-origin", () => [
+            `entry=${entryIdentity}`,
+            `from=${fromSpace}`,
+            `to=${toSpace}`,
+            `fallback=${fallback}`,
+            `originReason=${primaryReason}`,
+          ]);
+          origin = read;
+          break;
+        }
+      }
+      if (!origin.complete) {
+        throw new Error(primaryReason);
+      }
     }
-    if (!sourceDocs?.has(entryIdentity)) {
-      throw new Error("source closure unavailable in origin space");
-    }
-    if (
-      runtimeVersion !== undefined &&
-      isPatternCoverageCacheRuntimeVersion(runtimeVersion) &&
-      (compiledDocs === undefined ||
-        !cacheEntriesIncludePatternCoverage(compiledDocs.values()))
-    ) {
-      throw new Error("coverage spans unavailable in origin space");
-    }
+    const { sourceDocs, compiledDocs } = origin;
     const modules: CacheableModule[] = [];
     const fabricDependencies = new Set<string>();
     for (const [identity, doc] of sourceDocs) {
@@ -799,6 +948,7 @@ export class PatternManager {
         toSpace,
         visited,
         delegated,
+        ticket,
       );
     }
   }
@@ -2027,6 +2177,10 @@ export class PatternManager {
           this.failedCompileCacheRecoveries.delete(
             compileCacheRecoveryKey(space, entryIdentity),
           );
+          this.recordPersistedClosureSpaces(
+            [entryIdentity, ...modules.map((module) => module.identity)],
+            space,
+          );
           return;
         }
         this.persistedCompileCacheClosures.delete(persistenceSlotKey);
@@ -2046,6 +2200,10 @@ export class PatternManager {
       );
       this.failedCompileCacheRecoveries.delete(
         compileCacheRecoveryKey(space, entryIdentity),
+      );
+      this.recordPersistedClosureSpaces(
+        [entryIdentity, ...modules.map((module) => module.identity)],
+        space,
       );
     })();
     this.inProgressCompileCacheWrites.set(persistenceSlotKey, {
@@ -2136,6 +2294,10 @@ export class PatternManager {
     this.pendingCacheWriteBacks.add(writeBack);
     try {
       await writeBack;
+      this.recordPersistedClosureSpaces(
+        [entryIdentity, ...modules.map((module) => module.identity)],
+        space,
+      );
     } finally {
       this.compileCacheWrites.delete(writeBack);
       this.pendingCacheWriteBacks.delete(writeBack);

@@ -5290,12 +5290,23 @@ supply; OW29/OW32/OW34 closed):
   step) and was held only by a co-resident file's red in the same shard,
   while lunch-poll-vote passed its local half 8/8 and its probe went red at
   the probed surface for the second campaign running. **The current census
-  (2026-08-28) is ONE patterns entry: lunch-poll-vote's FILE entry.**
-  default-app's reload STEP LIFTED 2026-08-28 — the owner ruled the SURFACE
-  reading of the probe bar, under which its evidence was already complete
-  (the LIFT block at the end of this row). That one entry, and the unlisted
-  co-resident debt the probe surfaced, gate the FLIP — whose bar is the list
-  EMPTY *and* a green ON lane — not the land. Rows, one per
+  (2026-08-28, after the lunch lift PR's three probe boards) is ONE patterns
+  entry: lunch-poll-vote's FILE entry, RESTORED.** default-app's reload
+  STEP LIFTED 2026-08-28 — the owner ruled the SURFACE reading of the
+  probe bar, under which its evidence was already complete (the LIFT block
+  at the end of this row). lunch-poll-vote's lift was ATTEMPTED the same
+  day on the probe's own artifact — the park root-caused into the
+  closure-replication write path, two supplier geometries fixed red-first
+  on the PR — and every one of the PR's THREE probe boards went red at the
+  probed surface (runs 33160430927, 33164596936, 33165960083; four probes
+  across the arc, counting the pre-PR phase-3 board 33138358110 that opened
+  it), the last exposing the still-open third geometry (the supplier
+  compile mid-flight), so the entry is restored carrying the accumulated
+  map (the lunch ROOT-CAUSE, PROBE-2/3/4 blocks at the end of
+  this row). The FLIP's bar remains a green ON lane and every list empty;
+  this entry is again what holds the list (the co-resident `:133` debt the
+  probe surfaced was paid by #6477 — the OBSERVATION's FIXED paragraph
+  below). Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
   lifts:
   - **OW45 — the profile piece's PROGRAM-materialization write path
@@ -7378,6 +7389,242 @@ supply; OW29/OW32/OW34 closed):
     **DISPOSITION: NO LIFT.** Local 8/8 against CI 1/1 red, for the second
     campaign running — this file's lift needs the park explained, not
     another local count.
+
+    **THE PARK EXPLAINED — ROOT-CAUSED 2026-08-28 from the probe's own
+    artifact, and FIXED red-first: the child closure replication
+    one-shot-died against the IN-FLIGHT SIBLING replication supplying its
+    origin space.** The discriminating event sits 33 s before the first
+    stuck warn and appears in NO local green (0/8 in the b-runs, 1/1 in
+    the CI red): `closure-replication-failed entry=Jlzs0wulc086…
+    from=did:key:z6Mkv7Tjz… to=did:key:z6MktpA5… Error: source closure
+    unavailable in origin space` at 03:18:09.048 — the shard's ONLY
+    pattern-manager error. That is the CT-1687 write path (S-A's
+    carriage arm) — the ONE writer that supplies a fresh child space's
+    program closure — failing at its READ side and, by its own contract,
+    never retrying ("retried on the next child creation"; a user creates
+    their profile once). With the supplier dead, the profile space's
+    deferral loop re-reads an empty store every cycle: patternIdentity
+    meta present (the carriaged materialization landed), the closure
+    absent, verdict `pattern-unloadable`, forever — the 80 stuck warns
+    are 40 distinct roots x streaks 8+16, the entire piece graph of that
+    one space. The name derivation never runs, the placeholder renders,
+    line 271 times out. WHY the origin was empty — the deduction chain,
+    each link forced: the serving session is ONE (every closure write in
+    every b-run store is the service session's), so the reader and any
+    same-runtime writer share a replica; the LAYERED VIEW was verified en
+    route (a deterministic executor-wave-harness experiment: a fresh-tx
+    read DOES see a held-open wave's staged writes — executor-wave.ts's
+    documented design), so a compile TARGETING the parent space would
+    have been readable the moment its pattern existed (E4 awaits the
+    write-back); the handler demonstrably RAN ProfileHome (the refusal
+    storm at 03:18:09.353 is its actions), so the pattern object existed
+    — therefore it came from the CONTENT CACHE with `cached.space` a
+    DIFFERENT space, and the content-hit arm (pattern-manager.ts ~2435)
+    had fired `replicate(cached.space -> parentSpace)` fire-and-forget:
+    the SIBLING, mid-flight at 03:18:09, its writes not yet issued —
+    the one supplier shape that leaves the origin empty to every read.
+    The b-run stores CONFIRM the machinery by commit class and timing:
+    the first serving-side compile's E4 write-back lands in an
+    identity-home space (seq 2 DERIVED, b01 03:05:48), the sibling
+    replications into the other served spaces land DERIVED via each
+    target's wave (lunch space seq 16, 03:05:51), and the child
+    replications into the two profile spaces land AUTHORED with §2b
+    carriage (seq 2, 03:05:54/56 — protocol §2's server-produced
+    authored row). Local greens are the sibling winning by ~3 s; CI's
+    crawling boot (first home-env compile 12 s after the parent space
+    activated, the click ~1 s after the content cache warmed) flips the
+    edge — the park was CI-timing-armed exactly as the method finding
+    predicted, and the foreign-write refusals stay what this entry
+    already said they are: standing, tolerated, present in every arm,
+    NOT the discriminator. Causality was validated end to end by a
+    working-tree fault injection (never committed): failing exactly the
+    delegated-carriage replication once reproduced the FULL CI signature
+    locally — 1 replication failure, 80 stuck warns over exactly 40
+    `pattern-unloadable` roots, the join flow dead, the 300 s net
+    (evidence: lunch-park-evidence/runs/lunch/inj01 on the measuring
+    box). THE FIX, at the write path and never the tolerance
+    (pattern-manager.ts): every replication registers under its TARGET
+    space with a monotonic ticket (`replicationsIntoSpace`), and a
+    replication awaits the STRICTLY OLDER replications registered INTO
+    its origin space before reading it — event-driven (the siblings' own
+    completion, no timers), acyclic by registration order (no from/to
+    mutual wait), with genuine absence still failing loud and settling
+    (pinned — no hang into `flushCompileCacheWrites` or the S-B
+    durability barrier). Red-first pin
+    `packages/runner/test/pattern-replication-sibling-race.test.ts`: the
+    race is deterministic-by-construction (the child is issued
+    synchronously after the sibling and its origin read is strictly less
+    work than the sibling's read-plus-write); watched red at the
+    pre-fix head with the exact production error line and the child
+    space empty; 6/6 green with the fix; mutation-killed (neutralizing
+    the await hunk alone reds it — the sibling step issues BOTH
+    replications from a second manager whose fallback-origin map is
+    empty, so the later fallback fix cannot mask this pin; moving them
+    back onto the compiling manager silently unpins the await).
+    Recorded residual, flagged not filled: a CROSS-REPLICA supplier (a
+    client/harness write-back
+    arriving over the wire) is outside the await's reach — no observed
+    red has that shape (the deduction above excludes it for this one),
+    and building for it would be filling an unobserved gap. Also
+    corrected en route: this row's original "wave staging vs durable
+    read" framing for the 2026-08-27 park is WRONG — the layered-view
+    experiment kills it — and the 2026-08-26 blind-spot note's
+    hypothesis space ("refused vs dropped vs never issued") resolves as
+    NEVER ISSUED, by a supplier that died before writing.
+
+    **LIFT ATTEMPT — lunch-poll-vote's FILE entry removed 2026-08-28 on
+    the evidence below; WITHDRAWN BY THE PROBES (the PROBE-2/3/4 blocks
+    that follow) and the entry RESTORED with the accumulated map.** The
+    ruled local-plus-CI-probe bar, both halves as they stood at the
+    attempt:
+    - **Requirement (1), the local campaign — MET TWICE, 8/8
+      quiet-and-loaded at the fix head AND 8/8 again at the rebased lift
+      head.** Method both times: ON binary sha256 re-verified into every
+      run's ledger (a mismatch aborts the run), fresh store + own 97xx
+      port + ON posture probe per run, ensure defaulting ON, toolshed
+      self-sourced on the run port, LLM masked, PID-only teardown with a
+      port-free check, 4 quiet / 4 loaded interleaved. Campaign F at the
+      pre-rebase fix commit (binary `8c693ea873…`, loads 4.3–10.4) and
+      campaign G at the rebased head — fix `044993c98` on main
+      `d9dc01d75`, which folds in #6477's UI-write retry on the very
+      fill path this test drives (binary `0ef22fced1…`, loads 3.3–7.5):
+      17–18 s walls in all sixteen runs against 313–322 s for every red
+      this entry ever recorded; `structureLoadStuck` 0,
+      `closure-replication-failed` 0 (the fixed mechanism's own line),
+      `pattern-load-error` 0, `deferred-start-catchup(-failed)` 0,
+      `session-remount` 0, `event-view-lag` 2/run, one designed
+      `sidecar-run-raced` and one recorded-non-discriminator
+      `piece-start-commit-failed` per run, and the tolerated refusal
+      storm present as ever (40 `foreign-write-refused` + 40
+      `seal-space-commit-failed` per run) — the park gone with the storm
+      untouched, which is exactly the discriminator this entry named.
+      The full runner suite is 1312/1312 at the rebased head. Campaign H
+      re-ran the same 8-run posture at the v4 head (sibling-await +
+      fallback-origin; binary `72be0363…`): 8/8 again, 17–19 s walls,
+      `structureLoadStuck` 0, `closure-replication-failed` 0, and
+      `closure-replication-fallback-origin` 0 — locally the heuristic
+      origin is always supplied (the parent compiles first), so the
+      fallback stays dormant exactly as designed; the runner suite is
+      1312/1312 at v4 too. Evidence on the measuring box:
+      `/Users/berni/labs-worktrees/lunch-park-evidence/runs/lunch/`
+      (`f01…f08`, `g01…g08`, `h11…h18` — per-run ledger, test+toolshed
+      logs, stats, own store); report
+      `/Users/berni/labs-worktrees/lunch-park-report.md`.
+    - **Requirement (2), the direct-CI unskip probe — THIS lift PR's own
+      board**: the registry carries no lunch entry, so the ON pattern
+      lanes RUN the file; per the ruled SURFACE reading the probed
+      surface's verdict decides, and a red AT the surface withdraws the
+      lift exactly as the bar states (captured and classified, never
+      rerun-looped).
+    **PROBE 2 (this PR's first board at head `83f31e47f`, run
+    [33160430927](https://github.com/commontoolsinc/labs/actions/runs/33160430927),
+    ON shard 7, job 98813758092): RED AT THE PROBED SURFACE — that lift
+    attempt WITHDREW, and the classification found the SECOND supplier
+    geometry.** The surface itself failed (`:271`, the HOST's join,
+    "Unknown profile #a_FyQU"; 11 co-residents passed — #6477's `:133`
+    fix held); the published toolshed artifact carries the SAME chain —
+    exactly one `closure-replication-failed from=parent(z6Mkv6nW…)
+    to=profile(z6MkpPK85…)` at 09:45:39.983, then 80
+    `structure-load-stuck` (40 roots, `pattern-unloadable`) from
+    09:45:44 — with the sibling-await IN PLACE and inert. The
+    instrumented local greens (SCRATCH build, runs instr01/wdel01/wdel02
+    on the measuring box) then decomposed the supplier model:
+    (i) `compileOrGetPattern` is NEVER CALLED in this flow — the
+    content-cache-hit sibling does not exist here; local greens have
+    `olderIntoOrigin=none-registered` and still pass. (ii) The parent
+    space's closure is supplied by the FIRST home-env/sidecar compile
+    that targets it (`persistCompileCacheTracked(parent)`, whose
+    per-module docs cover the profile-home entry) — locally always the
+    session's first compile (instr01's line 1). (iii) On both CI reds
+    the fetch/activation timeline shows NO compile ever targeting the
+    parent (the two home-env compiles land on the identity-home spaces,
+    09:45:30/34): `loadPatternByIdentity` then serves the pattern from
+    the manager's IN-MEMORY ARTIFACT INDEX — which persists NOTHING
+    per-space — so the parent space never receives the closure from any
+    flow, and the child's read was never going to find it: an ORDER
+    flip, not a data race. (iv) Wave-hold experiments (45 s holds on
+    closure-carrying waves) could not falsify read-visibility — every
+    local read trailed durability — so staged-vs-durable remains
+    UNDISCRIMINATED and is NOT load-bearing for the fix. THE SECOND FIX
+    (same PR, red-first): `replicateClosures` records every durable
+    persist target per entry (`persistedClosureSpaces`) and, on a dry
+    heuristic origin, retries its verified read against those recorded
+    spaces — content-addressed, so the copy is byte-identical and the
+    integrity-gated read stays fail-closed; genuine absence (no recorded
+    target) still fails loud and settles. Pinned in the same suite
+    (fallback test watched red at the sibling-await-only head with the
+    exact production error; recording no-op mutation-killed; the
+    no-record loud-failure control keeps the absence contract). Under
+    the CI geometry the identity-home persists ARE recorded, so the
+    child replication converges order-independently.
+    **PROBE 3 (the v4 board, run
+    [33164596936](https://github.com/commontoolsinc/labs/actions/runs/33164596936),
+    ON shard 7, job 98827162794): RED at the surface again — and the
+    artifact caught the fix's own defect: the fallback NEVER FIRED
+    (`closure-replication-fallback-origin` 0 beside the same one
+    failure + 80 stuck warns), because the recording KEYED BY THE
+    PERSIST CALL'S ENTRY while the replicated identity is a MODULE of
+    that closure** — the identity-home persists record the home-env
+    ROOT's identity, the failing replication's entry is the
+    profile-home MODULE the in-memory index served, and the lookup
+    found an empty set. The per-module docs were addressable all along
+    (the write functions persist one doc per module; the instrumented
+    green read them by module identity). Fixed: the recording covers
+    EVERY module identity of the persisted set
+    (`recordPersistedClosureSpaces`), and the pin suite gained the
+    exact geometry — an importer program whose LIB module's pattern is
+    served from the in-memory index and replicated from a dry origin —
+    watched red at the entry-keyed head (the lib-id replication's
+    production failure line) and green with module keying; the
+    original single-module tests were blind to the keying by
+    construction (entry == module there), which is recorded so the
+    next pin author widens the module graph first. The board at the
+    keying-fix head is this attempt's probe; a red at the surface
+    there restores the entry with the accumulated map — no further
+    iteration on this PR.
+    **PROBE 4 (the keying-fix board, run
+    [33165960083](https://github.com/commontoolsinc/labs/actions/runs/33165960083),
+    ON shard 7, job 98831529935): RED at the surface — the THIRD
+    geometry, and the declared hard stop is honored: THE ENTRY IS
+    RESTORED.** Same signature, fallback counter still 0 — and this
+    time correctly: the artifact's timeline shows both identity-home
+    compiles STILL MID-FLIGHT at the child replication's moment
+    (fetch waves 18 s and 5 s earlier; the profile-home fetches before
+    them belong to the harness process), so NO persist of the
+    profile-home module had completed anywhere server-side and the
+    module-keyed map was genuinely empty. The supplier class the fix
+    chain has not reached: the IN-FLIGHT COMPILE — a compile's E4
+    persist registers in `pendingCacheWriteBacks` only once the
+    compile reaches it, so a mid-compile supplier is invisible to
+    every await the replication holds. DESIGNED, NOT LANDED (the hard
+    stop): on a dry fallback map, await the manager's in-flight
+    compilations once (`inProgressCompilations` — their E4 persists
+    record into the map before the compile promise resolves),
+    re-consult the map, then throw; event-driven, no timers, no
+    deadlock (compiles never await replications; the content-hit
+    replication call is fire-and-forget). WHAT THE PR KEEPS: both
+    landed fixes are real, pinned defect classes (the sibling race and
+    the by-ORDER dry origin with module keying); the pin suite is
+    rebound to the RESTORED single-entry registry; the entry's reason
+    carries the full three-geometry map with the four probes'
+    coordinates so the next seat starts where this one stopped. The
+    lift bar is unchanged (the ruled local-plus-CI-probe bar); the
+    lift condition is now concretely the third geometry's close. What
+    the arc's four probes taught — one before the PR, three on it —
+    recorded as method: each board's artifact advanced the map exactly
+    one geometry — the probe is not a gate ceremony but the arc's only
+    instrument that SEES the CI boot order; and a declared hard stop
+    kept the loop honest.
+    The pin suite (`tasks/server-execution-on-skips.test.ts`) is bound,
+    post-restore, to the SINGLE-entry registry: the patterns list holds
+    exactly the restored FILE entry (reason pinned to the
+    three-geometry map and the probe coordinates), the report carries
+    its SKIP line and no SKIP-STEP line, the shard filter drops exactly
+    that file, and the whole-registry loop asserts it is the only entry
+    anywhere — so any OTHER entry or a silent lift reddens a pin. The
+    flip's bar remains a green ON lane AND every list empty; this entry
+    again holds the list (the co-resident `:133` blocker in the
+    OBSERVATION below is PAID by #6477, its FIXED paragraph there).
 
     **OBSERVATION, not owed by this row and NOT one of the two entries —
     `cfc-group-chat-demo.test.ts` is failing ON at current main, 4/6, and

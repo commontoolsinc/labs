@@ -223,112 +223,65 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
     // was fully met by the evidence above. Full chain: verification-coverage.md
     // OW45 (the PHASE 3 block and the LIFT block that follows it).
     {
-      // Re-listed by the lunch-poll identity PR (#5744). This file was
-      // LIFTED 2026-08-19 for the swatch-stall class (stage-C W3.1 —
-      // history in the header comment above); the profile-first join
-      // that PR introduces newly exposes the arm-B family's REMAINING
-      // member (then the default-app reload STEP entry, LIFTED
-      // 2026-08-28 — the comment above): the test now creates the viewer's
-      // profile piece mid-test, and the flag-ON client's deferred start
-      // of that fresh piece dies terminally on the first-hydration
-      // stale-confirmed-read ConflictError, killing the client's piece
-      // context for the session — so the wish `#profile` never
-      // resolves and the join card never renders `#lp-join-button`.
-      // Both the 2026-08-22 red (run 32539777265, shards 7 and 9 —
-      // shard 9's cfc-staged-publish red is the same class's per-run
-      // lottery) and the 2026-08-24 red (run 32769542550) carry the
-      // deferred-start tx-commit-error signature; the OFF lane runs
-      // this file green. Every later step depends on that join, hence
-      // a FILE entry rather than a step guard. Same class, same fork
-      // memo as the lifted default-app STEP entry. MERGE NOTE (the
-      // catch-up-and-start PR): both recorded reds PREDATE the
-      // recovery landing — the "dies terminally" mechanism is exactly
-      // the b04 death that recovery closes (verification-coverage.md
-      // OW45's CATCH-UP-AND-START block), so this entry's lift condition is
-      // now concretely testable; it lifts on its own gate evidence at
-      // the merged head, never by inference from the default-app gate.
-      // THAT GATE RAN 2026-08-24 — 10 runs at merged head f14e44830
-      // (ON binary sha256 ce65782063f4f14a1…, fresh store + posture
-      // probe per run, ensure-off, 5 quiet / 5 loaded interleaved):
-      // 7/10, NO LIFT, and the b04 class above is CLOSED on this
-      // file's own evidence (catchup activations in 10/10 runs,
-      // deferred-start-catchup-failed 0, terminal "Error committing
-      // deferred …" 0, pattern-load-error 0 — the "dies terminally"
-      // mechanism did not reproduce once). The three reds are ONE
-      // shape and a THIRD residue member, on the WRITE side: the
-      // GUEST browser's mid-session profile piece never lands its
-      // ~98-101-op program-materialization commit, so its space holds
-      // exactly 4 commits (byte-identical across all three reds), no
-      // patternIdentity anywhere, and appears in ZERO toolshed log
-      // lines — greens reach 14-21 commits with patternIdentity named
-      // 57-216 times. That campaign deliberately left refused vs
-      // dropped vs never issued undetermined. PR #6378 later pinned the
-      // mechanism: the authoritative server attempt was dropped on its
-      // `RetryImmediately` name-resolution signal before it could issue
-      // the transaction. Flagged there, not here: S-B's barrier
-      // cannot cover a write that is never in flight, and the S-C
-      // skip ruling's premise (waitForRuntimeIdle before any reload)
-      // does not reach a surface with no reload. Recorded so nobody
-      // re-derives them: piece-start-commit-failed is NOT the
-      // discriminator (13 occurrences, green runs included) and
-      // OW46's structure-load-stuck is blind here (fires in both
-      // arms, names only the host's space). Full evidence in
-      // verification-coverage.md OW45's LUNCH-POLL FILE ENTRY'S OWN
-      // GATE block.
+      // RESTORED 2026-08-28 after THREE direct-CI unskip probes on the
+      // lift PR (#6484) — four across the arc, counting the pre-PR
+      // phase-3 board that opened it — the last one red at the surface
+      // with the declared hard stop honored. The park's WRITE PATH is now
+      // mapped three geometries deep, each caught by its probe's own
+      // artifact and the first two FIXED red-first on that PR (kept: the
+      // fixes are real —
+      // packages/runner/test/pattern-replication-sibling-race.test.ts):
+      // (1) the in-flight SIBLING replication supplying the parent space
+      // (sibling-await, `replicationsIntoSpace` tickets); (2) the parent
+      // space closure-less BY ORDER — `loadPatternByIdentity` serves
+      // patterns from the in-memory index with no per-space persist, so
+      // the CT-1687 child replication's origin read finds nothing
+      // (module-keyed fallback origins, `persistedClosureSpaces`); (3) —
+      // probe 4's residue, UNFIXED — the supplier COMPILE itself still
+      // mid-flight at child-replication time: no persist of the
+      // profile-home MODULE had completed anywhere server-side (both
+      // identity-home compiles started 5-18s earlier were still running;
+      // the earlier profile fetches are the harness process's), so the
+      // fallback map was correctly empty and the one-shot died. Every
+      // probe: ONE closure-replication-failed (parent -> profile), 80
+      // structure-load-stuck over 40 pattern-unloadable roots, the name
+      // placeholder, :271 at 300 s; fallback counter 0. The designed next
+      // move, recorded not landed: on a dry map, await the manager's
+      // in-flight compilations once (their E4 persists record before
+      // resolving), re-consult, then throw — event-driven, no timer, no
+      // deadlock (compiles never await replications). Local evidence at
+      // the fix heads: campaigns F/G/H 8/8 each (quiet+loaded, ensure-ON,
+      // self-sourced, posture-probed; structureLoadStuck 0), runner suite
+      // 1312/1312 — the park is CI-only in all 30 runs. Full chain:
+      // verification-coverage.md OW45's lunch ROOT-CAUSE/PROBE blocks.
       file: "integration/lunch-poll-vote.test.ts",
       phase: "phase-7",
-      reason: "OW45 arm B. The charge is now the ROW'S OWN ROOT " +
-        "MECHANISM, observed SERVER-SIDE in CI for the first time. " +
-        "Phase-3 re-baseline 2026-08-27 at main 1fc841b6e (ON binary " +
-        "sha256 a93047a461c0c4d8 re-verified per run, fresh store + own " +
-        "97xx port + ON posture probe per run, ensure defaulting ON, " +
-        "toolshed self-sourced, LLM masked): 8/8 GREEN in 16-18s, the " +
-        "owner-directed approximately-eight-run pin MET locally, with " +
-        "pattern-load-error, deferred-start-catchup, session-remount, " +
-        "piece-start-commit-failed(server), load-park and " +
-        "handlerNotRunDeferrals all ZERO. The DIRECT CI UNSKIP PROBE (run " +
-        "33138358110, ON shard 7, job 98743591583, head 95f313835) went " +
-        "RED at the SAME stage and signature as the 2026-08-26 probe: " +
-        "lunch-poll-vote.test.ts:271, the HOST's " +
-        "clickCfButton(#lp-join-button), " +
-        "'Timed out waiting for #lp-join-button to render. Last probe: " +
-        "{\"#lp-join-button\": []}', waitForCondition's unchanged " +
-        "300000ms bound, 5m5s; the body read '0 joined' and 'Unknown " +
-        "profile #MjhprA'. WHAT IS NEW: CI now publishes the toolshed log " +
-        "as a job artifact, closing the 2026-08-26 disposition's stated " +
-        "blind spot. In the file's window that log carries EIGHTY " +
-        "structure-load-stuck WARNs on the profile space " +
-        "did:key:z6MktpA5, the first naming demanded root " +
-        "of:fid1:32Pic3-REdd7zmJ8gPchJyFD0LECk0u-QrFUXMjhprA as " +
-        "pattern-unloadable after 8 consecutive deferred cycles — 'a " +
-        "forever-park ... the home-profile program-write-loss shape' — " +
-        "and that root's suffix IS the #MjhprA the placeholder rendered. " +
-        "Upstream sit TWENTY seal-space-commit-failed / " +
-        "foreign-write-refused pairs: applyInitialName and a __cfLift_1 " +
-        "action running in the HOME wave did:key:z6Mkv7Tjz refused a " +
-        "write to the profile space for want of the section 2b delegated " +
-        "carriage. CRUCIAL DISCRIMINATOR, so nobody chases the refusal: " +
-        "the refusal is NOT it. All eight local GREENS carry 80 " +
-        "foreign-write-refused and 40 seal-space-commit-failed each, with " +
-        "structureLoadStuck 0, structureLoadRearmed 7-10 and " +
-        "structureLoadTerminal 190-199. The PARK is the discriminator — " +
-        "locally the profile space's structure load always resolves, in " +
-        "CI it never does. Excluded from the CI window, all zero: " +
-        "pattern-load-error, pattern-swap-setup-error, " +
-        "deferred-start-catchup, session-remount, " +
-        "piece-start-commit-failed, sidecar-run-raced, handler-not-run, " +
-        "arrival-barrier, 'memory session revoked', sync-load-failure, " +
-        "Event deferred and Event dropped. So this is NOT the b04 " +
-        "client-start class (closed 2026-08-24), NOT the a04 " +
-        "mark/effects family (#6459), NOT the #6312 sidecar clobber, NOT " +
-        "the fifth-face load-park member, and NOT #6378's " +
-        "name-resolution drop — those were the entry's prior charges and " +
-        "each is now excluded by observation rather than by absence. The " +
-        "OFF lane's shard 7 PASSED on the same run, so the red is " +
-        "ON-specific. Local 8/8 against CI 1/1 red, for the second " +
-        "campaign running: this file's lift needs the PARK explained, " +
-        "not another local count. This FILE entry remains explicit until " +
-        "the phase-7 coordinator lifts it.",
+      reason: "OW45 arm B, the structure-load forever-park: the profile " +
+        "space's program closure has NO reliable server-side supplier " +
+        "when the create-profile event beats every persist of the " +
+        "profile-home module. Three supplier geometries mapped on PR " +
+        "#6484's three probe boards (runs 33160430927, 33164596936, " +
+        "33165960083; the arc's first probe, run 33138358110, ran " +
+        "pre-PR under phase 3): the in-flight sibling replication (FIXED, " +
+        "sibling-await), the by-ORDER closure-less parent (the in-memory " +
+        "index serves patterns with no per-space persist; FIXED, " +
+        "module-keyed fallback origins), and the still-mid-flight " +
+        "supplier compile (UNFIXED residue: the fallback map is " +
+        "correctly empty until a persist completes; the designed await " +
+        "of in-flight compilations is recorded in the register, not " +
+        "landed). Signature, identical in all four probes: one " +
+        "closure-replication-failed parent->profile, then 80 " +
+        "structure-load-stuck WARNs (40 roots, pattern-unloadable) on " +
+        "the profile space, 'Unknown profile #<id>' placeholder, " +
+        "lunch-poll-vote.test.ts:271 at the 300000ms bound; " +
+        "closure-replication-fallback-origin 0. Local 30/30 GREEN across " +
+        "campaigns F/G/H + smokes at the fix heads (fresh store + " +
+        "posture probe per run, ensure defaulting ON, toolshed " +
+        "self-sourced, LLM masked): the parent space's own sidecar " +
+        "compile always persists first locally — the park is a CI boot " +
+        "ORDER, not a race or a load artifact. Lifts on the in-flight " +
+        "compile await (or a deeper supply redesign) plus the ruled " +
+        "local-plus-CI-probe bar.",
     },
     // The sqlite identity pair's two FILE entries were LIFTED (OW53
     // CLOSED, 2026-08-22): the sqlite builtins consumed the RUNTIME's

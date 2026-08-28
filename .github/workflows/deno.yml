@@ -1445,10 +1445,10 @@ jobs:
   # probe below before the shard runs. Skips happen only through the explicit
   # per-phase lists in tasks/server-execution-on-skips.ts, printed by the run
   # step — never by silent filtering (ONE `patterns` entry today: the
-  # lunch-poll-vote FILE, #5744's client-start re-skip, OW45 arm B, with its
-  # loud reason. default-app's reload STEP entry lifted 2026-08-28 under the
-  # ruled surface reading of the local-plus-CI-probe bar, so this lane now
-  # RUNS that step; the flip PR needs every list EMPTY).
+  # lunch-poll-vote FILE entry, RESTORED 2026-08-28 after the lift PR's
+  # three probe boards each went red at that surface — the OW45
+  # forever-park, three supplier geometries mapped, two fixed, the
+  # mid-flight-compile residue open; the flip PR needs every list EMPTY).
   # No coverage collection and no cache save-back: the default lane owns
   # both; the compile byte cache is restored read-only (compiled bytes do not
   # depend on the flag).

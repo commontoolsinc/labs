@@ -128,22 +128,25 @@ Deno.test("main: no arguments behaves like an unknown suite", async () => {
 });
 
 Deno.test("main: empty lists print the report on stderr and nothing on stdout", async () => {
-  // The shell suite's list is empty (patterns carries the one lunch-poll-vote
-  // FILE entry; runner and runtime-client are empty since their lifts, and
-  // patterns' last STEP entry lifted 2026-08-28).
+  // The shell suite's list is empty (patterns carries the one restored
+  // lunch-poll-vote FILE entry; runner and runtime-client are empty since
+  // their lifts).
   const { out, err, io } = captureIo();
   assertEquals(await main(["shell"], io), 0);
   assertEquals(out, []);
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-// The one entry is lunch-poll-vote's FILE entry. The default-app reload STEP
-// entry lifted 2026-08-28 under the owner's surface reading of the ruled
-// local-plus-CI-probe bar — 10/10 local at 1fc841b6e AND a direct-CI probe of
-// that exact step green (run 33138358110, ON shard 5, `ok (18s)`), the shard's
-// red being the co-resident, unlisted cfc-group-chat-demo file. Evidence
-// chain: verification-coverage.md OW45.
-Deno.test("main: the patterns list carries the one remaining phase-7 entry and keeps the flip bar explicit", async () => {
+// The one entry is the RESTORED lunch-poll-vote FILE entry (2026-08-28):
+// the lift PR (#6484) ran THREE direct-CI unskip probe boards (four
+// across the arc — the first opened it pre-PR, under phase 3); every one
+// red at the probed surface with one identical signature, each probe's
+// artifact advancing the map one geometry (sibling replication in flight
+// -> FIXED; by-ORDER closure-less parent via the in-memory index ->
+// FIXED, module-keyed fallback; supplier compile still mid-flight ->
+// UNFIXED residue), and the declared hard stop restored the entry.
+// Evidence chain: verification-coverage.md OW45's lunch blocks.
+Deno.test("main: the patterns list carries the restored lunch-poll-vote FILE entry — the probe-mapped forever-park", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
   // The lunch-poll-vote FILE entry is the one --ignore flag on stdout.
@@ -156,54 +159,28 @@ Deno.test("main: the patterns list carries the one remaining phase-7 entry and k
   // …and the list holds EXACTLY that entry — an addition or a silent lift
   // both redden this pin.
   assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 1);
-  // The lunch-poll-vote entry is FILE-level (no step guard: every step
-  // depends on the profile-first join the class kills), same class and
-  // fork memo as the lifted default-app residue.
   assertEquals(
     SERVER_EXECUTION_ON_SKIPS.patterns[0].file,
     "integration/lunch-poll-vote.test.ts",
   );
   assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[0].step, undefined);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[0].phase, "phase-7");
-  // Its reason carries the 2026-08-27 phase-3 charge: the local ~8-run
-  // re-baseline PASSED (8/8) and the direct-CI unskip probe went RED at
-  // the HOST's join — the SECOND campaign in a row to split that way.
-  // Pinned by the CI coordinates, the failing line, and the newly
-  // OBSERVED server-side mechanism, so a future seat neither reads the
-  // 8/8 as a clean bar nor re-derives the classification from scratch.
-  assertMatch(SERVER_EXECUTION_ON_SKIPS.patterns[0].reason, /8\/8 GREEN/);
-  assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[0].reason,
-    /DIRECT CI UNSKIP PROBE .*went\s+RED/s,
-  );
-  assertMatch(SERVER_EXECUTION_ON_SKIPS.patterns[0].reason, /33138358110/);
-  assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[0].reason,
-    /lunch-poll-vote\.test\.ts:271/,
-  );
-  assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[0].reason,
-    /HOST's clickCfButton/,
-  );
-  // The mechanism half: the forever-park, its root, and the negative that
-  // stops the next seat chasing the foreign-write refusal (which every
-  // local GREEN also carries).
-  assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[0].reason,
-    /structure-load-stuck/,
-  );
-  assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[0].reason,
-    /foreign-write-refused/,
-  );
-  assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[0].reason,
-    /the refusal is NOT it/i,
-  );
-  assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[0].reason,
-    /PARK is the discriminator/,
-  );
+  // The reason carries the probe-accumulated map: the three supplier
+  // geometries with their fix state, the four-probe signature (so nobody
+  // chases the refusal storm or re-derives the classification), the
+  // local-vs-CI split, and the recorded-not-landed next move.
+  const reason = SERVER_EXECUTION_ON_SKIPS.patterns[0].reason;
+  assertMatch(reason, /forever-park/);
+  assertMatch(reason, /sibling replication \(FIXED, sibling-await\)/);
+  assertMatch(reason, /module-keyed fallback origins/);
+  assertMatch(reason, /still-mid-flight supplier compile \(UNFIXED residue/);
+  assertMatch(reason, /33160430927/);
+  assertMatch(reason, /33164596936/);
+  assertMatch(reason, /33165960083/);
+  assertMatch(reason, /structure-load-stuck/);
+  assertMatch(reason, /closure-replication-fallback-origin 0/);
+  assertMatch(reason, /lunch-poll-vote\.test\.ts:271/);
+  assertMatch(reason, /CI boot ORDER/);
   // The topic-board pivot-baseline entry is GONE (#6304 fixed): the
   // guard lookup for that step resolves nothing, so the case runs in
   // the ON lane — it is that issue's acceptance test.
@@ -218,9 +195,7 @@ Deno.test("main: the patterns list carries the one remaining phase-7 entry and k
   // The default-app reload STEP entry is GONE (LIFTED 2026-08-28 under the
   // owner's surface reading of the ruled bar): its guard lookup resolves
   // NOTHING, so the ON arm RUNS that step — the lift's standing proof, and the
-  // pin that makes a silent re-skip impossible. The bound in-file guard was
-  // removed with the entry, so the validator's step-entry binding check would
-  // fail any re-listing that did not restore the guard too.
+  // pin that makes a silent re-skip impossible.
   assertEquals(
     serverExecutionOnStepSkip(
       "patterns",
@@ -229,17 +204,15 @@ Deno.test("main: the patterns list carries the one remaining phase-7 entry and k
     ),
     undefined,
   );
-  // The report no longer carries a SKIP-STEP line at all: the one remaining
-  // entry is FILE-level, so a step line reappearing means a new step entry.
+  // The one remaining entry is FILE-level: no SKIP-STEP line anywhere.
   assert(
     !/SKIP-STEP/.test(err[0]),
-    "the patterns report must carry no SKIP-STEP line — the default-app " +
-      "reload step lifted 2026-08-28 and no other step entry exists",
+    "the patterns report must carry no SKIP-STEP line — the one entry " +
+      "is lunch-poll-vote's FILE entry",
   );
   // The shard filter drops exactly the FILE entry's file (the shard
   // lanes feed explicit file lists) and passes every other candidate
-  // through untouched — remove the lunch-poll-vote entry and this
-  // assertion reds.
+  // through untouched.
   const { files, skipped } = serverExecutionOnFilterFiles("patterns", [
     "./integration/default-app.test.ts",
     "./integration/cellset-lww.test.ts",
@@ -337,7 +310,12 @@ Deno.test("validation binds a step entry: the file must name the step and call t
   ]);
 });
 
-Deno.test("main: the runner list is EMPTY — pattern-and-data-persistence LIFTED by the arrival-witness predicate (RULED 2026-08-22, candidate (B): a cover at the floor witnesses only when derived-class) on 10/10 green at the true ON topology — so the full suite runs, and the ONLY file-level skip in ANY suite is patterns' lunch-poll-vote entry (the 2026-08-24 deliberate OW45 arm-B re-skip)", async () => {
+// The runner list emptied with the arrival-witness lift (RULED 2026-08-22,
+// candidate (B) of the OW33 fork memo). This pin holds the whole-registry
+// state: the ONLY entry anywhere is the restored lunch-poll-vote FILE
+// entry, so any OTHER entry in ANY suite reddens it and a skip stays a
+// deliberate change, never a leftover.
+Deno.test("main: the runner list is EMPTY and the only entry in ANY suite is the restored lunch-poll-vote FILE entry", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["runner"], io), 0);
   // No entries: no --ignore flag on stdout…
@@ -351,21 +329,15 @@ Deno.test("main: the runner list is EMPTY — pattern-and-data-persistence LIFTE
   // …and the report says so loudly.
   assertMatch(err[0], /runner: no skips — full suite runs\./);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.runner.length, 0);
-  // A FILE-level skip is a deliberate entry, never a leftover: the
-  // arrival-witness lift cleared the last one, and the single re-skip
-  // since — patterns' lunch-poll-vote entry (2026-08-24, the OW45 arm-B
-  // client-start class its profile-first join newly exposes) — is named
-  // here so the NEXT file-level entry still reddens this pin. The flip
-  // PR's list-EMPTY bar hangs on this file and the topic-board step.
+  // The whole registry: the restored lunch-poll-vote FILE entry is the
+  // ONLY entry in any suite — the flip PR's list-EMPTY bar hangs on it.
   for (const suite of ["patterns", "runner", "runtime-client", "shell"]) {
     if (!isServerExecutionSuite(suite)) throw new Error("unreachable");
     assertEquals(
-      SERVER_EXECUTION_ON_SKIPS[suite]
-        .filter((skip) => skip.step === undefined)
-        .map((skip) => skip.file),
+      SERVER_EXECUTION_ON_SKIPS[suite].map((skip) => skip.file),
       suite === "patterns" ? ["integration/lunch-poll-vote.test.ts"] : [],
-      `${suite}: the only FILE-level skip is the deliberate ` +
-        "lunch-poll-vote OW45 arm-B entry",
+      `${suite}: the only entry is the restored lunch-poll-vote FILE ` +
+        "entry (2026-08-28)",
     );
   }
 });
