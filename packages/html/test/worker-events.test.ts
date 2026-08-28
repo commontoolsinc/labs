@@ -394,18 +394,24 @@ Deno.test("events - serializeEvent", async (t) => {
     assertEquals("key" in serialized, false);
   });
 
-  await t.step("omits a target property whose type is not the DOM's", () => {
-    // The same for a target's `name`, which every component declaring one
-    // declares a `string`. Its `value` is a different question, the element
-    // choosing what that is, so it crosses regardless.
-    const event = new MockEvent("input", {
-      target: { name: 42, value: "kept" },
+  await t.step("carries a cell-bound target property as its link", () => {
+    // No target property can be narrowed past `FabricValue`. The JSX contract
+    // admits a cell for any attribute of any element, and a bound one reaches
+    // the element as a `CellHandle` whatever the component declares -- `cf-tab`
+    // declares `selected` a `boolean` and can still be handed a cell for it.
+    const link = { "/": { "link@1": { id: "of:fid1:abc" } } };
+    const handle = new (class {
+      toJSON() {
+        return link;
+      }
+    })();
+    const event = new MockEvent("cf-tab-select", {
+      target: { selected: handle },
     }) as unknown as Event;
 
     const serialized = serializeEvent(event);
 
-    assertEquals(serialized.target?.name, undefined);
-    assertEquals(serialized.target?.value, "kept");
+    assertEquals(serialized.target?.selected, link);
   });
 
   await t.step("omits undefined properties", () => {

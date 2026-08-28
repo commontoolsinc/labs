@@ -56,7 +56,10 @@ export type { EventProvenance };
  * Contains common input element properties.
  */
 export type SerializedEventTarget = {
-  name?: string;
+  /**
+   * The element's name, or whatever it chose to expose under that name.
+   */
+  name?: FabricValue;
 
   /**
    * The element's current value. A `FabricValue` rather than a string: a custom
@@ -73,8 +76,10 @@ export type SerializedEventTarget = {
    */
   checked?: FabricValue;
 
-  /** Whether the element reports itself selected. */
-  selected?: boolean;
+  /**
+   * Whether the element reports itself selected -- or, again, what it chose.
+   */
+  selected?: FabricValue;
 
   /**
    * Which option a select is on -- or, where the element chose to expose
@@ -164,23 +169,20 @@ export const ALLOWLISTED_EVENT_PROPERTIES = {
 } as const satisfies Partial<Record<keyof SerializedEvent, DomScalar>>;
 
 /**
- * Target properties whose type the DOM fixes, which therefore cross the way the
- * event's own properties do.
+ * Target properties that cross.
+ *
+ * Every one is a `FabricValue`, and none can be narrowed past that: the JSX
+ * contract admits a cell for any attribute of any element --
+ * `DetailedHTMLProps` maps each prop to `E[K] | CellLike<E[K]>` -- and a bound
+ * one reaches the element as a `CellHandle`, whatever the component declares
+ * its own property to be. So what crosses is whatever
+ * {@link toSerializableValue} makes of what is found.
  */
-export const ALLOWLISTED_TARGET_SCALARS = {
-  name: "string",
-  selected: "boolean",
-} as const satisfies Partial<Record<keyof SerializedEventTarget, DomScalar>>;
-
-/**
- * Target properties a custom element chooses the value of. Each is declared
- * `CellHandle<T> | T` by at least one component -- `value` by eight of them,
- * `checked` by two, `selectedIndex` by `cf-picker` -- so what crosses is
- * whatever {@link toSerializableValue} makes of what is found.
- */
-export const ALLOWLISTED_TARGET_EXPOSED = [
+export const ALLOWLISTED_TARGET_PROPERTIES = [
+  "name",
   "value",
   "checked",
+  "selected",
   "selectedIndex",
 ] as const satisfies readonly (keyof SerializedEventTarget)[];
 
@@ -216,13 +218,7 @@ export function serializeEvent(event: Event): SerializedEvent {
     const from = target as unknown as Record<string, unknown>;
     const to = serializedTarget as unknown as Record<string, unknown>;
 
-    // The ones the DOM fixes the type of, copied as the event's own are.
-    hasTargetProps = copyDomScalars(from, to, ALLOWLISTED_TARGET_SCALARS) ||
-      hasTargetProps;
-
-    // The ones a custom element chooses the value of, so that what crosses is
-    // whatever the conversion makes of what it finds.
-    for (const prop of ALLOWLISTED_TARGET_EXPOSED) {
+    for (const prop of ALLOWLISTED_TARGET_PROPERTIES) {
       const value = from[prop];
       if (value !== undefined) {
         to[prop] = toSerializableValue(value);
@@ -274,8 +270,7 @@ export function serializeEvent(event: Event): SerializedEvent {
 }
 
 /**
- * Copies each named property that is present and is what its tag says, and
- * reports whether any was copied.
+ * Copies each named property that is present and is what its tag says.
  *
  * The two casts are the loop's rather than a claim about the values: what is
  * read is a property of whatever object was dispatched, and what is written has
@@ -285,18 +280,13 @@ function copyDomScalars(
   from: Record<string, unknown>,
   to: Record<string, unknown>,
   tags: Readonly<Record<string, DomScalar>>,
-): boolean {
-  let copied = false;
-
+): void {
   for (const [prop, tag] of Object.entries(tags)) {
     const value = from[prop];
     if ((value !== undefined) && matchesDomScalar(value, tag)) {
       to[prop] = value;
-      copied = true;
     }
   }
-
-  return copied;
 }
 
 /**
