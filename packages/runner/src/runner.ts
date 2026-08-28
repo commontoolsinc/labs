@@ -8769,6 +8769,32 @@ export const PIECE_SOURCE_MOVED =
   "piece source changed while the source transition was being prepared";
 
 /**
+ * The session-side pattern the prepare/apply moved-guards below check a
+ * KEYLESS piece's source state against. A keyless expected pattern is
+ * session-side by construction — the durable pointer legitimately holds
+ * nothing (L3(a), RULED 2026-08-27) and a concurrent keyless re-setup moves
+ * neither durable meta nor source revisions — so the only supersession
+ * signal such a piece has is the runner's LIVE session pointer, and the
+ * guards must read exactly that. (An earlier revision substituted the
+ * transition's own expected pattern here, which compared expected against
+ * itself and let a prepared transition apply over a NEWER keyless setup —
+ * the abort the durable stamp used to provide.) The durable read still wins
+ * when present, so a REAL pointer appearing over a keyless piece reads as
+ * moved; an EVICTED session pointer reads as moved too — a spurious loud
+ * abort, failing safe. A real expected pattern gets no fallback: a cleared
+ * or changed durable pointer must read as moved.
+ */
+function keylessTransitionSessionPattern(
+  runtime: Runtime,
+  resultCell: Cell<unknown>,
+  expectedPattern: { identity: string; symbol: string },
+): { identity: string; symbol: string } | undefined {
+  return PatternManager.isKeylessPatternIdentity(expectedPattern.identity)
+    ? runtime.runner.sessionPatternPointerFor(resultCell)
+    : undefined;
+}
+
+/**
  * Verify that a source transition can restore the current source. Recovery
  * paths may omit an unavailable legacy baseline and retain the displaced
  * executable identity outside the restorable history instead.
@@ -8780,16 +8806,9 @@ export async function preparePieceSourceTransitionBaseline(
   options: { allowUnavailable?: boolean } = {},
 ): Promise<PieceSourceTransitionBaseline> {
   await prepareSourceClosureVerification();
-  // A KEYLESS expected pattern is session-side by construction — the durable
-  // pointer holds nothing and cannot move; movement for such a piece is a
-  // REAL pointer appearing, which the durable read (which wins when present)
-  // still surfaces. A real expected pattern gets no fallback: a cleared or
-  // changed durable pointer must read as moved.
   const current = getPieceSourceSnapshot(
     resultCell,
-    PatternManager.isKeylessPatternIdentity(expected.pattern.identity)
-      ? expected.pattern
-      : undefined,
+    keylessTransitionSessionPattern(runtime, resultCell, expected.pattern),
   );
   if (
     current === undefined ||
@@ -8827,14 +8846,15 @@ export function applyPieceSourceTransition(
   transition: PieceSourceTransition,
 ): void {
   const candidate = resultCell.withTx(tx);
-  // Same keyless-expected fallback as the prepare step above.
+  // Same live-session-pointer read as the prepare step above: the guard's
+  // whole job is catching what moved BETWEEN prepare and this commit.
   const current = getPieceSourceSnapshot(
     candidate,
-    PatternManager.isKeylessPatternIdentity(
-        transition.expected.pattern.identity,
-      )
-      ? transition.expected.pattern
-      : undefined,
+    keylessTransitionSessionPattern(
+      runtime,
+      resultCell,
+      transition.expected.pattern,
+    ),
   );
   if (
     current === undefined ||
