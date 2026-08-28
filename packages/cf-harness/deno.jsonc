@@ -9,7 +9,7 @@
     "test": "ENV=test deno test --allow-read --allow-write --allow-run --allow-ffi --allow-net --allow-env test",
     "test:integration": "CF_HARNESS_INTEGRATION=1 deno test -A integration",
     "measure-runs": "deno run --allow-read scripts/measure-runs.ts",
-    "measure-batch": "deno run --allow-net --allow-read --allow-write --allow-env scripts/run-measurement-batch.ts"
+    "measure-batch": "deno run --allow-net --allow-read --allow-write --allow-env --allow-run=git scripts/run-measurement-batch.ts"
   },
   "exports": {
     ".": "./mod.ts",

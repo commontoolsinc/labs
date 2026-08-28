@@ -23,6 +23,8 @@
  *   deno task measure-batch suite.json
  *   deno task measure-batch suite.json --console=http://127.0.0.1:8103
  *   deno task measure-batch suite.json --out=./measurements/tonight
+ *   deno task measure-batch suite.json --fabric-api-url=http://localhost:8040
+ *   deno task measure-batch suite.json --expect-git-sha=<sha>
  */
 
 import { parseArgs } from "@std/cli/parse-args";
@@ -44,13 +46,35 @@ import {
 const TOKEN_COOKIE = "cf_harness_console_token";
 const CHAT_SSE_EVENT = "chat";
 const DEFAULT_CONSOLE_URL = "http://127.0.0.1:8100";
+const DEFAULT_FABRIC_API_URL = "http://localhost:8000";
 
-/** The events that close a turn, and therefore settle a task's run on disk. */
-const TERMINAL_EVENT_KINDS: ReadonlySet<string> = new Set([
+/**
+ * What the pre-flight asks the index. Deliberately ordinary and unrelated to
+ * any suite task: the question is whether the index answers this identity, not
+ * what it holds, and an answer of no results passes.
+ */
+const PREFLIGHT_QUERY = "pattern";
+
+/**
+ * The events that close a turn, and what each one settles.
+ *
+ * `turn_completed` and `turn_failed` are emitted after the turn's store commit,
+ * so the run behind one is on disk when it arrives. `turn_canceled` is not: the
+ * service emits it the moment it aborts the turn, while the prompt loop is
+ * still unwinding, and the run's artifacts land afterwards. So a cancel is
+ * settled by the session's own `status_changed` back to idle, which the
+ * service emits from the finalizer once the turn has actually stopped.
+ *
+ * That distinction matters because cancel is the documented way to release a
+ * hung batch. Measuring on the cancel event alone would read whatever half of
+ * the run had reached disk and report it as the run.
+ */
+const SETTLED_TERMINAL_EVENT_KINDS: ReadonlySet<string> = new Set([
   "turn_completed",
   "turn_failed",
-  "turn_canceled",
 ]);
+
+const CANCEL_EVENT_KIND = "turn_canceled";
 
 /** One task of a suite: an identifier to file it under, and its exact text. */
 export interface MeasurementTask {
@@ -174,6 +198,183 @@ export async function* readSseFrames(
   }
 }
 
+/**
+ * What the fabric server reports about itself.
+ *
+ * Recorded on every report and never differenced against the console's own
+ * posture line. The two describe different runtimes: `cfcFlowLabels` is
+ * core-default off and the `MAX_ENFORCEMENT_CFC_OPTIONS` bundle is applied by
+ * the `remoteClient` and `browserWorker` presets, which is what cf-harness's
+ * fabric session is, while the toolshed runs a production-server preset. So
+ * the server reporting a dial off while the console prints an enforcing
+ * posture is the design rather than a contradiction, and a check that refused
+ * on the difference would fail every correctly configured night. Two facts,
+ * each labeled with whose it is.
+ */
+export interface ServerMeta {
+  gitSha?: string;
+  cfc?: Readonly<Record<string, unknown>>;
+  experimentalFlags?: Readonly<Record<string, unknown>>;
+}
+
+/** Whether the server's commit is on the branch the measurement assumes. */
+export type AncestryReading =
+  | { kind: "ancestor"; base: string }
+  | { kind: "diverged"; base: string }
+  | { kind: "unchecked"; reason: string };
+
+/**
+ * What the server said it was running, taken before the first task.
+ *
+ * This records rather than judges, with one exception: a batch told which
+ * commit to expect refuses when the server disagrees. Nothing is inferred.
+ * Running against a deliberately mismatched server is documented practice, so
+ * an undeclared mismatch is a fact for the report, not grounds to refuse a
+ * night's work.
+ */
+export type PosturePreflight =
+  | { kind: "read"; meta: ServerMeta; ancestry: AncestryReading }
+  | { kind: "refused"; reason: string; meta?: ServerMeta };
+
+/**
+ * Whether the index answered a search at all, taken before the first task.
+ *
+ * An index that refuses every query answers a run exactly as an empty index
+ * does: the run searches, gets nothing, and writes its own pattern. A whole
+ * phase-2 run family did this against `403: DID is not allowlisted` and
+ * recorded as an empty corpus, which nobody noticed. Unattended, that is six
+ * runs of plausible-looking evidence for a discovery problem that is an
+ * authorization problem, so the batch refuses to start rather than producing
+ * it. A refusal here names the status; it is not retried and not warned past.
+ */
+export type IndexPreflight =
+  | { kind: "answered"; results: number; candidates?: number }
+  | { kind: "refused"; reason: string };
+
+/**
+ * Reads the fabric server's own report of what it is running.
+ *
+ * `/api/meta` is unauthenticated and outside the console, so this is read
+ * directly rather than through the console's index proxy — the console cannot
+ * answer for a server it merely talks to.
+ */
+export const readServerMeta = async (
+  fabricApiUrl: string,
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+): Promise<ServerMeta | { error: string }> => {
+  try {
+    const response = await fetchImpl(
+      `${fabricApiUrl.replace(/\/$/, "")}/api/meta`,
+    );
+    if (!response.ok) {
+      await response.body?.cancel();
+      return { error: `/api/meta answered ${response.status}` };
+    }
+    const body = await response.json() as Record<string, unknown>;
+    return {
+      ...(typeof body.gitSha === "string" ? { gitSha: body.gitSha } : {}),
+      ...(typeof body.cfc === "object" && body.cfc !== null
+        ? { cfc: body.cfc as Record<string, unknown> }
+        : {}),
+      ...(typeof body.experimentalFlags === "object" &&
+          body.experimentalFlags !== null
+        ? {
+          experimentalFlags: body.experimentalFlags as Record<string, unknown>,
+        }
+        : {}),
+    };
+  } catch (error) {
+    return {
+      error: `the fabric server at ${fabricApiUrl} could not be reached: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+};
+
+/**
+ * Whether the server's commit is on `base`, asked of the local repository.
+ *
+ * A commit the local clone does not hold is reported unchecked rather than
+ * diverged: not knowing a commit and knowing it is off the branch are
+ * different readings, and only one of them is a fault in the server.
+ */
+export const readAncestry = async (
+  gitSha: string | undefined,
+  base: string,
+  run: (
+    args: readonly string[],
+  ) => Promise<{ success: boolean; code: number }> = defaultGitRun,
+): Promise<AncestryReading> => {
+  if (gitSha === undefined) {
+    return { kind: "unchecked", reason: "the server reported no gitSha" };
+  }
+  const known = await run(["cat-file", "-e", `${gitSha}^{commit}`]);
+  if (!known.success) {
+    return {
+      kind: "unchecked",
+      reason:
+        `this clone does not hold ${gitSha}, so whether it is on ${base} cannot be decided here`,
+    };
+  }
+  const ancestor = await run(["merge-base", "--is-ancestor", gitSha, base]);
+  return ancestor.success
+    ? { kind: "ancestor", base }
+    : { kind: "diverged", base };
+};
+
+const defaultGitRun = async (
+  args: readonly string[],
+): Promise<{ success: boolean; code: number }> => {
+  try {
+    const output = await new Deno.Command("git", {
+      args: [...args],
+      stdout: "null",
+      stderr: "null",
+    }).output();
+    return { success: output.success, code: output.code };
+  } catch {
+    return { success: false, code: -1 };
+  }
+};
+
+/**
+ * Reads what the server is running, and refuses only a commit the batch was
+ * told to expect and did not find.
+ *
+ * The ancestry reading is recorded and never refused on. A server on a commit
+ * off `main` is what a matched local toolshed looks like from here, and it is
+ * also what a stale process from another worktree looks like — the report says
+ * which commit and whether it is on the branch, and a reader decides.
+ */
+export const preflightPosture = async (
+  fabricApiUrl: string,
+  base: string,
+  expectGitSha?: string,
+  fetchImpl: typeof globalThis.fetch = globalThis.fetch,
+  run: (
+    args: readonly string[],
+  ) => Promise<{ success: boolean; code: number }> = defaultGitRun,
+): Promise<PosturePreflight> => {
+  const meta = await readServerMeta(fabricApiUrl, fetchImpl);
+  if ("error" in meta) return { kind: "refused", reason: meta.error };
+  if (expectGitSha !== undefined && meta.gitSha !== expectGitSha) {
+    return {
+      kind: "refused",
+      reason:
+        `this batch was told to expect the fabric server on ${expectGitSha}, and it reports ${
+          meta.gitSha ?? "no commit at all"
+        }. It is not running the code this measurement would report on.`,
+      meta,
+    };
+  }
+  return {
+    kind: "read",
+    meta,
+    ancestry: await readAncestry(meta.gitSha, base, run),
+  };
+};
+
 /** What the console answered a started task with. */
 export interface StartedTask {
   sessionId: string;
@@ -186,18 +387,15 @@ export type TurnOutcome =
   | { kind: "unwitnessed"; reason: string };
 
 /**
- * The fields an index answer may carry to say whether a recorded pattern is
- * offered in search results. Recording a pattern and surfacing it are separate,
- * so an entry can be published and not findable, and a report that treats the
- * two as one misreads the corpus. Several names are accepted because this
- * reader must not decide what the index calls it; the field it read is
- * recorded beside the reading.
+ * The field a `listPatterns` row carries to say whether the index offers that
+ * entry in search results. Recording a pattern and surfacing it are separate —
+ * an entry can be published and withheld, and `getPattern` serves it either
+ * way — so a report that treats the two as one misreads the corpus.
+ *
+ * An entry published before the field existed carries nothing here, and that
+ * reads as unknown rather than as findable.
  */
-const DISCOVERABILITY_FIELDS = [
-  "discoverable",
-  "findable",
-  "searchable",
-] as const;
+const DISCOVERABILITY_FIELD = "discoverable";
 
 /** One pattern as the index lists it. */
 export interface IndexedPattern {
@@ -208,14 +406,22 @@ export interface IndexedPattern {
 
   /** Whether the index offers this entry in search results, if it says. */
   discoverable?: boolean;
-
-  /** Which field the reading above came from. */
-  discoverabilityField?: string;
 }
 
 /** What the index held at one moment, or why it could not be read. */
 export type IndexSnapshot =
-  | { kind: "read"; patterns: readonly IndexedPattern[] }
+  | {
+    kind: "read";
+    patterns: readonly IndexedPattern[];
+
+    /**
+     * Entries the index holds and left out of this listing, as it counted
+     * them. A listing asks for the discoverable entries by default, so this
+     * is the rest of the corpus — recorded, resolvable by specifier, and not
+     * offered to a searching run.
+     */
+    nonDiscoverableCount?: number;
+  }
   | { kind: "unread"; reason: string };
 
 /** What changed in the index between two snapshots. */
@@ -278,9 +484,7 @@ const indexSnapshotOf = (answer: unknown): IndexSnapshot => {
     kind: "read",
     patterns: patterns.map((entry) => {
       const pattern = entry as Record<string, unknown>;
-      const discoverabilityField = DISCOVERABILITY_FIELDS.find((field) =>
-        typeof pattern[field] === "boolean"
-      );
+      const discoverable = pattern[DISCOVERABILITY_FIELD];
       return {
         patternId: String(pattern.patternId ?? "(unnamed)"),
         description: String(pattern.description ?? ""),
@@ -288,12 +492,16 @@ const indexSnapshotOf = (answer: unknown): IndexSnapshot => {
         events: typeof pattern.events === "object" && pattern.events !== null
           ? pattern.events as Record<string, number>
           : {},
-        ...(discoverabilityField === undefined ? {} : {
-          discoverable: pattern[discoverabilityField] as boolean,
-          discoverabilityField,
-        }),
+        ...(typeof discoverable === "boolean" ? { discoverable } : {}),
       };
     }),
+    ...(typeof (answer as Record<string, unknown>).nonDiscoverableCount ===
+        "number"
+      ? {
+        nonDiscoverableCount:
+          (answer as Record<string, number>).nonDiscoverableCount,
+      }
+      : {}),
   };
 };
 
@@ -411,62 +619,136 @@ export class ConsoleClient {
   }
 
   /**
+   * Asks the index one search, to establish that it answers this identity at
+   * all before a night of runs rests on what it says.
+   *
+   * Any well-formed answer passes, an empty result included: "the index
+   * answered and held nothing matching" is a real reading and a legitimate
+   * state to measure. What fails is an index that did not answer — a refusal,
+   * an unreachable host, a console started without one — and a body carrying
+   * no results array, which is an answer this reader cannot count.
+   */
+  async preflightIndex(text: string): Promise<IndexPreflight> {
+    let answer: unknown;
+    try {
+      answer = await this.#json("/api/index/call", {
+        method: "POST",
+        body: JSON.stringify({ fn: "searchPatterns", body: { text } }),
+      });
+    } catch (error) {
+      return {
+        kind: "refused",
+        reason: error instanceof Error ? error.message : String(error),
+      };
+    }
+    const results = (answer as Record<string, unknown>)?.results;
+    if (!Array.isArray(results)) {
+      return {
+        kind: "refused",
+        reason: `the index answered with no results array: ${
+          JSON.stringify(answer).slice(0, 200)
+        }`,
+      };
+    }
+    const candidates = (answer as Record<string, unknown>).candidates;
+    return {
+      kind: "answered",
+      results: results.length,
+      ...(typeof candidates === "number" ? { candidates } : {}),
+    };
+  }
+
+  /**
    * Waits for the turn to end, and returns how it ended.
    *
    * The stream is opened after the turn is started rather than before, which
    * is safe because the console backfills every envelope past the sequence the
    * request names: an envelope emitted in the gap arrives in the backfill.
    *
-   * A stream the server closes before the turn ends is reopened, and what
+   * A stream that ends or faults before the turn does is reopened, and what
    * bounds that is progress rather than a count or a clock. A reconnection
-   * that reads no frame at all before its own stream closes is a server that
-   * is not going to answer, and the turn is reported unwitnessed. A server
-   * that is answering delivers frames — its own liveness ticks if the turn
-   * itself is quiet — so a healthy quiet turn is never mistaken for one.
+   * that reads no frame at all is a server that is not going to answer, and
+   * the turn is reported unwitnessed. A server that is answering delivers
+   * frames — its own liveness ticks if the turn itself is quiet — so a healthy
+   * quiet turn is never mistaken for one. A fault is treated the same as an
+   * end: an unattended batch that lost a socket should reopen it and carry on,
+   * not abort the night with no report written.
+   *
+   * The stream is scoped to the session, so a console holding months of turns
+   * does not replay all of them into the first read of a batch.
    */
   async awaitTurn(started: StartedTask): Promise<TurnOutcome> {
+    let canceled: TurnOutcome | undefined;
     for (;;) {
-      const response = await this.#fetch(
-        `${this.#baseUrl}/api/events?afterSequence=${this.#sequence}`,
-        { headers: { cookie: this.#token, accept: "text/event-stream" } },
-      );
-      if (!response.ok || response.body === null) {
-        return {
-          kind: "unwitnessed",
-          reason: `/api/events answered ${response.status}`,
-        };
-      }
       let frames = 0;
-      for await (const frame of readSseFrames(response.body)) {
-        frames += 1;
-        if (frame.event !== CHAT_SSE_EVENT) continue;
-        const envelope = JSON.parse(frame.data) as HarnessChatEventEnvelope;
-        this.#sequence = Math.max(this.#sequence, envelope.sequence);
-        if (
-          envelope.sessionId !== started.sessionId ||
-          !TERMINAL_EVENT_KINDS.has(envelope.event.kind)
-        ) {
-          continue;
+      try {
+        const response = await this.#fetch(
+          `${this.#baseUrl}/api/events?sessionId=${
+            encodeURIComponent(started.sessionId)
+          }&afterSequence=${this.#sequence}`,
+          { headers: { cookie: this.#token, accept: "text/event-stream" } },
+        );
+        if (!response.ok || response.body === null) {
+          return {
+            kind: "unwitnessed",
+            reason: `/api/events answered ${response.status}`,
+          };
         }
-        const event = envelope.event as { kind: string; turnId?: string };
-        if (event.turnId !== undefined && event.turnId !== started.turnId) {
-          continue;
+        for await (const frame of readSseFrames(response.body)) {
+          frames += 1;
+          if (frame.event !== CHAT_SSE_EVENT) continue;
+          const envelope = JSON.parse(frame.data) as HarnessChatEventEnvelope;
+          this.#sequence = Math.max(this.#sequence, envelope.sequence);
+          if (envelope.sessionId !== started.sessionId) continue;
+          const event = envelope.event as { kind: string; turnId?: string };
+          if (
+            canceled !== undefined && event.kind === "status_changed" &&
+            this.#isIdle(envelope)
+          ) {
+            return canceled;
+          }
+          if (event.turnId !== undefined && event.turnId !== started.turnId) {
+            continue;
+          }
+          if (SETTLED_TERMINAL_EVENT_KINDS.has(event.kind)) {
+            return {
+              kind: event.kind as "turn_completed" | "turn_failed",
+              detail: describeTerminalEvent(envelope),
+            };
+          }
+          if (event.kind === CANCEL_EVENT_KIND) {
+            // Hold the outcome and keep reading: the run is not on disk yet.
+            canceled = {
+              kind: "turn_canceled",
+              detail: describeTerminalEvent(envelope),
+            };
+          }
         }
-        return {
-          kind: event.kind as Exclude<TurnOutcome, { kind: "unwitnessed" }>[
-            "kind"
-          ],
-          detail: describeTerminalEvent(envelope),
-        };
+      } catch (error) {
+        if (frames === 0) {
+          return {
+            kind: "unwitnessed",
+            reason: `the event stream faulted with nothing read: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          };
+        }
       }
       if (frames === 0) {
         return {
           kind: "unwitnessed",
-          reason:
-            "the console closed the event stream without delivering a frame",
+          reason: canceled === undefined
+            ? "the console closed the event stream without delivering a frame"
+            : "the turn was canceled and the console never reported the session idle, so its run may be half written",
         };
       }
     }
+  }
+
+  /** Whether a `status_changed` envelope reports the session at rest. */
+  #isIdle(envelope: HarnessChatEventEnvelope): boolean {
+    const event = envelope.event as { session?: { activeTurnId?: string } };
+    return event.session?.activeTurnId === undefined;
   }
 }
 
@@ -494,6 +776,27 @@ const describeTerminalEvent = (
 export interface SessionConfiguration {
   model?: string;
   cfcEnforcementMode?: string;
+
+  /**
+   * The skills tree the run scanned, and how many skills the scan found, read
+   * from the run's own `skill-registry.json`. The console exposes the root
+   * over no route, and a turn whose run carries no registry authors patterns
+   * without the authoring guides — a misconfiguration that changes what the
+   * runs do for a reason unrelated to the index, and that is invisible in
+   * every other artifact.
+   */
+  skillsRoot?: string;
+  skillsFound?: number;
+  skillsUnread?: string;
+
+  /**
+   * Runs of this family that wrote no registry. A `delegate_task` child is
+   * where authoring happens, so a parent that scanned a root while its
+   * children did not is the shape that matters, and a parent-only reading
+   * would report it as healthy.
+   */
+  runsWithoutSkillRegistry?: number;
+  runsInFamily?: number;
 }
 
 /** What one task did, as the report records it. */
@@ -516,10 +819,46 @@ export interface BatchResult {
   indexUrl: string | null;
   startedAt: string;
   endedAt: string;
+  preflight: IndexPreflight;
+  posture: PosturePreflight;
   indexBefore: IndexSnapshot;
   indexAfter: IndexSnapshot;
   results: readonly TaskResult[];
 }
+
+/**
+ * What the run's skill registry says, or why it says nothing. A run that
+ * scanned no skills root wrote no registry, and that is the reading to record
+ * rather than an absent field nobody notices.
+ */
+const readSkillRegistry = async (
+  runRoot: string,
+): Promise<
+  { skillsRoot?: string; skillsFound?: number; skillsUnread?: string }
+> => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(
+      await Deno.readTextFile(join(runRoot, "skill-registry.json")),
+    );
+  } catch (error) {
+    return {
+      skillsUnread: error instanceof Deno.errors.NotFound
+        ? "the run wrote no skill-registry.json, so it scanned no skills root"
+        : `skill-registry.json could not be read: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+    };
+  }
+  const registry = parsed as { skillsRoot?: unknown; skills?: unknown };
+  if (typeof registry.skillsRoot !== "string") {
+    return { skillsUnread: "skill-registry.json names no skills root" };
+  }
+  return {
+    skillsRoot: registry.skillsRoot,
+    skillsFound: Array.isArray(registry.skills) ? registry.skills.length : 0,
+  };
+};
 
 /** Runs one task and measures the run it left behind. */
 export const runTask = async (
@@ -551,6 +890,11 @@ export const runTask = async (
   if (runId === undefined || artifactRoot === undefined) {
     return {
       ...base,
+      configuration: {
+        ...base.configuration,
+        skillsUnread:
+          "the console named no run, so no skill registry could be read",
+      },
       measurementUnread:
         "the console named no run and artifact root for this session",
     };
@@ -573,8 +917,24 @@ export const runTask = async (
       }`,
     };
   }
+  const registries = await Promise.all(
+    members.map((member) => readSkillRegistry(join(artifactRoot, member))),
+  );
+  const scanned = registries.filter((registry) =>
+    registry.skillsRoot !== undefined
+  );
+  const configuration: SessionConfiguration = {
+    ...base.configuration,
+    ...(scanned[0] ?? {}),
+    ...(scanned.length === 0
+      ? { skillsUnread: registries[0]?.skillsUnread ?? "no run was read" }
+      : {}),
+    runsWithoutSkillRegistry: registries.length - scanned.length,
+    runsInFamily: registries.length,
+  };
   return {
     ...base,
+    configuration,
     measurement: await measureRunFamily(artifactRoot, runId, members.sort()),
   };
 };
@@ -612,13 +972,17 @@ const renderDiscoverability = (snapshot: IndexSnapshot): string => {
       "separate, so do not read the count above as a count of what a run " +
       "could find.\n";
   }
-  const field = flagged[0].discoverabilityField;
   const findable = flagged.filter((pattern) => pattern.discoverable).length;
-  return `Read from each entry's \`${field}\` field: ${findable} of ${snapshot.patterns.length} entries are offered in search results, ${
+  const withheld = snapshot.nonDiscoverableCount;
+  return `Read from each entry's \`${DISCOVERABILITY_FIELD}\` field: ${findable} of ${snapshot.patterns.length} listed entries are offered in search results, ${
     flagged.length - findable
-  } are recorded and withheld, and ${
+  } are listed and withheld, and ${
     snapshot.patterns.length - flagged.length
-  } carry no flag either way.\n`;
+  } carry no flag either way. ${
+    withheld === undefined
+      ? "The index did not say how many further entries it holds outside this listing."
+      : `The index holds ${withheld} further entries it did not list, recorded and withheld from search.`
+  }\n`;
 };
 
 const renderIndexChange = (change: IndexChange | undefined): string => {
@@ -721,12 +1085,88 @@ const renderConfiguration = (
     "",
     `- Model: ${named(models)}`,
     `- CFC enforcement: ${named(postures)}`,
-    "- Skills root: NOT RECORDED — the console exposes it over no route; it",
-    "  prints the root it scanned at startup, and a batch run against a server",
-    "  started without one authored patterns without the authoring guides.",
+    `- Skills root: ${skillsRoot(results)}`,
     "",
   ];
 };
+
+/**
+ * The skills tree the runs scanned, read from their own registries.
+ *
+ * A run that scanned none says so here rather than leaving the line blank: it
+ * authored without the authoring guides, which changes what the runs did for a
+ * reason that has nothing to do with the index.
+ */
+const skillsRoot = (results: readonly TaskResult[]): string => {
+  const roots = new Set(
+    results.map((result) => result.configuration.skillsRoot).filter((
+      root,
+    ): root is string => root !== undefined),
+  );
+  const unread = results.filter((result) =>
+    result.configuration.skillsRoot === undefined
+  );
+  const found = new Set(
+    results.map((result) => result.configuration.skillsFound).filter((
+      count,
+    ): count is number => count !== undefined),
+  );
+  const scanned = roots.size === 0
+    ? "NOT RECORDED"
+    : `${[...roots].sort().join(", ")} (${
+      [...found].sort((left, right) => left - right).join("/")
+    } skills)`;
+  return unread.length === 0
+    ? scanned
+    : `${scanned}; ${unread.length} of ${results.length} runs scanned none — ${
+      unread[0].configuration.skillsUnread ?? "no reason recorded"
+    }`;
+};
+
+const renderBlock = (
+  block: Readonly<Record<string, unknown>> | undefined,
+): string =>
+  block === undefined ? "NOT REPORTED" : Object.entries(block)
+    .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+    .sort()
+    .join(" ");
+
+/**
+ * What the fabric server said it was running.
+ *
+ * Reported as the **server's** reading, beside the console's as the console's,
+ * and never differenced. The two describe different runtimes under different
+ * presets, so a difference between them is ordinarily the design; a reader who
+ * needs to compare them has both, and nothing here decides for them.
+ */
+const renderPosture = (posture: PosturePreflight): string => {
+  const meta = posture.meta;
+  const ancestry = posture.kind !== "read"
+    ? "not reached"
+    : posture.ancestry.kind === "ancestor"
+    ? `on ${posture.ancestry.base}`
+    : posture.ancestry.kind === "diverged"
+    ? `NOT on ${posture.ancestry.base} — this server is not running the code on that branch`
+    : `NOT CHECKED — ${posture.ancestry.reason}`;
+  const header = posture.kind === "refused"
+    ? `**The fabric server was not the one this batch was told to expect, and the batch refused to start.** ${posture.reason}\n\nNothing below ran.`
+    : "Read from the fabric server's own `/api/meta`. These are the **server's** dials, under its production-server preset; the console's line below is its own runtime's, under a remoteClient preset. The two are different runtimes and a difference between them is ordinarily the design, not a fault — they are recorded side by side and never differenced.";
+  return `${header}\n\n- Server commit: ${
+    meta?.gitSha ?? "NOT REPORTED"
+  } (${ancestry})\n- Server CFC block: ${
+    renderBlock(meta?.cfc)
+  }\n- Server experimental flags: ${renderBlock(meta?.experimentalFlags)}\n`;
+};
+
+/** What the index answered the pre-flight search with. */
+const renderPreflight = (preflight: IndexPreflight): string =>
+  preflight.kind === "refused"
+    ? `**The index did not answer, and the batch refused to start.** ${preflight.reason}\n\nNothing below ran. An index that refuses a query answers a run exactly as an empty index does, so a batch started into one produces evidence for a discovery problem that is an authorization problem.\n`
+    : `The index answered a search before the first task: ${preflight.results} results${
+      preflight.candidates === undefined
+        ? ""
+        : ` over ${preflight.candidates} candidates examined`
+    }. So a run that found nothing below was answered and found nothing, rather than refused.\n`;
 
 /** The batch report, as Markdown. */
 export const renderBatchReport = (batch: BatchResult): string => {
@@ -748,6 +1188,12 @@ export const renderBatchReport = (batch: BatchResult): string => {
     lines.push(batch.suite.notes, "");
   }
   lines.push(
+    "## What the fabric server reported it was running",
+    "",
+    renderPosture(batch.posture),
+    "## Did the index answer at all",
+    "",
+    renderPreflight(batch.preflight),
     REPORT_SCOPE,
     "",
     ...renderConfiguration(batch.results),
@@ -818,8 +1264,13 @@ export const main = async (
   log: (line: string) => void = console.log,
 ): Promise<number> => {
   const flags = parseArgs([...args], {
-    string: ["console", "out"],
-    default: { console: DEFAULT_CONSOLE_URL },
+    string: ["console", "out", "fabric-api-url", "base", "expect-git-sha"],
+    default: {
+      console: DEFAULT_CONSOLE_URL,
+      "fabric-api-url": Deno.env.get("CF_HARNESS_FABRIC_API_URL") ??
+        DEFAULT_FABRIC_API_URL,
+      base: "main",
+    },
   });
   const suitePath = flags._.map(String)[0];
   if (suitePath === undefined) {
@@ -831,20 +1282,65 @@ export const main = async (
   );
   const client = await ConsoleClient.open(flags.console);
   const startedAt = new Date().toISOString();
-  const indexBefore = await client.indexSnapshot();
-  log(`index before: ${renderIndexSnapshot(indexBefore)}`);
-  const results: TaskResult[] = [];
-  for (const task of suite.tasks) {
-    results.push(await runTask(client, task, log));
+  // Read what the fabric server is running, and refuse only a commit this
+  // batch was told to expect and did not find. Everything else about the
+  // server is recorded for the report rather than judged: its CFC block is its
+  // own preset's, not the console's, and differencing the two would refuse
+  // every correctly configured night.
+  const posture = await preflightPosture(
+    flags["fabric-api-url"],
+    flags.base,
+    flags["expect-git-sha"],
+  );
+  if (posture.kind === "refused") {
+    log(
+      `the fabric server was not the expected one, so no task ran: ${posture.reason}`,
+    );
+  } else {
+    log(
+      `fabric server at ${flags["fabric-api-url"]}: ${
+        posture.meta.gitSha ?? "no commit reported"
+      } (${posture.ancestry.kind})`,
+    );
   }
-  const indexAfter = await client.indexSnapshot();
-  log(`index after: ${renderIndexSnapshot(indexAfter)}`);
+  // The index pre-flight is the unambiguous one: an index that does not answer
+  // reads to a run exactly as an empty corpus does, so a batch that started
+  // into one would spend the night producing evidence for the wrong problem.
+  const preflight = posture.kind === "refused"
+    ? {
+      kind: "refused" as const,
+      reason: "the commit pre-flight refused first, so the index was not asked",
+    }
+    : await client.preflightIndex(PREFLIGHT_QUERY);
+  const indexBefore = preflight.kind === "refused"
+    ? { kind: "unread" as const, reason: "the pre-flight search was refused" }
+    : await client.indexSnapshot();
+  const results: TaskResult[] = [];
+  if (preflight.kind === "refused") {
+    log(`the index did not answer, so no task ran: ${preflight.reason}`);
+  } else {
+    log(
+      `index answered the pre-flight search with ${preflight.results} results`,
+    );
+    log(`index before: ${renderIndexSnapshot(indexBefore)}`);
+    for (const task of suite.tasks) {
+      results.push(await runTask(client, task, log));
+    }
+  }
+  const indexAfter = preflight.kind === "refused"
+    ? indexBefore
+    : await client.indexSnapshot();
+  if (preflight.kind === "answered") {
+    log(`index after: ${renderIndexSnapshot(indexAfter)}`);
+  }
   const batch: BatchResult = {
     suite,
     consoleUrl: flags.console,
     indexUrl: Deno.env.get("CF_HARNESS_PATTERN_INDEX_URL") ?? null,
     startedAt,
     endedAt: new Date().toISOString(),
+    preflight,
+    posture,
     indexBefore,
     indexAfter,
     results,
@@ -865,6 +1361,11 @@ export const main = async (
     `${JSON.stringify(batch, null, 2)}\n`,
   );
   log(`report written to ${join(outDir, "report.md")}`);
+  // A refused pre-flight is a distinct exit code from a batch whose tasks ran
+  // and did not all complete: the first is a machine to fix before trying
+  // again, the second is a result to read.
+  if (posture.kind === "refused") return 4;
+  if (preflight.kind === "refused") return 3;
   return results.every((result) => result.outcome.kind === "turn_completed")
     ? 0
     : 1;

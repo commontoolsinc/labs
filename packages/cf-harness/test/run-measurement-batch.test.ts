@@ -5,8 +5,12 @@ import { fromFileUrl } from "@std/path";
 import {
   ConsoleClient,
   indexChangeOf,
+  type IndexPreflight,
   type IndexSnapshot,
   parseMeasurementSuite,
+  preflightPosture,
+  readAncestry,
+  readServerMeta,
   readSseFrames,
   renderBatchReport,
   runTask,
@@ -54,6 +58,9 @@ interface FakeConsoleOptions {
   runId?: string;
   artifactRoot?: string;
   patterns?: readonly Record<string, unknown>[];
+
+  /** What `/api/index/call` answers, and with what status. */
+  indexAnswer?: { status: number; body: unknown };
 }
 
 interface FakeConsole {
@@ -114,7 +121,16 @@ const startFakeConsole = (options: FakeConsoleOptions): FakeConsole => {
       });
     }
     if (url.pathname === "/api/index/call") {
-      return Response.json({ patterns: options.patterns ?? [] });
+      const answer = options.indexAnswer;
+      if (answer !== undefined) {
+        return Response.json(answer.body, { status: answer.status });
+      }
+      const { fn } = await request.json() as { fn: string };
+      return Response.json(
+        fn === "searchPatterns"
+          ? { results: [], candidates: 30 }
+          : { patterns: options.patterns ?? [] },
+      );
     }
     return new Response("not found", { status: 404 });
   });
@@ -150,6 +166,39 @@ const patternOf = (
   score,
   events: { published: 1 },
 });
+
+const META = {
+  gitSha: "7baa03f462e5a1e4b5e477bd2162c880c5e5bc4a",
+  cfc: { enforcementMode: "enforce-explicit", flowLabels: "off" },
+  experimentalFlags: { serverExecution: true },
+};
+
+const POSTURE = {
+  kind: "read" as const,
+  meta: META,
+  ancestry: { kind: "ancestor" as const, base: "main" },
+};
+
+const metaFetch = (
+  body: unknown,
+  status = 200,
+): typeof globalThis.fetch =>
+  ((_input, _init) =>
+    Promise.resolve(
+      Response.json(body, { status }),
+    )) as typeof globalThis.fetch;
+
+/** A stand-in `git`, keyed by the subcommand the reading issues. */
+const gitRun = (
+  known: boolean,
+  ancestor: boolean,
+) =>
+(args: readonly string[]) =>
+  Promise.resolve(
+    args[0] === "cat-file"
+      ? { success: known, code: known ? 0 : 1 }
+      : { success: ancestor, code: ancestor ? 0 : 1 },
+  );
 
 describe("run-measurement-batch", () => {
   describe("parseMeasurementSuite()", () => {
@@ -352,6 +401,195 @@ describe("run-measurement-batch", () => {
     });
   });
 
+  describe("readServerMeta()", () => {
+    it("returns the commit, the CFC block and the experimental flags the server reported", async () => {
+      expect(await readServerMeta("http://server", metaFetch(META)))
+        .toEqual(META);
+    });
+
+    it("returns an error naming the status for a server that refused the read", async () => {
+      expect(await readServerMeta("http://server", metaFetch({}, 503)))
+        .toEqual({ error: "/api/meta answered 503" });
+    });
+
+    it("returns an error for a server that could not be reached", async () => {
+      const failing = (() =>
+        Promise.reject(
+          new Error("connection refused"),
+        )) as typeof globalThis.fetch;
+      const meta = await readServerMeta("http://server", failing);
+      expect("error" in meta && meta.error).toContain("connection refused");
+    });
+  });
+
+  describe("readAncestry()", () => {
+    it("returns `ancestor` for a commit on the branch", async () => {
+      expect(await readAncestry("abc", "main", gitRun(true, true)))
+        .toEqual({ kind: "ancestor", base: "main" });
+    });
+
+    it("returns `diverged` for a commit the branch does not contain", async () => {
+      expect(await readAncestry("abc", "main", gitRun(true, false)))
+        .toEqual({ kind: "diverged", base: "main" });
+    });
+
+    it("returns `unchecked` for a commit this clone does not hold, which is not the same as one off the branch", async () => {
+      const reading = await readAncestry("abc", "main", gitRun(false, false));
+      expect(reading.kind).toBe("unchecked");
+      expect(reading.kind === "unchecked" ? reading.reason : "").toContain(
+        "does not hold abc",
+      );
+    });
+
+    it("returns `unchecked` for a server that reported no commit", async () => {
+      expect(await readAncestry(undefined, "main", gitRun(true, true)))
+        .toEqual({
+          kind: "unchecked",
+          reason: "the server reported no gitSha",
+        });
+    });
+  });
+
+  describe("preflightPosture()", () => {
+    it("returns the reading, and does not refuse, for a server on a commit off the branch", async () => {
+      const posture = await preflightPosture(
+        "http://server",
+        "main",
+        undefined,
+        metaFetch(META),
+        gitRun(true, false),
+      );
+      expect(posture.kind).toBe("read");
+      expect(posture.kind === "read" ? posture.ancestry : undefined).toEqual({
+        kind: "diverged",
+        base: "main",
+      });
+    });
+
+    it("returns a reading for a server whose CFC dials are off, which is the production-server preset rather than a fault", async () => {
+      const posture = await preflightPosture(
+        "http://server",
+        "main",
+        undefined,
+        metaFetch(META),
+        gitRun(true, true),
+      );
+      expect(posture.kind).toBe("read");
+      expect(posture.kind === "read" ? posture.meta.cfc : undefined).toEqual(
+        META.cfc,
+      );
+    });
+
+    it("returns a refusal for a commit the batch was told to expect and did not find", async () => {
+      const posture = await preflightPosture(
+        "http://server",
+        "main",
+        "0000000",
+        metaFetch(META),
+        gitRun(true, true),
+      );
+      expect(posture.kind).toBe("refused");
+      expect(posture.kind === "refused" ? posture.reason : "").toContain(
+        "told to expect the fabric server on 0000000",
+      );
+    });
+
+    it("returns the reading for a commit the batch expected and found", async () => {
+      expect(
+        (await preflightPosture(
+          "http://server",
+          "main",
+          META.gitSha,
+          metaFetch(META),
+          gitRun(true, true),
+        )).kind,
+      ).toBe("read");
+    });
+
+    it("returns a refusal for a server that could not be read", async () => {
+      const posture = await preflightPosture(
+        "http://server",
+        "main",
+        undefined,
+        metaFetch({}, 500),
+        gitRun(true, true),
+      );
+      expect(posture.kind).toBe("refused");
+    });
+  });
+
+  describe("preflightIndex()", () => {
+    it("returns the result and candidate counts for an index that answered", async () => {
+      const console_ = startFakeConsole({ streams: [completedStream()] });
+      try {
+        const client = await ConsoleClient.open(console_.url);
+        expect(await client.preflightIndex("pattern")).toEqual({
+          kind: "answered",
+          results: 0,
+          candidates: 30,
+        });
+      } finally {
+        await console_.close();
+      }
+    });
+
+    it("returns a refusal naming the status for an index that refused the identity", async () => {
+      const console_ = startFakeConsole({
+        streams: [completedStream()],
+        indexAnswer: {
+          status: 403,
+          body: { error: "DID is not allowlisted" },
+        },
+      });
+      try {
+        const client = await ConsoleClient.open(console_.url);
+        const preflight = await client.preflightIndex("pattern");
+        expect(preflight.kind).toBe("refused");
+        expect(
+          preflight.kind === "refused" ? preflight.reason : "",
+        ).toContain("403");
+        expect(
+          preflight.kind === "refused" ? preflight.reason : "",
+        ).toContain("DID is not allowlisted");
+      } finally {
+        await console_.close();
+      }
+    });
+
+    it("returns a refusal for an answer carrying no results array, which is not a count of nothing", async () => {
+      const console_ = startFakeConsole({
+        streams: [completedStream()],
+        indexAnswer: { status: 200, body: { ok: true } },
+      });
+      try {
+        const client = await ConsoleClient.open(console_.url);
+        const preflight = await client.preflightIndex("pattern");
+        expect(preflight.kind).toBe("refused");
+        expect(preflight.kind === "refused" ? preflight.reason : "").toContain(
+          "no results array",
+        );
+      } finally {
+        await console_.close();
+      }
+    });
+
+    it("returns an answer for an index that answered with nothing, which is a state to measure", async () => {
+      const console_ = startFakeConsole({
+        streams: [completedStream()],
+        indexAnswer: { status: 200, body: { results: [] } },
+      });
+      try {
+        const client = await ConsoleClient.open(console_.url);
+        expect(await client.preflightIndex("pattern")).toEqual({
+          kind: "answered",
+          results: 0,
+        });
+      } finally {
+        await console_.close();
+      }
+    });
+  });
+
   describe("runTask()", () => {
     it("measures the run family the console named for the session", async () => {
       const console_ = startFakeConsole({
@@ -374,6 +612,8 @@ describe("run-measurement-batch", () => {
         ]);
         expect(result.measurement?.totals.searches).toBe(5);
         expect(result.measurement?.totals.searchesRefused).toBe(1);
+        expect(result.configuration.skillsRoot).toBe("/repo/skills");
+        expect(result.configuration.skillsFound).toBe(2);
       } finally {
         await console_.close();
       }
@@ -391,6 +631,9 @@ describe("run-measurement-batch", () => {
         expect(result.measurement).toBeUndefined();
         expect(result.measurementUnread).toBe(
           "the console named no run and artifact root for this session",
+        );
+        expect(result.configuration.skillsUnread).toBe(
+          "the console named no run, so no skill registry could be read",
         );
       } finally {
         await console_.close();
@@ -419,6 +662,8 @@ describe("run-measurement-batch", () => {
           },
           consoleUrl: console_.url,
           indexUrl: "https://index.example",
+          preflight: { kind: "answered", results: 3, candidates: 30 },
+          posture: POSTURE,
           startedAt: "2026-08-28T21:00:00.000Z",
           endedAt: "2026-08-28T23:00:00.000Z",
           indexBefore: {
@@ -464,32 +709,63 @@ describe("run-measurement-batch", () => {
         indexUrl: null,
         startedAt: "2026-08-28T21:00:00.000Z",
         endedAt: "2026-08-28T21:00:01.000Z",
+        preflight: { kind: "answered", results: 1 },
+        posture: POSTURE,
         indexBefore: {
           kind: "read",
           patterns: [
-            {
-              ...patternOf("shown", 1),
-              discoverable: true,
-              discoverabilityField: "discoverable",
-            },
-            {
-              ...patternOf("withheld", 0),
-              discoverable: false,
-              discoverabilityField: "discoverable",
-            },
+            { ...patternOf("shown", 1), discoverable: true },
+            { ...patternOf("withheld", 0), discoverable: false },
           ] as never,
+          nonDiscoverableCount: 4,
         },
         indexAfter: { kind: "read", patterns: [] as never },
         results: [],
       });
       expect(report).toContain(
-        "Read from each entry's `discoverable` field: 1 of 2 entries are offered in search results, 1 are recorded and withheld, and 0 carry no flag either way.",
+        "Read from each entry's `discoverable` field: 1 of 2 listed entries are offered in search results, 1 are listed and withheld, and 0 carry no flag either way. The index holds 4 further entries it did not list, recorded and withheld from search.",
       );
     });
 
-    it("names the skills root as not recorded rather than leaving it out", async () => {
+    it("names the skills tree the runs scanned and how many skills it held", async () => {
       expect(await reportOf()).toContain(
-        "- Skills root: NOT RECORDED — the console exposes it over no route",
+        "- Skills root: /repo/skills (2 skills)",
+      );
+    });
+
+    it("says the batch refused to start when the index did not answer the pre-flight", () => {
+      const refused: IndexPreflight = {
+        kind: "refused",
+        reason: "/api/index/call answered 403: DID is not allowlisted",
+      };
+      const report = renderBatchReport({
+        suite: { label: "l", tasks: [{ id: "a", text: "do a thing" }] },
+        consoleUrl: "http://127.0.0.1:1",
+        indexUrl: null,
+        startedAt: "2026-08-28T21:00:00.000Z",
+        endedAt: "2026-08-28T21:00:01.000Z",
+        preflight: refused,
+        posture: POSTURE,
+        indexBefore: {
+          kind: "unread",
+          reason: "the pre-flight search was refused",
+        },
+        indexAfter: {
+          kind: "unread",
+          reason: "the pre-flight search was refused",
+        },
+        results: [],
+      });
+      expect(report).toContain(
+        "**The index did not answer, and the batch refused to start.**",
+      );
+      expect(report).toContain("403: DID is not allowlisted");
+      expect(report).toContain("Nothing below ran.");
+    });
+
+    it("says a run answered with nothing was answered rather than refused", async () => {
+      expect(await reportOf()).toContain(
+        "The index answered a search before the first task: 3 results over 30 candidates examined.",
       );
     });
 
@@ -507,6 +783,8 @@ describe("run-measurement-batch", () => {
         indexUrl: null,
         startedAt: "2026-08-28T21:00:00.000Z",
         endedAt: "2026-08-28T21:00:01.000Z",
+        preflight: { kind: "answered", results: 1 },
+        posture: POSTURE,
         indexBefore: { kind: "unread", reason: "no index configured" },
         indexAfter: { kind: "unread", reason: "no index configured" },
         results: [{
@@ -519,6 +797,9 @@ describe("run-measurement-batch", () => {
         }],
       });
       expect(report).toContain("NOT MEASURED — the console named no run");
+      expect(report).toContain(
+        "- Skills root: NOT RECORDED; 1 of 1 runs scanned none",
+      );
       expect(report).toContain(
         "Tasks: 1, of which 1 were not measured.",
       );

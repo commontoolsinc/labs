@@ -31,8 +31,6 @@ export const DEFAULT_ARTIFACT_ROOT = ".cf-harness-console/runs";
 /** The suffix the harness gives a `delegate_task` child's run directory. */
 const SUBAGENT_MARKER = ".subagent.";
 
-const CF_PATTERN_SPECIFIER = /cf:pattern:([A-Za-z0-9_-]+)/g;
-
 /**
  * A JSON payload lifted out of a transcript, or the reason it could not be
  * read. Nothing here collapses an unreadable payload into a zero: a search
@@ -102,7 +100,9 @@ export type RunPatternTarget =
   | { kind: "pattern-id"; patternId: string }
   | {
     kind: "source";
-    sourceLength: number;
+
+    /** The source's size in UTF-8 bytes, which is what the report prints. */
+    sourceBytes: number;
     importedPatternIds: readonly string[];
     composition: SourceComposition;
   };
@@ -118,7 +118,52 @@ export interface MeasuredDelegation {
 
 export interface MeasuredSlug {
   slug: TranscriptJson<string>;
+
+  /**
+   * What the tool answered. A slug the tool refused was requested and not
+   * assigned, so counting the request as an assignment would report a name
+   * nothing answers to.
+   */
+  outcome: TranscriptJson<{ status: string }>;
 }
+
+/**
+ * How a tool call ended, read off the result the run recorded.
+ *
+ * Derived here from the raw result rather than taken from any classified
+ * field, so what the report says a surface did is what that surface's own
+ * results say. A denial is kept apart from a failure: a tool the run was not
+ * allowed to use and a tool that ran and failed are different facts about what
+ * was available, and collapsing them reads as a model that chose not to use a
+ * surface that was in fact withheld.
+ */
+export type ToolOutcome = "ok" | "denied" | "error" | "unread";
+
+const DENIED_RESULT_TYPES: ReadonlySet<string> = new Set([
+  "cf-harness.observation-denied",
+  "cf-harness.tool-denied",
+]);
+
+/** How one recorded tool result reads. */
+export const toolOutcomeOf = (
+  output: TranscriptJson<Record<string, unknown>>,
+): ToolOutcome => {
+  if (output.kind === "unread") return "unread";
+  const value = output.value;
+  if (
+    typeof value.type === "string" && DENIED_RESULT_TYPES.has(value.type)
+  ) {
+    return "denied";
+  }
+  if (value.status === undefined && typeof value.reason === "string") {
+    return "denied";
+  }
+  if (typeof value.status === "string") {
+    return value.status === "ok" ? "ok" : "error";
+  }
+  if (value.ok === false || value.error !== undefined) return "error";
+  return "ok";
+};
 
 /** One run directory's calls against the index, and whether it was read. */
 export interface RunMeasurement {
@@ -129,6 +174,9 @@ export interface RunMeasurement {
   runPatterns: readonly MeasuredRunPattern[];
   delegations: readonly MeasuredDelegation[];
   slugs: readonly MeasuredSlug[];
+
+  /** Every tool the run called, and how each call ended. */
+  toolOutcomes: Readonly<Record<string, Readonly<Record<string, number>>>>;
 }
 
 /**
@@ -171,8 +219,22 @@ export interface MeasurementTotals {
   delegations: number;
   delegationProfiles: Readonly<Record<string, number>>;
   delegationProfilesUnread: number;
+  /**
+   * `assign_slug` calls, and the split of them. `slugNames` holds only the
+   * names the tool assigned.
+   */
   slugs: number;
+  slugsAssigned: number;
+  slugsRefused: number;
+  slugsUnread: number;
   slugNames: readonly string[];
+
+  /**
+   * Tool name to outcome to count, over every tool the runs called. This is
+   * what says which surfaces were available during a batch: a surface whose
+   * every call was denied was withheld, not declined.
+   */
+  toolOutcomes: Readonly<Record<string, Readonly<Record<string, number>>>>;
 }
 
 /** One run family: a parent run and the `delegate_task` children under it. */
@@ -210,7 +272,11 @@ export const emptyTotals = (): MeasurementTotals => ({
   delegationProfiles: {},
   delegationProfilesUnread: 0,
   slugs: 0,
+  slugsAssigned: 0,
+  slugsRefused: 0,
+  slugsUnread: 0,
   slugNames: [],
+  toolOutcomes: {},
 });
 
 const mergeCounts = (
@@ -220,6 +286,19 @@ const mergeCounts = (
   const merged: Record<string, number> = { ...left };
   for (const [key, count] of Object.entries(right)) {
     merged[key] = (merged[key] ?? 0) + count;
+  }
+  return merged;
+};
+
+const mergeToolOutcomes = (
+  left: Readonly<Record<string, Readonly<Record<string, number>>>>,
+  right: Readonly<Record<string, Readonly<Record<string, number>>>>,
+): Readonly<Record<string, Readonly<Record<string, number>>>> => {
+  const merged: Record<string, Readonly<Record<string, number>>> = {
+    ...left,
+  };
+  for (const [tool, outcomes] of Object.entries(right)) {
+    merged[tool] = mergeCounts(merged[tool] ?? {}, outcomes);
   }
   return merged;
 };
@@ -271,7 +350,11 @@ export const mergeTotals = (
   delegationProfilesUnread: left.delegationProfilesUnread +
     right.delegationProfilesUnread,
   slugs: left.slugs + right.slugs,
+  slugsAssigned: left.slugsAssigned + right.slugsAssigned,
+  slugsRefused: left.slugsRefused + right.slugsRefused,
+  slugsUnread: left.slugsUnread + right.slugsUnread,
   slugNames: mergeNames(left.slugNames, right.slugNames),
+  toolOutcomes: mergeToolOutcomes(left.toolOutcomes, right.toolOutcomes),
 });
 
 export const foldTotals = (
@@ -340,10 +423,20 @@ export const totalsOf = (run: RunMeasurement): MeasurementTotals => {
       delegationProfiles[profile] = (delegationProfiles[profile] ?? 0) + 1;
     }
   }
+  let slugsAssigned = 0;
+  let slugsRefused = 0;
+  let slugsUnread = 0;
   for (const slug of run.slugs) {
-    if (slug.slug.kind === "read") {
-      slugNames.add(slug.slug.value);
+    if (slug.outcome.kind === "unread") {
+      slugsUnread += 1;
+      continue;
     }
+    if (slug.outcome.value.status !== "ok") {
+      slugsRefused += 1;
+      continue;
+    }
+    slugsAssigned += 1;
+    if (slug.slug.kind === "read") slugNames.add(slug.slug.value);
   }
 
   return {
@@ -369,19 +462,13 @@ export const totalsOf = (run: RunMeasurement): MeasurementTotals => {
     delegationProfiles,
     delegationProfilesUnread: profilesUnread,
     slugs: run.slugs.length,
+    slugsAssigned,
+    slugsRefused,
+    slugsUnread,
     slugNames: [...slugNames].sort(),
+    toolOutcomes: run.toolOutcomes,
   };
 };
-
-/** The `cf:pattern:` specifiers a piece of pattern source imports. */
-export const importedPatternIdsOf = (
-  sourceText: string,
-): readonly string[] =>
-  [
-    ...new Set(
-      [...sourceText.matchAll(CF_PATTERN_SPECIFIER)].map(([, id]) => id),
-    ),
-  ].sort();
 
 const BLOCK_COMMENT = /\/\*[\s\S]*?\*\//g;
 const LINE_COMMENT = /(^|[^:])\/\/[^\n]*/g;
@@ -392,8 +479,13 @@ const DEFAULT_IMPORT =
   /\bimport\s+([A-Za-z_$][\w$]*)\s*(?:,[\s\S]*?)?\s+from\s*(['"])([^'"]+)\2\s*;?/g;
 const EXPORT_DEFAULT_IDENT = /\bexport\s+default\s+([A-Za-z_$][\w$]*)\s*;?/g;
 
+const PATTERN_SPECIFIER_PREFIX = "cf:pattern:";
+
 const isPatternSpecifier = (specifier: string): boolean =>
-  specifier.startsWith("cf:pattern:");
+  specifier.startsWith(PATTERN_SPECIFIER_PREFIX);
+
+const stripComments = (sourceText: string): string =>
+  sourceText.replace(BLOCK_COMMENT, " ").replace(LINE_COMMENT, "$1");
 
 /**
  * Whether pattern source composes the patterns it imports or merely re-exports
@@ -410,10 +502,7 @@ export const classifyPatternSource = (
   sourceText: string,
 ): SourceComposition => {
   if (importedPatternIdsOf(sourceText).length === 0) return "no-imports";
-  const stripped = sourceText.replace(BLOCK_COMMENT, " ").replace(
-    LINE_COMMENT,
-    "$1",
-  );
+  const stripped = stripComments(sourceText);
   const defaultBindings = new Set(
     [...stripped.matchAll(DEFAULT_IMPORT)]
       .filter(([, , , specifier]) => isPatternSpecifier(specifier))
@@ -429,6 +518,36 @@ export const classifyPatternSource = (
     .replace(EXPORT_FROM_STATEMENT, " ")
     .replace(EXPORT_DEFAULT_IDENT, " ");
   return remainder.trim() === "" ? "re-export" : "composition";
+};
+
+/**
+ * The `cf:pattern:` specifiers a piece of pattern source imports.
+ *
+ * Read from import and `export … from` declarations rather than from anywhere
+ * the text says `cf:pattern:`. A specifier named in a comment or quoted in a
+ * message imports nothing, and counting it would inflate the reuse reading
+ * with source that composes nothing — the same error a bare re-export makes,
+ * arrived at from the other direction.
+ */
+export const importedPatternIdsOf = (
+  sourceText: string,
+): readonly string[] => {
+  const stripped = stripComments(sourceText);
+  const specifiers = [
+    ...[...stripped.matchAll(IMPORT_STATEMENT)].map(([, , specifier]) =>
+      specifier
+    ),
+    ...[...stripped.matchAll(EXPORT_FROM_STATEMENT)].map(([, , specifier]) =>
+      specifier
+    ),
+  ];
+  return [
+    ...new Set(
+      specifiers.filter(isPatternSpecifier).map((specifier) =>
+        specifier.slice(PATTERN_SPECIFIER_PREFIX.length)
+      ),
+    ),
+  ].sort();
 };
 
 const searchQueryOf = (
@@ -477,7 +596,7 @@ const runPatternTargetOf = (
   if (typeof sourceText === "string") {
     return read({
       kind: "source",
-      sourceLength: sourceText.length,
+      sourceBytes: new TextEncoder().encode(sourceText).length,
       importedPatternIds: importedPatternIdsOf(sourceText),
       composition: classifyPatternSource(sourceText),
     });
@@ -520,8 +639,17 @@ export const measureTranscript = (
   transcript: readonly HarnessTranscriptMessage[],
 ): RunMeasurement => {
   const results = new Map<string, TranscriptJson<Record<string, unknown>>>();
-  for (const message of transcript) {
+  // A transcript that parsed as an array may still hold something that is not
+  // a message. Skipping a non-object entry keeps a malformed artifact to one
+  // unreadable run rather than aborting the whole report.
+  const messages = transcript.filter((
+    message,
+  ): message is typeof transcript[number] =>
+    typeof message === "object" && message !== null
+  );
+  for (const message of messages) {
     if (message.role === "tool") {
+      if (typeof message.toolCallId !== "string") continue;
       results.set(
         message.toolCallId,
         parseJson<Record<string, unknown>>(
@@ -537,18 +665,23 @@ export const measureTranscript = (
     results.get(toolCallId) ??
       unread("the run recorded no result for this call");
 
+  const toolOutcomes: Record<string, Record<string, number>> = {};
   const searches: MeasuredSearch[] = [];
   const runPatterns: MeasuredRunPattern[] = [];
   const delegations: MeasuredDelegation[] = [];
   const slugs: MeasuredSlug[] = [];
 
-  for (const message of transcript) {
+  for (const message of messages) {
     if (message.role !== "assistant") continue;
     for (const call of message.toolCalls ?? []) {
       const args = parseJson<Record<string, unknown>>(
         call.function.arguments,
         `the ${call.function.name} arguments`,
       );
+      const outcomes = toolOutcomes[call.function.name] ?? {};
+      const outcome = toolOutcomeOf(outputFor(call.id));
+      outcomes[outcome] = (outcomes[outcome] ?? 0) + 1;
+      toolOutcomes[call.function.name] = outcomes;
       switch (call.function.name) {
         case "search_patterns":
           searches.push({
@@ -566,7 +699,10 @@ export const measureTranscript = (
           delegations.push({ profile: stringFieldOf(args, "profile") });
           break;
         case "assign_slug":
-          slugs.push({ slug: stringFieldOf(args, "slug") });
+          slugs.push({
+            slug: stringFieldOf(args, "slug"),
+            outcome: statusOf(outputFor(call.id)),
+          });
           break;
       }
     }
@@ -575,11 +711,12 @@ export const measureTranscript = (
   return {
     runId,
     role,
-    transcript: read({ messages: transcript.length }),
+    transcript: read({ messages: messages.length }),
     searches,
     runPatterns,
     delegations,
     slugs,
+    toolOutcomes,
   };
 };
 
@@ -596,6 +733,7 @@ export const unreadRun = (
   runPatterns: [],
   delegations: [],
   slugs: [],
+  toolOutcomes: {},
 });
 
 /** Which family a run directory belongs to, by the name the harness gave it. */
@@ -773,7 +911,7 @@ export const renderRunLines = (run: RunMeasurement): readonly string[] => {
       ? `NOT READ (${call.target.reason})`
       : call.target.value.kind === "pattern-id"
       ? `by id ${call.target.value.patternId}`
-      : `source ${call.target.value.sourceLength}B${
+      : `source ${call.target.value.sourceBytes}B${
         call.target.value.importedPatternIds.length === 0
           ? ""
           : `${
@@ -799,6 +937,10 @@ export const renderRunLines = (run: RunMeasurement): readonly string[] => {
         slug.slug.kind === "read"
           ? slug.slug.value
           : `NOT READ (${slug.slug.reason})`
+      } -> ${
+        slug.outcome.kind === "read"
+          ? slug.outcome.value.status
+          : `NOT READ (${slug.outcome.reason})`
       }`,
     );
   }
@@ -824,10 +966,42 @@ export const renderTotalsLines = (
   `  delegations: ${totals.delegations} by profile ${
     formatCounts(totals.delegationProfiles)
   } (${totals.delegationProfilesUnread} not read)`,
-  `  slugs: ${totals.slugs}${
+  `  slugs: ${totals.slugs} = ${totals.slugsAssigned} assigned + ${totals.slugsRefused} refused + ${totals.slugsUnread} not read${
     totals.slugNames.length === 0 ? "" : ` — ${totals.slugNames.join(" ")}`
   }`,
+  ...renderToolSurfaceLines(totals.toolOutcomes),
 ];
+
+/**
+ * What each tool surface did, so a surface that was withheld is not read as a
+ * surface the model chose not to use. A tool whose every call was denied is
+ * marked, because that is the reading a report must not leave to inference.
+ */
+export const renderToolSurfaceLines = (
+  toolOutcomes: Readonly<Record<string, Readonly<Record<string, number>>>>,
+): readonly string[] => {
+  const tools = Object.entries(toolOutcomes).sort(([left], [right]) =>
+    left.localeCompare(right)
+  );
+  if (tools.length === 0) return ["  tool surfaces: none called"];
+  return [
+    "  tool surfaces:",
+    ...tools.map(([tool, outcomes]) => {
+      const total = Object.values(outcomes).reduce(
+        (sum, count) => sum + count,
+        0,
+      );
+      const denied = outcomes.denied ?? 0;
+      const ok = outcomes.ok ?? 0;
+      const note = denied === total
+        ? " — WITHHELD: every call denied"
+        : ok === 0
+        ? " — never once succeeded"
+        : "";
+      return `    ${tool}: ${formatCounts(outcomes)}${note}`;
+    }),
+  ];
+};
 
 /** The whole report, as lines. */
 export const renderReportLines = (

@@ -13,9 +13,11 @@ import {
   measureTranscript,
   mergeTotals,
   renderReportLines,
+  renderToolSurfaceLines,
   runFamiliesOf,
   type RunFamilyMeasurement,
   type RunMeasurement,
+  toolOutcomeOf,
   totalsOf,
 } from "../scripts/measure-runs.ts";
 import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
@@ -235,7 +237,10 @@ describe("measure-runs", () => {
         { profile: { kind: "read", value: "pattern-author" } },
       ]);
       expect(run.slugs).toEqual([
-        { slug: { kind: "read", value: "reading-list" } },
+        {
+          slug: { kind: "read", value: "reading-list" },
+          outcome: { kind: "read", value: { status: "ok" } },
+        },
       ]);
     });
 
@@ -263,6 +268,78 @@ describe("measure-runs", () => {
       expect(run.runPatterns[0].target.kind).toBe("unread");
       expect(totalsOf(run).runPatternsUnreadTarget).toBe(1);
       expect(totalsOf(run).runPatternsFromSource).toBe(0);
+    });
+  });
+
+  describe("toolOutcomeOf()", () => {
+    it("returns `denied` for a result the sandbox refused to let the run observe", () => {
+      expect(toolOutcomeOf({
+        kind: "read",
+        value: {
+          type: "cf-harness.observation-denied",
+          reason: "not-observable",
+        },
+      })).toBe("denied");
+    });
+
+    it("returns `denied` for a result carrying a reason and no status", () => {
+      expect(toolOutcomeOf({ kind: "read", value: { reason: "not-allowed" } }))
+        .toBe("denied");
+    });
+
+    it("returns `error` for a tool that ran and failed", () => {
+      expect(toolOutcomeOf({
+        kind: "read",
+        value: { ok: false, error: { message: "read_file failed" } },
+      })).toBe("error");
+    });
+
+    it("returns `error` for a status the tool did not report as `ok`", () => {
+      expect(
+        toolOutcomeOf({ kind: "read", value: { status: "compile-error" } }),
+      )
+        .toBe("error");
+    });
+
+    it("returns `ok` for a status the tool reported as `ok`", () => {
+      expect(toolOutcomeOf({ kind: "read", value: { status: "ok" } }))
+        .toBe("ok");
+    });
+
+    it("returns `unread` for a call the run recorded no result for", () => {
+      expect(toolOutcomeOf({ kind: "unread", reason: "no result" }))
+        .toBe("unread");
+    });
+  });
+
+  describe("renderToolSurfaceLines()", () => {
+    it("marks a surface whose every call was denied as withheld", () => {
+      expect(renderToolSurfaceLines({ bash: { denied: 38 } })).toEqual([
+        "  tool surfaces:",
+        "    bash: denied=38 — WITHHELD: every call denied",
+      ]);
+    });
+
+    it("marks a surface that ran and never succeeded apart from one that was withheld", () => {
+      expect(renderToolSurfaceLines({ read_file: { denied: 5, error: 13 } }))
+        .toEqual([
+          "  tool surfaces:",
+          "    read_file: denied=5 error=13 — never once succeeded",
+        ]);
+    });
+
+    it("marks nothing for a surface that answered at least once", () => {
+      expect(renderToolSurfaceLines({ run_pattern: { error: 218, ok: 41 } }))
+        .toEqual([
+          "  tool surfaces:",
+          "    run_pattern: error=218 ok=41",
+        ]);
+    });
+
+    it("returns one line for a run that called no tool", () => {
+      expect(renderToolSurfaceLines({})).toEqual([
+        "  tool surfaces: none called",
+      ]);
     });
   });
 
@@ -308,6 +385,46 @@ describe("measure-runs", () => {
       });
     });
 
+    it("counts a slug the tool refused as requested rather than as assigned", () => {
+      const run = measureTranscript("refused-slug", "parent", [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{
+            id: "s1",
+            type: "function",
+            function: {
+              name: "assign_slug",
+              arguments: JSON.stringify({ token: "t", slug: "taken" }),
+            },
+          }],
+        },
+        {
+          role: "tool",
+          toolCallId: "s1",
+          toolName: "assign_slug",
+          content: JSON.stringify({ status: "error", message: "slug in use" }),
+        },
+      ]);
+      const totals = totalsOf(run);
+      expect(totals.slugs).toBe(1);
+      expect(totals.slugsAssigned).toBe(0);
+      expect(totals.slugsRefused).toBe(1);
+      expect(totals.slugNames).toEqual([]);
+    });
+
+    it("counts every tool the run called by how each call ended", async () => {
+      const totals = totalsOf(await measureFixture("fixture-run"));
+      expect(totals.toolOutcomes).toEqual({
+        search_patterns: { ok: 2, error: 1, unread: 1 },
+        run_pattern: { ok: 2, error: 1 },
+        delegate_task: { ok: 1 },
+        bash: { denied: 1 },
+        read_file: { error: 1 },
+        assign_slug: { ok: 1 },
+      });
+    });
+
     it("counts a run whose transcript could not be read as a run not read", () => {
       const totals = totalsOf({
         runId: "gone",
@@ -317,6 +434,7 @@ describe("measure-runs", () => {
         runPatterns: [],
         delegations: [],
         slugs: [],
+        toolOutcomes: {},
       });
       expect(totals.runs).toBe(1);
       expect(totals.runsUnread).toBe(1);
@@ -435,6 +553,16 @@ describe("measure-runs", () => {
           line.includes("search tags=refused -> refused (pattern index")
         ),
       ).toBe(true);
+    });
+
+    it("marks a surface every one of whose calls was denied", async () => {
+      const lines = renderReportLines(
+        await measureArtifactRoot(FIXTURE_ROOT, ["fixture-run"]),
+      );
+      expect(lines).toContain(
+        "    bash: denied=1 — WITHHELD: every call denied",
+      );
+      expect(lines).toContain("    read_file: error=1 — never once succeeded");
     });
 
     it("names the patterns a composed run imported", async () => {
