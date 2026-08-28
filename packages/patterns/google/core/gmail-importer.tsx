@@ -1032,24 +1032,21 @@ const toggleDebugMode = handler<
   { target: { checked: boolean } },
   { settings: Writable<Settings> }
 >(({ target }, { settings }) => {
-  const current = settings.get();
-  settings.set({ ...current, debugMode: target.checked });
+  settings.update({ debugMode: target.checked });
 });
 
 const toggleAutoFetch = handler<
   { target: { checked: boolean } },
   { settings: Writable<Settings> }
 >(({ target }, { settings }) => {
-  const current = settings.get();
-  settings.set({ ...current, autoFetchOnAuth: target.checked });
+  settings.update({ autoFetchOnAuth: target.checked });
 });
 
 const toggleResolveInlineImages = handler<
   { target: { checked: boolean } },
   { settings: Writable<Settings> }
 >(({ target }, { settings }) => {
-  const current = settings.get();
-  settings.set({ ...current, resolveInlineImages: target.checked });
+  settings.update({ resolveInlineImages: target.checked });
 });
 
 const EmailCard = pattern<

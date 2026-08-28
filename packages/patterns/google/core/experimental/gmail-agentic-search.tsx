@@ -453,8 +453,7 @@ const searchGmailHandler = handler<
     if (input.result) {
       input.result.set(authErrorResult);
     }
-    state.progress.set({
-      ...currentProgress,
+    state.progress.update({
       status: "auth_error",
       authError: "Authentication required",
     });
@@ -482,8 +481,7 @@ const searchGmailHandler = handler<
     if (input.result) {
       input.result.set(limitResult);
     }
-    state.progress.set({
-      ...currentProgress,
+    state.progress.update({
       status: "limit_reached",
     });
     return limitResult;
@@ -504,8 +502,7 @@ const searchGmailHandler = handler<
   }
 
   // Update progress: starting new search
-  state.progress.set({
-    ...currentProgress,
+  state.progress.update({
     currentQuery: input.query,
     status: "searching",
   });
@@ -713,9 +710,7 @@ const searchGmailHandler = handler<
       // token refresh. If we still get here with a 401, the refresh failed
       // (possibly because auth cell is derived/read-only, or no refresh token)
       if (errorStr.includes("401")) {
-        const updatedProgress = state.progress.get();
-        state.progress.set({
-          ...updatedProgress,
+        state.progress.update({
           status: "auth_error",
           authError:
             "Gmail token expired and refresh failed. Please re-authenticate.",
@@ -1076,8 +1071,7 @@ const GmailAgenticSearch = pattern<
           const currentCount = tracker[queryId] || 0;
           const newCount = currentCount + 1;
 
-          foundItemsTracker.set({
-            ...tracker,
+          foundItemsTracker.update({
             [queryId]: newCount,
           });
 

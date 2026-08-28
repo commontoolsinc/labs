@@ -88,35 +88,28 @@ const updateDietaryRestrictions = handler<
   { detail: { tags: string[] } },
   { member: Writable<FamilyMember> }
 >(({ detail }, { member }) => {
-  const current = member.get();
-  member.set({
-    ...current,
-    dietaryRestrictions: detail?.tags ?? [],
-  });
+  member.update({ dietaryRestrictions: detail?.tags ?? [] });
 });
 
 const updateTags = handler<
   { detail: { tags: string[] } },
   { member: Writable<FamilyMember> }
 >(({ detail }, { member }) => {
-  const current = member.get();
-  member.set({ ...current, tags: detail?.tags ?? [] });
+  member.update({ tags: detail?.tags ?? [] });
 });
 
 const updateAllergies = handler<
   { detail: { tags: string[] } },
   { member: Writable<FamilyMember> }
 >(({ detail }, { member }) => {
-  const current = member.get();
-  member.set({ ...current, allergies: detail?.tags ?? [] });
+  member.update({ allergies: detail?.tags ?? [] });
 });
 
 const updateGiftIdeas = handler<
   { detail: { tags: string[] } },
   { member: Writable<FamilyMember> }
 >(({ detail }, { member }) => {
-  const current = member.get();
-  member.set({ ...current, giftIdeas: detail?.tags ?? [] });
+  member.update({ giftIdeas: detail?.tags ?? [] });
 });
 
 // sameAs handlers
@@ -126,15 +119,13 @@ const selectSameAs = handler<
 >(({ detail }, { member, showPicker }) => {
   const linked = detail?.data;
   if (!linked) return;
-  const current = member.get();
-  member.set({ ...current, sameAs: linked });
+  member.update({ sameAs: linked });
   showPicker.set(false);
 });
 
 const clearSameAs = handler<unknown, { member: Writable<FamilyMember> }>(
   (_event, { member }) => {
-    const current = member.get();
-    member.set({ ...current, sameAs: undefined });
+    member.update({ sameAs: undefined });
   },
 );
 
