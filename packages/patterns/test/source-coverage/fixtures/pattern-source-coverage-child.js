@@ -459,18 +459,40 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
         cells: { index: "of:index", health: "of:health" },
       },
     };
-    const hostActivity = (status) =>
+    const hostActivity = (status, sync) =>
       instantiatePattern(GithubActivity, {
         repoUrl: new Writable("https://github.com/acme/project"),
         pullRequestIndex: emptySynchronizedIndex,
-        health: { ...stoppedHealth, status },
+        health: {
+          ...stoppedHealth,
+          status,
+          ...(sync === undefined ? {} : { sync }),
+        },
       });
     const stoppedGithubActivity = hostActivity("stopped");
     const hostStatusCases = [
-      ["ready", "primary", hostActivity("ready")],
+      [
+        "ready",
+        "primary",
+        hostActivity("ready", {
+          reason: "scheduled",
+          status: "complete",
+          startedAt: "2026-08-28T01:58:00.000Z",
+          completedAt: "2026-08-28T01:59:00.000Z",
+          pullRequestCount: 0,
+        }),
+      ],
       ["degraded", "danger", synchronizedGithubActivity],
       ["starting", "accent", hostActivity("starting")],
-      ["syncing", "accent", hostActivity("syncing")],
+      [
+        "syncing",
+        "accent",
+        hostActivity("syncing", {
+          reason: "scheduled",
+          status: "running",
+          startedAt: "2026-08-28T01:58:00.000Z",
+        }),
+      ],
       ["stopped", "neutral", stoppedGithubActivity],
     ];
     const emptyStateMessages = elementsOfType(
