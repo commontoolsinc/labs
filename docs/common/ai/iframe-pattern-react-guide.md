@@ -156,7 +156,9 @@ be ready with the value `undefined`. Include `undefined` in the hook type. Use
 the declared input default for an absent read-only input. For writable state or
 output, initialize only after that Cell's authoritative pull reports
 `undefined`; do not replace a value that another session may already have
-materialized.
+materialized. Bridge `set()` is strict: after that pull, the default write
+either materializes the absent Cell or rejects if another writer won. Catch
+that rejection; the hook snapshot changes to `error` for the render path.
 
 Treat readiness as one aggregate phase. Every resource an action reads must be
 ready before that action becomes available:
@@ -177,6 +179,7 @@ import {
 
 const fabric = connectFabric();
 const { useCell } = createFabricReact(React, fabric);
+const stateCell = fabric.cell<typeof DEFAULT_STATE>("state");
 
 function Editor() {
   const input = useCell<typeof DEFAULT_INPUT | undefined>("input");
@@ -184,14 +187,17 @@ function Editor() {
   const output = useCell<typeof DEFAULT_OUTPUT | undefined>("output");
   const stateValue = state.status === "ready" ? state.value : undefined;
   const outputValue = output.status === "ready" ? output.value : undefined;
+  const actionTail = React.useRef(Promise.resolve());
+  const [pending, setPending] = React.useState(false);
+  const [actionError, setActionError] = React.useState<Error>();
   React.useEffect(() => {
     if (state.status === "ready" && stateValue === undefined) {
-      void state.set(DEFAULT_STATE);
+      void state.set(DEFAULT_STATE).catch(() => {});
     }
   }, [state.status, stateValue, state.set]);
   React.useEffect(() => {
     if (output.status === "ready" && outputValue === undefined) {
-      void output.set(DEFAULT_OUTPUT);
+      void output.set(DEFAULT_OUTPUT).catch(() => {});
     }
   }, [output.status, outputValue, output.set]);
   const resources = [input, state, output];
@@ -208,25 +214,47 @@ function Editor() {
     return <button type="button" disabled>Loading</button>;
   }
 
-  const addNote = async () => {
-    const note = { id: crypto.randomUUID(), text: "New note" };
-    await state.set((current: typeof DEFAULT_STATE | undefined) => ({
-      ...(current ?? DEFAULT_STATE),
-      notes: [...(current ?? DEFAULT_STATE).notes, note],
-      selectedId: note.id,
-    }));
-    const current = (await state.refresh()) ?? DEFAULT_STATE;
-    await output.set({
-      noteCount: current.notes.length,
-      selectedId: current.selectedId,
+  const runAction = (action: () => Promise<void>): Promise<void> => {
+    const next = actionTail.current.then(async () => {
+      setPending(true);
+      setActionError(undefined);
+      try {
+        await action();
+      } catch (cause) {
+        setActionError(
+          cause instanceof Error ? cause : new Error(String(cause)),
+        );
+      } finally {
+        setPending(false);
+      }
     });
+    actionTail.current = next;
+    return next;
   };
+  const addNote = () =>
+    runAction(async () => {
+      const note = { id: crypto.randomUUID(), text: "New note" };
+      await stateCell.key("notes").push(note);
+      await stateCell.key("selectedId").set(note.id);
+      const current = (await state.refresh()) ?? DEFAULT_STATE;
+      await output.set({
+        noteCount: current.notes.length,
+        selectedId: current.selectedId,
+      });
+    });
 
   return (
     <section>
       <h1>{(input.value ?? DEFAULT_INPUT).heading}</h1>
       <p>{stateValue.notes.length} notes</p>
-      <button type="button" onClick={() => void addNote()}>Add note</button>
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => void addNote()}
+      >
+        Add note
+      </button>
+      {actionError && <p role="alert">{actionError.message}</p>}
     </section>
   );
 }
@@ -234,7 +262,10 @@ function Editor() {
 
 The hooks load Cells independently, but the component owns one joint readiness
 predicate. An individual resource becoming ready must not enable an action that
-still reads fallback input, state, or output.
+still reads fallback input, state, or output. Initialization rejections are
+consumed because the hook exposes them through its `error` snapshot. Action
+rejections are rendered separately, and the ref-backed tail keeps rapid actions
+serialized across rerenders.
 
 Functional setters are serialized for the same remote Cell inside one guest.
 They are not a transaction across users or across resources. Prefer a narrow
@@ -249,7 +280,10 @@ const fabric = connectFabric();
 const state = fabric.cell<{ notes: Array<{ id: string; text: string }> }>(
   "state",
 );
-await state.key("notes").push({ id: crypto.randomUUID(), text: "New note" });
+
+async function appendNote(text: string): Promise<void> {
+  await state.key("notes").push({ id: crypto.randomUUID(), text });
+}
 ```
 
 `push()` is a mergeable append. Replacing the whole array from a React setter

@@ -1,3 +1,5 @@
+/** Exercises the React adapter with the browser's real React renderer. */
+
 // @deno-types="@types/react"
 import React, { act } from "react";
 // @deno-types="@types/react-dom/client"
