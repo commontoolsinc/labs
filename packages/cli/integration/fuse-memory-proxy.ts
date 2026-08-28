@@ -1,10 +1,31 @@
 import {
   decodeCompressedMemoryMessage,
   isMemoryMessageFrame,
-  type MemoryMessageFrame,
 } from "@commonfabric/memory/v2/message-compression";
 
-type RelayFrame = string | ArrayBuffer | Uint8Array<ArrayBuffer> | Blob;
+export type RelayFrame = string | ArrayBuffer | Uint8Array<ArrayBuffer> | Blob;
+
+/** Serializes upstream trace persistence before downstream frame delivery. */
+export class TraceBeforeRelayQueue {
+  #pending: Promise<void> = Promise.resolve();
+
+  enqueue(
+    frame: RelayFrame,
+    appendTrace: (frame: RelayFrame) => Promise<void>,
+    relay: (frame: RelayFrame) => void,
+    onError: (cause: unknown) => void,
+  ): void {
+    this.#pending = this.#pending.then(async () => {
+      await appendTrace(frame);
+      relay(frame);
+    });
+    void this.#pending.catch(onError);
+  }
+
+  async idle(): Promise<void> {
+    await this.#pending;
+  }
+}
 
 export type FuseMemoryProxy = {
   server: Deno.HttpServer;
@@ -41,7 +62,7 @@ export function startFuseMemoryProxy(
   onListen: (address: Deno.NetAddr) => void = () => {},
 ): FuseMemoryProxy {
   Deno.writeTextFileSync(tracePath, "");
-  let traceWrites: Promise<void> = Promise.resolve();
+  const upstreamFrames = new TraceBeforeRelayQueue();
 
   const proxyWebSocket = (request: Request): Response => {
     const { socket: downstream, response } = Deno.upgradeWebSocket(request);
@@ -53,16 +74,25 @@ export function startFuseMemoryProxy(
     const toUpstream: RelayFrame[] = [];
     const toDownstream: RelayFrame[] = [];
 
-    const appendTrace = (frame: MemoryMessageFrame): void => {
-      traceWrites = traceWrites.then(async () => {
-        const payload = await decodeCompressedMemoryMessage(frame);
-        await Deno.writeTextFile(tracePath, `${payload}\n`, { append: true });
-      });
-      void traceWrites.catch((cause) => {
-        console.error("memory websocket trace failed", cause);
-        closePeer(downstream, 1011, "memory websocket trace failed");
-        closePeer(upstream, 1011, "memory websocket trace failed");
-      });
+    const traceAndRelay = (frame: RelayFrame): void => {
+      upstreamFrames.enqueue(
+        frame,
+        async () => {
+          const payload = await decodeCompressedMemoryMessage(frame);
+          await Deno.writeTextFile(tracePath, `${payload}\n`, { append: true });
+        },
+        () => {
+          if (downstream.readyState === WebSocket.OPEN) downstream.send(frame);
+          else if (downstream.readyState === WebSocket.CONNECTING) {
+            toDownstream.push(frame);
+          }
+        },
+        (cause) => {
+          console.error("memory websocket trace failed", cause);
+          closePeer(downstream, 1011, "memory websocket trace failed");
+          closePeer(upstream, 1011, "memory websocket trace failed");
+        },
+      );
     };
 
     downstream.addEventListener("open", () => {
@@ -95,11 +125,7 @@ export function startFuseMemoryProxy(
         closePeer(upstream, 1003, "unsupported memory websocket frame");
         return;
       }
-      appendTrace(frame);
-      if (downstream.readyState === WebSocket.OPEN) downstream.send(frame);
-      else if (downstream.readyState === WebSocket.CONNECTING) {
-        toDownstream.push(frame);
-      }
+      traceAndRelay(frame);
     });
 
     downstream.addEventListener("close", (event) => {
@@ -145,7 +171,7 @@ export function startFuseMemoryProxy(
   return {
     server,
     async idle() {
-      await traceWrites;
+      await upstreamFrames.idle();
     },
   };
 }

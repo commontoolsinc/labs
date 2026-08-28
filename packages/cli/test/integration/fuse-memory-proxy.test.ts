@@ -13,9 +13,43 @@ import {
   type MemoryMessageFrame,
 } from "@commonfabric/memory/v2/message-compression";
 import { StandaloneMemoryServer } from "@commonfabric/memory/v2/standalone";
-import { startFuseMemoryProxy } from "../../integration/fuse-memory-proxy.ts";
+import {
+  startFuseMemoryProxy,
+  TraceBeforeRelayQueue,
+} from "../../integration/fuse-memory-proxy.ts";
 
 describe("fuse-memory-proxy", () => {
+  it("persists a trace before relaying its upstream frame", async () => {
+    const queue = new TraceBeforeRelayQueue();
+    const traceStarted = Promise.withResolvers<void>();
+    const finishTrace = Promise.withResolvers<void>();
+    const events: string[] = [];
+
+    queue.enqueue(
+      "frame",
+      async () => {
+        events.push("trace started");
+        traceStarted.resolve();
+        await finishTrace.promise;
+        events.push("trace persisted");
+      },
+      () => events.push("frame relayed"),
+      (cause) => {
+        throw cause;
+      },
+    );
+
+    await traceStarted.promise;
+    expect(events).toEqual(["trace started"]);
+    finishTrace.resolve();
+    await queue.idle();
+    expect(events).toEqual([
+      "trace started",
+      "trace persisted",
+      "frame relayed",
+    ]);
+  });
+
   it("relays binary frames and records their expanded text", async () => {
     const directory = await Deno.makeTempDir();
     const tracePath = `${directory}/memory-frames`;
@@ -37,16 +71,19 @@ describe("fuse-memory-proxy", () => {
 
       const marker = "fuse-binary-trace-marker-".repeat(100);
       const response = nextMessage(socket);
-      socket.send(
-        await encodeCompressedMemoryMessage(encodeMemoryBoundary({
+      // Drive the binary relay explicitly instead of depending on the shape or
+      // compression ratio of the upstream response.
+      const requestFrame = await encodeCompressedMemoryMessage(
+        encodeMemoryBoundary({
           type: "session.open",
           requestId: marker,
           space: "did:key:z6Mk-fuse-memory-proxy-test",
           session: {},
-        })),
+        }),
       );
+      expect(requestFrame).toBeInstanceOf(Uint8Array);
+      socket.send(requestFrame);
       const responseFrame = await response;
-      expect(responseFrame).toBeInstanceOf(ArrayBuffer);
       expect(
         decodeMemoryBoundary<{ requestId: string }>(
           await decodeCompressedMemoryMessage(responseFrame),
@@ -54,6 +91,55 @@ describe("fuse-memory-proxy", () => {
       ).toBe(marker);
 
       await proxy.idle();
+      expect(await Deno.readTextFile(tracePath)).toContain(marker);
+    } finally {
+      await closeSocket(socket);
+      await proxy.server.shutdown();
+      await upstream.close();
+      await Deno.remove(directory, { recursive: true });
+    }
+  });
+
+  it("records each upstream frame before forwarding it", async () => {
+    const directory = await Deno.makeTempDir();
+    const tracePath = `${directory}/memory-frames`;
+    const upstream = StandaloneMemoryServer.start();
+    const proxy = startFuseMemoryProxy(new URL(upstream.url), tracePath);
+    const address = proxy.server.addr as Deno.NetAddr;
+    const socket = new WebSocket(`ws://${address.hostname}:${address.port}`);
+    socket.binaryType = "arraybuffer";
+    try {
+      await opened(socket);
+      const helloReply = nextMessage(socket);
+      socket.send(encodeMemoryBoundary({
+        type: "hello",
+        protocol: MEMORY_PROTOCOL,
+        flags: getMemoryProtocolFlags(),
+      }));
+      await helloReply;
+
+      // The large, compressible identifier makes the upstream wire response
+      // small while its trace append remains substantial, exposing a relay
+      // that forwards before awaiting expansion and persistence.
+      const marker = `fuse-trace-order-${"x".repeat(2 * 1_024 * 1_024)}`;
+      const response = nextMessage(socket);
+      socket.send(
+        await encodeCompressedMemoryMessage(encodeMemoryBoundary({
+          type: "session.open",
+          requestId: marker,
+          space: "did:key:z6Mk-fuse-memory-proxy-trace-order-test",
+          session: {},
+        })),
+      );
+      const responseFrame = await response;
+      expect(
+        decodeMemoryBoundary<{ requestId: string }>(
+          await decodeCompressedMemoryMessage(responseFrame),
+        ).requestId,
+      ).toBe(marker);
+
+      // Receiving the response is the completion barrier used by FUSE. The
+      // corresponding trace entry must already be durable at this point.
       expect(await Deno.readTextFile(tracePath)).toContain(marker);
     } finally {
       await closeSocket(socket);
