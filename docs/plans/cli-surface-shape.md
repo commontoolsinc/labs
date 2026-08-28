@@ -32,6 +32,7 @@ have landed.
 | 8 — `CF_SPACE` is ambient, and a write names the space it wrote to | not started |
 | 9 — a reference takes a space by name and a piece by slug, positionally | not started |
 | 10 — the verb opens the callable's section and `--` closes it | not started; `PIECE_DATA_SPELLING_END_DATE` is the thing to check first |
+| 11 — `--url` decomposes into the transport it names and the reference it carries | not started |
 
 ## What the surface is for
 
