@@ -738,6 +738,6 @@ Deno.test("collectHarnessCapabilitySnapshot reads the CFC transport before captu
   ]);
   assertEquals(
     snapshot.cfc.sandbox.cfc?.invocationContextTransportReadiness,
-    "unwired",
+    "unregistered",
   );
 });

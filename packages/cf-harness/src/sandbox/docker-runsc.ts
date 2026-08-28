@@ -345,59 +345,6 @@ export const CFC_INVOCATION_CONTEXT_DIR_RUNTIME_FLAG =
 export const CFC_RESULT_DIR_RUNTIME_FLAG = "cfc-result-dir";
 
 /**
- * Docker Desktop runs the daemon inside a Linux VM and projects host paths
- * into it under this prefix, so a runtime argument and the host path
- * `cf-harness` writes to name the same directory while differing textually.
- */
-const DOCKER_DESKTOP_HOST_MOUNT_PREFIX = "/host_mnt";
-
-const stripTrailingSlashes = (path: string): string => {
-  const trimmed = path.replace(/\/+$/, "");
-  return trimmed.length === 0 ? "/" : trimmed;
-};
-
-/**
- * Whether a registered runtime argument and a harness directory name the same
- * host directory.
- *
- * `incomparable` is its own answer rather than a `differ`. A Docker runtime
- * argument always names a path inside the Linux VM the daemon runs in, so a
- * harness directory that is not a POSIX absolute path cannot be compared with
- * one textually; reporting that as a difference would be a reading of the path
- * style rather than of the registration, and it would refuse a host that is
- * wired correctly.
- *
- * That leniency belongs to the harness side alone. runsc refuses a
- * `--cfc-*-dir` that is not absolute — "must be an absolute path" — so a
- * registered value that is empty or relative names no directory at all, which
- * is evidence as positive as an absent flag and must not be softened into an
- * incomparability that lets an enforcing run proceed unread.
- */
-const hostDirCorrespondence = (
-  runtimeArgValue: string,
-  harnessDir: string,
-): "match" | "differ" | "incomparable" => {
-  if (!runtimeArgValue.startsWith("/")) {
-    return "differ";
-  }
-  if (!harnessDir.startsWith("/")) {
-    return "incomparable";
-  }
-  // Normalized before comparison: `.` and `..` segments survive
-  // `validateAbsoluteHostDir`, and two spellings of one directory must not
-  // read as two directories.
-  const runtimePath = stripTrailingSlashes(normalize(runtimeArgValue));
-  const harnessPath = stripTrailingSlashes(normalize(harnessDir));
-  if (runtimePath === harnessPath) {
-    return "match";
-  }
-  const projected = stripTrailingSlashes(
-    normalize(`${DOCKER_DESKTOP_HOST_MOUNT_PREFIX}${harnessPath}`),
-  );
-  return runtimePath === projected ? "match" : "differ";
-};
-
-/**
  * runsc parses its arguments with Go's `flag` package, which accepts one or
  * two leading dashes and both the `=` and the separate-token spelling.
  */
@@ -444,18 +391,6 @@ const readRuntimeArgs = (
 };
 
 /**
- * Decide, from the runtime table `docker info` reports, whether the runtime a
- * run is about to launch is registered against the same sidecar directories
- * `cf-harness` is configured with.
- *
- * Naming a directory in the harness config says only where the harness will
- * write; it says nothing about whether anything reads there. The two
- * transports are wired independently, so a host can have a working result
- * transport — sidecars arrive, output mediation succeeds, the run looks
- * healthy — while the invocation context carrying input labels is written into
- * a directory the runtime was never told about.
- */
-/**
  * One reading, applied to every configured transport. An unreadable runtime
  * table is a fact about the reading, not about either directory, so it must
  * not be expressed as an absent flag — that would be positive evidence the
@@ -479,26 +414,30 @@ export const cfcTransportReadinessIndeterminate = (options: {
   return readings as CfcTransportReadiness;
 };
 
+/**
+ * Read, from the runtime table `docker info` reports, whether each configured
+ * sidecar transport has a valid absolute directory registered for it.
+ *
+ * This asks whether anything is registered, never whether what is registered
+ * is the harness's directory. The second question cannot be answered from two
+ * path spellings — see `CfcSidecarTransportReading` — and every way of
+ * attacking this check has been an attack on a comparison it no longer makes.
+ */
 export const cfcTransportReadinessFromDockerRuntimes = (options: {
   runtimeName: string;
   runtimes: unknown;
   cfcInvocationContextDir?: string;
   cfcResultDir?: string;
 }): CfcTransportReadiness => {
-  const configured: Array<[CfcSidecarTransportKind, string, string]> = [];
+  const configured: Array<[CfcSidecarTransportKind, string]> = [];
   if (options.cfcInvocationContextDir !== undefined) {
     configured.push([
       "invocation-context",
       CFC_INVOCATION_CONTEXT_DIR_RUNTIME_FLAG,
-      options.cfcInvocationContextDir,
     ]);
   }
   if (options.cfcResultDir !== undefined) {
-    configured.push([
-      "result",
-      CFC_RESULT_DIR_RUNTIME_FLAG,
-      options.cfcResultDir,
-    ]);
+    configured.push(["result", CFC_RESULT_DIR_RUNTIME_FLAG]);
   }
   const allIndeterminate = (reason: string): CfcTransportReadiness =>
     cfcTransportReadinessIndeterminate({
@@ -533,24 +472,19 @@ export const cfcTransportReadinessFromDockerRuntimes = (options: {
   }
 
   const readings: Record<string, CfcSidecarTransportReading> = {};
-  for (const [kind, flag, harnessDir] of configured) {
+  for (const [kind, flag] of configured) {
     const registered = runtimeFlagValue(args, flag);
-    // A flag that is absent is positive evidence whatever the paths look like:
-    // nothing was registered to read anywhere.
-    if (registered === undefined) {
-      readings[kind] = { status: "unwired" };
-      continue;
-    }
-    const correspondence = hostDirCorrespondence(registered, harnessDir);
-    readings[kind] = correspondence === "match"
-      ? { status: "wired" }
-      : correspondence === "differ"
-      ? { status: "unwired" }
-      : {
-        status: "indeterminate",
-        reason: `the registered ${kind} path could not be compared with the ` +
-          `directory cf-harness is configured with`,
-      };
+    // The only question asked, and the only one a reading of the registration
+    // can answer: is a valid absolute directory registered for this flag at
+    // all. Absent, empty and relative all mean nothing reads anywhere — runsc
+    // refuses a non-absolute `--cfc-*-dir` — and that holds whatever
+    // filesystem either side resolves paths on. Which directory it names
+    // travels with the status rather than being compared with the harness's,
+    // because no comparison of two spellings can establish that they are, or
+    // are not, one directory.
+    readings[kind] = registered !== undefined && registered.startsWith("/")
+      ? { status: "registered", registeredPath: registered }
+      : { status: "unregistered" };
   }
   return readings as CfcTransportReadiness;
 };
@@ -768,7 +702,6 @@ const cfcResultFromRunscSidecar = (
 
 export class DockerRunscSandboxRuntime implements SandboxRuntime {
   #cfcTransportReadiness?: CfcTransportReadiness;
-  #cfcTransportReadinessProbe?: Promise<CfcTransportReadiness>;
   // Copied once here and read from here afterwards. `config` is public, its
   // `readonly` binds the reference rather than the fields, and `readonly` is a
   // compile-time annotation that no longer exists at runtime — so it cannot
@@ -819,19 +752,22 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
    * and report whether they name the sidecar directories the harness is
    * configured with.
    *
-   * The reading is memoized at one `docker info` per sandbox. That is a cost
-   * decision, not a claim that the answer cannot change: Docker reloads its
+   * Taken afresh on every call rather than memoized. Docker reloads its
    * `runtimes` configuration on SIGHUP, so a registration can be replaced
-   * mid-run. Only the affirmative half of a reading is weakened by that, and
-   * the affirmative half is not load-bearing — see `CfcSidecarTransportReading`.
+   * mid-run — and a cached reading does not merely weaken the affirmative
+   * half, it suppresses the negative one: an invocation held against a stale
+   * `registered` never meets the `unregistered` a current read would have
+   * returned, which is the refusal this whole check exists to make. One `docker info`
+   * against a call that is about to create, start, wait on and remove a
+   * container is not a cost worth a stale refusal.
+   *
+   * The last reading is retained so `describe()` can report what the run
+   * started with.
    */
   async probeCfcTransportReadiness(): Promise<CfcTransportReadiness> {
-    this.#cfcTransportReadinessProbe ??= this.#readCfcTransportReadiness()
-      .then((readiness) => {
-        this.#cfcTransportReadiness = readiness;
-        return readiness;
-      });
-    return await this.#cfcTransportReadinessProbe;
+    const readiness = await this.#readCfcTransportReadiness();
+    this.#cfcTransportReadiness = readiness;
+    return readiness;
   }
 
   async #readCfcTransportReadiness(): Promise<CfcTransportReadiness> {
@@ -943,6 +879,14 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
             // transport tag stand in for a working one.
             invocationContextTransportReadiness:
               this.#invocationContextReading()?.status ?? "unverified",
+            ...(this.#invocationContextReading()?.status === "registered"
+              ? {
+                invocationContextRegisteredPath:
+                  (this.#invocationContextReading() as {
+                    registeredPath: string;
+                  }).registeredPath,
+              }
+              : {}),
           }
           : {}),
       },
@@ -1181,7 +1125,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
       );
     }
     await this.probeCfcTransportReadiness();
-    if (this.#invocationContextReading()?.status !== "unwired") {
+    if (this.#invocationContextReading()?.status !== "unregistered") {
       return undefined;
     }
     return refuse(

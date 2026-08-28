@@ -798,164 +798,6 @@ const dockerRuntimes = (runtimeArgs?: readonly string[]) => ({
   },
 });
 
-Deno.test("cfcTransportReadinessFromDockerRuntimes reports wired when both directories are registered", () => {
-  assertEquals(
-    cfcTransportReadinessFromDockerRuntimes({
-      runtimeName: "runsc-cfc",
-      runtimes: dockerRuntimes([
-        "--cfc",
-        "--cfc-invocation-context-dir=/host/invocations",
-        "--cfc-result-dir=/host/results",
-      ]),
-      cfcInvocationContextDir: "/host/invocations",
-      cfcResultDir: "/host/results",
-    }),
-    {
-      "invocation-context": { status: "wired" },
-      result: { status: "wired" },
-    },
-  );
-});
-
-Deno.test("cfcTransportReadinessFromDockerRuntimes reports an unregistered invocation-context directory as unwired", () => {
-  // The registration this defect was found under: the runtime enables CFC and
-  // loads a policy, and is told about neither sidecar directory.
-  assertEquals(
-    cfcTransportReadinessFromDockerRuntimes({
-      runtimeName: "runsc-cfc",
-      runtimes: dockerRuntimes([
-        "--cfc",
-        "--cfc-policy=/host/cfc-policy.json",
-      ]),
-      cfcInvocationContextDir: "/host/invocations",
-      cfcResultDir: "/host/results",
-    }),
-    {
-      "invocation-context": { status: "unwired" },
-      result: { status: "unwired" },
-    },
-  );
-});
-
-Deno.test("cfcTransportReadinessFromDockerRuntimes reports a working result transport beside an unread invocation-context one", () => {
-  // The transports fail independently, and this pairing is the dangerous one:
-  // result sidecars arrive and output mediation succeeds, so the run looks
-  // healthy while every input label is written into a directory nothing reads.
-  assertEquals(
-    cfcTransportReadinessFromDockerRuntimes({
-      runtimeName: "runsc-cfc",
-      runtimes: dockerRuntimes([
-        "--cfc",
-        "--cfc-result-dir=/host/results",
-      ]),
-      cfcInvocationContextDir: "/host/invocations",
-      cfcResultDir: "/host/results",
-    })["invocation-context"],
-    { status: "unwired" },
-  );
-});
-
-Deno.test("cfcTransportReadinessFromDockerRuntimes reports a directory registered under a different path as unwired", () => {
-  assertEquals(
-    cfcTransportReadinessFromDockerRuntimes({
-      runtimeName: "runsc-cfc",
-      runtimes: dockerRuntimes([
-        "--cfc-invocation-context-dir=/host/other-invocations",
-      ]),
-      cfcInvocationContextDir: "/host/invocations",
-    })["invocation-context"],
-    { status: "unwired" },
-  );
-});
-
-Deno.test("cfcTransportReadinessFromDockerRuntimes accepts the Docker Desktop host mount projection", () => {
-  // Docker Desktop runs the daemon in a Linux VM, so the runtime argument
-  // carries the /host_mnt projection of the path the harness writes to.
-  assertEquals(
-    cfcTransportReadinessFromDockerRuntimes({
-      runtimeName: "runsc-cfc",
-      runtimes: dockerRuntimes([
-        "--cfc-invocation-context-dir=/host_mnt/Users/example/invocations/",
-      ]),
-      cfcInvocationContextDir: "/Users/example/invocations",
-    })["invocation-context"],
-    { status: "wired" },
-  );
-});
-
-Deno.test("cfcTransportReadinessFromDockerRuntimes reads both Go flag spellings", () => {
-  for (
-    const runtimeArgs of [
-      ["-cfc-invocation-context-dir=/host/invocations"],
-      ["--cfc-invocation-context-dir", "/host/invocations"],
-      ["-cfc-invocation-context-dir", "/host/invocations"],
-    ]
-  ) {
-    assertEquals(
-      cfcTransportReadinessFromDockerRuntimes({
-        runtimeName: "runsc-cfc",
-        runtimes: dockerRuntimes(runtimeArgs),
-        cfcInvocationContextDir: "/host/invocations",
-      })["invocation-context"],
-      { status: "wired" },
-      `expected ${JSON.stringify(runtimeArgs)} to register the directory`,
-    );
-  }
-});
-
-Deno.test("cfcTransportReadinessFromDockerRuntimes treats a runtime registered without arguments as unwired", () => {
-  // Docker omits runtimeArgs entirely when a runtime carries none, so an
-  // absent key is a reading of "no arguments" and not a failure to read.
-  assertEquals(
-    cfcTransportReadinessFromDockerRuntimes({
-      runtimeName: "runsc-cfc",
-      runtimes: dockerRuntimes(),
-      cfcInvocationContextDir: "/host/invocations",
-    })["invocation-context"],
-    { status: "unwired" },
-  );
-});
-
-Deno.test("cfcTransportReadinessFromDockerRuntimes ignores a transport the harness is not configured with", () => {
-  assertEquals(
-    cfcTransportReadinessFromDockerRuntimes({
-      runtimeName: "runsc-cfc",
-      runtimes: dockerRuntimes(["--cfc"]),
-    }),
-    {},
-  );
-});
-
-Deno.test("cfcTransportReadinessFromDockerRuntimes reports indeterminate rather than unwired when it cannot read a registration", () => {
-  // An unreadable registration is the absence of evidence, and must not be
-  // spendable as evidence of a misconfiguration: that would refuse a host
-  // whose runtime is wired correctly.
-  const unreadable: Array<[string, unknown]> = [
-    ["no runtime table", "not-json-shaped"],
-    ["runtime not registered", dockerRuntimes(["--cfc"])],
-    ["non-object entry", { "other-runsc": "path-only" }],
-  ];
-  for (const [label, runtimes] of unreadable) {
-    const readiness = cfcTransportReadinessFromDockerRuntimes({
-      runtimeName: "other-runsc",
-      runtimes,
-      cfcInvocationContextDir: "/host/invocations",
-    });
-    assertEquals(
-      readiness["invocation-context"]?.status,
-      "indeterminate",
-      label,
-    );
-  }
-
-  const nonStringArgs = cfcTransportReadinessFromDockerRuntimes({
-    runtimeName: "runsc-cfc",
-    runtimes: { "runsc-cfc": { runtimeArgs: [{ cfc: true }] } },
-    cfcInvocationContextDir: "/host/invocations",
-  });
-  assertEquals(nonStringArgs["invocation-context"]?.status, "indeterminate");
-});
-
 const dockerInfoResult = (
   runtimeArgs?: readonly string[],
 ): ProcessRunResult => ({
@@ -1027,7 +869,7 @@ Deno.test("DockerRunscSandboxRuntime refuses an enforcing invocation whose input
   ]);
   assertEquals(
     runtime.describe().cfc?.invocationContextTransportReadiness,
-    "unwired",
+    "unregistered",
   );
 });
 
@@ -1098,7 +940,7 @@ Deno.test("DockerRunscSandboxRuntime writes the sidecar when the runtime is regi
     );
     assertEquals(
       runtime.describe().cfc?.invocationContextTransportReadiness,
-      "wired",
+      "registered",
     );
   } finally {
     await Deno.remove(cfcInvocationContextDir, { recursive: true });
@@ -1174,13 +1016,18 @@ Deno.test("DockerRunscSandboxRuntime does not probe the registration outside enf
   }
 });
 
-Deno.test("DockerRunscSandboxRuntime probes the runtime registration once per sandbox", async () => {
+Deno.test("DockerRunscSandboxRuntime refuses on a registration reloaded away between probe and launch", async () => {
+  // Docker reloads `runtimes` on SIGHUP, so a registration read at probe time
+  // can be replaced before the container starts. A cached reading would not
+  // merely be a weaker affirmative: it would suppress the refusal a current
+  // read makes, which is the one thing this check is for.
   const cfcInvocationContext = await enforcingInvocationContext();
   const runner = new FakeProcessRunner([
+    dockerInfoResult(["--cfc-invocation-context-dir=/host/invocations"]),
     { stdout: "container-123\n", stderr: "", exitCode: 0 },
+    // Same runtime name, same directories, same endpoint — only the daemon's
+    // registration changed underneath.
     dockerInfoResult(["--cfc"]),
-    { stdout: "", stderr: "", exitCode: 0 },
-    { stdout: "container-123\n", stderr: "", exitCode: 0 },
     { stdout: "", stderr: "", exitCode: 0 },
   ]);
   const runtime = new DockerRunscSandboxRuntime(
@@ -1191,12 +1038,27 @@ Deno.test("DockerRunscSandboxRuntime probes the runtime registration once per sa
     runner,
   );
 
-  await runtime.run({ argv: ["/bin/echo", "hello"], cfcInvocationContext });
-  await runtime.run({ argv: ["/bin/echo", "hello"], cfcInvocationContext });
-
   assertEquals(
-    runner.requests.filter((request) => request.args[0] === "info").length,
-    1,
+    (await runtime.probeCfcTransportReadiness())["invocation-context"]?.status,
+    "registered",
+  );
+
+  const result = await runtime.run({
+    argv: ["/bin/echo", "hello"],
+    cfcInvocationContext,
+  });
+
+  assertEquals(result.exitCode, 125);
+  assertMatch(result.stderr, /would be written and never read/);
+  assertEquals(runner.requests.map((request) => request.args[0]), [
+    "info",
+    "create",
+    "info",
+    "rm",
+  ]);
+  assertEquals(
+    runtime.describe().cfc?.invocationContextTransportReadiness,
+    "unregistered",
   );
 });
 
@@ -1305,192 +1167,6 @@ Deno.test("DockerRunscSandboxRuntime reports an unrunnable docker info as indete
   }
 });
 
-Deno.test("cfcTransportReadinessFromDockerRuntimes compares directories through path normalization", () => {
-  // `validateAbsoluteHostDir` accepts `.` and `..` segments, so one directory
-  // has more than one spelling and the two sides need not agree on which.
-  for (
-    const [registered, configured] of [
-      ["/host/./invocations", "/host/invocations"],
-      ["/host/invocations", "/host/other/../invocations"],
-      ["/host_mnt/Users/x/./invocations", "/Users/x/invocations"],
-    ]
-  ) {
-    assertEquals(
-      cfcTransportReadinessFromDockerRuntimes({
-        runtimeName: "runsc-cfc",
-        runtimes: dockerRuntimes([
-          `--cfc-invocation-context-dir=${registered}`,
-        ]),
-        cfcInvocationContextDir: configured,
-      })["invocation-context"],
-      { status: "wired" },
-      `expected ${registered} to correspond to ${configured}`,
-    );
-  }
-});
-
-Deno.test("cfcTransportReadinessFromDockerRuntimes reports an incomparable path as indeterminate rather than unwired", () => {
-  // A runtime argument names a path inside the daemon's Linux VM. A harness
-  // directory in another path style cannot be compared with one, and reading
-  // that as a difference would refuse a host that may be wired correctly.
-  const readiness = cfcTransportReadinessFromDockerRuntimes({
-    runtimeName: "runsc-cfc",
-    runtimes: dockerRuntimes([
-      "--cfc-invocation-context-dir=/host_mnt/c/work/cfc",
-    ]),
-    cfcInvocationContextDir: "C:\\work\\cfc",
-  });
-
-  assertEquals(readiness["invocation-context"]?.status, "indeterminate");
-});
-
-Deno.test("cfcTransportReadinessFromDockerRuntimes still reports an absent flag as unwired whatever the path style", () => {
-  // Absence is positive evidence on its own: nothing was registered to read
-  // anywhere, so the path style never enters into it.
-  assertEquals(
-    cfcTransportReadinessFromDockerRuntimes({
-      runtimeName: "runsc-cfc",
-      runtimes: dockerRuntimes(["--cfc"]),
-      cfcInvocationContextDir: "C:\\work\\cfc",
-    })["invocation-context"],
-    { status: "unwired" },
-  );
-});
-
-Deno.test("cfcTransportReadinessFromDockerRuntimes reports a registered path that names no directory as unwired", () => {
-  // runsc refuses a `--cfc-*-dir` that is not absolute, so an empty or
-  // relative registered value names nothing. Softening that into an
-  // incomparability would let an enforcing run proceed with its invocation
-  // context unread — the failure this whole check exists to stop.
-  for (const registered of ["", "relative/invocations", "./invocations"]) {
-    assertEquals(
-      cfcTransportReadinessFromDockerRuntimes({
-        runtimeName: "runsc-cfc",
-        runtimes: dockerRuntimes([
-          `--cfc-invocation-context-dir=${registered}`,
-        ]),
-        cfcInvocationContextDir: "/host/invocations",
-      })["invocation-context"],
-      { status: "unwired" },
-      `expected a registered value of "${registered}" to be positive evidence`,
-    );
-  }
-});
-
-Deno.test("cfcTransportReadinessFromDockerRuntimes prefers positive evidence over an incomparable harness path", () => {
-  // Both sides are unusable here. The registered value naming nothing is a
-  // reading of the registration; the harness path style is not.
-  assertEquals(
-    cfcTransportReadinessFromDockerRuntimes({
-      runtimeName: "runsc-cfc",
-      runtimes: dockerRuntimes(["--cfc-invocation-context-dir="]),
-      cfcInvocationContextDir: "C:\\work\\cfc",
-    })["invocation-context"],
-    { status: "unwired" },
-  );
-});
-
-Deno.test("cfcTransportReadinessFromDockerRuntimes resolves every absolute/non-absolute pairing the same way", () => {
-  // The two path-shape questions are asked in a fixed order, and the ordering
-  // is the part that was wrong once: a reading of the registration outranks a
-  // reading of the harness path style, because only the first is evidence
-  // about whether anything reads the directory. Four combinations, closed.
-  const cases: Array<
-    { registered: string; configured: string; expected: string; why: string }
-  > = [
-    {
-      registered: "/host/invocations",
-      configured: "/host/invocations",
-      expected: "wired",
-      why: "both absolute and naming one directory",
-    },
-    {
-      registered: "",
-      configured: "/host/invocations",
-      expected: "unwired",
-      why: "registration names nothing; harness path is readable",
-    },
-    {
-      registered: "/host_mnt/c/work/cfc",
-      configured: "C:\\work\\cfc",
-      expected: "indeterminate",
-      why: "registration is readable; harness path style is not comparable",
-    },
-    {
-      registered: "",
-      configured: "C:\\work\\cfc",
-      expected: "unwired",
-      why:
-        "registration names nothing, which outranks an unreadable harness path",
-    },
-  ];
-
-  for (const { registered, configured, expected, why } of cases) {
-    assertEquals(
-      cfcTransportReadinessFromDockerRuntimes({
-        runtimeName: "runsc-cfc",
-        runtimes: dockerRuntimes([
-          `--cfc-invocation-context-dir=${registered}`,
-        ]),
-        cfcInvocationContextDir: configured,
-      })["invocation-context"]?.status,
-      expected,
-      why,
-    );
-  }
-});
-
-Deno.test("cfcTransportReadinessFromDockerRuntimes keeps each transport's reading when the pair disagrees", () => {
-  // The mixed case a single summary verdict cannot express: the result
-  // transport is positively unread while the invocation transport's path
-  // cannot be compared. Summarizing would let `unwired` outrank and erase the
-  // invocation-side `indeterminate`, and the invocation guard would then read
-  // a verdict the result transport produced.
-  const readiness = cfcTransportReadinessFromDockerRuntimes({
-    runtimeName: "runsc-cfc",
-    runtimes: dockerRuntimes([
-      "--cfc-invocation-context-dir=/host_mnt/c/work/cfc",
-    ]),
-    cfcInvocationContextDir: "C:\\work\\cfc",
-    cfcResultDir: "/host/results",
-  });
-
-  assertEquals(readiness["invocation-context"]?.status, "indeterminate");
-  assertEquals(readiness.result?.status, "unwired");
-});
-
-Deno.test("cfcTransportReadinessFromDockerRuntimes reads the last occurrence of a repeated flag", () => {
-  // Docker does not require runtime arguments to be unique and Go's flag
-  // parser applies every occurrence, so the last is what runsc runs with.
-  // Reading the first would report a directory the runtime is not using — in
-  // one order a false `wired`, which starts an enforcing invocation with
-  // neither a refusal nor a recorded indeterminate.
-  assertEquals(
-    cfcTransportReadinessFromDockerRuntimes({
-      runtimeName: "runsc-cfc",
-      runtimes: dockerRuntimes([
-        "--cfc-invocation-context-dir=/host/invocations",
-        "--cfc-invocation-context-dir=relative/invocations",
-      ]),
-      cfcInvocationContextDir: "/host/invocations",
-    })["invocation-context"],
-    { status: "unwired" },
-    "a good value followed by an invalid one must not report wired",
-  );
-  assertEquals(
-    cfcTransportReadinessFromDockerRuntimes({
-      runtimeName: "runsc-cfc",
-      runtimes: dockerRuntimes([
-        "--cfc-invocation-context-dir=relative/invocations",
-        "--cfc-invocation-context-dir=/host/invocations",
-      ]),
-      cfcInvocationContextDir: "/host/invocations",
-    })["invocation-context"],
-    { status: "wired" },
-    "an invalid value followed by a good one must not report unwired",
-  );
-});
-
 Deno.test("DockerRunscSandboxRuntime holds the directories its readiness verdict was read against", async () => {
   // `readonly` is erased at runtime, so it cannot stop a JavaScript caller, a
   // cast, or `any`. The runtime copies both directories at construction, so a
@@ -1503,6 +1179,7 @@ Deno.test("DockerRunscSandboxRuntime holds the directories its readiness verdict
     const runner = new FakeProcessRunner([
       dockerInfoResult([`--cfc-invocation-context-dir=${original}`]),
       create!,
+      dockerInfoResult([`--cfc-invocation-context-dir=${original}`]),
       start!,
       wait!,
       remove!,
@@ -1516,8 +1193,9 @@ Deno.test("DockerRunscSandboxRuntime holds the directories its readiness verdict
     );
 
     assertEquals(
-      (await runtime.probeCfcTransportReadiness())["invocation-context"],
-      { status: "wired" },
+      (await runtime.probeCfcTransportReadiness())["invocation-context"]
+        ?.status,
+      "registered",
     );
     (runtime.config as { cfcInvocationContextDir?: string })
       .cfcInvocationContextDir = "/host/drifted";
@@ -1534,57 +1212,15 @@ Deno.test("DockerRunscSandboxRuntime holds the directories its readiness verdict
       JSON.parse(await Deno.readTextFile(`${original}/container-123.json`)),
       cfcInvocationContext,
     );
+    // Both readings are taken against the copied directory, never the
+    // drifted one.
     assertEquals(
       runner.requests.filter((request) => request.args[0] === "info").length,
-      1,
+      2,
     );
   } finally {
     await Deno.remove(original, { recursive: true });
   }
-});
-
-Deno.test("cfcTransportReadinessFromDockerRuntimes reads the last of two valid absolute registrations", () => {
-  // Multiplicity makes registration order semantic, and two valid absolute
-  // values are not rescued by runsc rejecting a relative one: whichever comes
-  // last is the directory the container actually reads.
-  assertEquals(
-    cfcTransportReadinessFromDockerRuntimes({
-      runtimeName: "runsc-cfc",
-      runtimes: dockerRuntimes([
-        "--cfc-invocation-context-dir=/expected",
-        "--cfc-invocation-context-dir=/other",
-      ]),
-      cfcInvocationContextDir: "/expected",
-    })["invocation-context"],
-    { status: "unwired" },
-    "the configured directory registered first, then overridden, is not read",
-  );
-  assertEquals(
-    cfcTransportReadinessFromDockerRuntimes({
-      runtimeName: "runsc-cfc",
-      runtimes: dockerRuntimes([
-        "--cfc-invocation-context-dir=/other",
-        "--cfc-invocation-context-dir=/expected",
-      ]),
-      cfcInvocationContextDir: "/expected",
-    })["invocation-context"],
-    { status: "wired" },
-    "the configured directory registered last is the one runsc reads",
-  );
-});
-
-Deno.test("cfcTransportReadinessFromDockerRuntimes privileges neither transport when the pair disagrees the other way", () => {
-  // The mirror of the earlier mixed case: there, the invocation transport was
-  // incomparable and the result transport unread. Here the roles swap, which
-  // pins that neither transport's reading is privileged over the other's.
-  const mirrored = cfcTransportReadinessFromDockerRuntimes({
-    runtimeName: "runsc-cfc",
-    runtimes: dockerRuntimes(["--cfc-result-dir=/host_mnt/c/results"]),
-    cfcInvocationContextDir: "/host/invocations",
-    cfcResultDir: "C:\\results",
-  });
-  assertEquals(mirrored["invocation-context"]?.status, "unwired");
-  assertEquals(mirrored.result?.status, "indeterminate");
 });
 
 Deno.test("DockerRunscSandboxRuntime holds the runtime identity its verdict was read against", async () => {
@@ -1630,7 +1266,7 @@ Deno.test("DockerRunscSandboxRuntime probes the runtime an extraDockerArgs overr
   // and Docker takes the last occurrence, so an override there is what the
   // container runs under. Reading the registration of the configured name
   // while launching another would be a verdict about a runtime that never ran
-  // — a false `wired` with no refusal, which is the failure this check exists
+  // — a false `registered` with no refusal, which is the failure this check
   // to stop.
   const cfcInvocationContext = await enforcingInvocationContext();
   const runner = new FakeProcessRunner([
@@ -1693,4 +1329,185 @@ Deno.test("DockerRunscSandboxRuntime holds its extra docker arguments against la
   // runtime whose registration the verdict describes.
   assertEquals(runtime.describe().cfc?.runtimeName, "corp-runsc");
   assertEquals(runtime.describe().cfc?.extraDockerArgsCount, 2);
+});
+
+//
+// The reading asks one question: is a valid absolute directory registered for
+// this flag. It never compares that directory with the harness's, so none of
+// these exercise a path comparison — there is none to exercise.
+//
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes reports a registered absolute directory and carries it", () => {
+  assertEquals(
+    cfcTransportReadinessFromDockerRuntimes({
+      runtimeName: "runsc-cfc",
+      runtimes: dockerRuntimes([
+        "--cfc",
+        "--cfc-invocation-context-dir=/host/invocations",
+        "--cfc-result-dir=/host/results",
+      ]),
+      cfcInvocationContextDir: "/host/invocations",
+      cfcResultDir: "/host/results",
+    }),
+    {
+      "invocation-context": {
+        status: "registered",
+        registeredPath: "/host/invocations",
+      },
+      result: { status: "registered", registeredPath: "/host/results" },
+    },
+  );
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes registers a directory that is not the configured one", () => {
+  // The registered path differs from what the harness writes to, and this is
+  // deliberately NOT a refusal. Two spellings cannot establish two
+  // directories: a symlink, a bind alias or a case-insensitive projection
+  // makes them one. The path travels with the status so an operator can see
+  // the difference the check will not claim to understand.
+  assertEquals(
+    cfcTransportReadinessFromDockerRuntimes({
+      runtimeName: "runsc-cfc",
+      runtimes: dockerRuntimes([
+        "--cfc-invocation-context-dir=/host/somewhere-else",
+      ]),
+      cfcInvocationContextDir: "/host/invocations",
+    })["invocation-context"],
+    { status: "registered", registeredPath: "/host/somewhere-else" },
+  );
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes reports every shape that registers nothing as unregistered", () => {
+  // The one sound status, and the only one that refuses. runsc refuses a
+  // non-absolute `--cfc-*-dir`, so absent, empty and relative all mean the
+  // same thing: nothing reads anywhere, whatever filesystem either side is on.
+  // Docker omits `runtimeArgs` entirely when a runtime carries none, so an
+  // absent key and an empty array are different shapes of the same reading and
+  // both have to be exercised.
+  const cases: Array<[string, readonly string[] | undefined]> = [
+    ["flag absent", ["--cfc", "--cfc-policy=/host/cfc-policy.json"]],
+    ["runtimeArgs key absent", undefined],
+    ["runtimeArgs present but empty", []],
+    ["empty value", ["--cfc-invocation-context-dir="]],
+    ["relative value", ["--cfc-invocation-context-dir=relative/dir"]],
+    ["dot-relative value", ["--cfc-invocation-context-dir=./dir"]],
+  ];
+  for (const [label, runtimeArgs] of cases) {
+    assertEquals(
+      cfcTransportReadinessFromDockerRuntimes({
+        runtimeName: "runsc-cfc",
+        runtimes: dockerRuntimes(runtimeArgs),
+        cfcInvocationContextDir: "/host/invocations",
+      })["invocation-context"],
+      { status: "unregistered" },
+      label,
+    );
+  }
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes reads the last occurrence of a repeated flag", () => {
+  // Go's parser applies every occurrence, so the last is what runsc runs with
+  // and the last is what the reading must report. This decides which path is
+  // carried, and — when the last one is not absolute — whether anything is
+  // registered at all.
+  assertEquals(
+    cfcTransportReadinessFromDockerRuntimes({
+      runtimeName: "runsc-cfc",
+      runtimes: dockerRuntimes([
+        "--cfc-invocation-context-dir=/host/first",
+        "--cfc-invocation-context-dir=/host/last",
+      ]),
+      cfcInvocationContextDir: "/host/first",
+    })["invocation-context"],
+    { status: "registered", registeredPath: "/host/last" },
+  );
+  assertEquals(
+    cfcTransportReadinessFromDockerRuntimes({
+      runtimeName: "runsc-cfc",
+      runtimes: dockerRuntimes([
+        "--cfc-invocation-context-dir=/host/invocations",
+        "--cfc-invocation-context-dir=relative/dir",
+      ]),
+      cfcInvocationContextDir: "/host/invocations",
+    })["invocation-context"],
+    { status: "unregistered" },
+    "a valid value overridden by an invalid one registers nothing",
+  );
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes reads both Go flag spellings", () => {
+  for (
+    const runtimeArgs of [
+      ["-cfc-invocation-context-dir=/host/invocations"],
+      ["--cfc-invocation-context-dir", "/host/invocations"],
+      ["-cfc-invocation-context-dir", "/host/invocations"],
+    ]
+  ) {
+    assertEquals(
+      cfcTransportReadinessFromDockerRuntimes({
+        runtimeName: "runsc-cfc",
+        runtimes: dockerRuntimes(runtimeArgs),
+        cfcInvocationContextDir: "/host/invocations",
+      })["invocation-context"],
+      { status: "registered", registeredPath: "/host/invocations" },
+      `expected ${JSON.stringify(runtimeArgs)} to register the directory`,
+    );
+  }
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes keeps one reading per transport", () => {
+  // The two transports are registered independently and can disagree. A
+  // summary would have to pick one answer, and the invocation guard would then
+  // read a verdict the result transport contributed to.
+  const readiness = cfcTransportReadinessFromDockerRuntimes({
+    runtimeName: "runsc-cfc",
+    runtimes: dockerRuntimes(["--cfc-result-dir=/host/results"]),
+    cfcInvocationContextDir: "/host/invocations",
+    cfcResultDir: "/host/results",
+  });
+  assertEquals(readiness["invocation-context"], { status: "unregistered" });
+  assertEquals(readiness.result, {
+    status: "registered",
+    registeredPath: "/host/results",
+  });
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes ignores a transport the harness is not configured with", () => {
+  assertEquals(
+    cfcTransportReadinessFromDockerRuntimes({
+      runtimeName: "runsc-cfc",
+      runtimes: dockerRuntimes(["--cfc"]),
+    }),
+    {},
+  );
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes reports indeterminate when it cannot read a registration at all", () => {
+  // An unreadable table is a fact about the reading, not about the directory,
+  // and must not be expressed as an absent flag — that would be positive
+  // evidence the check never gathered.
+  const unreadable: Array<[string, unknown]> = [
+    ["no runtime table", "not-json-shaped"],
+    ["runtime not registered", dockerRuntimes(["--cfc"])],
+    ["non-object entry", { "other-runsc": "path-only" }],
+  ];
+  for (const [label, runtimes] of unreadable) {
+    assertEquals(
+      cfcTransportReadinessFromDockerRuntimes({
+        runtimeName: "other-runsc",
+        runtimes,
+        cfcInvocationContextDir: "/host/invocations",
+      })["invocation-context"]?.status,
+      "indeterminate",
+      label,
+    );
+  }
+  assertEquals(
+    cfcTransportReadinessFromDockerRuntimes({
+      runtimeName: "runsc-cfc",
+      runtimes: { "runsc-cfc": { runtimeArgs: [{ cfc: true }] } },
+      cfcInvocationContextDir: "/host/invocations",
+    })["invocation-context"]?.status,
+    "indeterminate",
+  );
 });

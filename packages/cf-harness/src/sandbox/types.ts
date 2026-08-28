@@ -99,47 +99,43 @@ export interface ResolveDockerRunscSandboxConfigOptions {
 export type CfcSidecarTransportKind = "invocation-context" | "result";
 
 /**
- * One transport's reading — and the two halves of it are not equally strong.
+ * One transport's reading.
  *
- * `unwired` is load-bearing and sound. A flag that is absent, empty, relative,
- * or naming another directory is positive evidence that nothing reads the one
- * the harness writes to, and that holds whatever filesystem the daemon
- * resolves paths on. It is the only status that refuses an invocation.
+ * `unregistered` is the only status that refuses, and it is the only one that
+ * is a statement about the world: no valid absolute value is registered for
+ * the flag — absent, empty, or relative, and runsc refuses a non-absolute one
+ * — so nothing reads the harness's directory. That holds under any filesystem
+ * topology, against any daemon, however the arguments were parsed, and
+ * whenever the registration was last reloaded, because **it compares no
+ * paths**. Every attack on this check has been an attack on a comparison; this
+ * status makes none.
  *
- * `wired` claims only that **the runtime's registration named this directory
- * at the moment it was read**. It is deliberately not a claim that the
- * transport works, and nothing behaves differently for it than for
- * `indeterminate` — both proceed. Two facts about Docker keep the stronger
- * claim out of reach, and neither is an oversight that could be patched:
- * bind paths resolve on the daemon's host rather than the client's, so equal
- * path text says nothing when the daemon is elsewhere and no client-side
- * inspection settles where it is; and `runtimes` is SIGHUP-reloadable, so a
- * registration can be replaced after it is read. Affirming the transport would
- * need an end-to-end proof — a sentinel written by the harness and read back
- * from inside the sandbox — which this reading is not.
+ * `registered` says a valid absolute directory is registered, and carries
+ * which one. It is deliberately not a claim that the directory is the one the
+ * harness writes to, and not a claim that the transport works. Comparing the
+ * two spellings cannot establish either: Docker resolves bind paths on the
+ * daemon's host, symlinks and case-insensitive projections make two spellings
+ * one directory, `runtimes` is SIGHUP-reloadable, and Docker generates a shell
+ * wrapper for runtime arguments so what runsc parses is not the array
+ * `docker info` reports. The registered path travels with the status instead,
+ * so an operator can see that it differs without this check pretending that
+ * seeing it differ is knowing it differs. Affirming the transport needs an
+ * end-to-end proof — a sentinel written by the harness and read back from
+ * inside the sandbox — which this reading is not.
  *
- * `indeterminate` is the absence of any reading. Folding it into `unwired`
- * refuses a host whose registration simply could not be read; folding it into
- * `wired` excuses a broken one.
+ * `indeterminate` is the absence of any reading. Folding it into `unregistered`
+ * refuses a host whose registration could not be read; folding it into
+ * `registered` excuses a broken one.
+ *
+ * The word each status carries is what survives: these travel on the wire into
+ * `policy-snapshot.json`, where no doc comment follows them, and a reader who
+ * meets one there has only the word.
  */
 export type CfcSidecarTransportReading =
-  | { status: "wired" }
-  | { status: "unwired" }
+  | { status: "registered"; registeredPath: string }
+  | { status: "unregistered" }
   | { status: "indeterminate"; reason: string };
 
-/**
- * Whether the installed Docker runtime is registered to use the sidecar
- * directories `cf-harness` is configured with — **one reading per transport**,
- * with an entry present exactly when that transport is configured.
- *
- * The pair is read in a single pass but must not be summarized into a single
- * verdict. The two transports are registered independently and can disagree,
- * and a summary has to pick one answer: an `unwired` result directory would
- * otherwise outrank and erase an `indeterminate` invocation-context one, so a
- * consumer asking about input taint would be told about output mediation
- * instead, and an enforcing invocation would start carrying exactly the
- * uncertainty the third state exists to preserve.
- */
 export type CfcTransportReadiness = {
   readonly [K in CfcSidecarTransportKind]?: CfcSidecarTransportReading;
 };
@@ -183,6 +179,7 @@ export interface SandboxRuntimeDescription {
     extraDockerArgsCount?: number;
     invocationContextTransport?: string;
     invocationContextTransportReadiness?: string;
+    invocationContextRegisteredPath?: string;
   };
 }
 
