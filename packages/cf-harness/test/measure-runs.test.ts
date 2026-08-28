@@ -4,6 +4,7 @@ import { fromFileUrl } from "@std/path";
 
 import {
   classifyPatternSource,
+  describeError,
   emptyTotals,
   familyIdOf,
   foldTotals,
@@ -109,6 +110,21 @@ describe("measure-runs", () => {
       expect(classifyPatternSource(
         'import Rating from "cf:pattern:abc";\nimport Local from "./local.ts";\nexport default Local;\n',
       )).toBe("composition");
+    });
+  });
+
+  describe("describeError()", () => {
+    it("returns an `Error`'s message", () => {
+      expect(describeError(new Error("fetch failed"))).toBe("fetch failed");
+    });
+
+    it("returns the string form of a thrown value that is not an `Error`", () => {
+      // A rejected fetch is not the only way into a catch here, and a thrown
+      // string would otherwise render as the word "undefined".
+      expect(describeError("the socket went away")).toBe(
+        "the socket went away",
+      );
+      expect(describeError(undefined)).toBe("undefined");
     });
   });
 
@@ -384,6 +400,10 @@ describe("measure-runs", () => {
         .toBe("ok");
     });
 
+    it("returns `ok` for a result that reported neither a status nor a failure", () => {
+      expect(toolOutcomeOf({ kind: "read", value: {} })).toBe("ok");
+    });
+
     it("returns `unread` for a call the run recorded no result for", () => {
       expect(toolOutcomeOf({ kind: "unread", reason: "no result" }))
         .toBe("unread");
@@ -460,6 +480,108 @@ describe("measure-runs", () => {
       expect(totals.runPatternOutcomes).toEqual({
         "ok": 2,
         "compile-error": 1,
+      });
+    });
+
+    it("counts a delegation whose profile the call omitted, and a slug whose result the run never wrote", () => {
+      const run = measureTranscript("ragged-calls", "parent", [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            {
+              id: "d1",
+              type: "function",
+              function: { name: "delegate_task", arguments: "{}" },
+            },
+            {
+              id: "s1",
+              type: "function",
+              function: {
+                name: "assign_slug",
+                arguments: JSON.stringify({ slug: "orphan" }),
+              },
+            },
+            {
+              id: "r1",
+              type: "function",
+              function: { name: "run_pattern", arguments: "{}" },
+            },
+          ],
+        },
+      ]);
+      const totals = totalsOf(run);
+      expect(totals.delegationProfilesUnread).toBe(1);
+      expect(totals.slugsUnread).toBe(1);
+      expect(totals.slugsAssigned).toBe(0);
+      expect(totals.runPatternsUnreadTarget).toBe(1);
+      expect(run.runPatterns[0].target).toEqual({
+        kind: "unread",
+        reason: "a run_pattern call named neither patternId nor sourceText",
+      });
+    });
+
+    it("records a delegation whose arguments are not JSON as an unread profile", () => {
+      const run = measureTranscript("bad-delegate", "parent", [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{
+            id: "d1",
+            type: "function",
+            function: { name: "delegate_task", arguments: "{nope" },
+          }],
+        },
+      ]);
+      expect(run.delegations[0].profile.kind).toBe("unread");
+      expect(totalsOf(run).delegationProfilesUnread).toBe(1);
+    });
+
+    it("reports a search the index refused without a message as carrying none", () => {
+      const run = measureTranscript("no-message", "parent", [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{
+            id: "q1",
+            type: "function",
+            function: { name: "search_patterns", arguments: "{}" },
+          }],
+        },
+        {
+          role: "tool",
+          toolCallId: "q1",
+          toolName: "search_patterns",
+          content: JSON.stringify({ status: "error" }),
+        },
+      ]);
+      expect(run.searches[0].answer).toEqual({
+        kind: "read",
+        value: { status: "error", message: "(no message)" },
+      });
+    });
+
+    it("skips a tool message whose call id is not a string rather than indexing by it", () => {
+      const run = measureTranscript("odd-id", "parent", [
+        {
+          role: "tool",
+          toolCallId: 7 as unknown as string,
+          toolName: "search_patterns",
+          content: "{}",
+        },
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{
+            id: "q1",
+            type: "function",
+            function: { name: "search_patterns", arguments: "{}" },
+          }],
+        },
+      ]);
+      expect(run.searches[0].answer).toEqual({
+        kind: "unread",
+        reason: "the run recorded no result for this call",
       });
     });
 
@@ -604,6 +726,31 @@ describe("measure-runs", () => {
       });
     });
 
+    it("reports a transcript that is not JSON at all as its own reading", async () => {
+      // Built here rather than committed: a deliberately malformed `.json`
+      // fixture is a file `deno fmt` refuses, and excluding it from formatting
+      // to keep it would be a worse trade than making it at test time.
+      const root = await Deno.makeTempDir();
+      try {
+        await Deno.mkdir(`${root}/unparsable`);
+        await Deno.writeTextFile(
+          `${root}/unparsable/transcript.json`,
+          "not json at all\n",
+        );
+        const report = await measureArtifactRoot(root, ["unparsable"]);
+        const transcript = report.families[0].runs[0].transcript;
+        expect(transcript.kind).toBe("unread");
+        expect(transcript.kind === "unread" ? transcript.reason : "").toContain(
+          "transcript.json is not JSON",
+        );
+        expect(
+          renderReportLines(report).every((line) => !line.includes("\n")),
+        ).toBe(true);
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
+
     it("reports a transcript that could not be read for a reason other than absence as its own reading", async () => {
       const report = await measureArtifactRoot(FIXTURE_ROOT, [
         "unreadable-transcript",
@@ -679,7 +826,11 @@ describe("measure-runs", () => {
       const lines = renderReportLines(await measureArtifactRoot(FIXTURE_ROOT));
       expect(
         lines.filter((line) => line.includes("NOT READ")).map((line) =>
-          line.split("(")[0].trim()
+          // The engine's own parse message is not this repository's to pin.
+          line.split("(")[0].trim().replace(
+            /is not JSON:[\s\S]*/,
+            "is not JSON",
+          )
         ),
       ).toEqual([
         "[parent] NOT READ: transcript.json is not an array of messages",

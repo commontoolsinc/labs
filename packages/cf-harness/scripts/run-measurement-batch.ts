@@ -76,6 +76,16 @@ const SETTLED_TERMINAL_EVENT_KINDS: ReadonlySet<string> = new Set([
 
 const CANCEL_EVENT_KIND = "turn_canceled";
 
+/**
+ * What went wrong, as a line for a report.
+ *
+ * One helper rather than the same ternary at every catch: a thrown value is
+ * not always an `Error`, and a reader of a report should not be able to tell
+ * which catch site produced a reading from how the message is shaped.
+ */
+export const describeError = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 /** One task of a suite: an identifier to file it under, and its exact text. */
 export interface MeasurementTask {
   id: string;
@@ -325,7 +335,7 @@ export const readServerMeta = async (
   } catch (error) {
     return {
       error: `the fabric server at ${fabricApiUrl} could not be reached: ${
-        error instanceof Error ? error.message : String(error)
+        describeError(error)
       }`,
     };
   }
@@ -348,33 +358,47 @@ export const readAncestry = async (
   if (gitSha === undefined) {
     return { kind: "unchecked", reason: "the server reported no gitSha" };
   }
-  const known = await run(["cat-file", "-e", `${gitSha}^{commit}`]);
-  if (!known.success) {
+  try {
+    const known = await run(["cat-file", "-e", `${gitSha}^{commit}`]);
+    if (!known.success) {
+      return {
+        kind: "unchecked",
+        reason:
+          `this clone does not hold ${gitSha}, so whether it is on ${base} cannot be decided here`,
+      };
+    }
+    const ancestor = await run(["merge-base", "--is-ancestor", gitSha, base]);
+    return ancestor.success
+      ? { kind: "ancestor", base }
+      : { kind: "diverged", base };
+  } catch (error) {
+    // A git that cannot be run at all is an unchecked reading, not a batch
+    // that stops: whether the server's commit is on the branch is context for
+    // the report rather than a condition the batch depends on.
     return {
       kind: "unchecked",
-      reason:
-        `this clone does not hold ${gitSha}, so whether it is on ${base} cannot be decided here`,
+      reason: `git could not be run here: ${describeError(error)}`,
     };
   }
-  const ancestor = await run(["merge-base", "--is-ancestor", gitSha, base]);
-  return ancestor.success
-    ? { kind: "ancestor", base }
-    : { kind: "diverged", base };
 };
 
+/**
+ * Runs one `git` command, reporting only whether it succeeded.
+ *
+ * A `git` that cannot be run at all throws, and {@link readAncestry} turns
+ * that into an unchecked reading. Swallowing it here as well would make "git
+ * is missing" indistinguishable from "this clone does not hold that commit",
+ * which are different things to tell a reader.
+ */
 const defaultGitRun = async (
   args: readonly string[],
 ): Promise<{ success: boolean; code: number }> => {
-  try {
-    const output = await new Deno.Command("git", {
-      args: [...args],
-      stdout: "null",
-      stderr: "null",
-    }).output();
-    return { success: output.success, code: output.code };
-  } catch {
-    return { success: false, code: -1 };
-  }
+  const output = await new Deno.Command("git", {
+    args: [...args],
+    stdout: "null",
+    stderr: "null",
+  }).output();
+  return { success: output.success, code: output.code };
 };
 
 /**
@@ -693,7 +717,7 @@ export class ConsoleClient {
     } catch (error) {
       return {
         kind: "unread",
-        reason: error instanceof Error ? error.message : String(error),
+        reason: describeError(error),
       };
     }
   }
@@ -718,7 +742,7 @@ export class ConsoleClient {
     } catch (error) {
       return {
         kind: "refused",
-        reason: error instanceof Error ? error.message : String(error),
+        reason: describeError(error),
       };
     }
     const results = (answer as Record<string, unknown>)?.results;
@@ -739,6 +763,36 @@ export class ConsoleClient {
   }
 
   /**
+   * Whether the index offers one named pattern in search results, or
+   * `undefined` when it would not say.
+   *
+   * `listPatterns` leaves a withheld entry out of its listing entirely, so a
+   * report built from that listing cannot tell a withheld entry from one that
+   * was never published. Asking for the entry by name is the only way to say
+   * which.
+   */
+  async patternDiscoverable(patternId: string): Promise<boolean | undefined> {
+    const pattern = await this.#pattern(patternId);
+    return typeof pattern?.discoverable === "boolean"
+      ? pattern.discoverable
+      : undefined;
+  }
+
+  async #pattern(
+    patternId: string,
+  ): Promise<Record<string, unknown> | undefined> {
+    try {
+      const answer = await this.#json("/api/index/call", {
+        method: "POST",
+        body: JSON.stringify({ fn: "getPattern", body: { patternId } }),
+      }) as Record<string, unknown>;
+      return (answer.pattern ?? answer) as Record<string, unknown>;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * What the index says one pattern depends on, or `undefined` when it would
    * not say. `getPattern` is called without source, exactly as the console's
    * own proxy always calls it.
@@ -746,20 +800,12 @@ export class ConsoleClient {
   async dependenciesOf(
     patternId: string,
   ): Promise<readonly string[] | undefined> {
-    try {
-      const answer = await this.#json("/api/index/call", {
-        method: "POST",
-        body: JSON.stringify({ fn: "getPattern", body: { patternId } }),
-      }) as Record<string, unknown>;
-      const pattern = (answer.pattern ?? answer) as Record<string, unknown>;
-      return Array.isArray(pattern.dependencies)
-        ? pattern.dependencies.filter((entry): entry is string =>
-          typeof entry === "string"
-        )
-        : undefined;
-    } catch {
-      return undefined;
-    }
+    const pattern = await this.#pattern(patternId);
+    return Array.isArray(pattern?.dependencies)
+      ? pattern.dependencies.filter((entry): entry is string =>
+        typeof entry === "string"
+      )
+      : undefined;
   }
 
   /**
@@ -817,14 +863,18 @@ export class ConsoleClient {
           if (SETTLED_TERMINAL_EVENT_KINDS.has(event.kind)) {
             return {
               kind: event.kind as "turn_completed" | "turn_failed",
-              detail: describeTerminalEvent(envelope),
+              detail: describeTerminalEvent(
+                envelope.event as Parameters<typeof describeTerminalEvent>[0],
+              ),
             };
           }
           if (event.kind === CANCEL_EVENT_KIND) {
             // Hold the outcome and keep reading: the run is not on disk yet.
             canceled = {
               kind: "turn_canceled",
-              detail: describeTerminalEvent(envelope),
+              detail: describeTerminalEvent(
+                envelope.event as Parameters<typeof describeTerminalEvent>[0],
+              ),
             };
           }
         }
@@ -833,7 +883,7 @@ export class ConsoleClient {
           return {
             kind: "unwitnessed",
             reason: `the event stream faulted with nothing read: ${
-              error instanceof Error ? error.message : String(error)
+              describeError(error)
             }`,
           };
         }
@@ -856,20 +906,26 @@ export class ConsoleClient {
   }
 }
 
+/**
+ * What a turn's closing event says for itself, for the three kinds that close
+ * one. The parameter is narrowed to those three rather than accepting any
+ * envelope with a fallback, because a fallback here would be a branch no call
+ * can reach and no test can cover — which reads as untested code rather than
+ * as the impossibility it is.
+ */
 const describeTerminalEvent = (
-  envelope: HarnessChatEventEnvelope,
+  event: Extract<
+    HarnessChatEventEnvelope["event"],
+    { kind: "turn_completed" | "turn_failed" | "turn_canceled" }
+  >,
 ): string => {
-  const event = envelope.event;
   if (event.kind === "turn_completed") {
     return event.finalText ?? "(the turn completed with no final text)";
   }
   if (event.kind === "turn_failed") {
     return event.error.message ?? JSON.stringify(event.error);
   }
-  if (event.kind === "turn_canceled") {
-    return event.reason ?? "(canceled with no reason given)";
-  }
-  return event.kind;
+  return event.reason ?? "(canceled with no reason given)";
 };
 
 /**
@@ -928,6 +984,15 @@ export interface BatchResult {
 
   /** Where each pattern the batch composed came from, one hop deep. */
   importedPatternOrigins: Readonly<Record<string, ImportedPatternOrigin>>;
+
+  /**
+   * Whether each superseded seed was still offered in search when the batch
+   * started, read entry by entry. A batch that ran while the superseded copies
+   * were findable measured a different corpus from one that ran after they
+   * were withheld, and the listing alone cannot say which: a withheld entry is
+   * simply absent from it.
+   */
+  supersededVisibility?: Readonly<Record<string, boolean | undefined>>;
   indexBefore: IndexSnapshot;
   indexAfter: IndexSnapshot;
   results: readonly TaskResult[];
@@ -952,9 +1017,7 @@ const readSkillRegistry = async (
     return {
       skillsUnread: error instanceof Deno.errors.NotFound
         ? "the run wrote no skill-registry.json, so it scanned no skills root"
-        : `skill-registry.json could not be read: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        : `skill-registry.json could not be read: ${describeError(error)}`,
     };
   }
   const registry = parsed as { skillsRoot?: unknown; skills?: unknown };
@@ -990,6 +1053,18 @@ export const resolveImportedPatternOrigins = async (
     );
   }
   return origins;
+};
+
+/** Whether each named pattern was findable, asked of the index by name. */
+export const readSupersededVisibility = async (
+  client: ConsoleClient,
+  patternIds: readonly string[],
+): Promise<Readonly<Record<string, boolean | undefined>>> => {
+  const visibility: Record<string, boolean | undefined> = {};
+  for (const patternId of patternIds) {
+    visibility[patternId] = await client.patternDiscoverable(patternId);
+  }
+  return visibility;
 };
 
 /** Runs one task and measures the run it left behind. */
@@ -1045,7 +1120,7 @@ export const runTask = async (
     return {
       ...base,
       measurementUnread: `the artifact root could not be listed: ${
-        error instanceof Error ? error.message : String(error)
+        describeError(error)
       }`,
     };
   }
@@ -1290,6 +1365,43 @@ const renderPosture = (posture: PosturePreflight): string => {
   }\n- Server experimental flags: ${renderBlock(meta?.experimentalFlags)}\n`;
 };
 
+/**
+ * Whether the superseded seeds could be found when the batch began.
+ *
+ * Reported because it decides how a composition of one reads: a session that
+ * found a superseded copy was offered it, and a session that could not find
+ * one was not. Both are legitimate runs and they are not the same run.
+ */
+const renderSupersededVisibility = (
+  visibility: Readonly<Record<string, boolean | undefined>> | undefined,
+): string => {
+  const entries = Object.entries(visibility ?? {});
+  if (entries.length === 0) {
+    return "The suite named no superseded seeds, so there was nothing to ask about.\n";
+  }
+  const findable = entries.filter(([, seen]) => seen === true);
+  const withheld = entries.filter(([, seen]) => seen === false);
+  const unread = entries.filter(([, seen]) => seen === undefined);
+  const lines = [
+    `Of ${entries.length} superseded seeds, ${findable.length} were still offered in search when this batch started, ${withheld.length} were withheld, and ${unread.length} could not be read.`,
+  ];
+  if (findable.length > 0) {
+    lines.push(
+      "",
+      "**Still findable when the batch started**, so a session could have composed a version the committed source cannot rebuild:",
+      ...findable.map(([id]) => `- \`${id}\``),
+    );
+  }
+  if (unread.length > 0) {
+    lines.push(
+      "",
+      "NOT READ, so nothing here says whether these were findable:",
+      ...unread.map(([id]) => `- \`${id}\``),
+    );
+  }
+  return `${lines.join("\n")}\n`;
+};
+
 /** What the index answered the pre-flight search with. */
 const renderPreflight = (preflight: IndexPreflight): string =>
   preflight.kind === "refused"
@@ -1439,6 +1551,10 @@ export const renderBatchReport = (batch: BatchResult): string => {
     "How much of it a run could find, going in:",
     "",
     renderDiscoverability(batch.indexBefore),
+    "Superseded seeds, asked for by name because a withheld entry is absent",
+    "from the listing rather than marked in it:",
+    "",
+    renderSupersededVisibility(batch.supersededVisibility),
     renderIndexChange(indexChangeOf(batch.indexBefore, batch.indexAfter)),
     "## The tasks",
     "",
@@ -1536,6 +1652,11 @@ export const main = async (
   const indexBefore = preflight.kind === "refused"
     ? { kind: "unread" as const, reason: "the pre-flight search was refused" }
     : await client.indexSnapshot();
+  // Taken before the tasks run: whether the superseded copies were findable is
+  // a fact about the corpus this batch measured, and it changes underneath.
+  const supersededVisibility = preflight.kind === "refused"
+    ? {}
+    : await readSupersededVisibility(client, suite.supersededPatternIds ?? []);
   const results: TaskResult[] = [];
   if (preflight.kind === "refused") {
     log(`the index did not answer, so no task ran: ${preflight.reason}`);
@@ -1576,6 +1697,7 @@ export const main = async (
     preflight,
     posture,
     importedPatternOrigins,
+    supersededVisibility,
     indexBefore,
     indexAfter,
     results,
@@ -1606,4 +1728,7 @@ export const main = async (
     : 1;
 };
 
+// deno-coverage-ignore-start -- the entrypoint guard is false under every test
+// that imports this module, which is what it is for
 if (import.meta.main) Deno.exit(await main(Deno.args));
+// deno-coverage-ignore-stop

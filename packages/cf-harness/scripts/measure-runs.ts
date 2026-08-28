@@ -42,6 +42,16 @@ export type TranscriptJson<Value> =
   | { kind: "read"; value: Value }
   | { kind: "unread"; reason: string };
 
+/**
+ * What went wrong, as a line for a report.
+ *
+ * One helper rather than the same ternary at every catch: a thrown value is
+ * not always an `Error`, and a reader of a report should not be able to tell
+ * which catch site produced a reading from how the message is shaped.
+ */
+export const describeError = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
 const read = <Value>(value: Value): TranscriptJson<Value> => ({
   kind: "read",
   value,
@@ -60,9 +70,7 @@ const parseJson = <Value>(
     return read(JSON.parse(text) as Value);
   } catch (error) {
     return unread(
-      `${what} is not JSON: ${
-        error instanceof Error ? error.message : String(error)
-      }`,
+      `${what} is not JSON: ${describeError(error)}`,
     );
   }
 };
@@ -791,9 +799,7 @@ const readTranscript = async (
     return unread(
       error instanceof Deno.errors.NotFound
         ? "the run directory holds no transcript.json"
-        : `transcript.json could not be read: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        : `transcript.json could not be read: ${describeError(error)}`,
     );
   }
   const parsed = parseJson<unknown>(text, "transcript.json");
@@ -875,7 +881,7 @@ export const measureArtifactRoot = async (
 };
 
 const formatSearchQuery = (query: TranscriptJson<SearchQuery>): string => {
-  if (query.kind === "unread") return `(unread: ${query.reason})`;
+  if (query.kind === "unread") return `(unread: ${singleLine(query.reason)})`;
   const parts: string[] = [];
   if (query.value.tags.length > 0) {
     parts.push(`tags=${query.value.tags.join(",")}`);
@@ -890,7 +896,7 @@ const formatSearchAnswer = (
   answer: TranscriptJson<SearchAnswer>,
 ): string =>
   answer.kind === "unread"
-    ? `NOT READ (${answer.reason})`
+    ? `NOT READ (${singleLine(answer.reason)})`
     : answer.value.status === "error"
     ? `refused (${answer.value.message})`
     : `${answer.value.hits} hits`;
@@ -904,12 +910,22 @@ const formatCounts = (counts: Readonly<Record<string, number>>): string => {
     : entries.map(([key, count]) => `${key}=${count}`).join(" ");
 };
 
+/**
+ * One reading, on one line.
+ *
+ * A reason can carry a newline — an engine's parse error quotes the offending
+ * text, which may itself span lines — and the text report's contract is one
+ * reading per line. A reason left unfolded silently becomes two readings, one
+ * of which names nothing.
+ */
+const singleLine = (text: string): string => text.replace(/\s+/g, " ").trim();
+
 /** The per-call lines one run contributes to the rendered report. */
 export const renderRunLines = (run: RunMeasurement): readonly string[] => {
   const label = run.role === "parent" ? "parent" : run.runId;
   const lines: string[] = [];
   if (run.transcript.kind === "unread") {
-    return [`  [${label}] NOT READ: ${run.transcript.reason}`];
+    return [`  [${label}] NOT READ: ${singleLine(run.transcript.reason)}`];
   }
   for (const search of run.searches) {
     lines.push(
@@ -920,10 +936,10 @@ export const renderRunLines = (run: RunMeasurement): readonly string[] => {
   }
   for (const call of run.runPatterns) {
     const outcome = call.outcome.kind === "unread"
-      ? `NOT READ (${call.outcome.reason})`
+      ? `NOT READ (${singleLine(call.outcome.reason)})`
       : call.outcome.value.status;
     const target = call.target.kind === "unread"
-      ? `NOT READ (${call.target.reason})`
+      ? `NOT READ (${singleLine(call.target.reason)})`
       : call.target.value.kind === "pattern-id"
       ? `by id ${call.target.value.patternId}`
       : `source ${call.target.value.sourceBytes}B${
@@ -942,7 +958,7 @@ export const renderRunLines = (run: RunMeasurement): readonly string[] => {
       `  [${label}] delegate -> ${
         delegation.profile.kind === "read"
           ? delegation.profile.value
-          : `NOT READ (${delegation.profile.reason})`
+          : `NOT READ (${singleLine(delegation.profile.reason)})`
       }`,
     );
   }
@@ -951,7 +967,7 @@ export const renderRunLines = (run: RunMeasurement): readonly string[] => {
       `  [${label}] assign_slug ${
         slug.slug.kind === "read"
           ? slug.slug.value
-          : `NOT READ (${slug.slug.reason})`
+          : `NOT READ (${singleLine(slug.slug.reason)})`
       } -> ${
         slug.outcome.kind === "read"
           ? `${slug.outcome.value.status}${
@@ -959,7 +975,7 @@ export const renderRunLines = (run: RunMeasurement): readonly string[] => {
               ? ""
               : ` (${slug.outcome.value.message})`
           }`
-          : `NOT READ (${slug.outcome.reason})`
+          : `NOT READ (${singleLine(slug.outcome.reason)})`
       }`,
     );
   }
@@ -1058,4 +1074,7 @@ export const main = async (
   return 0;
 };
 
+// deno-coverage-ignore-start -- the entrypoint guard is false under every test
+// that imports this module, which is what it is for
 if (import.meta.main) Deno.exit(await main(Deno.args));
+// deno-coverage-ignore-stop

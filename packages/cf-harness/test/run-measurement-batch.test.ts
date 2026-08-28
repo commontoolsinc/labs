@@ -13,11 +13,13 @@ import {
   readAncestry,
   readServerMeta,
   readSseFrames,
+  readSupersededVisibility,
   renderBatchReport,
   resolveImportedPatternOrigins,
   runTask,
 } from "../scripts/run-measurement-batch.ts";
 import { main } from "../scripts/run-measurement-batch.ts";
+import { emptyTotals as emptyMeasurementTotals } from "../scripts/measure-runs.ts";
 
 const FIXTURE_ROOT = fromFileUrl(
   new URL("./support/measure-runs/runs", import.meta.url),
@@ -105,6 +107,15 @@ interface FakeConsoleOptions {
 
   /** What `getPattern` reports each pattern depends on. */
   dependencies?: Readonly<Record<string, readonly string[]>>;
+
+  /** What `getPattern` reports about each pattern's discoverability. */
+  discoverable?: Readonly<Record<string, boolean>>;
+
+  /** A status for `/api/events` to refuse the stream with. */
+  eventStatus?: number;
+
+  /** Break the index response body mid-read, as a dropped connection does. */
+  indexFault?: boolean;
 }
 
 interface FakeConsole {
@@ -148,6 +159,11 @@ const startFakeConsole = (options: FakeConsoleOptions): FakeConsole => {
     }
     if (url.pathname === "/api/events") {
       eventRequests.push(url.searchParams.get("afterSequence") ?? "");
+      if (options.eventStatus !== undefined) {
+        return new Response("no stream for you", {
+          status: options.eventStatus,
+        });
+      }
       // A server with nothing more to say closes rather than repeating
       // itself, which is what lets a caller tell "still working" from "gone".
       const stream = options.streams[streamIndex++] ??
@@ -174,6 +190,16 @@ const startFakeConsole = (options: FakeConsoleOptions): FakeConsole => {
       });
     }
     if (url.pathname === "/api/index/call") {
+      if (options.indexFault) {
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              controller.error(new Error("the socket went away"));
+            },
+          }),
+          { headers: { "content-type": "application/json" } },
+        );
+      }
       const answer = options.indexAnswer;
       if (answer !== undefined) {
         return Response.json(answer.body, { status: answer.status });
@@ -187,9 +213,11 @@ const startFakeConsole = (options: FakeConsoleOptions): FakeConsole => {
       }
       if (body.fn === "getPattern") {
         const patternId = body.body?.patternId ?? "";
+        const discoverable = options.discoverable?.[patternId];
         return Response.json({
           patternId,
           dependencies: options.dependencies?.[patternId] ?? [],
+          ...(discoverable === undefined ? {} : { discoverable }),
         });
       }
       return Response.json({ patterns: options.patterns ?? [] });
@@ -274,6 +302,33 @@ describe("run-measurement-batch", () => {
         notes: "against the seeded index",
         tasks: [{ id: "books", text: "Track the books I am reading." }],
       });
+    });
+
+    it("throws for a suite that is not a JSON object", () => {
+      expect(() => parseMeasurementSuite("a string")).toThrow(
+        "must be a JSON object",
+      );
+    });
+
+    it("throws for a suite whose notes are not a string", () => {
+      expect(() =>
+        parseMeasurementSuite({
+          label: "l",
+          notes: 7,
+          tasks: [{ id: "a", text: "one" }],
+        })
+      ).toThrow("notes must be a string");
+    });
+
+    it("throws for a task that is not a JSON object", () => {
+      expect(() => parseMeasurementSuite({ label: "l", tasks: ["nope"] }))
+        .toThrow("task 0 is not a JSON object");
+    });
+
+    it("throws for a task carrying no id", () => {
+      expect(() =>
+        parseMeasurementSuite({ label: "l", tasks: [{ text: "one" }] })
+      ).toThrow("task 0 carries no id");
     });
 
     it("throws for a suite carrying no tasks", () => {
@@ -579,6 +634,49 @@ describe("run-measurement-batch", () => {
         }
       });
 
+      it("returns an unwitnessed outcome naming the status when the console refuses the stream", async () => {
+        const console_ = startFakeConsole({
+          streams: [completedStream()],
+          eventStatus: 503,
+        });
+        try {
+          const client = await ConsoleClient.open(console_.url);
+          const started = await client.startTask("Track my books.");
+          expect(await client.awaitTurn(started)).toEqual({
+            kind: "unwitnessed",
+            reason: "/api/events answered 503",
+          });
+        } finally {
+          await console_.close();
+        }
+      });
+
+      it("reads past a terminal event belonging to another turn of the same session", async () => {
+        const console_ = startFakeConsole({
+          streams: [{
+            frames: [
+              chatFrame(4, "session-1", {
+                kind: "turn_completed",
+                turnId: "turn-earlier",
+                finalText: "an older turn",
+              }),
+              ...completedStream(9).frames,
+            ],
+            keepOpen: true,
+          }],
+        });
+        try {
+          const client = await ConsoleClient.open(console_.url);
+          const started = await client.startTask("Track my books.");
+          expect(await client.awaitTurn(started)).toEqual({
+            kind: "turn_completed",
+            detail: "Your reading list is at /reading-list.",
+          });
+        } finally {
+          await console_.close();
+        }
+      });
+
       it("returns an unwitnessed outcome for a stream the console closes having said nothing", async () => {
         const console_ = startFakeConsole({
           streams: [{ frames: [], keepOpen: false }],
@@ -805,6 +903,150 @@ describe("run-measurement-batch", () => {
     });
   });
 
+  describe("readServerMeta()/readAncestry() edges", () => {
+    it("returns only what the server reported, omitting fields it did not send", async () => {
+      expect(
+        await readServerMeta("http://server", metaFetch({ gitSha: "abc" })),
+      ).toEqual({ gitSha: "abc" });
+    });
+
+    it("returns `unchecked` when git itself cannot be run", async () => {
+      const reading = await readAncestry("abc", "main", () => {
+        throw new Error("git is not on the path");
+      });
+      expect(reading.kind).toBe("unchecked");
+      // Distinct from "this clone does not hold that commit", which is what a
+      // git that ran and answered would have said.
+      expect(reading.kind === "unchecked" ? reading.reason : "").toContain(
+        "git could not be run here",
+      );
+    });
+  });
+
+  describe("index reads against a console that has gone away", () => {
+    /**
+     * Opens a client and then stops the server under it, so the next request
+     * fails at the socket rather than with a status. That is the shape of a
+     * console an unattended batch outlives, and it is the only way to reach
+     * these paths: an HTTP error is an answer, and this is the absence of one.
+     */
+    const clientWithNoServer = async (): Promise<ConsoleClient> => {
+      const console_ = startFakeConsole({ streams: [completedStream()] });
+      const client = await ConsoleClient.open(console_.url);
+      await console_.close();
+      return client;
+    };
+
+    it("returns a refusal naming the fault for a pre-flight that could not reach the console", async () => {
+      const preflight = await (await clientWithNoServer()).preflightIndex(
+        "pattern",
+      );
+      expect(preflight.kind).toBe("refused");
+      expect(preflight.kind === "refused" ? preflight.reason : "").not.toBe("");
+    });
+
+    it("returns an unread snapshot for a listing that could not reach the console", async () => {
+      const snapshot = await (await clientWithNoServer()).indexSnapshot();
+      expect(snapshot.kind).toBe("unread");
+      expect(snapshot.kind === "unread" ? snapshot.reason : "").not.toBe("");
+    });
+  });
+
+  describe("indexSnapshot() shapes", () => {
+    it("returns an unread snapshot for an answer that is not an object", async () => {
+      const console_ = startFakeConsole({
+        streams: [completedStream()],
+        indexAnswer: { status: 200, body: "not an object" },
+      });
+      try {
+        const client = await ConsoleClient.open(console_.url);
+        expect(await client.indexSnapshot()).toEqual({
+          kind: "unread",
+          reason: "the index answered with no object",
+        });
+      } finally {
+        await console_.close();
+      }
+    });
+
+    it("reads each listed pattern and the count the index left out of the listing", async () => {
+      const console_ = startFakeConsole({
+        streams: [completedStream()],
+        indexAnswer: {
+          status: 200,
+          body: {
+            patterns: [
+              { ...patternOf("shown", 3), discoverable: true },
+              { patternId: "bare" },
+            ],
+            nonDiscoverableCount: 17,
+          },
+        },
+      });
+      try {
+        const client = await ConsoleClient.open(console_.url);
+        const snapshot = await client.indexSnapshot();
+        expect(snapshot.kind).toBe("read");
+        if (snapshot.kind !== "read") return;
+        expect(snapshot.nonDiscoverableCount).toBe(17);
+        expect(snapshot.patterns[0]).toEqual({
+          patternId: "shown",
+          description: "shown does a thing.",
+          score: 3,
+          events: { published: 1 },
+          discoverable: true,
+        });
+        // A row with nothing on it still reads, with the absences visible.
+        expect(snapshot.patterns[1].description).toBe("");
+        expect(Number.isNaN(snapshot.patterns[1].score)).toBe(true);
+        expect(snapshot.patterns[1].discoverable).toBeUndefined();
+      } finally {
+        await console_.close();
+      }
+    });
+  });
+
+  describe("startTask()", () => {
+    it("throws for a console that answered without a session and turn", async () => {
+      const server = Deno.serve({ port: 0, onListen: () => {} }, (request) => {
+        const url = new URL(request.url);
+        if (url.pathname === "/") {
+          return new Response("", {
+            headers: { "set-cookie": `${TOKEN}; Path=/` },
+          });
+        }
+        return Response.json({ nothing: true });
+      });
+      try {
+        const client = await ConsoleClient.open(
+          `http://127.0.0.1:${(server.addr as Deno.NetAddr).port}`,
+        );
+        await expect(client.startTask("do a thing")).rejects.toThrow(
+          "answered without a session and turn",
+        );
+      } finally {
+        await server.shutdown();
+      }
+    });
+  });
+
+  describe("readSupersededVisibility()", () => {
+    it("returns whether each named pattern is still offered in search", async () => {
+      const console_ = startFakeConsole({
+        streams: [completedStream()],
+        discoverable: { archived: false, live: true },
+      });
+      try {
+        const client = await ConsoleClient.open(console_.url);
+        expect(
+          await readSupersededVisibility(client, ["archived", "live", "quiet"]),
+        ).toEqual({ archived: false, live: true, quiet: undefined });
+      } finally {
+        await console_.close();
+      }
+    });
+  });
+
   describe("preflightIndex()", () => {
     it("returns the result and candidate counts for an index that answered", async () => {
       const console_ = startFakeConsole({ streams: [completedStream()] });
@@ -960,6 +1202,130 @@ describe("run-measurement-batch", () => {
       }
     });
 
+    it("records that the artifact root could not be listed rather than reporting no calls", async () => {
+      const console_ = startFakeConsole({
+        streams: [completedStream()],
+        runId: "fixture-run",
+        artifactRoot: "/no/such/artifact/root",
+      });
+      try {
+        const client = await ConsoleClient.open(console_.url);
+        const result = await runTask(
+          client,
+          { id: "books", text: "Track the books I am reading." },
+          () => {},
+        );
+        expect(result.measurement).toBeUndefined();
+        expect(result.measurementUnread).toContain(
+          "the artifact root could not be listed",
+        );
+      } finally {
+        await console_.close();
+      }
+    });
+
+    it("counts no skills for a registry whose skills field is not a list", async () => {
+      const dir = await Deno.makeTempDir();
+      try {
+        await Deno.mkdir(`${dir}/fixture-run`);
+        await Deno.writeTextFile(
+          `${dir}/fixture-run/skill-registry.json`,
+          JSON.stringify({ skillsRoot: "/repo/skills", skills: "lots" }),
+        );
+        await Deno.writeTextFile(
+          `${dir}/fixture-run/transcript.json`,
+          JSON.stringify([{ role: "user", content: "hi" }]),
+        );
+        const console_ = startFakeConsole({
+          streams: [completedStream()],
+          runId: "fixture-run",
+          artifactRoot: dir,
+        });
+        try {
+          const client = await ConsoleClient.open(console_.url);
+          const result = await runTask(
+            client,
+            { id: "a", text: "do a thing" },
+            () => {},
+          );
+          expect(result.configuration.skillsRoot).toBe("/repo/skills");
+          expect(result.configuration.skillsFound).toBe(0);
+        } finally {
+          await console_.close();
+        }
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("records a skill registry that could not be read for a reason other than absence", async () => {
+      const dir = await Deno.makeTempDir();
+      try {
+        await Deno.mkdir(`${dir}/fixture-run/skill-registry.json`, {
+          recursive: true,
+        });
+        await Deno.writeTextFile(
+          `${dir}/fixture-run/transcript.json`,
+          JSON.stringify([{ role: "user", content: "hi" }]),
+        );
+        const console_ = startFakeConsole({
+          streams: [completedStream()],
+          runId: "fixture-run",
+          artifactRoot: dir,
+        });
+        try {
+          const client = await ConsoleClient.open(console_.url);
+          const result = await runTask(
+            client,
+            { id: "a", text: "do a thing" },
+            () => {},
+          );
+          expect(result.configuration.skillsUnread).toContain(
+            "skill-registry.json could not be read",
+          );
+        } finally {
+          await console_.close();
+        }
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("records a skill registry that names no skills root as its own reading", async () => {
+      const dir = await Deno.makeTempDir();
+      try {
+        await Deno.mkdir(`${dir}/fixture-run`);
+        await Deno.writeTextFile(
+          `${dir}/fixture-run/skill-registry.json`,
+          JSON.stringify({ type: "cf-harness.skill-registry", skills: [] }),
+        );
+        await Deno.writeTextFile(
+          `${dir}/fixture-run/transcript.json`,
+          JSON.stringify([{ role: "user", content: "hi" }]),
+        );
+        const console_ = startFakeConsole({
+          streams: [completedStream()],
+          runId: "fixture-run",
+          artifactRoot: dir,
+        });
+        try {
+          const client = await ConsoleClient.open(console_.url);
+          const result = await runTask(
+            client,
+            { id: "books", text: "do a thing" },
+            () => {},
+          );
+          expect(result.configuration.skillsUnread).toBe(
+            "skill-registry.json names no skills root",
+          );
+        } finally {
+          await console_.close();
+        }
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
     it("records why a session's run could not be measured rather than reporting no calls", async () => {
       const console_ = startFakeConsole({ streams: [completedStream()] });
       try {
@@ -1109,6 +1475,59 @@ describe("run-measurement-batch", () => {
       }
     });
 
+    it("records the notes, the seeded marks and the superseded visibility a full suite asks for", async () => {
+      const { dir, code } = await runMain({
+        streams: [completedStream()],
+        runId: "fixture-run",
+        artifactRoot: FIXTURE_ROOT,
+        discoverable: { "stale-one": true, "stale-two": false },
+        dependencies: { "pub-reading-shelf": [] },
+      }, {
+        ...ONE_TASK,
+        notes: "Run against the gardened corpus.",
+        seededPatternIds: ["pub-rating"],
+        supersededPatternIds: ["stale-one", "stale-two"],
+      });
+      try {
+        expect(code).toBe(0);
+        const report = await Deno.readTextFile(`${dir}/out/report.md`);
+        expect(report).toContain("Run against the gardened corpus.");
+        expect(report).toContain("`pub-rating` **(seeded)**");
+        expect(report).toContain("`pub-reading-shelf` (pre-existing)");
+        expect(report).toContain(
+          "Of 2 superseded seeds, 1 were still offered in search when this batch started, 1 were withheld, and 0 could not be read.",
+        );
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("writes its report under a dated directory when given no --out", async () => {
+      const console_ = startFakeConsole({ streams: [completedStream()] });
+      const dir = await Deno.makeTempDir();
+      const cwd = Deno.cwd();
+      try {
+        const suitePath = `${dir}/suite.json`;
+        await Deno.writeTextFile(suitePath, JSON.stringify(ONE_TASK));
+        Deno.chdir(dir);
+        await main([
+          suitePath,
+          `--console=${console_.url}`,
+          `--fabric-api-url=${console_.url}`,
+        ], () => {});
+        const measurements = `${dir}/.cf-harness-console/measurements`;
+        const written = [...Deno.readDirSync(measurements)];
+        expect(written).toHaveLength(1);
+        expect(
+          await Deno.stat(`${measurements}/${written[0].name}/report.md`),
+        ).toBeDefined();
+      } finally {
+        Deno.chdir(cwd);
+        await console_.close();
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
     it("returns 2 and names its usage when given no suite", async () => {
       const logs: string[] = [];
       expect(await main([], (line) => logs.push(line))).toBe(2);
@@ -1250,6 +1669,99 @@ describe("run-measurement-batch", () => {
         results: [],
       });
       expect(report).toContain("No task imported a published pattern.");
+    });
+
+    it("names a superseded seed that was still findable when the batch started", async () => {
+      const report = renderBatchReport({
+        suite: {
+          label: "l",
+          tasks: [{ id: "a", text: "do a thing" }],
+          supersededPatternIds: ["stale-a", "stale-b"],
+        },
+        consoleUrl: "http://127.0.0.1:1",
+        indexUrl: null,
+        startedAt: "2026-08-28T21:00:00.000Z",
+        endedAt: "2026-08-28T21:00:01.000Z",
+        preflight: { kind: "answered", results: 1 },
+        posture: POSTURE,
+        importedPatternOrigins: {},
+        supersededVisibility: { "stale-a": true, "stale-b": false },
+        indexBefore: { kind: "read", patterns: [] as never },
+        indexAfter: { kind: "read", patterns: [] as never },
+        results: [],
+      });
+      expect(report).toContain(
+        "Of 2 superseded seeds, 1 were still offered in search when this batch started, 1 were withheld, and 0 could not be read.",
+      );
+      expect(report).toContain("- `stale-a`");
+    });
+
+    it("says a superseded seed's visibility could not be read rather than assuming it was withheld", () => {
+      const report = renderBatchReport({
+        suite: {
+          label: "l",
+          tasks: [{ id: "a", text: "do a thing" }],
+          supersededPatternIds: ["stale-a"],
+        },
+        consoleUrl: "http://127.0.0.1:1",
+        indexUrl: null,
+        startedAt: "2026-08-28T21:00:00.000Z",
+        endedAt: "2026-08-28T21:00:01.000Z",
+        preflight: { kind: "answered", results: 1 },
+        posture: POSTURE,
+        importedPatternOrigins: {},
+        supersededVisibility: { "stale-a": undefined },
+        indexBefore: { kind: "read", patterns: [] as never },
+        indexAfter: { kind: "read", patterns: [] as never },
+        results: [],
+      });
+      expect(report).toContain("NOT READ, so nothing here says whether");
+    });
+
+    it("marks a composed identifier the batch resolved no origin for", () => {
+      const report = renderBatchReport({
+        suite: {
+          label: "l",
+          tasks: [{ id: "a", text: "do a thing" }],
+          seededPatternIds: ["seed"],
+          supersededPatternIds: ["stale"],
+        },
+        consoleUrl: "http://127.0.0.1:1",
+        indexUrl: null,
+        startedAt: "2026-08-28T21:00:00.000Z",
+        endedAt: "2026-08-28T21:00:01.000Z",
+        preflight: { kind: "answered", results: 1 },
+        posture: POSTURE,
+        importedPatternOrigins: {
+          stale: { kind: "seeded-superseded" },
+          mystery: { kind: "unresolved", reason: "the index said nothing" },
+        },
+        indexBefore: { kind: "read", patterns: [] as never },
+        indexAfter: { kind: "read", patterns: [] as never },
+        results: [{
+          task: { id: "a", text: "do a thing" },
+          sessionId: "s",
+          turnId: "t",
+          outcome: { kind: "turn_completed", detail: "done" },
+          configuration: {},
+          measurement: {
+            familyId: "f",
+            runs: [],
+            totals: {
+              ...emptyMeasurementTotals(),
+              importedPatternIds: ["stale", "mystery", "unlisted"],
+              runPatternsComposing: 2,
+            },
+          },
+        }],
+      });
+      expect(report).toContain("**(seeded, superseded duplicate");
+      expect(report).toContain(
+        "`mystery` (ORIGIN NOT RESOLVED — the index said nothing)",
+      );
+      expect(report).toContain(
+        "`unlisted` (ORIGIN NOT RESOLVED — this batch resolved no origin for it)",
+      );
     });
 
     it("names what the batch added to the index", async () => {

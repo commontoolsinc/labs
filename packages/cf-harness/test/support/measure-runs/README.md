@@ -5,7 +5,7 @@ extractor is pinned against transcripts whose contents are known rather than
 against whatever a machine happens to be holding under
 `.cf-harness-console/runs`.
 
-`runs/` is an artifact root of six directories:
+`runs/` is an artifact root of five directories:
 
 - `fixture-run/` — the parent run. Its searches cover every answer the extractor
   distinguishes: two hits, none, a refusal from the index, and one call the run
