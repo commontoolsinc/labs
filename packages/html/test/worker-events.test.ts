@@ -497,6 +497,20 @@ Deno.test("events - serializeEvent", async (t) => {
     assertEquals(serialized.target?.value, 42n);
   });
 
+  await t.step("carries a `CellHandle` handed over as a whole detail", () => {
+    // The one way a handle reaches the general conversion: a target property is
+    // checked for one before delegating, so this is a component emitting a
+    // handle as the detail itself rather than inside a record.
+    const handle = makeHandle();
+    const event = new MockCustomEvent("custom", {
+      detail: handle,
+    }) as unknown as Event;
+
+    const serialized = serializeEvent(event);
+
+    assertEquals(serialized.detail, handle.toJSON());
+  });
+
   await t.step("carries a `FabricBytes` in a detail as its own bytes", () => {
     // A fabric primitive's state is not enumerable properties, so the round
     // trip rendered one as `{}`.
