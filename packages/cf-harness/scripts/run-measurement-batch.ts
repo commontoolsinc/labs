@@ -160,6 +160,20 @@ export const parseMeasurementSuite = (input: unknown): MeasurementSuite => {
       throw new Error(`a task suite's ${field} must be a list of strings`);
     }
   }
+  // Provenance must not depend on which branch a classifier happens to test
+  // first. An identifier in both lists is a suite that has not decided what it
+  // is claiming, and taking the seeded branch would silently drop the
+  // superseded reading — the misattribution the third category exists to stop.
+  const bothLists = ((seededPatternIds ?? []) as readonly string[]).filter(
+    (id) => ((supersededPatternIds ?? []) as readonly string[]).includes(id),
+  );
+  if (bothLists.length > 0) {
+    throw new Error(
+      `a task suite names ${
+        bothLists.join(", ")
+      } as both seeded and superseded; an identifier is one or the other`,
+    );
+  }
   const seen = new Set<string>();
   const parsed = tasks.map((task, index) => {
     if (typeof task !== "object" || task === null) {
@@ -466,7 +480,17 @@ export const preflightPosture = async (
 export type ImportedPatternOrigin =
   | { kind: "seeded" }
   | { kind: "seeded-superseded" }
-  | { kind: "seeded-via-alias"; through: readonly string[] }
+  | {
+    kind: "seeded-via-alias";
+    /** Seeded patterns this one depends on. */
+    through: readonly string[];
+    /**
+     * Superseded seeds it depends on. Kept apart from `through` because an
+     * alias of a superseded copy inherits the fact that the committed source
+     * cannot rebuild it, and folding the two loses exactly that.
+     */
+    throughSuperseded: readonly string[];
+  }
   | { kind: "pre-existing" }
   | { kind: "unresolved"; reason: string };
 
@@ -485,11 +509,12 @@ export const classifyImportedPattern = (
       reason: "the index did not say what this pattern depends on",
     };
   }
-  const through = dependencies.filter((dependency) =>
-    seeded.has(dependency) || superseded.has(dependency)
+  const through = dependencies.filter((dependency) => seeded.has(dependency));
+  const throughSuperseded = dependencies.filter((dependency) =>
+    superseded.has(dependency)
   );
-  return through.length > 0
-    ? { kind: "seeded-via-alias", through }
+  return through.length > 0 || throughSuperseded.length > 0
+    ? { kind: "seeded-via-alias", through, throughSuperseded }
     : { kind: "pre-existing" };
 };
 
@@ -844,7 +869,12 @@ export class ConsoleClient {
   async awaitTurn(started: StartedTask): Promise<TurnOutcome> {
     let canceled: TurnOutcome | undefined;
     for (;;) {
-      let frames = 0;
+      // Progress is the sequence advancing, not frames arriving. A reconnect
+      // that replays envelopes this client has already seen delivers frames
+      // and advances nothing, and counting those as progress reopens the
+      // stream forever — the same defect as a stand-in that never stops
+      // talking, on the client side of the same conversation.
+      const sequenceBefore = this.#sequence;
       try {
         const response = await this.#fetch(
           `${this.#baseUrl}/api/events?sessionId=${
@@ -859,7 +889,6 @@ export class ConsoleClient {
           };
         }
         for await (const frame of readSseFrames(response.body)) {
-          frames += 1;
           if (frame.event !== CHAT_SSE_EVENT) continue;
           const envelope = JSON.parse(frame.data) as HarnessChatEventEnvelope;
           this.#sequence = Math.max(this.#sequence, envelope.sequence);
@@ -893,20 +922,22 @@ export class ConsoleClient {
           }
         }
       } catch (error) {
-        if (frames === 0) {
+        if (this.#sequence === sequenceBefore) {
           return {
             kind: "unwitnessed",
-            reason: `the event stream faulted with nothing read: ${
-              describeError(error)
-            }`,
+            reason:
+              `the event stream faulted without advancing past ${sequenceBefore}: ${
+                describeError(error)
+              }`,
           };
         }
+        continue;
       }
-      if (frames === 0) {
+      if (this.#sequence === sequenceBefore) {
         return {
           kind: "unwitnessed",
           reason: canceled === undefined
-            ? "the console closed the event stream without delivering a frame"
+            ? `the console closed the event stream without advancing past ${sequenceBefore}`
             : "the turn was canceled and the console never reported the session idle, so its run may be half written",
         };
       }
@@ -1461,10 +1492,21 @@ const renderComposition = (
         return `\`${id}\` **(seeded)**`;
       case "seeded-superseded":
         return `\`${id}\` **(seeded, superseded duplicate — not reproducible from the committed source)**`;
-      case "seeded-via-alias":
-        return `\`${id}\` **(seeded, via alias of ${
-          origin.through.join(", ")
-        })**`;
+      case "seeded-via-alias": {
+        const parts = [
+          ...(origin.through.length > 0
+            ? [`via alias of ${origin.through.join(", ")}`]
+            : []),
+          ...(origin.throughSuperseded.length > 0
+            ? [
+              `via alias of superseded ${
+                origin.throughSuperseded.join(", ")
+              }, which the committed source cannot rebuild`,
+            ]
+            : []),
+        ];
+        return `\`${id}\` **(seeded, ${parts.join("; ")})**`;
+      }
       case "pre-existing":
         return `\`${id}\` (pre-existing)`;
       case "unresolved":

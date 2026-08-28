@@ -358,6 +358,20 @@ describe("run-measurement-batch", () => {
       ).toEqual(["seed-1", "seed-2"]);
     });
 
+    it("throws for an identifier named as both seeded and superseded", () => {
+      // Provenance would otherwise depend on which branch the classifier tests
+      // first, and the seeded branch runs first, so the superseded reading
+      // would vanish silently.
+      expect(() =>
+        parseMeasurementSuite({
+          label: "l",
+          tasks: [{ id: "a", text: "one" }],
+          seededPatternIds: ["both", "fine"],
+          supersededPatternIds: ["both"],
+        })
+      ).toThrow("as both seeded and superseded");
+    });
+
     it("throws for superseded pattern identifiers that are not strings", () => {
       expect(() =>
         parseMeasurementSuite({
@@ -490,9 +504,18 @@ describe("run-measurement-batch", () => {
       it("resumes from the newest sequence it read when the stream is reopened", async () => {
         const console_ = startFakeConsole({
           streams: [
-            // A stream the server closes having delivered only a liveness
-            // tick: progress, so the client reconnects rather than giving up.
-            { frames: ["event: ping\ndata: 1\n\n"], keepOpen: false },
+            // A stream the server closes having advanced the sequence: real
+            // progress, so the client reconnects rather than giving up. A
+            // liveness tick alone would not be — frames are not progress.
+            {
+              frames: [
+                chatFrame(4, "session-1", {
+                  kind: "assistant_completed",
+                  text: "working",
+                }),
+              ],
+              keepOpen: false,
+            },
             completedStream(11),
           ],
         });
@@ -500,7 +523,9 @@ describe("run-measurement-batch", () => {
           const client = await ConsoleClient.open(console_.url);
           const started = await client.startTask("Track my books.");
           expect((await client.awaitTurn(started)).kind).toBe("turn_completed");
-          expect(console_.eventRequests).toEqual(["0", "0"]);
+          // The reconnect resumes from the sequence the first stream reached,
+          // which is both the resume contract and the progress measure.
+          expect(console_.eventRequests).toEqual(["0", "4"]);
           const second = await client.startTask("Track my films.");
           await client.awaitTurn(second);
           expect(console_.eventRequests[2]).toBe("11");
@@ -589,11 +614,66 @@ describe("run-measurement-batch", () => {
         }
       });
 
+      it("stops rather than reopening forever when a reconnect replays what it already read", async () => {
+        // Frames arriving is not progress. Two identical streams deliver
+        // frames and advance nothing; counting those as progress reopens the
+        // stream for as long as the console repeats itself.
+        const replay = {
+          frames: [
+            chatFrame(1, "session-1", {
+              kind: "assistant_completed",
+              text: "thinking",
+            }),
+          ],
+          keepOpen: false,
+        };
+        const replaying = startFakeConsole({ streams: [replay, replay] });
+        try {
+          const client = await ConsoleClient.open(replaying.url);
+          const started = await client.startTask("Track my books.");
+          const outcome = await client.awaitTurn(started);
+          expect(outcome.kind).toBe("unwitnessed");
+          expect(outcome.kind === "unwitnessed" ? outcome.reason : "")
+            .toContain("without advancing past 1");
+          expect(replaying.eventRequests).toHaveLength(2);
+        } finally {
+          await replaying.close();
+        }
+      });
+
+      it("stops when a held cancel is followed by a replay that advances nothing", async () => {
+        const canceled = {
+          frames: [
+            chatFrame(5, "session-1", {
+              kind: "turn_canceled",
+              turnId: "turn-1",
+            }),
+          ],
+          keepOpen: false,
+        };
+        const console_ = startFakeConsole({ streams: [canceled, canceled] });
+        try {
+          const client = await ConsoleClient.open(console_.url);
+          const started = await client.startTask("Track my books.");
+          const outcome = await client.awaitTurn(started);
+          expect(outcome.kind).toBe("unwitnessed");
+          expect(outcome.kind === "unwitnessed" ? outcome.reason : "")
+            .toContain("may be half written");
+        } finally {
+          await console_.close();
+        }
+      });
+
       it("reopens a stream that faulted part way and reads the turn from the next one", async () => {
         const console_ = startFakeConsole({
           streams: [
             {
-              frames: ["event: ping\ndata: 1\n\n"],
+              frames: [
+                chatFrame(3, "session-1", {
+                  kind: "assistant_completed",
+                  text: "working",
+                }),
+              ],
               keepOpen: false,
               fault: true,
             },
@@ -619,7 +699,7 @@ describe("run-measurement-batch", () => {
           const outcome = await client.awaitTurn(started);
           expect(outcome.kind).toBe("unwitnessed");
           expect(outcome.kind === "unwitnessed" ? outcome.reason : "")
-            .toContain("faulted with nothing read");
+            .toContain("faulted without advancing past");
         } finally {
           await console_.close();
         }
@@ -663,6 +743,25 @@ describe("run-measurement-batch", () => {
         }
       });
 
+      it("reads past a liveness tick, which is not a chat envelope", async () => {
+        const console_ = startFakeConsole({
+          streams: [{
+            frames: [
+              "event: ping\ndata: 1\n\n",
+              ...completedStream(6).frames,
+            ],
+            keepOpen: true,
+          }],
+        });
+        try {
+          const client = await ConsoleClient.open(console_.url);
+          const started = await client.startTask("Track my books.");
+          expect((await client.awaitTurn(started)).kind).toBe("turn_completed");
+        } finally {
+          await console_.close();
+        }
+      });
+
       it("reads past a terminal event belonging to another turn of the same session", async () => {
         const console_ = startFakeConsole({
           streams: [{
@@ -699,7 +798,7 @@ describe("run-measurement-batch", () => {
           expect(await client.awaitTurn(started)).toEqual({
             kind: "unwitnessed",
             reason:
-              "the console closed the event stream without delivering a frame",
+              "the console closed the event stream without advancing past 0",
           });
         } finally {
           await console_.close();
@@ -881,6 +980,7 @@ describe("run-measurement-batch", () => {
         .toEqual({
           kind: "seeded-via-alias",
           through: ["seed-b"],
+          throughSuperseded: [],
         });
     });
 
@@ -890,10 +990,17 @@ describe("run-measurement-batch", () => {
       ).toEqual({ kind: "seeded-superseded" });
     });
 
-    it("returns `seeded-via-alias` for a pattern depending on a superseded seed", () => {
+    it("keeps the superseded fact for an alias of a superseded seed", () => {
+      // Folded into `through`, this would report the alias as reaching a live
+      // seed and drop that the committed source cannot rebuild what it
+      // actually reaches.
       expect(
         classifyImportedPattern("alias", seeded, new Set(["old"]), ["old"]),
-      ).toEqual({ kind: "seeded-via-alias", through: ["old"] });
+      ).toEqual({
+        kind: "seeded-via-alias",
+        through: [],
+        throughSuperseded: ["old"],
+      });
     });
 
     it("returns `pre-existing` for a pattern depending on nothing seeded", () => {
@@ -925,7 +1032,11 @@ describe("run-measurement-batch", () => {
           ),
         ).toEqual({
           "pub-rating": { kind: "seeded" },
-          alias: { kind: "seeded-via-alias", through: ["pub-rating"] },
+          alias: {
+            kind: "seeded-via-alias",
+            through: ["pub-rating"],
+            throughSuperseded: [],
+          },
           other: { kind: "pre-existing" },
         });
       } finally {
@@ -1848,6 +1959,51 @@ describe("run-measurement-batch", () => {
       );
       expect(report).toContain(
         "`unlisted` (ORIGIN NOT RESOLVED — this batch resolved no origin for it)",
+      );
+    });
+
+    it("names an alias of a superseded seed as reaching what the committed source cannot rebuild", () => {
+      const report = renderBatchReport({
+        suite: {
+          label: "l",
+          tasks: [{ id: "a", text: "do a thing" }],
+          seededPatternIds: ["live"],
+          supersededPatternIds: ["old"],
+        },
+        consoleUrl: "http://127.0.0.1:1",
+        indexUrl: null,
+        startedAt: "2026-08-28T21:00:00.000Z",
+        endedAt: "2026-08-28T21:00:01.000Z",
+        preflight: { kind: "answered", results: 1 },
+        posture: POSTURE,
+        importedPatternOrigins: {
+          alias: {
+            kind: "seeded-via-alias",
+            through: [],
+            throughSuperseded: ["old"],
+          },
+        },
+        indexBefore: { kind: "read", patterns: [] as never },
+        indexAfter: { kind: "read", patterns: [] as never },
+        results: [{
+          task: { id: "a", text: "do a thing" },
+          sessionId: "s",
+          turnId: "t",
+          outcome: { kind: "turn_completed", detail: "done" },
+          configuration: {},
+          measurement: {
+            familyId: "f",
+            runs: [],
+            totals: {
+              ...emptyMeasurementTotals(),
+              importedPatternIds: ["alias"],
+              runPatternsComposing: 1,
+            },
+          },
+        }],
+      });
+      expect(report).toContain(
+        "via alias of superseded old, which the committed source cannot rebuild",
       );
     });
 
