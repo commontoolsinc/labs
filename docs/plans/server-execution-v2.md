@@ -38,7 +38,36 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
-**Delta 2026-08-28 (this PR): the lunch forever-park ROOT-CAUSED from the
+**Delta 2026-08-28 (this PR, FINAL disposition): the lunch forever-park's
+WRITE PATH is mapped THREE GEOMETRIES DEEP on four direct-CI probe boards,
+the first two geometries FIXED red-first — and the entry is RESTORED: every
+probe went red at the probed surface, the fourth under the declared hard
+stop. The census returns to ONE patterns entry.** The three geometries, each
+caught by its probe's own toolshed artifact: (1) the in-flight sibling
+replication supplying the parent space — fixed, the sibling-await
+(`replicationsIntoSpace`, ticket-ordered, acyclic); (2) the parent space
+closure-less BY ORDER — `loadPatternByIdentity` serves patterns from the
+in-memory artifact index with no per-space persist, so when another space's
+compile warms the index first nothing ever supplies the parent — fixed, the
+module-keyed fallback origins (`persistedClosureSpaces`; probe 3 caught the
+first cut's entry-keying defect, probe-pinned); (3) the supplier COMPILE
+itself still mid-flight at child-replication time (probe 4): no persist of
+the profile-home module had completed anywhere server-side, the fallback map
+was correctly empty, and the one-shot died — UNFIXED; the designed next move
+(on a dry map, await the manager's in-flight compilations once — their E4
+persists record before resolving — then re-consult, then throw; event-driven,
+no deadlock) is recorded in the register, not landed. Signature identical in
+all four probes: one `closure-replication-failed` parent→profile, 80
+`structure-load-stuck` (40 roots, `pattern-unloadable`), the name
+placeholder, `:271` at 300 s, fallback counter 0. Local 30/30 green across
+campaigns F/G/H + smokes at the fix heads — the park is a CI boot ORDER
+(locally the parent's own sidecar compile always persists first), not a race
+or load artifact. The fixes stay in (both pinned, both real defect classes);
+the entry's reason carries the map; the original delta text follows for the
+record.**
+
+**Delta 2026-08-28 (this PR, original lift text — superseded above): the
+lunch forever-park ROOT-CAUSED from the
 phase-3 probe's own artifact and FIXED red-first; lunch-poll-vote's FILE
 entry LIFTED under the ruled bar — the ON-skip registry is EMPTY across
 ALL FOUR SUITES for the first time since stage F.** The park's mechanism,

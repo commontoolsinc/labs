@@ -5290,17 +5290,21 @@ supply; OW29/OW32/OW34 closed):
   step) and was held only by a co-resident file's red in the same shard,
   while lunch-poll-vote passed its local half 8/8 and its probe went red at
   the probed surface for the second campaign running. **The current census
-  (2026-08-28, the lunch lift PR) is EMPTY — every suite's list, for the
-  first time since stage F.** default-app's reload STEP LIFTED 2026-08-28 —
-  the owner ruled the SURFACE reading of the probe bar, under which its
-  evidence was already complete (the LIFT block at the end of this row) —
-  and lunch-poll-vote's FILE entry LIFTED the same day on the probe's own
-  artifact: the park it recorded was root-caused to the sibling
-  closure-replication race and fixed red-first (the lunch ROOT-CAUSE and
-  LIFT blocks at the end of this row). The flip PR's list-EMPTY
-  precondition is MET; the FLIP's bar remains a green ON lane, not merely
-  the empty list (the co-resident `:133` debt the probe surfaced was paid
-  by #6477 — the OBSERVATION's FIXED paragraph below). Rows, one per
+  (2026-08-28, after the lunch lift PR's four probe boards) is ONE patterns
+  entry: lunch-poll-vote's FILE entry, RESTORED.** default-app's reload
+  STEP LIFTED 2026-08-28 — the owner ruled the SURFACE reading of the
+  probe bar, under which its evidence was already complete (the LIFT block
+  at the end of this row). lunch-poll-vote's lift was ATTEMPTED the same
+  day on the probe's own artifact — the park root-caused into the
+  closure-replication write path, two supplier geometries fixed red-first
+  on the PR — and every one of the PR's FOUR probe boards went red at the
+  probed surface, the last exposing the still-open third geometry (the
+  supplier compile mid-flight), so the entry is restored carrying the
+  accumulated map (the lunch ROOT-CAUSE, PROBE-2/3/4 blocks at the end of
+  this row). The FLIP's bar remains a green ON lane and every list empty;
+  this entry is again what holds the list (the co-resident `:133` debt the
+  probe surfaced was paid by #6477 — the OBSERVATION's FIXED paragraph
+  below). Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
   lifts:
   - **OW45 — the profile piece's PROGRAM-materialization write path
@@ -7462,10 +7466,11 @@ supply; OW29/OW32/OW34 closed):
     hypothesis space ("refused vs dropped vs never issued") resolves as
     NEVER ISSUED, by a supplier that died before writing.
 
-    **LIFT — lunch-poll-vote's FILE entry is REMOVED, 2026-08-28: the
-    LAST entry in any suite — the ON-skip registry is EMPTY across all
-    four suites for the first time since stage F.** The ruled
-    local-plus-CI-probe bar, both halves:
+    **LIFT ATTEMPT — lunch-poll-vote's FILE entry removed 2026-08-28 on
+    the evidence below; WITHDRAWN BY THE PROBES (the PROBE-2/3/4 blocks
+    that follow) and the entry RESTORED with the accumulated map.** The
+    ruled local-plus-CI-probe bar, both halves as they stood at the
+    attempt:
     - **Requirement (1), the local campaign — MET TWICE, 8/8
       quiet-and-loaded at the fix head AND 8/8 again at the rebased lift
       head.** Method both times: ON binary sha256 re-verified into every
@@ -7571,16 +7576,48 @@ supply; OW29/OW32/OW34 closed):
     keying-fix head is this attempt's probe; a red at the surface
     there restores the entry with the accumulated map — no further
     iteration on this PR.
-    The pin suite (`tasks/server-execution-on-skips.test.ts`) now binds
-    the EMPTY registry: the patterns list length is 0, the report
-    carries no SKIP line of any kind, the shard filter passes
-    lunch-poll-vote through (the lanes run it), and the whole-registry
-    loop asserts every suite's list empty — so ANY new entry reddens a
-    pin and a re-skip is a deliberate change. The flip PR's list-EMPTY
-    precondition is MET; the flip's own bar remains a green ON lane —
-    unlisted debt blocks it on its own accountability (the co-resident
-    `:133` blocker in the OBSERVATION below is PAID by #6477, its FIXED
-    paragraph there).
+    **PROBE 4 (the keying-fix board, run
+    [33165960083](https://github.com/commontoolsinc/labs/actions/runs/33165960083),
+    ON shard 7, job 98831529935): RED at the surface — the THIRD
+    geometry, and the declared hard stop is honored: THE ENTRY IS
+    RESTORED.** Same signature, fallback counter still 0 — and this
+    time correctly: the artifact's timeline shows both identity-home
+    compiles STILL MID-FLIGHT at the child replication's moment
+    (fetch waves 18 s and 5 s earlier; the profile-home fetches before
+    them belong to the harness process), so NO persist of the
+    profile-home module had completed anywhere server-side and the
+    module-keyed map was genuinely empty. The supplier class the fix
+    chain has not reached: the IN-FLIGHT COMPILE — a compile's E4
+    persist registers in `pendingCacheWriteBacks` only once the
+    compile reaches it, so a mid-compile supplier is invisible to
+    every await the replication holds. DESIGNED, NOT LANDED (the hard
+    stop): on a dry fallback map, await the manager's in-flight
+    compilations once (`inProgressCompilations` — their E4 persists
+    record into the map before the compile promise resolves),
+    re-consult the map, then throw; event-driven, no timers, no
+    deadlock (compiles never await replications; the content-hit
+    replication call is fire-and-forget). WHAT THE PR KEEPS: both
+    landed fixes are real, pinned defect classes (the sibling race and
+    the by-ORDER dry origin with module keying); the pin suite is
+    rebound to the RESTORED single-entry registry; the entry's reason
+    carries the full three-geometry map with the four probes'
+    coordinates so the next seat starts where this one stopped. The
+    lift bar is unchanged (the ruled local-plus-CI-probe bar); the
+    lift condition is now concretely the third geometry's close. What
+    four probes on one PR taught, recorded as method: each board's
+    artifact advanced the map exactly one geometry — the probe is not
+    a gate ceremony but the arc's only instrument that SEES the CI
+    boot order; and a declared hard stop kept the loop honest.
+    The pin suite (`tasks/server-execution-on-skips.test.ts`) is bound,
+    post-restore, to the SINGLE-entry registry: the patterns list holds
+    exactly the restored FILE entry (reason pinned to the
+    three-geometry map and the probe coordinates), the report carries
+    its SKIP line and no SKIP-STEP line, the shard filter drops exactly
+    that file, and the whole-registry loop asserts it is the only entry
+    anywhere — so any OTHER entry or a silent lift reddens a pin. The
+    flip's bar remains a green ON lane AND every list empty; this entry
+    again holds the list (the co-resident `:133` blocker in the
+    OBSERVATION below is PAID by #6477, its FIXED paragraph there).
 
     **OBSERVATION, not owed by this row and NOT one of the two entries —
     `cfc-group-chat-demo.test.ts` is failing ON at current main, 4/6, and
