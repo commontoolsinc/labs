@@ -525,7 +525,11 @@ raise), and leaves `cfcDecomposedEnvelopes`, `cfcTrustConfig`, and
 flip: cf-harness exposes it for its fabric session as `--fabric-cfc-posture`
 (`CF_HARNESS_FABRIC_CFC_POSTURE`); toolshed publishes whatever CFC posture its
 Runtime resolved on `/api/meta` (`lib/cfc-posture.ts`), so a deployment's
-enforcement is readable rather than indistinguishable from the default.
+enforcement is readable rather than indistinguishable from the default. The
+cf-harness console is the one surface that opts in by default — it exists to
+show CFC working, so its fabric session takes the bundle unless
+`--fabric-cfc-posture none` says otherwise, and it prints the posture it
+resolved at startup.
 The interactive `cf-harness` and the `fuse` mount expose the enforcement mode
 through `CF_CFC_MODE` for testing. Because these dials are keys of
 `RuntimeOptions`, the exhaustive `RUNTIME_OPTION_KEYS` registry in the same file
