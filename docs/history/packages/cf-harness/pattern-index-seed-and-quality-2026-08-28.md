@@ -238,6 +238,16 @@ the check would have reported a presence. That takes a case whose answer is
 known independently, which is a different and more expensive thing than a test
 that passes.
 
+Where that independent case comes from is the operational half, and it is the
+harder half: **re-derive from a source that cannot inherit the mistake.** A
+system agreeing with itself is not evidence. Every real catch in this pass came
+from stepping outside whatever produced the claim — running the test suite
+outside the sandbox that was failing it, composing into a space that could not
+already hold the dependencies, reverting a fix to watch its test fail, reading
+a clock from a remote server's response header rather than from the machine
+that had been reporting the time. Two parties agreeing is not independence
+either, when one of them told the other.
+
 Its companion, arrived at the hard way: **a regression test that has not been
 seen to fail is not evidence.** The `no-ui` fix above shipped first with a
 mechanism asserted rather than measured, and with a test that still passed when
