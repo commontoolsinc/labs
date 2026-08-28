@@ -873,10 +873,22 @@ const PATTERN_INDEX_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
   ["search_patterns", "record_feedback"] as const,
 );
 
+/**
+ * The tools that exist only over a skill registry, gated on the same terms.
+ * A run given no skills root scans no registry, so `read_skill_resource`
+ * would answer `skill_registry_missing` on every call and `run_skill_script`
+ * has nothing to run — absent rather than present-but-failing, so a model
+ * does not spend turns discovering a tool it was never backed to use.
+ */
+const SKILL_REGISTRY_TOOL_IDS: ReadonlySet<BuiltinToolId> = new Set(
+  ["read_skill_resource", "run_skill_script"] as const,
+);
+
 /** What a run can back the gated tools with. */
 interface HarnessToolBackingAvailability {
   fabricSessionAvailable: boolean;
   patternIndexAvailable: boolean;
+  skillRegistryAvailable: boolean;
 }
 
 /** The gated tools this run cannot back, and so does not offer. */
@@ -886,6 +898,7 @@ const withheldToolIds = (
   new Set([
     ...(availability.fabricSessionAvailable ? [] : FABRIC_SESSION_TOOL_IDS),
     ...(availability.patternIndexAvailable ? [] : PATTERN_INDEX_TOOL_IDS),
+    ...(availability.skillRegistryAvailable ? [] : SKILL_REGISTRY_TOOL_IDS),
   ]);
 
 /**
@@ -2353,6 +2366,11 @@ export class CfHarnessPromptLoop {
     return {
       fabricSessionAvailable: this.engine.fabricSessionAvailable,
       patternIndexAvailable: this.engine.patternIndexAvailable,
+      // A configured skills root is what a run scans into the registry the
+      // skill tools read, so its presence is the tools' backing — a run that
+      // has yet to scan still knows it will, and one that never will offers
+      // neither tool.
+      skillRegistryAvailable: this.engine.config.skillsRoot !== undefined,
     };
   }
 

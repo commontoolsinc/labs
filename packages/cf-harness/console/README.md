@@ -78,6 +78,15 @@ Every environment variable has a flag, and the flag wins:
 | `--artifact-root`     | `CF_HARNESS_ARTIFACT_ROOT`           | `.cf-harness-console/runs`            |
 | `--session-db`        | `CF_HARNESS_CONSOLE_SESSION_DB`      | `.cf-harness-console/sessions.sqlite` |
 | `--max-model-turns`   | `CF_HARNESS_CONSOLE_MAX_MODEL_TURNS` | the prompt loop's default             |
+| `--skills-root`       | `CF_HARNESS_CONSOLE_SKILLS_ROOT`     | the repository's `skills/` tree       |
+
+Every turn scans the skills root and records the registry on its run before the
+first model call, so `read_skill_resource` can answer and a delegated
+`pattern-author` child inherits its profile's preloaded skills — the authoring,
+schema, and UI guides. A turn whose run carries no registry authors patterns
+without them. Tools read the tree on the host, so it needs no sandbox mount; the
+registry names host paths, and the run's `skill-registry.json` artifact records
+what the scan found.
 
 Everything the server writes lives under `.cf-harness-console/` in the working
 directory — the sandbox workspace, run artifacts, the session database, and the

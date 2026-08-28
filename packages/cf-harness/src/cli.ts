@@ -85,10 +85,8 @@ import {
   type CreateHarnessPromptLoopOptions,
   type HarnessPromptLoopResult,
 } from "./prompt-loop.ts";
-import {
-  discoverHarnessSkills,
-  loadHarnessSkillContext,
-} from "./skills/registry.ts";
+import { loadHarnessSkillContext } from "./skills/registry.ts";
+import { persistHarnessRunSkillRegistry } from "./skills/run-registry.ts";
 import {
   parseAllowedSkillScriptSpec,
   uniqueAllowedSkillScripts,
@@ -3065,11 +3063,12 @@ export const runCfHarnessCli = async (
       if (parsed.skillsRoot === undefined) {
         return [];
       }
-      const registry = await discoverHarnessSkills({
+      const registry = await persistHarnessRunSkillRegistry(engine, {
         skillsRoot: parsed.skillsRoot,
-        sandboxSkillsRoot: parsed.skillsRootSandboxPath,
+        ...(parsed.skillsRootSandboxPath !== undefined
+          ? { sandboxSkillsRoot: parsed.skillsRootSandboxPath }
+          : {}),
       });
-      await engine.persistSkillRegistry(registry);
       if (parsed.skillNames.length === 0) {
         return [];
       }
