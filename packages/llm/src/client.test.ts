@@ -12,6 +12,7 @@ import {
   LLMStreamError,
   loadConversationFixture,
   normalizeLLMResponse,
+  readLLMStream,
   resetMockMode,
   setMockResponseGate,
 } from "./client.ts";
@@ -32,14 +33,8 @@ function streamFromChunks(chunks: string[]): ReadableStream<Uint8Array> {
   });
 }
 
-function runClientStream(client: LLMClient, chunks: string[]) {
-  return (client as unknown as {
-    stream(
-      body: ReadableStream<Uint8Array>,
-      id: string,
-      callback?: (text: string) => void,
-    ): Promise<unknown>;
-  }).stream(streamFromChunks(chunks), "trace-1", () => {});
+function runClientStream(chunks: string[]) {
+  return readLLMStream(streamFromChunks(chunks), "trace-1", () => {});
 }
 
 describe("LLMClient test-environment guard", () => {
@@ -435,7 +430,7 @@ describe("LLMClient test-environment guard", () => {
       ]
     ) {
       try {
-        await runClientStream(client, chunks);
+        await runClientStream(chunks);
       } catch (error) {
         expect(error).toBeInstanceOf(LLMStreamError);
         expect((error as Error).message).toBe("boom");
@@ -455,7 +450,7 @@ describe("LLMClient test-environment guard", () => {
       sources: [{ url: "https://example.com" }],
     }];
 
-    const result = await runClientStream(client, [
+    const result = await runClientStream([
       JSON.stringify({ type: "text-delta", textDelta: "searched" }) + "\n",
       JSON.stringify({
         type: "finish",
@@ -479,7 +474,7 @@ describe("LLMClient test-environment guard", () => {
     };
 
     try {
-      const result = await runClientStream(client, [
+      const result = await runClientStream([
         JSON.stringify("hello") + "\n",
         "not json\n",
         "not final json",

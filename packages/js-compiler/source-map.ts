@@ -394,10 +394,10 @@ const CF_INTERNAL = `    at <CF_INTERNAL>`;
 const UNMAPPED = `    at <UNMAPPED>`;
 
 export class SourceMapParser {
-  private sourceMaps = new LRUCache<string, SourceMap>({
+  #sourceMaps = new LRUCache<string, SourceMap>({
     capacity: MAX_SOURCE_MAP_CACHE_SIZE,
   });
-  private consumers = new WeakMap<SourceMap, SourceMapConsumer>();
+  #consumers = new WeakMap<SourceMap, SourceMapConsumer>();
   // Deferred registrations (CT-1819): the boot path registers a PROVIDER
   // instead of composing eagerly; the first lookup that needs the filename
   // materializes it. One-shot — the provider is dropped as soon as it runs,
@@ -407,15 +407,15 @@ export class SourceMapParser {
   // unbounded leak on long-lived runners — so cap it and evict the oldest.
   // Evicting an unused provider only means a later error in that (old) eval
   // goes unmapped, exactly as when the composed-map LRU evicts a stale entry.
-  private pendingProviders = new LRUCache<
+  #pendingProviders = new LRUCache<
     string,
     () => SourceMap | undefined
   >({ capacity: MAX_SOURCE_MAP_CACHE_SIZE });
 
   load(filename: string, sourceMap: SourceMap) {
     // An explicit map supersedes any pending provider for the same name.
-    this.pendingProviders.delete(filename);
-    this.sourceMaps.put(filename, sourceMap);
+    this.#pendingProviders.delete(filename);
+    this.#sourceMaps.put(filename, sourceMap);
   }
 
   /**
@@ -424,21 +424,21 @@ export class SourceMapParser {
    * compose) simply leaves the name unmapped, matching eager behavior.
    */
   loadLazy(filename: string, provider: () => SourceMap | undefined) {
-    this.pendingProviders.put(filename, provider);
+    this.#pendingProviders.put(filename, provider);
   }
 
   /** Tests-only: count of still-deferred (not-yet-materialized) providers. */
   pendingProviderCountForTesting(): number {
-    return this.pendingProviders.size;
+    return this.#pendingProviders.size;
   }
 
-  private materialize(filename: string): void {
-    const provider = this.pendingProviders.get(filename);
+  #materialize(filename: string): void {
+    const provider = this.#pendingProviders.get(filename);
     if (provider === undefined) return;
-    this.pendingProviders.delete(filename);
+    this.#pendingProviders.delete(filename);
     const sourceMap = provider();
     if (sourceMap !== undefined) {
-      this.sourceMaps.put(filename, sourceMap);
+      this.#sourceMaps.put(filename, sourceMap);
     }
   }
 
@@ -447,8 +447,8 @@ export class SourceMapParser {
    * Used for cleanup when the runtime is disposed.
    */
   clear(): void {
-    this.sourceMaps.clear();
-    this.pendingProviders.clear();
+    this.#sourceMaps.clear();
+    this.#pendingProviders.clear();
   }
 
   // Fixes stack traces to use source map from eval. Strangely, both Deno and
@@ -459,14 +459,14 @@ export class SourceMapParser {
       const match = line.match(stackTracePattern);
 
       if (match) {
-        return this.mapFrame(match[1], match[2], match[3], match[4], line);
+        return this.#mapFrame(match[1], match[2], match[3], match[4], line);
       }
 
       // V8 eval frames without a function name.
       // Try the nested pattern first (inner position is more precise).
       const nestedMatch = line.match(evalFrameNestedPattern);
       if (nestedMatch) {
-        return this.mapFrame(
+        return this.#mapFrame(
           "",
           nestedMatch[1],
           nestedMatch[2],
@@ -477,7 +477,7 @@ export class SourceMapParser {
 
       const evalMatch = line.match(evalFramePattern);
       if (evalMatch) {
-        return this.mapFrame(
+        return this.#mapFrame(
           "",
           evalMatch[1],
           evalMatch[2],
@@ -490,7 +490,7 @@ export class SourceMapParser {
     }).join("\n");
   }
 
-  private mapFrame(
+  #mapFrame(
     fnName: string,
     filename: string,
     lineStr: string,
@@ -500,11 +500,11 @@ export class SourceMapParser {
     const lineNum = parseInt(lineStr, 10);
     const columnNum = parseInt(colStr, 10);
 
-    this.materialize(filename);
-    const sourceMap = this.sourceMaps.get(filename);
+    this.#materialize(filename);
+    const sourceMap = this.#sourceMaps.get(filename);
     if (!sourceMap) return originalLine;
 
-    const consumer = this.getConsumer(sourceMap);
+    const consumer = this.#getConsumer(sourceMap);
     const originalPosition = consumer.originalPositionFor({
       line: lineNum,
       column: columnNum,
@@ -528,21 +528,21 @@ export class SourceMapParser {
     line: number,
     column: number,
   ): MappedPosition | null {
-    this.materialize(filename);
-    const sourceMap = this.sourceMaps.get(filename);
+    this.#materialize(filename);
+    const sourceMap = this.#sourceMaps.get(filename);
     if (!sourceMap) return null;
-    const consumer = this.getConsumer(sourceMap);
+    const consumer = this.#getConsumer(sourceMap);
     const pos = consumer.originalPositionFor({ line, column });
     return mapIsEmpty(pos) ? null : pos;
   }
 
-  private getConsumer(sourceMap: SourceMap): SourceMapConsumer {
-    let consumer = this.consumers.get(sourceMap);
+  #getConsumer(sourceMap: SourceMap): SourceMapConsumer {
+    let consumer = this.#consumers.get(sourceMap);
     if (consumer) {
       return consumer;
     }
     consumer = new SourceMapConsumer(sourceMap);
-    this.consumers.set(sourceMap, consumer);
+    this.#consumers.set(sourceMap, consumer);
     return consumer;
   }
 }
