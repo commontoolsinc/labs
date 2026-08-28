@@ -6,7 +6,7 @@
  * `FabricBytes` means holding the `FabricBytes` class, and a concrete fabric
  * class reaches the codecs and, through them, the instance bases -- so a module
  * that asks about the fabric classes is layered above them. `type-check.ts` is
- * layered *below* them, and still has to be able to tell a `Date` from a `Map`
+ * layered _below_ them, and still has to be able to tell a `Date` from a `Map`
  * from an ordinary class instance. What it can ask is here; the rest is in
  * `native-type-tags.ts`, which asks this and then its own.
  *
