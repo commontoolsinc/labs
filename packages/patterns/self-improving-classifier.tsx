@@ -594,8 +594,7 @@ const updateFieldHandler = handler<
   }
 >((event, { fieldKey, newItemFields }) => {
   const value = event.detail?.value ?? "";
-  const current = newItemFields.get();
-  newItemFields.set({ ...current, [fieldKey]: value });
+  newItemFields.update({ [fieldKey]: value });
 });
 
 // =============================================================================
@@ -1180,8 +1179,7 @@ const addFieldToNewItemHandler = handler<
   const key = newFieldKey.get().trim();
   const value = newFieldValue.get().trim();
   if (key && value) {
-    const current = newItemFields.get();
-    newItemFields.set({ ...current, [key]: value });
+    newItemFields.update({ [key]: value });
     newFieldKey.set("");
     newFieldValue.set("");
   }

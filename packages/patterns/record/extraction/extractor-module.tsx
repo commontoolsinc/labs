@@ -964,8 +964,7 @@ const toggleSourceHandler = handler<
   const current = sourceSelectionsCell.get() || {};
   // Default is selected (true), so toggle means: if undefined or true -> false, if false -> true
   const currentValue = current[index] !== false;
-  sourceSelectionsCell.set({
-    ...current,
+  sourceSelectionsCell.update({
     [index]: !currentValue,
   });
 });
@@ -985,8 +984,7 @@ const toggleTrashHandler = handler<
   const current = trashSelectionsCell.get() || {};
   // Default is not selected (false)
   const currentValue = current[index] === true;
-  trashSelectionsCell.set({
-    ...current,
+  trashSelectionsCell.update({
     [index]: !currentValue,
   });
 });
@@ -1009,8 +1007,7 @@ const toggleFieldHandler = handler<
   const currentValue = current[fieldKey] !== undefined
     ? current[fieldKey] !== false
     : defaultSelected;
-  selectionsCell.set({
-    ...current,
+  selectionsCell.update({
     [fieldKey]: !currentValue,
   });
 });
