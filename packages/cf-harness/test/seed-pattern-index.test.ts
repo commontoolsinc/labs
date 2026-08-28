@@ -13,6 +13,7 @@ import {
   defaultSeedIo,
   denoFmtCheck,
   durableEntryIdentity,
+  fabricSeedDeps,
   main,
   parseArguments,
   publishRequestFor,
@@ -21,6 +22,7 @@ import {
   runSeed,
   SEED_DIRECTORY,
   type SeedDeps,
+  seedDepsFrom,
   type SeedIo,
   seedMetadataFromSource,
   seedSourcePaths,
@@ -590,8 +592,17 @@ describe("seed-pattern-index", () => {
     it("reads the environment and roots itself at the repository", () => {
       const io = defaultSeedIo();
       expect(io.repoRoot).toBe(REPO_ROOT);
-      expect(typeof io.env).toBe("function");
-      expect(io.createDeps).toBeDefined();
+      expect(io.createDeps).toBe(fabricSeedDeps);
+      // Reads the real environment, and writes where a script writes.
+      Deno.env.set("CF_SEED_IO_PROBE", "present");
+      try {
+        expect(io.env("CF_SEED_IO_PROBE")).toBe("present");
+      } finally {
+        Deno.env.delete("CF_SEED_IO_PROBE");
+      }
+      expect(io.env("CF_SEED_IO_ABSENT")).toBeUndefined();
+      io.log("");
+      io.logError("");
     });
   });
 
@@ -677,6 +688,80 @@ describe("seed-pattern-index", () => {
         "packages/cf-harness/test/support/seed-pattern-index/unformatted.ts",
       );
       expect(await denoFmtCheck([unformatted])).toEqual([unformatted]);
+    });
+  });
+
+  describe("seedDepsFrom()", () => {
+    const client = () => {
+      const published: string[] = [];
+      const events: string[] = [];
+      return {
+        published,
+        events,
+        get: () =>
+          Promise.resolve({
+            publishPattern: (request: { patternId: string }) => {
+              published.push(request.patternId);
+              return Promise.resolve({
+                patternId: request.patternId,
+                created: true,
+              });
+            },
+            recordEvent: (
+              request: { patternId: string; eventType: string },
+            ) => {
+              events.push(`${request.patternId}:${request.eventType}`);
+              return Promise.resolve({ ok: true });
+            },
+          }),
+      };
+    };
+
+    const depsOver = (c: ReturnType<typeof client>) => {
+      const lines: string[] = [];
+      return {
+        lines,
+        deps: seedDepsFrom({
+          // Never called in these cases; `compileAtom` is covered on its own
+          // against a real runtime.
+          runtime: {} as never,
+          space: "did:key:zTest" as never,
+          getClient: c.get,
+          patternsRoot: "/repo/packages/patterns",
+          log: (line: string) => lines.push(line),
+          logError: () => {},
+        }),
+      };
+    };
+
+    it("publishes through the client it was given", async () => {
+      const c = client();
+      const { deps } = depsOver(c);
+      const response = await deps.publish(
+        { patternId: "abc", program: { main: "/m", files: [] } } as never,
+      );
+      expect(response).toEqual({ patternId: "abc", created: true });
+      expect(c.published).toEqual(["abc"]);
+    });
+
+    it("records a created event through the same client", async () => {
+      const c = client();
+      const { deps } = depsOver(c);
+      await deps.recordCreated("abc");
+      expect(c.events).toEqual(["abc:created"]);
+    });
+
+    it("logs through the callbacks it was given", () => {
+      const c = client();
+      const { deps, lines } = depsOver(c);
+      deps.log("hello");
+      expect(lines).toEqual(["hello"]);
+    });
+
+    it("checks formatting with the repository's own formatter", () => {
+      const c = client();
+      const { deps } = depsOver(c);
+      expect(deps.checkFormatting).toBe(denoFmtCheck);
     });
   });
 

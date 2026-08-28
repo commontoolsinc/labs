@@ -39,6 +39,7 @@ import {
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
 import {
   createHarnessPatternIndexClientFactory,
+  type PatternIndexClient,
   type PatternIndexPublishRequest,
 } from "../src/pattern-index/client.ts";
 import { createHarnessFabricSessionFactory } from "../src/fabric-session.ts";
@@ -534,6 +535,38 @@ export const runSeed = async (
   return 0;
 };
 
+/**
+ * The deps, given the collaborators already built. Separated from the building
+ * so the wiring can be exercised without a fabric or an index behind it: what
+ * is left in {@link fabricSeedDeps} is the two constructions themselves.
+ */
+export const seedDepsFrom = (
+  options: {
+    runtime: SeedRuntime;
+    space: MemorySpace;
+    getClient: () => Promise<
+      Pick<PatternIndexClient, "publishPattern" | "recordEvent">
+    >;
+    patternsRoot: string;
+    log: (line: string) => void;
+    logError: (line: string) => void;
+  },
+): SeedDeps => ({
+  compile: (path) =>
+    compileAtom(options.runtime, options.space, path, options.patternsRoot),
+  publish: async (request) =>
+    await (await options.getClient()).publishPattern(request),
+  recordCreated: async (patternId) => {
+    await (await options.getClient()).recordEvent({
+      patternId,
+      eventType: "created",
+    });
+  },
+  checkFormatting: denoFmtCheck,
+  log: options.log,
+  logError: options.logError,
+});
+
 /** Builds the deps a real run uses: a fabric session and an index client. */
 export const fabricSeedDeps = async (
   settings: SeedSettings,
@@ -546,25 +579,17 @@ export const fabricSeedDeps = async (
     identityKeyPath: settings.identityKeyPath,
     space: settings.space,
   })();
-  const getClient = createHarnessPatternIndexClientFactory(
-    { baseUrl: settings.indexBaseUrl },
-    settings.identityKeyPath,
-  );
-  const space = pieces.getSpace();
-  return {
-    compile: (path) => compileAtom(pieces.runtime, space, path, patternsRoot),
-    publish: async (request) =>
-      await (await getClient()).publishPattern(request),
-    recordCreated: async (patternId) => {
-      await (await getClient()).recordEvent({
-        patternId,
-        eventType: "created",
-      });
-    },
-    checkFormatting: denoFmtCheck,
+  return seedDepsFrom({
+    runtime: pieces.runtime,
+    space: pieces.getSpace(),
+    getClient: createHarnessPatternIndexClientFactory(
+      { baseUrl: settings.indexBaseUrl },
+      settings.identityKeyPath,
+    ),
+    patternsRoot,
     log,
     logError,
-  };
+  });
 };
 
 /** What `main` reaches the world through, so a test can drive all of it. */

@@ -24,10 +24,10 @@ import OptionPicker from "../option-picker.tsx";
 import SortableTable from "../sortable-table.tsx";
 
 interface AtomsDemoInput {
-  score: Writable<number | Default<3>>;
-  strength: Writable<number | Default<1>>;
-  dexterity: Writable<number | Default<1>>;
-  category: Writable<string | Default<"">>;
+  score?: Writable<number | Default<3>>;
+  strength?: Writable<number | Default<1>>;
+  dexterity?: Writable<number | Default<1>>;
+  category?: Writable<string | Default<"">>;
 }
 
 interface AtomsDemoOutput {
