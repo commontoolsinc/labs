@@ -365,12 +365,21 @@ const stripTrailingSlashes = (path: string): string => {
  * one textually; reporting that as a difference would be a reading of the path
  * style rather than of the registration, and it would refuse a host that is
  * wired correctly.
+ *
+ * That leniency belongs to the harness side alone. runsc refuses a
+ * `--cfc-*-dir` that is not absolute — "must be an absolute path" — so a
+ * registered value that is empty or relative names no directory at all, which
+ * is evidence as positive as an absent flag and must not be softened into an
+ * incomparability that lets an enforcing run proceed unread.
  */
 const hostDirCorrespondence = (
   runtimeArgValue: string,
   harnessDir: string,
 ): "match" | "differ" | "incomparable" => {
-  if (!harnessDir.startsWith("/") || !runtimeArgValue.startsWith("/")) {
+  if (!runtimeArgValue.startsWith("/")) {
+    return "differ";
+  }
+  if (!harnessDir.startsWith("/")) {
     return "incomparable";
   }
   // Normalized before comparison: `.` and `..` segments survive

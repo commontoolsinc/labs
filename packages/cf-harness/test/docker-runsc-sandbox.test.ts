@@ -1346,3 +1346,36 @@ Deno.test("cfcTransportReadinessFromDockerRuntimes still reports an absent flag 
     { status: "unwired", unread: ["invocation-context"] },
   );
 });
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes reports a registered path that names no directory as unwired", () => {
+  // runsc refuses a `--cfc-*-dir` that is not absolute, so an empty or
+  // relative registered value names nothing. Softening that into an
+  // incomparability would let an enforcing run proceed with its invocation
+  // context unread — the failure this whole check exists to stop.
+  for (const registered of ["", "relative/invocations", "./invocations"]) {
+    assertEquals(
+      cfcTransportReadinessFromDockerRuntimes({
+        runtimeName: "runsc-cfc",
+        runtimes: dockerRuntimes([
+          `--cfc-invocation-context-dir=${registered}`,
+        ]),
+        cfcInvocationContextDir: "/host/invocations",
+      }),
+      { status: "unwired", unread: ["invocation-context"] },
+      `expected a registered value of "${registered}" to be positive evidence`,
+    );
+  }
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes prefers positive evidence over an incomparable harness path", () => {
+  // Both sides are unusable here. The registered value naming nothing is a
+  // reading of the registration; the harness path style is not.
+  assertEquals(
+    cfcTransportReadinessFromDockerRuntimes({
+      runtimeName: "runsc-cfc",
+      runtimes: dockerRuntimes(["--cfc-invocation-context-dir="]),
+      cfcInvocationContextDir: "C:\\work\\cfc",
+    }),
+    { status: "unwired", unread: ["invocation-context"] },
+  );
+});
