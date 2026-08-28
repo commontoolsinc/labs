@@ -200,9 +200,13 @@ The counts, and the distinctions worth knowing about:
 - **`run_pattern` calls**, split by whether they named a published pattern or
   carried source. This is the reuse signal: a run that names an id found
   something, a run that carries source wrote it.
-- **`cf:pattern:` imports** in that source, split into source that **composes**
-  an imported pattern and source that is a **bare re-export** of one. That split
-  is not fussiness. The live index holds entries whose whole program is
+- **`cf:pattern:` imports** in that source, split three ways: source that
+  **composes** an imported pattern, source that is a **bare re-export** of one,
+  and source whose only reference is a **bare import** —
+  `import
+  "cf:pattern:…"` with no bindings, which references a pattern and
+  cannot put it to work. That split is not fussiness. The live index holds
+  entries whose whole program is
   `import P from "cf:pattern:…"; export default P` — one of them ranked third
   overall — and a re-export composes nothing while looking identical to
   composition in an import count. The two are reported apart, never as one

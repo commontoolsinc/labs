@@ -105,6 +105,21 @@ describe("measure-runs", () => {
       )).toBe("composition");
     });
 
+    it("returns `bare-import` for source whose only pattern reference binds nothing", () => {
+      // A bare import references a published pattern and cannot put it to
+      // work, so counting it as composition would inflate the one figure the
+      // composing/re-export split exists to isolate.
+      expect(classifyPatternSource(
+        'import "cf:pattern:abc";\nexport default () => ({ n: 1 });\n',
+      )).toBe("bare-import");
+    });
+
+    it("returns `composition` for source that bare-imports one pattern and uses another", () => {
+      expect(classifyPatternSource(
+        'import "cf:pattern:abc";\nimport R from "cf:pattern:def";\nexport default () => ({ r: R });\n',
+      )).toBe("composition");
+    });
+
     it("returns `no-imports` for source importing no published pattern", () => {
       expect(classifyPatternSource(
         'import { cell } from "commontools";\nexport default () => ({ n: cell(0) });\n',
@@ -485,6 +500,44 @@ describe("measure-runs", () => {
       expect(totals.runPatternsImportingPatterns).toBe(1);
       expect(totals.runPatternsComposing).toBe(1);
       expect(totals.runPatternsReexporting).toBe(0);
+      expect(totals.runPatternsBareImporting).toBe(0);
+      // The three partition the calls that import a published pattern.
+      expect(
+        totals.runPatternsComposing + totals.runPatternsReexporting +
+          totals.runPatternsBareImporting,
+      ).toBe(totals.runPatternsImportingPatterns);
+    });
+
+    it("counts a bare import apart from both a composition and a re-export", () => {
+      const run = measureTranscript("bare", "parent", [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{
+            id: "r1",
+            type: "function",
+            function: {
+              name: "run_pattern",
+              arguments: JSON.stringify({
+                sourceText:
+                  'import "cf:pattern:pub-rating";\nexport default () => ({});\n',
+              }),
+            },
+          }],
+        },
+        {
+          role: "tool",
+          toolCallId: "r1",
+          toolName: "run_pattern",
+          content: JSON.stringify({ status: "ok" }),
+        },
+      ]);
+      const totals = totalsOf(run);
+      expect(totals.runPatternsImportingPatterns).toBe(1);
+      expect(totals.runPatternsBareImporting).toBe(1);
+      expect(totals.runPatternsComposing).toBe(0);
+      expect(totals.runPatternsReexporting).toBe(0);
+      expect(renderRunLines(run)[0]).toContain("bare-imports pub-rating");
     });
 
     it("counts a bare re-export apart from a composition", async () => {

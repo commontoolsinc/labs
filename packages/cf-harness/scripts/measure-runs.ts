@@ -101,7 +101,11 @@ export interface MeasuredSearch {
  * would inflate the reuse reading with the behavior the measurement exists to
  * tell apart, so they are counted separately the whole way to the report.
  */
-export type SourceComposition = "no-imports" | "re-export" | "composition";
+export type SourceComposition =
+  | "no-imports"
+  | "bare-import"
+  | "re-export"
+  | "composition";
 
 /** What a `run_pattern` call was pointed at. */
 export type RunPatternTarget =
@@ -233,6 +237,7 @@ export interface MeasurementTotals {
   runPatternsImportingPatterns: number;
   runPatternsComposing: number;
   runPatternsReexporting: number;
+  runPatternsBareImporting: number;
   runPatternOutcomes: Readonly<Record<string, number>>;
   runPatternOutcomesUnread: number;
   importedPatternIds: readonly string[];
@@ -285,6 +290,7 @@ export const emptyTotals = (): MeasurementTotals => ({
   runPatternsImportingPatterns: 0,
   runPatternsComposing: 0,
   runPatternsReexporting: 0,
+  runPatternsBareImporting: 0,
   runPatternOutcomes: {},
   runPatternOutcomesUnread: 0,
   importedPatternIds: [],
@@ -352,6 +358,8 @@ export const mergeTotals = (
   runPatternsComposing: left.runPatternsComposing + right.runPatternsComposing,
   runPatternsReexporting: left.runPatternsReexporting +
     right.runPatternsReexporting,
+  runPatternsBareImporting: left.runPatternsBareImporting +
+    right.runPatternsBareImporting,
   runPatternOutcomes: mergeCounts(
     left.runPatternOutcomes,
     right.runPatternOutcomes,
@@ -398,6 +406,7 @@ export const totalsOf = (run: RunMeasurement): MeasurementTotals => {
   let importing = 0;
   let composing = 0;
   let reexporting = 0;
+  let bareImporting = 0;
   let outcomesUnread = 0;
   let profilesUnread = 0;
 
@@ -422,7 +431,9 @@ export const totalsOf = (run: RunMeasurement): MeasurementTotals => {
       if (call.target.value.importedPatternIds.length > 0) {
         importing += 1;
         if (call.target.value.composition === "re-export") reexporting += 1;
-        else composing += 1;
+        else if (call.target.value.composition === "bare-import") {
+          bareImporting += 1;
+        } else composing += 1;
       }
       for (const id of call.target.value.importedPatternIds) {
         importedPatternIds.add(id);
@@ -475,6 +486,7 @@ export const totalsOf = (run: RunMeasurement): MeasurementTotals => {
     runPatternsImportingPatterns: importing,
     runPatternsComposing: composing,
     runPatternsReexporting: reexporting,
+    runPatternsBareImporting: bareImporting,
     runPatternOutcomes,
     runPatternOutcomesUnread: outcomesUnread,
     importedPatternIds: [...importedPatternIds].sort(),
@@ -525,6 +537,20 @@ export const classifyPatternSource = (
 ): SourceComposition => {
   if (importedPatternIdsOf(sourceText).length === 0) return "no-imports";
   const stripped = stripComments(sourceText);
+  // A bare `import "cf:pattern:…"` binds nothing, so source whose only
+  // reference to a published pattern is one cannot be putting it to work. It
+  // is a reference and not a composition, and counting it as composition
+  // would inflate the one figure this split exists to isolate.
+  if (
+    [...stripped.matchAll(IMPORT_STATEMENT)].every(([, , specifier]) =>
+      !isPatternSpecifier(specifier)
+    ) &&
+    [...stripped.matchAll(EXPORT_FROM_STATEMENT)].every(([, , specifier]) =>
+      !isPatternSpecifier(specifier)
+    )
+  ) {
+    return "bare-import";
+  }
   const defaultBindings = new Set(
     [...stripped.matchAll(DEFAULT_IMPORT)]
       .filter(([, , , specifier]) => isPatternSpecifier(specifier))
@@ -963,6 +989,8 @@ export const renderRunLines = (run: RunMeasurement): readonly string[] => {
           : `${
             call.target.value.composition === "re-export"
               ? " BARE RE-EXPORT of"
+              : call.target.value.composition === "bare-import"
+              ? " bare-imports"
               : " composes"
           } ${call.target.value.importedPatternIds.join(",")}`
       }`;
@@ -1004,7 +1032,7 @@ export const renderTotalsLines = (
   `  runs: ${totals.runs} (${totals.runsUnread} not read)`,
   `  searches: ${totals.searches} = ${totals.searchesWithHits} with hits + ${totals.searchesEmpty} empty + ${totals.searchesRefused} refused + ${totals.searchesUnread} not read`,
   `  run_pattern: ${totals.runPatterns} = ${totals.runPatternsByPatternId} by id + ${totals.runPatternsFromSource} from source + ${totals.runPatternsUnreadTarget} not read`,
-  `  run_pattern source importing a published pattern: ${totals.runPatternsImportingPatterns} = ${totals.runPatternsComposing} composing + ${totals.runPatternsReexporting} bare re-export`,
+  `  run_pattern source importing a published pattern: ${totals.runPatternsImportingPatterns} = ${totals.runPatternsComposing} composing + ${totals.runPatternsReexporting} bare re-export + ${totals.runPatternsBareImporting} bare import`,
   `  run_pattern outcomes: ${
     formatCounts(totals.runPatternOutcomes)
   } (${totals.runPatternOutcomesUnread} not read)`,
