@@ -659,6 +659,32 @@ describe("RuntimeClient", () => {
         "Piece source URL must use HTTP or HTTPS",
       );
 
+      // A URL is a place to read a program from once, not an origin: the piece
+      // it creates records none, and its owner names one afterwards.
+      const sourceServer = Deno.serve(
+        { hostname: "127.0.0.1", port: 0, onListen: () => {} },
+        () =>
+          new Response(FOLLOWED_SOURCE_V1, {
+            headers: { "content-type": "text/typescript-jsx" },
+          }),
+      );
+      const address = sourceServer.addr as Deno.NetAddr;
+      try {
+        const fetched = await rt.createPage(
+          new URL(`http://${address.hostname}:${address.port}/fetched.tsx`),
+          session.space,
+          { argument: {}, run: true },
+        );
+        const fetchedSource = await rt.getPieceSource(
+          fetched.id(),
+          session.space,
+        );
+        assertEquals(fetchedSource.origin, undefined);
+        assertEquals(fetchedSource.unusableOrigin, undefined);
+      } finally {
+        await sourceServer.shutdown();
+      }
+
       // The upstream piece runs source whose argument contract differs from
       // the follower's, so following it is a contract change its owner has to
       // confirm. That confirmation is what this test drives over the wire.

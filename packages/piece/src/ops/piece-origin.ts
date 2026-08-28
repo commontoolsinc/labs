@@ -471,16 +471,13 @@ export function acceptEnteredOrigin(
 
 /**
  * Whether a URL carries user information. A fabric URL with an authority can,
- * the same as any other; one with no authority parses with both fields empty,
- * and a string the URL parser refuses carries nothing it could hide there.
+ * the same as any other; one with no authority parses with both fields empty.
+ * Classification returns either a URL the parser has already accepted or a
+ * `cf:` reference, so parsing here cannot fail.
  */
 function carriesCredentials(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    return parsed.username !== "" || parsed.password !== "";
-  } catch {
-    return false;
-  }
+  const parsed = new URL(url);
+  return parsed.username !== "" || parsed.password !== "";
 }
 
 /**
