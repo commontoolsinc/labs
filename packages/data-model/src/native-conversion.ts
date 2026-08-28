@@ -221,16 +221,11 @@ export function errorClassFromType(type: string): ErrorConstructor {
 /**
  * Throws unless the given value is usable as a `FabricValueLayer`, naming what
  * is wrong with it when it is not. This is `isValidFabricValueLayer()` asked so
- * that the answer carries a reason, and that predicate is what decides it --
- * subject to one added condition, which the predicate has no view on.
+ * that the answer carries a reason: that predicate decides the outcome and
+ * this adds nothing to it, everything past the decision existing to say why it
+ * went the way it did.
  *
- * The added condition: a `FabricSpecialObject` whose class this system does not
- * recognize -- a `FabricPrimitive` subclass defined elsewhere, say -- is
- * refused. Membership in the type is all the predicate asks about, and such a
- * value is a member; what it does not have is a codec, so letting it through
- * only moves its failure somewhere later and further away.
- *
- * A `FabricNativeObject` is refused too, and told which refusal it is: a value
+ * A `FabricNativeObject` is refused with a reason of its own: a value
  * that conversion may yet turn into a `FabricValue` is in a different position
  * from one that has no fabric form at all, and the message it gets says so.
  * `shallowFabricFromNativeObjectElseUndefined()` is what does that converting,
@@ -241,11 +236,11 @@ export function errorClassFromType(type: string): ErrorConstructor {
 export function assertValidFabricValueLayer(
   value: unknown,
 ): asserts value is FabricValueLayer {
-  const tag = tagFromNativeValue(value);
-
-  if (isValidFabricValueLayer(value) && (tag !== null)) {
+  if (isValidFabricValueLayer(value)) {
     return;
   }
+
+  const tag = tagFromNativeValue(value);
 
   // Past here the value is refused, and all that is left is to say why. Each
   // arm below is reached only for a value the test above turned away, so the
@@ -315,9 +310,8 @@ export function assertValidFabricValueLayer(
     }
 
     default: {
-      // No recognized class at all: an ordinary class instance, or the
-      // unrecognized `FabricSpecialObject` the added condition above turns
-      // away. Death before confusion!
+      // No recognized class at all -- an ordinary class instance, most
+      // commonly. Death before confusion!
       throw new Error(
         `Not representable as a \`FabricValue\`: ${
           backtickQuote((value as object).constructor?.name ?? typeof value)

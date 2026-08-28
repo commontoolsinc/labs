@@ -17,19 +17,10 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-import { BaseFabricPrimitive } from "@commonfabric/data-model/fabric-bases";
-
 import { convertCellsToLinks } from "../src/cell.ts";
 
 /** A class with no fabric representation. */
 class PlainClass {}
-
-/**
- * A `FabricPrimitive` subclass this system does not register. Structurally it
- * is a `FabricValue` -- `isValidFabricValueLayer()` accepts one -- but no codec
- * knows it, so nothing downstream can encode it.
- */
-class UnregisteredPrimitive extends BaseFabricPrimitive {}
 
 /**
  * An `Array` subclass, whose instances are live code rather than inert data.
@@ -120,25 +111,6 @@ describe("convert-cells-to-links-vetting", () => {
   // anything else with no fabric form. Letting one through would land it in
   // the record branch, which would rebuild it -- a `Map` having no enumerable
   // own properties -- as a bare `{}`.
-  // The walk decides a `FabricPrimitive` is a leaf and returns it whole, which
-  // is right for the six this system registers and wrong for anything else: an
-  // unregistered subclass has no codec, so returning it moves the failure to
-  // encode time and away from the value that caused it. The vet is what catches
-  // it, and it has to run BEFORE the leaf return to do so.
-  it("throws for a `FabricPrimitive` subclass this system does not register", () => {
-    expect(() =>
-      convertCellsToLinks({ x: new UnregisteredPrimitive() } as never)
-    ).toThrow(
-      "Not representable as a `FabricValue`: `UnregisteredPrimitive` (not a " +
-        "recognized fabric type)",
-    );
-  });
-
-  it("throws for such a subclass at the top level too", () => {
-    expect(() => convertCellsToLinks(new UnregisteredPrimitive() as never))
-      .toThrow("`UnregisteredPrimitive` (not a recognized fabric type)");
-  });
-
   it("throws for a `Map`", () => {
     expect(() => convertCellsToLinks({ x: new Map() } as never)).toThrow(
       "`Map` (a `FabricNativeObject`, so conversion is what decides it)",

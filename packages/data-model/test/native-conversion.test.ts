@@ -69,11 +69,7 @@ import {
   shallowFabricFromNativeValue,
 } from "@/native-conversion.ts";
 import { isValidFabricValueLayer } from "@/type-check.ts";
-import {
-  LAYER_CORPUS,
-  PlainClass,
-  UnregisteredPrimitive,
-} from "./fabric-value-corpus.ts";
+import { LAYER_CORPUS, PlainClass } from "./fabric-value-corpus.ts";
 
 /** A concrete fabric class, `toBeInstanceOf()` wanting a constructor. */
 type FabricClass = new (...args: never[]) => object;
@@ -691,29 +687,6 @@ describe("native-conversion", () => {
         for (const cls of codecClasses()) {
           expect([cls.name, carried.has(cls)]).toEqual([cls.name, true]);
         }
-      });
-    });
-
-    // The one added condition, and the one place the two answers part. Such a
-    // value is a `FabricSpecialObject`, so membership -- all the predicate asks
-    // about -- holds; what it lacks is a codec, so every path that could do
-    // something with it fails later and further away instead.
-    describe("given a `FabricPrimitive` subclass this system does not register", () => {
-      it("is accepted by `isValidFabricValueLayer()`", () => {
-        expect(isValidFabricValueLayer(new UnregisteredPrimitive())).toBe(true);
-      });
-
-      it("is refused as an unrecognized type", () => {
-        expect(() => assertValidFabricValueLayer(new UnregisteredPrimitive()))
-          .toThrow(
-            "Not representable as a `FabricValue`: `UnregisteredPrimitive` " +
-              "(not a recognized fabric type)",
-          );
-      });
-
-      it("is refused by the shallow conversion, which the vet answers for", () => {
-        expect(() => shallowFabricFromNativeValue(new UnregisteredPrimitive()))
-          .toThrow("(not a recognized fabric type)");
       });
     });
 
