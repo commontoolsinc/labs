@@ -1038,6 +1038,102 @@ describe("data-updating", () => {
     expect(destinationCell.get()).toEqual({ value: 42 });
   });
 
+  // The two container re-assert branches, which are the ONLY places this
+  // walk writes a container whole rather than by its members: a subtree that
+  // emits nothing has to assert the container itself, or a completion
+  // writeback of an equal `[]` against a doomed optimistic overlay commits
+  // only its siblings and leaves the durable result torn.
+  //
+  // Writing a container whole is also what makes its frozenness the store's
+  // business rather than the walk's, so these pin both at once: the write
+  // happens, and what it carries is not something the caller can go on
+  // mutating.
+  describe("authoritative container re-assert in normalizeAndDiff", () => {
+    /**
+     * The transaction with the authoritative posture reported. The real setter
+     * is gated on a configured seal destination, which is serving-posture
+     * plumbing that has nothing to do with what is under test here: the walk
+     * reads the posture as one boolean and this supplies it. Methods are bound
+     * to the real transaction, whose private state they need.
+     */
+    function authoritative(): IExtendedStorageTransaction {
+      return new Proxy(tx, {
+        get(target, prop) {
+          if (prop === "isAuthoritativeWrites") return () => true;
+          const member = Reflect.get(target, prop, target);
+          return typeof member === "function" ? member.bind(target) : member;
+        },
+      });
+    }
+
+    it("asserts an equal array whole, frozen and unaliased", () => {
+      const testCell = runtime.getCell<{ items: number[] }>(
+        space,
+        "authoritative re-assert equal array",
+        undefined,
+        tx,
+      );
+      testCell.set({ items: [] });
+      const current = testCell.key("items").getAsNormalizedFullLink();
+
+      const written: number[] = [];
+      const changes = normalizeAndDiff(
+        runtime,
+        authoritative(),
+        current,
+        written,
+      );
+
+      expect(changes.length).toBe(1);
+      expect(changes[0].location).toEqual(current);
+      expect(changes[0].value).toEqual([]);
+      // Frozen, and not the caller's own array: the caller may still be
+      // holding `written` and may still push to it.
+      expect(Object.isFrozen(changes[0].value)).toBe(true);
+      expect(changes[0].value).not.toBe(written);
+      expect(Object.isFrozen(written)).toBe(false);
+    });
+
+    it("asserts an equal record whole, frozen and unaliased", () => {
+      const testCell = runtime.getCell<{ rec: Record<string, number> }>(
+        space,
+        "authoritative re-assert equal record",
+        undefined,
+        tx,
+      );
+      testCell.set({ rec: {} });
+      const current = testCell.key("rec").getAsNormalizedFullLink();
+
+      const written: Record<string, number> = {};
+      const changes = normalizeAndDiff(
+        runtime,
+        authoritative(),
+        current,
+        written,
+      );
+
+      expect(changes.length).toBe(1);
+      expect(changes[0].location).toEqual(current);
+      expect(changes[0].value).toEqual({});
+      expect(Object.isFrozen(changes[0].value)).toBe(true);
+      expect(changes[0].value).not.toBe(written);
+      expect(Object.isFrozen(written)).toBe(false);
+    });
+
+    it("emits nothing for an equal array outside the authoritative posture", () => {
+      const testCell = runtime.getCell<{ items: number[] }>(
+        space,
+        "ordinary posture equal array",
+        undefined,
+        tx,
+      );
+      testCell.set({ items: [] });
+      const current = testCell.key("items").getAsNormalizedFullLink();
+
+      expect(normalizeAndDiff(runtime, tx, current, []).length).toBe(0);
+    });
+  });
+
   describe("array-element anchoring in normalizeAndDiff", () => {
     it("stores array-element objects inline when no anchor id source is supplied", () => {
       // `diffAndUpdate` without an anchor id source is the frameless write:
