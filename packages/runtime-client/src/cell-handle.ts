@@ -725,17 +725,22 @@ export class CellHandle<T = unknown> {
     };
   }
 
-  toJSON(): SigilLink {
-    // Wrap in sigil link format so the runtime recognizes this as a link
-    // and dereferences it (e.g., when passed through event.detail.sourceCell).
-    //
-    // The ref-carried `cfcLabelView` is deliberately NOT serialized (inv-12
-    // Stage 0, like `toWireString`): toJSON output is exactly what
-    // JSON.stringify hands the VDOM event path when a handle lands in
-    // CustomEvent.detail, and that raw sigil link re-enters the worker
-    // without passing getCell/cellRefToSigilLink — a main-thread display
-    // copy must not ride back in as label state (codex/cubic review on the
-    // Stage 0 PR; the worker also strips inbound views defensively).
+  /**
+   * Returns the sigil link naming this cell.
+   *
+   * The link is what stands in for a cell wherever a cell itself has no
+   * representation, and this is how a caller that has already recognized the
+   * value as a handle asks for it -- by name, rather than by reaching for a
+   * serialization protocol that happens to yield one. `Cell` is arranged the
+   * same way, its `toSigilLinkOrNull()` answering the callers that have
+   * recognized a cell and its `toJSON()` answering the protocol.
+   *
+   * The ref-carried `cfcLabelView` is deliberately not included, as
+   * `toWireString()` omits it: what this produces re-enters the worker without
+   * passing `getCell()` or `cellRefToSigilLink()`, and a main-thread display
+   * copy must not ride back in as label state (inv-12 Stage 0).
+   */
+  toSigilLink(): SigilLink {
     return linkRefFrom<CfcCellLinkRefPayload>({
       id: this.#ref.id,
       space: this.#ref.space,
@@ -745,6 +750,16 @@ export class CellHandle<T = unknown> {
       ...(this.#ref.overwrite !== undefined &&
         { overwrite: this.#ref.overwrite }),
     });
+  }
+
+  /**
+   * Returns the same link under the JSON protocol's name, so a handle reads as
+   * the cell it names wherever a renderer honors that protocol -- which is what
+   * carries one through `JSON.stringify()`. A caller that has recognized the
+   * handle asks {@link toSigilLink} instead.
+   */
+  toJSON(): SigilLink {
+    return this.toSigilLink();
   }
 
   /**

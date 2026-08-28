@@ -154,7 +154,7 @@ idempotently.)
 The v2 protocol is a discriminated union of message `type`s
 ([`packages/memory/v2.ts`](../../../packages/memory/v2.ts), `ClientMessage` /
 server messages; parsed in `parseClientMessage`, routed in
-`Connection.receiveOrdered`, correlated by `requestId` in
+`Connection.#receiveOrdered`, correlated by `requestId` in
 [`packages/memory/v2/client.ts`](../../../packages/memory/v2/client.ts)). It is
 extensible by adding variants. We add **one new read verb** and **fold writes
 into the existing `transact` commit**.
@@ -194,7 +194,7 @@ interface SqliteQueryWireResult {
 
 Server handling (mirrors `Server.transact` / `Server.queryGraph`):
 
-1. Route the new `type` in `Connection.receiveOrdered`, guarded by
+1. Route the new `type` in `Connection.#receiveOrdered`, guarded by
    `requireSession`.
 2. **Apply the statement guard** (above): single `SELECT`/read-only CTE; reject
    DML/DDL, schema-qualified references, `PRAGMA`/`ATTACH`/`DETACH`, and multiple

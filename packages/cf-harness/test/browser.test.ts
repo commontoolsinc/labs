@@ -90,17 +90,21 @@ class FakeSandboxRuntime implements SandboxRuntime {
 class FakeProcessRunner implements ProcessRunner {
   readonly calls: ProcessRunRequest[] = [];
 
+  readonly #results: (ProcessRunResult | Error)[];
+
   constructor(
-    private readonly results: (ProcessRunResult | Error)[] = [{
+    results: (ProcessRunResult | Error)[] = [{
       stdout: "",
       stderr: "",
       exitCode: 0,
     }],
-  ) {}
+  ) {
+    this.#results = results;
+  }
 
   run(request: ProcessRunRequest): Promise<ProcessRunResult> {
     this.calls.push(request);
-    const next = this.results.shift() ??
+    const next = this.#results.shift() ??
       { stdout: "", stderr: "", exitCode: 0 };
     // An `Error` in the script stands for a run that never produced a result
     // at all — no binary on the host, a spawn the OS refused.

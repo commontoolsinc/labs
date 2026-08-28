@@ -48,14 +48,14 @@ export const isNonFatalDiagnosticCode = (code: number): boolean =>
   code === UNUSED_TS_EXPECT_ERROR;
 
 export class Checker {
-  private program: Program;
-  private messageTransformer?: DiagnosticMessageTransformer;
-  private storedSource: boolean;
+  #program: Program;
+  #messageTransformer?: DiagnosticMessageTransformer;
+  #storedSource: boolean;
 
   constructor(program: Program, options: CheckerOptions = {}) {
-    this.program = program;
-    this.messageTransformer = options.messageTransformer;
-    this.storedSource = options.storedSource === true;
+    this.#program = program;
+    this.#messageTransformer = options.messageTransformer;
+    this.#storedSource = options.storedSource === true;
   }
 
   typeCheck() {
@@ -81,14 +81,14 @@ export class Checker {
    * error semantics via {@link throwIfErrors}.
    */
   checkableSources(): SourceFile[] {
-    return this.sources();
+    return this.#sources();
   }
 
   /** Per-file semantic diagnostics, as the error details typeCheck throws. */
   collectSemanticErrors(sourceFile: SourceFile): ErrorDetails[] {
-    return this.program.getSemanticDiagnostics(sourceFile)
+    return this.#program.getSemanticDiagnostics(sourceFile)
       .filter((diagnostic) =>
-        !this.storedSource || !isNonFatalDiagnosticCode(diagnostic.code)
+        !this.#storedSource || !isNonFatalDiagnosticCode(diagnostic.code)
       )
       .map(
         (diagnostic) => ({ diagnostic, source: sourceFile.text }),
@@ -103,7 +103,7 @@ export class Checker {
    * codes are semantic; a file that does not parse can never be loaded.
    */
   collectSyntacticErrors(sourceFile: SourceFile): ErrorDetails[] {
-    return this.program.getSyntacticDiagnostics(sourceFile).map(
+    return this.#program.getSyntacticDiagnostics(sourceFile).map(
       (diagnostic) => ({ diagnostic, source: sourceFile.text }),
     );
   }
@@ -111,8 +111,8 @@ export class Checker {
   /** Program-level (options + global) diagnostics, same fatality contract. */
   collectProgramErrors(): ErrorDetails[] {
     return [
-      ...this.program.getOptionsDiagnostics(),
-      ...this.program.getGlobalDiagnostics(),
+      ...this.#program.getOptionsDiagnostics(),
+      ...this.#program.getGlobalDiagnostics(),
     ].map((diagnostic) => ({ diagnostic }));
   }
 
@@ -123,7 +123,7 @@ export class Checker {
   collectDeclarationErrors(sourceFile: SourceFile): ErrorDetails[] {
     const errors: ErrorDetails[] = [];
     for (
-      const diagnostic of this.program.getDeclarationDiagnostics(sourceFile)
+      const diagnostic of this.#program.getDeclarationDiagnostics(sourceFile)
     ) {
       // Skip "private name" errors for known exported symbols
       const message = typeof diagnostic.messageText === "string"
@@ -142,7 +142,7 @@ export class Checker {
 
   throwIfErrors(errors: ErrorDetails[]) {
     if (errors.length) {
-      throw new CompilerError(errors, this.messageTransformer);
+      throw new CompilerError(errors, this.#messageTransformer);
     }
   }
 
@@ -152,19 +152,19 @@ export class Checker {
     // too.
     const fatal = (diagnostics ?? []).filter(
       (diagnostic) =>
-        !this.storedSource || !isNonFatalDiagnosticCode(diagnostic.code),
+        !this.#storedSource || !isNonFatalDiagnosticCode(diagnostic.code),
     );
     if (fatal.length === 0) {
       return;
     }
     throw new CompilerError(
       fatal.map((diagnostic) => ({ diagnostic })),
-      this.messageTransformer,
+      this.#messageTransformer,
     );
   }
 
-  private sources() {
-    return this.program.getSourceFiles().filter((source) =>
+  #sources() {
+    return this.#program.getSourceFiles().filter((source) =>
       !source.fileName.startsWith("$types/")
     );
   }
