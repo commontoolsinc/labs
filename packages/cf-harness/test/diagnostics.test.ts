@@ -727,17 +727,22 @@ Deno.test("collectHarnessCapabilitySnapshot reads the CFC transport before captu
     { cfcEnforcementMode: "enforce-explicit" },
   );
 
-  // The reading is taken first, so the persisted description carries it
-  // instead of the `unverified` it would hold if nothing had probed.
-  assertEquals(requests.map((request) => request.args[0]), [
-    "info",
-    "create",
-    "start",
-    "wait",
-    "rm",
-  ]);
+  // What this test pins: the reading is taken BEFORE the description is
+  // captured, so the persisted snapshot carries it instead of the
+  // `unverified` it would hold if nothing had probed.
+  assertEquals(requests[0]?.args[0], "info");
   assertEquals(
     snapshot.cfc.sandbox.cfc?.invocationContextTransportReadiness,
     "unregistered",
   );
+
+  // What it deliberately does NOT pin: that the capability container is
+  // allowed to start on that reading. It does start — this probe calls
+  // `runShell` without a `cfcInvocationContext`, so it bypasses the
+  // per-invocation refusal, and `engine.ts` claims the readiness check
+  // precedes any sandbox execution under enforcement while it does not.
+  // Asserting the full `info,create,start,wait,rm` order here would make a
+  // test out of that defect and turn it into expected behavior. Whether an
+  // enforcing run should abort at this point is the run-start fail-closed
+  // decision tracked on CT-2122.
 });

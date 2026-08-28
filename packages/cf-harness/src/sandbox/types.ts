@@ -179,18 +179,25 @@ export interface SandboxRuntimeDescription {
     extraDockerArgsCount?: number;
     invocationContextTransport?: string;
     invocationContextTransportReadiness?: string;
+    // Reported as a pair so the difference between them is legible without
+    // this check comparing them. The two are expected to differ on Docker
+    // Desktop, where the documented configuration registers the `/host_mnt`
+    // projection of the very directory the harness writes to.
     invocationContextRegisteredPath?: string;
+    invocationContextConfiguredPath?: string;
   };
 }
 
 export interface SandboxRuntime {
   describe(): SandboxRuntimeDescription;
   /**
-   * Read whether the host runtime is registered to use this sandbox's CFC
-   * sidecar directories, so that `describe()` reports a reading rather than
-   * `unverified`. Optional because it is meaningful only for a runtime that
-   * has a counterparty to check; a caller that wants the description to carry
-   * a reading awaits this first.
+   * Read whether the host runtime has a valid absolute directory registered
+   * for each CFC sidecar flag, so that `describe()` reports a reading rather
+   * than `unverified`. It does not check that what is registered is this
+   * sandbox's directory — see `CfcSidecarTransportReading` for why that
+   * cannot be read from a registration. Optional because it is meaningful
+   * only for a runtime that has a registration to read; a caller that wants
+   * the description to carry a reading awaits this first.
    */
   probeCfcTransportReadiness?(): Promise<CfcTransportReadiness>;
   resolvePath(path: string, cwd?: string): string;

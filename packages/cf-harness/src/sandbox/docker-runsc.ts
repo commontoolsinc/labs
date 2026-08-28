@@ -879,6 +879,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
             // transport tag stand in for a working one.
             invocationContextTransportReadiness:
               this.#invocationContextReading()?.status ?? "unverified",
+            invocationContextConfiguredPath: this.#cfcInvocationContextDir,
             ...(this.#invocationContextReading()?.status === "registered"
               ? {
                 invocationContextRegisteredPath:

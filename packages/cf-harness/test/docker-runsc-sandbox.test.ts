@@ -1511,3 +1511,34 @@ Deno.test("cfcTransportReadinessFromDockerRuntimes reports indeterminate when it
     "indeterminate",
   );
 });
+
+Deno.test("DockerRunscSandboxRuntime reports the registered and configured paths as a pair", async () => {
+  // The two are expected to differ on the documented Docker Desktop setup,
+  // where the runtime is registered with the `/host_mnt` projection of the
+  // very directory the harness writes to. That is why the difference is
+  // reported for an operator to judge rather than refused: a check that
+  // refused it would refuse the supported macOS configuration, and one that
+  // excused it would need the projection logic that cannot be made sound.
+  const runner = new FakeProcessRunner([
+    dockerInfoResult([
+      "--cfc-invocation-context-dir=/host_mnt/host/invocations",
+    ]),
+  ]);
+  const runtime = new DockerRunscSandboxRuntime(
+    resolveDockerRunscSandboxConfig({
+      workspaceHostPath: "/host/project",
+      cfcInvocationContextDir: "/host/invocations",
+    }),
+    runner,
+  );
+
+  await runtime.probeCfcTransportReadiness();
+  const cfc = runtime.describe().cfc;
+
+  assertEquals(cfc?.invocationContextTransportReadiness, "registered");
+  assertEquals(
+    cfc?.invocationContextRegisteredPath,
+    "/host_mnt/host/invocations",
+  );
+  assertEquals(cfc?.invocationContextConfiguredPath, "/host/invocations");
+});
