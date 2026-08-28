@@ -51,6 +51,7 @@ The client MUST declare its protocol version in the first WebSocket message:
   "protocol": "memory",
   "flags": {
     "modernCellRep": true,
+    "messageCompressionV1": true,
     "syncSchemaTableV2": true,
     "verdictCatchUpMarkers": true,
     "entityIdListing": true,
@@ -68,6 +69,7 @@ If the server accepts the protocol, it returns:
   "protocol": "memory",
   "flags": {
     "modernCellRep": true,
+    "messageCompressionV1": true,
     "syncSchemaTableV2": true,
     "verdictCatchUpMarkers": true,
     "entityIdListing": true,
@@ -87,6 +89,27 @@ If the server accepts the protocol, it returns:
 If the server does not support the requested version or the required data-model
 flags do not match what it implements, it returns a typed error response and
 does not mark the connection ready.
+
+`hello` and `hello.ok` are always ordinary memory text messages. When both
+peers advertise `messageCompressionV1`, either peer may send later messages as
+a versioned compression envelope:
+
+```text
+mcmp1:{"encoding":"gzip","uncompressedBytes":1234,"payload":"H4sI..."}
+```
+
+The payload is unpadded base64url containing one gzip member. A peer expands
+the envelope before decoding the memory message inside it. Messages below
+1,024 UTF-8 bytes stay in their ordinary form, as do messages whose envelope
+would not be smaller. Receivers therefore accept both ordinary and compressed
+messages after negotiation. Expansion is limited to 64 MiB per envelope and
+must produce exactly the declared byte count. Compression work preserves
+WebSocket message order in both directions.
+
+The capability defaults to `false` when absent. A new peer connected to an old
+peer consequently keeps every message in the ordinary form. Each reconnect
+starts again with an uncompressed `hello`; compression from the previous
+connection does not carry across WebSocket boundaries.
 
 Memory hosts include `sessionOpen.audience` and `sessionOpen.challenge` in
 `hello.ok`. The audience is the server DID the client must sign for. Toolshed
@@ -277,6 +300,7 @@ interface HelloMessage {
   protocol: "memory";
   flags: {
     modernCellRep: boolean;
+    messageCompressionV1?: boolean;
     syncSchemaTableV2?: boolean;
     entityIdListing?: boolean;
     entityIdPagination?: boolean;
@@ -831,6 +855,10 @@ Transport security, origin checks, and product-level signing prompts remain
 part of the complete security boundary.
 
 The memory protocol does not add encryption above WebSocket.
+The `messageCompressionV1` envelope changes representation only and provides
+no confidentiality or integrity protection. Compressed frame sizes reveal
+plaintext-length and repeated-substring correlations, so callers must not treat
+wire length as confidential.
 Remote deployments must expose the route over `wss` or another TLS-protected
 transport.
 Plain `ws` is only appropriate for local development or a trusted private

@@ -10,6 +10,11 @@ import {
 } from "@commonfabric/memory/v2";
 import * as MemoryClient from "@commonfabric/memory/v2/client";
 import {
+  decodeCompressedMemoryMessage,
+  encodeCompressedMemoryMessage,
+  MEMORY_COMPRESSION_ENVELOPE_PREFIX,
+} from "@commonfabric/memory/v2/message-compression";
+import {
   createStorageAddressResolver,
   MEMORY_STORAGE_PATH,
   RemoteSessionFactory,
@@ -630,6 +635,38 @@ describe("WebSocketTransport failure signaling", () => {
       await Promise.all([first, second]);
       expect(activeSocket.sent).toEqual(["first", "second"]);
       expect(DrivableWebSocket.instances).toHaveLength(1);
+    });
+  });
+
+  it("compresses and expands negotiated messages without reordering them", async () => {
+    await withTransport(async (transport, socket) => {
+      const opening = transport.send("hello");
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await opening;
+      transport.setMessageCompressionEnabled(true);
+
+      const first = "first compressed message ".repeat(1_000);
+      const second = "second compressed message ".repeat(1_000);
+      await Promise.all([transport.send(first), transport.send(second)]);
+
+      expect(activeSocket.sent[1].startsWith(
+        MEMORY_COMPRESSION_ENVELOPE_PREFIX,
+      )).toBe(true);
+      expect(activeSocket.sent[2].startsWith(
+        MEMORY_COMPRESSION_ENVELOPE_PREFIX,
+      )).toBe(true);
+      expect(await decodeCompressedMemoryMessage(activeSocket.sent[1])).toBe(
+        first,
+      );
+      expect(await decodeCompressedMemoryMessage(activeSocket.sent[2])).toBe(
+        second,
+      );
+
+      const received = Promise.withResolvers<string>();
+      transport.setReceiver(received.resolve);
+      activeSocket.receive(await encodeCompressedMemoryMessage(first));
+      expect(await received.promise).toBe(first);
     });
   });
 

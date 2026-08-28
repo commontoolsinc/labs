@@ -15,6 +15,7 @@
 import { Identity } from "@commonfabric/identity";
 
 import { encodeMemoryBoundary } from "../v2.ts";
+import { MemoryMessageCompressionChannel } from "./message-compression.ts";
 import * as MemoryServer from "./server.ts";
 import { verifySessionOpenAuthorization } from "./session-open-auth.ts";
 
@@ -35,11 +36,17 @@ let nextConnectionTag = 0;
 export class StandaloneMemoryServer {
   #memory: MemoryServer.Server;
   #http: Deno.HttpServer;
+  #channels: Set<MemoryMessageCompressionChannel>;
   readonly url: URL;
 
-  private constructor(memory: MemoryServer.Server, http: Deno.HttpServer) {
+  private constructor(
+    memory: MemoryServer.Server,
+    http: Deno.HttpServer,
+    channels: Set<MemoryMessageCompressionChannel>,
+  ) {
     this.#memory = memory;
     this.#http = http;
+    this.#channels = channels;
     const address = http.addr as Deno.NetAddr;
     this.url = new URL(`http://127.0.0.1:${address.port}/`);
   }
@@ -61,6 +68,7 @@ export class StandaloneMemoryServer {
       },
       acl: options.acl,
     });
+    const channels = new Set<MemoryMessageCompressionChannel>();
     const http = Deno.serve({
       hostname: "127.0.0.1",
       port: 0,
@@ -71,45 +79,75 @@ export class StandaloneMemoryServer {
       }
       const { socket, response } = Deno.upgradeWebSocket(request);
       const connectionTag = nextConnectionTag++;
+      let compressionNegotiated = false;
+      let sawFirstMessage = false;
+      let closed = false;
+      const channel = new MemoryMessageCompressionChannel(
+        (frame) => {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(frame);
+          }
+        },
+        () => {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.close(1011, "memory websocket message failure");
+          }
+          closeConnection();
+        },
+      );
+      channels.add(channel);
       const connection = memory.connect((message) => {
-        if (socket.readyState === WebSocket.OPEN) {
-          socket.send(encodeMemoryBoundary(message));
+        channel.send(encodeMemoryBoundary(message));
+        if (compressionNegotiated && message.type === "hello.ok") {
+          channel.enable();
         }
       });
+      function closeConnection(): void {
+        if (closed) return;
+        closed = true;
+        channel.close();
+        channels.delete(channel);
+        connection.close();
+      }
       const debugWrites = Deno.env.get("CF_DEBUG_MEMORY_WRITES") === "1";
       socket.addEventListener("message", (event) => {
         if (typeof event.data !== "string") {
           socket.close(1003, "memory websocket expects text frames");
-          connection.close();
+          closeConnection();
           return;
         }
-        if (debugWrites) {
-          logCommitOperations(connectionTag, event.data);
-        }
-        connection.receive(event.data).catch(() => {
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.close(1011, "memory websocket receive failure");
+        if (closed) return;
+        const frame = event.data;
+        channel.receive(frame, async (payload) => {
+          if (!sawFirstMessage) {
+            sawFirstMessage = true;
+            const first = MemoryServer.parseClientMessage(payload);
+            compressionNegotiated = first?.type === "hello" &&
+              first.flags.messageCompressionV1 === true;
           }
-          connection.close();
+          await connection.receive(payload);
+          if (debugWrites) {
+            logCommitOperations(connectionTag, payload);
+          }
         });
       });
-      socket.addEventListener("close", () => connection.close());
-      socket.addEventListener("error", () => connection.close());
+      socket.addEventListener("close", closeConnection);
+      socket.addEventListener("error", closeConnection);
       return response;
     });
-    return new StandaloneMemoryServer(memory, http);
+    return new StandaloneMemoryServer(memory, http, channels);
   }
 
   /**
-   * Drain the underlying memory server: apply every received commit, run
-   * post-commit scheduler bookkeeping, and flush all pending subscription
-   * fan-out so every frame the server owes its subscribers has been sent.
-   * A passthrough to `MemoryServer.Server.idle()`; multi-runtime test harnesses
-   * call it as the deterministic "the server has published everything" barrier
-   * in place of a fixed delay.
+   * Drains received compression work, the underlying memory server, and sent
+   * compression work in that order. Multi-runtime test harnesses call this as
+   * the deterministic "the server has published everything" barrier in place
+   * of a fixed delay.
    */
   async idle(): Promise<void> {
+    await Promise.all([...this.#channels].map((channel) => channel.idle()));
     await this.#memory.idle();
+    await Promise.all([...this.#channels].map((channel) => channel.idle()));
   }
 
   async close(): Promise<void> {

@@ -1,4 +1,7 @@
 import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
+import {
+  MemoryMessageCompressionChannel,
+} from "@commonfabric/memory/v2/message-compression";
 import * as MemoryServer from "@commonfabric/memory/v2/server";
 import { getLogger } from "@commonfabric/utils/logger";
 
@@ -188,9 +191,12 @@ export const attachMemorySocketPipeline = (
   negotiation: ReturnType<typeof bufferTextMessagesUntilNegotiated>,
   firstMessage: string,
 ): boolean => {
-  if (MemoryServer.parseClientMessage(firstMessage) === null) {
+  const parsedFirstMessage = MemoryServer.parseClientMessage(firstMessage);
+  if (parsedFirstMessage === null) {
     return false;
   }
+  const compressionNegotiated = parsedFirstMessage.type === "hello" &&
+    parsedFirstMessage.flags.messageCompressionV1 === true;
 
   const safeSocketClose = (code: number, reason: string) => {
     if (
@@ -205,17 +211,32 @@ export const attachMemorySocketPipeline = (
       // Ignore close races with the peer.
     }
   };
+  let closed = false;
+  const channel = new MemoryMessageCompressionChannel(
+    (frame) => {
+      if (socket.readyState === WebSocket.OPEN) {
+        socket.send(frame);
+      }
+    },
+    () => {
+      safeSocketClose(1011, "Memory websocket message failure");
+      closeConnection();
+    },
+  );
   const connection = memoryServer.connect((message) => {
-    if (socket.readyState !== WebSocket.OPEN) {
-      return;
-    }
     const encoded = encodeMemoryBoundary(message);
     warnOnOversizedOutboundFrame(encoded, message);
-    socket.send(encoded);
+    channel.send(encoded);
+    if (compressionNegotiated && message.type === "hello.ok") {
+      channel.enable();
+    }
   });
-  const closeConnection = () => {
+  function closeConnection(): void {
+    if (closed) return;
+    closed = true;
+    channel.close();
     connection.close();
-  };
+  }
 
   // Gated diagnostic write trace (off by default). `CF_DEBUG_MEMORY_WRITES=1`
   // logs one `[memwrite]` line per committed op, tagged with this connection's
@@ -248,15 +269,11 @@ export const attachMemorySocketPipeline = (
       logMemWrites(firstMessage);
       negotiation.handoff({
         onMessage(message) {
-          // Trace only after the receive resolves, so a message whose receive
-          // fails (the fatal-error path below) is not logged as a write.
-          void connection.receive(message).then(
-            () => logMemWrites(message),
-            () => {
-              safeSocketClose(1011, "Memory websocket receive failure");
-              closeConnection();
-            },
-          );
+          if (closed) return;
+          channel.receive(message, async (payload) => {
+            await connection.receive(payload);
+            logMemWrites(payload);
+          });
         },
         onClose: closeConnection,
         onError(error) {

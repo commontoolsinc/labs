@@ -1,8 +1,12 @@
 import { hashOf } from "@commonfabric/data-model/value-hash";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { type MemorySpace, type Signer } from "@commonfabric/memory/interface";
-import * as MemoryClient from "@commonfabric/memory/v2/client";
 import { MEMORY_PROTOCOL } from "@commonfabric/memory/v2";
+import * as MemoryClient from "@commonfabric/memory/v2/client";
+import {
+  decodeCompressedMemoryMessage,
+  encodeCompressedMemoryMessage,
+} from "@commonfabric/memory/v2/message-compression";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 
 export interface SessionFactory {
@@ -125,8 +129,17 @@ export class WebSocketTransport implements MemoryClient.Transport {
   #closeReceiver: (error?: Error) => void = () => {};
   #socket: WebSocket | null = null;
   #opening: Promise<WebSocket> | null = null;
+  #compressionEnabled = false;
+  #sending: Promise<void> = Promise.resolve();
+  #receiving: Promise<void> = Promise.resolve();
 
   constructor(private readonly address: URL) {}
+
+  /** @inheritDoc */
+  get supportsMessageCompression(): boolean {
+    return typeof CompressionStream === "function" &&
+      typeof DecompressionStream === "function";
+  }
 
   setReceiver(receiver: (payload: string) => void): void {
     this.#receiver = receiver;
@@ -136,15 +149,29 @@ export class WebSocketTransport implements MemoryClient.Transport {
     this.#closeReceiver = receiver;
   }
 
+  /** @inheritDoc */
+  setMessageCompressionEnabled(enabled: boolean): void {
+    this.#compressionEnabled = enabled;
+  }
+
   async send(payload: string): Promise<void> {
-    const socket = await this.open();
-    socket.send(payload);
+    const opening = this.open();
+    const send = this.#sending.then(async () => {
+      const socket = await opening;
+      const frame = this.#compressionEnabled
+        ? await encodeCompressedMemoryMessage(payload)
+        : payload;
+      socket.send(frame);
+    });
+    this.#sending = send.catch(() => {});
+    await send;
   }
 
   async close(): Promise<void> {
     const socket = this.#socket;
     this.#socket = null;
     this.#opening = null;
+    this.#compressionEnabled = false;
     if (!socket || socket.readyState === WebSocket.CLOSED) {
       return;
     }
@@ -172,6 +199,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
     const opening = new Promise<WebSocket>((resolve, reject) => {
       const socket = new WebSocket(address);
       this.#socket = socket;
+      this.#compressionEnabled = false;
       let opened = false;
       socket.addEventListener("open", () => {
         opened = true;
@@ -179,7 +207,27 @@ export class WebSocketTransport implements MemoryClient.Transport {
       }, { once: true });
       socket.addEventListener("message", (event) => {
         if (typeof event.data === "string") {
-          this.#receiver(event.data);
+          const receive = this.#receiving.then(async () => {
+            if (this.#socket !== socket) return;
+            const payload = this.#compressionEnabled
+              ? await decodeCompressedMemoryMessage(event.data)
+              : event.data;
+            if (this.#socket !== socket) return;
+            this.#receiver(payload);
+          });
+          this.#receiving = receive.catch((cause) => {
+            const error = new Error(
+              "Unable to decode compressed memory websocket message",
+              { cause },
+            );
+            if (this.#socket === socket) {
+              this.#socket = null;
+            }
+            this.#closeReceiver(error);
+            if (socket.readyState === WebSocket.OPEN) {
+              socket.close(1007, error.message);
+            }
+          });
         }
       });
       socket.addEventListener("close", () => {
@@ -189,6 +237,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
         if (this.#opening === opening) {
           this.#opening = null;
         }
+        this.#compressionEnabled = false;
         this.#closeReceiver();
         if (!opened) {
           reject(new Error("memory websocket transport closed before opening"));
@@ -201,6 +250,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
         if (this.#opening === opening) {
           this.#opening = null;
         }
+        this.#compressionEnabled = false;
         this.#closeReceiver(
           event instanceof ErrorEvent && event.error instanceof Error
             ? event.error

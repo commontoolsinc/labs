@@ -1078,7 +1078,8 @@ export type MemoryProtocolFlags = {
   operationCodecs?: readonly string[];
   /** Hash-keyed per-frame schema table. */
   syncSchemaTableV2: boolean;
-
+  /** The peer can exchange `mcmp1` gzip message envelopes. */
+  messageCompressionV1: boolean;
   /**
    * Server capability (CFC Phase 3.c): commit-folded `sqlite` writes to
    * rule-bearing tables are re-derived through the shared row-label evaluator
@@ -1139,6 +1140,7 @@ export type WireMemoryProtocolFlags = {
   applyOp?: boolean;
   operationCodecs?: readonly string[];
   syncSchemaTableV2?: boolean;
+  messageCompressionV1?: boolean;
   sqliteCommitRowLabelEval?: boolean;
   pendingReadStacks?: boolean;
   verdictCatchUpMarkers?: boolean;
@@ -1809,6 +1811,7 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   commitPreconditions: getCommitPreconditionsConfig(),
   applyOp: true,
   operationCodecs: [CODEMIRROR_CHANGESET_CODEC],
+  messageCompressionV1: true,
   // A build-inherent capability, not configuration: this build's engine always
   // evaluates row-label rules at commit (sqlite/commit-eval.ts), so it always
   // advertises the fact. Peers that see it absent (an older server) keep their
@@ -1892,6 +1895,14 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const messageCompressionV1 = value.messageCompressionV1;
+  if (
+    messageCompressionV1 !== undefined &&
+    typeof messageCompressionV1 !== "boolean"
+  ) {
+    return null;
+  }
+
   const sqliteCommitRowLabelEval = value.sqliteCommitRowLabelEval;
   if (
     sqliteCommitRowLabelEval !== undefined &&
@@ -1948,6 +1959,7 @@ export const parseMemoryProtocolFlags = (
       ? {}
       : { operationCodecs: [...operationCodecs].sort() as string[] }),
     syncSchemaTableV2: syncSchemaTableV2 === true,
+    messageCompressionV1: messageCompressionV1 === true,
     // Absent (an older peer) parses to false: the capability must be
     // POSITIVELY advertised for the runner to relax its write gate.
     sqliteCommitRowLabelEval: sqliteCommitRowLabelEval === true,
@@ -1977,6 +1989,7 @@ export const wireMemoryProtocolFlags = (
     ? {}
     : { operationCodecs: flags.operationCodecs }),
   syncSchemaTableV2: flags.syncSchemaTableV2,
+  messageCompressionV1: flags.messageCompressionV1,
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
   pendingReadStacks: flags.pendingReadStacks,
   verdictCatchUpMarkers: flags.verdictCatchUpMarkers,

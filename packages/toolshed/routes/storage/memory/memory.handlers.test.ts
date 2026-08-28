@@ -7,6 +7,11 @@ import {
   getMemoryProtocolFlags,
   MEMORY_PROTOCOL,
 } from "@commonfabric/memory/v2";
+import {
+  decodeCompressedMemoryMessage,
+  encodeCompressedMemoryMessage,
+  MEMORY_COMPRESSION_ENVELOPE_PREFIX,
+} from "@commonfabric/memory/v2/message-compression";
 
 import {
   attachMemorySocketPipeline,
@@ -24,12 +29,28 @@ const HELLO = encodeMemoryBoundary({
 class FakeSocket extends EventTarget {
   readyState: number = WebSocket.OPEN;
   readonly sent: string[] = [];
+  #sentWaiters: Array<{ count: number; resolve: () => void }> = [];
 
   send(payload: string): void {
     this.sent.push(payload);
+    this.#sentWaiters = this.#sentWaiters.filter((waiter) => {
+      if (this.sent.length >= waiter.count) {
+        waiter.resolve();
+        return false;
+      }
+      return true;
+    });
   }
 
   close(): void {}
+
+  /** Resolves once the socket has sent `count` messages. */
+  whenSent(count: number): Promise<void> {
+    if (this.sent.length >= count) return Promise.resolve();
+    return new Promise((resolve) => {
+      this.#sentWaiters.push({ count, resolve });
+    });
+  }
 }
 
 // Runs the pipeline the way `subscribe` does: deliver the first message
@@ -90,6 +111,53 @@ describe("memory.handlers", () => {
       await runHelloThroughPipeline(fake, WebSocket.CLOSED);
 
       expect(fake.sent).toEqual([]);
+    });
+
+    it("exchanges compressed messages after the uncompressed hello", async () => {
+      const fake = new FakeSocket();
+      const socket = fake as unknown as WebSocket;
+      const negotiation = bufferTextMessagesUntilNegotiated(socket);
+      const handedOff = Promise.withResolvers<void>();
+      const handoff = negotiation.handoff;
+      negotiation.handoff = (handlers) => {
+        handoff(handlers);
+        handedOff.resolve();
+      };
+
+      fake.dispatchEvent(new MessageEvent("message", { data: HELLO }));
+      const firstMessage = await negotiation.firstMessage;
+      expect(attachMemorySocketPipeline(
+        socket,
+        negotiation,
+        firstMessage!,
+      )).toBe(true);
+      await handedOff.promise;
+      expect(fake.sent[0].startsWith(
+        MEMORY_COMPRESSION_ENVELOPE_PREFIX,
+      )).toBe(false);
+
+      const requestId = "compressed-session-open-".repeat(100);
+      const request = encodeMemoryBoundary({
+        type: "session.open",
+        requestId,
+        space: "did:key:z6Mk-compression-test",
+        session: {},
+      });
+      fake.dispatchEvent(
+        new MessageEvent("message", {
+          data: await encodeCompressedMemoryMessage(request),
+        }),
+      );
+      await fake.whenSent(2);
+
+      expect(fake.sent[1].startsWith(
+        MEMORY_COMPRESSION_ENVELOPE_PREFIX,
+      )).toBe(true);
+      const response = decodeMemoryBoundary<{ requestId: string }>(
+        await decodeCompressedMemoryMessage(fake.sent[1]),
+      );
+      expect(response.requestId).toBe(requestId);
+      fake.dispatchEvent(new CloseEvent("close"));
     });
   });
 

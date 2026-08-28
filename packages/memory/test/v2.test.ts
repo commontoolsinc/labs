@@ -137,6 +137,7 @@ describe("memory v2 flags", () => {
       commitPreconditions: false,
       applyOp: true,
       operationCodecs: ["codemirror-changeset@1"],
+      messageCompressionV1: true,
       // Build-inherent capability, not configuration: always advertised.
       sqliteCommitRowLabelEval: true,
       pendingReadStacks: true,
@@ -156,6 +157,7 @@ describe("memory v2 flags", () => {
       commitPreconditions: true,
       applyOp: true,
       operationCodecs: ["codemirror-changeset@1"],
+      messageCompressionV1: true,
       sqliteCommitRowLabelEval: true,
       pendingReadStacks: true,
       verdictCatchUpMarkers: true,
@@ -177,6 +179,7 @@ describe("memory v2 flags", () => {
         commitPreconditions: true,
         applyOp: true,
         syncSchemaTableV2: true,
+        messageCompressionV1: true,
         sqliteCommitRowLabelEval: true,
         pendingReadStacks: true,
         verdictCatchUpMarkers: false,
@@ -189,6 +192,7 @@ describe("memory v2 flags", () => {
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
+        messageCompressionV1: false,
         // A peer without commit-time sqlite row-label evaluation stays
         // compatible — the capability only gates the runner's write-gate
         // relaxation, never the connection.
@@ -210,6 +214,7 @@ describe("parseMemoryProtocolFlags", () => {
       commitPreconditions: false,
       applyOp: false,
       syncSchemaTableV2: false,
+      messageCompressionV1: false,
       sqliteCommitRowLabelEval: false,
       pendingReadStacks: false,
       verdictCatchUpMarkers: false,
@@ -222,6 +227,7 @@ describe("parseMemoryProtocolFlags", () => {
       commitPreconditions: false,
       applyOp: false,
       syncSchemaTableV2: false,
+      messageCompressionV1: false,
       sqliteCommitRowLabelEval: false,
       pendingReadStacks: false,
       verdictCatchUpMarkers: false,
@@ -241,6 +247,7 @@ describe("parseMemoryProtocolFlags", () => {
         commitPreconditions: true,
         applyOp: false,
         syncSchemaTableV2: false,
+        messageCompressionV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
@@ -279,6 +286,26 @@ describe("parseMemoryProtocolFlags", () => {
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: true,
+        messageCompressionV1: false,
+        sqliteCommitRowLabelEval: false,
+        pendingReadStacks: false,
+        verdictCatchUpMarkers: false,
+        entityIdListing: false,
+        entityIdPagination: false,
+        entityIdLookup: false,
+      },
+    );
+  });
+
+  it("accepts the messageCompressionV1 capability key", () => {
+    assertEquals(
+      parseMemoryProtocolFlags({ messageCompressionV1: true }),
+      {
+        modernCellRep: false,
+        commitPreconditions: false,
+        applyOp: false,
+        syncSchemaTableV2: false,
+        messageCompressionV1: true,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
@@ -299,6 +326,7 @@ describe("parseMemoryProtocolFlags", () => {
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
+        messageCompressionV1: false,
         sqliteCommitRowLabelEval: true,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
@@ -327,6 +355,7 @@ describe("parseMemoryProtocolFlags", () => {
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
+        messageCompressionV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: true,
@@ -348,6 +377,7 @@ describe("parseMemoryProtocolFlags", () => {
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
+        messageCompressionV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: true,
         verdictCatchUpMarkers: false,
@@ -366,6 +396,7 @@ describe("parseMemoryProtocolFlags", () => {
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
+        messageCompressionV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
@@ -387,6 +418,7 @@ describe("parseMemoryProtocolFlags", () => {
         commitPreconditions: false,
         applyOp: false,
         syncSchemaTableV2: false,
+        messageCompressionV1: false,
         sqliteCommitRowLabelEval: false,
         pendingReadStacks: false,
         verdictCatchUpMarkers: false,
@@ -409,6 +441,10 @@ describe("parseMemoryProtocolFlags", () => {
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: "true" }), null);
     assertEquals(parseMemoryProtocolFlags({ syncSchemaTableV2: "true" }), null);
     assertEquals(parseMemoryProtocolFlags({ applyOp: "true" }), null);
+    assertEquals(
+      parseMemoryProtocolFlags({ messageCompressionV1: "true" }),
+      null,
+    );
     assertEquals(
       parseMemoryProtocolFlags({ verdictCatchUpMarkers: "true" }),
       null,
