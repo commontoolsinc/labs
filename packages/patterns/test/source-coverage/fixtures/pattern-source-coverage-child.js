@@ -32,6 +32,15 @@ function sendCountOf(value) {
   return value.sendCount;
 }
 
+function elementsOfType(node, type) {
+  if (node == null || typeof node !== "object") return [];
+  if (Array.isArray(node)) {
+    return node.flatMap((child) => elementsOfType(child, type));
+  }
+  const matches = node.type === type ? [node] : [];
+  return matches.concat(elementsOfType(node.children, type));
+}
+
 if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
   Deno.test("changed pattern source paths execute under plain Deno coverage", async () => {
     const { default: DoList } = await import("../../../do-list/do-list.tsx");
@@ -356,7 +365,7 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
       },
       health: {
         schema: "commonfabric.github-connector.health.v1",
-        service: "github-connector",
+        service: "github-host",
         formatVersion: 1,
         status: "degraded",
         startedAt: "2026-08-28T01:00:00.000Z",
@@ -367,7 +376,7 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
         },
         sync: {
           reason: "scheduled",
-          status: "completed-with-errors",
+          status: "failed",
           startedAt: "2026-08-28T01:58:00.000Z",
           completedAt: "2026-08-28T01:59:00.000Z",
           pullRequestCount: synchronizedStatuses.length,
@@ -396,6 +405,28 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
         synchronizedText.includes("feature-0 → main"),
       "GitHub activity renders synchronized pull requests and health",
     );
+    const statusBadges = elementsOfType(
+      uiOf(synchronizedGithubActivity),
+      "cf-badge",
+    );
+    for (
+      const [label, color] of [
+        ["Ready to land", "primary"],
+        ["Tests running", "accent"],
+        ["Tests failed", "danger"],
+        ["Merge conflicts", "danger"],
+        ["Merge blocked", "neutral"],
+        ["Visibility unknown", "accent"],
+        ["Draft", "neutral"],
+      ]
+    ) {
+      assert(
+        statusBadges.some((badge) =>
+          badge.props.color === color && textContent(badge).includes(label)
+        ),
+        `GitHub activity renders ${label} with the ${color} badge color`,
+      );
+    }
     assert(
       synchronizedGithubActivity.pullRequests.every((row) =>
         !("detail" in row)
@@ -415,10 +446,18 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
         pullRequests: [],
       },
     });
+    const emptyStateMessages = elementsOfType(
+      uiOf(emptySynchronizedGithubActivity),
+      "cf-empty-state",
+    ).map((node) => node.props.message);
     assert(
       emptySynchronizedGithubActivity.pullRequestCount === 0 &&
         emptySynchronizedGithubActivity.repositoryCount === 0 &&
-        uiOf(emptySynchronizedGithubActivity) !== undefined,
+        emptyStateMessages.includes("No synchronized pull requests") &&
+        emptyStateMessages.includes("No recent pull-request activity") &&
+        emptyStateMessages.includes(
+          "No connector health snapshot is connected",
+        ),
       "GitHub activity renders empty synchronized states",
     );
 
