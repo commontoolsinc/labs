@@ -357,6 +357,12 @@ interface PropRebuildJob {
 }
 
 export class CellBridge {
+  // A member below declared `private` rather than `#` is one
+  // `cell-bridge.test.ts` reaches and drives directly; a `#` name would put
+  // it out of that test's reach. Three also keep a leading `_` that this
+  // convention otherwise drops, `_attemptReconnect`, `_disconnected`, and
+  // `_reconnectTimer` being the names the test uses.
+
   tree: FsTree;
   spaces: Map<string, SpaceState> = new Map();
 
@@ -370,22 +376,12 @@ export class CellBridge {
   #apiUrl: string = "";
   #connecting = new Map<string, Promise<SpaceState>>();
 
-  /** In-flight piece-list synchronization keyed by space name. *
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
+  /** In-flight piece-list synchronization keyed by space name. */
   private pieceSyncs = new Map<string, Promise<void>>();
 
-  /** Flag: re-run sync after current pass completes. *
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
+  /** Flag: re-run sync after current pass completes. */
   private syncAgain: Set<string> = new Set();
 
-  /**
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
   private pendingPieceHydrations = new Map<string, Promise<void>>();
 
   /** Coalesced subtree rebuilds keyed by piece inode + prop name. */
@@ -407,57 +403,29 @@ export class CellBridge {
   #execCli: string;
   #pieceRoots = new Map<bigint, PieceRootInfo>();
 
-  /**
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
   private unhydratedEntityRoots = new Map<
     bigint,
     UnhydratedEntityRootInfo
   >();
 
-  /**
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
   private pendingEntityHydrations = new Map<bigint, Promise<boolean>>();
   #pendingEntityDirectorySnapshots = new Map<
     SpaceState,
     Promise<readonly DirectorySnapshotEntry[]>
   >();
 
-  /**
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
   private entityProjectionLru = new Map<bigint, UnhydratedEntityRootInfo>();
 
-  /**
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
   private entityProjectionEvictionCandidates = new Map<
     bigint,
     UnhydratedEntityRootInfo
   >();
 
-  /**
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
   private entityProjectionUseOrder = new Map<bigint, number>();
   #nextEntityProjectionUseOrder = 0;
 
-  /**
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
   private entityProjectionLookupRefs = new Map<bigint, bigint>();
 
-  /**
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
   private entityProjectionLookupOwners = new Map<
     bigint,
     EntityProjectionLookupOwner
@@ -470,16 +438,8 @@ export class CellBridge {
   >();
   #entityProjectionOpenOwnerInodes = new Map<bigint, Set<bigint>>();
 
-  /**
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
   private pendingEntityRemovals = new Map<bigint, UnhydratedEntityRootInfo>();
 
-  /**
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
   private entitySubscriptions = new Map<bigint, Cancel[]>();
   #piecePropRoots = new Map<bigint, PiecePropRootInfo>();
   #hydratedPieceProps = new Map<bigint, Set<"input" | "result">>();
@@ -511,18 +471,11 @@ export class CellBridge {
    * Once disconnected, all files appear read-only (EACCES on write)
    * so agents get immediate feedback rather than silent data loss.
    * Reconnection is attempted automatically with exponential backoff.
-   *
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
    */
   private _disconnected = false;
   #disconnectCount = 0;
   #lastDisconnectReason: string | null = null;
 
-  /**
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
   private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   get disconnected(): boolean {
@@ -558,10 +511,6 @@ export class CellBridge {
     this._reconnectTimer = timerId;
   }
 
-  /**
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
   private async _attemptReconnect(): Promise<void> {
     const spaces = [...this.spaces];
     let allSpacesRestored = spaces.length > 0;
@@ -849,10 +798,7 @@ export class CellBridge {
     this.#updatePieceManifest(state, piece.id, { summary, patternRef });
   }
 
-  /** Refresh synthetic pattern metadata after an in-place pattern swap. *
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
+  /** Refresh synthetic pattern metadata after an in-place pattern swap. */
   private async refreshPiecePatternMetadata(
     state: SpaceState,
     piece: PieceController,
@@ -1866,10 +1812,6 @@ export class CellBridge {
     this.#hydrationEpochs.set(key, (this.#hydrationEpochs.get(key) ?? 0) + 1);
   }
 
-  /**
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
   private async rebuildPieceProp(args: {
     cell: Cell<unknown>;
     newValue: unknown;
@@ -2136,10 +2078,6 @@ export class CellBridge {
     this.#debugLog(`[${spaceName}] Updated ${pieceName}/${propName}`);
   }
 
-  /**
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
   private async enqueuePiecePropRebuild(args: PropRebuildJob): Promise<void> {
     const key = this.#propRebuildKey(args.pieceIno, args.propName);
     const previous = this.#pendingPropRebuildQueues.get(key) ??
@@ -2159,10 +2097,6 @@ export class CellBridge {
 
   static readonly #MAX_HYDRATION_RETRIES = 3;
 
-  /**
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
   private hydratePieceProp(
     pieceIno: bigint,
     propName: "input" | "result",
@@ -2568,10 +2502,6 @@ export class CellBridge {
     );
   }
 
-  /**
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
   private buildSpaceTree(
     spaceName: string,
     pieces: PiecesController,
@@ -3122,9 +3052,6 @@ export class CellBridge {
   /**
    * Add a single piece to a space's tree.
    * Returns the assigned display name.
-   *
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
    */
   private async addPieceToSpace(
     state: SpaceState,
@@ -3254,10 +3181,7 @@ export class CellBridge {
     } while (this.syncAgain.has(spaceName));
   }
 
-  /** Single pass of piece list sync (called by guarded syncPieceList). *
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
+  /** Single pass of piece list sync (called by guarded syncPieceList). */
   private async syncPieceListOnce(
     state: SpaceState,
     spaceName: string,
@@ -3321,10 +3245,7 @@ export class CellBridge {
     }
   }
 
-  /** Update the pieces/pieces.json manifest for a space. *
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
+  /** Update the pieces/pieces.json manifest for a space. */
   private updatePiecesJson(state: SpaceState): void {
     const entries = this.#buildPiecesManifestEntries(state);
     const existingIno = this.tree.lookup(state.piecesIno, "pieces.json");
@@ -3352,10 +3273,7 @@ export class CellBridge {
     );
   }
 
-  /** Update the pieces/.index.json file for a space. *
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
+  /** Update the pieces/.index.json file for a space. */
   private updateIndexJson(state: SpaceState): void {
     const existingIno = this.tree.lookup(state.piecesIno, ".index.json");
     if (existingIno !== undefined) {
@@ -3964,9 +3882,6 @@ export class CellBridge {
   /**
    * Subscribe to cell changes for hydration-cache invalidation and
    * projected name changes for a piece.
-   *
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
    */
   private async subscribePiece(
     piece: PieceController,
@@ -4260,9 +4175,6 @@ export class CellBridge {
    *   Same-space + id:  "../".repeat(depth+2) + "entities/<hash>[/<path>]"
    *   Cross-space:      "../".repeat(depth+3) + "<spaceName>/entities/<hash>[/<path>]"
    *   Self-ref (no id): relative path within the same piece
-   *
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
    */
   private makeLinkResolver(
     spaceName: string,
@@ -4327,10 +4239,6 @@ export class CellBridge {
     };
   }
 
-  /**
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
-   */
   private async loadPieceTree(
     piece: PieceController,
     parentIno: bigint,
@@ -4418,9 +4326,6 @@ export class CellBridge {
    * authored source files (recovered from the content-addressed
    * `pattern:<identity>` source-doc closure). Skips system pieces that have no
    * recoverable source.
-   *
-   * TypeScript-private rather than a `#` name: `cell-bridge.test.ts` drives
-   * this member directly.
    */
   private async buildSourceTree(
     pieceIno: bigint,
