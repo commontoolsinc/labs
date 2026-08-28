@@ -358,6 +358,52 @@ describe("run-measurement-batch", () => {
       ).toEqual(["seed-1", "seed-2"]);
     });
 
+    it("returns the supersession reasons a suite gives for identifiers it names", () => {
+      expect(parseMeasurementSuite({
+        label: "l",
+        tasks: [{ id: "a", text: "one" }],
+        supersededPatternIds: ["old", "older"],
+        supersededReasons: { old: "a defect in it was fixed" },
+      })).toEqual({
+        label: "l",
+        tasks: [{ id: "a", text: "one" }],
+        supersededPatternIds: ["old", "older"],
+        supersededReasons: { old: "a defect in it was fixed" },
+      });
+    });
+
+    it("throws for a supersession reason naming an identifier the suite does not call superseded", () => {
+      expect(() =>
+        parseMeasurementSuite({
+          label: "l",
+          tasks: [{ id: "a", text: "one" }],
+          supersededPatternIds: ["old"],
+          supersededReasons: { other: "a reason for nothing" },
+        })
+      ).toThrow("which it does not name as superseded");
+    });
+
+    it("throws for a supersession reason that is not a string", () => {
+      expect(() =>
+        parseMeasurementSuite({
+          label: "l",
+          tasks: [{ id: "a", text: "one" }],
+          supersededPatternIds: ["old"],
+          supersededReasons: { old: 7 },
+        })
+      ).toThrow("reason for old must be a string");
+    });
+
+    it("throws for supersession reasons that are not an object", () => {
+      expect(() =>
+        parseMeasurementSuite({
+          label: "l",
+          tasks: [{ id: "a", text: "one" }],
+          supersededReasons: "nope",
+        })
+      ).toThrow("supersededReasons must be a JSON object");
+    });
+
     it("throws for an identifier named as both seeded and superseded", () => {
       // Provenance would otherwise depend on which branch the classifier tests
       // first, and the seeded branch runs first, so the superseded reading
@@ -1845,7 +1891,7 @@ describe("run-measurement-batch", () => {
           indexAfter: { kind: "read", patterns: [] as never },
           results: [result],
         });
-        expect(report).toContain("**(seeded, superseded duplicate");
+        expect(report).toContain("**(seeded, superseded");
         expect(report).not.toContain("The suite named no seeded patterns");
       } finally {
         await console_.close();
@@ -1948,17 +1994,58 @@ describe("run-measurement-batch", () => {
             totals: {
               ...emptyMeasurementTotals(),
               importedPatternIds: ["stale", "mystery", "unlisted"],
+              composedPatternIds: ["stale", "mystery", "unlisted"],
               runPatternsComposing: 2,
             },
           },
         }],
       });
-      expect(report).toContain("**(seeded, superseded duplicate");
+      expect(report).toContain("**(seeded, superseded");
       expect(report).toContain(
         "`mystery` (ORIGIN NOT RESOLVED — the index said nothing)",
       );
       expect(report).toContain(
         "`unlisted` (ORIGIN NOT RESOLVED — this batch resolved no origin for it)",
+      );
+    });
+
+    it("names why a superseded seed was superseded, when the suite says", () => {
+      const report = renderBatchReport({
+        suite: {
+          label: "l",
+          tasks: [{ id: "a", text: "do a thing" }],
+          supersededPatternIds: ["old"],
+          supersededReasons: { old: "a defect in it was fixed" },
+        },
+        consoleUrl: "http://127.0.0.1:1",
+        indexUrl: null,
+        startedAt: "2026-08-28T21:00:00.000Z",
+        endedAt: "2026-08-28T21:00:01.000Z",
+        preflight: { kind: "answered", results: 1 },
+        posture: POSTURE,
+        importedPatternOrigins: { old: { kind: "seeded-superseded" } },
+        indexBefore: { kind: "read", patterns: [] as never },
+        indexAfter: { kind: "read", patterns: [] as never },
+        results: [{
+          task: { id: "a", text: "do a thing" },
+          sessionId: "s",
+          turnId: "t",
+          outcome: { kind: "turn_completed", detail: "done" },
+          configuration: {},
+          measurement: {
+            familyId: "f",
+            runs: [],
+            totals: {
+              ...emptyMeasurementTotals(),
+              importedPatternIds: ["old"],
+              composedPatternIds: ["old"],
+              runPatternsComposing: 1,
+            },
+          },
+        }],
+      });
+      expect(report).toContain(
+        "**(seeded, superseded — a defect in it was fixed)**",
       );
     });
 
@@ -1997,6 +2084,7 @@ describe("run-measurement-batch", () => {
             totals: {
               ...emptyMeasurementTotals(),
               importedPatternIds: ["alias"],
+              composedPatternIds: ["alias"],
               runPatternsComposing: 1,
             },
           },

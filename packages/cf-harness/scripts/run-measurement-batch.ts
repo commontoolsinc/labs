@@ -123,6 +123,18 @@ export interface MeasurementSuite {
    * that reason, not counted against the seeding.
    */
   supersededPatternIds?: readonly string[];
+
+  /**
+   * Why each superseded seed was superseded, keyed by identifier.
+   *
+   * Not every supersession is the same finding. A seed replaced because a
+   * formatter rewrote its bytes is behaviourally identical to its replacement
+   * and merely unreproducible from the committed source; a seed replaced
+   * because a defect was fixed in it is a program that is known to be wrong.
+   * A session composing one of each has done two different things, and a
+   * single "superseded" mark would report them as one.
+   */
+  supersededReasons?: Readonly<Record<string, string>>;
 }
 
 /**
@@ -136,8 +148,14 @@ export const parseMeasurementSuite = (input: unknown): MeasurementSuite => {
   if (typeof input !== "object" || input === null) {
     throw new Error("a task suite must be a JSON object");
   }
-  const { label, notes, tasks, seededPatternIds, supersededPatternIds } =
-    input as Record<string, unknown>;
+  const {
+    label,
+    notes,
+    tasks,
+    seededPatternIds,
+    supersededPatternIds,
+    supersededReasons,
+  } = input as Record<string, unknown>;
   if (typeof label !== "string" || label.trim() === "") {
     throw new Error("a task suite must carry a non-empty label");
   }
@@ -167,6 +185,27 @@ export const parseMeasurementSuite = (input: unknown): MeasurementSuite => {
   const bothLists = ((seededPatternIds ?? []) as readonly string[]).filter(
     (id) => ((supersededPatternIds ?? []) as readonly string[]).includes(id),
   );
+  const declaredSuperseded = new Set(
+    (supersededPatternIds ?? []) as readonly string[],
+  );
+  if (supersededReasons !== undefined) {
+    if (typeof supersededReasons !== "object" || supersededReasons === null) {
+      throw new Error("a task suite's supersededReasons must be a JSON object");
+    }
+    for (const [id, reason] of Object.entries(supersededReasons)) {
+      if (typeof reason !== "string") {
+        throw new Error(`a task suite's reason for ${id} must be a string`);
+      }
+      if (!declaredSuperseded.has(id)) {
+        // A reason for an identifier the suite does not call superseded is a
+        // claim about something the report will never mark, so it is a suite
+        // that does not say what it means rather than a harmless extra.
+        throw new Error(
+          `a task suite gives a supersession reason for ${id}, which it does not name as superseded`,
+        );
+      }
+    }
+  }
   if (bothLists.length > 0) {
     throw new Error(
       `a task suite names ${
@@ -201,6 +240,13 @@ export const parseMeasurementSuite = (input: unknown): MeasurementSuite => {
       : {}),
     ...(supersededPatternIds !== undefined
       ? { supersededPatternIds: supersededPatternIds as readonly string[] }
+      : {}),
+    ...(supersededReasons !== undefined
+      ? {
+        supersededReasons: supersededReasons as Readonly<
+          Record<string, string>
+        >,
+      }
       : {}),
   };
 };
@@ -1476,6 +1522,7 @@ const renderComposition = (
   seeded: readonly string[] = [],
   origins: Readonly<Record<string, ImportedPatternOrigin>> = {},
   superseded: readonly string[] = [],
+  supersededReasons: Readonly<Record<string, string>> = {},
 ): readonly string[] => {
   const isSeeded = new Set(seeded);
   // A suite may declare only superseded seeds, and the marks still mean
@@ -1491,7 +1538,9 @@ const renderComposition = (
       case "seeded":
         return `\`${id}\` **(seeded)**`;
       case "seeded-superseded":
-        return `\`${id}\` **(seeded, superseded duplicate — not reproducible from the committed source)**`;
+        return `\`${id}\` **(seeded, superseded — ${
+          supersededReasons[id] ?? "not reproducible from the committed source"
+        })**`;
       case "seeded-via-alias": {
         const parts = [
           ...(origin.through.length > 0
@@ -1519,7 +1568,7 @@ const renderComposition = (
       totals: result.measurement?.totals,
     }))
     .filter((entry) =>
-      entry.totals !== undefined && entry.totals.importedPatternIds.length > 0
+      entry.totals !== undefined && entry.totals.composedPatternIds.length > 0
     );
   const lines = [
     "## What composed what",
@@ -1537,7 +1586,7 @@ const renderComposition = (
     const totals = entry.totals!;
     lines.push(
       `- **${entry.id}** — ${totals.runPatternsComposing} composing, ${totals.runPatternsReexporting} bare re-export, importing ${
-        totals.importedPatternIds.map(mark).join(", ")
+        totals.composedPatternIds.map(mark).join(", ")
       }`,
     );
   }
@@ -1610,6 +1659,7 @@ export const renderBatchReport = (batch: BatchResult): string => {
       batch.suite.seededPatternIds,
       batch.importedPatternOrigins,
       batch.suite.supersededPatternIds,
+      batch.suite.supersededReasons,
     ),
     "## The index, before and after",
     "",

@@ -212,7 +212,9 @@ The counts, and the distinctions worth knowing about:
   composition in an import count. The two are reported apart, never as one
   "compositions" figure. The classifier is a heuristic on the source text, and
   it errs towards calling unusual source composition rather than quietly
-  discounting it, which is why both numbers are printed rather than one.
+  discounting it, which is why all three figures are printed rather than one.
+  The "what composed what" section lists only the identifiers a composing call
+  put to work, because a reference is not a composition.
 - **`run_pattern` outcomes**, counted by whatever status the tool reported.
 - **Delegations**, by profile.
 - **Slugs**, split into assigned, refused, and not read. Only an assigned slug

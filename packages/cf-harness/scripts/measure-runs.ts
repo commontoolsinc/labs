@@ -240,7 +240,16 @@ export interface MeasurementTotals {
   runPatternsBareImporting: number;
   runPatternOutcomes: Readonly<Record<string, number>>;
   runPatternOutcomesUnread: number;
+
+  /** Every published pattern the source referenced, however it referenced it. */
   importedPatternIds: readonly string[];
+
+  /**
+   * Only those a composing call put to work. A bare import or a bare
+   * re-export references a pattern and composes nothing, so presenting the
+   * union as "what composed what" would report a reference as a composition.
+   */
+  composedPatternIds: readonly string[];
   delegations: number;
   delegationProfiles: Readonly<Record<string, number>>;
   delegationProfilesUnread: number;
@@ -294,6 +303,7 @@ export const emptyTotals = (): MeasurementTotals => ({
   runPatternOutcomes: {},
   runPatternOutcomesUnread: 0,
   importedPatternIds: [],
+  composedPatternIds: [],
   delegations: 0,
   delegationProfiles: {},
   delegationProfilesUnread: 0,
@@ -370,6 +380,10 @@ export const mergeTotals = (
     left.importedPatternIds,
     right.importedPatternIds,
   ),
+  composedPatternIds: mergeNames(
+    left.composedPatternIds,
+    right.composedPatternIds,
+  ),
   delegations: left.delegations + right.delegations,
   delegationProfiles: mergeCounts(
     left.delegationProfiles,
@@ -395,6 +409,7 @@ export const totalsOf = (run: RunMeasurement): MeasurementTotals => {
   const runPatternOutcomes: Record<string, number> = {};
   const delegationProfiles: Record<string, number> = {};
   const importedPatternIds = new Set<string>();
+  const composedPatternIds = new Set<string>();
   const slugNames = new Set<string>();
   let searchesWithHits = 0;
   let searchesEmpty = 0;
@@ -437,6 +452,9 @@ export const totalsOf = (run: RunMeasurement): MeasurementTotals => {
       }
       for (const id of call.target.value.importedPatternIds) {
         importedPatternIds.add(id);
+        if (call.target.value.composition === "composition") {
+          composedPatternIds.add(id);
+        }
       }
     }
     if (call.outcome.kind === "unread") {
@@ -490,6 +508,7 @@ export const totalsOf = (run: RunMeasurement): MeasurementTotals => {
     runPatternOutcomes,
     runPatternOutcomesUnread: outcomesUnread,
     importedPatternIds: [...importedPatternIds].sort(),
+    composedPatternIds: [...composedPatternIds].sort(),
     delegations: run.delegations.length,
     delegationProfiles,
     delegationProfilesUnread: profilesUnread,

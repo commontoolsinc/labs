@@ -537,6 +537,10 @@ describe("measure-runs", () => {
       expect(totals.runPatternsBareImporting).toBe(1);
       expect(totals.runPatternsComposing).toBe(0);
       expect(totals.runPatternsReexporting).toBe(0);
+      // Referenced, and composed by nothing — so it must not appear in the
+      // report's account of what composed what.
+      expect(totals.importedPatternIds).toEqual(["pub-rating"]);
+      expect(totals.composedPatternIds).toEqual([]);
       expect(renderRunLines(run)[0]).toContain("bare-imports pub-rating");
     });
 
@@ -545,6 +549,7 @@ describe("measure-runs", () => {
       expect(totals.runPatternsImportingPatterns).toBe(1);
       expect(totals.runPatternsReexporting).toBe(1);
       expect(totals.runPatternsComposing).toBe(0);
+      expect(totals.composedPatternIds).toEqual([]);
     });
 
     it("counts `run_pattern` outcomes by the status the tool reported", async () => {
@@ -751,6 +756,10 @@ describe("measure-runs", () => {
     it("unions the imported pattern identifiers rather than counting them twice", async () => {
       const [first, second] = await totalsUnderTest();
       expect(mergeTotals(first, second).importedPatternIds).toEqual([
+        "pub-rating",
+        "pub-reading-shelf",
+      ]);
+      expect(mergeTotals(first, second).composedPatternIds).toEqual([
         "pub-rating",
         "pub-reading-shelf",
       ]);
