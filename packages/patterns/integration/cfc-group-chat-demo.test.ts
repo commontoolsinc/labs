@@ -130,6 +130,24 @@ describe("cfc group chat demo integration test", () => {
       "#host-message-draft",
       "Fake hello from Alice",
     );
+    // PROBE (temporary, diagnosis branch only): discriminate the two §2b
+    // candidate mechanisms for the 4/6 red at the click below — (a) the
+    // served hostSendDisabled flip is merely still in flight when the click
+    // loop gives up, vs (b) the draft write is wedged client-side and the
+    // flip never comes (rootcause §2b / OW47 S-E shape). If (a), the wait
+    // below resolves quickly and the file goes green; if (b), it hangs to
+    // waitForCondition's 300 s net with the write absent from the store.
+    const fillDiag = await page.evaluate(() =>
+      JSON.stringify(
+        (globalThis as unknown as { __cfFillDiag?: unknown }).__cfFillDiag ??
+          null,
+      )
+    );
+    console.log(`PROBE host-draft fillDiag: ${fillDiag}`);
+    await waitForRuntimeIdle(page);
+    console.log("PROBE runtime idle returned after host-draft fill");
+    await waitForDisabled(page, "#host-send-button", false);
+    console.log("PROBE host-send-button ENABLED");
     await clickCfButton(page, "#host-send-button");
     await waitForRuntimeIdle(page);
     await waitForTextAbsent(
