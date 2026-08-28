@@ -376,11 +376,10 @@ const runtimeFlagValue = (
   args: readonly string[],
   flag: string,
 ): string | undefined => {
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-    if (arg === undefined) {
-      continue;
-    }
+  // `entries()` rather than an index loop: it yields the element as `string`,
+  // so there is no absent-element case to guard that the caller cannot reach —
+  // `readRuntimeArgs` has already rejected a table with a non-string in it.
+  for (const [index, arg] of args.entries()) {
     for (const dashes of ["--", "-"]) {
       if (arg.startsWith(`${dashes}${flag}=`)) {
         return arg.slice(`${dashes}${flag}=`.length);
