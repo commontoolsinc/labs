@@ -58,14 +58,17 @@ import {
   type FabricValue,
 } from "@/interface.ts";
 import {
+  assertValidFabricValueLayer,
   fabricFromNativeValue,
   isValidFabricConvertibleValue,
   isValidFabricNativeObject,
   nativeFromFabricValue,
   shallowCleanArray,
   shallowCleanPlainObject,
+  shallowFabricFromNativeObject,
   shallowFabricFromNativeValue,
 } from "@/native-conversion.ts";
+import { isValidFabricValueLayer } from "@/type-check.ts";
 
 /**
  * Helper for the round-trip tests, which encodes a value to fabric form via
@@ -74,6 +77,28 @@ import {
  */
 function roundTrip(value: FabricValue): FabricConvertibleValue {
   return nativeFromFabricValue(fabricFromNativeValue(value));
+}
+
+/** A class with no fabric representation, wanted here by name. */
+class PlainClass {}
+
+/** An `Array` subclass, whose instances are live code rather than inert data. */
+class ArraySubclass extends Array {}
+
+/** A concrete fabric class, `toBeInstanceOf()` wanting a constructor. */
+type FabricClass = new (...args: never[]) => object;
+
+/**
+ * Helper for the `assertValidFabricValueLayer()` tests, which reports whether
+ * the vet refuses the given value.
+ */
+function refuses(value: unknown): boolean {
+  try {
+    assertValidFabricValueLayer(value);
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 describe("native-conversion", () => {
@@ -578,6 +603,221 @@ describe("native-conversion", () => {
       expect(Object.isFrozen(peShared)).toBe(true);
     });
   });
+  // The corpus the two blocks below are cross-checked over. It carries one
+  // entry per arm of the tag dispatch both functions make, plus the shapes
+  // each arm accepts and refuses, so a value dropped from here is an arm the
+  // cross-checks stop reaching.
+  const LAYER_CORPUS: ReadonlyArray<[string, unknown]> = [
+    ["a boolean", true],
+    ["a string", "hello"],
+    ["a number", 42],
+    ["a `bigint`", 42n],
+    ["`null`", null],
+    ["`undefined`", undefined],
+    ["a registry-interned symbol", Symbol.for("native-conversion.test")],
+    ["a unique symbol", Symbol("nope")],
+    ["a function", () => {}],
+    ["an inert array", [1, 2, 3]],
+    ["an inert plain object", { a: 1 }],
+    ["an array carrying a named property", Object.assign([1], { z: 1 })],
+    ["an `Array` subclass instance", ArraySubclass.from([1, 2])],
+    ["an object carrying a symbol key", { a: 1, [Symbol.for("k")]: 2 }],
+    ["an object carrying a reserved property name", { ["__proto__"]: 1 }],
+    ["a null-prototype object", Object.assign(Object.create(null), { a: 1 })],
+    ["a class instance", new PlainClass()],
+    ["a `FabricBytes`", new FabricBytes(new Uint8Array([1]))],
+    ["a `FabricEpochNsec`", new FabricEpochNsec(0n)],
+    ["a `FabricEpochDay`", new FabricEpochDay(0n)],
+    ["a `FabricRegExp`", new FabricRegExp(/a/)],
+    ["a `FabricHash`", new FabricHash(new Uint8Array(32), "fid1")],
+    [
+      "a `FabricKeyPair`",
+      new FabricKeyPair(
+        "ExampleAlgorithm",
+        new Uint8Array([1]),
+        new Uint8Array([2]),
+      ),
+    ],
+    ["a `FabricError`", FabricError.fromNativeError(new Error("x"))],
+    ["a `Date`", new Date(1234)],
+    ["a `Uint8Array`", new Uint8Array([1, 2, 3])],
+    ["a `RegExp`", /abc/gi],
+    ["an `Error`", new Error("boom")],
+    ["a `Map`", new Map()],
+    ["a `Set`", new Set()],
+  ];
+
+  describe("shallowFabricFromNativeObject()", () => {
+    // The `FabricNativeObject`s that have a fabric form, each with the class
+    // it mints.
+    const MINTED: ReadonlyArray<[string, unknown, FabricClass]> = [
+      ["a `Date`", new Date(1234), FabricEpochNsec],
+      ["a `Uint8Array`", new Uint8Array([1, 2, 3]), FabricBytes],
+      ["a `RegExp`", /abc/gi, FabricRegExp],
+      ["an `Error`", new Error("boom"), FabricError],
+    ];
+
+    describe("given a `FabricNativeObject` with a fabric form", () => {
+      for (const [label, value, cls] of MINTED) {
+        it(`returns a frozen \`${cls.name}\`, not the input, for ${label}`, () => {
+          const result = shallowFabricFromNativeObject(value);
+          expect(result).toBeInstanceOf(cls);
+          expect(result).not.toBe(value);
+          expect(Object.isFrozen(result)).toBe(true);
+        });
+      }
+
+      it("throws for a `Date` carrying extra enumerable properties", () => {
+        const date = Object.assign(new Date(0), { extra: 1 });
+        expect(() => shallowFabricFromNativeObject(date)).toThrow(
+          "Not representable as a `FabricValue`: `Date` with extra " +
+            "enumerable properties",
+        );
+      });
+    });
+
+    describe("given a `FabricNativeObject` whose fabric form is not built", () => {
+      it("throws for a `Map`", () => {
+        expect(() => shallowFabricFromNativeObject(new Map())).toThrow(
+          "Not representable as a `FabricValue`: `Map` (a " +
+            "`FabricNativeObject` whose fabric form is not built yet)",
+        );
+      });
+
+      it("throws for a `Set`", () => {
+        expect(() => shallowFabricFromNativeObject(new Set())).toThrow(
+          "Not representable as a `FabricValue`: `Set` (a " +
+            "`FabricNativeObject` whose fabric form is not built yet)",
+        );
+      });
+    });
+
+    // The split this function makes is on whether conversion produces a new
+    // value, which is NOT the same question as membership: a `Map` is a
+    // `FabricNativeObject` and still has no fabric form. So `undefined` has to
+    // mean "not a member" and nothing else -- for a member it would state
+    // something false, quite apart from letting one reach a caller's walk.
+    describe("returns `undefined` for exactly what is not a `FabricNativeObject`", () => {
+      for (const [label, value] of LAYER_CORPUS) {
+        if (isValidFabricNativeObject(value)) {
+          it(`does not return \`undefined\` for ${label}`, () => {
+            let result: unknown;
+            try {
+              result = shallowFabricFromNativeObject(value);
+            } catch {
+              return; // A refusal is the other allowed answer for a member.
+            }
+            expect(result).not.toBe(undefined);
+          });
+        } else {
+          it(`returns \`undefined\` for ${label}`, () => {
+            expect(shallowFabricFromNativeObject(value)).toBe(undefined);
+          });
+        }
+      }
+    });
+  });
+
+  describe("assertValidFabricValueLayer()", () => {
+    describe("agrees with `isValidFabricValueLayer()`", () => {
+      // Two statements of one question, in two files, is how they drift. The
+      // corpus above is what makes this worth anything, carrying one entry per
+      // dispatch arm; that it lands on both answers is asserted below rather
+      // than assumed, agreement being free for a corpus that has drifted to
+      // one side.
+      const accepted: string[] = [];
+      const refused: string[] = [];
+
+      for (const [label, value] of LAYER_CORPUS) {
+        (isValidFabricValueLayer(value) ? accepted : refused).push(label);
+        it(`treats ${label} the same way`, () => {
+          expect(refuses(value)).toBe(!isValidFabricValueLayer(value));
+        });
+      }
+
+      it("is checked against both answers", () => {
+        expect(accepted.length).toBeGreaterThan(0);
+        expect(refused.length).toBeGreaterThan(0);
+      });
+
+      // The accepting side is a `switch` with one `case` per primitive class
+      // and a throwing `default`, so a class the corpus never carries is a
+      // `case` no cross-check above reaches.
+      it("carries every registered primitive class", () => {
+        const carried = new Set(
+          LAYER_CORPUS.map(([, value]) =>
+            (value as object)?.constructor as unknown
+          ),
+        );
+        for (const cls of codecClasses()) {
+          expect([cls.name, carried.has(cls)]).toEqual([cls.name, true]);
+        }
+      });
+    });
+
+    describe("refusals", () => {
+      it("names an array that is not inert", () => {
+        expect(() => assertValidFabricValueLayer(Object.assign([1], { z: 1 })))
+          .toThrow(
+            "Not representable as a `FabricValue`: array that is not an " +
+              "inert array",
+          );
+      });
+
+      it("names an object that is not an inert plain object", () => {
+        expect(() =>
+          assertValidFabricValueLayer({ a: 1, [Symbol.for("k")]: 2 })
+        ).toThrow(
+          "Not representable as a `FabricValue`: object that is not an " +
+            "inert plain object",
+        );
+      });
+
+      it("names the property name this runtime reserves", () => {
+        expect(() => assertValidFabricValueLayer({ ["__proto__"]: 1 })).toThrow(
+          "Not representable as a `FabricValue`: object with a property " +
+            "name this runtime reserves (`__proto__`)",
+        );
+      });
+
+      it("names a function", () => {
+        expect(() => assertValidFabricValueLayer(() => {})).toThrow(
+          "Not representable as a `FabricValue`: function",
+        );
+      });
+
+      it("names a unique symbol", () => {
+        expect(() => assertValidFabricValueLayer(Symbol("nope"))).toThrow(
+          "Not representable as a `FabricValue`: unique (uninterned) symbol",
+        );
+      });
+
+      it("names a class instance as an unrecognized type", () => {
+        expect(() => assertValidFabricValueLayer(new PlainClass())).toThrow(
+          "Not representable as a `FabricValue`: `PlainClass` (not a " +
+            "recognized fabric type)",
+        );
+      });
+
+      // A `Date` IS representable, so it is refused on different grounds and
+      // told so. What the vet decides is what the value already is; minting
+      // its fabric form is the conversion's business.
+      it("names a `Date` as not yet in `FabricValue` form", () => {
+        expect(() => assertValidFabricValueLayer(new Date(0))).toThrow(
+          "Not yet in `FabricValue` form: `Date` (a `FabricNativeObject`; " +
+            "conversion mints one)",
+        );
+      });
+
+      it("names a `Map` as having no fabric form yet", () => {
+        expect(() => assertValidFabricValueLayer(new Map())).toThrow(
+          "Not representable as a `FabricValue`: `Map` (a " +
+            "`FabricNativeObject` whose fabric form is not built yet)",
+        );
+      });
+    });
+  });
+
   describe("shallowFabricFromNativeValue()", () => {
     describe("passes through primitives", () => {
       it("passes through booleans", () => {

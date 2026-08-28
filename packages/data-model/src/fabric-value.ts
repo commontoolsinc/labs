@@ -50,11 +50,13 @@ export {
 } from "./type-check.ts";
 
 export {
+  assertValidFabricValueLayer,
   fabricFromNativeValue,
   isValidFabricConvertibleValue,
   nativeFromFabricValue,
   shallowCleanArray,
   shallowCleanPlainObject,
+  shallowFabricFromNativeObject,
   shallowFabricFromNativeValue,
 } from "./native-conversion.ts";
 

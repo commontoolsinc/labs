@@ -6,6 +6,7 @@ import {
   linkRefFrom,
 } from "@commonfabric/data-model/cell-rep";
 import {
+  assertValidFabricValueLayer,
   cloneIfNecessary,
   type FabricConvertibleValue,
   fabricFromNativeValue,
@@ -13,10 +14,9 @@ import {
   FabricPrimitive,
   FabricSpecialObject,
   type FabricValue,
-  type FabricValueLayer,
   shallowCleanArray,
   shallowCleanPlainObject,
-  shallowFabricFromNativeValue,
+  shallowFabricFromNativeObject,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import {
@@ -4028,10 +4028,14 @@ export function convertCellsToLinks(
 
   // At this point `value` is a non-`null` object(ish) thing.
 
-  // Held before the conversions below reassign `value`, since what `ancestors` is
-  // keyed on -- and cleared of on the way back out -- is the object as given.
+  // What `ancestors` is keyed on -- and cleared of on the way back out -- is
+  // the object as given.
   const original = value as object;
-  let converted: FabricValueLayer;
+
+  // Only a container reaches the walk below: everything else has returned or
+  // been refused by the time the branch ends, which is what the type says.
+  let container: unknown[] | Record<string, unknown>;
+
   ancestors.set(original, path); // ...which needs to be tracked for circularity.
 
   // Everything past the line above runs inside this `try`, so that EVERY way
@@ -4042,69 +4046,58 @@ export function convertCellsToLinks(
   try {
     // A schema-bearing read hangs a non-enumerable `toCell` symbol on the
     // arrays it returns. That symbol is machinery, not content, and an array
-    // carrying it is not a `FabricValue`, so drop it before the conversion
-    // below would reject it. Only annotated arrays are cleaned: an array
-    // carrying anything else non-index is genuinely unrepresentable and must
-    // still be rejected.
+    // carrying it is not a `FabricValue`, so drop it before the vetting below
+    // would reject it. Only annotated arrays are cleaned: an array carrying
+    // anything else non-index is genuinely unrepresentable and must still be
+    // rejected.
     if (isCellResultForDereferencing(value) && isPlainContainer(value)) {
       // What these produce is a valid `FabricValueLayer` already, so it wants
       // no further conversion. Objects need this as much as arrays do -- the
       // annotation goes on either (see `schema.ts`).
-      converted = Array.isArray(value)
+      container = (Array.isArray(value)
         ? shallowCleanArray(value, false)
-        : shallowCleanPlainObject(value as object, false);
-    } else {
-      // Convert the (top level of) the value to fabric form (a valid
-      // `FabricValue`) if it isn't already, or throw if it's neither already
-      // valid nor convertible.
-      converted = shallowFabricFromNativeValue(value);
-    }
-
-    // Recursively process arrays and objects, if we ended up with one of those.
-    //
-    // TODO(danfuzz): Both container branches below build a fresh container,
-    // throwing away the copy just made above. One copy could serve both.
-    if (!isObjectOrArray(converted)) {
-      // `shallowFabricFromNativeValue()` converted this into a primitive value
-      // of some sort.
-      //
-      // `FabricValueLayer` is looser than `FabricValue` -- its containers hold
-      // `unknown`, being unconverted until the recursion reaches them -- and
-      // `isObjectOrArray()` does not narrow an array out of the union. The cast is
-      // that gap, not a claim about the value.
-      return converted as FabricValue;
-    } else if (converted instanceof FabricPrimitive) {
+        : shallowCleanPlainObject(value as object, false)) as
+          | unknown[]
+          | Record<string, unknown>;
+    } else if (value instanceof FabricPrimitive) {
       // An opaque scalar whose state lives in private fields, so it has zero
       // enumerable own properties and the object branch below would rebuild it
       // from its (empty) entries as a bare `{}`. It leaves whole instead.
-      //
-      // This catches both forms that arrive here: one the caller already built,
-      // and one `shallowFabricFromNativeValue()` just minted from a native (a
-      // `Uint8Array`, a `Date`) immediately above.
-      return converted;
-    } else if (converted instanceof FabricInstance) {
-      // A `FabricInstance` is NOT a leaf. It is a container reached by its
-      // codec contents rather than by property name, which this walk cannot do,
-      // so the object branch below would rebuild it from enumerable own
-      // properties it is not supposed to have -- and a cell nested in its state
-      // would go unconverted, which is the whole of what this walk is for. It
-      // refuses instead of doing that quietly.
-      //
-      // TODO(danfuzz): descend a `FabricInstance` by its codec contents, at
-      // which point this becomes a walk rather than a refusal. See "Flag-gated
-      // tripwires" in `docs/development/EXPERIMENTAL_OPTIONS.md`.
-      throw new Error(
-        `Cannot yet handle \`${converted.constructor.name}\` (a ` +
-          "`FabricInstance`) when converting cells to links.",
-      );
+      return value;
+    } else if (value instanceof FabricInstance) {
+      refuseFabricInstance(value, "when converting cells to links");
+    } else {
+      // A native object carrying a fabric form is minted into it here: a
+      // `Date` or `Uint8Array` becomes a `FabricPrimitive`, an `Error` a
+      // `FabricError`. Anything else comes back `undefined`, which says only
+      // that nothing needed minting -- so the value stands as its own answer,
+      // and every test above and below runs on `value` itself.
+      const minted = shallowFabricFromNativeObject(value);
+      if (minted instanceof FabricInstance) {
+        // A `FabricError` is the one mint this walk cannot descend.
+        refuseFabricInstance(minted, "when converting cells to links");
+      } else if (minted !== undefined) {
+        // A `FabricPrimitive`, which is a leaf. The cast is the gap between
+        // `FabricValueLayer` and `FabricValue` -- the former's containers hold
+        // `unknown` -- rather than a claim about the value.
+        return minted as FabricValue;
+      }
+
+      // Nothing was minted, so the value has to be walkable as it stands. This
+      // is what refuses a function, a class instance, and a container that is
+      // not inert; it is also what keeps the walk below from rebuilding such a
+      // container out of `Object.entries()` and quietly dropping a named
+      // property or a symbol key.
+      assertValidFabricValueLayer(value);
+      container = value as unknown[] | Record<string, unknown>;
     }
 
-    // A member arrives here `unknown`: the shallow conversion above converted
-    // only the top level, so what a container holds is unconverted until the
-    // recursion reaches it. That makes each one a `CellLinkInput` -- the very
-    // domain this walk takes -- rather than anything narrower.
-    if (Array.isArray(converted)) {
-      return converted.map((element: unknown, index: number) =>
+    // A member arrives here `unknown`: only the top level has been decided, so
+    // what a container holds is unconverted until the recursion reaches it.
+    // That makes each one a `CellLinkInput` -- the very domain this walk takes
+    // -- rather than anything narrower.
+    if (Array.isArray(container)) {
+      return container.map((element: unknown, index: number) =>
         convertCellsToLinks(
           element as CellLinkInput,
           options,
@@ -4114,7 +4107,7 @@ export function convertCellsToLinks(
       );
     }
     return Object.fromEntries(
-      Object.entries(converted).map(([key, member]) => [
+      Object.entries(container).map(([key, member]) => [
         key,
         convertCellsToLinks(
           member as CellLinkInput,

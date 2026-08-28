@@ -8,11 +8,13 @@ import type { CfcAtom } from "@commonfabric/api/cfc";
 import { linkRefFrom, linkRefPayload } from "@commonfabric/data-model/cell-rep";
 import { isFabricDataUri } from "@commonfabric/data-model/data-uri-codec";
 import {
+  assertValidFabricValueLayer,
+  cloneIfNecessary,
   fabricFromNativeValue,
   type FabricPlainObject,
   FabricSpecialObject,
   type FabricValue,
-  shallowFabricFromNativeValue,
+  shallowFabricFromNativeObject,
 } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
@@ -1218,20 +1220,23 @@ export function normalizeAndDiff(
     }
   }
 
-  // Convert the (top level of) the value to fabric form (a valid `FabricValue`)
-  // if it isn't already, or throw if it's neither already valid nor
-  // convertible. The pre-conversion value is kept: shared references and
-  // cycles arrive under that identity, so it is what anchoring registers in
-  // `state.seen`.
-  const preConversionValue = newValue;
-  const fabricValue = shallowFabricFromNativeValue(newValue);
-  if (fabricValue !== newValue) {
+  // Mint the fabric form of a native object -- a `Date`, a `Uint8Array`, an
+  // `Error`. Anything else comes back `undefined`, which says only that
+  // nothing needed minting; the value then has to be storable as it stands,
+  // and the vet is what holds it to that. Nothing minted here is a container,
+  // so a container keeps its own identity all the way through the walk below
+  // -- and that identity is the one shared references and cycles arrive
+  // under, which is what `state.seen` is keyed on.
+  const minted = shallowFabricFromNativeObject(newValue);
+  if (minted === undefined) {
+    assertValidFabricValueLayer(newValue);
+  } else {
     diffLogger.debug(
       "diff",
       () =>
         `[TO_STORABLE_VALUE] Converted ${typeof newValue} at path=${pathStr}`,
     );
-    newValue = fabricValue;
+    newValue = minted as FabricValue;
   }
 
   // Anchor a plain object sitting in an array into an entity document of its
@@ -1274,7 +1279,7 @@ export function normalizeAndDiff(
     !(newValue instanceof FabricSpecialObject) &&
     !isCellLink(newValue)
   ) {
-    if (Object.is(currentValue, preConversionValue)) {
+    if (Object.is(currentValue, newValue)) {
       diffLogger.debug(
         "diff",
         () => `[BRANCH_ANCHOR] Untouched element, no-op at path=${pathStr}`,
@@ -1295,7 +1300,7 @@ export function normalizeAndDiff(
       tx,
       link,
       { ...(newValue as FabricPlainObject) },
-      preConversionValue,
+      newValue,
       state.nextAnchorId(),
       context,
       options,
@@ -1317,11 +1322,6 @@ export function normalizeAndDiff(
 
     // Have to set this before recursing!
     state.seen.set(newValue, link);
-    // Shared references and cycles arrive under the pre-conversion identity;
-    // register that too when conversion produced a copy.
-    if (preConversionValue !== newValue) {
-      state.seen.set(preConversionValue, link);
-    }
 
     // Get current array for precomputing child values (if it was an array)
     const currentArray = Array.isArray(currentValue) ? currentValue : undefined;
@@ -1468,7 +1468,14 @@ export function normalizeAndDiff(
     // emitted nothing; identical re-asserts are idempotent at the
     // store (serving-loop.md §5).
     if (changes.length === 0 && tx.isAuthoritativeWrites?.() === true) {
-      changes.push({ location: link, value: newValue as FabricValue });
+      // Written whole rather than by its members, and this is the only branch
+      // that does so, which makes it the only one that owes the store a value
+      // the caller cannot go on mutating. Already-frozen input is handed
+      // through by identity.
+      changes.push({
+        location: link,
+        value: cloneIfNecessary(newValue as FabricValue, { deep: false }),
+      });
     }
 
     return changes;
@@ -1557,11 +1564,6 @@ export function normalizeAndDiff(
 
     // Have to set this before recursing!
     state.seen.set(newValue, link);
-    // Shared references and cycles arrive under the pre-conversion identity;
-    // register that too when conversion produced a copy.
-    if (preConversionValue !== newValue) {
-      state.seen.set(preConversionValue, link);
-    }
 
     // At this point currentValue is guaranteed to be a record
     const currentRecord = currentValue as Record<string, unknown>;
@@ -1760,7 +1762,14 @@ export function normalizeAndDiff(
     // completion's equal-`{}` result riding a doomed overlay is never
     // asserted durably. See the array branch for the full rationale.
     if (changes.length === 0 && tx.isAuthoritativeWrites?.() === true) {
-      changes.push({ location: link, value: newValue as FabricValue });
+      // Written whole rather than by its members, and this is the only branch
+      // that does so, which makes it the only one that owes the store a value
+      // the caller cannot go on mutating. Already-frozen input is handed
+      // through by identity.
+      changes.push({
+        location: link,
+        value: cloneIfNecessary(newValue as FabricValue, { deep: false }),
+      });
     }
 
     return changes;
