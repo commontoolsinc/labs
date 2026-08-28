@@ -48,7 +48,7 @@ const secretLabels: ConsoleCellLabels = {
   integrity: [],
   derived: false,
   transformedBy: [],
-  entries: [{ path: "", confidentiality: ["Secret"], integrity: [] }],
+  entries: [{ path: [], confidentiality: ["Secret"], integrity: [] }],
 };
 
 describe("console/flow", () => {

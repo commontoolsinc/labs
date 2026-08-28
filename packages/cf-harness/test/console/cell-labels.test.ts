@@ -23,6 +23,10 @@ const entity = (name: string) => `of:fid1:${name.padEnd(44, "0")}`;
 const LABELLED = entity("labelled");
 const BARE = entity("bare");
 
+/** The space a snapshot is taken in, and one it is not. */
+const OWN_DID = "did:key:z6MkfrQ3tCDZgvJcLwPTvxNsFR8RgTsHTa5JzmnW9pQrUvNq";
+const FOREIGN_DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+
 const atom = (name: string) => ({ type: name, name });
 
 /** The provenance atom for one identity arm, as the space stores it. */
@@ -115,6 +119,36 @@ const pieceSnapshot = snapshot([
   }]),
 ]);
 
+const WILD = entity("wild");
+
+/**
+ * A document labelled the way the runtime writes one: `*` stands for every
+ * member of `items`, and two of its keys hold the characters a reference
+ * escapes — `/`, which is the separator itself, and `~`, which escapes it.
+ */
+const wildSnapshot = snapshot([
+  record(WILD, `/${WILD}`, [
+    {
+      path: ["items", "*"],
+      confidentiality: [atom("member-secret")],
+      integrity: [],
+      origin: "declared",
+    },
+    {
+      path: ["a/b"],
+      confidentiality: [atom("slash-secret")],
+      integrity: [],
+      origin: "declared",
+    },
+    {
+      path: ["c~d"],
+      confidentiality: [atom("tilde-secret")],
+      integrity: [],
+      origin: "declared",
+    },
+  ]),
+]);
+
 describe("console/cell-labels", () => {
   describe("consoleCellLabels()", () => {
     it("returns every atom of every path, deduplicated", () => {
@@ -130,8 +164,8 @@ describe("console/cell-labels", () => {
         "TransformedBy",
       ]);
       expect(labels.entries.map((entry) => entry.path)).toEqual([
-        "",
-        "summary",
+        [],
+        ["summary"],
       ]);
       expect(labels.entries[1].observes).toBe("members");
     });
@@ -264,7 +298,7 @@ describe("console/cell-labels", () => {
     it("narrows a reference addressing a path inside a document to that path", () => {
       expect(cellLabelsAt(index, `/${LABELLED}/value/secret`)?.entries)
         .toEqual([{
-          path: "",
+          path: [],
           confidentiality: ["demo-secret"],
           integrity: ["cf-compiled-by:cf-compiler"],
           origin: "declared",
@@ -277,11 +311,35 @@ describe("console/cell-labels", () => {
       );
     });
 
-    it("returns the document's labels for a cross-space link", () => {
-      const did = "did:key:z6MkfrQ3tCDZgvJcLwPTvxNsFR8RgTsHTa5JzmnW9pQrUvNq";
-      expect(cellLabelsAt(index, `/@${did}/${LABELLED}`)).toBe(
-        index.byAddress.get(LABELLED),
+    it("returns `undefined` for a link into a space the snapshot was not taken in", () => {
+      expect(cellLabelsAt(index, `/@${FOREIGN_DID}/${LABELLED}`)).toBe(
+        undefined,
       );
+    });
+
+    it("returns the labels for a link naming the space the snapshot was taken in", () => {
+      const inSpace = consoleCellLabelIndex({
+        ...readSnapshot,
+        space: { configured: "demo-space", did: OWN_DID },
+      });
+      expect(cellLabelsAt(inSpace, `/@${OWN_DID}/${LABELLED}`)).toBe(
+        inSpace.byAddress.get(LABELLED),
+      );
+    });
+
+    it("leaves a cell the snapshot marked unread out of the index it answers from", () => {
+      const unread = consoleCellLabelIndex(snapshot([
+        record(LABELLED, `/${LABELLED}`, [declared]),
+        {
+          entityId: BARE,
+          ref: `/@${FOREIGN_DID}/${BARE}`,
+          space: FOREIGN_DID,
+          unreadReason: "cross-space",
+          entries: [],
+        },
+      ]));
+      expect([...unread.byAddress.keys()]).toEqual([LABELLED]);
+      expect(consoleCellLabelsSummary(unread).cellsRead).toBe(1);
     });
 
     it("returns `undefined` for a reference naming no entity", () => {
@@ -305,8 +363,8 @@ describe("console/cell-labels", () => {
       it("keeps the suffix of an entry under the named path, re-rooted to it", () => {
         const labels = cellLabelsAt(piece, `/${PIECE}/briefing`);
         expect(labels?.entries.map((entry) => entry.path)).toEqual([
-          "",
-          "inner",
+          [],
+          ["inner"],
         ]);
         expect(labels?.confidentiality).toEqual(["demo-secret", "inner-only"]);
       });
@@ -314,7 +372,7 @@ describe("console/cell-labels", () => {
       it("returns an entry at the document root for every reference into the document", () => {
         const labels = cellLabelsAt(piece, `/${ROOTED}/anything/deeper`);
         expect(labels?.entries).toEqual([{
-          path: "",
+          path: [],
           confidentiality: ["org-only"],
           integrity: [],
           origin: "declared",
@@ -331,6 +389,37 @@ describe("console/cell-labels", () => {
         const labels = cellLabelsAt(piece, `/${PIECE}/briefing`);
         expect(labels?.derived).toBe(true);
         expect(labels?.transformedBy).toEqual(["llm"]);
+      });
+    });
+
+    describe("matching the segments a label path is written in", () => {
+      const wild = consoleCellLabelIndex(wildSnapshot);
+
+      it("returns the atom of a `*` entry for a reference to a member under it", () => {
+        const labels = cellLabelsAt(wild, `/${WILD}/items/0`);
+        expect(labels?.confidentiality).toEqual(["member-secret"]);
+        expect(labels?.entries.map((entry) => entry.path)).toEqual([[]]);
+      });
+
+      it("keeps the `*` of an entry under the container a reference names", () => {
+        const labels = cellLabelsAt(wild, `/${WILD}/items`);
+        expect(labels?.entries.map((entry) => entry.path)).toEqual([["*"]]);
+      });
+
+      it("returns the atom of a key holding the separator for the reference that escapes it", () => {
+        expect(cellLabelsAt(wild, `/${WILD}/a~1b`)?.confidentiality)
+          .toEqual(["slash-secret"]);
+      });
+
+      it("returns the atom of a key holding a tilde for the reference that escapes it", () => {
+        expect(cellLabelsAt(wild, `/${WILD}/c~0d`)?.confidentiality)
+          .toEqual(["tilde-secret"]);
+      });
+
+      it("returns no atom of a key holding the separator for a reference naming two segments", () => {
+        const labels = cellLabelsAt(wild, `/${WILD}/a/b`);
+        expect(labels?.entries).toEqual([]);
+        expect(labels?.confidentiality).toEqual([]);
       });
     });
   });

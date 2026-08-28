@@ -93,7 +93,6 @@ import type { CreateHarnessPromptLoopOptions } from "../src/prompt-loop.ts";
 import type { HarnessChatSessionStore } from "../src/session-store.ts";
 import { FileSystemHarnessArtifactStore } from "../src/artifacts.ts";
 import type { HarnessRunState } from "../src/run-state.ts";
-import { readSpaceCellLabels } from "../src/space-labels.ts";
 import {
   listConsoleRuns,
   readConsoleRun,
@@ -644,6 +643,16 @@ interface StreamClient {
 
 const encoder = new TextEncoder();
 
+/**
+ * The events that close a turn. The run behind one is settled on disk once it
+ * is emitted, and the page re-reads the run when it arrives.
+ */
+const TERMINAL_TURN_EVENT_KINDS: ReadonlySet<string> = new Set([
+  "turn_completed",
+  "turn_failed",
+  "turn_canceled",
+]);
+
 /** The live event fan-out, and the routes that read and write through it. */
 export class ConsoleServer {
   readonly #clients = new Set<StreamClient>();
@@ -653,6 +662,14 @@ export class ConsoleServer {
   readonly #patternIndexClientFactory:
     | HarnessPatternIndexClientFactory
     | undefined;
+  readonly #recordCellLabels: (sessionId: string) => Promise<void>;
+
+  /**
+   * The tail of the fan-out a terminal event is holding, or `undefined` when
+   * nothing is waiting — which is the ordinary case, and the one where an
+   * envelope reaches the streams on the call that broadcast it.
+   */
+  #heldFanOut: Promise<void> | undefined;
   #beats = 0;
 
   /**
@@ -664,7 +681,9 @@ export class ConsoleServer {
    *
    * The index client is the other way round: it reads the fabric identity from
    * disk to sign with, so it is built lazily, cached once healthy, and handed
-   * in by a test that has no keyfile to read.
+   * in by a test that has no keyfile to read. The cell-label snapshot is
+   * handed in for the same reason — it reads a space database this host may
+   * not hold, and it is what a terminal event waits on.
    */
   constructor(
     config: ConsoleConfig,
@@ -672,8 +691,11 @@ export class ConsoleServer {
       onEvent: HarnessInteractiveChatEventListener,
     ) => HarnessInteractiveChatService,
     patternIndexClientFactory?: HarnessPatternIndexClientFactory,
+    recordCellLabels?: (sessionId: string) => Promise<void>,
   ) {
     this.#config = config;
+    this.#recordCellLabels = recordCellLabels ??
+      ((sessionId) => this.#snapshotCellLabels(sessionId));
     this.#service = createService((envelope) => this.broadcast(envelope));
     const factory = patternIndexClientFactory ??
       (config.patternIndex !== undefined
@@ -692,24 +714,45 @@ export class ConsoleServer {
     return this.#service;
   }
 
-  /** Writes one envelope to every stream that has not already seen it. */
+  /**
+   * Writes one envelope to every stream that has not already seen it.
+   *
+   * The run's cells are settled once its turn is, so a terminal event is what
+   * the snapshot is taken on — and the page re-reads the run on that same
+   * event, so the event is held until the snapshot has landed. An event that
+   * overtook its own snapshot would hand the page a run whose labels read
+   * `absent`, with no later event to correct it. Nothing of the turn waits
+   * behind the event that closes it, and an envelope broadcast while one is
+   * held queues behind it, so the stream stays in sequence order — which is
+   * the order it delivers in or not at all. A snapshot this server could not
+   * write still lets the event through: the run stands as it is, and the page
+   * is owed the turn either way.
+   */
   broadcast(envelope: HarnessChatEventEnvelope): void {
-    if (
-      envelope.event.kind === "turn_completed" ||
-      envelope.event.kind === "turn_failed" ||
-      envelope.event.kind === "turn_canceled"
-    ) {
-      // The run's cells are settled once its turn is, and the page re-reads
-      // the run on the same event, so the snapshot is taken here rather than
-      // on the read that wants it. A failure to read the space is a snapshot
-      // that says so; a failure to write one leaves the run as it stands.
-      this.#recordCellLabels(envelope.sessionId).catch((error: unknown) => {
+    const snapshot = TERMINAL_TURN_EVENT_KINDS.has(envelope.event.kind)
+      ? this.#recordCellLabels(envelope.sessionId).catch((error: unknown) => {
         console.error(
           `cell label snapshot failed for session ${envelope.sessionId}:`,
           error,
         );
-      });
+      })
+      : undefined;
+    if (snapshot === undefined && this.#heldFanOut === undefined) {
+      this.#fanOut(envelope);
+      return;
     }
+    const held = (this.#heldFanOut ?? Promise.resolve())
+      .then(() => snapshot)
+      .then(() => this.#fanOut(envelope), () => this.#fanOut(envelope));
+    this.#heldFanOut = held;
+    void held.finally(() => {
+      if (this.#heldFanOut === held) {
+        this.#heldFanOut = undefined;
+      }
+    });
+  }
+
+  #fanOut(envelope: HarnessChatEventEnvelope): void {
     for (const client of this.#clients) {
       if (
         client.sessionId !== undefined &&
@@ -740,7 +783,7 @@ export class ConsoleServer {
    * writes a snapshot that says so, which is a different page from a run whose
    * cells carry no label.
    */
-  async #recordCellLabels(sessionId: string): Promise<void> {
+  async #snapshotCellLabels(sessionId: string): Promise<void> {
     const [session] = this.#service.status(sessionId).sessions;
     const runId = session?.harnessRunId;
     if (runId === undefined) {
@@ -768,6 +811,8 @@ export class ConsoleServer {
       if (refs.length === 0) {
         continue;
       }
+      // deno-lint-ignore cf-imports/no-inline-module-import -- reading a space database opens SQLite's native library, and a console process whose runs have no cell to snapshot must be able to serve its page without `--allow-ffi`
+      const { readSpaceCellLabels } = await import("../src/space-labels.ts");
       const labels = await readSpaceCellLabels({
         space: this.#config.fabricSession.space,
         ...(this.#config.spaceDbPath !== undefined
@@ -1314,6 +1359,14 @@ export const startConsoleServer = async (
               : "off")
         }, ${config.fabricSession.cfcEnforcementMode ?? "enforce-explicit"}`,
       );
+      // The two sidecar transports a run's mediation moves over. The engine's
+      // guard asks only that they are named, so a console pointed at
+      // directories no sandbox sidecar writes starts cleanly and then denies
+      // every observation of the run; printing them is what lets an operator
+      // read at startup which directories that depends on, for the same
+      // reason the posture is printed rather than left to be inferred.
+      console.log(`  results:    ${config.cfcResultDir}`);
+      console.log(`  contexts:   ${config.cfcInvocationContextDir}`);
       console.log(`  workspace:  ${config.workspacePath}`);
       console.log(`  artifacts:  ${config.artifactRoot}\n`);
     },

@@ -171,14 +171,23 @@ A turn ends by reading the space it wrote into for the labels it holds on the
 cells the run touched, and records them as the run's `cell-labels.json`. That is
 what a cell chip draws its `space` row from, and what the head of the map states
 the regime of — a space that could not be read is a run whose cells are
-unasked-about rather than unlabelled.
+unasked-about rather than unlabelled. A run and the `delegate_task` children
+beneath it each record their own, and the head states what every cell on the map
+can be taken to mean, so a family whose runs did not all read the space is
+stated as read for none of them: one member's reading cannot speak for another
+member's cells.
 
 The read is one hop wide. A pattern's results are their own cells, linked from
 the piece that names them, and the derived label sits on the cell — so the
-labels of every cell a run's own cells link to are read too, under the key that
-named them. The database is opened read-only, and it is found by the space the
-fabric session names; `--space-db` points at the file instead, for a host whose
-store is not where the search looks.
+labels of the cells a run's own cells link to are read too, under the key that
+named them.
+
+It reaches one space. A reference or a link naming a space other than the one
+opened is recorded as unread rather than resolved, because the id it names may
+also exist here and would answer with the wrong cell's labels; such a cell reads
+as nothing known, which is what it is. The database is opened read-only, and it
+is found by the space the fabric session names; `--space-db` points at the file
+instead, for a host whose store is not where the search looks.
 
 ## Reading a run
 
@@ -186,9 +195,11 @@ Three columns, each scrolling on its own: the runs there are, the run being
 read, and the map of how it went. A turn produces a run, and the run's artifacts
 are the record of it, so the same view serves a run that finished an hour ago
 and one still going. The live event stream drives the status line and the
-re-reads; it is not a second feed. A run writes its artifacts as it goes, so
-every completed tool call re-reads the list, the open run and its map. The step
-the scrubber sits on survives the re-read.
+re-reads; it is not a second feed. The event that closes a turn is published
+once that turn's labels have been recorded, so the re-read it drives reads the
+snapshot rather than racing it. A run writes its artifacts as it goes, so every
+completed tool call re-reads the list, the open run and its map. The step the
+scrubber sits on survives the re-read.
 
 ### The runs
 

@@ -303,7 +303,9 @@ export class ConsoleCell extends LitElement {
               html`
                 <span class="cell-path">
                   <span class="label-path">
-                    ${entry.path === "" ? "(the cell)" : entry.path}
+                    ${entry.path.length === 0
+                      ? "(the cell)"
+                      : entry.path.join("/")}
                   </span>
                   ${entry.origin === undefined
                     ? nothing

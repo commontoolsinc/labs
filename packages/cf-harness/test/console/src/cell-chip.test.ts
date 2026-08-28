@@ -95,7 +95,7 @@ describe("console/src/cell-chip", () => {
           transformedBy: ["summarize in inbox.tsx"],
           entries: [
             {
-              path: "notes/0",
+              path: ["notes", "0"],
               confidentiality: ["private"],
               integrity: [],
               origin: "derived",
@@ -106,7 +106,7 @@ describe("console/src/cell-chip", () => {
       });
       expect(view.derived).toBe(true);
       expect(view.transformedBy).toEqual(["summarize in inbox.tsx"]);
-      expect(view.paths.map((entry) => entry.path)).toEqual(["notes/0"]);
+      expect(view.paths.map((entry) => entry.path)).toEqual([["notes", "0"]]);
     });
   });
 

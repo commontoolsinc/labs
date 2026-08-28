@@ -32,6 +32,8 @@ import { type ConsoleFlow, consoleRunFlow } from "./flow.ts";
 import {
   type ConsoleCellLabelIndex,
   consoleCellLabelIndex,
+  type ConsoleCellLabels,
+  type ConsoleCellLabelsStatus,
   type ConsoleCellLabelsSummary,
   consoleCellLabelsSummary,
 } from "./cell-labels.ts";
@@ -343,6 +345,10 @@ const readConsoleRunFamily = async (
   if (root === undefined) {
     return undefined;
   }
+  const members: FamilyLabelReading[] = [{
+    runState: root.runState,
+    labels: await cellLabelIndex(join(artifactRoot, runId)),
+  }];
   const descendants: ConsoleGraphRunInput[] = [];
   try {
     for await (const entry of Deno.readDir(artifactRoot)) {
@@ -355,6 +361,10 @@ const readConsoleRunFamily = async (
           runId: entry.name,
           steps: child.steps,
           handles: child.handles,
+        });
+        members.push({
+          runState: child.runState,
+          labels: await cellLabelIndex(join(artifactRoot, entry.name)),
         });
       }
     }
@@ -371,8 +381,69 @@ const readConsoleRunFamily = async (
     root: withNeighbours({ runId, steps: root.steps, handles: root.handles }),
     descendants: descendants.map(withNeighbours),
     runState: root.runState,
-    cellLabels: root.cellLabels,
+    cellLabels: familyCellLabels(members),
   };
+};
+
+/** One member of a family, as the family's own reading is folded from. */
+interface FamilyLabelReading {
+  runState: HarnessRunState;
+  labels: ConsoleCellLabelIndex;
+}
+
+/** The members that each status was read for, in the words a header uses. */
+const statusTally = (
+  statuses: readonly ConsoleCellLabelsStatus[],
+): string =>
+  (["read", "unavailable", "absent"] as const)
+    .flatMap((status) => {
+      const count = statuses.filter((each) => each === status).length;
+      return count === 0 ? [] : [`${count} ${status}`];
+    })
+    .join(", ");
+
+/**
+ * What the whole family read of the space, folded from what each member read.
+ *
+ * The status is the sentence every bare cell on the map is read under: no
+ * labels means the space holds none where the snapshot was taken, and means
+ * nobody asked where it was not. So a family whose members disagree cannot be
+ * reported as any one member's status — the root's `read` would speak for a
+ * child's cells that nothing was read for, and the root's `absent` would deny
+ * a child's cells the labels its own snapshot holds. A disagreement is stated
+ * as one instead: `unavailable`, with the split in its detail, which claims
+ * nothing about any member's cells.
+ *
+ * A member that minted no handle had no cell to snapshot, and its missing
+ * snapshot is that rather than a gap, so it is left out of the reckoning.
+ * The cells themselves are merged by address, so a cell a parent and its
+ * child both hold is one cell of the family rather than two.
+ */
+const familyCellLabels = (
+  members: readonly FamilyLabelReading[],
+): ConsoleCellLabelsSummary => {
+  const byAddress = new Map<string, ConsoleCellLabels>();
+  for (const member of members) {
+    for (const [address, labels] of member.labels.byAddress) {
+      byAddress.set(address, labels);
+    }
+  }
+  const speaking = members.filter((member) =>
+    (member.runState.handleTable?.entries ?? []).length > 0
+  );
+  const statuses = speaking.map((member) => member.labels.status);
+  const agreed = speaking[0] ?? members[0];
+  if (new Set(statuses).size > 1) {
+    const space = members.find((member) => member.labels.space !== undefined)
+      ?.labels.space;
+    return consoleCellLabelsSummary({
+      status: "unavailable",
+      detail: `the runs in this family disagree: ${statusTally(statuses)}`,
+      ...(space !== undefined ? { space } : {}),
+      byAddress,
+    });
+  }
+  return consoleCellLabelsSummary({ ...agreed.labels, byAddress });
 };
 
 /**

@@ -48,6 +48,31 @@ const DISJUNCTIVE = entity("disjunctive");
 const COMMITTED = entity("committed");
 const NEVER_WRITTEN = entity("neverWritten");
 
+/**
+ * The space the DID-named database holds, and one this host never opened. The
+ * store names its file after its space, so a file named for {@link OWN_DID} is
+ * the only proof this reader has of which space its ids belong to.
+ */
+const OWN_DID = "did:key:z6MkfrQ3tCDZgvJcLwPTvxNsFR8RgTsHTa5JzmnW9pQrUvNq";
+const FOREIGN_DID = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
+
+/**
+ * An id the seeded space holds a label for, standing for the id collision a
+ * cross-space reference invites: the same id in another space is another cell
+ * entirely, and reading it here would answer with this one's label.
+ */
+const COLLIDING = entity("colliding");
+
+/** A document whose links reach the colliding id in three spaces. */
+const LINKER = entity("linker");
+
+/** One stored link, in the at-rest sigil form the store holds. */
+const link = (id: string, space?: string) => ({
+  "/": {
+    "link@1": { id, path: [], ...(space === undefined ? {} : { space }) },
+  },
+});
+
 /** One `labelMap` entry, in the shape the space stores it. */
 const stored = (
   path: string[],
@@ -130,6 +155,28 @@ const documents: Record<string, unknown> = {
       },
     },
   },
+  [COLLIDING]: {
+    value: { secret: "local, and labelled" },
+    cfc: {
+      version: 1,
+      labelMap: {
+        version: 1,
+        entries: [
+          stored([], {
+            confidentiality: ["foreign-secret"],
+            integrity: [],
+          }, "declared"),
+        ],
+      },
+    },
+  },
+  [LINKER]: {
+    value: {
+      mine: link(COLLIDING),
+      ours: link(COLLIDING, OWN_DID),
+      theirs: link(COLLIDING, FOREIGN_DID),
+    },
+  },
   [COMMITTED]: {
     value: { attachment: "…" },
     cfc: {
@@ -153,13 +200,18 @@ const documents: Record<string, unknown> = {
   },
 };
 
+/** The documents written as plain JSON rather than through the codec. */
+const PLAIN = new Set([UNLABELLED, LINKER]);
+
 /**
- * A stored `revision.data` payload. Every document but {@link UNLABELLED} goes
- * in through the codec, which tags its envelope (`fvj1:…`) the way the server
- * writes one; that one goes in as plain JSON, which the store also holds.
+ * A stored `revision.data` payload. Most documents go in through the codec,
+ * which tags their envelope (`fvj1:…`) the way the server writes one; the
+ * {@link PLAIN} ones go in as plain JSON, which the store also holds — one to
+ * show that a legacy row still reads, and one to keep its links in the sigil
+ * form a reader meets them in.
  */
 const payload = (id: string, document: unknown): string =>
-  id === UNLABELLED
+  PLAIN.has(id)
     ? JSON.stringify(document)
     : jsonFromFabricValue(document as FabricValue);
 
@@ -186,17 +238,28 @@ const seed = (path: string) => {
 describe("space-labels", () => {
   let directory: string;
   let dbPath: string;
+  let didDbPath: string;
   let reader: SpaceLabelReader;
+  let didReader: SpaceLabelReader;
 
   beforeAll(async () => {
     directory = await Deno.makeTempDir({ prefix: "cf-harness-space-labels-" });
     dbPath = `${directory}/space.sqlite`;
     seed(dbPath);
     reader = await openSpaceLabelReader("demo-space", { dbPath });
+    // The same store under the name the server gives one, so the reader can
+    // prove which space its ids belong to. Every space-naming reference is
+    // answerable only against this one.
+    didDbPath = `${directory}/${OWN_DID}.sqlite`;
+    seed(didDbPath);
+    didReader = await openSpaceLabelReader("demo-space", {
+      dbPath: didDbPath,
+    });
   });
 
   afterAll(async () => {
     reader.close();
+    didReader.close();
     await Deno.remove(directory, { recursive: true });
   });
 
@@ -215,10 +278,10 @@ describe("space-labels", () => {
       });
     });
 
-    it("returns the entity named after the space of a cross-space link", () => {
-      const did = "did:key:z6MkfrQ3tCDZgvJcLwPTvxNsFR8RgTsHTa5JzmnW9pQrUvNq";
-      expect(cellAddressOfRef(`/@${did}/${DECLARED}/title`)).toEqual({
+    it("returns the entity and the space a cross-space link names", () => {
+      expect(cellAddressOfRef(`/@${FOREIGN_DID}/${DECLARED}/title`)).toEqual({
         id: DECLARED,
+        space: FOREIGN_DID,
         scope: "space",
       });
     });
@@ -314,6 +377,84 @@ describe("space-labels", () => {
         },
       }]);
     });
+
+    it("returns the space DID the opened file is named for", () => {
+      expect(didReader.did).toBe(OWN_DID);
+    });
+
+    it("returns no space DID for an opened file whose name is not one", () => {
+      expect(reader.did).toBe(undefined);
+    });
+
+    it("returns the labels of an address naming the space that was opened", () => {
+      const read = didReader.read({
+        id: COLLIDING,
+        space: OWN_DID,
+        scope: "space",
+      });
+      expect(read.unread).toBe(undefined);
+      expect(read.entries.map((entry) => entry.confidentiality)).toEqual([
+        [{ type: "foreign-secret", name: "foreign-secret" }],
+      ]);
+    });
+
+    it("returns no labels and `cross-space` for an address in another space holding an id this space also holds", () => {
+      const read = didReader.read({
+        id: COLLIDING,
+        space: FOREIGN_DID,
+        scope: "space",
+      });
+      expect(read.unread).toBe("cross-space");
+      expect(read.entries).toEqual([]);
+    });
+
+    it("returns no labels for an address naming any space when the opened file proves none", () => {
+      const read = reader.read({
+        id: COLLIDING,
+        space: OWN_DID,
+        scope: "space",
+      });
+      expect(read.unread).toBe("cross-space");
+      expect(read.entries).toEqual([]);
+    });
+
+    it("returns the labels of the linked cells naming no space and naming the opened one", () => {
+      const read = didReader.read({ id: LINKER, scope: "space" });
+      expect(read.linked).toEqual([
+        { key: "mine", id: COLLIDING },
+        { key: "ours", id: COLLIDING },
+      ]);
+      expect(read.entries).toEqual([
+        {
+          path: ["mine"],
+          confidentiality: [{ type: "foreign-secret", name: "foreign-secret" }],
+          integrity: [],
+          origin: "declared",
+          source: COLLIDING,
+        },
+        {
+          path: ["ours"],
+          confidentiality: [{ type: "foreign-secret", name: "foreign-secret" }],
+          integrity: [],
+          origin: "declared",
+          source: COLLIDING,
+        },
+      ]);
+    });
+
+    it("returns no entry under a link into another space holding an id this space also holds", () => {
+      const read = didReader.read({ id: LINKER, scope: "space" });
+      expect(read.linked.map((cell) => cell.key)).not.toContain("theirs");
+      expect(read.entries.map((entry) => entry.path[0])).not.toContain(
+        "theirs",
+      );
+    });
+
+    it("returns only the link naming no space when the opened file proves no DID", () => {
+      const read = reader.read({ id: LINKER, scope: "space" });
+      expect(read.linked).toEqual([{ key: "mine", id: COLLIDING }]);
+      expect(read.entries.map((entry) => entry.path)).toEqual([["mine"]]);
+    });
   });
 
   describe("readSpaceCellLabels()", () => {
@@ -353,6 +494,48 @@ describe("space-labels", () => {
     it("drops a reference that names no document", async () => {
       const snapshot = await read(["my notebook", `/${DECLARED}`]);
       expect(snapshot.cells.map((cell) => cell.entityId)).toEqual([DECLARED]);
+    });
+
+    const readAgainstDid = (refs: readonly string[]) =>
+      readSpaceCellLabels({
+        space: "demo-space",
+        dbPath: didDbPath,
+        refs,
+        generatedAt: "2026-01-01T00:00:00.000Z",
+      });
+
+    it("names the space DID of a database named for its space", async () => {
+      const snapshot = await readAgainstDid([`/${DECLARED}`]);
+      expect(snapshot.space).toEqual({
+        configured: "demo-space",
+        did: OWN_DID,
+        dbPath: didDbPath,
+      });
+    });
+
+    it("records a reference into another space as unread rather than reading its id here", async () => {
+      const ref = `/@${FOREIGN_DID}/${COLLIDING}`;
+      const snapshot = await readAgainstDid([ref]);
+      expect(snapshot.cells).toEqual([{
+        entityId: COLLIDING,
+        ref,
+        space: FOREIGN_DID,
+        unreadReason: "cross-space",
+        entries: [],
+      }]);
+    });
+
+    it("records one cell per space for an id referenced in two", async () => {
+      const snapshot = await readAgainstDid([
+        `/${COLLIDING}`,
+        `/@${FOREIGN_DID}/${COLLIDING}`,
+      ]);
+      expect(snapshot.cells.map((cell) => cell.unreadReason)).toEqual([
+        undefined,
+        "cross-space",
+      ]);
+      expect(snapshot.cells[0].entries.map((entry) => entry.confidentiality))
+        .toEqual([[{ type: "foreign-secret", name: "foreign-secret" }]]);
     });
 
     it("returns an unavailable snapshot naming the space when no database is found", async () => {

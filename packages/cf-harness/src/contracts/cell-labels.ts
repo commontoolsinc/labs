@@ -95,6 +95,14 @@ export interface HarnessCellLabelEntry {
   source?: string;
 }
 
+/**
+ * Why one cell of a read snapshot holds no labels because none were looked
+ * for. `cross-space` is a reference into a space other than the one opened:
+ * an entity id addresses a document within its own space, so asking the
+ * opened store for it answers with whatever local document shares that id.
+ */
+export type HarnessCellLabelUnreadReason = "cross-space";
+
 /** Every label the space holds for one cell. */
 export interface HarnessCellLabelRecord {
   /** The entity the labels belong to, as the store ids it (`of:fid1:…`). */
@@ -106,12 +114,28 @@ export interface HarnessCellLabelRecord {
    */
   ref?: string;
 
+  /**
+   * The space the reference named, when it named one. An id is unique only
+   * within its space, so this is what says which cell the record is about
+   * when the id alone does not — and, where it differs from the space the
+   * snapshot was taken in, it is why the cell went unread.
+   */
+  space?: string;
+
   /** The hash of the schema the labels were computed against, if recorded. */
   schemaHash?: string;
 
   /**
+   * Set when this cell's labels were not looked for, naming which of the
+   * reasons it was. It is what separates the two readings of an empty
+   * `entries`, at the granularity of one cell rather than of the snapshot.
+   */
+  unreadReason?: HarnessCellLabelUnreadReason;
+
+  /**
    * The labels, one entry per labelled path. An empty list is a positive
-   * finding: the space was read and holds no label for this cell.
+   * finding — the space was read and holds no label for this cell — except
+   * where `unreadReason` is set, which says nothing was asked.
    */
   entries: readonly HarnessCellLabelEntry[];
 }

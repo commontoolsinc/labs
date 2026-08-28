@@ -27,6 +27,7 @@ import {
   type HarnessCellLabelEntry,
   type HarnessCellLabelRecord,
   type HarnessCellLabels,
+  type HarnessCellLabelUnreadReason,
   type HarnessCfcAtom,
 } from "./contracts/cell-labels.ts";
 
@@ -85,6 +86,13 @@ const atomsOf = (value: unknown): HarnessCfcAtom[] =>
 interface StoredCellLabels {
   entries: HarnessCellLabelEntry[];
   schemaHash?: string;
+
+  /**
+   * Set when nothing was looked for, naming why. An entry list is otherwise
+   * a positive finding about the opened store, so a lookup that never
+   * reached it says so rather than reading as a document with no label.
+   */
+  unread?: HarnessCellLabelUnreadReason;
 }
 
 /**
@@ -143,6 +151,14 @@ export interface CellAddress {
   id: string;
 
   /**
+   * The space the reference named, when it named one. An entity id is only
+   * unique within its space, so a reference that carries a space addresses a
+   * document in that space and nowhere else; one that carries none addresses
+   * the store it was read out of.
+   */
+  space?: string;
+
+  /**
    * The scope kind the reference names, `space` unless it says otherwise. A
    * labelMap is written at the same scope as the document it labels, so a
    * per-user override's labels are not in the space scope.
@@ -168,13 +184,47 @@ export const cellAddressOfRef = (ref: string): CellAddress | undefined => {
     const link = parseLLMFriendlyLink(
       trimmed.startsWith("/") ? trimmed : `/${trimmed}`,
     );
-    return link.id === undefined
-      ? undefined
-      : { id: link.id, scope: link.scope ?? "space" };
+    return link.id === undefined ? undefined : {
+      id: link.id,
+      ...(link.space ? { space: link.space } : {}),
+      scope: link.scope ?? "space",
+    };
   } catch {
     return undefined;
   }
 };
+
+/** A space DID, as a store file is named after one and a reference spells one. */
+const SPACE_DID = /^did:[a-z0-9]+:[A-Za-z0-9._%-]+$/;
+
+/**
+ * The DID of the space a database file holds, from the file's own name: a
+ * space store is named for its space, which is how `discoverSpaceDbs` in
+ * `@commonfabric/state-inspector` reads a DID off one. A file named anything
+ * else — a fixture, a copy taken by hand — proves no DID, and answering
+ * `undefined` is what keeps a cross-space reference from being read against
+ * it.
+ */
+const spaceDidOfDbPath = (dbPath: string): string | undefined => {
+  const name = (dbPath.split("/").pop() ?? dbPath).replace(/\.sqlite$/, "");
+  return SPACE_DID.test(name) ? name : undefined;
+};
+
+/**
+ * Whether an address is one the opened store can answer. A reference naming
+ * no space names the store it came from, and is read. A reference naming a
+ * space is read only where the opened store's own DID is known and is that
+ * space: an entity id names a document within its space, so reading a foreign
+ * id here would answer with whatever local document shares the id and graft
+ * its labels onto the foreign cell. An unknown DID proves nothing, so it
+ * fails closed.
+ */
+const addressesOpenedSpace = (
+  space: string | undefined | null,
+  did: string | undefined,
+): boolean =>
+  space === undefined || space === null ||
+  (did !== undefined && space === did);
 
 /**
  * The cells one document links to, by the key that names each. A pattern's
@@ -196,12 +246,10 @@ const linkedCellsOf = (
     if (link?.id === undefined || link.id === null) {
       continue;
     }
-    // A link naming another space addresses a store this reader did not
-    // open. One naming this space, or naming none, is a cell here.
-    if (
-      link.space === undefined || link.space === null || space === undefined ||
-      link.space === space
-    ) {
+    // A link naming another space addresses a store this reader did not open,
+    // and one naming a space against an unknown DID cannot be shown to be
+    // this one. Only a link naming this space, or naming none, is a cell here.
+    if (addressesOpenedSpace(link.space, space)) {
       linked.push({ key, id: link.id });
     }
   }
@@ -211,6 +259,12 @@ const linkedCellsOf = (
 /** A space DB opened for reading labels, and the space it was resolved from. */
 export interface SpaceLabelReader {
   readonly dbPath: string;
+
+  /**
+   * The DID of the space the opened file holds, when the file proves one.
+   * Nothing but this establishes which space an id is being looked up in, so
+   * a reader without it can answer for no reference that names a space.
+   */
   readonly did?: string;
 
   /**
@@ -222,6 +276,9 @@ export interface SpaceLabelReader {
    * undecodable — reads as no labels, the same as one whose document carries
    * no `cfc` path: neither is a label this reader can report, and one corrupt
    * entity does not end the walk.
+   *
+   * An address in another space is not looked up at all: the answer comes
+   * back `unread`, which is a different fact from a document with no labels.
    */
   read(address: CellAddress): StoredCellLabels & {
     linked: { key: string; id: string }[];
@@ -244,11 +301,14 @@ export const openSpaceLabelReader = async (
     : undefined;
   const dbPath = options.dbPath ?? await resolveSpace(space, discovered);
   const opened: SpaceDb = openSpace(dbPath);
-  const did = discovered?.find((entry) => entry.path === dbPath)?.did;
+  const did = spaceDidOfDbPath(dbPath);
   return {
     dbPath,
     ...(did !== undefined ? { did } : {}),
     read: (address) => {
+      if (!addressesOpenedSpace(address.space, did)) {
+        return { entries: [], linked: [], unread: "cross-space" };
+      }
       // The named scope, then the base scope it inherits from: a reference
       // carries a scope kind rather than a principal, so a scoped one
       // addresses no stored row and would otherwise read as unlabelled.
@@ -297,7 +357,10 @@ export interface SpaceLabelSnapshotRequest {
  *
  * A reference that names no document is dropped rather than recorded empty —
  * it addresses nothing this reader can ask about, and an empty record would
- * read as a cell the space holds no label for. Every other failure lands on
+ * read as a cell the space holds no label for. A reference into another
+ * space does address a cell, so it is recorded and marked unread instead of
+ * dropped: the run held it, and a reader that saw it vanish would take the
+ * snapshot to cover every cell the run touched. Every other failure lands on
  * the snapshot as a whole, so a reader can tell "no labels" from "not read".
  */
 export const readSpaceCellLabels = async (
@@ -336,7 +399,9 @@ export const readSpaceCellLabels = async (
       if (address === undefined) {
         continue;
       }
-      const key = `${address.scope}\x00${address.id}`;
+      // Keyed by the space as well as the entity: one id can name a cell in
+      // the opened space and a cell in another, and they are two cells.
+      const key = `${address.space ?? ""}\x00${address.scope}\x00${address.id}`;
       if (seen.has(key)) {
         continue;
       }
@@ -345,9 +410,11 @@ export const readSpaceCellLabels = async (
       cells.push({
         entityId: address.id,
         ref,
+        ...(address.space !== undefined ? { space: address.space } : {}),
         ...(read.schemaHash !== undefined
           ? { schemaHash: read.schemaHash }
           : {}),
+        ...(read.unread !== undefined ? { unreadReason: read.unread } : {}),
         entries: read.entries,
       });
     }
