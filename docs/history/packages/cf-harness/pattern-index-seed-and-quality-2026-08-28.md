@@ -224,6 +224,15 @@ produced it.
   exactly this.
 - One reported figure ("no empty searches across six runs") was contradicted by
   the tool's own printed output, and lost in a total summed by eye.
+- An instrument answered confidently about a subject nobody had asked it
+  about. `gh pr checks --watch` binds to whichever check run exists when it
+  starts and does not follow a later push, so it reported success three times
+  during this pass for a commit that was not the head — once when the head
+  carried a single queued check. The pull-request-level rollup has the same
+  property. Neither was lying; both were answering a question that had not been
+  asked. Naming the commit in the request (`commits/<sha>/check-runs`) removes
+  the ambiguity, because a request that names a subject cannot answer about a
+  different one.
 - The sandbox transport guard checked that two directories were *named* in a
   runtime's configuration, never that the runtime read them, and then reported
   `invocationContextTransport: "sidecar"` into the run's policy snapshot on the
