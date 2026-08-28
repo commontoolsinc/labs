@@ -154,6 +154,150 @@ describe("declaredResultProjection", () => {
     });
   });
 
+  describe('the `"shape"` bound', () => {
+    /**
+     * A verb that hands back a piece and declares a compact row over it: two
+     * scalars, re-entering nowhere. The circle a readback of that piece closes
+     * is at no position this declaration names, so there is nothing for the
+     * recursion bound to cut and the shape itself is the only boundary in
+     * reach.
+     */
+    const ROW: JSONSchema = {
+      type: "object",
+      properties: {
+        row: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            createdAt: { type: "number" },
+          },
+        },
+      },
+    };
+
+    it("holds every object position to the fields it declares", () => {
+      expect(declaredResultProjection(ROW, "shape")?.schema).toEqual({
+        type: "object",
+        properties: {
+          row: {
+            type: "object",
+            properties: { title: true, createdAt: true },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
+      });
+    });
+
+    it("derives nothing from the same declaration under the recursion bound", () => {
+      // The contrast is the whole reason the stronger bound exists, and the
+      // default is the weaker one: a declaration that re-enters nowhere bounds
+      // nothing on its own, so a result that renders is never narrowed.
+      expect(declaredResultProjection(ROW)).toBeUndefined();
+      expect(declaredResultProjection(ROW, "recursion")).toBeUndefined();
+    });
+
+    it("still renders the address where the declaration does re-enter", () => {
+      // The stronger bound adds to the weaker one rather than replacing it:
+      // `parent` is where the declared type re-enters, and it renders its
+      // address under both.
+      expect(declaredResultProjection(declarationBeside({}), "shape")?.schema)
+        .toEqual({
+          type: "object",
+          properties: { item: CUT_ITEM },
+          additionalProperties: false,
+        });
+    });
+
+    it("returns `undefined` for a declaration whose positions state no fields", () => {
+      // Bare types and an unconstrained object read no less than the value
+      // does, so there is nothing here that a readback does not already do —
+      // and answering with a projection that changes nothing would report a
+      // bound where none was found.
+      expect(declaredResultProjection({ type: "object" }, "shape"))
+        .toBeUndefined();
+      expect(declaredResultProjection({}, "shape")).toBeUndefined();
+      expect(
+        declaredResultProjection(
+          { type: "object", properties: {} },
+          "shape",
+        ),
+      ).toBeUndefined();
+      expect(declaredResultProjection({ type: "string" }, "shape"))
+        .toBeUndefined();
+    });
+
+    it("leaves a union position as wide as it was declared", () => {
+      // A projection states one shape per position and a union does not, so
+      // the position is left wide under this bound too — the same answer
+      // `allOf` gets, and for the same reason. Only re-entry turns a union
+      // into an address.
+      expect(
+        declaredResultProjection({
+          type: "object",
+          properties: {
+            author: {
+              anyOf: [
+                { type: "object", properties: { name: { type: "string" } } },
+                { type: "null" },
+              ],
+            },
+          },
+        }, "shape")?.schema,
+      ).toEqual({
+        type: "object",
+        properties: { author: true },
+        additionalProperties: false,
+      });
+    });
+
+    it("holds an array's elements to the fields they declare", () => {
+      expect(
+        declaredResultProjection({
+          type: "object",
+          properties: {
+            rows: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: { title: { type: "string" } },
+              },
+            },
+          },
+        }, "shape")?.schema,
+      ).toEqual({
+        type: "object",
+        properties: {
+          rows: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: { title: true },
+              additionalProperties: false,
+            },
+          },
+        },
+        additionalProperties: false,
+      });
+    });
+
+    it("drops a stream position, which holds no value to read", () => {
+      expect(
+        declaredResultProjection({
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            rename: { asCell: ["stream"] },
+          },
+        }, "shape")?.schema,
+      ).toEqual({
+        type: "object",
+        properties: { title: true },
+        additionalProperties: false,
+      });
+    });
+  });
+
   it("returns `undefined` where the verb declares no result to bound with", () => {
     expect(declaredResultProjection(undefined)).toBeUndefined();
     expect(declaredResultProjection(true)).toBeUndefined();

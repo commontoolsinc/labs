@@ -311,24 +311,60 @@ cf call --piece "$EPIC" addChild -- --title "Session cookie handling"
 ```
 
 That address is the one a `$link` marker would have produced by hand, so the
-derived answer and a written one agree. A shape you asked for wins wherever it
-renders: `--filter`, `--select` and `--schema` are applied to the receipt first,
-and one that narrows past the circle — `--select item.title` — comes back
-exactly as written, with nothing derived added to it. One that keeps the circle
-— `--select item`, which names the re-entering subtree whole — is bounded on the
-way out, and the bound is a cut into what you selected rather than a shape that
-replaces it: the closing position renders its address, and no position you did
-not name comes back beside it. `--select item.parent` names the closing position
-itself, and answers with that one address alone.
+derived answer and a written one agree.
 
-Where nothing bounds it — the verb declares no result, the declaration leaves
-the closing position wide, or a `--filter` is in play, whose surviving elements
-no longer say which positions they came from and so cannot carry an address —
-the call names the position the circle closes at and the receipt to collect the
-outcome from, and exits nonzero. Read that as the result being unrenderable,
-never as the mutation having failed: **the write landed**, and the message says
-so. A `--filter` reaches a renderable answer by naming a projection beside it
-that narrows past the circle.
+A verb whose declared result is narrower than the value behind it is bounded a
+second way. `addTopic` is the case: it hands back the topic it created and
+declares a compact row over it, so a create does not expand that topic's prose,
+its thread, and every sibling it references. The row re-enters nowhere, and the
+circle a readback of the topic closes — through its view, into a profile, into
+that profile's own view — is at no position the row names. There is nothing
+there for a recursion cut to land on, and the bound is the declared shape
+itself: every object position is held to the fields it declares, and what comes
+back is the row its author wrote.
+
+```bash
+cf call --piece "$BOARD" addTopic -- --title "Session cookie handling" \
+  --agent-name b7
+```
+
+```json
+{
+  "invocation": "9a71…",
+  "status": "settled",
+  "result": {
+    "topic": {
+      "title": "Session cookie handling",
+      "createdAt": 1756400000000,
+      "createdBy": { "kind": "agent", "name": "b7" },
+      "commentCount": 0
+    }
+  }
+}
+```
+
+The two bounds are tried weakest first, so neither narrows anything it does not
+have to: a result the recursion cut renders is never held to the declared shape
+as well.
+
+A shape you asked for wins wherever it renders: `--filter`, `--select` and
+`--schema` are applied to the receipt first, and one that narrows past the
+circle — `--select item.title` — comes back exactly as written, with nothing
+derived added to it. One that keeps the circle — `--select item`, which names
+the re-entering subtree whole — is bounded on the way out, and the bound is a
+cut into what you selected rather than a shape that replaces it: the closing
+position renders its address, and no position you did not name comes back
+beside it. `--select item.parent` names the closing position itself, and answers
+with that one address alone.
+
+Where nothing bounds it — the verb declares no result, the declaration
+describes no less than the value does, or a `--filter` is in play, whose
+surviving elements no longer say which positions they came from and so cannot
+carry an address — the call names the position the circle closes at and the
+receipt to collect the outcome from, and exits nonzero. Read that as the result
+being unrenderable, never as the mutation having failed: **the write landed**,
+and the message says so. A `--filter` reaches a renderable answer by naming a
+projection beside it that narrows past the circle.
 
 ### Retries are safe, and cheap to reason about
 
