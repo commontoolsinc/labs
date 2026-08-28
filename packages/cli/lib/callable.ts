@@ -47,6 +47,7 @@ import {
 } from "./cell-selection.ts";
 import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 import type { ExecCommandSpec } from "./exec-schema.ts";
+import { noteWroteTo } from "./write-receipt.ts";
 
 export const CF_RUNTIME_ERROR_LOG = Symbol.for("cf.cli.runtimeErrorLog");
 
@@ -1624,6 +1625,11 @@ export async function executeResolvedCallable(
         }`,
       );
     }
+
+    // The handling committed, so the space it committed to is named here —
+    // before the early return below, which a call without an invocation id
+    // takes.
+    noteWroteTo(resolved.space);
 
     if (invocationId === undefined) return {};
 
