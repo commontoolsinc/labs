@@ -33,6 +33,11 @@ request; both lists are written out in the infra repository, under
 `provenanceEntries` and not to those lists travels to the model vendor and
 appears in no log, so a new field is two changes across two repositories.
 
+The gateway requires the invoker, principal and session headers on every
+request to its LLM hostname. It returns HTTP 400 before forwarding upstream
+when any of the three is absent or empty. Browser CORS preflights do not
+require provenance.
+
 ## Two channels, one set of values
 
 The values travel twice: as `x-cf-harness-*` headers, and condensed into the
