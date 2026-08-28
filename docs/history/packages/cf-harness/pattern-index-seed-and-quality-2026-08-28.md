@@ -297,6 +297,26 @@ same is true of the composition proof: only a space known not to hold the
 dependencies could distinguish a fetch that succeeded from a fetch that never
 ran.
 
+Two rules generalize the list, and both were arrived at only after the
+instances had accumulated.
+
+**When a tool summarizes, ask what population it summarized over.** Every
+instrument failure above is one answer to that question going unasked. The
+watcher: *which run*. The page: *how many rows*. The check-run list: *which
+checks existed yet*. `--detailed` against `--lcov`: *which lines, under which
+reader*. A review tool's check conclusion: *whether it finished*, not what it
+found. A package-scoped linter: *which configuration*. None of them was wrong
+about its own population; each was asked a question about a different one.
+
+**Whether an absence is evidence depends on whether the thing would
+necessarily have been present.** A configuration flag that is missing would
+have been written if it applied, so its absence is positive evidence and
+justifies refusing. A rendered `[object Object]` that is missing proves
+nothing, because a pattern with no text renders none either — so its absence is
+recorded uncertified rather than treated as a pass. The same distinction
+settles a missing check run (absent because not yet created — unknown) against
+a missing runtime argument (absent because nothing registered it — known).
+
 The practical rule this leaves: when a check reports an absence, establish that
 the check would have reported a presence. That takes a case whose answer is
 known independently, which is a different and more expensive thing than a test
