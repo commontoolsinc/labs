@@ -1,3 +1,5 @@
+/** Tests frame relay and trace ordering in the FUSE memory proxy. */
+
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
