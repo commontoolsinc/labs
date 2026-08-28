@@ -99,13 +99,28 @@ export interface ResolveDockerRunscSandboxConfigOptions {
 export type CfcSidecarTransportKind = "invocation-context" | "result";
 
 /**
- * One transport's reading.
+ * One transport's reading — and the two halves of it are not equally strong.
  *
- * The three states stay distinct rather than collapsing into a boolean because
- * the evidence behind them differs. `unwired` is a positive reading of the
- * runtime's registered arguments; `indeterminate` is the absence of any
- * reading. Folding the second into the first refuses a host whose registration
- * simply could not be read, and folding it into `wired` excuses a broken one.
+ * `unwired` is load-bearing and sound. A flag that is absent, empty, relative,
+ * or naming another directory is positive evidence that nothing reads the one
+ * the harness writes to, and that holds whatever filesystem the daemon
+ * resolves paths on. It is the only status that refuses an invocation.
+ *
+ * `wired` claims only that **the runtime's registration named this directory
+ * at the moment it was read**. It is deliberately not a claim that the
+ * transport works, and nothing behaves differently for it than for
+ * `indeterminate` — both proceed. Two facts about Docker keep the stronger
+ * claim out of reach, and neither is an oversight that could be patched:
+ * bind paths resolve on the daemon's host rather than the client's, so equal
+ * path text says nothing when the daemon is elsewhere and no client-side
+ * inspection settles where it is; and `runtimes` is SIGHUP-reloadable, so a
+ * registration can be replaced after it is read. Affirming the transport would
+ * need an end-to-end proof — a sentinel written by the harness and read back
+ * from inside the sandbox — which this reading is not.
+ *
+ * `indeterminate` is the absence of any reading. Folding it into `unwired`
+ * refuses a host whose registration simply could not be read; folding it into
+ * `wired` excuses a broken one.
  */
 export type CfcSidecarTransportReading =
   | { status: "wired" }

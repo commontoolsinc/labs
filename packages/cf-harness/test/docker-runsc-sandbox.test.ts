@@ -964,19 +964,6 @@ const dockerInfoResult = (
   exitCode: 0,
 });
 
-/**
- * The endpoint reading the runtime takes before it will accept two equal path
- * strings as naming one directory. A local socket is the shared-filesystem
- * case.
- */
-const dockerContextResult = (
-  endpoint = "unix:///var/run/docker.sock",
-): ProcessRunResult => ({
-  stdout: `${endpoint}\n`,
-  stderr: "",
-  exitCode: 0,
-});
-
 const enforcingInvocationContext = (
   cfcEnforcementMode: "enforce-explicit" | "observe" = "enforce-explicit",
 ) =>
@@ -1049,7 +1036,6 @@ Deno.test("DockerRunscSandboxRuntime refuses when only the result transport is r
   const runner = new FakeProcessRunner([
     { stdout: "container-123\n", stderr: "", exitCode: 0 },
     dockerInfoResult(["--cfc-result-dir=/host/results"]),
-    dockerContextResult(),
     { stdout: "", stderr: "", exitCode: 0 },
   ]);
   const runtime = new DockerRunscSandboxRuntime(
@@ -1067,13 +1053,9 @@ Deno.test("DockerRunscSandboxRuntime refuses when only the result transport is r
   });
 
   assertEquals(result.exitCode, 125);
-  // `info` reads the registration; `context` resolves the endpoint, because
-  // the result transport read as wired and that verdict rests on two paths
-  // naming the same filesystem.
   assertEquals(runner.requests.map((request) => request.args[0]), [
     "create",
     "info",
-    "context",
     "rm",
   ]);
 });
@@ -1088,7 +1070,6 @@ Deno.test("DockerRunscSandboxRuntime writes the sidecar when the runtime is regi
       dockerInfoResult([
         `--cfc-invocation-context-dir=${cfcInvocationContextDir}`,
       ]),
-      dockerContextResult(),
       start!,
       wait!,
       remove!,
@@ -1521,7 +1502,6 @@ Deno.test("DockerRunscSandboxRuntime holds the directories its readiness verdict
     const [create, start, wait, remove] = dockerLifecycleResults();
     const runner = new FakeProcessRunner([
       dockerInfoResult([`--cfc-invocation-context-dir=${original}`]),
-      dockerContextResult(),
       create!,
       start!,
       wait!,
@@ -1621,7 +1601,6 @@ Deno.test("DockerRunscSandboxRuntime holds the runtime identity its verdict was 
   const [create, start, wait, remove] = dockerLifecycleResults();
   const runner = new FakeProcessRunner([
     dockerInfoResult(["--cfc-invocation-context-dir=/host/invocations"]),
-    dockerContextResult(),
     create!,
     start!,
     wait!,
@@ -1714,113 +1693,4 @@ Deno.test("DockerRunscSandboxRuntime holds its extra docker arguments against la
   // runtime whose registration the verdict describes.
   assertEquals(runtime.describe().cfc?.runtimeName, "corp-runsc");
   assertEquals(runtime.describe().cfc?.extraDockerArgsCount, 2);
-});
-
-Deno.test("DockerRunscSandboxRuntime will not read equal path text as wired against a non-local daemon", async () => {
-  // The registration names the very directory the harness is configured with,
-  // so the text matches exactly. It proves nothing: `DOCKER_HOST`,
-  // `DOCKER_CONTEXT` and `docker context use` can all send the CLI to another
-  // machine, where that same string is a different directory. Accepting the
-  // match would start an enforcing container on a false `wired`.
-  const runner = new FakeProcessRunner([
-    dockerInfoResult(["--cfc-invocation-context-dir=/host/invocations"]),
-    dockerContextResult("tcp://build-box.example:2376"),
-  ]);
-  const runtime = new DockerRunscSandboxRuntime(
-    resolveDockerRunscSandboxConfig({
-      workspaceHostPath: "/host/project",
-      cfcInvocationContextDir: "/host/invocations",
-    }),
-    runner,
-  );
-
-  const reading = (await runtime.probeCfcTransportReadiness())[
-    "invocation-context"
-  ];
-  assertEquals(reading?.status, "indeterminate");
-  assertMatch(
-    reading?.status === "indeterminate" ? reading.reason : "",
-    /tcp:\/\/build-box\.example:2376/,
-  );
-  // Recorded rather than silently downgraded: the snapshot says what it is.
-  assertEquals(
-    runtime.describe().cfc?.invocationContextTransportReadiness,
-    "indeterminate",
-  );
-});
-
-Deno.test("DockerRunscSandboxRuntime does not resolve the endpoint when nothing read as wired", async () => {
-  // The endpoint only bears on a `wired` verdict. An unwired reading is the
-  // safe direction and a flag naming another directory is a difference
-  // wherever it is read, so there is nothing for the endpoint to settle.
-  const runner = new FakeProcessRunner([dockerInfoResult(["--cfc"])]);
-  const runtime = new DockerRunscSandboxRuntime(
-    resolveDockerRunscSandboxConfig({
-      workspaceHostPath: "/host/project",
-      cfcInvocationContextDir: "/host/invocations",
-    }),
-    runner,
-  );
-
-  assertEquals(
-    (await runtime.probeCfcTransportReadiness())["invocation-context"],
-    { status: "unwired" },
-  );
-  assertEquals(
-    runner.requests.filter((request) => request.args[0] === "context").length,
-    0,
-  );
-});
-
-Deno.test("DockerRunscSandboxRuntime treats an unresolvable endpoint as indeterminate rather than shared", async () => {
-  const runner = new FakeProcessRunner([
-    dockerInfoResult(["--cfc-invocation-context-dir=/host/invocations"]),
-    { stdout: "", stderr: "no context", exitCode: 1 },
-  ]);
-  const runtime = new DockerRunscSandboxRuntime(
-    resolveDockerRunscSandboxConfig({
-      workspaceHostPath: "/host/project",
-      cfcInvocationContextDir: "/host/invocations",
-    }),
-    runner,
-  );
-
-  assertEquals(
-    (await runtime.probeCfcTransportReadiness())["invocation-context"]?.status,
-    "indeterminate",
-  );
-});
-
-Deno.test("DockerRunscSandboxRuntime treats an unrunnable endpoint lookup as indeterminate", async () => {
-  // Distinct from the lookup exiting nonzero: here the process cannot be run
-  // at all. Not being able to ask which daemon the CLI will use is the same
-  // epistemic state as being told it is remote — the path comparison has
-  // nothing to rest on, and must not be accepted as `wired`.
-  const info = new FakeProcessRunner([
-    dockerInfoResult(["--cfc-invocation-context-dir=/host/invocations"]),
-  ]);
-  const runner: ProcessRunner = {
-    run(request) {
-      if (request.args[0] === "context") {
-        throw new Error("docker: command not found");
-      }
-      return info.run(request);
-    },
-  };
-  const runtime = new DockerRunscSandboxRuntime(
-    resolveDockerRunscSandboxConfig({
-      workspaceHostPath: "/host/project",
-      cfcInvocationContextDir: "/host/invocations",
-    }),
-    runner,
-  );
-
-  const reading = (await runtime.probeCfcTransportReadiness())[
-    "invocation-context"
-  ];
-  assertEquals(reading?.status, "indeterminate");
-  assertMatch(
-    reading?.status === "indeterminate" ? reading.reason : "",
-    /could not be resolved/,
-  );
 });

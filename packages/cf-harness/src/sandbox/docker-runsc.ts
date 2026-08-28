@@ -817,8 +817,13 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
   /**
    * Read the registered arguments of the Docker runtime this sandbox launches
    * and report whether they name the sidecar directories the harness is
-   * configured with. The reading is memoized: a host's runtime registration
-   * does not change under a run, and one `docker info` per sandbox is enough.
+   * configured with.
+   *
+   * The reading is memoized at one `docker info` per sandbox. That is a cost
+   * decision, not a claim that the answer cannot change: Docker reloads its
+   * `runtimes` configuration on SIGHUP, so a registration can be replaced
+   * mid-run. Only the affirmative half of a reading is weakened by that, and
+   * the affirmative half is not load-bearing — see `CfcSidecarTransportReading`.
    */
   async probeCfcTransportReadiness(): Promise<CfcTransportReadiness> {
     this.#cfcTransportReadinessProbe ??= this.#readCfcTransportReadiness()
@@ -827,51 +832,6 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
         return readiness;
       });
     return await this.#cfcTransportReadinessProbe;
-  }
-
-  /**
-   * Whether the daemon the CLI will talk to shares this host's filesystem.
-   *
-   * Textual equality between a registered path and a configured one only says
-   * the runtime reads the directory the harness wrote if both name the same
-   * filesystem. `DOCKER_HOST`, `DOCKER_CONTEXT` and `docker context use` can
-   * all point the CLI at another machine, where the same string is a different
-   * directory. Asking for the resolved endpoint covers all three, because it
-   * reports what the CLI will actually use rather than how it was chosen.
-   *
-   * A local socket is the shared case, and includes Docker Desktop, whose VM
-   * projection the path comparison already models.
-   */
-  async #dockerEndpointSharesHostFilesystem(): Promise<
-    { shared: true } | { shared: false; reason: string }
-  > {
-    let result: ProcessRunResult;
-    try {
-      result = await this.runner.run({
-        command: this.#dockerBinary,
-        args: ["context", "inspect", "--format", "{{.Endpoints.docker.Host}}"],
-      });
-    } catch (error) {
-      return {
-        shared: false,
-        reason: `the docker endpoint could not be resolved: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      };
-    }
-    if (result.exitCode !== 0) {
-      return {
-        shared: false,
-        reason: `docker context inspect exited ${result.exitCode}`,
-      };
-    }
-    const endpoint = result.stdout.trim();
-    return endpoint.startsWith("unix://") ? { shared: true } : {
-      shared: false,
-      reason:
-        `the docker endpoint '${endpoint}' is not a local socket, so a path ` +
-        `the runtime reads need not be the path cf-harness wrote`,
-    };
   }
 
   async #readCfcTransportReadiness(): Promise<CfcTransportReadiness> {
@@ -906,31 +866,11 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
         }`,
       );
     }
-    const readings = cfcTransportReadinessFromDockerRuntimes({
+    return cfcTransportReadinessFromDockerRuntimes({
       runtimeName: this.#runtimeName,
       runtimes,
       ...this.#configuredTransportDirs(),
     });
-    // The endpoint is only load-bearing for a `wired` reading: that is the one
-    // verdict resting on two paths naming the same directory. `unwired` stays
-    // as it is, both because it is the safe direction and because a flag
-    // naming something else is a difference wherever it is read.
-    if (
-      !Object.values(readings).some((reading) => reading?.status === "wired")
-    ) {
-      return readings;
-    }
-    const endpoint = await this.#dockerEndpointSharesHostFilesystem();
-    if (endpoint.shared) {
-      return readings;
-    }
-    const downgraded: Record<string, CfcSidecarTransportReading> = {};
-    for (const [kind, reading] of Object.entries(readings)) {
-      downgraded[kind] = reading.status === "wired"
-        ? { status: "indeterminate", reason: endpoint.reason }
-        : reading;
-    }
-    return downgraded as CfcTransportReadiness;
   }
 
   #configuredTransportDirs(): {
