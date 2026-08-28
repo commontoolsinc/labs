@@ -46,13 +46,13 @@ export {
   isFabricPlainObject,
   isValidFabricPlainObject,
   isValidFabricValue,
-  isValidFabricValueLayer,
 } from "./type-check.ts";
 
 export {
   assertValidFabricValueLayer,
   fabricFromNativeValue,
   isValidFabricConvertibleValue,
+  isValidFabricValueLayer,
   nativeFromFabricValue,
   shallowCleanArray,
   shallowCleanPlainObject,
