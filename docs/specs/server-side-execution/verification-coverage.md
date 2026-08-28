@@ -5284,8 +5284,15 @@ supply; OW29/OW32/OW34 closed):
   updating this sentence. **The current census (2026-08-27) is TWO patterns
   entries: default-app's reload STEP and lunch-poll-vote's FILE entry.**
   BOTH were campaigned for a lift on 2026-08-27 and NEITHER lifted (the
-  STEP-ENTRY and LUNCH-POLL blocks below). They gate the FLIP — whose bar
-  is the list EMPTY — not the land. Rows, one per
+  STEP-ENTRY and LUNCH-POLL blocks below), and **both were campaigned AGAIN
+  the same day under the newly ruled local-plus-CI-probe bar (the PHASE-3
+  block at the end of this row) — again neither lifted, but the two now
+  fail for OPPOSITE reasons**: the default-app step passed BOTH halves of
+  its own evidence (10/10 local, and a GREEN direct-CI run of the exact
+  step) and is held only by a co-resident file's red in the same shard,
+  while lunch-poll-vote passed its local half 8/8 and its probe went red at
+  the probed surface for the second campaign running. They gate the FLIP —
+  whose bar is the list EMPTY — not the land. Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
   lifts:
   - **OW45 — the profile piece's PROGRAM-materialization write path
@@ -6726,6 +6733,21 @@ supply; OW29/OW32/OW34 closed):
     shards), and the honest reading is that the lift bar for this file
     should require a green DIRECT CI unskip probe, not a local count alone.
     That is a bar change, so it is the owner's call, flagged not taken.
+    **RULED 2026-08-27 (owner: "agreed") — THE BAR CHANGE IS TAKEN, AND IT
+    BINDS EVERY ON-SKIP ENTRY, NOT ONLY THIS FILE.** An entry lifts only on
+    BOTH (1) its own local campaign bar AND (2) a GREEN DIRECT-CI UNSKIP
+    PROBE: a commit on the lift branch that removes the entry's guard, a CI
+    board that demonstrably RAN the un-skipped surface, and that probed lane
+    green. A local campaign is evidence about the box it ran on; only the
+    lane is evidence about the lane. Both of this row's entries carry a
+    member with exactly that profile (the fifth-face load-park member: local
+    control 0/12 against CI 2/2 red; this file's 2026-08-26 split: local 0/8
+    against CI 1/1 red), so the probe is not ceremony — it is the only
+    observation that has ever caught them. A RED probe WITHDRAWS that
+    entry's lift: the signature is captured from the job log and classified
+    against this row's recorded members, and any sibling entry's lift stands
+    or falls on its own probe. No rerun-looping — one probe board,
+    classified honestly.
     **THE ENSURE-ON PROFILE-SURFACE MEMBER ROOT-CAUSED AND FIXED
     2026-08-25 (PR #6312) — the n=3 side probe's "create surface never renders"
     shape and the #6248 board's profile-shard family, reproduced
@@ -7217,6 +7239,140 @@ supply; OW29/OW32/OW34 closed):
     The F1 barrier scenario above ("the load heals ... seconds") now
     has an actual mechanism behind its premise for the fresh-space
     boot order; it was written against a heal that did not exist.
+    **PHASE 3 — BOTH ENTRIES CAMPAIGNED UNDER THE RULED
+    LOCAL-PLUS-CI-PROBE BAR, 2026-08-27. NEITHER LIFTED, and the two now
+    fail for OPPOSITE reasons.** Base: main `1fc841b6e`, one ON-built
+    binary (sha256
+    `a93047a461c0c4d8cb5c63106179eaf9613b2b431269877255100e7fbaf40e79`,
+    re-verified into every run's ledger; a mismatch aborts the run), fresh
+    store and own 97xx port and ON posture probe per run, ensure defaulting
+    ON, the toolshed self-sourced on the run port, LLM masked, PID-only
+    teardown with a port-free check, `gtimeout 600` never approached, quiet
+    and loaded interleaved. Probe head `95f313835` (both entries and the
+    default-app in-file guard removed in one commit), CI run
+    [33138358110](https://github.com/commontoolsinc/labs/actions/runs/33138358110);
+    eight of the ten ON pattern shards passed, shards 5 and 7 red — the two
+    shards that carry the two probed files.
+
+    **default-app's reload STEP: LOCAL 10/10, CI PROBE OF THE STEP GREEN,
+    LANE RED ON A CO-RESIDENT FILE — the entry's own charge did not
+    reproduce in either arm.** Ten counted runs (5 quiet / 5 loaded,
+    interleaved, plus an uncounted green smoke) at 13–14 s wall each,
+    against 313–315 s for every red the earlier 2026-08-27 campaign
+    recorded; the step itself finished in 7–8 s. Campaign-wide zeroes:
+    `pattern-load-error` (so a03/a07's keyless discriminator is absent —
+    #6451), `pattern-swap-setup-error` and recursive-schema (the
+    split-source artifact stays gone), `deferred-start-catchup(-failed)`,
+    terminal `Error committing deferred`, `session-remount`, load-park
+    deferrals and drops, `piece-start-commit-failed`, `sidecar-run-raced`,
+    `schema-doc-quarantine`, `structure-load-stuck`,
+    `contribution-dropped`, and `events.handlerNotRunDeferrals` — #6459's
+    new deferral arm never had to fire, i.e. the a04 dispatch-side skip did
+    not occur rather than being recovered from. Serving stats:
+    `events.appended` 14 = `events.processed` 14 in all ten (no silent
+    requeue), `dropped` 0, `needsAttention.total` 0, `derivedCommits`
+    54–58, `settleAdvances` 12–15. Then the probe (ON shard 5, job
+    98743591519) ran the exact step with no listed skip and it **PASSED —
+    `ok (18s)`** — the whole `default-app flow test` green, and the shard's
+    published toolshed log clean across the file's window (4
+    `event-view-lag`, nothing else). Shard 5's red is
+    `cfc-group-chat-demo.test.ts:133`: `clickCfButton("#host-send-button")`
+    retargeting to the cf-button host (`cf-button#host-send-button < slot <
+    div < cf-hstack`) — rootcause §2b's disabled-inner-button shape, whose
+    S-G test-aim seat is named-but-unbuilt. That file is NOT skip-listed,
+    is untouched by the probe diff, and **reproduces 4/6 RED locally at the
+    same head running ALONE on a fresh store with the same signature
+    (line 133, same retarget chain)**, so it is neither this entry's charge
+    nor a probe artifact — see the OW31-adjacent observation below.
+    **DISPOSITION: NO LIFT, on the literal reading of the ruled bar.** The
+    entry and its bound guard stay, reworded to say exactly this. **OPEN
+    QUESTION FOR THE COORDINATOR/OWNER, flagged not filled: does "the
+    probed lane GREEN" mean the probed SURFACE green, or every test in the
+    shard green?** The bar was ruled hours before its first use and the
+    case that distinguishes the two readings arrived immediately. Under the
+    surface reading this entry lifts today; under the shard reading it
+    cannot lift until an unrelated file is fixed. The next seat should
+    RE-PROBE this step, not re-run a local campaign.
+
+    **lunch-poll-vote's FILE entry: LOCAL 8/8, CI PROBE RED AT THE PROBED
+    SURFACE — and the mechanism is now OBSERVED SERVER-SIDE for the first
+    time.** Eight counted runs (4 quiet / 4 loaded, interleaved), 16–18 s
+    each, against 313–322 s for every red this entry has ever recorded; the
+    owner-directed approximately-eight-run pin MET locally, with
+    `pattern-load-error`, `deferred-start-catchup(-failed)`,
+    `session-remount`, load-park, `handler-not-run`/`arrival-barrier` and
+    `events.handlerNotRunDeferrals` all zero, `events.appended` 9 in all
+    eight, `dropped` 0, `needsAttention.total` 0, `derivedCommits` 74–87.
+    (Present in every run INCLUDING the greens, so recorded as expected
+    recovery rather than smell: one `sidecar-run-raced` — #6312's
+    loser-yields arm — one `piece-start-commit-failed`, two
+    `event-view-lag`, one stale-read line; b06 also logged two
+    `contribution-dropped` and greened.) The probe (ON shard 7, job
+    98743591583) went RED at the SAME stage and signature as the
+    2026-08-26 probe: `lunch-poll-vote.test.ts:271`, the HOST's
+    `clickCfButton("#lp-join-button")`, `Timed out waiting for
+    #lp-join-button to render. Last probe: {"#lp-join-button": []}`,
+    `waitForCondition` at its unchanged 300000 ms bound, 5m5s, the body
+    reading "0 joined" and **"Unknown profile #MjhprA"**. The OFF lane's
+    shard 7 passed on the same run, so the red is ON-specific.
+    **WHAT IS NEW — the 2026-08-26 disposition's stated blind spot is
+    CLOSED: CI now publishes the toolshed log as a job artifact**
+    (`toolshed-log-pattern-integration-server-execution-on-7`), so the
+    server-side members can be examined instead of merely not excluded. In
+    the file's window that log carries **80 `structure-load-stuck` WARNs**
+    on the profile space `did:key:z6MktpA5…`, the first naming demanded
+    root `of:fid1:32Pic3-REdd7zmJ8gPchJyFD0LECk0u-QrFUXMjhprA` as
+    `pattern-unloadable` after 8 consecutive deferred cycles — the
+    detector's own words, "a forever-park … the home-profile
+    program-write-loss shape" — and **that root's suffix IS the `#MjhprA`
+    the placeholder rendered**. Upstream sit **20
+    `seal-space-commit-failed` / `foreign-write-refused` pairs**:
+    `applyInitialName` and a `__cfLift_1` action running in the HOME wave
+    `did:key:z6Mkv7Tjz…` refused a write to the profile space for want of
+    the §2b delegated carriage. So the chain is this row's ORIGINAL
+    mechanism, end to end: profile program/name write refused → structure
+    load parks forever → the name renders the `#id` placeholder → the join
+    card never renders `#lp-join-button` → line 271 times out.
+    **CRUCIAL DISCRIMINATOR, recorded so nobody chases the refusal: the
+    refusal is NOT it.** All eight local GREENS carry 80
+    `foreign-write-refused` and 40 `seal-space-commit-failed` each — MORE
+    than the CI red — with `structureLoadStuck` 0, `structureLoadRearmed`
+    7–10 and `structureLoadTerminal` 190–199. The foreign-write refusal is
+    a standing, tolerated condition in both arms; **the PARK is the
+    discriminator.** Locally the profile space's structure load always
+    resolves; in CI it never does, and why it never does is the open
+    question this entry now names. Excluded from the CI window, all zero:
+    `pattern-load-error`, `pattern-swap-setup-error`,
+    `deferred-start-catchup`, `session-remount`,
+    `piece-start-commit-failed`, `sidecar-run-raced`, `handler-not-run`,
+    `arrival-barrier`, `memory session revoked`, `sync-load-failure`,
+    `Event deferred` and `Event dropped` — so NOT the b04 client-start
+    class, NOT the a04 mark/effects family, NOT the #6312 sidecar clobber,
+    NOT the fifth-face load-park member, and NOT #6378's name-resolution
+    drop. Each of those was a prior charge for this entry and each is now
+    excluded by OBSERVATION rather than by absence of it.
+    **DISPOSITION: NO LIFT.** Local 8/8 against CI 1/1 red, for the second
+    campaign running — this file's lift needs the park explained, not
+    another local count.
+
+    **OBSERVATION, not owed by this row and NOT one of the two entries —
+    `cfc-group-chat-demo.test.ts` is failing ON at current main, 4/6, and
+    is not skip-listed.** The file's ON skip was lifted with OW31's
+    trust-attribution build (that row's live lift condition, green 4/4 at
+    the time). At `1fc841b6e`, run alone on a fresh store under the full ON
+    posture, it reds 4 of 6 at `:133` —
+    `clickCfButton("#host-send-button")`, the aimed button's click
+    retargeting to its own cf-button host, which rootcause §2b identifies
+    as the inner native button being DISABLED (the served `sendDisabled`
+    never flipping). Its named seats S-E (the client binding-write wedge),
+    S-F (the barrier that did not see that write as pending) and S-G (the
+    missing `waitForDisabled(false)` before a served-enable round trip) are
+    all recorded-not-built. Main's own board at `1fc841b6e` was green on
+    that shard, so CI sees it less often than this box does; either way it
+    is a FLIP blocker in its own right (the flip's bar is a green ON lane,
+    not merely an empty skip list) and it is what currently holds the
+    default-app lift. Recorded here because the phase-3 probe is where it
+    surfaced; whether it earns its own row is the coordinator's call.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:

@@ -171,32 +171,18 @@ Deno.test("main: the patterns list carries the two current phase-7 entries and k
   );
   assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[1].step, undefined);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[1].phase, "phase-7");
-  // Its reason names the NARROWED charge the entry's own gate found
-  // (2026-08-24), the pinned never-issued mechanism, and the completed
-  // post-fix gate — not the b04 client-start class that gate closed,
-  // whose fork memo the reason keeps as history.
+  // Its reason carries the 2026-08-27 phase-3 charge: the local ~8-run
+  // re-baseline PASSED (8/8) and the direct-CI unskip probe went RED at
+  // the HOST's join — the SECOND campaign in a row to split that way.
+  // Pinned by the CI coordinates, the failing line, and the newly
+  // OBSERVED server-side mechanism, so a future seat neither reads the
+  // 8/8 as a clean bar nor re-derives the classification from scratch.
+  assertMatch(SERVER_EXECUTION_ON_SKIPS.patterns[1].reason, /8\/8 GREEN/);
   assertMatch(
     SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
-    /program-materialization|patternIdentity/,
+    /DIRECT CI UNSKIP PROBE .*went\s+RED/s,
   );
-  assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
-    /ow45-armb-client-start-fork\.md/,
-  );
-  assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
-    /never issued/i,
-  );
-  assertMatch(SERVER_EXECUTION_ON_SKIPS.patterns[1].reason, /0\/8/);
-  // …and the 2026-08-27 lift attempt, whose local re-baseline PASSED (8/8)
-  // while the direct CI unskip probe on the same branch went RED — pinned by
-  // its CI coordinates and by the HOST-side line, so a future seat cannot
-  // read that 8/8 as a clean lift bar, nor re-derive the stage from scratch.
-  assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
-    /DIRECT CI UNSKIP PROBE ON THE SAME BRANCH FAILED/,
-  );
-  assertMatch(SERVER_EXECUTION_ON_SKIPS.patterns[1].reason, /33085668531/);
+  assertMatch(SERVER_EXECUTION_ON_SKIPS.patterns[1].reason, /33138358110/);
   assertMatch(
     SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
     /lunch-poll-vote\.test\.ts:271/,
@@ -204,6 +190,25 @@ Deno.test("main: the patterns list carries the two current phase-7 entries and k
   assertMatch(
     SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
     /HOST's clickCfButton/,
+  );
+  // The mechanism half: the forever-park, its root, and the negative that
+  // stops the next seat chasing the foreign-write refusal (which every
+  // local GREEN also carries).
+  assertMatch(
+    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
+    /structure-load-stuck/,
+  );
+  assertMatch(
+    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
+    /foreign-write-refused/,
+  );
+  assertMatch(
+    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
+    /the refusal is NOT it/i,
+  );
+  assertMatch(
+    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
+    /PARK is the discriminator/,
   );
   // The topic-board pivot-baseline entry is GONE (#6304 fixed): the
   // guard lookup for that step resolves nothing, so the case runs in
@@ -225,27 +230,23 @@ Deno.test("main: the patterns list carries the two current phase-7 entries and k
   );
   assert(entry !== undefined, "the rapid-note step's guard entry must resolve");
   assertEquals(entry.phase, "phase-7");
-  assertMatch(entry.reason, /66a969ca0/);
-  assertMatch(entry.reason, /33008274232/);
-  assertMatch(entry.reason, /5m22s/);
-  assertMatch(entry.reason, /300000ms/);
-  assertMatch(entry.reason, /eventInvocationCount=7/);
-  assertMatch(entry.reason, /notebookActionCount=0/);
-  assertMatch(entry.reason, /84 stored UI note chips/);
-  assertMatch(entry.reason, /zero pattern-swap-setup-error/);
-  assertMatch(entry.reason, /distinct from the split-source/);
+  // The 2026-08-27 phase-3 campaign INVERTED this entry's evidence: the
+  // step is 10/10 locally AND passed its direct-CI unskip probe, and the
+  // lane red was a co-resident file. Pin all three so the next seat
+  // re-probes instead of re-running a local campaign, and so a stale
+  // charge (the 66a969ca0 fingerprint, or the a04 residue #6459 closed)
+  // cannot quietly return as this entry's reason.
   assertMatch(entry.reason, /10\/10 quiet-and-loaded/);
-  // The 2026-08-27 root cause narrowed the charge: the navigation half
-  // (wrong-branch optimistic navigateTo — L2, ruled PUNT: sanctioned) is
-  // absorbed by the step's id-bound reads, so the residue that KEEPS the
-  // entry is the a04 write-side member — consequenced marks whose derived
-  // commits carry none of the effects. Pin the narrowed discriminators so
-  // a stale cause-unassigned reason (or the closed navigation charge)
-  // cannot return silently.
-  assertMatch(entry.reason, /a04/);
-  assertMatch(entry.reason, /mark-without-effects/);
-  assertMatch(entry.reason, /ruled PUNT/);
-  assertMatch(entry.reason, /keyless-diagnosis-2026-08-27\.md/);
+  assertMatch(entry.reason, /33138358110/);
+  assertMatch(entry.reason, /it PASSED/);
+  assertMatch(entry.reason, /cfc-group-chat-demo\.test\.ts:133/);
+  assertMatch(entry.reason, /4\/6 RED locally/);
+  assertMatch(entry.reason, /RE-PROBE/);
+  assert(
+    !/Lifts on 10\/10/.test(entry.reason),
+    "the reason must not still state a bare local-count lift bar — the " +
+      "ruled bar (2026-08-27) also requires a green direct-CI unskip probe",
+  );
   assert(
     !/cause is not yet assigned/.test(entry.reason),
     "the reason must not claim the cause is unassigned — it was root-caused " +

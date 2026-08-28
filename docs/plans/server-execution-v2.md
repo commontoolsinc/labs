@@ -38,6 +38,47 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
+**Delta 2026-08-27 (phase 3, #6469): the lift bar CHANGED by owner ruling
+— an ON-skip entry lifts only on its local campaign AND a green direct-CI
+unskip probe — and both entries were campaigned again under it. NEITHER
+lifted, and they now fail for OPPOSITE reasons.** The bar: the register had
+already reached "the lift bar should require a green DIRECT CI unskip
+probe, not a local count alone. That is a bar change, so it is the owner's
+call, flagged not taken"; RULED 2026-08-27, owner: "agreed", and it binds
+every entry, not only the file that provoked it. Both campaigns ran at main
+`1fc841b6e` on one ON binary (sha256 `a93047a461c0c4d8…`), fresh store + own
+97xx port + ON posture probe per run, ensure defaulting ON, toolshed
+self-sourced, quiet and loaded interleaved; the probe was head `95f313835`
+(both entries and the default-app guard removed in one commit), CI run
+[33138358110](https://github.com/commontoolsinc/labs/actions/runs/33138358110)
+— 8 of 10 ON pattern shards green, red on exactly the two shards carrying
+the two probed files.
+**default-app's reload STEP: 10/10 local AND its CI probe of the step
+GREEN (`ok (18s)`, server window clean) — the entry's own charge did not
+reproduce in either arm.** It is held ONLY by the lane: shard 5 red on a
+CO-RESIDENT file, `cfc-group-chat-demo.test.ts:133`, which is not
+skip-listed, is untouched by the probe diff, and reproduces 4/6 red locally
+at the same head running alone. **That raises the bar's first
+interpretation question, and it is the coordinator's/owner's, flagged not
+filled: does "the probed lane GREEN" mean the probed SURFACE green or every
+test in the shard green?** Under the first reading this entry lifts today.
+**lunch-poll-vote's FILE entry: 8/8 local, probe RED at the probed
+surface** — line 271, the HOST's `#lp-join-button`, 300000 ms, 5m5s, the
+same signature as the 2026-08-26 probe, with the OFF lane green on the same
+run. What is genuinely new is the evidence position: **CI now publishes the
+toolshed log as a job artifact**, closing the 2026-08-26 disposition's
+stated blind spot, and it shows this row's ORIGINAL mechanism end to end —
+80 `structure-load-stuck` WARNs on the profile space (the parked root's id
+suffix is literally the `#MjhprA` the placeholder rendered) behind 20
+`seal-space-commit-failed`/`foreign-write-refused` pairs. **The refusal is
+not the discriminator** — every local GREEN carries more of it than the CI
+red does, with `structureLoadStuck` 0 — **the PARK is.** Also surfaced, not
+owed here: `cfc-group-chat-demo.test.ts` is failing ON at current main 4/6
+and is NOT skip-listed, so it is a flip blocker in its own right (the
+flip's bar is a green ON lane, not merely an empty skip list). Full
+ledgers, classifications, and the co-resident finding:
+verification-coverage.md OW45's PHASE 3 block.
+
 **Delta 2026-08-27: BOTH remaining entries were campaigned for a lift and
 NEITHER lifted. default-app's reload STEP is 7/10 locally. lunch-poll-vote
 passed its local re-baseline 8/8 — and then the lift PR's own CI ran the
