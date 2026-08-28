@@ -156,6 +156,14 @@ export interface SandboxRuntimeDescription {
 
 export interface SandboxRuntime {
   describe(): SandboxRuntimeDescription;
+  /**
+   * Read whether the host runtime is registered to use this sandbox's CFC
+   * sidecar directories, so that `describe()` reports a reading rather than
+   * `unverified`. Optional because it is meaningful only for a runtime that
+   * has a counterparty to check; a caller that wants the description to carry
+   * a reading awaits this first.
+   */
+  probeCfcTransportReadiness?(): Promise<CfcTransportReadiness>;
   resolvePath(path: string, cwd?: string): string;
   isPathWithinWorkspace(path: string): boolean;
   isPathWithinAllowedRoots(path: string): boolean;
