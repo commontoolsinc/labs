@@ -2,7 +2,7 @@
 status: historical
 created: 2026-08-28
 archived: 2026-08-28
-reason: "Record of the first model-driven `cf:pattern:` composition run (CT-2104)."
+reason: "Record of a model-driven `cf:pattern:` composition run (CT-2104)."
 ---
 
 # A model-authored `cf:pattern:` import, end to end
@@ -10,9 +10,14 @@ reason: "Record of the first model-driven `cf:pattern:` composition run (CT-2104
 Two turns of one cf-harness console session, 2026-08-28, against a local
 toolshed on `http://localhost:8000`, space `pattern-index-demo`, the deployed
 pattern index, model `gpt-5.6-terra`, CFC at max-enforcement with flow labels
-persisting and `enforce-explicit`. The point of the run was to see whether a
-model, unprompted about mechanism, would decompose a task into an atom and a
-composition and reach the atom through the index rather than rebuilding it.
+persisting and `enforce-explicit`.
+
+The decomposition was in the prompting: turn 1 asks for the small piece, and
+turn 2 asks for the composition and says to find the first one in the index and
+import it. So what the run puts to the test is whether the machinery and the
+guidance carry that instruction all the way through — author, publish, search,
+import, compile, run — not whether the model would have chosen to decompose or
+to reuse on its own. The turns are quoted in full below for that reason.
 
 ## Turn 1 — the atom
 
@@ -61,10 +66,17 @@ Result: `http://localhost:8000/pattern-index-demo/dice-table`.
 
 - A model-authored `cf:pattern:` import compiled and ran against an atom
   published by an earlier run's child. The composition machinery had been
-  unit-tested; this is the first time a model drove it.
+  unit-tested; here a model drove it end to end. CT-2104 records that no
+  model-driven run had produced a composed piece from an index-discovered
+  building block before this one; that this run is the first rests on that
+  record rather than on anything in these artifacts.
 - Reuse travelled through the index, not through the parent. No pattern source
   and no pattern id crossed a delegation boundary in either direction. The
-  parent named the capability in words; the child found the id itself.
+  parent was told to reuse, but it was not told what to reuse: it named the
+  capability in words, and the child found the id itself.
+- Both children searched before authoring, and the composing child's very
+  first `run_pattern` already carried the import — the search result was wired
+  rather than read and rebuilt.
 - The `pattern-author` return contract carried the work: a result-cell handle
   the parent could slug, with the prose and hashtags sealed beside it.
 
