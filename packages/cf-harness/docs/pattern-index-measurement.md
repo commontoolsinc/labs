@@ -276,9 +276,56 @@ causes by a priority ordering chosen for another purpose, and a measurement that
 inherits one reports that ordering rather than what happened.
 
 It **does not measure the index's own ranking.** The report records each listed
-pattern's score, and score is computed from recorded events. With
-`record_feedback` uncalled, a score is a count of "an agent started this and
-nothing threw".
+pattern's score, and score is computed from recorded events; a score is close to
+a count of "an agent started this and nothing threw". Retrieval quality — what a
+search actually hands back, and at which rank — is a separate instrument with a
+separate query set, described in [Measuring retrieval](#measuring-retrieval)
+below. Keep the two apart: this protocol asks whether a session reached for the
+index at all, and that one asks whether what it was handed was the right thing.
+
+## Measuring retrieval
+
+[`scripts/pattern-index-retrieval-queries.json`](../scripts/pattern-index-retrieval-queries.json)
+is a labelled query set, and `scripts/score-retrieval.ts` scores
+`searchPatterns` against it. Both are read-only against the index, so a run is
+safe while a batch is publishing.
+
+```sh
+PATTERN_INDEX_BASE_URL=https://index.example \
+CF_IDENTITY="$HOME/.cf/my-key.pkcs8" \
+deno run -A scripts/score-retrieval.ts --out=report.json \
+  --min-hit-at-5=0.5 --max-dirty-negatives=15
+```
+
+**The exit code is the verdict; the printed lines are not.** The thresholds are
+arguments rather than constants because the corpus moves, and a gate with a
+baked-in expected value stops being readable the first time someone publishes.
+Before trusting a passing run, make it fail once — raising `--min-hit-at-5`
+above the reported rate is the cheapest way.
+
+Three properties of the set decide what its numbers mean, and all three are
+stated in the file itself rather than here, so that editing one edits its own
+documentation:
+
+- **Labels are derived from source and declared schemas, never from
+  descriptions.** A query set written by reading descriptions retrieves those
+  descriptions and measures nothing.
+- **Queries are asked in four registers**, one of them the real queries
+  extracted verbatim from console run transcripts. Registers are scored apart,
+  because phrasing changes the answer far more than the corpus does.
+- **Negative queries carry the weight.** A query nothing should answer is where
+  loose matching shows up; a capability query cannot distinguish a good index
+  from a permissive one.
+
+Adding a query leaves the earlier ones comparable. Rewording one does not, so
+add rather than reword — the same rule the task suite carries, for the same
+reason.
+
+**The set measures free-text search only.** Tag-only searches — `tags` passed
+with no `text` — are a different mechanism, an `array-contains-any` over
+author-chosen hashtags, and they are a large minority of what runs actually
+issue. Nothing measures them yet, so a retrieval number from this set describes
+part of the search surface and should be quoted that way.
 
 ## The server the runs ran against
 
