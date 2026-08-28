@@ -5123,6 +5123,34 @@ describe("openSidecarSurface", () => {
     expect(opens).toBe(2);
   });
 
+  it("asks again when the epoch ends under an open nobody replaced", async () => {
+    // The epoch can end with no second launch behind it — a lease released
+    // while the only open is still in flight. Nothing has replaced that open,
+    // and its pattern is dead all the same, so what makes it ask again is the
+    // epoch rather than another open having taken its place.
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let opens = 0;
+    const runtime = makeFakeRuntime(() => {
+      opens += 1;
+      return opens === 1
+        ? gate.then(() => ({ marker: "stale" }))
+        : Promise.resolve({ marker: "fresh" });
+    });
+    const slot: SidecarSurfaceState = {};
+
+    const lease = acquireSchemaRegistryLease();
+    const opening = openSidecarSurface(runtime, slot, piece, SURFACE);
+    lease();
+    release();
+
+    expect(await opening).toEqual({ marker: "fresh" });
+    expect(openedSidecarSurface(slot)).toEqual({ marker: "fresh" });
+    expect(opens).toBe(2);
+  });
+
   it("drops an opened pattern when the schema registry epoch clears", async () => {
     // A compiled pattern's serialized graph embeds `cid:` schema references
     // minted in the registry epoch that compiled it, and both backings die

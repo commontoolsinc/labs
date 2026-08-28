@@ -1621,12 +1621,16 @@ export function openSidecarSurface(
   const opening: Promise<Pattern | undefined> = runtime.sourceReconciler
     .open(piece, surface.origin)
     .then((pattern) => {
-      // A later epoch's open replaced this one while it was in flight, so this
-      // pattern was minted in an epoch that has ended and is no answer at all:
-      // running it would stage links nothing can resolve. Wait on the open that
-      // replaced it, so the caller gets a live answer instead of a dead one or
-      // an error account written over a surface still on its way.
-      if (state.opening !== opening) {
+      // An open answers about the registry epoch it ran in. Once that epoch has
+      // ended — because a later launch replaced this open, or because the
+      // registry simply cleared while it was in flight — the pattern it
+      // resolved carries `cid:` schema references that resolve to nothing, and
+      // running it would stage links nothing anywhere can resolve. So ask
+      // again, in the epoch that will use the answer: a launch that has already
+      // started one joins it, and otherwise a fresh one starts here. The
+      // caller is handed a live answer either way, rather than a dead one or an
+      // error account written over a surface still on its way.
+      if (epoch !== schemaRegistryEpoch) {
         return openSidecarSurface(runtime, state, piece, surface, options);
       }
       if (pattern !== undefined) {

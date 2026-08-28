@@ -602,10 +602,12 @@ export class SourceReconciler {
    * serving it, or why that host did not say — which a caller with a piece to
    * report on records as the reason it is not following its origin.
    *
-   * A host that cannot be reached at all answers here rather than throwing: a
-   * runtime built with no patterns route behind its API address — a pattern
-   * test's, a tool's — reaches this on every open, and the origin being
-   * unavailable is the ordinary state there rather than a fault. An abort still
+   * A request that throws rather than answering is the commonest way an origin
+   * is out of reach, and it answers here like any other refusal rather than
+   * escaping: a runtime built with no patterns route behind its API address —
+   * a pattern test's, a tool's — reaches this on every open, where the origin
+   * being unavailable is the ordinary state rather than a fault worth
+   * reporting. What the throw said is kept as the reason. An abort still
    * propagates, because teardown asking the pass to stop is not the origin
    * failing to answer.
    */
@@ -619,9 +621,9 @@ export class SourceReconciler {
     let response: Response;
     try {
       response = await fetch(identityUrl);
-    } catch {
+    } catch (error) {
       signal.throwIfAborted();
-      return { detail: "the origin could not be reached" };
+      return { detail: reconciliationDetail(error) };
     }
     if (!response.ok) {
       return { detail: `the origin answered ${response.status}` };

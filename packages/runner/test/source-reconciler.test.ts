@@ -1361,6 +1361,26 @@ describe("piece source reconciliation", () => {
       expect(await opening).toBeUndefined();
     });
 
+    it("answers rather than rejecting when nothing about the open works", async () => {
+      // Opening a surface runs from a launch nothing awaits for its value, so
+      // a rejection escaping it would surface as an unhandled one rather than
+      // as a surface that did not come up. A runtime that cannot even say
+      // which host serves the space is the shortest way to a throw before any
+      // of the paths that answer for themselves.
+      const piece = await preparePiece(refuseEveryFetch);
+      const hostForSpace = runtime.hostForSpace;
+      (runtime as unknown as { hostForSpace: () => URL }).hostForSpace = () => {
+        throw new Error("no route for this space");
+      };
+      try {
+        expect(await open(piece)).toBeUndefined();
+      } finally {
+        (runtime as unknown as { hostForSpace: typeof hostForSpace })
+          .hostForSpace = hostForSpace;
+      }
+      expect(getPatternSource(piece)).toBeUndefined();
+    });
+
     it("answers nothing for a piece it cannot even read", async () => {
       // Opening starts by reading the piece, which is what says whether it
       // exists at all. A read that fails outright — storage closing under a
