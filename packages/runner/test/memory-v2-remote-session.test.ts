@@ -13,7 +13,9 @@ import {
   decodeCompressedMemoryMessage,
   encodeCompressedMemoryMessage,
   type EncodedMemoryMessage,
+  encodeMemoryCompressionControlMessage,
   type MemoryMessageFrame,
+  parseMemoryCompressionControlMessage,
 } from "@commonfabric/memory/v2/message-compression";
 import {
   createStorageAddressResolver,
@@ -611,8 +613,11 @@ describe("WebSocketTransport failure signaling", () => {
   const answerSessionOpen = (
     socket: DrivableWebSocket,
     sessionId: string,
+    requestIndex = 1,
   ): void => {
-    const open = decodeMemoryBoundary(requireTextFrame(socket.sent[1])) as {
+    const open = decodeMemoryBoundary(
+      requireTextFrame(socket.sent[requestIndex]),
+    ) as {
       requestId: string;
     };
     socket.receive(encodeMemoryBoundary({
@@ -692,6 +697,53 @@ describe("WebSocketTransport failure signaling", () => {
       transport.setReceiver(received.resolve);
       activeSocket.receive(await encodeCompressedMemoryMessage(payloads[0]));
       expect(await received.promise).toBe(payloads[0]);
+    });
+  });
+
+  it("changes compression on a live socket", async () => {
+    await withTransport(async (transport, socket) => {
+      const opening = transport.send("hello");
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await opening;
+      transport.setMessageCompressionEnabled(true);
+
+      const disabling = transport.requestMessageCompression(false);
+      await activeSocket.whenSent(2);
+      const disableControl = parseMemoryCompressionControlMessage(
+        requireTextFrame(activeSocket.sent[1]),
+      );
+      expect(disableControl?.enabled).toBe(false);
+      if (!disableControl) throw new Error("Expected disable control");
+      activeSocket.receive(encodeMemoryCompressionControlMessage({
+        requestId: disableControl.requestId,
+        enabled: false,
+      }));
+      expect(await disabling).toBe(false);
+
+      const large = "visible memory websocket message ".repeat(1_000);
+      await transport.send(large);
+      expect(activeSocket.sent[2]).toBe(large);
+
+      const received = Promise.withResolvers<string>();
+      transport.setReceiver(received.resolve);
+      activeSocket.receive(await encodeCompressedMemoryMessage(large));
+      expect(await received.promise).toBe(large);
+
+      const enabling = transport.requestMessageCompression(true);
+      await activeSocket.whenSent(4);
+      const enableControl = parseMemoryCompressionControlMessage(
+        requireTextFrame(activeSocket.sent[3]),
+      );
+      expect(enableControl?.enabled).toBe(true);
+      if (!enableControl) throw new Error("Expected enable control");
+      activeSocket.receive(encodeMemoryCompressionControlMessage({
+        requestId: enableControl.requestId,
+        enabled: true,
+      }));
+      expect(await enabling).toBe(true);
+      await transport.send(large);
+      expect(activeSocket.sent[4]).toBeInstanceOf(Uint8Array);
     });
   });
 
@@ -795,6 +847,41 @@ describe("WebSocketTransport failure signaling", () => {
         factory.create(signer.did(), signer, {}, controller.signal),
       ).rejects.toBe(reason);
       expect(DrivableWebSocket.instances).toHaveLength(0);
+    });
+  });
+
+  it("applies a disabled preference to remote sessions opened later", async () => {
+    const signer = await Identity.fromPassphrase(
+      "disabled-compression-remote-session",
+    );
+    await withTransport(async (_transport, socket) => {
+      const factory = new RemoteSessionFactory(
+        () => new URL("wss://memory.test/api/storage/memory"),
+        signer,
+      );
+      await factory.setMessageCompressionEnabled(false);
+      const opening = factory.create(signer.did(), signer, {});
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await activeSocket.whenSent(1);
+      answerHello(activeSocket);
+
+      await activeSocket.whenSent(2);
+      const control = parseMemoryCompressionControlMessage(
+        requireTextFrame(activeSocket.sent[1]),
+      );
+      expect(control?.enabled).toBe(false);
+      if (!control) throw new Error("Expected disable control");
+      activeSocket.receive(encodeMemoryCompressionControlMessage({
+        requestId: control.requestId,
+        enabled: false,
+      }));
+
+      await activeSocket.whenSent(3);
+      expect(typeof activeSocket.sent[2]).toBe("string");
+      answerSessionOpen(activeSocket, "disabled-compression-session", 2);
+      const created = await opening;
+      await created.client.close();
     });
   });
 

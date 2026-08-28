@@ -117,6 +117,29 @@ The local `setMessageCompressionConfig(false)` rollback override suppresses
 advertisement on clients and servers, keeping connections text-only even when
 both builds support compression.
 
+After compression negotiation, a client may change the send mode in both
+directions without reconnecting by sending an ordinary text control frame:
+
+```json
+{
+  "type": "memory.compression",
+  "requestId": "debug-1",
+  "enabled": false
+}
+```
+
+The server applies the requested mode to its later sends and returns the same
+control frame as an acknowledgement. It returns `enabled: false` when the
+connection did not negotiate compression. Both peers continue accepting text
+and binary frames after a negotiated connection disables sending compression,
+so compressed work already in flight remains valid. Control frames share the
+application-message queues and therefore cannot reorder the messages around
+them.
+
+The browser shell exposes this exchange as
+`await commonfabric.setMemoryMessageCompression(false)`. Passing `true`
+re-enables compression on connections which negotiated the capability.
+
 Memory hosts include `sessionOpen.audience` and `sessionOpen.challenge` in
 `hello.ok`. The audience is the server DID the client must sign for. Toolshed
 uses its service identity DID. The standalone memory host uses a stable

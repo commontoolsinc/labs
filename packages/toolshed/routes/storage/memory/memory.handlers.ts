@@ -4,10 +4,12 @@ import {
 } from "@commonfabric/memory/v2";
 import {
   type EncodedMemoryMessage,
+  encodeMemoryCompressionControlMessage,
   isMemoryMessageFrame,
   MemoryMessageCompressionChannel,
   type MemoryMessageFrame,
   memoryMessageFrameBytes,
+  parseMemoryCompressionControlMessage,
 } from "@commonfabric/memory/v2/message-compression";
 import * as MemoryServer from "@commonfabric/memory/v2/server";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -292,6 +294,16 @@ export const attachMemorySocketPipeline = (
             return;
           }
           channel.receive(message, async (payload) => {
+            const control = parseMemoryCompressionControlMessage(payload);
+            if (control) {
+              const enabled = compressionNegotiated && control.enabled;
+              channel.setSendCompressionEnabled(enabled);
+              channel.send(encodeMemoryCompressionControlMessage({
+                requestId: control.requestId,
+                enabled,
+              }));
+              return;
+            }
             await connection.receive(payload);
             logMemWrites(payload);
           });

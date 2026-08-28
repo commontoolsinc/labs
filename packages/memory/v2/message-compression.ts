@@ -7,6 +7,13 @@
 /** Frames produced by the compression encoder. */
 export type EncodedMemoryMessage = string | Uint8Array<ArrayBuffer>;
 
+/** In-band request and acknowledgement for one connection's send mode. */
+export type MemoryCompressionControlMessage = {
+  type: "memory.compression";
+  requestId: string;
+  enabled: boolean;
+};
+
 /** WebSocket message forms accepted by the compression decoder. */
 export type MemoryMessageFrame =
   | EncodedMemoryMessage
@@ -35,10 +42,11 @@ const TEXT_ENCODER = new TextEncoder();
  * directions of one WebSocket channel.
  */
 export class MemoryMessageCompressionChannel {
-  #compressionEnabled = false;
   #closed = false;
   #incoming: Promise<void> = Promise.resolve();
   #outgoing: Promise<void> = Promise.resolve();
+  #receiveCompressionEnabled = false;
+  #sendCompressionEnabled = false;
   #sendRaw: (payload: EncodedMemoryMessage) => void;
   #onError: (error: Error) => void;
 
@@ -53,7 +61,13 @@ export class MemoryMessageCompressionChannel {
 
   /** Enables compression envelopes for messages sent after this call. */
   enable(): void {
-    this.#compressionEnabled = true;
+    this.#receiveCompressionEnabled = true;
+    this.#sendCompressionEnabled = true;
+  }
+
+  /** Changes whether later sends use compression on a negotiated channel. */
+  setSendCompressionEnabled(enabled: boolean): void {
+    this.#sendCompressionEnabled = enabled;
   }
 
   /** Stops queued work and ignores later messages. */
@@ -72,22 +86,16 @@ export class MemoryMessageCompressionChannel {
     beforeSend?: (frame: EncodedMemoryMessage) => void,
   ): void {
     if (this.#closed) return;
-    if (!this.#compressionEnabled) {
-      try {
-        beforeSend?.(payload);
-        this.#sendRaw(payload);
-      } catch (cause) {
-        this.#fail(cause);
-      }
-      return;
-    }
+    const compressionEnabled = this.#sendCompressionEnabled;
     const send = this.#outgoing.then(async () => {
       if (this.#closed) return;
-      const frame = await encodeCompressedMemoryMessage(payload);
+      const frame = compressionEnabled
+        ? await encodeCompressedMemoryMessage(payload)
+        : payload;
       if (!this.#closed) {
-        // Every post-negotiation send stays on this queue, even when the
-        // encoder returns a small text frame. That preserves submission order
-        // behind earlier messages whose compression is still asynchronous.
+        // Every send stays on this queue, including uncompressed control and
+        // pre-negotiation frames. A mode change therefore cannot move its
+        // acknowledgement ahead of compression work already in flight.
         beforeSend?.(frame);
         this.#sendRaw(frame);
       }
@@ -103,7 +111,7 @@ export class MemoryMessageCompressionChannel {
     if (this.#closed) return;
     const receive = this.#incoming.then(async () => {
       if (this.#closed) return;
-      const payload = this.#compressionEnabled
+      const payload = this.#receiveCompressionEnabled
         ? await decodeCompressedMemoryMessage(frame)
         : requireTextFrame(frame);
       if (!this.#closed) await receiver(payload);
@@ -120,6 +128,37 @@ export class MemoryMessageCompressionChannel {
         ? cause
         : new Error("Memory message compression failure", { cause }),
     );
+  }
+}
+
+/** Encodes a compression-mode request as an ordinary inspectable text frame. */
+export function encodeMemoryCompressionControlMessage(
+  message: Omit<MemoryCompressionControlMessage, "type">,
+): string {
+  return JSON.stringify({ type: "memory.compression", ...message });
+}
+
+/** Parses a compression-mode text frame, returning `null` for memory data. */
+export function parseMemoryCompressionControlMessage(
+  payload: string,
+): MemoryCompressionControlMessage | null {
+  if (!payload.startsWith("{")) return null;
+  try {
+    const value = JSON.parse(payload) as Record<string, unknown>;
+    if (
+      value.type !== "memory.compression" ||
+      typeof value.requestId !== "string" || value.requestId.length === 0 ||
+      typeof value.enabled !== "boolean"
+    ) {
+      return null;
+    }
+    return {
+      type: "memory.compression",
+      requestId: value.requestId,
+      enabled: value.enabled,
+    };
+  } catch {
+    return null;
   }
 }
 

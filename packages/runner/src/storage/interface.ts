@@ -253,6 +253,9 @@ export interface IStorageManager extends IStorageSubscriptionCapability {
    */
   registerSpaceHost?(space: MemorySpace, host: string): boolean;
 
+  /** Changes memory-message compression for live and later remote sessions. */
+  setMessageCompressionEnabled?(enabled: boolean): Promise<void>;
+
   /**
    * Register a derived space identity for fresh-space ACL genesis. Optional:
    * storage managers without ACL bootstrap support may ignore this capability.

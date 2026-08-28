@@ -12,7 +12,9 @@ import {
 import {
   decodeCompressedMemoryMessage,
   encodeCompressedMemoryMessage,
+  encodeMemoryCompressionControlMessage,
   type MemoryMessageFrame,
+  parseMemoryCompressionControlMessage,
 } from "../../v2/message-compression.ts";
 import { StandaloneMemoryServer } from "../../v2/standalone.ts";
 
@@ -105,6 +107,108 @@ describe("standalone memory compression", () => {
       expect(
         decodeMemoryBoundary<{ requestId: string }>(responseFrame).requestId,
       ).toBe(requestId);
+
+      const enabledReply = nextMessage(socket);
+      socket.send(encodeMemoryCompressionControlMessage({
+        requestId: "standalone-enable-control",
+        enabled: true,
+      }));
+      const enabledFrame = await enabledReply;
+      expect(typeof enabledFrame).toBe("string");
+      if (typeof enabledFrame !== "string") {
+        throw new Error("Expected text compression control");
+      }
+      expect(parseMemoryCompressionControlMessage(enabledFrame)?.enabled).toBe(
+        false,
+      );
+    } finally {
+      await closeSocket(socket);
+      await server.close();
+    }
+  });
+
+  it("changes compression without reconnecting", async () => {
+    const server = StandaloneMemoryServer.start();
+    const address = new URL(server.url);
+    address.protocol = "ws:";
+    const socket = new WebSocket(address);
+    socket.binaryType = "arraybuffer";
+    try {
+      await opened(socket);
+      const helloReply = nextMessage(socket);
+      socket.send(encodeMemoryBoundary({
+        type: "hello",
+        protocol: MEMORY_PROTOCOL,
+        flags: getMemoryProtocolFlags(),
+      }));
+      await helloReply;
+
+      const controlReply = nextMessage(socket);
+      socket.send(encodeMemoryCompressionControlMessage({
+        requestId: "standalone-debug-control",
+        enabled: false,
+      }));
+      const controlFrame = await controlReply;
+      expect(typeof controlFrame).toBe("string");
+      if (typeof controlFrame !== "string") {
+        throw new Error("Expected text compression control");
+      }
+      expect(parseMemoryCompressionControlMessage(controlFrame)).toEqual({
+        type: "memory.compression",
+        requestId: "standalone-debug-control",
+        enabled: false,
+      });
+
+      const requestId = "standalone-visible-session-open-".repeat(100);
+      const response = nextMessage(socket);
+      socket.send(encodeMemoryBoundary({
+        type: "session.open",
+        requestId,
+        space: "did:key:z6Mk-standalone-visible-compression-test",
+        session: {},
+      }));
+      const responseFrame = await response;
+      expect(typeof responseFrame).toBe("string");
+      if (typeof responseFrame !== "string") {
+        throw new Error("Expected text response after disabling compression");
+      }
+      expect(
+        decodeMemoryBoundary<{ requestId: string }>(responseFrame).requestId,
+      ).toBe(requestId);
+
+      const enabledReply = nextMessage(socket);
+      socket.send(encodeMemoryCompressionControlMessage({
+        requestId: "standalone-enable-control",
+        enabled: true,
+      }));
+      const enabledFrame = await enabledReply;
+      expect(typeof enabledFrame).toBe("string");
+      if (typeof enabledFrame !== "string") {
+        throw new Error("Expected text compression control");
+      }
+      expect(parseMemoryCompressionControlMessage(enabledFrame)?.enabled).toBe(
+        true,
+      );
+
+      const compressedRequestId = "standalone-restored-session-open-".repeat(
+        100,
+      );
+      const compressedResponse = nextMessage(socket);
+      socket.send(
+        await encodeCompressedMemoryMessage(encodeMemoryBoundary({
+          type: "session.open",
+          requestId: compressedRequestId,
+          space: "did:key:z6Mk-standalone-restored-compression-test",
+          session: {},
+        })),
+      );
+      const compressedResponseFrame = await compressedResponse;
+      expect(compressedResponseFrame).toBeInstanceOf(ArrayBuffer);
+      expect(
+        decodeMemoryBoundary<{ requestId: string }>(
+          await decodeCompressedMemoryMessage(compressedResponseFrame),
+        ).requestId,
+      ).toBe(compressedRequestId);
     } finally {
       await closeSocket(socket);
       await server.close();

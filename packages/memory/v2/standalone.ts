@@ -16,8 +16,10 @@ import { Identity } from "@commonfabric/identity";
 
 import { encodeMemoryBoundary, getMemoryProtocolFlags } from "../v2.ts";
 import {
+  encodeMemoryCompressionControlMessage,
   isMemoryMessageFrame,
   MemoryMessageCompressionChannel,
+  parseMemoryCompressionControlMessage,
 } from "./message-compression.ts";
 import * as MemoryServer from "./server.ts";
 import { verifySessionOpenAuthorization } from "./session-open-auth.ts";
@@ -148,6 +150,16 @@ export class StandaloneMemoryServer {
         }
         if (closed) return;
         channel.receive(frame, async (payload) => {
+          const control = parseMemoryCompressionControlMessage(payload);
+          if (control) {
+            const enabled = compressionNegotiated && control.enabled;
+            channel.setSendCompressionEnabled(enabled);
+            channel.send(encodeMemoryCompressionControlMessage({
+              requestId: control.requestId,
+              enabled,
+            }));
+            return;
+          }
           await connection.receive(payload);
           if (debugWrites) {
             logCommitOperations(connectionTag, payload);

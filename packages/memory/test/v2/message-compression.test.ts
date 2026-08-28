@@ -6,8 +6,10 @@ import { describe, it } from "@std/testing/bdd";
 import {
   decodeCompressedMemoryMessage,
   encodeCompressedMemoryMessage,
+  encodeMemoryCompressionControlMessage,
   MAX_DECOMPRESSED_MEMORY_MESSAGE_BYTES,
   MemoryMessageCompressionChannel,
+  parseMemoryCompressionControlMessage,
 } from "../../v2/message-compression.ts";
 
 describe("message-compression", () => {
@@ -133,5 +135,43 @@ describe("message-compression", () => {
     expect(await Promise.all(sent.map(decodeCompressedMemoryMessage))).toEqual(
       payloads,
     );
+  });
+
+  it("changes the send mode while continuing to accept compressed frames", async () => {
+    const sent: Array<string | Uint8Array<ArrayBuffer>> = [];
+    const received: string[] = [];
+    const channel = new MemoryMessageCompressionChannel(
+      (frame) => sent.push(frame),
+      (error) => {
+        throw error;
+      },
+    );
+    channel.enable();
+    const large = "inspectable compression message ".repeat(1_000);
+
+    channel.send(large);
+    channel.setSendCompressionEnabled(false);
+    const control = encodeMemoryCompressionControlMessage({
+      requestId: "debug-control",
+      enabled: false,
+    });
+    channel.send(control);
+    channel.receive(
+      await encodeCompressedMemoryMessage(large),
+      (payload) => {
+        received.push(payload);
+      },
+    );
+    await channel.idle();
+
+    expect(sent[0]).toBeInstanceOf(Uint8Array);
+    expect(sent[1]).toBe(control);
+    expect(received).toEqual([large]);
+    expect(parseMemoryCompressionControlMessage(control)).toEqual({
+      type: "memory.compression",
+      requestId: "debug-control",
+      enabled: false,
+    });
+    expect(parseMemoryCompressionControlMessage("memory data")).toBeNull();
   });
 });

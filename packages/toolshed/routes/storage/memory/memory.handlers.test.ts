@@ -11,6 +11,8 @@ import {
   decodeCompressedMemoryMessage,
   encodeCompressedMemoryMessage,
   type EncodedMemoryMessage,
+  encodeMemoryCompressionControlMessage,
+  parseMemoryCompressionControlMessage,
 } from "@commonfabric/memory/v2/message-compression";
 
 import {
@@ -201,6 +203,66 @@ describe("memory.handlers", () => {
       );
 
       expect(fake.closedWith?.code).toBe(1003);
+    });
+
+    it("changes compression without replacing the socket", async () => {
+      const fake = new FakeSocket();
+      const socket = fake as unknown as WebSocket;
+      const negotiation = bufferTextMessagesUntilNegotiated(socket);
+      const handedOff = Promise.withResolvers<void>();
+      const handoff = negotiation.handoff;
+      negotiation.handoff = (handlers) => {
+        handoff(handlers);
+        handedOff.resolve();
+      };
+      fake.dispatchEvent(new MessageEvent("message", { data: HELLO }));
+      const firstMessage = await negotiation.firstMessage;
+      expect(attachMemorySocketPipeline(
+        socket,
+        negotiation,
+        firstMessage!,
+      )).toBe(true);
+      await handedOff.promise;
+
+      fake.dispatchEvent(
+        new MessageEvent("message", {
+          data: encodeMemoryCompressionControlMessage({
+            requestId: "toolshed-debug-control",
+            enabled: false,
+          }),
+        }),
+      );
+      await fake.whenSent(2);
+      expect(typeof fake.sent[1]).toBe("string");
+      if (typeof fake.sent[1] !== "string") {
+        throw new Error("Expected text compression control");
+      }
+      expect(parseMemoryCompressionControlMessage(fake.sent[1])).toEqual({
+        type: "memory.compression",
+        requestId: "toolshed-debug-control",
+        enabled: false,
+      });
+
+      const requestId = "toolshed-visible-session-open-".repeat(100);
+      fake.dispatchEvent(
+        new MessageEvent("message", {
+          data: encodeMemoryBoundary({
+            type: "session.open",
+            requestId,
+            space: "did:key:z6Mk-toolshed-visible-compression-test",
+            session: {},
+          }),
+        }),
+      );
+      await fake.whenSent(3);
+      expect(typeof fake.sent[2]).toBe("string");
+      if (typeof fake.sent[2] !== "string") {
+        throw new Error("Expected text response after disabling compression");
+      }
+      expect(
+        decodeMemoryBoundary<{ requestId: string }>(fake.sent[2]).requestId,
+      ).toBe(requestId);
+      fake.dispatchEvent(new CloseEvent("close"));
     });
   });
 

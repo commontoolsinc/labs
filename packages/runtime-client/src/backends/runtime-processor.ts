@@ -180,6 +180,7 @@ import {
   type SetBreakpointsRequest,
   type SetLoggerEnabledRequest,
   type SetLoggerLevelRequest,
+  type SetMemoryMessageCompressionRequest,
   type SetSettleStatsEnabledRequest,
   type SetTelemetryEnabledRequest,
   type SettleStatsHistoryResponse,
@@ -1974,6 +1975,15 @@ export class RuntimeProcessor {
     this.runtime.scheduler.setEventPreflightTelemetryEnabled(request.enabled);
   }
 
+  /** Changes memory-message compression for every remote storage session. */
+  async setMemoryMessageCompression(
+    request: SetMemoryMessageCompressionRequest,
+  ): Promise<void> {
+    await this.runtime.storageManager.setMessageCompressionEnabled?.(
+      request.enabled,
+    );
+  }
+
   resetLoggerBaselines(_: any): void {
     resetAllCountBaselines();
     resetAllTimingBaselines();
@@ -2279,6 +2289,8 @@ export class RuntimeProcessor {
         return this.setLoggerEnabled(request);
       case RequestType.SetTelemetryEnabled:
         return this.setTelemetryEnabled(request);
+      case RequestType.SetMemoryMessageCompression:
+        return await this.setMemoryMessageCompression(request);
       case RequestType.ResetLoggerBaselines:
         return this.resetLoggerBaselines(request);
       case RequestType.GetSettleStats:
