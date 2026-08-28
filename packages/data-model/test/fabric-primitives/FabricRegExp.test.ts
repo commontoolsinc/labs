@@ -29,7 +29,7 @@ import {
   shallowFabricFromNativeValue,
 } from "@/fabric-value.ts";
 import { FabricInstance, FabricPrimitive } from "@/interface.ts";
-import { isValidFabricNativeObject } from "@/native-conversion.ts";
+import { isValidFabricNativeObject } from "@/native-type-tags.ts";
 import {
   NATIVE_TAGS,
   tagFromNativeClass,

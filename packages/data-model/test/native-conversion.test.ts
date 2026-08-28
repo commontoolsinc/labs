@@ -60,12 +60,12 @@ import {
 import {
   fabricFromNativeValue,
   isValidFabricConvertibleValue,
-  isValidFabricNativeObject,
   nativeFromFabricValue,
   shallowCleanArray,
   shallowCleanPlainObject,
   shallowFabricFromNativeValue,
 } from "@/native-conversion.ts";
+import { isValidFabricNativeObject } from "@/native-type-tags.ts";
 
 /**
  * Helper for the round-trip tests, which encodes a value to fabric form via
