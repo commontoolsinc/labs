@@ -1445,10 +1445,13 @@ jobs:
   # probe below before the shard runs. Skips happen only through the explicit
   # per-phase lists in tasks/server-execution-on-skips.ts, printed by the run
   # step — never by silent filtering (ONE `patterns` entry today: the
-  # lunch-poll-vote FILE entry, RESTORED 2026-08-28 after the lift PR's
-  # three probe boards each went red at that surface — the OW45
-  # forever-park, three supplier geometries mapped, two fixed, the
-  # mid-flight-compile residue open; the flip PR needs every list EMPTY).
+  # lunch-poll-vote FILE entry, RESTORED a second time 2026-08-28 after
+  # the geometry-3 close PR's own probe (run 33198257149) went red at
+  # that surface with the register's PRE-DECLARED geometry-3b signature
+  # — the supplier compile NOT YET STARTED at consult, invisible to any
+  # once-await; geometries 1-3 are closed red-first and kept; the 3b
+  # close is the register's owner-court one-shot-contract fork; the flip
+  # PR needs every list EMPTY).
   # No coverage collection and no cache save-back: the default lane owns
   # both; the compile byte cache is restored read-only (compiled bytes do not
   # depend on the flag).

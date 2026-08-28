@@ -230,6 +230,47 @@ export class CellHandle<T = unknown> {
     });
   }
 
+  /**
+   * Atomically stores `value` only if the cell is undefined, then returns the
+   * value selected by that transaction. Concurrent initializers converge on
+   * one winner instead of replacing it with a blind write.
+   */
+  async initialize(value: T): Promise<Readonly<T>> {
+    this.#requireSchema("initialize");
+    if (value === undefined) {
+      throw new TypeError("Cell initialize requires a defined value.");
+    }
+    const serialized = this.#serializeWrite(value);
+    const writeGeneration = ++this.#writeGeneration;
+    const updateGeneration = this.#updateGeneration;
+    const { current, authoritative } = await this.#enqueueOperation(
+      async (queue) => {
+        const authoritativeGeneration = queue.authoritativeGeneration;
+        const response = await this.#conn.request<RequestType.CellInitialize>({
+          type: RequestType.CellInitialize,
+          cell: this.ref(),
+          value: serialized,
+        });
+        const current = CellHandle.deserialize<T>(this, response.value) as T;
+        const authoritative = updateGeneration === this.#updateGeneration &&
+          authoritativeGeneration === queue.authoritativeGeneration;
+        if (authoritative) {
+          queue.value = current;
+          queue.hasValue = true;
+        }
+        return { current, authoritative };
+      },
+    );
+    if (
+      writeGeneration === this.#writeGeneration &&
+      updateGeneration === this.#updateGeneration &&
+      authoritative
+    ) {
+      this.#publishValue(current);
+    }
+    return current as Readonly<T>;
+  }
+
   #enqueueOperation<R>(
     operation: (queue: CellOperationQueue) => Promise<R>,
   ): Promise<R> {

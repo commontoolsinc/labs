@@ -106,6 +106,12 @@ export enum RequestType {
   CellPull = "cell:pull",
 
   /**
+   * Stores a value only when the cell is currently undefined, using the read
+   * as an optimistic-concurrency precondition. Returns the value that won.
+   */
+  CellInitialize = "cell:initialize",
+
+  /**
    * Overwrites a cell's value blindly: the write carries no value-equality
    * precondition, so a concurrent write to the same cell does not make it
    * fail. That is not the same as unconditional. A blind write still carries
@@ -811,6 +817,17 @@ export type CellPullRequest = BaseRequest & {
    * The cell whose producers to demand before reading its current value.
    */
   cell: CellRef;
+};
+
+/** The {@link RequestType.CellInitialize} request. */
+export type CellInitializeRequest = BaseRequest & {
+  type: RequestType.CellInitialize;
+
+  /** The cell to initialize when it is currently undefined. */
+  cell: CellRef;
+
+  /** The non-undefined default to store. */
+  value: FabricValue;
 };
 
 /**
@@ -2333,6 +2350,7 @@ export type IPCClientRequest =
   | DisposeRequest
   | CellGetRequest
   | CellPullRequest
+  | CellInitializeRequest
   | CellSetRequest
   | CellPushRequest
   | CellSendRequest
@@ -2969,6 +2987,10 @@ export type Commands = {
   [RequestType.CellPull]: {
     request: CellPullRequest;
     response: CellGetResponse;
+  };
+  [RequestType.CellInitialize]: {
+    request: CellInitializeRequest;
+    response: CellValueResponse;
   };
   [RequestType.CellSet]: {
     request: CellSetRequest;
