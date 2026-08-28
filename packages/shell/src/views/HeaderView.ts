@@ -548,11 +548,11 @@ export class XHeaderView extends BaseView {
    * demand when the user actually favorites something.
    *
    * Idempotent while a subscription is live. After teardown — a disconnect or
-   * a runtime swap clears `_unsubscribeFavorites` — the next call re-subscribes,
+   * a runtime swap clears `#unsubscribeFavorites` — the next call re-subscribes,
    * so a reconnected header is not left without favorites.
    *
-   * TypeScript-private rather than a `#` name: `test/root-view.test.ts` drives
-   * this member directly.
+   * TypeScript-private rather than a `#` name:
+   * `test/header-view-favorites.test.ts` drives this member directly.
    */
   private _ensureFavoritesSubscription(): void {
     if (this.#unsubscribeFavorites) return;
@@ -759,8 +759,8 @@ export class XHeaderView extends BaseView {
   /**
    * Open the main dropdown menu and move focus to the close button.
    *
-   * TypeScript-private rather than a `#` name: `test/root-view.test.ts` drives
-   * this member directly.
+   * TypeScript-private rather than a `#` name:
+   * `test/header-view-favorites.test.ts` drives this member directly.
    */
   private handleLogoClick(e: Event) {
     e.preventDefault();
@@ -894,24 +894,27 @@ export class XHeaderView extends BaseView {
    * updates local state immediately, then syncs with the server.
    * Rolls back local state on error. Guarded against double-clicks
    * with _isFavoriteLoading to prevent conflicting requests.
+   *
+   * TypeScript-private rather than a `#` name:
+   * `test/header-view-favorites.test.ts` drives this member directly.
    */
-  #isFavoriteLoading = false;
+  private _isFavoriteLoading = false;
 
   /**
-   * TypeScript-private rather than a `#` name: `test/root-view.test.ts` drives
-   * this member directly.
+   * TypeScript-private rather than a `#` name:
+   * `test/header-view-favorites.test.ts` drives this member directly.
    */
   private async handleToggleFavorite(e: Event) {
     e.preventDefault();
     e.stopPropagation();
     const space = this.space;
-    if (!this.rt || !space || !this.pieceId || this.#isFavoriteLoading) {
+    if (!this.rt || !space || !this.pieceId || this._isFavoriteLoading) {
       return;
     }
 
     const currentlyFavorite = this.#isFavorite();
     this._localIsFavorite = !currentlyFavorite;
-    this.#isFavoriteLoading = true;
+    this._isFavoriteLoading = true;
     // Favoriting touches the home pattern anyway; start reflecting server
     // state from here on if the menu was never opened.
     this._ensureFavoritesSubscription();
@@ -931,7 +934,7 @@ export class XHeaderView extends BaseView {
       console.error("[HeaderView] Error toggling favorite:", err);
       this._localIsFavorite = undefined;
     } finally {
-      this.#isFavoriteLoading = false;
+      this._isFavoriteLoading = false;
     }
   }
 
