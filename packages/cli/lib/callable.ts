@@ -1628,8 +1628,10 @@ export async function executeResolvedCallable(
 
     // The handling committed, so the space it committed to is named here —
     // before the early return below, which a call without an invocation id
-    // takes.
-    noteWroteTo(resolved.space);
+    // takes. A deduplicated retry is excluded: it settles on the original
+    // outcome and commits nothing, so a receipt would name a write this
+    // invocation did not perform.
+    if (!deduplicated) noteWroteTo(resolved.space);
 
     if (invocationId === undefined) return {};
 
@@ -1799,6 +1801,9 @@ export async function executeResolvedCallable(
     await runtime.idle();
     runtime.prepareTxForCommit(tx);
     await tx.commit();
+    // A tool's result cell is durable, so this commit is a write to the space
+    // like a handler's is.
+    noteWroteTo(resolved.space);
 
     // Drain the tool to a fully settled state — scheduler idle, storage synced,
     // and every in-flight async builtin finished — so the result is final by the

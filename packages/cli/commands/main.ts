@@ -59,7 +59,8 @@ FIRST TIME SETUP:
   cf id new > claude.key            # Create identity key
   export CF_IDENTITY=./claude.key   # Set default identity
   export CF_API_URL=http://localhost:${ports.toolshed}  # Set default API URL
-  export CF_SPACE=my-space          # Set default space (--space overrides)
+  export CF_SPACE=my-space          # Default space for piece/get/set/call,
+                                    # wish, acl and deps (--space overrides)
 
 SHELL COMPLETION:
   source <(cf completion zsh)      # add to ~/.zshrc  (bash: completion bash)

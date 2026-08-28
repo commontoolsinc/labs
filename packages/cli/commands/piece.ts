@@ -113,6 +113,7 @@ import {
   type UnreportedRunDeps,
 } from "../lib/unreported-run.ts";
 import { absPath } from "../lib/utils.ts";
+import { noteWroteTo } from "../lib/write-receipt.ts";
 
 // Hint system: print helpful next-step suggestions after operations
 let quietMode = false;
@@ -3116,6 +3117,14 @@ export interface PieceCLIOptions {
   apiUrl?: string;
   identity?: string;
   space?: string;
+  /**
+   * Whether `space` was written on the command line rather than supplied by
+   * `CF_SPACE`. Cliffy merges an environment value into the option and keeps
+   * no record of which it was, and only an explicit one refuses `--url`.
+   * Defaults to reading the process arguments; a caller driving this function
+   * directly states it.
+   */
+  explicitSpace?: boolean;
   url?: string;
   mainExport?: string;
   repository?: string;
@@ -3811,6 +3820,11 @@ export async function repairFromCommand(
       }
     }
   }
+  // A repaired row is a written document, so the space is named whenever at
+  // least one was — before the refusal below, which an incomplete run takes.
+  if (report.rows.some((row) => row.verdict === "repaired")) {
+    noteWroteTo(spaceConfig.space);
+  }
   for (const row of report.rows) {
     if (row.problem !== undefined) {
       printHint(`${row.verdict}: ${row.piece} ${row.problem}`);
@@ -3999,6 +4013,7 @@ export async function retargetFromCommand(
     report,
     {
       verb: "Retarget",
+      space: spaceConfig.space,
       ...(options.apply === true ? { apply: true } : {}),
       ...(options.out === undefined ? {} : { out: options.out }),
       ...(options.json === true ? { json: true } : {}),
@@ -4035,12 +4050,22 @@ function countApplyRow(progress: ApplyRunProgress, row: ApplyRow): void {
  */
 async function reportApplyRun(
   report: ApplyReport,
-  run: { verb: string; apply?: boolean; out?: string; json?: boolean },
+  run: {
+    verb: string;
+    apply?: boolean;
+    out?: string;
+    json?: boolean;
+    space?: string;
+  },
   deps: ApplyCommandDependencies,
   guard?: RunReportGuard,
 ): Promise<void> {
   const print = deps.render ?? render;
   const printHint = deps.printHint ?? hint;
+  // A dry run classifies and writes nothing, so the receipt follows the
+  // applied count rather than the flag: an `--apply` over a plan whose rows
+  // have all landed already writes nothing either.
+  if (run.space !== undefined && report.applied > 0) noteWroteTo(run.space);
   // The canonical FabricValue encoding, as the repair's report uses: one
   // encoding for one document, whichever destination it goes to.
   const encoded = jsonFromFabricValue(report as unknown as FabricValue);
@@ -4243,6 +4268,7 @@ export async function rollbackFromCommand(
     report,
     {
       verb: "Rollback",
+      space: spaceConfig.space,
       ...(options.apply === true ? { apply: true } : {}),
       ...(options.out === undefined ? {} : { out: options.out }),
       ...(options.json === true ? { json: true } : {}),
@@ -4337,6 +4363,7 @@ export async function restoreFromCommand(
       `${outcome.revisions.length} revision(s); name one with --revision`,
     );
   } else if (outcome.restored) {
+    noteWroteTo(pieceConfig.space);
     printHint(`restored ${outcome.piece} to ${options.revision}`);
   } else if (outcome.selected?.current === true) {
     // Running the reference is not the same as standing where the restore
@@ -4647,6 +4674,22 @@ export function readCallTarget(
 // The piece arrives through `--piece` (or the positional address it carries)
 // or inside the `--url`: a URL that names one excludes the flag, and a
 // piece-less URL composes with it.
+/**
+ * Was the space written on the command line? `explicit` answers for a caller
+ * driving {@link parseSpaceOptions} directly; otherwise the process arguments
+ * do, which is where the distinction actually lives once cliffy has merged the
+ * environment into the option.
+ */
+export function spaceWasWritten(
+  explicit?: boolean,
+  argv: readonly string[] = Deno.args,
+): boolean {
+  if (explicit !== undefined) return explicit;
+  return argv.some((arg) =>
+    arg === "--space" || arg === "-s" || arg.startsWith("--space=")
+  );
+}
+
 export function parseSpaceOptions(
   input: PieceCLIOptions,
 ): SpaceConfig {
@@ -4654,12 +4697,14 @@ export function parseSpaceOptions(
   // ambient default a more specific spelling overrides: a caller who exports
   // `CF_SPACE` for a session must still be able to paste a URL. `--url`
   // supplies the space itself below, so the ambient value is replaced rather
-  // than reconciled. Cliffy merges an environment value into the option and
-  // keeps no record of which it was, so comparing against the variable is how
-  // that provenance is recovered.
-  const spaceIsAmbient = input.space !== undefined &&
-    input.space === Deno.env.get("CF_SPACE");
-  if (input.url && input.space && !spaceIsAmbient) {
+  // than reconciled.
+  //
+  // Cliffy merges an environment value into the option and keeps no record of
+  // which it was, so provenance is read off the command line. Comparing the
+  // value against `CF_SPACE` instead would call an explicit `--space` ambient
+  // whenever it happened to name the same space, which is the one case where
+  // a caller stated the target twice and deserves the refusal.
+  if (input.url && input.space && spaceWasWritten(input.explicitSpace)) {
     throw new ValidationError(
       `"--space" cannot be provided when using "--url".`,
       { exitCode: 1 },

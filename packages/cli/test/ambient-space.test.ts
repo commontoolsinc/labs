@@ -105,6 +105,19 @@ describe("an ambient space", () => {
     );
   });
 
+  it("refuses an explicit --space beside --url even when it names the ambient space", async () => {
+    // The caller stated the target twice, which is what the refusal is for.
+    // Deciding provenance by comparing the value against CF_SPACE would call
+    // this one ambient and let it through.
+    const { stderr } = await cf(
+      `piece ls --url http://localhost:9999/aspace --space ${AMBIENT}`,
+      { env: { ...FABRIC, CF_SPACE: AMBIENT } },
+    );
+    expect(errorText(stderr)).toContain(
+      '"--space" cannot be provided when using "--url"',
+    );
+  });
+
   it("loses to the flag, which is what makes it safe to leave set", async () => {
     // A guard against a future precedence change rather than a test of this
     // one: the flag decided the space before the variable existed, so removing
