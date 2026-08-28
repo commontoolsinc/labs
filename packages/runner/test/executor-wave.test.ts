@@ -900,6 +900,109 @@ describe("stage D seal-into-wave", () => {
     expect(stored?.document).toEqual({ value: { a: 2, b: 50 } });
   });
 
+  it("rebases an indexed stream consequence across a concurrent tail append", async () => {
+    const stream = runtime.getCell<{ $stream: boolean }>(
+      space,
+      "wave-stream-rebase",
+      undefined,
+    );
+    const streamLink = stream.getAsNormalizedFullLink();
+    const streamRef = { id: streamLink.id, path: [...streamLink.path] };
+    const sidecarId = streamEntriesDocId(streamRef);
+
+    const lease = liveLease();
+    const sink = newSink();
+    const seedWave = newWave({ lease });
+    runtime.installSealDestination(seedWave);
+    const seedTx = runtime.edit();
+    stampWaveRunContext(seedTx, {
+      actionId: "seed-stream-entry",
+      kind: "derivation",
+      acting: { user: "did:key:alice", session: "sess-1" },
+    });
+    seedTx.writeValueOrThrow(
+      { space, id: sidecarId, path: [] } as never,
+      {
+        entries: [{
+          eventId: "e-stream-seed",
+          stream: streamRef,
+          payload: { value: 1 },
+          firedAt: { user: "did:key:alice", session: "sess-1" },
+        }],
+      } as never,
+    );
+    expect((await seedTx.commit()).error).toBeUndefined();
+    runtime.clearSealDestination();
+    const seedOutcome = await seedWave.commitWave(sink);
+    await seedWave.settled();
+    expect(seedOutcome.aborted).toBeUndefined();
+
+    const wave = newWave({ lease });
+    runtime.installSealDestination(wave);
+    const consequenceTx = runtime.edit();
+    stampWaveRunContext(consequenceTx, {
+      actionId: "handle-stream-entry",
+      kind: "event-handler",
+      eventId: "e-stream-seed",
+      acting: { user: "did:key:alice" },
+    });
+    consequenceTx.writeValueOrThrow(
+      {
+        space,
+        id: sidecarId,
+        path: ["entries", "0", "consequenced"],
+      } as never,
+      true as never,
+    );
+    expect((await consequenceTx.commit()).error).toBeUndefined();
+    runtime.clearSealDestination();
+
+    Engine.applyCommit(engine, {
+      sessionId: "stream-rival-session",
+      space,
+      principal: "user:rival",
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "patch",
+          id: sidecarId,
+          patches: [{
+            op: "append",
+            path: "/value/entries",
+            values: [{
+              eventId: "e-stream-rival",
+              stream: streamRef,
+              payload: { value: 2 },
+            }],
+          }],
+        }],
+        eventAppends: [{ id: sidecarId, eventId: "e-stream-rival" }],
+      },
+    });
+
+    const outcome = await wave.commitWave(sink);
+    await wave.settled();
+
+    expect(outcome.aborted).toBeUndefined();
+    expect(outcome.requeuedEventIds).toEqual([]);
+    expect(outcome.dispositions).toEqual([{ kind: "committed" }]);
+    const stored = Engine.readState(engine, { id: sidecarId })?.document
+      ?.value as
+        | {
+          entries?: Array<{
+            eventId?: string;
+            consequenced?: boolean;
+          }>;
+        }
+        | undefined;
+    expect(stored?.entries?.map((entry) => entry.eventId)).toEqual([
+      "e-stream-seed",
+      "e-stream-rival",
+    ]);
+    expect(stored?.entries?.[0].consequenced).toBe(true);
+  });
+
   it("aborts the wave commit when the lease tenure lapsed (work sealed under a lapsed tenure never commits)", async () => {
     let now = 1_000_000;
     const cycle = new ExecutionLeaseCycle({
