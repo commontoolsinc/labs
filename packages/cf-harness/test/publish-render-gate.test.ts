@@ -293,6 +293,46 @@ describe("publish-render-gate", () => {
       expect(container.innerHTML.match(/<p>/g)).toHaveLength(3);
     });
 
+    it("bounds a single child that is itself oversized", () => {
+      // The adversarial shape, and the one the wide tree above does not
+      // reach: one top-level child with a hundred descendants. Removing
+      // whole children after the budget is crossed never touches the child
+      // that crossed it, so the bound reported true and retained everything.
+      const mock = new MockDoc(
+        `<!DOCTYPE html><html><body><div id="root"><section>${
+          "<span>x</span>".repeat(100)
+        }</section></div></body></html>`,
+      );
+      const container = mock.document.getElementById("root");
+      if (container === null) throw new Error("no container");
+      expect(cutTreeToNodeBudget(container, 6)).toBe(true);
+      const kept = (container.innerHTML.match(/<span>/g) ?? []).length;
+      expect(kept).toBeLessThanOrEqual(6);
+    });
+
+    it("bounds every shape, not the one the author thought of", () => {
+      // The wide test below passed while a deep child retained a hundred
+      // nodes, so the shapes are enumerated rather than sampled: a chain, a
+      // single oversized child, a pyramid, and the two degenerate cases.
+      const shapes: Record<string, string> = {
+        chain: "<i>".repeat(200) + "x" + "</i>".repeat(200),
+        oneWideChild: `<section>${"<span>x</span>".repeat(100)}</section>`,
+        pyramid: `<a>${`<b>${"<c>y</c>".repeat(50)}</b>`.repeat(5)}</a>`,
+        empty: "",
+        single: "<p>p</p>",
+      };
+      for (const [name, html] of Object.entries(shapes)) {
+        const mock = new MockDoc(
+          `<!DOCTYPE html><html><body><div id="root">${html}</div></body></html>`,
+        );
+        const container = mock.document.getElementById("root");
+        if (container === null) throw new Error("no container");
+        cutTreeToNodeBudget(container, 6);
+        const tags = (container.innerHTML.match(/<[a-z]/g) ?? []).length;
+        expect(`${name}:${tags <= 6}`).toBe(`${name}:true`);
+      }
+    });
+
     it("cuts a tree past the budget and says it did", () => {
       // Serializing first and truncating after would build the whole string;
       // what a pattern renders is bounded by nothing but the pattern.
@@ -410,9 +450,15 @@ describe("publish-render-gate", () => {
       expect(passed).toContain("not that the component works");
     });
 
-    it("says of the one refusing verdict where its evidence went", () => {
+    it("does not promise a copy of the render it does not keep", () => {
+      // The artifact root is not a confidentiality boundary, so the gate
+      // keeps no rendered output; a message promising one would send a
+      // reader looking for something that is not there.
+      for (const message of Object.values(PATTERN_PUBLICATION_MESSAGES)) {
+        expect(message).not.toContain("retained in the run artifact");
+      }
       expect(PATTERN_PUBLICATION_MESSAGES["ui-default-tostring"]).toContain(
-        "retained in the run artifact and withheld here",
+        "reproducible from the recorded program",
       );
     });
 

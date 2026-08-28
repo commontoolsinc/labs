@@ -137,18 +137,23 @@ export interface RunPatternToolSuccessOutput {
   patternPublication?: RunPatternPublicationReport;
 
   /**
-   * The probe render's own output, retained for the persisted artifact and
-   * stripped from the model-facing rendering, on the same terms as thrown
-   * text: rendered DOM can carry both labeled data a pattern reached for
-   * itself and text from `cf:pattern:` source the model has never seen.
+   * What the render gate's probe THREW, when one did — never what it
+   * rendered. Retained for the persisted artifact and stripped from the
+   * model-facing rendering, on the same terms as every other thrown message
+   * this tool withholds: a computation over data the model cannot read can
+   * carry that data in what it throws.
    *
-   * Stripped from the tool result is the whole of the claim. The artifact it
-   * lands in is reachable by `bash`, which does not reserve the artifact root
-   * the way the file tools do — a property of that root, which already holds
-   * `rawValue` and every withheld thrown message, rather than of this field.
-   * CT-2117 carries the structural fix. Until it lands, the DOM is written
-   * only for a verdict that withheld discoverability, so a passing run adds
-   * nothing to that root.
+   * **The artifact root is not a confidentiality boundary.** `bash` does not
+   * reserve it the way `read_file`, `write_file`, `edit_file` and
+   * `view_image` do, and its stdout is model-facing, so a later turn — or a
+   * delegated child sharing the workspace — can read this back. Two
+   * reviewers walked that route independently and one reproduced it with a
+   * planted marker; CT-2117 carries the structural fix. Thrown text is here
+   * because it is the class this artifact already holds and cannot be
+   * recovered any other way. Rendered DOM is NOT, because it can: the
+   * synthetic instance is a deterministic function of the argument schema
+   * and the index records the program, so the render is reproducible rather
+   * than needing to be kept.
    */
   rawCauseMessage?: string;
 }
@@ -1486,24 +1491,20 @@ export const runPatternTool: HarnessToolDefinition<
         status: PatternPublicationStatus;
         reason: PatternPublicationReason;
         syntheticInputsComplete: boolean;
-        html?: string;
+        thrown?: string;
       } | "cancelled"
     > => {
       const synthetic = syntheticArgument(pattern.argumentSchema);
-      const recorded = (reason: PatternPublicationReason, html?: string) => ({
+      const recorded = (reason: PatternPublicationReason, thrown?: string) => ({
         status: "recorded" as const,
         reason,
         syntheticInputsComplete: synthetic.complete,
-        ...(html !== undefined ? { html } : {}),
+        ...(thrown !== undefined ? { thrown } : {}),
       });
-      const discoverable = (
-        reason: PatternPublicationReason,
-        html?: string,
-      ) => ({
+      const discoverable = (reason: PatternPublicationReason) => ({
         status: "discoverable" as const,
         reason,
         syntheticInputsComplete: synthetic.complete,
-        ...(html !== undefined ? { html } : {}),
       });
       let probeCell: Cell<unknown> | undefined;
       // One race over the whole probe rather than a check between each await.
@@ -1527,19 +1528,16 @@ export const runPatternTool: HarnessToolDefinition<
           () => pieces.runtime.idle(),
         );
         if (rendered === undefined) return discoverable("no-ui");
-        const html = rendered.html.length > PROBE_HTML_MAX_CHARS
-          ? `${
-            rendered.html.slice(0, PROBE_HTML_MAX_CHARS)
-          }\n[truncated at ${PROBE_HTML_MAX_CHARS} characters]`
-          : rendered.html;
         // What the render means is decided by `classifyRenderedHtml`; what
         // that meaning costs is decided here. Only a default-`toString` is
         // positive evidence of a defect — the rest are absences, recorded
-        // uncertified rather than condemned.
+        // uncertified rather than condemned. The DOM itself is read and
+        // discarded: see `PatternRenderVerdict.thrown` for why none of it is
+        // persisted.
         const reason = classifyRenderedHtml(rendered.html, rendered.errors);
         return reason === "ui-rendered"
-          ? discoverable(reason, html)
-          : recorded(reason, html);
+          ? discoverable(reason)
+          : recorded(reason);
       };
       // One consultation of the signal, at the single exit. An abort reaches
       // this function three ways — the race interrupts it, an await it does
@@ -1578,7 +1576,7 @@ export const runPatternTool: HarnessToolDefinition<
     // nothing: it ran what the index already holds.
     const description = input.description?.trim();
     let publication: RunPatternPublicationReport | undefined;
-    let probeHtml: string | undefined;
+    let probeThrown: string | undefined;
     // The engine hands the ledger over with the index client, in one spread,
     // so requiring it here is the same condition as requiring the client —
     // spelled twice because the type cannot say they arrive together. There is
@@ -1631,7 +1629,7 @@ export const runPatternTool: HarnessToolDefinition<
         // the artifact root being readable through `bash` (CT-2117); it
         // simply stops writing this into that root on the runs where it earns
         // nothing, which is most of them.
-        probeHtml = verdict.status === "recorded" ? verdict.html : undefined;
+        probeThrown = verdict.thrown;
         {
           const request: PatternIndexPublishRequest = {
             patternId: entryIdentity,
@@ -1677,7 +1675,7 @@ export const runPatternTool: HarnessToolDefinition<
       ...(valueError !== undefined ? { valueError } : {}),
       ...(rawValue !== undefined ? { rawValue } : {}),
       ...(publication !== undefined ? { patternPublication: publication } : {}),
-      ...(probeHtml !== undefined ? { rawCauseMessage: probeHtml } : {}),
+      ...(probeThrown !== undefined ? { rawCauseMessage: probeThrown } : {}),
     };
   },
 };

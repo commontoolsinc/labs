@@ -341,21 +341,30 @@ describe("run_pattern publish render gate", () => {
     expect(output.pieceId).toBeDefined();
   });
 
-  it("keeps the rendered output in the artifact and out of what the model reads", async () => {
+  it("persists none of the rendered output, anywhere", async () => {
+    // The artifact root is not a confidentiality boundary: `bash` does not
+    // reserve it and its stdout is model-facing. The DOM is read, classified
+    // and discarded — reproducible from the recorded program and a
+    // deterministic synthetic instance, so keeping a copy buys nothing and
+    // costs an exposure two reviewers have walked.
     const index = stubIndex();
     const output = await runAndFlush(index, {
       sourceText: LIVE_BROKEN_SORTABLE_TABLE,
       inputs: { rows: [{ name: "Avery", score: 12 }], columns: ["name"] },
       description: "Reusable sortable table component",
     });
-    // The DOM the probe produced, which is what a browser showed for this
-    // very pattern. `rawCauseMessage` is the field the prompt loop strips
-    // from the model-facing rendering; the artifact keeps it.
-    expect(output.rawCauseMessage).toContain("<td>[object Object]</td>");
-    // Nothing the model reads carries any of it.
-    const modelFacing = JSON.stringify(output.patternPublication);
-    expect(modelFacing).not.toContain("<td");
-    expect(modelFacing).not.toContain("alpha");
+
+    // The gate saw the marker — that is what the verdict says.
+    expect(output.patternPublication?.reason).toBe("ui-default-tostring");
+    // And nothing it saw is anywhere in the output the artifact persists.
+    // The constant message names the marker as a literal — the gate's own
+    // vocabulary, not something it read — so the check covers the rest.
+    const { patternPublication: _verdict, ...rest } = output;
+    const persisted = JSON.stringify(rest);
+    expect(persisted).not.toContain("[object Object]");
+    expect(persisted).not.toContain("<td");
+    expect(persisted).not.toContain("alpha");
+    expect(output.rawCauseMessage).toBeUndefined();
   });
 
   it("offers a table that renders its cells to search", async () => {
@@ -592,7 +601,8 @@ describe("run_pattern publish render gate", () => {
     expect(output.status).toBe("ok");
     expect(output.patternPublication?.status).toBe("recorded");
     expect(output.patternPublication?.reason).toBe("probe-failed");
-    // Artifact-only, and not in what the model reads.
+    // Thrown text IS kept: it is the class this artifact already holds and
+    // cannot be recovered any other way. It stays out of what the model reads.
     expect(output.rawCauseMessage).toContain("probeExplodedForItsOwnReasons");
     expect(JSON.stringify(output.patternPublication)).not.toContain(
       "probeExplodedForItsOwnReasons",

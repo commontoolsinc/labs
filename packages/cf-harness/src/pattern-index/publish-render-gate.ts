@@ -166,17 +166,20 @@ export interface PatternRenderVerdict {
   readonly syntheticInputsComplete: boolean;
 
   /**
-   * The probe's rendered HTML, bounded. Kept for the run artifact and never
-   * put in the tool result. The artifact root itself is reachable through
-   * `bash`, which does not reserve it the way the file tools do.
+   * What a probe THREW, when one did. Artifact-only, on the same terms as
+   * every other thrown message this tool withholds: a computation over data
+   * the model cannot read can carry that data in what it throws.
+   *
+   * The rendered DOM is deliberately NOT here and is not persisted anywhere.
+   * The artifact root is not a confidentiality boundary — `bash` does not
+   * reserve it the way the file tools do, and two reviewers have walked that
+   * route, one with a planted marker — so the only defensible amount of
+   * rendered content to put in it is none. Nothing is lost: the synthetic
+   * instance is a deterministic function of the argument schema, and the
+   * index records the program, so anyone adjudicating an entry can reproduce
+   * the exact render rather than read a copy of it.
    */
-  readonly html?: string;
-
-  /** Whether `html` stops at `PROBE_HTML_MAX_CHARS` rather than at its end. */
-  readonly htmlTruncated?: boolean;
-
-  /** What the reconciler or the applicator reported. Artifact-only. */
-  readonly renderErrors?: readonly string[];
+  readonly thrown?: string;
 }
 
 /**
@@ -192,7 +195,7 @@ export const PATTERN_PUBLICATION_MESSAGES: Readonly<
   "no-ui":
     "published to the pattern index and offered to search. It declares no $UI, so the render check does not apply to it.",
   "ui-default-tostring":
-    "recorded in the pattern index but NOT offered to search. Rendering its $UI host-side produced text of the form [object Object] — a value reaching the DOM through Object.prototype.toString rather than through a read. Indexing a reactive row by a reactive key is the usual cause: the index expression yields a proxy, and stringifying a proxy gives exactly this. Read the value out (a derive or a lift over the row and the key) and run it again to have the fixed version offered. The rendered output is retained in the run artifact and withheld here.",
+    "recorded in the pattern index but NOT offered to search. Rendering its $UI host-side produced text of the form [object Object] — a value reaching the DOM through Object.prototype.toString rather than through a read. Indexing a reactive row by a reactive key is the usual cause: the index expression yields a proxy, and stringifying a proxy gives exactly this. Read the value out (a derive or a lift over the row and the key) and run it again to have the fixed version offered. The render itself is not retained anywhere: it is reproducible from the recorded program, since the synthetic instance is a deterministic function of the argument schema.",
   "ui-rendered-empty":
     "recorded in the pattern index but NOT offered to search: its $UI rendered a tree carrying no text and no attributes at all, against a synthetic instance of its own argument schema. That is an absence of evidence rather than a defect found — an empty-state list renders this way too — so the entry is uncertified rather than condemned.",
   "probe-failed":
@@ -585,23 +588,31 @@ export const cutTreeToNodeBudget = (
   // surface the renderer needs — `children`, `remove()`, `innerHTML` — so the
   // walk uses that and nothing more. `children` on a text node is undefined,
   // which ends a branch.
-  const size = (node: { children?: unknown[] }, budget: number): number => {
-    let seen = 0;
-    for (const child of node.children ?? []) {
-      seen += 1 + size(child as { children?: unknown[] }, budget - seen);
-      if (seen >= budget) return seen;
+  //
+  // The prune is RECURSIVE against one shared remaining count, and that is
+  // the whole of it: dropping whole top-level children once a running total
+  // crosses the budget leaves the child that crossed it entirely intact, so a
+  // single `<section>` holding a hundred descendants passes such a check
+  // while retaining all hundred. A bound that reports true and bounds nothing
+  // is worse than no bound, because the caller then serializes an unbounded
+  // tree believing it was cut.
+  type Node = { children?: unknown[]; remove?: () => void };
+  let remaining = budget;
+  let cut = false;
+  const prune = (node: Node): void => {
+    for (const child of [...(node.children ?? [])]) {
+      const typed = child as Node;
+      if (remaining <= 0) {
+        typed.remove?.();
+        cut = true;
+        continue;
+      }
+      remaining -= 1;
+      prune(typed);
     }
-    return seen;
   };
-  const node = container as unknown as { children?: unknown[] };
-  if (size(node, budget) < budget) return false;
-  let kept = 0;
-  for (const child of [...(node.children ?? [])]) {
-    const typed = child as { children?: unknown[]; remove?: () => void };
-    if (kept >= budget) typed.remove?.();
-    else kept += 1 + size(typed, budget);
-  }
-  return true;
+  prune(container as unknown as Node);
+  return cut;
 };
 
 /**
