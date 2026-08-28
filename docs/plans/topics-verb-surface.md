@@ -180,11 +180,18 @@ before writing a case:
 
 ## Deploying to the team board
 
-Stage B rewrites the shape of live team data, so it goes through the rehearsal
-in [Topics migration rehearsal](../history/plans/topics-migration-rehearsal.md): a snapshot
-first, two consecutive clean passes against a clone, the board before its
-children,
-and a content export that the restore drill exercises rather than assumes.
+Stage B rewrote the shape of live team data, so it went through a rehearsal
+before it went to the team board: a snapshot first, passes against a clone, the
+board before its children, and a content export the restore drill exercised
+rather than assumed. It was deployed on 2026-08-28. The script is archived at
+[`../history/plans/topics-migration-rehearsal.md`](../history/plans/topics-migration-rehearsal.md)
+and what the run found — including where that script was wrong — is in
+[`../history/topics-board-migration-2026-08-28.md`](../history/topics-board-migration-2026-08-28.md).
+
+A later break to these patterns needs the same treatment, and the record is the
+better starting point of the two: the ordering rule it establishes is that the
+side able to read BOTH shapes moves first, which is a question about which
+demand changed rather than about which piece is the parent.
 
 Two preconditions belong to the board rather than to the code:
 

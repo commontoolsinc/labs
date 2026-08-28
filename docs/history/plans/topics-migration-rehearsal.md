@@ -2,8 +2,8 @@
 status: historical
 created: 2026-07-29
 archived: 2026-08-28
-reason: "The rehearsal script for the Estuary Topics board migration, executed on 2026-08-27/28. What the run found, including where this script was wrong, is recorded in ../topics-board-migration-2026-08-28.md."
-superseded-by: ../topics-board-migration-2026-08-28.md
+reason: "The rehearsal script for the Estuary Topics board migration, executed on 2026-08-27/28. What the run found, including where this script was wrong, is recorded in docs/history/topics-board-migration-2026-08-28.md."
+superseded-by: docs/history/topics-board-migration-2026-08-28.md
 ---
 
 # Topics board migration — the rehearsal script
