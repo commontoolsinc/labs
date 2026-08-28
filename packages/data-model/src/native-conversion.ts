@@ -41,7 +41,7 @@ import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { VALUE_TAGS } from "./VALUE_TAGS.ts";
-import { isValidFabricNativeObject } from "./native-builtin-tags.ts";
+import { isValidFabricNativeObject } from "./type-check.ts";
 import { tagFromNativeValue } from "./native-type-tags.ts";
 import { cloneHelper } from "./value-clone.ts";
 import { isValidDeepFrozenFabricValue } from "./deep-freeze.ts";

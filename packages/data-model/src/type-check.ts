@@ -18,18 +18,23 @@
 
 import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isInertArray } from "@commonfabric/utils/arrays";
-import { isInertPlainObject } from "@commonfabric/utils/objects";
+import {
+  constructorOfObject,
+  isInertPlainObject,
+} from "@commonfabric/utils/objects";
 import {
   isPlainContainer,
   isPlainObject,
   unsafeObjectKeyIn,
 } from "@commonfabric/utils/types";
 
-import { isValidFabricNativeObject } from "./native-builtin-tags.ts";
+import { tagFromNativeBuiltinClass } from "./native-builtin-tags.ts";
+import { VALUE_TAGS } from "./VALUE_TAGS.ts";
 import {
   type FabricArray,
   type FabricContainerValue,
   FabricInstance,
+  type FabricNativeObject,
   type FabricPlainObject,
   FabricSpecialObject,
   type FabricValue,
@@ -95,6 +100,50 @@ export function isValidFabricValueLayer(
     default: {
       return false;
     }
+  }
+}
+
+/**
+ * Returns `true` if the value is a `FabricNativeObject`: one of the
+ * "wild-west" native JS instances that the conversion layer wraps into a
+ * `FabricNativeWrapper` subclass, a `FabricPrimitive`, or a `FabricInstance`.
+ *
+ * Arrays, plain objects, and system-defined `FabricPrimitive`s are recognized
+ * by `tagFromNativeValue()` but are _not_ `FabricNativeObject`s -- they have
+ * their own handling paths in the conversion layer.
+ *
+ * Membership is not convertibility: a `Map` and a `Set` are members whose
+ * fabric form has yet to be built.
+ *
+ * This function is a TypeScript type guard for `FabricNativeObject`.
+ */
+export function isValidFabricNativeObject(
+  value: unknown,
+): value is FabricNativeObject {
+  if (value === null || typeof value !== "object") return false;
+
+  // Arrays first, and unconditionally, exactly as the full dispatch does it.
+  // An array's class is USUALLY `Array`, whose tag is not one of the six
+  // below -- but a prototype can be re-pointed, and an array wearing
+  // `Date.prototype` would otherwise be reported as a convertible `Date`.
+  // `Array.isArray()` sees through that, and through a subclass and a severed
+  // prototype besides, which is why the array rule alone decides what an array
+  // may be.
+  if (Array.isArray(value)) return false;
+
+  const ctor = constructorOfObject(value);
+  const tag = (ctor !== undefined) ? tagFromNativeBuiltinClass(ctor) : null;
+
+  switch (tag ?? (Error.isError(value) ? VALUE_TAGS.Error : null)) {
+    case VALUE_TAGS.Error:
+    case VALUE_TAGS.Map:
+    case VALUE_TAGS.Set:
+    case VALUE_TAGS.Date:
+    case VALUE_TAGS.Uint8Array:
+    case VALUE_TAGS.RegExp:
+      return true;
+    default:
+      return false;
   }
 }
 

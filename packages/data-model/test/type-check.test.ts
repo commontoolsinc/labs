@@ -28,7 +28,7 @@ import {
 } from "@/type-check.ts";
 import { codecClasses } from "@/fabric-primitives/index.ts";
 import { shallowFabricFromNativeValue } from "@/native-conversion.ts";
-import { isValidFabricNativeObject } from "@/native-builtin-tags.ts";
+import { isValidFabricNativeObject } from "@/type-check.ts";
 import { LAYER_CORPUS, PlainClass } from "./fabric-value-corpus.ts";
 import type { FabricValue } from "@/interface.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
@@ -271,6 +271,44 @@ describe("type-check", () => {
       it("returns `false` for a unique (uninterned) symbol", () => {
         expect(isValidFabricValueLayer(Symbol("k"))).toBe(false);
       });
+    });
+  });
+
+  describe("isValidFabricNativeObject()", () => {
+    it("returns `true` for all convertible types", () => {
+      expect(isValidFabricNativeObject(new Error("e"))).toBe(true);
+      expect(isValidFabricNativeObject(new TypeError("e"))).toBe(true);
+      expect(isValidFabricNativeObject(new Map())).toBe(true);
+      expect(isValidFabricNativeObject(new Set())).toBe(true);
+      expect(isValidFabricNativeObject(new Date())).toBe(true);
+      expect(isValidFabricNativeObject(new Uint8Array())).toBe(true);
+    });
+
+    it("returns `true` for exotic `Error` subclass", () => {
+      class WeirdError extends RangeError {}
+      expect(isValidFabricNativeObject(new WeirdError("weird"))).toBe(true);
+    });
+
+    it("returns `true` for `RegExp`", () => {
+      expect(isValidFabricNativeObject(/abc/)).toBe(true);
+    });
+
+    it("returns `false` for non-convertible types", () => {
+      expect(isValidFabricNativeObject({})).toBe(false);
+      expect(isValidFabricNativeObject([])).toBe(false);
+      expect(isValidFabricNativeObject(new WeakMap())).toBe(false);
+    });
+
+    it("returns `false` for objects with `toJSON()`", () => {
+      expect(isValidFabricNativeObject({ toJSON: () => "x" })).toBe(false);
+    });
+
+    it("returns `false` for a non-object", () => {
+      expect(isValidFabricNativeObject(null)).toBe(false);
+      expect(isValidFabricNativeObject(undefined)).toBe(false);
+      expect(isValidFabricNativeObject(1)).toBe(false);
+      expect(isValidFabricNativeObject("a")).toBe(false);
+      expect(isValidFabricNativeObject(() => {})).toBe(false);
     });
   });
 

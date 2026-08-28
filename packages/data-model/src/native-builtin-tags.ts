@@ -7,16 +7,13 @@
  * class reaches the codecs and, through them, the instance bases -- so a module
  * that asks about the fabric classes is layered above them. `type-check.ts` is
  * layered _below_ them, and still has to be able to tell a `Date` from a `Map`
- * from an ordinary class instance. What it can ask is here; the rest is in
- * `native-type-tags.ts`, which asks this and then its own.
+ * from an ordinary class instance; this is what it asks. `native-type-tags.ts`
+ * asks this first and then its own.
  *
  * What this file must not import is any module that knows a fabric class, since
  * that is the whole of what its callers cannot reach. `VALUE_TAGS.ts` is below
  * even this one and is fine; anything else deserves a second look.
  */
-
-import type { FabricNativeObject } from "./interface.ts";
-import { constructorOfObject } from "@commonfabric/utils/objects";
 
 import { VALUE_TAGS, type ValueTag } from "./VALUE_TAGS.ts";
 
@@ -74,49 +71,5 @@ export function tagFromNativeBuiltinClass(
         return VALUE_TAGS.Error;
       }
       return null;
-  }
-}
-
-/**
- * Returns `true` if the value is a `FabricNativeObject`: one of the
- * "wild-west" native JS instances that the conversion layer wraps into a
- * `FabricNativeWrapper` subclass, a `FabricPrimitive`, or a `FabricInstance`.
- *
- * Arrays, plain objects, and system-defined `FabricPrimitive`s are recognized
- * by `tagFromNativeValue()` but are _not_ `FabricNativeObject`s -- they have
- * their own handling paths in the conversion layer.
- *
- * Membership is not convertibility: a `Map` and a `Set` are members whose
- * fabric form has yet to be built.
- *
- * This function is a TypeScript type guard for `FabricNativeObject`.
- */
-export function isValidFabricNativeObject(
-  value: unknown,
-): value is FabricNativeObject {
-  if (value === null || typeof value !== "object") return false;
-
-  // Arrays first, and unconditionally, exactly as the full dispatch does it.
-  // An array's class is USUALLY `Array`, whose tag is not one of the six
-  // below -- but a prototype can be re-pointed, and an array wearing
-  // `Date.prototype` would otherwise be reported as a convertible `Date`.
-  // `Array.isArray()` sees through that, and through a subclass and a severed
-  // prototype besides, which is why the array rule alone decides what an array
-  // may be.
-  if (Array.isArray(value)) return false;
-
-  const ctor = constructorOfObject(value);
-  const tag = (ctor !== undefined) ? tagFromNativeBuiltinClass(ctor) : null;
-
-  switch (tag ?? (Error.isError(value) ? VALUE_TAGS.Error : null)) {
-    case VALUE_TAGS.Error:
-    case VALUE_TAGS.Map:
-    case VALUE_TAGS.Set:
-    case VALUE_TAGS.Date:
-    case VALUE_TAGS.Uint8Array:
-    case VALUE_TAGS.RegExp:
-      return true;
-    default:
-      return false;
   }
 }

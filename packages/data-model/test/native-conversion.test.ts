@@ -65,7 +65,6 @@ import {
   shallowCleanPlainObject,
   shallowFabricFromNativeValue,
 } from "@/native-conversion.ts";
-import { isValidFabricNativeObject } from "@/native-builtin-tags.ts";
 
 /**
  * Helper for the round-trip tests, which encodes a value to fabric form via
@@ -340,44 +339,6 @@ describe("native-conversion", () => {
       expect(Object.isFrozen(result)).toBe(false);
       expect(result.cause).toBeInstanceOf(Error);
       expect(Object.isFrozen(result.cause)).toBe(false);
-    });
-  });
-
-  describe("isValidFabricNativeObject()", () => {
-    it("returns `true` for all convertible types", () => {
-      expect(isValidFabricNativeObject(new Error("e"))).toBe(true);
-      expect(isValidFabricNativeObject(new TypeError("e"))).toBe(true);
-      expect(isValidFabricNativeObject(new Map())).toBe(true);
-      expect(isValidFabricNativeObject(new Set())).toBe(true);
-      expect(isValidFabricNativeObject(new Date())).toBe(true);
-      expect(isValidFabricNativeObject(new Uint8Array())).toBe(true);
-    });
-
-    it("returns `true` for exotic `Error` subclass", () => {
-      class WeirdError extends RangeError {}
-      expect(isValidFabricNativeObject(new WeirdError("weird"))).toBe(true);
-    });
-
-    it("returns `true` for `RegExp`", () => {
-      expect(isValidFabricNativeObject(/abc/)).toBe(true);
-    });
-
-    it("returns `false` for non-convertible types", () => {
-      expect(isValidFabricNativeObject({})).toBe(false);
-      expect(isValidFabricNativeObject([])).toBe(false);
-      expect(isValidFabricNativeObject(new WeakMap())).toBe(false);
-    });
-
-    it("returns `false` for objects with `toJSON()`", () => {
-      expect(isValidFabricNativeObject({ toJSON: () => "x" })).toBe(false);
-    });
-
-    it("returns `false` for a non-object", () => {
-      expect(isValidFabricNativeObject(null)).toBe(false);
-      expect(isValidFabricNativeObject(undefined)).toBe(false);
-      expect(isValidFabricNativeObject(1)).toBe(false);
-      expect(isValidFabricNativeObject("a")).toBe(false);
-      expect(isValidFabricNativeObject(() => {})).toBe(false);
     });
   });
 
