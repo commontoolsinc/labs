@@ -56,6 +56,36 @@ describe("typecheck", () => {
         }
       }
     });
+
+    it("includes iframe guests of either extension under arbitrary names", async () => {
+      const root = await Deno.makeTempDir({ prefix: "typecheck-guests-" });
+      try {
+        await Deno.mkdir(
+          join(root, "packages", "ui", "src", "v2", "components"),
+          { recursive: true },
+        );
+        for (
+          const [name, guest] of [
+            ["custom-board", "guest.ts"],
+            ["plain-name", "guest.tsx"],
+          ]
+        ) {
+          const directory = join(root, "packages", "patterns", name);
+          await Deno.mkdir(directory, { recursive: true });
+          await Deno.writeTextFile(join(directory, guest), "export {};\n");
+        }
+
+        const byScope = await collectPathsByScope(root);
+        expect(byScope.get("patterns")).toContain(
+          "packages/patterns/custom-board/guest.ts",
+        );
+        expect(byScope.get("patterns")).toContain(
+          "packages/patterns/plain-name/guest.tsx",
+        );
+      } finally {
+        await Deno.remove(root, { recursive: true });
+      }
+    });
   });
 
   describe("checkGroup()", () => {

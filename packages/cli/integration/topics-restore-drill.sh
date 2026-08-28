@@ -2,7 +2,7 @@
 # The Topics content-safety drill: deploy a board, seed it, snapshot the
 # store, export, clobber a topic the worst way a bad migration would, restore
 # it, and prove the restore byte-exact — the loop
-# docs/plans/topics-migration-rehearsal.md's "restore drill" section makes
+# docs/history/plans/topics-migration-rehearsal.md's "restore drill" section makes
 # part of every clean rehearsal pass, runnable as one command.
 #
 # Unlike verbs-over-the-cli.sh, this deliberately exercises the REAL topics

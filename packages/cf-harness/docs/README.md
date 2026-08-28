@@ -18,6 +18,10 @@ migration notes live under `docs/history/` at the repository root.
   repeated as a plan.
 - [SKILLS_SUPPORT_SPEC.md](SKILLS_SUPPORT_SPEC.md) — live
   implementation-specific skills contract and future dynamic-activation design.
+- [pattern-index-measurement.md](pattern-index-measurement.md) — how a run
+  against the pattern index is measured so two runs can be compared: the task
+  wording rule the finding rests on, what a batch records, and what its counts
+  do and do not establish.
 
 ## Normative boundary
 

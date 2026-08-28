@@ -99,6 +99,13 @@ export enum RequestType {
   CellGet = "cell:get",
 
   /**
+   * Pulls a cell through the scheduler before reading it. Unlike
+   * {@link CellGet}, this demands lazy producers and waits for their
+   * transitive work to settle.
+   */
+  CellPull = "cell:pull",
+
+  /**
    * Overwrites a cell's value blindly: the write carries no value-equality
    * precondition, so a concurrent write to the same cell does not make it
    * fail. That is not the same as unconditional. A blind write still carries
@@ -110,7 +117,7 @@ export enum RequestType {
   CellSet = "cell:set",
 
   /**
-   * Applies a value to a cell read-modify-write, keeping compare-and-set.
+   * Appends values to an array cell as a mergeable server-side operation.
    * The counterpart to {@link CellSet}'s blind overwrite.
    */
   CellPush = "cell:push",
@@ -160,6 +167,12 @@ export enum RequestType {
 
   /** Forgets a client's pinned operation target. */
   OperationSessionClose = "operation:session-close",
+
+  /** Runs a read-only SQL query against a SQLite database cell. */
+  SqliteQuery = "sqlite:query",
+
+  /** Commits a SQL write through a SQLite database cell. */
+  SqliteExec = "sqlite:exec",
 
   // Runtime operations
 
@@ -660,6 +673,12 @@ export type InitializationData = {
     // materialized in the carrying transaction (content-addressed schemas
     // Phase 1). Default on; an explicit false is the rollback override.
     contentAddressedSchemas?: boolean;
+    // Link crossings resolve schemas by reader precedence
+    // (combineSchemaForLink). Server-authoritative: the host declares the
+    // deployment's posture so the worker resolves hops under the same
+    // combine rule as the server that ships its subscriptions. Default on;
+    // an explicit false is the rollback override.
+    readerSchemaPrecedence?: boolean;
   };
   // Commit-boundary CFC mode for the worker runtime.
   cfcEnforcementMode?:
@@ -785,6 +804,15 @@ export type CellGetRequest = BaseRequest & {
   includeRef?: boolean;
 };
 
+/** The {@link RequestType.CellPull} request. */
+export type CellPullRequest = BaseRequest & {
+  type: RequestType.CellPull;
+  /**
+   * The cell whose producers to demand before reading its current value.
+   */
+  cell: CellRef;
+};
+
 /**
  * The {@link RequestType.CellSet} request. `value` is the whole
  * already-resolved value rather than a delta.
@@ -801,14 +829,14 @@ export type CellSetRequest = BaseRequest & {
    * The value to store, whole and already resolved.
    */
   value: FabricValue;
+  /** Wait for commit confirmation and return a refusal to the caller. */
+  awaitCommit?: boolean;
 };
 
 /**
- * The {@link RequestType.CellPush} request: a read-modify-write append.
- * The same wire shape as {@link CellSetRequest}, carrying the whole
- * already-appended array rather than a delta, but routed as its own request
- * so the runtime keeps the read target as a commit precondition. That is
- * the compare-and-set a blind set gives up.
+ * The {@link RequestType.CellPush} request: a mergeable server-side append.
+ * It carries only the invocation-time member snapshots, so an equivalent
+ * client handle with a stale local cache cannot replace a newer array base.
  */
 export type CellPushRequest = BaseRequest & {
   type: RequestType.CellPush;
@@ -818,10 +846,11 @@ export type CellPushRequest = BaseRequest & {
    */
   cell: CellRef;
 
-  /**
-   * The value to apply, whole and already resolved.
-   */
-  value: FabricValue;
+  /** The members to append, already resolved. */
+  values: FabricValue[];
+
+  /** Wait for commit confirmation and return a refusal to the caller. */
+  awaitCommit?: boolean;
 };
 
 /**
@@ -840,6 +869,8 @@ export type CellSendRequest = BaseRequest & {
    * The event to deliver.
    */
   event: FabricValue;
+  /** Wait for commit confirmation and return a refusal to the caller. */
+  awaitCommit?: boolean;
 };
 
 /**
@@ -966,6 +997,29 @@ export type OperationApplyResponse = {
   resolution: ApplyOpResolution;
 };
 
+/** SQLite bind values as the main-thread connection carries them. */
+export type SqliteParams =
+  | { kind: "positional"; values: readonly FabricValue[] }
+  | {
+    kind: "named";
+    entries: readonly (readonly [string, FabricValue])[];
+  };
+
+/** The {@link RequestType.SqliteQuery} request. */
+export type SqliteQueryRequest = BaseRequest & {
+  type: RequestType.SqliteQuery;
+  cell: CellRef;
+  sql: string;
+  params?: SqliteParams;
+};
+
+/** The {@link RequestType.SqliteExec} request. */
+export type SqliteExecRequest = BaseRequest & {
+  type: RequestType.SqliteExec;
+  cell: CellRef;
+  sql: string;
+  params?: SqliteParams;
+};
 /**
  * The {@link RequestType.GetCell} request. `cause` is what derives the
  * cell: the same space and cause always name the same one.
@@ -2195,138 +2249,22 @@ export type VDomEventNotification = BaseClientNotification & {
 };
 
 /**
- * Serialized DOM event data for IPC.
+ * The shape a DOM event crosses in, and the shape of its target within it.
+ *
+ * `serializeEvent()` in `@commonfabric/html` is what produces both, so that is
+ * where they are defined; the protocol re-exports them so a message shape and
+ * the event inside it cannot describe different things. That is the same
+ * arrangement, and for the same reason, as the VDOM op union below.
+ *
+ * The event's name here is `SerializedDomEvent`, which says which of this
+ * file's messages it belongs to; `SerializedEvent` alone would not, among the
+ * other serialized things around it.
  */
-export type SerializedDomEvent = {
-  /**
-   * The DOM event's type, as `click` or `input`.
-   */
-  type: string;
-
-  /**
-   * Where the event came from, so a handler can tell a real user
-   * gesture from a synthesized one.
-   */
-  provenance?: {
-    origin?: string;
-    trusted?: boolean;
-    ui?: {
-      pattern?: string;
-      eventIntegrity?: readonly string[];
-      uiContractDataset?: Record<string, string>;
-    };
-  };
-
-  /**
-   * The key pressed, for a keyboard event.
-   */
-  key?: string;
-
-  /**
-   * The physical key, which `key` does not identify across layouts.
-   */
-  code?: string;
-
-  /**
-   * Whether the key was being held.
-   */
-  repeat?: boolean;
-
-  /**
-   * Whether Alt was held.
-   */
-  altKey?: boolean;
-
-  /**
-   * Whether Control was held.
-   */
-  ctrlKey?: boolean;
-
-  /**
-   * Whether Meta was held.
-   */
-  metaKey?: boolean;
-
-  /**
-   * Whether Shift was held.
-   */
-  shiftKey?: boolean;
-
-  /**
-   * What kind of edit an input event was.
-   */
-  inputType?: string;
-
-  /**
-   * The text an input event inserted, `null` where it inserted none.
-   */
-  data?: string | null;
-
-  /**
-   * Which button a pointer event used.
-   */
-  button?: number;
-
-  /**
-   * Which buttons were held during a pointer event.
-   */
-  buttons?: number;
-
-  /**
-   * What the event fired on, reduced to the fields a handler reads.
-   */
-  target?: SerializedEventTarget;
-
-  /**
-   * A custom event's payload.
-   */
-  detail?: FabricValue;
-};
-
-/**
- * Serialized event target data for IPC.
- */
-export type SerializedEventTarget = {
-  /**
-   * The element's name, or its tag where it has none.
-   */
-  name?: string;
-
-  /**
-   * The element's current value. A `FabricValue` rather than a string: a custom
-   * element chooses what its `value` is, and a `cf-input`, a `cf-tabs` and a
-   * `cf-calendar` each declare theirs as `CellHandle<string> | string`, which
-   * arrives here as the sigil link the main thread resolved it to.
-   */
-  value?: FabricValue;
-
-  /**
-   * Whether a checkbox or radio is checked -- or, where the element chose to
-   * expose something else, what it chose. `cf-checkbox` and `cf-switch` each
-   * declare theirs as `CellHandle<boolean> | boolean`.
-   */
-  checked?: FabricValue;
-
-  /**
-   * Whether an option is selected.
-   */
-  selected?: boolean;
-
-  /**
-   * Which option a select is on.
-   */
-  selectedIndex?: number;
-
-  /**
-   * Every selected option's value, for a multiple select.
-   */
-  selectedOptions?: { value: string }[];
-
-  /**
-   * The element's `data-` attributes.
-   */
-  dataset?: Record<string, string>;
-};
+import type {
+  SerializedEvent as SerializedDomEvent,
+  SerializedEventTarget,
+} from "@commonfabric/html/events";
+export type { SerializedDomEvent, SerializedEventTarget };
 
 /**
  * Request to start VDOM rendering for a cell.
@@ -2394,6 +2332,7 @@ export type IPCClientRequest =
   | InitializeRequest
   | DisposeRequest
   | CellGetRequest
+  | CellPullRequest
   | CellSetRequest
   | CellPushRequest
   | CellSendRequest
@@ -2408,6 +2347,8 @@ export type IPCClientRequest =
   | OperationSubscribeRequest
   | OperationUnsubscribeRequest
   | OperationSessionCloseRequest
+  | SqliteQueryRequest
+  | SqliteExecRequest
   | GetCellRequest
   | GetHomeSpaceCellRequest
   | EnsureHomePatternRunningRequest
@@ -2511,6 +2452,13 @@ export type CellGetResponse = CellValueResponse & {
    * none to reference.
    */
   cell?: CellRef;
+};
+
+/** Rows returned by {@link RequestType.SqliteQuery}. */
+export type SqliteQueryResponse = {
+  rows: readonly {
+    readonly [key: string]: FabricValue;
+  }[];
 };
 
 /** A reference to one cell, for a request whose answer is which cell. */
@@ -2857,6 +2805,7 @@ export type RemoteResponse =
   | CellGetResponse
   | CellResponse
   | CfcLabelViewResponse
+  | SqliteQueryResponse
   | GraphSnapshotResponse
   | LoggerCountsResponse
   | PatternCoverageResponse
@@ -3017,6 +2966,10 @@ export type Commands = {
     request: CellGetRequest;
     response: CellGetResponse;
   };
+  [RequestType.CellPull]: {
+    request: CellPullRequest;
+    response: CellGetResponse;
+  };
   [RequestType.CellSet]: {
     request: CellSetRequest;
     response: EmptyResponse;
@@ -3072,6 +3025,14 @@ export type Commands = {
   [RequestType.OperationSessionClose]: {
     request: OperationSessionCloseRequest;
     response: BooleanResponse;
+  };
+  [RequestType.SqliteQuery]: {
+    request: SqliteQueryRequest;
+    response: SqliteQueryResponse;
+  };
+  [RequestType.SqliteExec]: {
+    request: SqliteExecRequest;
+    response: EmptyResponse;
   };
   // Page requests
   [RequestType.PageCreate]: {

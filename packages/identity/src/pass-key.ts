@@ -27,13 +27,13 @@ export interface PassKeyGetOptions {
 // A key must first be created for an origin, and then retrieved
 // as a `PassKey` instance. From there, a root key `Identity` can be derived/stored.
 export class PassKey {
-  private credentials: PublicKeyCredential;
+  #credentials: PublicKeyCredential;
   private constructor(credentials: PublicKeyCredential) {
-    this.credentials = credentials;
+    this.#credentials = credentials;
   }
 
   id() {
-    return this.credentials.id;
+    return this.#credentials.id;
   }
 
   // Generate a root key from a `PassKey`.
@@ -41,7 +41,7 @@ export class PassKey {
   // PRF output, a 32-byte hash, which is used as ed25519 key material.
   // Note: Root keys can only be created from PassKeys obtained via PassKey.get()
   async createRootKey(): Promise<Identity> {
-    const seed = this.prf();
+    const seed = this.#prf();
     if (!seed) {
       throw new Error(
         "common-identity: No PRF found. This PassKey appears to have just been created - root keys can only be generated from PassKeys obtained via PassKey.get()",
@@ -52,10 +52,10 @@ export class PassKey {
   }
 
   // Return the secret 32-bytes derived from the passkey's PRF data.
-  private prf(): Uint8Array | null {
+  #prf(): Uint8Array | null {
     // PRF results are only available when calling `get()`,
     // not during key creation.
-    const extResults = this.getCredentials().getClientExtensionResults();
+    const extResults = this.#getCredentials().getClientExtensionResults();
     const prf = extResults?.prf?.results?.first;
     if (prf) {
       return new Uint8Array(bufferSourceToArrayBuffer(prf));
@@ -153,7 +153,7 @@ export class PassKey {
     return new PassKey(credential);
   }
 
-  private getCredentials(): PublicKeyCredential {
-    return this.credentials;
+  #getCredentials(): PublicKeyCredential {
+    return this.#credentials;
   }
 }

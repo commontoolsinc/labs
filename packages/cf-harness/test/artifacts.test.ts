@@ -33,9 +33,13 @@ import {
 class FakeSandboxRuntime implements SandboxRuntime {
   readonly shellRequests: SandboxShellRequest[] = [];
 
+  readonly #shellResults: SandboxCommandResult[];
+
   constructor(
-    private readonly shellResults: SandboxCommandResult[] = [],
-  ) {}
+    shellResults: SandboxCommandResult[] = [],
+  ) {
+    this.#shellResults = shellResults;
+  }
 
   describe(): SandboxRuntimeDescription {
     return {
@@ -83,7 +87,7 @@ class FakeSandboxRuntime implements SandboxRuntime {
       });
     }
     return Promise.resolve(
-      this.shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+      this.#shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
     );
   }
 }

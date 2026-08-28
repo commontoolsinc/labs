@@ -29,7 +29,7 @@
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 
 import { openSpace, type SpaceDb } from "./db.ts";
-import { annotate, collectLinks } from "./decode.ts";
+import { annotate, linksWithPaths, type LinkWalkBounds } from "./decode.ts";
 import {
   candidatesMatching,
   getValueAt,
@@ -336,6 +336,23 @@ export function convergence(
 }
 
 /**
+ * How far the cross-space index's link walk reaches. The index's answer is
+ * which entities in one space name another, and a link it misses is an edge
+ * the index reports as absent, so the walk wants every link a document holds
+ * — twelve levels of nesting reaches past any value this tool has met.
+ *
+ * `maxNodes` is unbounded because `CrossSpaceLinkIndex` counts the entities it
+ * examined but carries no field saying an entity was examined only in part,
+ * and an edge silently missing from the index is worse than a walk that does
+ * not stop early. Giving it a finite value belongs with giving the index that
+ * field.
+ */
+const CROSS_SPACE_LINK_WALK: LinkWalkBounds = {
+  maxDepth: 12,
+  maxNodes: Number.POSITIVE_INFINITY,
+};
+
+/**
  * Build a cross-space link index over the given spaces: every link whose `space`
  * field names a DIFFERENT space than the one holding it. Only entities whose
  * stored data carries an explicit `"space":"did:key:` are reconstructed, which
@@ -371,7 +388,9 @@ export function buildCrossSpaceLinkIndex(
       } catch {
         continue;
       }
-      for (const link of collectLinks(doc)) {
+      for (
+        const { link } of linksWithPaths(doc, CROSS_SPACE_LINK_WALK).links
+      ) {
         if (link.id && link.space && link.space !== ownDid) {
           edges.push({
             fromSpace: ownDid,

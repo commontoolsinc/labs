@@ -100,15 +100,13 @@ const selectSameAs = handler<
 >(({ detail }, { person, showPicker }) => {
   const linked = detail?.data;
   if (!linked) return;
-  const current = person.get();
-  person.set({ ...current, sameAs: linked });
+  person.update({ sameAs: linked });
   showPicker.set(false);
 });
 
 const clearSameAs = handler<unknown, { person: Writable<Person> }>(
   (_event, { person }) => {
-    const current = person.get();
-    person.set({ ...current, sameAs: undefined });
+    person.update({ sameAs: undefined });
   },
 );
 
@@ -128,14 +126,12 @@ const updateTags = handler<
   { detail: { tags: string[] } },
   { person: Writable<Person> }
 >(({ detail }, { person }) => {
-  const current = person.get();
-  person.set({ ...current, tags: detail?.tags ?? [] });
+  person.update({ tags: detail?.tags ?? [] });
 });
 
 const addAddress = handler<unknown, { person: Writable<Person> }>(
   (_event, { person }) => {
-    const current = person.get();
-    const addresses = [...(current.addresses || [])];
+    const addresses = [...(person.get().addresses || [])];
     addresses.push({
       label: "",
       street: "",
@@ -144,7 +140,7 @@ const addAddress = handler<unknown, { person: Writable<Person> }>(
       zip: "",
       country: "",
     });
-    person.set({ ...current, addresses });
+    person.update({ addresses });
   },
 );
 
@@ -152,18 +148,16 @@ const removeAddress = handler<
   unknown,
   { person: Writable<Person>; index: number }
 >((_event, { person, index }) => {
-  const current = person.get();
-  const addresses = [...(current.addresses || [])];
+  const addresses = [...(person.get().addresses || [])];
   addresses.splice(index, 1);
-  person.set({ ...current, addresses });
+  person.update({ addresses });
 });
 
 const addSocialProfile = handler<unknown, { person: Writable<Person> }>(
   (_event, { person }) => {
-    const current = person.get();
-    const socialProfiles = [...(current.socialProfiles || [])];
+    const socialProfiles = [...(person.get().socialProfiles || [])];
     socialProfiles.push({ platform: "", url: "" });
-    person.set({ ...current, socialProfiles });
+    person.update({ socialProfiles });
   },
 );
 
@@ -171,10 +165,9 @@ const removeSocialProfile = handler<
   unknown,
   { person: Writable<Person>; index: number }
 >((_event, { person, index }) => {
-  const current = person.get();
-  const socialProfiles = [...(current.socialProfiles || [])];
+  const socialProfiles = [...(person.get().socialProfiles || [])];
   socialProfiles.splice(index, 1);
-  person.set({ ...current, socialProfiles });
+  person.update({ socialProfiles });
 });
 
 // ============================================================================

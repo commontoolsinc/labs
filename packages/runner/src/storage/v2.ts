@@ -126,6 +126,7 @@ import {
 } from "./transaction-inspection.ts";
 import {
   getBlindStructuralTarget,
+  isDurableReadTx,
   isInternalVerifierRead,
   isMergeableOpRead,
   isReadExcludedFromConflict,
@@ -5879,7 +5880,9 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
         // the blind-write tx shape: `structuralTarget` survives the
         // unmark exactly so commit-time emission can recognize it, and
         // a verifier read in any other tx keeps naming every layer.
-        structuralTarget !== undefined && isInternalVerifierRead(read.meta),
+        (source !== undefined && isDurableReadTx(source)) ||
+          (structuralTarget !== undefined &&
+            isInternalVerifierRead(read.meta)),
       );
     }
     // The blind UI-input write's single structural existence/shape precondition: a

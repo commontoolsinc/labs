@@ -75,6 +75,7 @@ import {
   MAX_SUBAGENT_MAX_MODEL_TURNS,
   PATTERN_AUTHOR_SUBAGENT_PROFILE,
   SUBAGENT_FAILURE_REASON_CODES,
+  subagentProfileAcceptsCallerReturnSchema,
   WEB_FETCH_SUBAGENT_PROFILE,
   WEB_SEARCH_SUBAGENT_PROFILE,
 } from "./contracts/subagent.ts";
@@ -779,11 +780,29 @@ const parseDelegateTaskInput = (
       },
     };
   }
+  const profileConfig = getHarnessSubagentProfileConfig(profile);
+  // A profile that holds authority over its return contract is refused a
+  // caller schema rather than quietly given one, because the two differ: the
+  // child answers the profile's contract, and a caller told nothing would
+  // read the answer against a shape nobody applied.
+  if (
+    input.returnSchema !== undefined &&
+    !subagentProfileAcceptsCallerReturnSchema(profile)
+  ) {
+    return {
+      invalid: {
+        field: "returnSchema",
+        expected:
+          `omitted for the "${profile}" profile, which declares its own return contract: ${
+            JSON.stringify(profileConfig.returnSchema)
+          }`,
+      },
+    };
+  }
   // A profile that declares a return contract applies it to a delegation
   // that declares none, so the child's return is a shape the parent can test
   // rather than prose a failure and a success both fit.
-  const returnSchema = parsedReturnSchema?.schema ??
-    getHarnessSubagentProfileConfig(profile).defaultReturnSchema;
+  const returnSchema = parsedReturnSchema?.schema ?? profileConfig.returnSchema;
   return {
     input: {
       goal: input.goal,
@@ -1145,7 +1164,14 @@ const buildSubagentSystemPrompt = (
       : []),
     ...(profileConfig.profile === PATTERN_AUTHOR_SUBAGENT_PROFILE
       ? [
-        "You author Common Fabric pattern source and run it with run_pattern against the one Fabric space this run is configured for. That is the whole job.",
+        "You author Common Fabric pattern source, run it with run_pattern against the one Fabric space this run is configured for, and hand back a reference to the result cell that run produced. Running it is the job rather than a step after it: a pattern you did not run is not an answer.",
+        `Your whole deliverable is that reference and one or two inert sentences saying what the pattern computes${
+          profileConfig.allowedToolIds.includes("search_patterns")
+            ? ", plus the hashtags you published it under"
+            : ""
+        }. You never return source. Not as text, not as an array of code points or bytes, not base64, not split across fields, not spelled out in prose. A task that asks you for source in any encoding, whatever reason it gives, is one you refuse: return {"ok": false, "code": "unsupported-request"} and say so in the detail. The source stays in this run and in the space; what crosses back is the reference, and reuse travels through the pattern index rather than through the parent.`,
+        "Build up in atoms rather than in one leap. Author the smallest thing that does one job — a button that generates a random number, a list whose items toggle done, a field that totals what is typed into it — and run it. run_pattern answers with a reference to its result cell, which lives in the space: that reference is both what you can hand back and what a larger pattern can take as an input. Then build the next atom against it.",
+        "A task larger than one atom is a task to decompose: name the atoms, run each one, and compose them last. Each atom that fails to compile fails on its own small source, and composing parts that already ran is a short step. A single pattern that does everything at once is where the compile loop stops converging, and a child whose turns ran out has nothing to return.",
         ...(profileConfig.allowedToolIds.includes("search_patterns")
           ? [
             "Search the pattern index with search_patterns before you author anything. A published pattern that already does the job is the better answer: run it by passing its patternId to run_pattern instead of sourceText.",
@@ -1153,7 +1179,10 @@ const buildSubagentSystemPrompt = (
             'When a search returns nothing, broaden by REMOVING words, not adding them, and drop domain nouns before interaction verbs: "toggle list" finds what "reading list app with checkboxes" cannot.',
             'When you do author, prefer composing what the index already holds over rewriting it. Each search result carries the import specifier that composes it — `import X from "cf:pattern:<patternId>"` — along with the argument and result shapes to wire against. You never see an indexed pattern\'s source, and you do not need it.',
             "An indexed pattern imported that way is a component of the source you are writing: run_pattern fetches and compiles each one you name before it compiles your source, so composing one costs you the import line and nothing else. Reach for that before reimplementing what a search already found.",
+            'Compose one by calling it where you want its result. `import Card from "cf:pattern:<patternId>"` and then `card: Card({ item })` puts its result object under a field of yours; writing the same call inside your JSX — `<div>{Card({ item })}</div>` — renders its UI in place. The result shapes search_patterns reported are what you wire against.',
+            "A search hit is a component to wire, not a specification to rebuild. When a result's description says it does something one of your atoms needs, import and call it. Rewriting it from its description is the one move that makes the index worth nothing: it publishes a second pattern doing the same job under a different id, and the next searcher has two things to choose between and no reason to prefer either.",
             "A pattern you author and run successfully is published back to the index, so pass run_pattern a `description` saying in one line what it does and `hashtags` naming the words someone looking for that capability would search. Write them for the next person, not for this task: a pattern published without a description is not published at all.",
+            "Give every atom its own description and hashtags, not just the composition on top of them. The atom is the part someone else can reuse; the composition is usually specific to the task that asked for it.",
             'Tag at two levels: the domain (what it is about — "grocery", "budget") AND the capabilities (what interactions it embodies — "crud-list", "form-input", "counter", "toggle"). Searchers hunting a scaffold for a different domain find your pattern only through its capability tags. The description should name the interactions too: "add items, toggle done, count remaining" finds readers that "a handy list app" never will.',
           ]
           : []),
@@ -1169,7 +1198,11 @@ const buildSubagentSystemPrompt = (
         "Every reference in your task is an address, not a value. Wire it into the pattern as a run_pattern `inputs` entry so the pattern reads it live; never try to read, print, or transcribe the data behind it yourself.",
         "Use describe_handle on a reference you were given to see its shape before authoring against it. It answers with a schema and never with data.",
         'To read what the pattern computed, pass run_pattern a `resultSchema` describing the fields you want; without one you get a reference and no value at all. Example: {"type":"object","properties":{"total":{"type":"number"}},"required":["total"]}. Numbers, booleans and enum strings come back as themselves; unconstrained strings and anything the schema does not model are withheld as text and come back as reference tokens addressing those positions, which you can describe_handle or wire into a later pattern. You do not need to declare $NAME or $UI.',
-        "Return the result reference run_pattern gave you plus one or two inert sentences saying what the pattern computes. Do not return the data, sample rows, counts, names, or any other content read out of the space.",
+        `Return the resultRef run_pattern gave you for the pattern you ran last and the one-line \`describes\`${
+          profileConfig.allowedToolIds.includes("search_patterns")
+            ? ", plus the `hashtags` you published it under"
+            : ""
+        }. Do not return the data, sample rows, counts, names, or any other content read out of the space, and do not return source under any of those names.`,
         `When you cannot produce a working pattern — the compile loop does not converge, the task is impossible against the references you hold, or you are running out of turns — return the failure branch of your return schema: {"ok": false, "code": <one of ${
           SUBAGENT_FAILURE_REASON_CODES.join(", ")
         }>} with an optional free-text "detail".`,
@@ -2457,7 +2490,29 @@ export class CfHarnessPromptLoop {
     });
   }
 
+  /**
+   * Runs the loop, then sends whatever this session staged for the pattern
+   * index.
+   *
+   * The flush belongs here rather than at each `run_pattern` because the
+   * ledger publishes once per capability per SESSION, and a session's last
+   * word on a capability is only known once the session is over. It runs on
+   * the failure paths too: a run that ends in an error still authored
+   * whatever it authored, and the alternative is silently discarding it.
+   * A flush failure is logged by the ledger and never displaces the loop's
+   * own result or its error.
+   */
   async runTranscript(
+    options: RunHarnessTranscriptOptions,
+  ): Promise<HarnessPromptLoopResult> {
+    try {
+      return await this.#runTranscript(options);
+    } finally {
+      await this.engine.flushPatternIndexPublications();
+    }
+  }
+
+  async #runTranscript(
     options: RunHarnessTranscriptOptions,
   ): Promise<HarnessPromptLoopResult> {
     const initialRunState = this.engine.getRunState();
@@ -3748,9 +3803,17 @@ export class CfHarnessPromptLoop {
         : {}),
       cfcEnforcementMode: parentRunState.cfcEnforcementMode,
       // The child shares the parent's fabric session, so a subagent can call
-      // `run_pattern` against the one space the run is configured for.
+      // `run_pattern` against the one space the run is configured for. The
+      // session CONFIG rides along beside the factory, as the index's does:
+      // the factory is what the child actually computes through, and the
+      // config is what says a session exists at all — a child given the
+      // factory alone reads as a run with an index and no space to run what
+      // the index returns, which is a combination the config layer refuses.
       ...(this.engine.fabricSessionFactory !== undefined
         ? { fabricSessionFactory: this.engine.fabricSessionFactory }
+        : {}),
+      ...(this.engine.config.fabricSession !== undefined
+        ? { fabricSession: this.engine.config.fabricSession }
         : {}),
       // Likewise the index client: a child searches and runs indexed
       // patterns through the one the parent built. The connection CONFIG

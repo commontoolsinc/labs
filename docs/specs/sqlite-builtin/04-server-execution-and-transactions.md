@@ -154,7 +154,7 @@ idempotently.)
 The v2 protocol is a discriminated union of message `type`s
 ([`packages/memory/v2.ts`](../../../packages/memory/v2.ts), `ClientMessage` /
 server messages; parsed in `parseClientMessage`, routed in
-`Connection.receiveOrdered`, correlated by `requestId` in
+`Connection.#receiveOrdered`, correlated by `requestId` in
 [`packages/memory/v2/client.ts`](../../../packages/memory/v2/client.ts)). It is
 extensible by adding variants. We add **one new read verb** and **fold writes
 into the existing `transact` commit**.
@@ -171,15 +171,30 @@ interface SqliteQueryRequest {
   db: SqliteDbRef;            // resolved source descriptor (Section 03)
   sql: string;               // single read-only statement
   params?: unknown[] | Record<string, unknown>;
+  // Key-safe entry transport for named parameters. Mutually exclusive with
+  // params; the client uses it when a parameter name is a reserved codec key.
+  namedParams?: Array<[string, unknown]>;
 }
 
-// Response rides the existing ResponseMessage envelope:
-//   { type: "response", requestId, ok?: { rows: unknown[] }, error?: V2Error }
+type SqliteRowWire =
+  | Record<string, unknown>
+  | Array<[string, unknown]>;
+
+interface SqliteQueryWireResult {
+  rows: SqliteRowWire[];
+  columns?: Array<{
+    output: string;
+    table: string | null;
+    column: string | null;
+  }>;
+}
+
+// The result rides the existing ResponseMessage envelope as `ok`.
 ```
 
 Server handling (mirrors `Server.transact` / `Server.queryGraph`):
 
-1. Route the new `type` in `Connection.receiveOrdered`, guarded by
+1. Route the new `type` in `Connection.#receiveOrdered`, guarded by
    `requireSession`.
 2. **Apply the statement guard** (above): single `SELECT`/read-only CTE; reject
    DML/DDL, schema-qualified references, `PRAGMA`/`ATTACH`/`DETACH`, and multiple
@@ -194,11 +209,15 @@ Server handling (mirrors `Server.transact` / `Server.queryGraph`):
    create-on-read semantics are preserved by the pool caller (`#readCellDb`):
    a missing file → `[]`, a "no such table" for a **declared** table → `[]`,
    anything else → surface the error.
-5. Reply with `{ type: "response", requestId, ok: { rows } }`.
+5. Convert each row with `sqliteRowToWire` and reply with
+   `{ type: "response", requestId, ok: { rows, columns? } }`. An ordinary row
+   stays an object; a row containing a reserved codec key such as
+   `constructor` uses key-value entries. The client reconstructs both forms.
 
 `_cf_link` decoding (Section [02](./02-cf-link-encoding.md)) happens **on the
 client** after the rows return, because reconstructing a `Cell` needs the
-runtime. The server returns raw strings.
+runtime. The server therefore keeps `_cf_link` values as their encoded strings;
+the key-safe row envelope changes field-name transport, not column values.
 
 ### Writes: `db.exec`, folded into `transact`
 

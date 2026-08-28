@@ -12,6 +12,10 @@
 
 import type { ConsoleHandle, ConsoleStep, ConsoleStepStatus } from "./steps.ts";
 import { consoleStepArguments, handleTokensIn } from "./steps.ts";
+import type {
+  ConsoleCellLabels,
+  ConsoleCellLabelsSummary,
+} from "./cell-labels.ts";
 
 /** What a node in the map stands for. */
 export type ConsoleFlowKind =
@@ -33,8 +37,10 @@ export interface ConsoleFlowCell {
   producedByStep?: number;
   /** The shape the pattern that made it declared, for the chip's card. */
   schema?: unknown;
-  /** Confidentiality atoms riding on it. */
+  /** Confidentiality atoms the invocation context put where it was used. */
   confidentiality: readonly string[];
+  /** The labels the space holds for the cell itself, where the run read them. */
+  labels?: ConsoleCellLabels;
   /** The argument name it came in as, for a cell a call read. */
   as?: string;
 }
@@ -116,6 +122,14 @@ export interface ConsoleFlow {
    * run — flow labels off record none, and persist records them.
    */
   cfc?: ConsoleFlowCfc;
+
+  /**
+   * Whether the run's space was read for per-cell labels, and what it said.
+   * The map states this once beside the posture, because a cell drawn with no
+   * labels means one thing under a snapshot that was taken and another under a
+   * run whose space could not be read.
+   */
+  cellLabels?: ConsoleCellLabelsSummary;
   /** Calls that failed, across the whole family. */
   failures: number;
   /** Calls CFC refused, across the whole family. */
@@ -162,6 +176,7 @@ const cellOf = (
     : {}),
   ...(handle?.schema !== undefined ? { schema: handle.schema } : {}),
   confidentiality: handle?.confidentiality ?? [],
+  ...(handle?.labels !== undefined ? { labels: handle.labels } : {}),
   ...(as !== undefined ? { as } : {}),
 });
 
@@ -314,6 +329,7 @@ export const consoleRunFlow = (
   root: ConsoleFlowRunInput,
   descendants: readonly ConsoleFlowRunInput[] = [],
   cfc?: ConsoleFlowCfc,
+  cellLabels?: ConsoleCellLabelsSummary,
 ): ConsoleFlow => {
   const byRunId = new Map(descendants.map((run) => [run.runId, run]));
   const nodes = runNodes(root, byRunId, 0, new Set());
@@ -350,6 +366,7 @@ export const consoleRunFlow = (
   return {
     turns,
     ...(cfc !== undefined ? { cfc } : {}),
+    ...(cellLabels !== undefined ? { cellLabels } : {}),
     failures: countIf(nodes, (node) => node.status === "error"),
     denials: countIf(
       nodes,

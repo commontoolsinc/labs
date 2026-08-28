@@ -15,6 +15,9 @@ For a link column:
 - **On write** (`db.exec`), a bound `Cell` is opaquely encoded to a **full sigil
   link string** before the `INSERT`/`UPDATE`. (A `Cell` bound to a *non*-link
   column throws.)
+- A `Cell` nested inside a JSON bind value is lowered to its sigil-link object
+  before the value crosses the storage boundary. It remains JSON data; only a
+  direct bind to a `_cf_link` column receives the link-column string encoding.
 - **On read** the behavior depends on whether the query is **typed**:
   - A **typed `db.query<{ col_cf_link: Cell<T> }>`** surfaces the column as a
     live `Cell`. (Mechanically: the runtime decodes the stored sigil **string**

@@ -783,6 +783,31 @@ export function encodeSqliteParams(
       );
     }
   };
+  const encodeNested = (value: unknown): unknown => {
+    assertDefined(value);
+    const cell = asBoundCell(value);
+    if (cell) {
+      const link = cell.toSigilLinkOrNull();
+      if (link === null) {
+        throw new TypeError(
+          "sqlite: a nested Cell parameter must have a durable link",
+        );
+      }
+      return link;
+    }
+    if (Array.isArray(value)) {
+      return value.map(encodeNested);
+    }
+    if (isPlainContainer(value)) {
+      return Object.fromEntries(
+        Object.entries(value).map(([key, member]) => [
+          key,
+          encodeNested(member),
+        ]),
+      );
+    }
+    return value;
+  };
   const encodeOne = (value: unknown, isLinkCol: boolean): unknown => {
     assertDefined(value);
     const cell = asBoundCell(value);
@@ -792,7 +817,7 @@ export function encodeSqliteParams(
       }
       return encodeCellToSigilString(cell);
     }
-    return value;
+    return encodeNested(value);
   };
   if (Array.isArray(params)) {
     const cols = parseSqliteInsertColumns(sql);
@@ -810,14 +835,15 @@ export function encodeSqliteParams(
             "params (:col) so the binding can be verified.",
         );
       }
-      return v;
+      return encodeNested(v);
     }) as SqliteParamsWire;
   }
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(params)) {
-    out[k] = encodeOne(v, isCfLinkColumn(k));
-  }
-  return out as SqliteParamsWire;
+  return Object.fromEntries(
+    Object.entries(params).map(([key, value]) => [
+      key,
+      encodeOne(value, isCfLinkColumn(key)),
+    ]),
+  ) as SqliteParamsWire;
 }
 
 export function createCell<T>(
@@ -1135,7 +1161,11 @@ export class CellImpl<T extends FabricValue>
     const tx = this.runtime.readTx(this.tx);
 
     if (!resolvedToValueLink) {
-      resolvedToValueLink = resolveLink(this.runtime, tx, this.link);
+      // A content read: the terminal-value read below is what decides, so
+      // the resolution's crossings mark like any other read's.
+      resolvedToValueLink = resolveLink(this.runtime, tx, this.link, "value", {
+        markIfcCrossings: true,
+      });
     }
 
     // The link's schema may ride as a content-addressed reference; the
@@ -1519,10 +1549,18 @@ export class CellImpl<T extends FabricValue>
      */
     sendOptions?: StreamSendOptions,
   ): Cell<T> {
+    // This resolution is a read — isStream() below reads the resolved
+    // terminal value — so it opts into the ifc crossing seam like every
+    // other content read. A transaction it marks relevant must then be
+    // prepared before commit (prepareTxForCommit), which every
+    // runtime-owned commit path already does; a hand-rolled edit()/commit()
+    // that sets through an ifc-bearing crossing owes the same call.
     const resolvedToValueLink = resolveLink(
       this.runtime,
       this.runtime.readTx(this.tx),
       this.link,
+      "value",
+      { markIfcCrossings: true },
     );
 
     // Check if we're dealing with a stream
@@ -2131,7 +2169,17 @@ export class CellImpl<T extends FabricValue>
     if (!this.synced) this.sync();
 
     // Get current value, following aliases and references
-    const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    // The read half of this read-modify-write is a content read: labeled
+    // crossings mark (the write half's policy input is recorded separately).
+    const resolvedLink = resolveLink(
+      this.runtime,
+      this.tx,
+      this.link,
+      "value",
+      {
+        markIfcCrossings: true,
+      },
+    );
     recordRelevantSchemaWritePolicyInput(
       this.tx,
       resolvedLink,
@@ -2192,7 +2240,17 @@ export class CellImpl<T extends FabricValue>
 
     // Follow aliases and references, since we want to get to an assumed
     // existing array.
-    const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    // The read half of this read-modify-write is a content read: labeled
+    // crossings mark (the write half's policy input is recorded separately).
+    const resolvedLink = resolveLink(
+      this.runtime,
+      this.tx,
+      this.link,
+      "value",
+      {
+        markIfcCrossings: true,
+      },
+    );
     recordRelevantSchemaWritePolicyInput(
       this.tx,
       resolvedLink,
@@ -2285,7 +2343,17 @@ export class CellImpl<T extends FabricValue>
     }
     if (!this.synced) this.sync();
 
-    const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    // The read half of this read-modify-write is a content read: labeled
+    // crossings mark (the write half's policy input is recorded separately).
+    const resolvedLink = resolveLink(
+      this.runtime,
+      this.tx,
+      this.link,
+      "value",
+      {
+        markIfcCrossings: true,
+      },
+    );
     recordRelevantSchemaWritePolicyInput(
       this.tx,
       resolvedLink,
@@ -2352,6 +2420,7 @@ export class CellImpl<T extends FabricValue>
             true,
             this.tx!,
             this.runtime,
+            true,
           )
         );
       }
@@ -2407,7 +2476,17 @@ export class CellImpl<T extends FabricValue>
     }
     if (!this.synced) this.sync();
 
-    const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    // The read half of this read-modify-write is a content read: labeled
+    // crossings mark (the write half's policy input is recorded separately).
+    const resolvedLink = resolveLink(
+      this.runtime,
+      this.tx,
+      this.link,
+      "value",
+      {
+        markIfcCrossings: true,
+      },
+    );
     recordRelevantSchemaWritePolicyInput(
       this.tx,
       resolvedLink,
@@ -2448,7 +2527,17 @@ export class CellImpl<T extends FabricValue>
     }
     if (!this.synced) this.sync();
 
-    const resolvedLink = resolveLink(this.runtime, this.tx, this.link);
+    // The read half of this read-modify-write is a content read: labeled
+    // crossings mark (the write half's policy input is recorded separately).
+    const resolvedLink = resolveLink(
+      this.runtime,
+      this.tx,
+      this.link,
+      "value",
+      {
+        markIfcCrossings: true,
+      },
+    );
     recordRelevantSchemaWritePolicyInput(
       this.tx,
       resolvedLink,
@@ -2480,6 +2569,7 @@ export class CellImpl<T extends FabricValue>
           true,
           this.tx!,
           this.runtime,
+          true,
         )
         : valueEqual(element, ref as FabricValue);
     const removed = array.filter(matches);
@@ -2510,7 +2600,9 @@ export class CellImpl<T extends FabricValue>
   // addUnique / removeByValue, without ever reading the whole array.
   elementById(idKey: string, schema?: JSONSchema): Cell<any> {
     const tx = this.runtime.readTx(this.tx);
-    const resolvedLink = resolveLink(this.runtime, tx, this.link);
+    const resolvedLink = resolveLink(this.runtime, tx, this.link, "value", {
+      markIfcCrossings: true,
+    });
     const entityId = createRef(
       { id: idKey },
       {
@@ -2813,7 +2905,16 @@ export class CellImpl<T extends FabricValue>
         );
     } else {
       // Regular cell behavior: subscribe to changes
-      if (!this.synced) this.sync(); // No await, just kicking this off
+      if (!this.synced) {
+        // sink() returns synchronously and immediately publishes the replica's
+        // current value, but the first backing-doc load remains part of the
+        // runtime's convergence work. A pull begun after this call sees the
+        // cell as synced and will not start a second load of its own, so keep
+        // this promise in the shared settled pool until the first load lands.
+        this.runtime.storageManager.trackUntilSettled(
+          this.sync().catch(() => {}),
+        );
+      }
       return subscribeToReferencedDocs(
         callback,
         this.runtime,
@@ -2863,7 +2964,11 @@ export class CellImpl<T extends FabricValue>
     callback: (value: FabricValue) => Cancel | undefined | void,
     options: SinkOptions = {},
   ): Cancel {
-    if (!this.synced) this.sync();
+    if (!this.synced) {
+      this.runtime.storageManager.trackUntilSettled(
+        this.sync().catch(() => {}),
+      );
+    }
 
     const sink: SinkAction = {
       cleanup: undefined,
@@ -2888,6 +2993,8 @@ export class CellImpl<T extends FabricValue>
       this.runtime,
       readTx,
       this.link,
+      "value",
+      { markIfcCrossings: true },
     );
     const dereferenceView = cfcLabelViewForDereferenceTraces(
       readTx,
@@ -2991,7 +3098,11 @@ export class CellImpl<T extends FabricValue>
     // Resolve all links ON THE WAY to the target, but don't resolve the final
     // link.
     const value = tx.readValueOrThrow(
-      resolveLink(this.runtime, tx, this.link, lastNode),
+      // A raw read still resolves links on the way to the target, and those
+      // crossings are content reads: the seam marks labeled hops.
+      resolveLink(this.runtime, tx, this.link, lastNode, {
+        markIfcCrossings: true,
+      }),
       readOptions,
     );
     // Deep-copy with desired frozenness, without native unwrapping — getRaw()

@@ -540,10 +540,14 @@ const cfcResultFromRunscSidecar = (
 };
 
 export class DockerRunscSandboxRuntime implements SandboxRuntime {
+  readonly #runner: ProcessRunner;
+
   constructor(
     readonly config: DockerRunscSandboxConfig,
-    private readonly runner: ProcessRunner = new DenoProcessRunner(),
-  ) {}
+    runner: ProcessRunner = new DenoProcessRunner(),
+  ) {
+    this.#runner = runner;
+  }
 
   defaultWorkingDirectory(): string {
     return normalizeWorkspacePath(this.config.workspaceMountPath);
@@ -648,7 +652,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
       this.config.image,
       ...request.argv,
     ];
-    const createResult = await this.runner.run({
+    const createResult = await this.#runner.run({
       command: this.config.dockerBinary,
       args: createArgs,
     });
@@ -668,7 +672,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
     }
 
     try {
-      const sidecarFailure = await this.writeCfcInvocationContextSidecar(
+      const sidecarFailure = await this.#writeCfcInvocationContextSidecar(
         containerID,
         request,
         createResult,
@@ -676,7 +680,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
       if (sidecarFailure !== undefined) {
         return sidecarFailure;
       }
-      const startResult = await this.runner.run({
+      const startResult = await this.#runner.run({
         command: this.config.dockerBinary,
         args: [
           "start",
@@ -687,7 +691,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
         stdinText: request.stdinText,
         timeoutMs: request.timeoutMs,
       });
-      const waitResult = await this.runner.run({
+      const waitResult = await this.#runner.run({
         command: this.config.dockerBinary,
         args: ["wait", containerID],
       });
@@ -700,7 +704,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
           : appendStderr(startResult.stderr, waitResult.stderr),
         exitCode,
       };
-      const cfcResult = await this.readCfcResultSidecar(
+      const cfcResult = await this.#readCfcResultSidecar(
         containerID,
         commandResult,
       );
@@ -708,7 +712,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
         ? commandResult
         : { ...commandResult, cfcResult };
     } finally {
-      await this.runner.run({
+      await this.#runner.run({
         command: this.config.dockerBinary,
         args: ["rm", "-f", containerID],
       });
@@ -732,7 +736,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
     });
   }
 
-  private async readCfcResultSidecar(
+  async #readCfcResultSidecar(
     containerID: string,
     commandResult: SandboxCommandResult,
   ): Promise<CfcSandboxResult | undefined> {
@@ -785,7 +789,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
     }
   }
 
-  private async writeCfcInvocationContextSidecar(
+  async #writeCfcInvocationContextSidecar(
     containerID: string,
     request: SandboxCommandRequest,
     createResult: SandboxCommandResult,

@@ -13,7 +13,10 @@ import {
   FabricBytes,
   FabricEpochNsec,
 } from "@commonfabric/data-model/fabric-primitives";
-import { linkRefPayloadFromString } from "@commonfabric/runner/shared";
+import {
+  linkRefFrom,
+  linkRefPayloadFromString,
+} from "@commonfabric/runner/shared";
 
 import {
   $conn,
@@ -24,9 +27,214 @@ import {
   RequestType,
   type RuntimeClient,
 } from "@/mod.ts";
-import { cellRefToKey } from "@/shared/utils.ts";
+import { cellRefToIdentityKey, cellRefToKey } from "@/shared/utils.ts";
 
 describe("cell-handle", () => {
+  it("pulls lazy producers before caching the returned value", async () => {
+    const requests: unknown[] = [];
+    const ref: CellRef = {
+      id: "of:lazy-cell" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "session",
+      path: [],
+    };
+    const runtime = {
+      [$conn]: () => ({
+        request: (request: unknown) => {
+          requests.push(request);
+          return Promise.resolve({ value: { ready: true } });
+        },
+      }),
+    } as unknown as RuntimeClient;
+    const cell = new CellHandle<{ ready: boolean }>(runtime, ref);
+
+    await expect(cell.pull()).resolves.toEqual({ ready: true });
+    expect(cell.get()).toEqual({ ready: true });
+    expect(requests).toEqual([{
+      type: RequestType.CellPull,
+      cell: ref,
+    }]);
+  });
+
+  describe("SQLite IPC", () => {
+    const ref: CellRef = {
+      id: "of:database" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+
+    it("queries through the database cell and hydrates returned cell refs", async () => {
+      const requests: unknown[] = [];
+      const linked = { ...ref, id: "of:linked" as CellRef["id"] };
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: unknown) => {
+            requests.push(request);
+            return Promise.resolve({
+              rows: [{
+                title: "One",
+                source: linkRefFrom(linked),
+              }],
+            });
+          },
+        }),
+      } as unknown as RuntimeClient;
+      const database = new CellHandle(runtime, ref);
+
+      const rows = await database.querySqlite<{
+        title: string;
+        source: CellHandle<unknown>;
+      }>("SELECT title, source FROM notes WHERE id = ?", [1]);
+
+      expect(requests).toEqual([{
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT title, source FROM notes WHERE id = ?",
+        params: {
+          kind: "positional",
+          values: [1],
+        },
+      }]);
+      expect(rows[0]?.title).toBe("One");
+      expect(rows[0]?.source).toBeInstanceOf(CellHandle);
+      expect(rows[0]?.source.ref()).toEqual(linked);
+    });
+
+    it("commits writes through the database cell", async () => {
+      const requests: unknown[] = [];
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: unknown) => {
+            requests.push(request);
+            return Promise.resolve({});
+          },
+        }),
+      } as unknown as RuntimeClient;
+      const database = new CellHandle(runtime, ref);
+
+      await database.execSqlite(
+        "INSERT INTO notes (title) VALUES (:title)",
+        { title: "New" },
+      );
+
+      expect(requests).toEqual([{
+        type: RequestType.SqliteExec,
+        cell: ref,
+        sql: "INSERT INTO notes (title) VALUES (:title)",
+        params: {
+          kind: "named",
+          entries: [["title", "New"]],
+        },
+      }]);
+    });
+
+    it("preserves BLOB values in query rows and bind parameters", async () => {
+      const requests: unknown[] = [];
+      const output = new FabricBytes(new Uint8Array([1, 2, 3]));
+      const input = new FabricBytes(new Uint8Array([4, 5, 6]));
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType }) => {
+            requests.push(
+              fabricFromRealmValue(
+                structuredClone(realmFromFabricValue(request as never)),
+              ),
+            );
+            return Promise.resolve(
+              request.type === RequestType.SqliteQuery
+                ? fabricFromRealmValue(
+                  structuredClone(realmFromFabricValue({
+                    rows: [{ payload: output }],
+                  })),
+                )
+                : {},
+            );
+          },
+        }),
+      } as unknown as RuntimeClient;
+      const database = new CellHandle(runtime, ref);
+
+      const rows = await database.querySqlite<{ payload: FabricBytes }>(
+        "SELECT payload FROM blobs",
+      );
+      await database.execSqlite(
+        "INSERT INTO blobs (payload) VALUES (?)",
+        [input],
+      );
+
+      expect(rows[0]?.payload).toBeInstanceOf(FabricBytes);
+      expect(rows[0]?.payload.slice()).toEqual(new Uint8Array([1, 2, 3]));
+      const request = requests[1] as {
+        params: { kind: "positional"; values: [unknown] };
+      };
+      const parameter = request.params.values[0];
+      expect(parameter).toBeInstanceOf(FabricBytes);
+      expect((parameter as FabricBytes).slice()).toEqual(
+        new Uint8Array([4, 5, 6]),
+      );
+    });
+
+    it("serializes linked and nested SQLite bind values", async () => {
+      const requests: unknown[] = [];
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: unknown) => {
+            requests.push(
+              fabricFromRealmValue(
+                structuredClone(realmFromFabricValue(request as never)),
+              ),
+            );
+            return Promise.resolve({});
+          },
+        }),
+      } as unknown as RuntimeClient;
+      const database = new CellHandle(runtime, ref);
+      const linkedRef = { ...ref, id: "of:linked" as CellRef["id"] };
+      const linked = new CellHandle(runtime, linkedRef);
+      const bytes = new FabricBytes(new Uint8Array([7, 8, 9]));
+
+      await database.execSqlite(
+        "SELECT :linked, :nested",
+        {
+          linked,
+          nested: { bytes, links: [linked] },
+        },
+      );
+
+      const params = Object.fromEntries(
+        (requests[0] as {
+          params: {
+            kind: "named";
+            entries: Array<[string, unknown]>;
+          };
+        }).params.entries,
+      );
+      expect(params.linked).toEqual(linkedRef);
+      const nested = params.nested as {
+        bytes: FabricBytes;
+        links: CellRef[];
+      };
+      expect(nested.bytes).toBeInstanceOf(FabricBytes);
+      expect(nested.bytes.slice()).toEqual(new Uint8Array([7, 8, 9]));
+      expect(nested.links).toEqual([linkedRef]);
+    });
+
+    it("rejects unsupported Fabric special objects in SQLite binds", async () => {
+      const runtime = {
+        [$conn]: () => ({ request: () => Promise.resolve({}) }),
+      } as unknown as RuntimeClient;
+      const database = new CellHandle(runtime, ref);
+
+      await expect(database.execSqlite(
+        "SELECT :nested",
+        { nested: { when: new FabricEpochNsec(1n) } },
+      )).rejects.toThrow(
+        "SQLite bind values support `FabricBytes` but not `FabricEpochNsec`.",
+      );
+    });
+  });
+
   describe("CellHandle CFC label IPC", () => {
     it("queries the runtime for the label view behind a cell", async () => {
       const cfcLabel = {
@@ -116,12 +324,10 @@ describe("cell-handle", () => {
       }]);
     });
 
-    // Inv-12 Stage 0: toJSON output is what JSON.stringify emits when a handle
-    // lands in CustomEvent.detail (drag/drop sourceCell) — a raw sigil link
-    // that re-enters the worker through the VDOM event path, bypassing
-    // getCell/cellRefToSigilLink. The ref's display view must not ride it
-    // (codex/cubic review on the Stage 0 PR); like toWireString, only
-    // addressing fields (+schema) serialize.
+    // Inv-12 Stage 0: the link a handle names itself by re-enters the worker
+    // without passing getCell/cellRefToSigilLink, so the ref's display view
+    // must not ride it (codex/cubic review on the Stage 0 PR). Like
+    // toWireString, only addressing fields (+schema) go.
     it("does not serialize the ref-carried label view into sigil links", () => {
       const runtime = {
         [$conn]: () => ({
@@ -154,6 +360,28 @@ describe("cell-handle", () => {
           },
         },
       });
+    });
+
+    it("names the same link whichever of the two names asks for it", () => {
+      // `toSigilLink()` is for a caller that has recognized the handle, and
+      // `toJSON()` for the protocol that reaches one without recognizing it.
+      // They are two names, not two answers.
+      const runtime = {
+        [$conn]: () => ({
+          request: () => Promise.resolve({}),
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, {
+        id: "of:two-names" as CellRef["id"],
+        space: "did:key:test" as CellRef["space"],
+        scope: "space",
+        path: ["value"],
+      } as CellRef);
+
+      expect(cell.toSigilLink()).toEqual(cell.toJSON());
+      expect(JSON.parse(JSON.stringify(cell))).toEqual(cell.toSigilLink());
     });
 
     it("encodes its link to an fcl1: wire string with only addressing fields", () => {
@@ -289,6 +517,24 @@ describe("cell-handle", () => {
       });
       expect(cellRefToKey(withPath(["."]))).not.toEqual(
         cellRefToKey(withPath(["", ""])),
+      );
+
+      // Operation ordering follows only the canonical address. Display schema
+      // and labels can differ between handles without splitting their queue.
+      const address = refFor("of:fid1:abc");
+      expect(cellRefToIdentityKey({
+        ...address,
+        schema: { type: "string" },
+      })).toEqual(cellRefToIdentityKey({
+        ...address,
+        schema: { type: "number" },
+        cfcLabelView: { version: 1, entries: [] },
+      }));
+      expect(cellRefToIdentityKey(address)).not.toEqual(
+        cellRefToIdentityKey({ ...address, scope: "user" }),
+      );
+      expect(cellRefToIdentityKey(withPath(["."]))).not.toEqual(
+        cellRefToIdentityKey(withPath(["", ""])),
       );
 
       // CellHandle.id() is the FULL schemed id — a true identity accessor.
@@ -763,6 +1009,12 @@ describe("cell-handle", () => {
       expect(spy.calls.length).toBe(0);
     });
 
+    it("rejects a strict send when the runtime refuses the event", async () => {
+      const cell = new CellHandle(runtimeWith(false), ref);
+
+      await expect(cell.sendStrict({ n: 1 })).rejects.toThrow("aborted");
+    });
+
     it("logs a set() failure while the connection is alive", async () => {
       const cell = new CellHandle(runtimeWith(false), ref);
       const spy = captureError();
@@ -784,9 +1036,560 @@ describe("cell-handle", () => {
       }
       expect(spy.calls.length).toBe(0);
     });
+
+    it("rejects a strict set when the runtime refuses the write", async () => {
+      const cell = new CellHandle(runtimeWith(false), ref, { n: 0 });
+      const updates: unknown[] = [];
+      const unsubscribe = cell.subscribe((value) => {
+        updates.push(value);
+      });
+      updates.length = 0;
+
+      await expect(cell.setStrict({ n: 1 })).rejects.toThrow("aborted");
+      expect(cell.get()).toEqual({ n: 0 });
+      expect(updates).toEqual([]);
+      unsubscribe();
+    });
+
+    it("keeps an earlier strict commit when a queued strict set fails", async () => {
+      let writes = 0;
+      const runtime = {
+        [$conn]: () => ({
+          request: () =>
+            ++writes === 1
+              ? Promise.resolve({})
+              : Promise.reject(new Error("aborted")),
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, ref, { n: 0 });
+
+      const first = cell.setStrict({ n: 1 });
+      const second = cell.setStrict({ n: 2 });
+
+      await first;
+      await expect(second).rejects.toThrow("aborted");
+      expect(cell.get()).toEqual({ n: 1 });
+    });
+
+    it("publishes the strict value captured at invocation", async () => {
+      const response = Promise.withResolvers<unknown>();
+      let request: { value?: unknown } | undefined;
+      const runtime = {
+        [$conn]: () => ({
+          request: (next: { value?: unknown }) => {
+            request = structuredClone(next);
+            return response.promise;
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, ref, { n: 0 });
+      const value = { n: 1 };
+
+      const writing = cell.setStrict(value);
+      value.n = 2;
+      response.resolve({});
+      await writing;
+
+      expect(request?.value).toEqual({ n: 1 });
+      expect(cell.get()).toEqual({ n: 1 });
+    });
+
+    it("preserves nested cell handles in snapshotted sets", async () => {
+      const requests: Array<{ value?: unknown }> = [];
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { value?: unknown }) => {
+            requests.push(request);
+            return Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const linked = new CellHandle(runtime, {
+        ...ref,
+        id: "of:linked" as CellRef["id"],
+      });
+      const cell = new CellHandle<{ linked: CellHandle }>(runtime, ref);
+
+      await cell.set({ linked });
+
+      expect(cell.get()?.linked).toBe(linked);
+      expect(requests[0].value).toEqual({ linked: linked.ref() });
+    });
+
+    it("marks strict writes as commit-confirmed requests", async () => {
+      const requests: unknown[] = [];
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: unknown) => {
+            requests.push(request);
+            return Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, ref, { n: 0 });
+      const updates: unknown[] = [];
+      const unsubscribe = cell.subscribe((value) => {
+        updates.push(value);
+      });
+      updates.length = 0;
+
+      await cell.setStrict({ n: 1 });
+      await cell.sendStrict({ n: 2 });
+
+      expect(requests).toEqual([{
+        type: RequestType.CellSet,
+        cell: ref,
+        value: { n: 1 },
+        awaitCommit: true,
+      }, {
+        type: RequestType.CellSend,
+        cell: ref,
+        event: { n: 2 },
+        awaitCommit: true,
+      }]);
+      expect(cell.get()).toEqual({ n: 1 });
+      expect(updates).toEqual([{ n: 1 }]);
+      unsubscribe();
+    });
+
+    it("preserves an equal authoritative update over a strict response", async () => {
+      const response = Promise.withResolvers<unknown>();
+      const runtime = {
+        [$conn]: () => ({
+          request: () => response.promise,
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, ref, { n: 1 });
+
+      const writing = cell.setStrict({ n: 2 });
+      cell[$onCellUpdate]({ n: 1 });
+      response.resolve({});
+      await writing;
+
+      expect(cell.get()).toEqual({ n: 1 });
+    });
+
+    it("waits for every queued strict write before a later read", async () => {
+      const requests: RequestType[] = [];
+      const firstWrite = Promise.withResolvers<void>();
+      let stored = { n: 0 };
+      let writes = 0;
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: {
+            type: RequestType;
+            value?: { n: number };
+          }) => {
+            requests.push(request.type);
+            if (request.type === RequestType.CellSet) {
+              writes++;
+              const commit = () => {
+                stored = request.value!;
+                return {};
+              };
+              return writes === 1
+                ? firstWrite.promise.then(commit)
+                : Promise.resolve(commit());
+            }
+            return Promise.resolve({ value: stored });
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, ref, { n: 0 });
+
+      const first = cell.setStrict({ n: 1 });
+      const second = cell.setStrict({ n: 2 });
+      const reading = cell.sync();
+      await Promise.resolve();
+      expect(requests).toEqual([RequestType.CellSet]);
+
+      firstWrite.resolve();
+      await expect(reading).resolves.toEqual({ n: 2 });
+      await Promise.all([first, second]);
+      expect(requests).toEqual([
+        RequestType.CellSet,
+        RequestType.CellSet,
+        RequestType.CellGet,
+      ]);
+    });
+
+    it("waits for every queued strict event before later operations", async () => {
+      const requests: RequestType[] = [];
+      const firstEvent = Promise.withResolvers<void>();
+      let events = 0;
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType }) => {
+            requests.push(request.type);
+            if (request.type === RequestType.CellSend && ++events === 1) {
+              return firstEvent.promise.then(() => ({}));
+            }
+            if (request.type === RequestType.CellGet) {
+              return Promise.resolve({ value: { n: 3 } });
+            }
+            return Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, ref, { n: 0 });
+
+      const first = cell.sendStrict({ n: 1 });
+      const second = cell.sendStrict({ n: 2 });
+      const setting = cell.set({ n: 3 });
+      const reading = cell.sync();
+      await Promise.resolve();
+      expect(requests).toEqual([RequestType.CellSend]);
+
+      firstEvent.resolve();
+      await Promise.all([first, second, setting, reading]);
+      expect(requests).toEqual([
+        RequestType.CellSend,
+        RequestType.CellSend,
+        RequestType.CellSet,
+        RequestType.CellGet,
+      ]);
+    });
+
+    it("publishes optimistic sets immediately while their requests stay queued", async () => {
+      const firstWrite = Promise.withResolvers<void>();
+      const requests: Array<{ type: RequestType; value?: { n: number } }> = [];
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: {
+            type: RequestType;
+            value?: { n: number };
+          }) => {
+            requests.push(request);
+            return requests.length === 1
+              ? firstWrite.promise.then(() => ({}))
+              : Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, ref, { n: 0 });
+      const updates: Array<{ n: number } | undefined> = [];
+      const cancel = cell.subscribe((value) => {
+        updates.push(value);
+      });
+      updates.length = 0;
+
+      const first = cell.set({ n: 1 });
+      const second = cell.set({ n: 2 });
+      const third = cell.set({ n: 3 });
+
+      expect(updates).toEqual([{ n: 1 }, { n: 2 }, { n: 3 }]);
+      expect(cell.get()).toEqual({ n: 3 });
+      expect(requests.map(({ type }) => type)).toEqual([
+        RequestType.CellSet,
+      ]);
+
+      firstWrite.resolve();
+      await Promise.all([first, second, third]);
+      expect(requests.map(({ value }) => value)).toEqual([
+        { n: 1 },
+        { n: 2 },
+        { n: 3 },
+      ]);
+      cancel();
+    });
+
+    it("keeps a later optimistic set over an earlier read response", async () => {
+      const readResponse = Promise.withResolvers<{
+        value: { n: number };
+      }>();
+      const requests: RequestType[] = [];
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType }) => {
+            requests.push(request.type);
+            return request.type === RequestType.CellGet
+              ? readResponse.promise
+              : Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, ref, { n: 0 });
+
+      const reading = cell.sync();
+      const setting = cell.set({ n: 2 });
+      expect(cell.get()).toEqual({ n: 2 });
+      expect(requests).toEqual([RequestType.CellGet]);
+
+      readResponse.resolve({ value: { n: 0 } });
+      await expect(reading).resolves.toEqual({ n: 0 });
+      await setting;
+      expect(requests).toEqual([
+        RequestType.CellGet,
+        RequestType.CellSet,
+      ]);
+      expect(cell.get()).toEqual({ n: 2 });
+    });
+
+    it("preserves authoritative updates over sync and pull responses", async () => {
+      const verify = async (operation: "sync" | "pull") => {
+        const response = Promise.withResolvers<{ value: { n: number } }>();
+        const runtime = {
+          [$conn]: () => ({
+            request: () => response.promise,
+            subscribe: () => Promise.resolve(),
+            unsubscribe: () => Promise.resolve(),
+            signal: { aborted: false },
+          }),
+        } as unknown as RuntimeClient;
+        const cell = new CellHandle(runtime, ref, { n: 0 });
+
+        const reading = cell[operation]();
+        cell[$onCellUpdate]({ n: 1 });
+        response.resolve({ value: { n: 0 } });
+
+        await expect(reading).resolves.toEqual({ n: 0 });
+        expect(cell.get()).toEqual({ n: 1 });
+      };
+
+      await verify("sync");
+      await verify("pull");
+    });
+
+    it("keeps a queued read ahead of a later strict write", async () => {
+      const firstWrite = Promise.withResolvers<void>();
+      const readResponse = Promise.withResolvers<void>();
+      const readStarted = Promise.withResolvers<void>();
+      const requests: RequestType[] = [];
+      let stored = { n: 0 };
+      let writes = 0;
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: {
+            type: RequestType;
+            value?: { n: number };
+          }) => {
+            requests.push(request.type);
+            if (request.type === RequestType.CellSet) {
+              const commit = () => {
+                stored = request.value!;
+                return {};
+              };
+              return ++writes === 1
+                ? firstWrite.promise.then(commit)
+                : Promise.resolve(commit());
+            }
+            const captured = stored;
+            readStarted.resolve();
+            return readResponse.promise.then(() => ({ value: captured }));
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, ref, stored);
+
+      const first = cell.setStrict({ n: 1 });
+      const reading = cell.sync();
+      const second = cell.setStrict({ n: 2 });
+      expect(requests).toEqual([RequestType.CellSet]);
+
+      firstWrite.resolve();
+      await readStarted.promise;
+      expect(requests).toEqual([
+        RequestType.CellSet,
+        RequestType.CellGet,
+      ]);
+
+      readResponse.resolve();
+      await Promise.all([first, reading, second]);
+      expect(requests).toEqual([
+        RequestType.CellSet,
+        RequestType.CellGet,
+        RequestType.CellSet,
+      ]);
+      expect(cell.get()).toEqual({ n: 2 });
+    });
+
+    it("shares operation order across equivalent handles", async () => {
+      const writeResponse = Promise.withResolvers<void>();
+      const requests: RequestType[] = [];
+      const connection = {
+        request: (request: { type: RequestType }) => {
+          requests.push(request.type);
+          return request.type === RequestType.CellSet
+            ? writeResponse.promise.then(() => ({}))
+            : Promise.resolve({ value: { n: 1 } });
+        },
+        subscribe: () => Promise.resolve(),
+        unsubscribe: () => Promise.resolve(),
+        signal: { aborted: false },
+      };
+      const runtime = {
+        [$conn]: () => connection,
+      } as unknown as RuntimeClient;
+      const first = new CellHandle(runtime, {
+        ...ref,
+        schema: { type: "object" },
+      }, { n: 0 });
+      const second = new CellHandle(runtime, {
+        ...ref,
+        schema: {
+          type: "object",
+          properties: { n: { type: "number" } },
+        },
+      }, { n: 0 });
+
+      const writing = first.setStrict({ n: 1 });
+      const reading = second.sync();
+      expect(requests).toEqual([RequestType.CellSet]);
+
+      writeResponse.resolve();
+      await Promise.all([writing, reading]);
+      expect(requests).toEqual([
+        RequestType.CellSet,
+        RequestType.CellGet,
+      ]);
+    });
+
+    it("waits for every queued strict write before later remote operations", async () => {
+      const requests: RequestType[] = [];
+      const firstWrite = Promise.withResolvers<void>();
+      let writes = 0;
+      const resolvedRef = {
+        ...ref,
+        id: "of:strict-resolved" as CellRef["id"],
+      };
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType }) => {
+            requests.push(request.type);
+            if (request.type === RequestType.CellSet) {
+              writes++;
+              return writes === 1
+                ? firstWrite.promise.then(() => ({}))
+                : Promise.resolve({});
+            }
+            switch (request.type) {
+              case RequestType.CellResolveAsCell:
+                return Promise.resolve({ cell: resolvedRef });
+              case RequestType.CellGetCfcLabel:
+                return Promise.resolve({ cfcLabel: undefined });
+              case RequestType.SqliteQuery:
+                return Promise.resolve({ rows: [] });
+              default:
+                return Promise.resolve({});
+            }
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, ref, { n: 0 });
+
+      const first = cell.setStrict({ n: 1 });
+      const second = cell.setStrict({ n: 2 });
+      const later = [
+        cell.set({ n: 3 }),
+        cell.send({ n: 4 }),
+        cell.resolveAsCell(),
+        cell.getCfcLabel(),
+        cell.querySqlite("SELECT 1"),
+        cell.execSqlite("DELETE FROM notes"),
+      ];
+      await Promise.resolve();
+      expect(requests).toEqual([RequestType.CellSet]);
+
+      firstWrite.resolve();
+      await Promise.all([first, second, ...later]);
+      expect(requests).toEqual([
+        RequestType.CellSet,
+        RequestType.CellSet,
+        RequestType.CellSet,
+        RequestType.CellSend,
+        RequestType.CellResolveAsCell,
+        RequestType.CellGetCfcLabel,
+        RequestType.SqliteQuery,
+        RequestType.SqliteExec,
+      ]);
+    });
+
+    it("snapshots queued event and SQLite arguments at invocation", async () => {
+      const firstWrite = Promise.withResolvers<void>();
+      const requests: Array<Record<string, unknown>> = [];
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: Record<string, unknown>) => {
+            requests.push(structuredClone(request));
+            if (request.type === RequestType.CellSet) {
+              return firstWrite.promise.then(() => ({}));
+            }
+            if (request.type === RequestType.SqliteQuery) {
+              return Promise.resolve({ rows: [] });
+            }
+            return Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, ref, { n: 0 });
+      const event = { n: 1 };
+      const queryParams = { payload: { n: 1 } };
+      const execParams = [{ n: 1 }];
+
+      const first = cell.setStrict({ n: 1 });
+      const sending = cell.send(event);
+      const querying = cell.querySqlite("SELECT :payload", queryParams);
+      const executing = cell.execSqlite("DELETE FROM notes WHERE value = ?", {
+        payload: execParams,
+      });
+      event.n = 2;
+      queryParams.payload.n = 2;
+      execParams[0].n = 2;
+
+      firstWrite.resolve();
+      await Promise.all([first, sending, querying, executing]);
+
+      expect(requests.find(({ type }) => type === RequestType.CellSend)?.event)
+        .toEqual({ n: 1 });
+      for (const type of [RequestType.SqliteQuery, RequestType.SqliteExec]) {
+        const params = requests.find((request) => request.type === type)
+          ?.params as {
+            entries: Array<[string, unknown]>;
+          };
+        expect(params.entries[0][1]).toEqual(
+          type === RequestType.SqliteQuery ? { n: 1 } : [{ n: 1 }],
+        );
+      }
+    });
   });
 
-  describe("CellHandle push (read-modify-write)", () => {
+  describe("CellHandle push", () => {
     const ref: CellRef = {
       id: "of:push-cell" as CellRef["id"],
       space: "did:key:test" as CellRef["space"],
@@ -807,7 +1610,7 @@ describe("cell-handle", () => {
         }),
       }) as unknown as RuntimeClient;
 
-    it("sends a CellPush carrying the appended array (not a blind CellSet)", () => {
+    it("sends a CellPush carrying only the appended members", () => {
       const requests: unknown[] = [];
       const cell = new CellHandle<number[]>(runtimeCapturing(requests), ref);
       // Seed the local cache so push has an array to read-modify-write.
@@ -816,11 +1619,27 @@ describe("cell-handle", () => {
       cell.push(3);
 
       expect(requests.length).toBe(1);
-      const request = requests[0] as { type: unknown; value: unknown };
-      // Routed as CellPush (compare-and-set) rather than the blind CellSet, and
-      // it carries the whole client-computed array.
+      const request = requests[0] as { type: unknown; values: unknown };
       expect(request.type).toBe(RequestType.CellPush);
-      expect(request.value).toEqual([1, 2, 3]);
+      expect(request.values).toEqual([3]);
+      expect(request).toMatchObject({ awaitCommit: true });
+      expect(cell.get()).toEqual([1, 2, 3]);
+    });
+
+    it("reports a refused strict push to capability callers", async () => {
+      const refused = new Error("push refused");
+      const runtime = {
+        [$conn]: () => ({
+          request: () => Promise.reject(refused),
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<number[]>(runtime, ref, [1]);
+
+      await expect(cell.pushStrict(2)).rejects.toBe(refused);
+      expect(cell.get()).toEqual([1]);
     });
 
     it("throws when the cell is not an array", () => {
@@ -829,6 +1648,605 @@ describe("cell-handle", () => {
       expect(() => cell.push(1)).toThrow(
         "push() can only be used on array cells",
       );
+    });
+
+    it("appends after queued strict writes", async () => {
+      const firstWrite = Promise.withResolvers<void>();
+      const requests: Array<{
+        type: RequestType;
+        value?: unknown;
+        values?: unknown[];
+      }> = [];
+      let writes = 0;
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType; value?: unknown }) => {
+            requests.push(request);
+            if (request.type === RequestType.CellSet && ++writes === 1) {
+              return firstWrite.promise.then(() => ({}));
+            }
+            return Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<number[]>(runtime, ref, [0]);
+
+      const first = cell.setStrict([1]);
+      const second = cell.setStrict([2]);
+      cell.push(3);
+      await Promise.resolve();
+      expect(requests.map(({ type }) => type)).toEqual([
+        RequestType.CellSet,
+      ]);
+
+      firstWrite.resolve();
+      await Promise.all([first, second]);
+      await Promise.resolve();
+      expect(requests.map(({ type }) => type)).toEqual([
+        RequestType.CellSet,
+        RequestType.CellSet,
+        RequestType.CellPush,
+      ]);
+      expect(requests.at(-1)?.values).toEqual([3]);
+    });
+
+    it("keeps strict replacements in the shared append queue", async () => {
+      const requests: RequestType[] = [];
+      let stored = [0];
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: {
+            type: RequestType;
+            value?: unknown;
+            values?: unknown[];
+          }) => {
+            requests.push(request.type);
+            if (request.type === RequestType.CellSet) {
+              stored = request.value as number[];
+            } else if (request.type === RequestType.CellPush) {
+              stored = [...stored, ...request.values as number[]];
+            }
+            return Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<number[]>(runtime, ref, [0]);
+      const published: Array<readonly number[] | undefined> = [];
+      cell.subscribe((value) => {
+        published.push(value);
+      });
+
+      cell.push(1);
+      const replacing = cell.setStrict([9]);
+      cell.push(2);
+      const drained = cell.sendStrict([]);
+      await Promise.all([replacing, drained]);
+
+      expect(requests).toEqual([
+        RequestType.CellPush,
+        RequestType.CellSet,
+        RequestType.CellPush,
+        RequestType.CellSend,
+      ]);
+      expect(stored).toEqual([9, 2]);
+      expect(cell.get()).toEqual([9, 2]);
+      expect(published.at(-1)).toEqual([9, 2]);
+    });
+
+    it("appends to a queued replacement from an equivalent handle", async () => {
+      const requests: Array<{
+        type: RequestType;
+        value?: unknown;
+        values?: unknown[];
+      }> = [];
+      let stored = [0];
+      const runtime = {
+        [$conn]: () => ({
+          request: (
+            request: {
+              type: RequestType;
+              value?: unknown;
+              values?: unknown[];
+            },
+          ) => {
+            requests.push(request);
+            if (request.type === RequestType.CellSet) {
+              stored = request.value as number[];
+              return Promise.resolve({});
+            }
+            if (request.type === RequestType.CellPush) {
+              stored = [...stored, ...request.values as number[]];
+              return Promise.resolve({});
+            }
+            return Promise.resolve({ value: stored });
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const first = new CellHandle<number[]>(runtime, ref, [0]);
+      const second = new CellHandle<number[]>(runtime, {
+        ...ref,
+        schema: { type: "array" },
+      }, [0]);
+
+      const replacing = first.setStrict([1]);
+      second.push(2);
+      await replacing;
+      await second.sync();
+
+      expect(requests.map(({ type }) => type)).toEqual([
+        RequestType.CellSet,
+        RequestType.CellPush,
+        RequestType.CellGet,
+      ]);
+      expect(stored).toEqual([1, 2]);
+      expect(second.get()).toEqual([1, 2]);
+    });
+
+    it("appends to a committed replacement from an equivalent handle", async () => {
+      const requests: Array<{
+        type: RequestType;
+        value?: unknown;
+        values?: unknown[];
+      }> = [];
+      let stored = [0];
+      const runtime = {
+        [$conn]: () => ({
+          request: (
+            request: {
+              type: RequestType;
+              value?: unknown;
+              values?: unknown[];
+            },
+          ) => {
+            requests.push(request);
+            if (request.type === RequestType.CellSet) {
+              stored = request.value as number[];
+              return Promise.resolve({});
+            }
+            if (request.type === RequestType.CellPush) {
+              stored = [...stored, ...request.values as number[]];
+              return Promise.resolve({});
+            }
+            return Promise.resolve({ value: stored });
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const first = new CellHandle<number[]>(runtime, ref, [0]);
+      const second = new CellHandle<number[]>(runtime, {
+        ...ref,
+        schema: { type: "array" },
+      }, [0]);
+
+      await first.setStrict([1]);
+      await Promise.resolve();
+      second.push(2);
+      await second.sync();
+
+      expect(stored).toEqual([1, 2]);
+      expect(second.get()).toEqual([1, 2]);
+    });
+
+    it("preserves an equivalent handle update across a strict response", async () => {
+      const strictResponse = Promise.withResolvers<void>();
+      let stored = [0];
+      const runtime = {
+        [$conn]: () => ({
+          request: (
+            request: {
+              type: RequestType;
+              value?: unknown;
+              values?: unknown[];
+            },
+          ) => {
+            if (request.type === RequestType.CellSet) {
+              stored = request.value as number[];
+              return strictResponse.promise.then(() => ({}));
+            }
+            if (request.type === RequestType.CellPush) {
+              stored = [...stored, ...request.values as number[]];
+            }
+            return Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const first = new CellHandle<number[]>(runtime, ref, [0]);
+      const second = new CellHandle<number[]>(runtime, {
+        ...ref,
+        schema: { type: "array" },
+      }, [0]);
+
+      const replacing = first.setStrict([9]);
+      stored = [7];
+      second[$onCellUpdate]([7]);
+      second.push(2);
+
+      strictResponse.resolve();
+      await replacing;
+      await second.sendStrict([]);
+
+      expect(stored).toEqual([7, 2]);
+      expect(first.get()).toEqual([0]);
+      expect(second.get()).toEqual([7, 2]);
+    });
+
+    it("does not append to a later optimistic replacement", async () => {
+      const firstWrite = Promise.withResolvers<void>();
+      const requests: Array<{
+        type: RequestType;
+        value?: unknown;
+        values?: unknown[];
+      }> = [];
+      let stored = [0];
+      let writes = 0;
+      const runtime = {
+        [$conn]: () => ({
+          request: (
+            request: {
+              type: RequestType;
+              value?: unknown;
+              values?: unknown[];
+            },
+          ) => {
+            requests.push(request);
+            if (
+              request.type === RequestType.CellSet ||
+              request.type === RequestType.CellPush
+            ) {
+              const commit = () => {
+                stored = request.type === RequestType.CellSet
+                  ? request.value as number[]
+                  : [...stored, ...request.values as number[]];
+                return {};
+              };
+              return ++writes === 1
+                ? firstWrite.promise.then(commit)
+                : Promise.resolve(commit());
+            }
+            return Promise.resolve({ value: stored });
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<number[]>(runtime, ref, [0]);
+
+      const replacing = cell.setStrict([1]);
+      cell.push(2);
+      const later = cell.set([3]);
+      expect(cell.get()).toEqual([3]);
+
+      firstWrite.resolve();
+      await Promise.all([replacing, later]);
+      await cell.sync();
+
+      expect(requests.map(({ type }) => type)).toEqual([
+        RequestType.CellSet,
+        RequestType.CellPush,
+        RequestType.CellSet,
+        RequestType.CellGet,
+      ]);
+      expect(requests[1].values).toEqual([2]);
+      expect(stored).toEqual([3]);
+    });
+
+    it("keeps a later mutation newer than a delayed append", async () => {
+      for (const strict of [false, true]) {
+        const firstEvent = Promise.withResolvers<void>();
+        let stored = [0];
+        const runtime = {
+          [$conn]: () => ({
+            request: (request: {
+              type: RequestType;
+              value?: unknown;
+              values?: unknown[];
+            }) => {
+              if (request.type === RequestType.CellSend) {
+                return firstEvent.promise.then(() => ({}));
+              }
+              if (request.type === RequestType.CellPush) {
+                stored = [...stored, ...request.values as number[]];
+              } else if (request.type === RequestType.CellSet) {
+                stored = request.value as number[];
+              }
+              return Promise.resolve({});
+            },
+            subscribe: () => Promise.resolve(),
+            unsubscribe: () => Promise.resolve(),
+            signal: { aborted: false },
+          }),
+        } as unknown as RuntimeClient;
+        const cell = new CellHandle<number[]>(runtime, ref, [0]);
+
+        const blocking = cell.sendStrict([]);
+        cell.push(1);
+        const replacing = strict ? cell.setStrict([9]) : cell.set([9]);
+        expect(cell.get()).toEqual(strict ? [0] : [9]);
+
+        firstEvent.resolve();
+        await Promise.all([blocking, replacing]);
+
+        expect(stored).toEqual([9]);
+        expect(cell.get()).toEqual([9]);
+      }
+    });
+
+    it("publishes a read invoked after a delayed append", async () => {
+      const firstEvent = Promise.withResolvers<void>();
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType }) => {
+            if (request.type === RequestType.CellSend) {
+              return firstEvent.promise.then(() => ({}));
+            }
+            if (request.type === RequestType.CellGet) {
+              return Promise.resolve({ value: [0, 8, 1] });
+            }
+            return Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<number[]>(runtime, ref, [0]);
+
+      const blocking = cell.sendStrict([]);
+      cell.push(1);
+      const reading = cell.sync();
+
+      firstEvent.resolve();
+      expect(await reading).toEqual([0, 8, 1]);
+      expect(cell.get()).toEqual([0, 8, 1]);
+      await blocking;
+    });
+
+    it("appends values captured at invocation", async () => {
+      const firstWrite = Promise.withResolvers<void>();
+      const requests: Array<{
+        type: RequestType;
+        value?: unknown;
+        values?: unknown[];
+      }> = [];
+      let stored: Array<{ n: number }> = [];
+      let writes = 0;
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: {
+            type: RequestType;
+            value?: unknown;
+            values?: unknown[];
+          }) => {
+            requests.push(structuredClone(request));
+            if (
+              request.type === RequestType.CellSet ||
+              request.type === RequestType.CellPush
+            ) {
+              const commit = () => {
+                stored = request.type === RequestType.CellSet
+                  ? request.value as Array<{ n: number }>
+                  : [
+                    ...stored,
+                    ...request.values as Array<{ n: number }>,
+                  ];
+                return {};
+              };
+              return ++writes === 1
+                ? firstWrite.promise.then(commit)
+                : Promise.resolve(commit());
+            }
+            return Promise.resolve({ value: stored });
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<Array<{ n: number }>>(runtime, ref, []);
+      const member = { n: 1 };
+
+      const replacing = cell.setStrict([]);
+      cell.push(member);
+      member.n = 2;
+
+      firstWrite.resolve();
+      await replacing;
+      await cell.sync();
+
+      expect(requests.find(({ type }) => type === RequestType.CellPush)?.values)
+        .toEqual([{ n: 1 }]);
+      expect(stored).toEqual([{ n: 1 }]);
+    });
+
+    it("captures the cached append base at invocation", async () => {
+      const firstEvent = Promise.withResolvers<void>();
+      const requests: Array<{
+        type: RequestType;
+        value?: unknown;
+        values?: unknown[];
+      }> = [];
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType; value?: unknown }) => {
+            requests.push(structuredClone(request));
+            return request.type === RequestType.CellSend
+              ? firstEvent.promise.then(() => ({}))
+              : Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<Array<{ n: number }>>(
+        runtime,
+        ref,
+        [{ n: 0 }],
+      );
+
+      const blocking = cell.sendStrict([]);
+      cell.push({ n: 2 });
+      cell.get()![0].n = 99;
+
+      firstEvent.resolve();
+      await blocking;
+      await Promise.resolve();
+
+      expect(requests.find(({ type }) => type === RequestType.CellPush)?.values)
+        .toEqual([{ n: 2 }]);
+      expect(cell.get()).toEqual([{ n: 0 }, { n: 2 }]);
+    });
+
+    it("reports a queued append whose committed value is not an array", async () => {
+      const firstWrite = Promise.withResolvers<void>();
+      const reported = Promise.withResolvers<unknown[]>();
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType }) =>
+            request.type === RequestType.CellSet
+              ? firstWrite.promise.then(() => ({}))
+              : Promise.resolve({}),
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<number[]>(runtime, ref, [0]);
+      const originalError = console.error;
+      console.error = (...args: unknown[]) => reported.resolve(args);
+
+      try {
+        const writing = cell.setStrict([1]);
+        cell.push(2);
+        cell[$onCellUpdate]("not an array" as unknown as number[]);
+        firstWrite.resolve();
+        await writing;
+
+        const [message, error] = await reported.promise;
+        expect(message).toBe("[CellHandle] Push failed:");
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toBe(
+          "push() can only be used on array cells",
+        );
+      } finally {
+        console.error = originalError;
+      }
+    });
+
+    it("reports a rejected append commit", async () => {
+      const failure = new Error("commit refused");
+      const reported = Promise.withResolvers<unknown[]>();
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType }) =>
+            request.type === RequestType.CellPush
+              ? Promise.reject(failure)
+              : Promise.resolve({}),
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<number[]>(runtime, ref, [0]);
+      const originalError = console.error;
+      console.error = (...args: unknown[]) => reported.resolve(args);
+
+      try {
+        cell.push(1);
+
+        const [message, error] = await reported.promise;
+        expect(message).toBe("[CellHandle] Push failed:");
+        expect(error).toBe(failure);
+        expect(cell.get()).toEqual([0]);
+      } finally {
+        console.error = originalError;
+      }
+    });
+
+    it("rolls back a refused append before a later append", async () => {
+      const failure = new Error("commit refused");
+      const reported = Promise.withResolvers<void>();
+      const secondCommit = Promise.withResolvers<void>();
+      let stored = [0];
+      let appends = 0;
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType; values?: unknown[] }) => {
+            if (request.type !== RequestType.CellPush) {
+              return Promise.resolve({});
+            }
+            if (++appends === 1) return Promise.reject(failure);
+            stored = [...stored, ...request.values as number[]];
+            secondCommit.resolve();
+            return Promise.resolve({});
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<number[]>(runtime, ref, [0]);
+      const originalError = console.error;
+      console.error = (...args: unknown[]) => {
+        if (args[0] === "[CellHandle] Push failed:") reported.resolve();
+      };
+
+      try {
+        cell.push(1);
+        cell.push(2);
+        await Promise.all([reported.promise, secondCommit.promise]);
+
+        expect(stored).toEqual([0, 2]);
+        expect(cell.get()).toEqual([0, 2]);
+      } finally {
+        console.error = originalError;
+      }
+    });
+
+    it("keeps a later read behind an in-flight append", async () => {
+      const appendResponse = Promise.withResolvers<void>();
+      const requests: RequestType[] = [];
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: { type: RequestType }) => {
+            requests.push(request.type);
+            if (request.type === RequestType.CellPush) {
+              return appendResponse.promise.then(() => ({}));
+            }
+            return Promise.resolve({ value: [0, 1] });
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<number[]>(runtime, ref, [0]);
+
+      cell.push(1);
+      const reading = cell.sync();
+      expect(requests).toEqual([RequestType.CellPush]);
+
+      appendResponse.resolve();
+      await reading;
+      expect(requests).toEqual([
+        RequestType.CellPush,
+        RequestType.CellGet,
+      ]);
     });
   });
 
@@ -1094,12 +2512,10 @@ describe("cell-handle", () => {
       expect(seen[1]).toBe(uncrossable);
     });
 
-    it("has already cached the appended array after a failed `push()`", () => {
-      // `push()` reaches the same `#applyLocalAndSend()`, so it makes the same
-      // trade -- over the array it computed, which is what a subscriber is
-      // left holding. It differs in how the caller hears about the failure:
-      // `push()` returns `void`, so the encode's throw arrives synchronously
-      // rather than as a rejection.
+    it("rolls back an appended array after a failed strict push", async () => {
+      // A push is optimistic while its mergeable write is in flight, but a
+      // refused or unencodable request restores the authoritative base. The
+      // strict form exposes that refusal to its caller.
       const cell = new CellHandle<unknown[]>(encodingRuntime(), ref);
       cell[$onCellUpdate]([1]);
       const seen: unknown[] = [];
@@ -1108,11 +2524,10 @@ describe("cell-handle", () => {
       });
 
       const uncrossable = Object.create(FabricBytes.prototype);
-      expect(() => cell.push(uncrossable)).toThrow(Error);
+      await expect(cell.pushStrict(uncrossable)).rejects.toThrow(Error);
 
-      expect(cell.get()).toEqual([1, uncrossable]);
-      expect(seen).toHaveLength(2);
-      expect(seen[1]).toEqual([1, uncrossable]);
+      expect(cell.get()).toEqual([1]);
+      expect(seen).toEqual([[1], [1, uncrossable], [1]]);
     });
   });
 
@@ -1153,16 +2568,16 @@ describe("cell-handle", () => {
     // only the path `set()` takes.
 
     it("carries one through `push()`", () => {
-      const requests: Array<{ value?: unknown }> = [];
+      const requests: Array<{ values?: unknown[] }> = [];
       const cell = new CellHandle<unknown[]>(runtimeCapturing(requests), ref);
       cell[$onCellUpdate]([1, 2]);
 
       cell.push(new FabricBytes(new Uint8Array([1])));
 
       expect(requests).toHaveLength(1);
-      const pushed = requests[0].value as unknown[];
-      expect(pushed[2]).toBeInstanceOf(FabricBytes);
-      expect((pushed[2] as FabricBytes).slice()).toEqual(new Uint8Array([1]));
+      const pushed = requests[0].values!;
+      expect(pushed[0]).toBeInstanceOf(FabricBytes);
+      expect((pushed[0] as FabricBytes).slice()).toEqual(new Uint8Array([1]));
     });
 
     it("carries one through `send()`", async () => {

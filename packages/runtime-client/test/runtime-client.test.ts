@@ -4,6 +4,7 @@ import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { Identity } from "@commonfabric/identity";
 import { RuntimeClient } from "@/runtime-client.ts";
 import {
+  type CellRef,
   NotificationType,
   RequestType,
   type UploadBlobRequest,
@@ -50,6 +51,52 @@ describe("RuntimeClient", () => {
         new (conn: never, options: unknown): RuntimeClient;
       })(conn, {});
       expect(client.signal).toBe(signal);
+    });
+  });
+
+  describe("cellInstanceId", () => {
+    const ref: CellRef = {
+      id: "of:fid1:instance" as CellRef["id"],
+      space: "did:key:instance-space" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+
+    function clientWith(identity?: Identity): RuntimeClient {
+      const conn = { on: () => {} } as unknown as never;
+      return new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, identity === undefined ? {} : { identity });
+    }
+
+    it("identifies space, user, and session instances at their scopes", async () => {
+      const identity = await Identity.fromPassphrase(
+        "runtime-client-cell-instance",
+      );
+      const first = clientWith(identity);
+      const second = clientWith(identity);
+
+      expect(first.cellInstanceId(ref)).toBe(second.cellInstanceId(ref));
+      expect(first.cellInstanceId({ ...ref, scope: "user" })).toBe(
+        second.cellInstanceId({ ...ref, scope: "user" }),
+      );
+      expect(first.cellInstanceId({ ...ref, scope: "session" })).toBe(
+        first.cellInstanceId({ ...ref, scope: "session" }),
+      );
+      expect(first.cellInstanceId({ ...ref, scope: "session" })).not.toBe(
+        second.cellInstanceId({ ...ref, scope: "session" }),
+      );
+    });
+
+    it("refuses a scoped instance without a runtime identity", () => {
+      const client = clientWith();
+      expect(() => client.cellInstanceId({ ...ref, scope: "user" })).toThrow(
+        "Cannot identify a user-scoped Cell without a runtime identity.",
+      );
+      expect(() => client.cellInstanceId({ ...ref, scope: "session" })).toThrow(
+        "Cannot identify a session-scoped Cell without a runtime identity.",
+      );
+      expect(client.cellInstanceId(ref)).toBeDefined();
     });
   });
 

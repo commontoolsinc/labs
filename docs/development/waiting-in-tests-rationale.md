@@ -521,7 +521,7 @@ out.
 ### Production reconnect backoff
 
 One loop that looks like a violation is a deliberate exception:
-`MemoryClient.reconnect()` in `packages/memory/v2/client.ts`. When the
+`MemoryClient.#reconnect()` in `packages/memory/v2/client.ts`. When the
 websocket to the memory server drops, the client loops — it re-runs the
 `hello` handshake, re-opens every mounted space's session, and, when an
 attempt fails, waits a short, growing delay before trying again. That

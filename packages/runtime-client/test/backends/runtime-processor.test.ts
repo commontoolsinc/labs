@@ -22,6 +22,7 @@ import {
   eventAttentionEntryKey,
   eventAttentionIndexKey,
   SERVER_EXECUTION_ATTENTION_DOC_ID,
+  type SqliteDbRef,
 } from "@commonfabric/memory/v2";
 import * as MemoryV2Client from "@commonfabric/memory/v2/client";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
@@ -30,12 +31,17 @@ import { PieceController, PiecesController } from "@commonfabric/piece/ops";
 import {
   type Cell,
   entityIdFrom,
+  popFrame,
+  pushFrame,
   Runtime,
   type RuntimeFetch,
   runtimePresets,
   RuntimeTelemetry,
 } from "@commonfabric/runner";
-import { atomsOutsideCeiling } from "@commonfabric/runner/cfc";
+import {
+  atomsOutsideCeiling,
+  cfcLabelViewForCell,
+} from "@commonfabric/runner/cfc";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { StorageManager as WorkerStorageManager } from "@commonfabric/runner/storage/cache";
 
@@ -61,6 +67,7 @@ import {
 import {
   assertFabricLoggerFlags,
   cellRefToSigilLink,
+  createCellRef,
   getCell,
   mapCellRefsToSigilLinks,
 } from "@/backends/utils.ts";
@@ -71,11 +78,15 @@ const cfcSigner = await Identity.fromPassphrase(
 const testSessionOpenAudience = "did:key:z6Mk-runtime-processor-test-audience";
 
 class SharedV2SessionFactory implements V2Storage.SessionFactory {
-  constructor(private readonly server: MemoryV2Server.Server) {}
+  readonly #server: MemoryV2Server.Server;
+
+  constructor(server: MemoryV2Server.Server) {
+    this.#server = server;
+  }
 
   async create(space: MemorySpace) {
     const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.server),
+      transport: MemoryV2Client.loopback(this.#server),
     });
     const session = await client.mount(
       space,
@@ -2118,6 +2129,50 @@ describe("runtime-processor", () => {
     });
   });
 
+  describe("RuntimeProcessor cell pull IPC", () => {
+    it("waits for producer commit durability before returning a cell value", async () => {
+      const ref: CellRef = {
+        id: "of:lazy-cell" as CellRef["id"],
+        space: "did:key:test" as CellRef["space"],
+        scope: "session",
+        path: [],
+      };
+      const calls: string[] = [];
+      let durable = false;
+      const processor = Object.assign(
+        Object.create(
+          RuntimeProcessor.prototype,
+        ),
+        {
+          runtime: {
+            getCellFromLink: () => ({
+              pull: () => {
+                calls.push("pull");
+                return Promise.resolve();
+              },
+              get: () => durable ? { ready: true } : undefined,
+            }),
+            scheduler: {
+              idleWithPendingCommits: () => {
+                calls.push("commits");
+                durable = true;
+                return Promise.resolve();
+              },
+            },
+          },
+        },
+      ) as RuntimeProcessor;
+
+      await expect(
+        processor.handleRequest({
+          type: RequestType.CellPull,
+          cell: ref,
+        }),
+      ).resolves.toEqual({ value: { ready: true } });
+      expect(calls).toEqual(["pull", "commits"]);
+    });
+  });
+
   describe("RuntimeProcessor CFC label IPC", () => {
     it('fails closed on the raw meta:"cfc" seam (inv-12 Stage 0 / SC-25)', () => {
       const ref: CellRef = {
@@ -2637,6 +2692,55 @@ describe("runtime-processor", () => {
       });
     });
 
+    it("describes a resolved SQLite cell as a SQLite capability", () => {
+      const sourceRef: CellRef = {
+        id: "of:sqlite-source" as CellRef["id"],
+        space: "did:key:test" as CellRef["space"],
+        scope: "space",
+        path: [],
+      };
+      const resolvedRef: CellRef = {
+        id: "of:sqlite-database" as CellRef["id"],
+        space: "did:key:test" as CellRef["space"],
+        scope: "space",
+        path: [],
+        schema: { type: "object", properties: {} },
+      };
+      const resolvedCell = {
+        getAsLink: () => ({ "/": { "link@1": resolvedRef } }),
+        getAsNormalizedFullLink: () => resolvedRef,
+        getRaw: () => ({
+          id: "fid1:sqlite-database",
+          tables: { notes: { type: "object" } },
+          scope: "space",
+        }),
+        runtime: {
+          readTx: () => ({
+            readOrThrow: () => ({ value: { id: "fid1:sqlite-database" } }),
+          }),
+        },
+      };
+      const processor = {
+        runtime: {
+          getCellFromLink: () => ({ resolveAsCell: () => resolvedCell }),
+        },
+      } as unknown as RuntimeProcessor;
+
+      const response = RuntimeProcessor.prototype.handleCellResolveAsCell.call(
+        processor,
+        { type: RequestType.CellResolveAsCell, cell: sourceRef },
+      );
+
+      expect(response.cell).toEqual({
+        ...resolvedRef,
+        schema: {
+          type: "object",
+          properties: {},
+          asCell: ["sqlite"],
+        },
+      });
+    });
+
     it("does not look up CFC labels from a result meta cell", () => {
       const resultRef: CellRef = {
         id: "of:cfc-label-result" as CellRef["id"],
@@ -3062,36 +3166,42 @@ describe("runtime-processor", () => {
       },
     };
 
-    const createProcessor = () => {
+    const createProcessor = (
+      commitResult: { ok?: object; error?: { message: string } } = { ok: {} },
+      commitFailure?: Error,
+    ) => {
+      const calls: Array<{
+        cell: unknown;
+        value: unknown;
+        options: { blind: boolean; supersedeKey?: string };
+      }> = [];
       let prepared = false;
       const tx = {
         commit: () => {
           expect(prepared).toBe(true);
-          return Promise.resolve({ ok: {} });
+          if (commitFailure) return Promise.reject(commitFailure);
+          return Promise.resolve(commitResult);
         },
       };
       const cellWithTx = {
-        set: (value: unknown) => {
-          expect(value).toBe("new value");
+        push: (...values: unknown[]) => {
+          expect(values).toEqual(["new value"]);
         },
         send: (value: unknown) => {
           expect(value).toBe("new value");
         },
-        // A blind `set` resolves the write target to thread its parent as the
-        // structural precondition (see applyCellWrite).
-        resolveAsCell: () => ({
-          getAsNormalizedFullLink: () => ({
-            id: ref.id,
-            space: ref.space,
-            scope: ref.scope,
-            path: ref.path,
-          }),
-        }),
+      };
+      const resolvedCell = {
+        marker: "resolved-cell",
+        withTx: (candidateTx: unknown) => {
+          expect(candidateTx).toBe(tx);
+          return cellWithTx;
+        },
       };
       return {
-        processor: {
-          // handleCellSet/handleCellPush delegate to the shared applyCellWrite.
-          applyCellWrite: RuntimeProcessor.prototype.applyCellWrite,
+        calls,
+        resolvedCell,
+        processor: Object.assign(Object.create(RuntimeProcessor.prototype), {
           runtime: {
             edit: () => tx,
             prepareTxForCommit: (candidate: unknown) => {
@@ -3100,35 +3210,53 @@ describe("runtime-processor", () => {
             },
             getCellFromLink: (candidate: unknown) => {
               expect(candidate).toBe(ref);
-              return {
-                withTx: (candidateTx: unknown) => {
-                  expect(candidateTx).toBe(tx);
-                  return cellWithTx;
-                },
-              };
+              return resolvedCell;
+            },
+            commitUiCellWrite: (
+              cell: unknown,
+              value: unknown,
+              options: { blind: boolean; supersedeKey?: string },
+            ) => {
+              calls.push({ cell, value, options });
+              if (commitFailure) return Promise.reject(commitFailure);
+              return Promise.resolve(commitResult);
             },
           },
-        } as unknown as RuntimeProcessor,
+        }) as RuntimeProcessor,
       };
     };
 
-    it("prepares cell set transactions before committing", async () => {
-      const { processor } = createProcessor();
+    it("routes a cell set through the blind supersede lane", () => {
+      const { processor, calls, resolvedCell } = createProcessor();
 
-      await RuntimeProcessor.prototype.handleCellSet.call(processor, {
+      RuntimeProcessor.prototype.handleCellSet.call(processor, {
         type: RequestType.CellSet,
         cell: ref,
         value: "new value",
       });
+
+      expect(calls).toEqual([{
+        cell: resolvedCell,
+        value: "new value",
+        options: {
+          blind: true,
+          supersedeKey: JSON.stringify([
+            ref.space,
+            ref.id,
+            ref.scope,
+            ref.path,
+          ]),
+        },
+      }]);
     });
 
-    it("prepares cell push transactions before committing (non-blind path)", async () => {
+    it("prepares mergeable cell append transactions before committing", async () => {
       const { processor } = createProcessor();
 
       await RuntimeProcessor.prototype.handleCellPush.call(processor, {
         type: RequestType.CellPush,
         cell: ref,
-        value: "new value",
+        values: ["new value"],
       });
     });
 
@@ -3140,6 +3268,199 @@ describe("runtime-processor", () => {
         cell: ref,
         event: "new value",
       });
+    });
+
+    it("observes rejected fire-and-forget cell commits", async () => {
+      const calls: unknown[][] = [];
+      const original = console.error;
+      console.error = (...args: unknown[]) => calls.push(args);
+      try {
+        const set = createProcessor(
+          { ok: {} },
+          new Error("set commit rejected"),
+        );
+        const push = createProcessor(
+          { ok: {} },
+          new Error("push commit rejected"),
+        );
+        const send = createProcessor(
+          { ok: {} },
+          new Error("send commit rejected"),
+        );
+
+        RuntimeProcessor.prototype.handleCellSet.call(set.processor, {
+          type: RequestType.CellSet,
+          cell: ref,
+          value: "new value",
+        });
+        RuntimeProcessor.prototype.handleCellPush.call(push.processor, {
+          type: RequestType.CellPush,
+          cell: ref,
+          values: ["new value"],
+        });
+        RuntimeProcessor.prototype.handleCellSend.call(send.processor, {
+          type: RequestType.CellSend,
+          cell: ref,
+          event: "new value",
+        });
+        await Promise.resolve();
+
+        expect(calls.map(([message]) => message)).toEqual([
+          "[RuntimeProcessor] Cell set commit failed:",
+          "[RuntimeProcessor] Cell push commit failed:",
+          "[RuntimeProcessor] Cell send commit failed:",
+        ]);
+      } finally {
+        console.error = original;
+      }
+    });
+
+    it("observes resolved fire-and-forget cell commit refusals", async () => {
+      const calls: unknown[][] = [];
+      const original = console.error;
+      console.error = (...args: unknown[]) => calls.push(args);
+      try {
+        const set = createProcessor({ error: { message: "set refused" } });
+        const push = createProcessor({ error: { message: "push refused" } });
+        const send = createProcessor({ error: { message: "send refused" } });
+
+        RuntimeProcessor.prototype.handleCellSet.call(set.processor, {
+          type: RequestType.CellSet,
+          cell: ref,
+          value: "new value",
+        });
+        RuntimeProcessor.prototype.handleCellPush.call(push.processor, {
+          type: RequestType.CellPush,
+          cell: ref,
+          values: ["new value"],
+        });
+        RuntimeProcessor.prototype.handleCellSend.call(send.processor, {
+          type: RequestType.CellSend,
+          cell: ref,
+          event: "new value",
+        });
+        await Promise.resolve();
+
+        expect(calls.map(([message]) => message)).toEqual([
+          "[RuntimeProcessor] Cell push commit failed:",
+          "[RuntimeProcessor] Cell send commit failed:",
+        ]);
+      } finally {
+        console.error = original;
+      }
+    });
+
+    it("returns a strict set commit refusal to the caller", async () => {
+      const { processor } = createProcessor({
+        error: { message: "set refused" },
+      });
+
+      await expect(RuntimeProcessor.prototype.handleCellSet.call(processor, {
+        type: RequestType.CellSet,
+        cell: ref,
+        value: "new value",
+        awaitCommit: true,
+      })).rejects.toThrow("set refused");
+    });
+
+    it("returns a confirmed append commit refusal to the caller", async () => {
+      const { processor } = createProcessor({
+        error: { message: "push refused" },
+      });
+
+      await expect(
+        RuntimeProcessor.prototype.handleCellPush.call(processor, {
+          type: RequestType.CellPush,
+          cell: ref,
+          values: ["new value"],
+          awaitCommit: true,
+        }),
+      ).rejects.toThrow("push refused");
+    });
+
+    it("returns a strict send commit refusal to the caller", async () => {
+      const { processor } = createProcessor({
+        error: { message: "send refused" },
+      });
+
+      await expect(RuntimeProcessor.prototype.handleCellSend.call(processor, {
+        type: RequestType.CellSend,
+        cell: ref,
+        event: "new value",
+        awaitCommit: true,
+      })).rejects.toThrow("send refused");
+    });
+  });
+
+  describe("direct cell appends", () => {
+    it("keeps object members distinct across independent callers", async () => {
+      const signer = await Identity.fromPassphrase(
+        `direct-cell-push-${crypto.randomUUID()}`,
+      );
+      const space = signer.did();
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("http://localhost/"),
+        storageManager,
+      });
+      try {
+        const schema = {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              optionId: { type: "string" },
+            },
+            required: ["optionId"],
+          },
+          default: [],
+        } as const;
+        const cell = runtime.getCell<Array<{ optionId: string }>>(
+          space,
+          `direct-cell-push-${crypto.randomUUID()}`,
+          schema,
+        );
+        await cell.sync();
+        const seed = runtime.edit();
+        cell.withTx(seed).set([]);
+        expect((await seed.commit()).error).toBeUndefined();
+
+        const processor = Object.assign(
+          Object.create(RuntimeProcessor.prototype),
+          { runtime },
+        ) as RuntimeProcessor;
+        const append = async (value: { optionId: string }) => {
+          const callerFrame = pushFrame({
+            runtime,
+            generatedIdCounter: 0,
+          });
+          try {
+            await processor.handleCellPush({
+              type: RequestType.CellPush,
+              cell: createCellRef(cell),
+              values: [value],
+              awaitCommit: true,
+            });
+          } finally {
+            popFrame(callerFrame);
+          }
+        };
+
+        await append({ optionId: "library" });
+        await append({ optionId: "studio" });
+        await cell.pull();
+
+        expect(cell.get()).toEqual([
+          { optionId: "library" },
+          { optionId: "studio" },
+        ]);
+        const first = cell.key(0).resolveAsCell().getAsNormalizedFullLink();
+        const second = cell.key(1).resolveAsCell().getAsNormalizedFullLink();
+        expect(first.id).not.toBe(second.id);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
     });
   });
 
@@ -4605,6 +4926,636 @@ describe("runtime-processor", () => {
         processorOver({ "cf:module/abc": undefined }),
       );
       expect(patterns).toEqual([]);
+    });
+  });
+
+  describe("RuntimeProcessor SQLite IPC", () => {
+    const ref: CellRef = {
+      id: "of:database" as CellRef["id"],
+      space: "did:key:test" as CellRef["space"],
+      scope: "space",
+      path: [],
+    };
+
+    const processorWith = (
+      db: Record<string, unknown>,
+      sqliteQuery: (...args: unknown[]) => Promise<unknown>,
+    ) => {
+      let pulled = false;
+      const cell = {
+        pull: () => {
+          pulled = true;
+          return Promise.resolve(db);
+        },
+        getRaw: () => pulled ? db : undefined,
+        asSchema: () => ({ get: () => db }),
+      };
+      const runtime = {
+        getCellFromLink: () => cell,
+        storageManager: { open: () => ({ sqliteQuery }) },
+      };
+      return Object.assign(Object.create(RuntimeProcessor.prototype), {
+        runtime,
+      }) as RuntimeProcessor;
+    };
+
+    it("queries an unlabeled database through its storage provider", async () => {
+      const calls: unknown[][] = [];
+      const processor = processorWith(
+        { id: "db-1", tables: { notes: {} }, scope: "user" },
+        (...args) => {
+          calls.push(args);
+          return Promise.resolve({ rows: [{ title: "One" }] });
+        },
+      );
+
+      await expect(processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT title FROM notes WHERE id = ?",
+        params: {
+          kind: "positional",
+          values: [1],
+        },
+      })).resolves.toEqual({
+        rows: [{ title: "One" }],
+      });
+      expect(calls).toEqual([[
+        { id: "db-1", tables: { notes: {} }, scope: "user" },
+        "SELECT title FROM notes WHERE id = ?",
+        [1],
+      ]]);
+    });
+
+    it("waits for a scoped database factory commit before loading its handle", async () => {
+      const calls: string[] = [];
+      const db = { id: "db-1", tables: { notes: {} }, scope: "user" };
+      let committed = false;
+      let loaded = false;
+      const cell = {
+        pull: () => {
+          calls.push("pull");
+          return Promise.resolve();
+        },
+        sync: () => {
+          calls.push("sync");
+          loaded = committed;
+          return Promise.resolve(loaded ? db : undefined);
+        },
+        getRaw: () => loaded ? db : {},
+        asSchema: () => ({ get: () => loaded ? db : undefined }),
+      };
+      const processor = Object.assign(
+        Object.create(RuntimeProcessor.prototype),
+        {
+          runtime: {
+            getCellFromLink: () => cell,
+            scheduler: {
+              idleWithPendingCommits: () => {
+                calls.push("commits");
+                committed = true;
+                return Promise.resolve();
+              },
+            },
+            storageManager: {
+              open: () => ({
+                sqliteQuery: () => {
+                  calls.push("query");
+                  return Promise.resolve({ rows: [] });
+                },
+              }),
+            },
+          },
+        },
+      ) as RuntimeProcessor;
+
+      await processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT * FROM notes",
+      });
+
+      expect(calls).toEqual(["pull", "commits", "sync", "query"]);
+    });
+
+    it("keeps SQLite BLOB parameters encoded across the storage boundary", async () => {
+      const calls: unknown[][] = [];
+      const processor = processorWith(
+        { id: "db-1", tables: { blobs: {} } },
+        (...args) => {
+          calls.push(args);
+          return Promise.resolve({
+            rows: [{
+              payload: new FabricBytes(new Uint8Array([1, 2, 3])),
+            }],
+          });
+        },
+      );
+      const input = new FabricBytes(new Uint8Array([4, 5, 6]));
+
+      const result = await processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT payload FROM blobs WHERE payload = ?",
+        params: {
+          kind: "positional",
+          values: [input],
+        },
+      });
+
+      const output = result.rows[0]!.payload;
+      expect(output).toBeInstanceOf(FabricBytes);
+      expect((output as FabricBytes).slice()).toEqual(
+        new Uint8Array([1, 2, 3]),
+      );
+      const parameter = (calls[0]?.[2] as unknown[])[0];
+      expect(parameter).toBeInstanceOf(FabricBytes);
+      expect((parameter as FabricBytes).slice()).toEqual(
+        new Uint8Array([4, 5, 6]),
+      );
+    });
+
+    it("lowers linked and nested SQLite bind values for storage", async () => {
+      const calls: unknown[][] = [];
+      const created = createRuntime();
+      try {
+        const linkedCell = created.runtime.getCell(
+          cfcSigner.did(),
+          `sqlite-linked-${crypto.randomUUID()}`,
+        );
+        const linked = createCellRef(linkedCell);
+        const db = { id: "db-1", tables: { notes: {} } };
+        let pulled = false;
+        const source = {
+          pull: () => {
+            pulled = true;
+            return Promise.resolve(db);
+          },
+          getRaw: () => pulled ? db : undefined,
+          asSchema: () => ({ get: () => db }),
+        };
+        const runtime = {
+          getCellFromLink: (cellRef: CellRef) =>
+            cellRef.id === ref.id
+              ? source
+              : created.runtime.getCellFromLink(cellRef),
+          storageManager: {
+            open: () => ({
+              sqliteQuery: (...args: unknown[]) => {
+                calls.push(args);
+                return Promise.resolve({ rows: [] });
+              },
+            }),
+          },
+        };
+        const processor = Object.assign(
+          Object.create(RuntimeProcessor.prototype),
+          { runtime },
+        ) as RuntimeProcessor;
+        const bytes = new FabricBytes(new Uint8Array([7, 8, 9]));
+
+        await processor.handleSqliteQuery({
+          type: RequestType.SqliteQuery,
+          cell: ref,
+          sql: "SELECT :linked_cf_link, :nested",
+          params: {
+            kind: "named",
+            entries: [
+              ["linked_cf_link", linked],
+              [
+                "nested",
+                {
+                  bytes,
+                  links: [linked],
+                },
+              ],
+            ],
+          },
+        });
+
+        const params = calls[0]?.[2] as Record<string, unknown>;
+        const nested = params.nested as {
+          bytes: FabricBytes;
+          links: unknown[];
+        };
+        expect(JSON.parse(params.linked_cf_link as string)).toEqual(
+          nested.links[0],
+        );
+        expect(nested.bytes).toBeInstanceOf(FabricBytes);
+        expect(nested.bytes.slice()).toEqual(new Uint8Array([7, 8, 9]));
+      } finally {
+        await created.runtime.dispose();
+        await created.storageManager.close();
+      }
+    });
+
+    it("preserves reserved SQLite column names in query rows", async () => {
+      const row = Object.fromEntries([
+        ["constructor", "constructor-value"],
+        ["__proto__", "proto-value"],
+      ]);
+      const processor = processorWith(
+        { id: "db-1", tables: { notes: {} } },
+        () => Promise.resolve({ rows: [row] }),
+      );
+
+      const result = await processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: 'SELECT 1 AS "constructor", 2 AS "__proto__"',
+      });
+
+      expect(Object.hasOwn(result.rows[0]!, "constructor")).toBe(true);
+      expect(Object.hasOwn(result.rows[0]!, "__proto__")).toBe(true);
+      const resultRow = result.rows[0]!;
+      const constructorValue = Object.getOwnPropertyDescriptor(
+        resultRow,
+        "constructor",
+      )!.value;
+      const prototypeValue = Object.getOwnPropertyDescriptor(
+        resultRow,
+        "__proto__",
+      )!.value;
+      expect(constructorValue).toBe("constructor-value");
+      expect(prototypeValue).toBe("proto-value");
+    });
+
+    it("refuses a direct query whose result needs CFC provenance", async () => {
+      let queried = false;
+      const processor = processorWith({
+        id: "db-1",
+        tables: {
+          notes: {
+            properties: {
+              secret: { ifc: { confidentiality: ["private"] } },
+            },
+          },
+        },
+      }, () => {
+        queried = true;
+        return Promise.resolve({ rows: [] });
+      });
+
+      await expect(processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT secret FROM notes",
+      })).rejects.toThrow("query them inside a pattern");
+      expect(queried).toBe(false);
+    });
+
+    it("rejects queries when the storage provider has no SQLite support", async () => {
+      const processor = processorWith(
+        { id: "db-1", tables: { notes: {} } },
+        () => Promise.resolve({ rows: [] }),
+      );
+      (processor as unknown as {
+        runtime: { storageManager: { open(): object } };
+      }).runtime.storageManager.open = () => ({});
+
+      await expect(processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT 1",
+      })).rejects.toThrow("sqliteQuery unavailable");
+    });
+
+    it("rejects queries through a cell without a database reference", async () => {
+      const processor = processorWith(
+        { tables: { notes: {} } },
+        () => Promise.resolve({ rows: [] }),
+      );
+
+      await expect(processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT 1",
+      })).rejects.toThrow("valid SqliteDb cell handle");
+    });
+
+    it("rejects a database reference with an unknown scope", async () => {
+      const db = { id: "db-1", tables: { notes: {} }, scope: "tenant" };
+      const processor = processorWith(
+        db,
+        () => Promise.resolve({ rows: [] }),
+      );
+
+      await expect(processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT 1",
+      })).rejects.toThrow("Invalid SQLite database scope: tenant");
+
+      let edited = false;
+      const cell = {
+        pull: () => Promise.resolve(db),
+        getRaw: () => db,
+        asSchema: () => ({ get: () => db }),
+      };
+      const execProcessor = Object.assign(
+        Object.create(RuntimeProcessor.prototype),
+        {
+          runtime: {
+            getCellFromLink: () => cell,
+            editWithRetry: () => {
+              edited = true;
+              return Promise.resolve({ ok: undefined });
+            },
+          },
+        },
+      ) as RuntimeProcessor;
+      await expect(execProcessor.handleSqliteExec({
+        type: RequestType.SqliteExec,
+        cell: ref,
+        sql: "DELETE FROM notes",
+      })).rejects.toThrow("Invalid SQLite database scope: tenant");
+      expect(edited).toBe(false);
+    });
+
+    it("rejects a database reference with a non-string owner", async () => {
+      const processor = processorWith(
+        { id: "db-1", tables: { notes: {} }, owner: { id: "not-a-did" } },
+        () => Promise.resolve({ rows: [] }),
+      );
+
+      await expect(processor.handleSqliteQuery({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT 1",
+      })).rejects.toThrow("Invalid SQLite database owner");
+    });
+
+    it("commits writes through the database cell's transactional exec", async () => {
+      const calls: unknown[][] = [];
+      const db = { id: "db-1", tables: { notes: {} } };
+      const cell = {
+        pull: () => {
+          calls.push(["pull"]);
+          return Promise.resolve(db);
+        },
+        getRaw: () => db,
+        asSchema: () => ({ get: () => db }),
+        withTx: (tx: unknown) => ({
+          getRaw: () => db,
+          exec: (sql: string, params: unknown) => calls.push([tx, sql, params]),
+        }),
+      };
+      const tx = { id: "transaction" };
+      const runtime = {
+        getCellFromLink: () => cell,
+        editWithRetry: (edit: (tx: unknown) => void) => {
+          edit(tx);
+          return Promise.resolve({ ok: undefined });
+        },
+      };
+      const processor = Object.assign(
+        Object.create(RuntimeProcessor.prototype),
+        { runtime },
+      ) as RuntimeProcessor;
+
+      await processor.handleSqliteExec({
+        type: RequestType.SqliteExec,
+        cell: ref,
+        sql: "INSERT INTO notes (title) VALUES (:title)",
+        params: {
+          kind: "named",
+          entries: [["title", "New"]],
+        },
+      });
+
+      expect(calls).toEqual([[
+        "pull",
+      ], [
+        tx,
+        "INSERT INTO notes (title) VALUES (:title)",
+        { title: "New" },
+      ]]);
+    });
+
+    it("uses durable labels for Cells bound to direct SQLite writes", async () => {
+      const signer = await Identity.fromPassphrase(
+        `sqlite-durable-label-${crypto.randomUUID()}`,
+      );
+      const space = signer.did();
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("http://localhost/"),
+        storageManager,
+        experimental: { serverExecution: true },
+      });
+
+      try {
+        const secret = runtime.getCell(
+          space,
+          "sqlite-durable-secret",
+          { type: "string", ifc: { confidentiality: ["secret"] } },
+        );
+        await secret.sync();
+        {
+          const tx = runtime.edit();
+          secret.withTx(tx).set("classified");
+          runtime.prepareTxForCommit(tx);
+          expect((await tx.commit()).error).toBeUndefined();
+        }
+
+        const dbRef: SqliteDbRef = {
+          id: `of:sqlite-durable-label-${crypto.randomUUID()}`,
+          tables: {
+            documents: {
+              type: "object",
+              properties: {
+                id: {
+                  type: "integer",
+                  sqlType: "integer primary key",
+                },
+                target_cf_link: {
+                  type: "string",
+                  sqlType: "text",
+                  ifc: { maxConfidentiality: [] },
+                },
+              },
+              required: [],
+            },
+          },
+        };
+        const database = runtime.getCell(space, "sqlite-durable-db");
+        await database.sync();
+        {
+          const tx = runtime.edit();
+          database.withTx(tx).set(dbRef);
+          expect((await tx.commit()).error).toBeUndefined();
+        }
+        await storageManager.synced();
+
+        const processor = Object.assign(
+          Object.create(RuntimeProcessor.prototype),
+          { runtime },
+        ) as RuntimeProcessor;
+        const exec = (id: number) =>
+          processor.handleSqliteExec({
+            type: RequestType.SqliteExec,
+            cell: createCellRef(database),
+            sql: "INSERT INTO documents (id, target_cf_link) VALUES (?, ?)",
+            params: {
+              kind: "positional",
+              values: [
+                id,
+                createCellRef(secret),
+              ],
+            },
+          });
+
+        await expect(exec(1)).rejects.toThrow("exceeds its maxConfidentiality");
+
+        const replica = storageManager.open(space).replica;
+        const link = secret.getAsNormalizedFullLink();
+        const durableDocument = replica.getDocument(link.id, link.scope);
+        expect(durableDocument).toBeDefined();
+        const verdict = Promise.withResolvers<{
+          withdrawn: { message: string };
+        }>();
+        const sealed = replica.sealNative!(
+          {
+            operations: [{
+              op: "set",
+              id: link.id,
+              type: "application/json",
+              value: {
+                ...(durableDocument as Record<string, unknown>),
+                cfc: { version: 1, labelMap: { version: 1, entries: [] } },
+              } as never,
+            }],
+          },
+          undefined,
+          verdict.promise,
+          { speculative: true },
+        );
+        try {
+          expect(cfcLabelViewForCell(secret)).toBeUndefined();
+          await expect(exec(2)).rejects.toThrow(
+            "exceeds its maxConfidentiality",
+          );
+          const rows = await storageManager.open(space).sqliteQuery!(
+            dbRef,
+            "SELECT id FROM documents ORDER BY id",
+          );
+          expect(rows.rows).toEqual([]);
+        } finally {
+          verdict.resolve({ withdrawn: { message: "test complete" } });
+          await sealed.settled;
+        }
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("materializes a scoped database handle in the same direct transaction as its first write", async () => {
+      const calls: unknown[][] = [];
+      const db = {
+        id: "db-user",
+        tables: { notes: {} },
+        scope: "user" as const,
+        owner: "did:key:alice",
+      };
+      const cell = {
+        pull: () => Promise.resolve(db),
+        getRaw: () => db,
+        asSchema: () => ({ get: () => db }),
+        withTx: (tx: unknown) => ({
+          getRaw: () => undefined,
+          asSchema: () => ({
+            set: (value: unknown) => calls.push([tx, "set", value]),
+          }),
+          exec: (sql: string, params: unknown) =>
+            calls.push([
+              tx,
+              "exec",
+              sql,
+              params,
+            ]),
+        }),
+      };
+      const tx = { id: "transaction" };
+      const processor = Object.assign(
+        Object.create(RuntimeProcessor.prototype),
+        {
+          runtime: {
+            getCellFromLink: () => cell,
+            editWithRetry: (edit: (tx: unknown) => void) => {
+              edit(tx);
+              return Promise.resolve({ ok: undefined });
+            },
+          },
+        },
+      ) as RuntimeProcessor;
+
+      await processor.handleSqliteExec({
+        type: RequestType.SqliteExec,
+        cell: ref,
+        sql: "INSERT INTO notes (title) VALUES (?)",
+        params: {
+          kind: "positional",
+          values: ["First"],
+        },
+      });
+
+      expect(calls).toEqual([
+        [tx, "set", db],
+        [
+          tx,
+          "exec",
+          "INSERT INTO notes (title) VALUES (?)",
+          ["First"],
+        ],
+      ]);
+    });
+
+    it("reports a transactional SQLite write failure", async () => {
+      const db = { id: "db-1", tables: { notes: {} } };
+      const cell = {
+        pull: () => Promise.resolve(db),
+        getRaw: () => db,
+        asSchema: () => ({ get: () => db }),
+        withTx: () => ({ getRaw: () => db, exec: () => {} }),
+      };
+      const processor = Object.assign(
+        Object.create(RuntimeProcessor.prototype),
+        {
+          runtime: {
+            getCellFromLink: () => cell,
+            editWithRetry: () =>
+              Promise.resolve({ error: { message: "write refused" } }),
+          },
+        },
+      ) as RuntimeProcessor;
+
+      await expect(processor.handleSqliteExec({
+        type: RequestType.SqliteExec,
+        cell: ref,
+        sql: "DELETE FROM notes",
+      })).rejects.toThrow("write refused");
+    });
+
+    it("routes SQLite requests through the processor dispatch", async () => {
+      const processor = Object.assign(
+        Object.create(RuntimeProcessor.prototype),
+        {
+          handleSqliteQuery: () => Promise.resolve({ rows: [{ value: 1 }] }),
+          handleSqliteExec: () => Promise.resolve(),
+        },
+      ) as RuntimeProcessor;
+
+      await expect(processor.handleRequest({
+        type: RequestType.SqliteQuery,
+        cell: ref,
+        sql: "SELECT 1 AS value",
+      })).resolves.toEqual({ rows: [{ value: 1 }] });
+      await expect(processor.handleRequest({
+        type: RequestType.SqliteExec,
+        cell: ref,
+        sql: "DELETE FROM notes",
+      })).resolves.toBeUndefined();
     });
   });
 });

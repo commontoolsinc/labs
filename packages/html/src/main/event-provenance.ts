@@ -1,14 +1,14 @@
-export interface EventProvenance {
+export type EventProvenance = {
   origin: "dom";
   trusted: boolean;
   ui?: EventUiProvenance;
-}
+};
 
-export interface EventUiProvenance {
+export type EventUiProvenance = {
   pattern?: string;
   eventIntegrity?: string[];
   uiContractDataset?: Record<string, string>;
-}
+};
 
 type EventLike = Pick<Event, "isTrusted"> & {
   composedPath?: () => readonly unknown[];

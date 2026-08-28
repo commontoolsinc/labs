@@ -29,6 +29,18 @@ import {
   consoleRunFamilyGraph,
 } from "./graph.ts";
 import { type ConsoleFlow, consoleRunFlow } from "./flow.ts";
+import {
+  cellLabelsSummaryOf,
+  type ConsoleCellLabelIndex,
+  consoleCellLabelIndex,
+  type ConsoleCellLabels,
+  consoleCellLabels,
+  type ConsoleCellLabelsStatus,
+  type ConsoleCellLabelsSummary,
+  consoleCellLabelsSummary,
+  foldCellLabels,
+} from "./cell-labels.ts";
+import type { HarnessCellLabels } from "../src/contracts/cell-labels.ts";
 
 /**
  * A single path segment of the characters the artifact store itself writes.
@@ -57,6 +69,18 @@ const readJson = async <Value>(path: string): Promise<Value | undefined> => {
   }
 };
 
+/**
+ * The per-cell labels a run recorded, indexed by the addresses its cells go
+ * by. A run that wrote no snapshot indexes as `absent`, which is not the same
+ * reading as a space that had nothing to say.
+ */
+const cellLabelIndex = async (
+  root: string,
+): Promise<ConsoleCellLabelIndex> =>
+  consoleCellLabelIndex(
+    await readJson<HarnessCellLabels>(join(root, "cell-labels.json")),
+  );
+
 /** Everything `/api/runs/<run-id>` answers with. */
 export interface ConsoleRunDetail {
   summary: ConsoleRunSummary;
@@ -72,6 +96,14 @@ export interface ConsoleRunDetail {
    * that cell would otherwise read as coming from nowhere.
    */
   handles: readonly ConsoleHandle[];
+
+  /**
+   * Whether the run's space was read for per-cell labels, and what it said.
+   * The run states this once because the per-cell fact cannot: a cell with no
+   * labels means the space holds none for it under a snapshot that was taken,
+   * and means nobody asked under a run whose space could not be read.
+   */
+  cellLabels: ConsoleCellLabelsSummary;
   /** The artifacts this run wrote, by name, for the raw pane to fetch. */
   artifactNames: readonly string[];
   /** The files under `tool-outputs/`, newest call last. */
@@ -94,6 +126,7 @@ const RUN_ARTIFACT_NAMES = [
   "skill-activations.json",
   "skill-resource-reads.json",
   "skill-script-executions.json",
+  "cell-labels.json",
 ] as const;
 
 const namesPresent = async (
@@ -215,6 +248,10 @@ export const readConsoleRun = async (
   // from nowhere. The neighbours' tables are what give it an address, and so a
   // name and an origin.
   const neighbours = await neighbouringHandles(artifactRoot);
+  // The index is the run's own, and it is applied to every handle the run
+  // introduced — so a cell whose address only a neighbour's entry supplies is
+  // labelled here all the same, while the neighbour's own handles stay bare.
+  const labels = await cellLabelIndex(root);
   const table: HarnessHandleTable = {
     type: "cf-harness.handle-table",
     version: 1,
@@ -237,7 +274,8 @@ export const readConsoleRun = async (
     transcript,
     lens: consoleRunLens(transcript),
     steps,
-    handles: consoleRunHandles(steps, table),
+    handles: consoleRunHandles(steps, table, labels),
+    cellLabels: consoleCellLabelsSummary(labels),
     artifactNames: await namesPresent(root, RUN_ARTIFACT_NAMES),
     toolOutputNames: await toolOutputNames(root),
   };
@@ -283,13 +321,16 @@ export const readConsoleRunFlow = async (
       flowLabels: posture.flowLabels,
       ...(posture.posture !== undefined ? { posture: posture.posture } : {}),
     },
+    family.cellLabels,
   );
 };
 
 /**
  * A run and its `delegate_task` descendants, each reading its handles against
- * the neighbours' tables as well as its own. Both the map and the graph are
- * built from this, and neither wants to know how a family is found on disk.
+ * the neighbours' tables as well as its own, and each against its own label
+ * snapshot — a child writes its own, so a cell a child produced carries the
+ * space's labels in the family graph and in the map. Both are built from this,
+ * and neither wants to know how a family is found on disk.
  */
 const readConsoleRunFamily = async (
   artifactRoot: string,
@@ -299,6 +340,7 @@ const readConsoleRunFamily = async (
     root: ConsoleGraphRunInput;
     descendants: ConsoleGraphRunInput[];
     runState: HarnessRunState;
+    cellLabels: ConsoleCellLabelsSummary;
   }
   | undefined
 > => {
@@ -306,6 +348,10 @@ const readConsoleRunFamily = async (
   if (root === undefined) {
     return undefined;
   }
+  const members: FamilyLabelReading[] = [{
+    runState: root.runState,
+    labels: await cellLabelIndex(join(artifactRoot, runId)),
+  }];
   const descendants: ConsoleGraphRunInput[] = [];
   try {
     for await (const entry of Deno.readDir(artifactRoot)) {
@@ -318,6 +364,10 @@ const readConsoleRunFamily = async (
           runId: entry.name,
           steps: child.steps,
           handles: child.handles,
+        });
+        members.push({
+          runState: child.runState,
+          labels: await cellLabelIndex(join(artifactRoot, entry.name)),
         });
       }
     }
@@ -334,7 +384,75 @@ const readConsoleRunFamily = async (
     root: withNeighbours({ runId, steps: root.steps, handles: root.handles }),
     descendants: descendants.map(withNeighbours),
     runState: root.runState,
+    cellLabels: familyCellLabels(members),
   };
+};
+
+/** One member of a family, as the family's own reading is folded from. */
+interface FamilyLabelReading {
+  runState: HarnessRunState;
+  labels: ConsoleCellLabelIndex;
+}
+
+/** The members that each status was read for, in the words a header uses. */
+const statusTally = (
+  statuses: readonly ConsoleCellLabelsStatus[],
+): string =>
+  (["read", "unavailable", "absent"] as const)
+    .flatMap((status) => {
+      const count = statuses.filter((each) => each === status).length;
+      return count === 0 ? [] : [`${count} ${status}`];
+    })
+    .join(", ");
+
+/**
+ * What the whole family read of the space, folded from what each member read.
+ *
+ * The status is the sentence every bare cell on the map is read under: no
+ * labels means the space holds none where the snapshot was taken, and means
+ * nobody asked where it was not. So a family whose members disagree cannot be
+ * reported as any one member's status — the root's `read` would speak for a
+ * child's cells that nothing was read for, and the root's `absent` would deny
+ * a child's cells the labels its own snapshot holds. A disagreement is stated
+ * as one instead: `unavailable`, with the split in its detail, which claims
+ * nothing about any member's cells.
+ *
+ * A member that minted no handle had no cell to snapshot, and its missing
+ * snapshot is that rather than a gap, so it is left out of the reckoning.
+ * The cells themselves are merged by address, so a cell a parent and its
+ * child both hold is one cell of the family rather than two — and merged by
+ * {@link foldCellLabels}, so that a cell one member did not finish reading is
+ * counted as partial however whole another member's reading of it was.
+ */
+const familyCellLabels = (
+  members: readonly FamilyLabelReading[],
+): ConsoleCellLabelsSummary => {
+  const byAddress = new Map<string, ConsoleCellLabels>();
+  for (const member of members) {
+    for (const [address, record] of member.labels.byAddress) {
+      const held = byAddress.get(address);
+      const reading = consoleCellLabels(record);
+      byAddress.set(
+        address,
+        held === undefined ? reading : foldCellLabels(held, reading),
+      );
+    }
+  }
+  const speaking = members.filter((member) =>
+    (member.runState.handleTable?.entries ?? []).length > 0
+  );
+  const statuses = speaking.map((member) => member.labels.status);
+  const agreed = speaking[0] ?? members[0];
+  if (new Set(statuses).size > 1) {
+    const space = members.find((member) => member.labels.space !== undefined)
+      ?.labels.space;
+    return cellLabelsSummaryOf({
+      status: "unavailable",
+      detail: `the runs in this family disagree: ${statusTally(statuses)}`,
+      ...(space !== undefined ? { space } : {}),
+    }, byAddress.values());
+  }
+  return cellLabelsSummaryOf(agreed.labels, byAddress.values());
 };
 
 /**
@@ -417,7 +535,8 @@ const readNeighbouringHandles = async (
           addressKey: entryHandle.addressKey,
           introducedAtStep: 0,
           // A neighbour's entry resolves an address and nothing more; what the
-          // handle was used for belongs to the run that used it.
+          // handle was used for, and what its cell is labelled, belong to the
+          // run that used it and are left absent rather than invented here.
           uses: [],
           confidentiality: [],
         });

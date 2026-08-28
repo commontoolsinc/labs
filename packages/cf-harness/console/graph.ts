@@ -16,6 +16,7 @@
 import type { ConsoleDisclosure, ConsoleHandle, ConsoleStep } from "./steps.ts";
 import { matchLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { HANDLE_TOKEN_PATTERN } from "../src/contracts/handle-table.ts";
+import { type ConsoleCellLabels, foldCellLabels } from "./cell-labels.ts";
 
 /** A pattern that ran, or a cell in the space. */
 export type ConsoleGraphNodeKind = "pattern" | "cell";
@@ -48,8 +49,14 @@ export interface ConsoleGraphNode {
   /** Whether any step asked what shape this cell's referent has. */
   described?: boolean;
 
-  /** Confidentiality atoms the run's labels attached to this node. */
+  /** Confidentiality atoms the invocation context attached to this node. */
   confidentiality: readonly string[];
+
+  /**
+   * For a cell: the labels the space holds for it. A fact about the cell,
+   * where `confidentiality` is a fact about the calls that touched it.
+   */
+  labels?: ConsoleCellLabels;
 }
 
 /**
@@ -183,6 +190,23 @@ export const consoleRunGraph = (
       handle.ref === undefined ? [] : [[handle.token, handle.ref] as const]
     ),
   );
+  // The same handles, read for what the space says about the cell rather than
+  // for its address: a token names one, and a whole link names the other by
+  // the address it shares with a handle's `ref`.
+  const labelsByToken = new Map(
+    handles.flatMap((handle) =>
+      handle.labels === undefined
+        ? []
+        : [[handle.token, handle.labels] as const]
+    ),
+  );
+  const labelsByAddress = new Map(
+    handles.flatMap((handle) =>
+      handle.ref === undefined || handle.labels === undefined
+        ? []
+        : [[handle.ref, handle.labels] as const]
+    ),
+  );
   const cellId = (token: string): string =>
     `cell:${addressByToken.get(token) ?? token}`;
 
@@ -196,6 +220,8 @@ export const consoleRunGraph = (
       return held;
     }
     const address = addressByToken.get(token);
+    const labels = labelsByToken.get(token) ??
+      (address === undefined ? undefined : labelsByAddress.get(address));
     const node: ConsoleGraphNode = {
       id,
       kind: "cell",
@@ -204,6 +230,7 @@ export const consoleRunGraph = (
       token,
       ...(address !== undefined ? { address } : {}),
       confidentiality: [],
+      ...(labels !== undefined ? { labels } : {}),
     };
     nodes.set(id, node);
     return node;
@@ -256,6 +283,7 @@ export const consoleRunGraph = (
           if (document !== undefined) {
             const linkId = `cell:${document}`;
             if (!nodes.has(linkId)) {
+              const linkLabels = labelsByAddress.get(document);
               nodes.set(linkId, {
                 id: linkId,
                 kind: "cell",
@@ -263,6 +291,7 @@ export const consoleRunGraph = (
                 atStep: step.index,
                 address: document,
                 confidentiality: [],
+                ...(linkLabels !== undefined ? { labels: linkLabels } : {}),
               });
             }
             read(linkId);
@@ -358,6 +387,17 @@ export const consoleRunFamilyGraph = (
         nodes.set(node.id, dated);
         continue;
       }
+      // Two runs' readings of one cell are two partial views of it, folded
+      // conservatively rather than chosen between: a run that read the cell
+      // whole does not answer for one that stopped partway through it, so
+      // the fold keeps the truncation and the unread paths of either. A
+      // sighting with no reading at all is a run that never covered the
+      // cell, which the other run's reading stands for on its own.
+      const labels = held.labels === undefined
+        ? dated.labels
+        : dated.labels === undefined
+        ? held.labels
+        : foldCellLabels(held.labels, dated.labels);
       // One cell reached from two runs: keep the earliest sighting, and take
       // whichever facts either run established about it.
       nodes.set(node.id, {
@@ -370,6 +410,7 @@ export const consoleRunFamilyGraph = (
         confidentiality: [
           ...new Set([...held.confidentiality, ...dated.confidentiality]),
         ],
+        ...(labels !== undefined ? { labels } : {}),
       });
     }
     for (const edge of graph.edges) {

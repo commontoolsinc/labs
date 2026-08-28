@@ -150,7 +150,7 @@ function filterOutCell(
  * preserved input or unclassified document data onto a now-required field that
  * carries no default. Generated result fields are not in this class: pattern
  * setup materializes them. This is ONE of the two repair-failure classes the
- * runnability backstop ({@link PiecesController.healDefaultRootByRollForward})
+ * runnability backstop (`PiecesController.#healDefaultRootByRollForward`)
  * acts on — the other is a refused stored argument
  * ({@link isStoredArgumentSchemaRefusal}); every other failure stays
  * fail-closed.
@@ -203,11 +203,13 @@ export interface CreatePieceOptions {
  * the space's default root pattern. One instance serves one space.
  */
 export class PiecesController<T = unknown> {
-  private space: MemorySpace;
+  #session: Session;
 
-  private spaceCell: Cell<SpaceCellContents>;
+  #space: MemorySpace;
 
-  private diagnosticConsole: RuntimeConsole;
+  #spaceCell: Cell<SpaceCellContents>;
+
+  #diagnosticConsole: RuntimeConsole;
 
   /**
    * Promise resolved when the controller is ready.
@@ -215,23 +217,24 @@ export class PiecesController<T = unknown> {
   ready: Promise<void>;
 
   constructor(
-    private session: Session,
+    session: Session,
     public runtime: Runtime,
     options: PiecesControllerOptions = {},
   ) {
-    this.diagnosticConsole = new RuntimeConsole(runtime.harness);
-    this.space = this.session.space;
+    this.#session = session;
+    this.#diagnosticConsole = new RuntimeConsole(runtime.harness);
+    this.#space = this.#session.space;
 
     // Use the space DID as the cause - it's derived from the space name
     // and consistently available everywhere
-    const isHomeSpace = this.space === this.runtime.userIdentityDID;
-    this.spaceCell = isHomeSpace
+    const isHomeSpace = this.#space === this.runtime.userIdentityDID;
+    this.#spaceCell = isHomeSpace
       ? this.runtime.getHomeSpaceCell()
-      : this.runtime.getSpaceCell(this.space);
+      : this.runtime.getSpaceCell(this.#space);
 
     const syncSpaceCellContents = options.deferSpaceCellSync
       ? Promise.resolve()
-      : Promise.resolve(this.spaceCell.sync());
+      : Promise.resolve(this.#spaceCell.sync());
 
     // The piece registry is managed by the default pattern, not directly on
     // the space cell. The space cell only contains a link to defaultPattern.
@@ -377,11 +380,11 @@ export class PiecesController<T = unknown> {
   }
 
   getSpace(): MemorySpace {
-    return this.space;
+    return this.#space;
   }
 
   getSpaceName(): string | undefined {
-    return this.session.spaceName;
+    return this.#session.spaceName;
   }
 
   async synced(): Promise<void> {
@@ -391,19 +394,20 @@ export class PiecesController<T = unknown> {
 
   async ensureSpaceSession(): Promise<void> {
     await this.ready;
-    await this.runtime.storageManager.open(this.space).ensureSession?.();
+    await this.runtime.storageManager.open(this.#space).ensureSession?.();
   }
 
   async listEntityIds(): Promise<string[] | undefined> {
     await this.ready;
-    return await this.runtime.storageManager.open(this.space).listEntityIds?.();
+    return await this.runtime.storageManager.open(this.#space)
+      .listEntityIds?.();
   }
 
   async listEntityIdPage(
     options: EntityIdListOptions = {},
   ): Promise<EntityIdListResult | undefined> {
     await this.ready;
-    return await this.runtime.storageManager.open(this.space)
+    return await this.runtime.storageManager.open(this.#space)
       .listEntityIdPage?.(
         options,
       );
@@ -411,13 +415,13 @@ export class PiecesController<T = unknown> {
 
   async entityIdExists(id: string): Promise<boolean | undefined> {
     await this.ready;
-    return await this.runtime.storageManager.open(this.space).entityIdExists?.(
+    return await this.runtime.storageManager.open(this.#space).entityIdExists?.(
       id,
     );
   }
 
   getSpaceCellContents(): Cell<SpaceCellContents> {
-    return this.spaceCell;
+    return this.#spaceCell;
   }
 
   async dispose() {
@@ -433,7 +437,7 @@ export class PiecesController<T = unknown> {
     defaultPatternCell: Cell<any>,
   ): Promise<void> {
     const { error } = await this.runtime.editWithRetry((tx) => {
-      const spaceCellWithTx = this.spaceCell.withTx(tx);
+      const spaceCellWithTx = this.#spaceCell.withTx(tx);
       spaceCellWithTx.key("defaultPattern").set(defaultPatternCell.withTx(tx));
     });
     if (error) {
@@ -451,7 +455,7 @@ export class PiecesController<T = unknown> {
    */
   async unlinkDefaultPattern(): Promise<void> {
     const { error } = await this.runtime.editWithRetry((tx) => {
-      const spaceCellWithTx = this.spaceCell.withTx(tx);
+      const spaceCellWithTx = this.#spaceCell.withTx(tx);
       spaceCellWithTx.key("defaultPattern").set(undefined);
     });
     if (error) {
@@ -472,7 +476,7 @@ export class PiecesController<T = unknown> {
   ): Promise<Cell<NameSchema> | undefined> {
     const cell = await timePiecePhase(
       "getDefaultPattern.spaceCell.sync",
-      () => this.spaceCell.key("defaultPattern").sync(),
+      () => this.#spaceCell.key("defaultPattern").sync(),
     );
     const defaultPattern = cell.get();
     if (!defaultPattern) {
@@ -520,10 +524,10 @@ export class PiecesController<T = unknown> {
           await this.runtime.patternManager.loadPatternByIdentity(
             pinnedRef.identity,
             pinnedRef.symbol,
-            this.space,
+            this.#space,
           ) !== undefined
         ) throw error;
-        healed = await this.healDefaultRootByRollForward(
+        healed = await this.#healDefaultRootByRollForward(
           root,
           pinnedRef,
           error,
@@ -534,7 +538,7 @@ export class PiecesController<T = unknown> {
       }
       pieceUpdateLogger.warn("default-root-healed-on-load-failure", () => [
         "getDefaultPattern: start failed, the root rolled forward to the",
-        `space's official system root; retrying start once (${this.space})`,
+        `space's official system root; retrying start once (${this.#space})`,
       ]);
       try {
         await this.runtime.idle();
@@ -545,7 +549,7 @@ export class PiecesController<T = unknown> {
       } catch (retryError) {
         pieceUpdateLogger.warn("default-root-heal-retry-failed", () => [
           "getDefaultPattern: post-heal retry failed; surfacing the",
-          `original start failure (${this.space})`,
+          `original start failure (${this.#space})`,
           retryError,
         ]);
         throw error;
@@ -573,7 +577,7 @@ export class PiecesController<T = unknown> {
     if (this.runtime.cfcEnforcementMode === "disabled") return false;
     const origin = getPatternSource(root);
     return origin === undefined ||
-      origin === deriveSystemPatternSource(this.space, this.runtime);
+      origin === deriveSystemPatternSource(this.#space, this.runtime);
   }
 
   /**
@@ -588,10 +592,10 @@ export class PiecesController<T = unknown> {
       // subscription made against this placeholder never fires again, so a
       // cold-cache miss here silently freezes piece listings (e.g. FUSE).
       console.warn(
-        `getPieceRegistry: no default pattern found for space ${this.space}; ` +
+        `getPieceRegistry: no default pattern found for space ${this.#space}; ` +
           "returning detached empty piece list",
       );
-      return this.runtime.getCell(this.space, "empty-pieces", pieceListSchema);
+      return this.runtime.getCell(this.#space, "empty-pieces", pieceListSchema);
     }
 
     const cell = defaultPattern.asSchema({
@@ -704,7 +708,7 @@ export class PiecesController<T = unknown> {
     const addressed: Cell<unknown> = isCell(id)
       ? id
       : this.runtime.getCellFromEntityId(
-        this.space,
+        this.#space,
         entityIdFrom(id),
         [],
         undefined,
@@ -811,7 +815,7 @@ export class PiecesController<T = unknown> {
       try {
         argumentValue = argumentCell.getRaw();
       } catch (err) {
-        this.diagnosticConsole.debug("Error getting argument value:", err);
+        this.#diagnosticConsole.debug("Error getting argument value:", err);
         return result;
       }
 
@@ -882,7 +886,7 @@ export class PiecesController<T = unknown> {
 
             const resultCell = followCellToResult(
               this.runtime.getCellFromLink(link),
-              this.diagnosticConsole,
+              this.#diagnosticConsole,
               new Set(),
               0,
             );
@@ -898,7 +902,7 @@ export class PiecesController<T = unknown> {
                   depth + 1,
                 );
               } catch (err) {
-                this.diagnosticConsole.debug(
+                this.#diagnosticConsole.debug(
                   `Error processing array item at index ${i}:`,
                   err,
                 );
@@ -918,7 +922,7 @@ export class PiecesController<T = unknown> {
                   depth + 1,
                 );
               } catch (err) {
-                this.diagnosticConsole.debug(
+                this.#diagnosticConsole.debug(
                   `Error processing object property '${key}':`,
                   err,
                 );
@@ -926,7 +930,7 @@ export class PiecesController<T = unknown> {
             }
           }
         } catch (err) {
-          this.diagnosticConsole.debug("Error in processValue:", err);
+          this.#diagnosticConsole.debug("Error in processValue:", err);
         }
       };
 
@@ -940,7 +944,7 @@ export class PiecesController<T = unknown> {
         );
       }
     } catch (error) {
-      this.diagnosticConsole.debug(
+      this.#diagnosticConsole.debug(
         "Error finding references in piece arguments:",
         error,
       );
@@ -1023,13 +1027,13 @@ export class PiecesController<T = unknown> {
             // Check if cell link's source chain leads to our target
             const resultCell = followCellToResult(
               this.runtime.getCellFromLink(link),
-              this.diagnosticConsole,
+              this.#diagnosticConsole,
               new Set(),
               0,
             );
             if (resultCell?.sourceURI === piece.sourceURI) return true;
           } catch (err) {
-            this.diagnosticConsole.debug(
+            this.#diagnosticConsole.debug(
               "Error handling cell link in checkRefersToTarget:",
               err,
             );
@@ -1052,7 +1056,7 @@ export class PiecesController<T = unknown> {
                 return true;
               }
             } catch (err) {
-              this.diagnosticConsole.debug(
+              this.#diagnosticConsole.debug(
                 `Error checking array item at index ${i}:`,
                 err,
               );
@@ -1076,7 +1080,7 @@ export class PiecesController<T = unknown> {
                 return true;
               }
             } catch (err) {
-              this.diagnosticConsole.debug(
+              this.#diagnosticConsole.debug(
                 `Error checking object property '${key}':`,
                 err,
               );
@@ -1084,7 +1088,7 @@ export class PiecesController<T = unknown> {
           }
         }
       } catch (err) {
-        this.diagnosticConsole.debug("Error in checkRefersToTarget:", err);
+        this.#diagnosticConsole.debug("Error in checkRefersToTarget:", err);
       }
 
       return false;
@@ -1134,7 +1138,7 @@ export class PiecesController<T = unknown> {
     scope?: CellScope,
   ): Promise<Cell<T>> {
     const cell = this.runtime.getCellFromEntityId<T>(
-      this.space,
+      this.#space,
       id,
       path,
       schema,
@@ -1176,7 +1180,7 @@ export class PiecesController<T = unknown> {
    */
   async remove(pieceOrId: string | Cell<unknown>): Promise<boolean> {
     const piece = typeof pieceOrId === "string"
-      ? this.runtime.getCellFromEntityId(this.space, entityIdFrom(pieceOrId))
+      ? this.runtime.getCellFromEntityId(this.#space, entityIdFrom(pieceOrId))
       : pieceOrId;
     const piecesCell = await this.getPieceRegistry();
     await this.syncPieces(piecesCell);
@@ -1197,7 +1201,7 @@ export class PiecesController<T = unknown> {
       // state, and a link concurrently repointed at another piece must be
       // left in place (the same precondition-guard shape as the roll-forward
       // swap in startEnsuredDefaultPattern).
-      const defaultPatternCell = this.spaceCell.withTx(tx)
+      const defaultPatternCell = this.#spaceCell.withTx(tx)
         .key("defaultPattern");
       const linked = defaultPatternCell.get();
       if (linked && piece.resolveAsCell().equals(linked.resolveAsCell())) {
@@ -1284,7 +1288,7 @@ export class PiecesController<T = unknown> {
     },
   ): Promise<Cell<unknown>> {
     const piece = this.runtime.getCellFromEntityId(
-      this.space,
+      this.#space,
       entityIdFrom(pieceId),
     );
     await piece.sync();
@@ -1329,8 +1333,8 @@ export class PiecesController<T = unknown> {
       () => this.runtime.idle(),
     );
     const piece = this.runtime.getCell<T>(
-      this.space,
-      cause ?? { space: this.space, random: crypto.randomUUID() },
+      this.#space,
+      cause ?? { space: this.#space, random: crypto.randomUUID() },
       pattern.resultSchema,
     );
     // Fast path: the pattern's content-addressed entry ref, if it carries one
@@ -1476,7 +1480,7 @@ export class PiecesController<T = unknown> {
     const pattern = await this.runtime.patternManager.loadPatternByIdentity(
       ref.identity,
       ref.symbol,
-      this.space,
+      this.#space,
     );
     return pattern;
   }
@@ -1518,7 +1522,7 @@ export class PiecesController<T = unknown> {
   ): Promise<void> {
     const start = options?.start ?? true;
     let linkCell = this.runtime.getCellFromEntityId(
-      this.space,
+      this.#space,
       entityIdFrom(linkPieceId),
       [],
       undefined,
@@ -1548,7 +1552,7 @@ export class PiecesController<T = unknown> {
         // For pieces, target fields are in the result cell's argument
         const resultCell = followCellToResult(
           targetInputCell,
-          this.diagnosticConsole,
+          this.#diagnosticConsole,
         );
         if (!resultCell) {
           throw new Error("Target piece has no result cell");
@@ -1595,7 +1599,7 @@ export class PiecesController<T = unknown> {
    * Returns empty string if not configured, if the configured value cannot be
    * an origin, or if the home space is not accessible.
    */
-  private async getDefaultAppUrlFromHome(): Promise<string> {
+  async #getDefaultAppUrlFromHome(): Promise<string> {
     try {
       const homeSpaceCell = this.runtime.getHomeSpaceCell();
       await timePiecePhase(
@@ -1681,7 +1685,7 @@ export class PiecesController<T = unknown> {
           cause: `home-pattern-${Date.now()}`,
         };
       } else {
-        const customUrl = await this.getDefaultAppUrlFromHome();
+        const customUrl = await this.#getDefaultAppUrlFromHome();
         patternConfig = {
           name: "DefaultPieceList",
           source: customUrl || DEFAULT_APP_PATTERN_SOURCE,
@@ -1778,7 +1782,7 @@ export class PiecesController<T = unknown> {
     // origin has already replaced.
     const existingPattern = await this.getDefaultPattern(false);
     if (existingPattern) {
-      return await this.startEnsuredDefaultPattern(existingPattern, true);
+      return await this.#startEnsuredDefaultPattern(existingPattern, true);
     }
 
     // Determine which pattern to use based on space type
@@ -1795,7 +1799,7 @@ export class PiecesController<T = unknown> {
     } else {
       const customUrl = await timePiecePhase(
         "ensureDefaultPattern.getDefaultAppUrlFromHome",
-        () => this.getDefaultAppUrlFromHome(),
+        () => this.#getDefaultAppUrlFromHome(),
       );
       patternConfig = {
         name: "DefaultPieceList",
@@ -1836,7 +1840,7 @@ export class PiecesController<T = unknown> {
     // source immediately above. If another writer won the race, treat the
     // discovered root like every other persisted root and reconcile it before
     // start.
-    return await this.startEnsuredDefaultPattern(
+    return await this.#startEnsuredDefaultPattern(
       finalPattern,
       !createdByThisCall,
     );
@@ -1847,7 +1851,7 @@ export class PiecesController<T = unknown> {
    * from its source: following that origin again would fetch the route to
    * learn what was compiled from it moments ago.
    */
-  private async startEnsuredDefaultPattern(
+  async #startEnsuredDefaultPattern(
     root: Cell<NameSchema>,
     reconcileBeforeStart: boolean,
   ): Promise<PieceController<NameSchema>> {
@@ -1868,7 +1872,7 @@ export class PiecesController<T = unknown> {
       // that is simply wrong for it, and re-staging that one buys nothing the
       // repair below cannot do with the failure in hand.
       if (outcome === "current" || outcome === "migrated") {
-        rootToStart = await this.restageRootSetupIfStale(rootToStart);
+        rootToStart = await this.#restageRootSetupIfStale(rootToStart);
       }
     }
 
@@ -1933,7 +1937,7 @@ export class PiecesController<T = unknown> {
         if (!this.#rootNeedsRollForward(rootToStart)) throw startError;
         return new PieceController<NameSchema>(
           this,
-          await this.healDefaultRootByRollForward(
+          await this.#healDefaultRootByRollForward(
             rootToStart,
             ref,
             startError,
@@ -2026,7 +2030,7 @@ export class PiecesController<T = unknown> {
             repairError,
           ],
         );
-        rootToStart = await this.healDefaultRootByRollForward(
+        rootToStart = await this.#healDefaultRootByRollForward(
           rootToStart,
           ref,
           repairError,
@@ -2056,7 +2060,7 @@ export class PiecesController<T = unknown> {
    * start fail outright. Best-effort — a failed re-stage leaves the root as it
    * was, and the start reports whatever it reports.
    */
-  private async restageRootSetupIfStale(
+  async #restageRootSetupIfStale(
     root: Cell<NameSchema>,
   ): Promise<Cell<NameSchema>> {
     // Nothing to re-stage: a root with no pattern to stage from, or one whose
@@ -2097,7 +2101,7 @@ export class PiecesController<T = unknown> {
     } catch (error) {
       pieceUpdateLogger.warn("root-setup-restage-failed", () => [
         "startEnsuredDefaultPattern: could not re-stage a root whose setup",
-        `marker disagrees with its pinned pattern (${this.space})`,
+        `marker disagrees with its pinned pattern (${this.#space})`,
         error,
       ]);
       return root;
@@ -2136,7 +2140,7 @@ export class PiecesController<T = unknown> {
    * Returns the healed root cell so the caller starts/returns the swapped-in
    * pattern rather than the stale pinned view.
    */
-  private async healDefaultRootByRollForward(
+  async #healDefaultRootByRollForward(
     rootToStart: Cell<NameSchema>,
     pinnedRef: { identity: string; symbol: string },
     migrationError: unknown,
@@ -2247,7 +2251,7 @@ export class PiecesController<T = unknown> {
       // Nothing to swap: the root already names the entry the official source
       // compiles to, and that source has just been compiled into this space.
       // Materializing it over the document is the whole repair.
-      return await this.materializeHealedRoot(
+      return await this.#materializeHealedRoot(
         rootToStart,
         officialPattern,
         officialRef,
@@ -2342,7 +2346,7 @@ export class PiecesController<T = unknown> {
     // Re-resolve so the materialize observes the committed patternIdentity
     // (the caller's cell is a pre-swap transaction view), then materialize the
     // OFFICIAL pattern.
-    const swappedRoot = await this.materializeHealedRoot(
+    const swappedRoot = await this.#materializeHealedRoot(
       await this.getDefaultPattern(false) ?? rootToStart,
       officialPattern,
       officialRef,
@@ -2368,7 +2372,7 @@ export class PiecesController<T = unknown> {
    * continue — so an official pattern that also cannot migrate the document
    * surfaces as one clear error rather than a silently dead root.
    */
-  private async materializeHealedRoot(
+  async #materializeHealedRoot(
     root: Cell<NameSchema>,
     pattern: Pattern,
     ref: { identity: string; symbol: string },

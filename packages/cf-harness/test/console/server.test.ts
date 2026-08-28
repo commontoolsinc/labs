@@ -1,8 +1,15 @@
 import { beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { join, resolve, toFileUrl } from "@std/path";
 import { Identity } from "@commonfabric/identity";
+import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 import { ConsoleServer, resolveConsoleConfig } from "../../console/server.ts";
 import type { ConsoleSessionListing } from "../../console/sessions.ts";
+import {
+  createHarnessChatEventEnvelope,
+  type HarnessChatEventEnvelope,
+  type HarnessChatStructuredEvent,
+} from "../../src/contracts/interactive-chat.ts";
 import type { HarnessFetch } from "../../src/contracts/http-fetch.ts";
 import { PatternIndexClient } from "../../src/pattern-index/client.ts";
 import {
@@ -194,6 +201,143 @@ describe("console/server", () => {
       requests,
     };
   };
+
+  /**
+   * A server whose cell-label snapshot the test releases by hand, and an
+   * event stream already open on it. The snapshot is handed in because it
+   * reads a space database this test has none of, and because when it settles
+   * is the whole of what these tests are about.
+   */
+  const snapshotServer = async (
+    recordCellLabels: (sessionId: string) => Promise<void>,
+  ): Promise<{ server: ConsoleServer; stream: Response }> => {
+    const held = new ConsoleServer(
+      config(),
+      (onEvent) =>
+        new HarnessInteractiveChatService({
+          createPromptLoop: answeringLoop,
+          now: advancingClock(),
+          onEvent,
+        }),
+      undefined,
+      recordCellLabels,
+    );
+    const page = await held.handle(getRequest("/"));
+    await page.body?.cancel();
+    const streamCookie = page.headers.get("set-cookie")!.split(";")[0];
+    return {
+      server: held,
+      stream: await held.handle(
+        getRequest("/api/events?afterSequence=0", { cookie: streamCookie }),
+      ),
+    };
+  };
+
+  const envelope = (
+    sequence: number,
+    event: HarnessChatStructuredEvent,
+  ): HarnessChatEventEnvelope =>
+    createHarnessChatEventEnvelope({
+      sessionId: "session-1",
+      sequence,
+      event,
+    });
+
+  describe("the cell-label snapshot a terminal event waits on", () => {
+    it("writes a terminal event to a stream only once its snapshot has landed", async () => {
+      let land: (() => void) | undefined;
+      const snapshot = new Promise<void>((resolve) => {
+        land = resolve;
+      });
+      const held = await snapshotServer(() => snapshot);
+      const frames = frameReader(held.stream);
+      try {
+        held.server.broadcast(
+          envelope(1, { kind: "assistant_completed", text: "built it" }),
+        );
+        // Reading that frame back is what says the stream has drained its
+        // backfill: until it has, an envelope is buffered rather than written.
+        expect(await frames.next()).toBe("chat:assistant_completed");
+
+        held.server.broadcast(
+          envelope(2, { kind: "turn_completed", turnId: "turn-1" }),
+        );
+        // A frame written while the terminal event is still waiting. A stream
+        // delivers in the order it was written, so the terminal event arriving
+        // after this one is what says it did not overtake its snapshot.
+        held.server.ping();
+        land!();
+
+        expect(await frames.next()).toBe("ping");
+        expect(await frames.next()).toBe("chat:turn_completed");
+      } finally {
+        await frames.cancel();
+      }
+    });
+
+    it("writes a terminal event whose snapshot could not be taken", async () => {
+      const held = await snapshotServer(() =>
+        Promise.reject(new Error("no space database for console-test"))
+      );
+      const frames = frameReader(held.stream);
+      try {
+        held.server.broadcast(
+          envelope(1, { kind: "assistant_completed", text: "built it" }),
+        );
+        expect(await frames.next()).toBe("chat:assistant_completed");
+
+        held.server.broadcast(envelope(2, {
+          kind: "turn_failed",
+          turnId: "turn-1",
+          error: { code: "internal_error", message: "the model gave up" },
+        }));
+
+        expect(await frames.next()).toBe("chat:turn_failed");
+      } finally {
+        await frames.cancel();
+      }
+    });
+
+    it("loads the server module on a host with no FFI permission", async () => {
+      // The console promises a machine without the SQLite native library can
+      // serve its page, and a run whose cells there are none of takes no
+      // snapshot. So evaluating this module must not open that library.
+      const repoRoot = resolve(import.meta.dirname!, "..", "..", "..", "..");
+      const wrapperDir = await Deno.makeTempDir({
+        prefix: "cf-harness-console-import-",
+      });
+      try {
+        const wrapper = join(wrapperDir, "import-console-server.ts");
+        await Deno.writeTextFile(
+          wrapper,
+          `import ${
+            JSON.stringify(
+              toFileUrl(join(repoRoot, "packages/cf-harness/console/server.ts"))
+                .href,
+            )
+          };\n`,
+        );
+        const output = await runDenoCommandWithTemporaryLock({
+          root: repoRoot,
+          args: (lock) => [
+            "run",
+            `--lock=${lock}`,
+            // The entry sits outside the workspace, so it names the config
+            // rather than finding one beside itself.
+            `--config=${join(repoRoot, "deno.jsonc")}`,
+            "--allow-env",
+            wrapper,
+          ],
+        });
+        if (!output.success) {
+          console.error(new TextDecoder().decode(output.stderr));
+        }
+        expect(output.code).toBe(0);
+      } finally {
+        await Deno.remove(wrapperDir, { recursive: true });
+      }
+    });
+  });
 
   describe("GET /api/sessions", () => {
     it("answers with no sessions before a task is started", async () => {
@@ -709,6 +853,55 @@ const envelopesUntil = async (
   } finally {
     await reader.cancel();
   }
+};
+
+/**
+ * One SSE frame at a time, named `<event>` for a frame the server writes
+ * itself and `chat:<kind>` for a chat envelope. Each read resolves on the
+ * chunk the server enqueued, so it ends when a frame is written rather than
+ * after any span of time.
+ */
+const frameReader = (response: Response): {
+  next: () => Promise<string>;
+  cancel: () => Promise<void>;
+} => {
+  const reader = response.body!.pipeThrough(new TextDecoderStream())
+    .getReader();
+  const named = (frame: string): string | undefined => {
+    const lines = frame.split("\n");
+    const event = lines.find((line) => line.startsWith("event: "))?.slice(7);
+    if (event === undefined) {
+      return undefined;
+    }
+    if (event !== "chat") {
+      return event;
+    }
+    const data = lines.find((line) => line.startsWith("data: "))!.slice(6);
+    return `chat:${(JSON.parse(data) as StreamedEnvelope).event.kind}`;
+  };
+  const read: string[] = [];
+  let buffered = "";
+  return {
+    next: async (): Promise<string> => {
+      while (read.length === 0) {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          throw new Error("the stream closed before it wrote another frame");
+        }
+        buffered += chunk.value;
+        const frames = buffered.split("\n\n");
+        buffered = frames.pop() ?? "";
+        for (const frame of frames) {
+          const name = named(frame);
+          if (name !== undefined) {
+            read.push(name);
+          }
+        }
+      }
+      return read.shift()!;
+    },
+    cancel: () => reader.cancel(),
+  };
 };
 
 const kindsUntil = async (

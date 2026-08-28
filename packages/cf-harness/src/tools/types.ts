@@ -19,6 +19,7 @@ import type { HarnessBrowserAccessLease } from "../contracts/browser-access.ts";
 import type { HarnessHandleTable } from "../contracts/handle-table.ts";
 import type { HarnessFabricSession } from "../fabric-session.ts";
 import type { PatternIndexClient } from "../pattern-index/client.ts";
+import type { PatternIndexPublicationLedger } from "../pattern-index/publish-ledger.ts";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import type { ToolOutputId } from "../contracts/tool-result.ts";
 import type { ProcessRunner } from "../sandbox/process-runner.ts";
@@ -71,6 +72,15 @@ export interface HarnessToolContext {
    * searches, runs, and votes.
    */
   patternIndexPublishEnabled?: boolean;
+
+  /**
+   * Where a pattern this run authored is held until the session ends. The
+   * ledger publishes once per capability rather than once per successful run
+   * — see `pattern-index/publish-ledger.ts`. Absent when the run has no
+   * index, and absent for a tool invoked outside the engine, which publishes
+   * as it goes instead.
+   */
+  patternIndexPublications?: PatternIndexPublicationLedger;
 
   /**
    * What this run was asked to do, in the words it was asked in. A published

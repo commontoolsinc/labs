@@ -75,22 +75,22 @@ const cacheFiles = new WeakMap<ProcessModuleByteCache, string>();
 export class ProcessModuleByteCache implements ModuleByteCache {
   // Keyed by `${runtimeVersion}\0${identity}`. Map insertion order gives FIFO
   // eviction (recency-refreshed on read, so eviction is ~LRU).
-  private readonly entries = new Map<
+  readonly #entries = new Map<
     string,
     { artifact: CompiledModuleArtifact; size: number }
   >();
-  private totalBytes = 0;
-  private readonly maxBytes: number;
+  #totalBytes = 0;
+  readonly #maxBytes: number;
 
   constructor(maxBytes = 256 * 1024 * 1024) {
-    this.maxBytes = maxBytes;
+    this.#maxBytes = maxBytes;
   }
 
-  private static key(runtimeVersion: string, identity: string): string {
+  static #key(runtimeVersion: string, identity: string): string {
     return `${runtimeVersion}\0${identity}`;
   }
 
-  private static sizeOf(artifact: CompiledModuleArtifact): number {
+  static #sizeOf(artifact: CompiledModuleArtifact): number {
     let size = artifact.js.length;
     if (typeof artifact.sourceMap === "string") {
       size += artifact.sourceMap.length;
@@ -111,11 +111,11 @@ export class ProcessModuleByteCache implements ModuleByteCache {
     runtimeVersion: string,
     identity: string,
   ): CompiledModuleArtifact | undefined {
-    const key = ProcessModuleByteCache.key(runtimeVersion, identity);
-    const entry = this.entries.get(key);
+    const key = ProcessModuleByteCache.#key(runtimeVersion, identity);
+    const entry = this.#entries.get(key);
     if (entry === undefined) return undefined;
-    this.entries.delete(key);
-    this.entries.set(key, entry);
+    this.#entries.delete(key);
+    this.#entries.set(key, entry);
     return entry.artifact;
   }
 
@@ -137,32 +137,32 @@ export class ProcessModuleByteCache implements ModuleByteCache {
     identity: string,
     artifact: CompiledModuleArtifact,
   ): void {
-    this.insert(
-      ProcessModuleByteCache.key(runtimeVersion, identity),
+    this.#insert(
+      ProcessModuleByteCache.#key(runtimeVersion, identity),
       artifact,
       { replaceExisting: true },
     );
   }
 
-  private insert(
+  #insert(
     key: string,
     artifact: CompiledModuleArtifact,
     options: { replaceExisting: boolean },
   ): void {
-    const existing = this.entries.get(key);
+    const existing = this.#entries.get(key);
     if (existing !== undefined) {
-      this.entries.delete(key);
-      this.totalBytes -= existing.size;
+      this.#entries.delete(key);
+      this.#totalBytes -= existing.size;
       if (!options.replaceExisting) {
-        this.entries.set(key, existing);
-        this.totalBytes += existing.size;
+        this.#entries.set(key, existing);
+        this.#totalBytes += existing.size;
         return;
       }
     }
-    const size = ProcessModuleByteCache.sizeOf(artifact);
-    this.entries.set(key, { artifact, size });
-    this.totalBytes += size;
-    this.evictToCap();
+    const size = ProcessModuleByteCache.#sizeOf(artifact);
+    this.#entries.set(key, { artifact, size });
+    this.#totalBytes += size;
+    this.#evictToCap();
   }
 
   putAll(
@@ -174,20 +174,20 @@ export class ProcessModuleByteCache implements ModuleByteCache {
     }
   }
 
-  private evictToCap(): void {
-    while (this.totalBytes > this.maxBytes) {
-      const oldest = this.entries.keys().next().value;
+  #evictToCap(): void {
+    while (this.#totalBytes > this.#maxBytes) {
+      const oldest = this.#entries.keys().next().value;
       if (oldest === undefined) break;
-      const entry = this.entries.get(oldest);
-      this.entries.delete(oldest);
-      if (entry !== undefined) this.totalBytes -= entry.size;
+      const entry = this.#entries.get(oldest);
+      this.#entries.delete(oldest);
+      if (entry !== undefined) this.#totalBytes -= entry.size;
     }
   }
 
   /** A serializable dump of every cached module. Pairs with {@link restore}. */
   snapshot(): SerializedModuleBytes[] {
     const out: SerializedModuleBytes[] = [];
-    for (const [key, { artifact }] of this.entries) {
+    for (const [key, { artifact }] of this.#entries) {
       const serialized: SerializedModuleBytes = { key, js: artifact.js };
       if (artifact.sourceMap !== undefined) {
         serialized.sourceMap = artifact.sourceMap;
@@ -247,7 +247,7 @@ export class ProcessModuleByteCache implements ModuleByteCache {
       if (e.policyManifests !== undefined) {
         artifact.policyManifests = [...e.policyManifests];
       }
-      this.insert(
+      this.#insert(
         e.key,
         artifact,
         { replaceExisting: false },
@@ -256,12 +256,12 @@ export class ProcessModuleByteCache implements ModuleByteCache {
   }
 
   clear(): void {
-    this.entries.clear();
-    this.totalBytes = 0;
+    this.#entries.clear();
+    this.#totalBytes = 0;
   }
 
   stats(): { entries: number; bytes: number } {
-    return { entries: this.entries.size, bytes: this.totalBytes };
+    return { entries: this.#entries.size, bytes: this.#totalBytes };
   }
 }
 

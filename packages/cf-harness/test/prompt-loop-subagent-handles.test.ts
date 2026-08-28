@@ -48,7 +48,11 @@ const URI_C = `of:fid1:${HASH_C}`;
 class FakeSandboxRuntime implements SandboxRuntime {
   readonly shellRequests: SandboxShellRequest[] = [];
 
-  constructor(private readonly shellResults: SandboxCommandResult[] = []) {}
+  readonly #shellResults: SandboxCommandResult[];
+
+  constructor(shellResults: SandboxCommandResult[] = []) {
+    this.#shellResults = shellResults;
+  }
 
   describe(): SandboxRuntimeDescription {
     return {
@@ -88,7 +92,7 @@ class FakeSandboxRuntime implements SandboxRuntime {
       });
     }
     return Promise.resolve(
-      this.shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+      this.#shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
     );
   }
 }
@@ -656,7 +660,16 @@ describe("prompt-loop cross-agent address handles", () => {
       "You own the write, compile-error, fix",
     );
     expect(childSystemPrompt).toContain(
-      "Return the result reference run_pattern gave you",
+      "Return the resultRef run_pattern gave you for the pattern you ran last",
+    );
+    // The deliverable is a reference to something that ran, and source is
+    // refused rather than merely discouraged: an encoding is still source.
+    expect(childSystemPrompt).toContain("You never return source.");
+    expect(childSystemPrompt).toContain(
+      "not as an array of code points or bytes",
+    );
+    expect(childSystemPrompt).toContain(
+      "Build up in atoms rather than in one leap.",
     );
   });
 

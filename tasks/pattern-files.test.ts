@@ -40,6 +40,31 @@ describe("isPatternSource", () => {
     expect(isPatternSource("packages/patterns/tools/foo.ts")).toBe(false);
     expect(isPatternSource("packages/patterns/mod.ts")).toBe(false);
   });
+
+  it("rejects authored iframe support modules", () => {
+    expect(
+      isPatternSource("packages/patterns/iframe-notes/contract.ts"),
+    ).toBe(false);
+    expect(isPatternSource("packages/patterns/iframe-notes/guest.ts")).toBe(
+      false,
+    );
+    expect(isPatternSource("packages/patterns/iframe-notes/guest.tsx")).toBe(
+      false,
+    );
+    expect(isPatternSource("packages/patterns/iframe-notes/main.tsx")).toBe(
+      true,
+    );
+  });
+
+  it("does not reserve iframe support basenames outside iframe patterns", () => {
+    expect(isPatternSource("packages/patterns/notebook/contract.ts")).toBe(
+      true,
+    );
+    expect(isPatternSource("packages/patterns/notebook/guest.ts")).toBe(true);
+    expect(
+      isPatternSource("packages/connectors/example/pattern/guest.ts", "."),
+    ).toBe(true);
+  });
 });
 
 describe("patternKey", () => {

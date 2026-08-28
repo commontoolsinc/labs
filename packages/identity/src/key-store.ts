@@ -21,16 +21,15 @@ const DB_VERSION = 1;
 
 // An abstraction around storing key materials in IndexedDb.
 export class KeyStore {
-  static DEFAULT_DB_NAME = DEFAULT_DB_NAME;
-  private db: DB;
+  #db: DB;
 
   constructor(db: DB) {
-    this.db = db;
+    this.#db = db;
   }
 
   // Get the `name` keypair.
   async get(name: string): Promise<Identity | void> {
-    const result = await this.db.get(name);
+    const result = await this.#db.get(name);
     if (result) {
       return Identity.fromKeyPair(keyPairFromStored(result));
     }
@@ -39,12 +38,17 @@ export class KeyStore {
 
   // Set the `name` keypair with `value`.
   async set(name: string, value: Identity): Promise<undefined> {
-    await this.db.set(name, storedFromKeyPair(value.keyPair));
+    await this.#db.set(name, storedFromKeyPair(value.keyPair));
   }
 
   // Clear the key store's table.
   clear(): Promise<void> {
-    return this.db.clear();
+    return this.#db.clear();
+  }
+
+  /** The database name that `open()` uses when not given one. */
+  static get DEFAULT_DB_NAME(): string {
+    return DEFAULT_DB_NAME;
   }
 
   // Opens a new instance of `KeyStore`.
@@ -67,23 +71,23 @@ export class KeyStore {
 }
 
 class DB {
-  private db: IDBDatabase;
+  #db: IDBDatabase;
   constructor(db: IDBDatabase) {
-    this.db = db;
+    this.#db = db;
   }
 
   get(key: string): Promise<StoredKeyPair | void> {
-    const store = this.getStore(DEFAULT_STORE_NAME, "readonly");
+    const store = this.#getStore(DEFAULT_STORE_NAME, "readonly");
     return asyncWrap(store.get(key));
   }
 
   set(key: string, value: unknown): Promise<void> {
-    const store = this.getStore(DEFAULT_STORE_NAME, "readwrite");
+    const store = this.#getStore(DEFAULT_STORE_NAME, "readwrite");
     return asyncWrap(store.put(value, key)).then(() => undefined);
   }
 
   async clear() {
-    const store = this.getStore(DEFAULT_STORE_NAME, "readwrite");
+    const store = this.#getStore(DEFAULT_STORE_NAME, "readwrite");
     return await asyncWrap(store.clear());
   }
 
@@ -105,11 +109,11 @@ class DB {
     return new DB(db);
   }
 
-  private getStore(
+  #getStore(
     storeName: string,
     mode: "readonly" | "readwrite",
   ): IDBObjectStore {
-    const tx = this.db.transaction(storeName, mode);
+    const tx = this.#db.transaction(storeName, mode);
     return tx.objectStore(storeName);
   }
 }

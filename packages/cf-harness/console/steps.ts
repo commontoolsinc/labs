@@ -24,6 +24,11 @@ import type { ToolResultRef } from "../src/contracts/tool-result.ts";
 import type { HarnessPolicyEvent } from "../src/contracts/policy.ts";
 import type { HarnessPolicyDecisionRecord } from "../src/contracts/policy-trace.ts";
 import type { HarnessCfcInvocationContext } from "../src/contracts/cfc-invocation-context.ts";
+import {
+  cellLabelsAt,
+  type ConsoleCellLabelIndex,
+  type ConsoleCellLabels,
+} from "./cell-labels.ts";
 
 /** One place a handle was passed into a call. */
 export interface ConsoleHandleUse {
@@ -73,8 +78,20 @@ export interface ConsoleHandle {
   /** Every call this handle was passed into. */
   uses: readonly ConsoleHandleUse[];
 
-  /** Confidentiality atoms the run's labels attached where it was used. */
+  /**
+   * Confidentiality atoms the sandbox invocation context put on the arguments
+   * this handle was passed as. A fact about the calls that spent it: what the
+   * runtime labelled a position with at the moment a call went through it.
+   */
   confidentiality: readonly string[];
+
+  /**
+   * The labels the space holds for the cell this handle names. A fact about
+   * the cell, which is why it stands beside `confidentiality` rather than
+   * replacing it: a cell the space labels may be passed to a call that carries
+   * no atom, and a call may carry one on a cell the space labels with nothing.
+   */
+  labels?: ConsoleCellLabels;
 }
 
 /**
@@ -108,8 +125,11 @@ export interface ConsoleArgumentRef {
   /** The shape the pattern that made it declared. */
   schema?: unknown;
 
-  /** Confidentiality atoms the run's labels put on this argument. */
+  /** Confidentiality atoms the invocation context put on this argument. */
   confidentiality: readonly string[];
+
+  /** The labels the space holds for the cell this argument names. */
+  labels?: ConsoleCellLabels;
 
   /** The argument as written, for one that names nothing. */
   value?: unknown;
@@ -544,14 +564,15 @@ export const consoleRunSteps = (
 };
 
 /**
- * The handles a run introduced, each resolved against the run's own table.
- * A token the table no longer holds is still reported: that the run passed a
- * handle is the fact, and an address it did not keep is not a reason to hide
- * it.
+ * The handles a run introduced, each resolved against the run's own table and
+ * against the labels the run's space holds for what it names. A token the
+ * table no longer holds is still reported: that the run passed a handle is the
+ * fact, and an address it did not keep is not a reason to hide it.
  */
 export const consoleRunHandles = (
   steps: readonly ConsoleStep[],
   handleTable?: HarnessHandleTable,
+  labels?: ConsoleCellLabelIndex,
 ): readonly ConsoleHandle[] => {
   const entries = new Map<string, HarnessHandleEntry>(
     (handleTable?.entries ?? []).map((entry) => [entry.token, entry]),
@@ -562,6 +583,9 @@ export const consoleRunHandles = (
     for (const token of step.handlesIntroduced) {
       const entry = entries.get(token);
       const known = provenance.get(token);
+      const cellLabels = labels === undefined
+        ? undefined
+        : cellLabelsAt(labels, entry?.ref);
       handles.push({
         token,
         ...(entry?.ref !== undefined ? { ref: entry.ref } : {}),
@@ -577,6 +601,7 @@ export const consoleRunHandles = (
         ...(entry?.schema !== undefined ? { schema: entry.schema } : {}),
         uses: known?.uses ?? [],
         confidentiality: known?.confidentiality ?? [],
+        ...(cellLabels !== undefined ? { labels: cellLabels } : {}),
       });
     }
   }
@@ -749,10 +774,14 @@ const parsesAsLink = (text: string): boolean => {
  * that takes one takes it as a named argument, so both are read here. A
  * reference resolves against the run's handles whichever way it was written:
  * by token directly, and by link through the address the token stands for.
+ *
+ * The label index is what gives an argument the cell's own labels when the
+ * link names a cell no handle stands for.
  */
 export const consoleStepArguments = (
   step: ConsoleStep,
   handles: readonly ConsoleHandle[] = [],
+  labels?: ConsoleCellLabelIndex,
 ): readonly ConsoleArgumentRef[] => {
   if (step.kind !== "tool") {
     return [];
@@ -778,6 +807,11 @@ export const consoleStepArguments = (
         value,
       };
     }
+    // The handle carries the cell's labels already; an argument written as a
+    // whole link the run holds no handle for is looked up by the address the
+    // link itself names, so both spellings reach the same labels.
+    const cellLabels = handle?.labels ??
+      (labels === undefined ? undefined : cellLabelsAt(labels, ref));
     return {
       key,
       isReference: true,
@@ -789,6 +823,7 @@ export const consoleStepArguments = (
         : {}),
       ...(handle?.schema !== undefined ? { schema: handle.schema } : {}),
       confidentiality: argumentAtomNames(step, key, argumentKeys),
+      ...(cellLabels !== undefined ? { labels: cellLabels } : {}),
     };
   });
 };

@@ -34,10 +34,21 @@ Composable building blocks designed for embedding in other patterns
 `docs/common/patterns/primitives.md` for the composition contract and the
 adopter-first entry bar.
 
-Currently no occupants. The first candidate (`EditableList`) was built, proven
-against real callers both headless and rendered, and retired under the kill
-criterion — no caller benefited (see the contract doc's "Lessons" section). New
-primitives require a named, real adopter before they are built.
+`amount-ledger.tsx`, `check-list.tsx`, `counter.tsx`, `dice-roller.tsx`,
+`option-picker.tsx`, `sortable-table.tsx`, and the `demo/` host that embeds all
+six. Each is a single self-contained file taking real, optional inputs, with an
+embeddable `[UI]` — a fragment rather than a `cf-screen` — so a host can drop it
+in as a JSX tag or run it standalone.
+
+Their adopter is the pattern index: they are published to it as composable
+parts, and their descriptions are derived from their doc comments by
+`packages/cf-harness/scripts/seed-pattern-index.ts`. So the first paragraph of
+each doc comment is what a search ranks on, and it has to describe what the code
+does rather than what the atom is for.
+
+The earlier candidate (`EditableList`) was built, proven against real callers
+both headless and rendered, and retired under the kill criterion — no caller
+benefited (see the contract doc's "Lessons" section).
 
 ## exemplar
 

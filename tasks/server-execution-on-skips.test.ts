@@ -128,83 +128,59 @@ Deno.test("main: no arguments behaves like an unknown suite", async () => {
 });
 
 Deno.test("main: empty lists print the report on stderr and nothing on stdout", async () => {
-  // The shell suite's list is empty (patterns carries one FILE entry and two
-  // STEP entries; runner and runtime-client are empty since their lifts).
+  // The shell suite's list is empty (patterns carries the one restored
+  // lunch-poll-vote FILE entry; runner and runtime-client are empty since
+  // their lifts).
   const { out, err, io } = captureIo();
   assertEquals(await main(["shell"], io), 0);
   assertEquals(out, []);
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list carries the two current phase-7 entries and keeps the flip bar explicit", async () => {
+// The one entry is the RESTORED lunch-poll-vote FILE entry (2026-08-28):
+// the lift PR (#6484) ran THREE direct-CI unskip probe boards (four
+// across the arc — the first opened it pre-PR, under phase 3); every one
+// red at the probed surface with one identical signature, each probe's
+// artifact advancing the map one geometry (sibling replication in flight
+// -> FIXED; by-ORDER closure-less parent via the in-memory index ->
+// FIXED, module-keyed fallback; supplier compile still mid-flight ->
+// UNFIXED residue), and the declared hard stop restored the entry.
+// Evidence chain: verification-coverage.md OW45's lunch blocks.
+Deno.test("main: the patterns list carries the restored lunch-poll-vote FILE entry — the probe-mapped forever-park", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
-  // The default-app step entry never drops its file; the lunch-poll-vote
-  // FILE entry is the one --ignore flag on stdout.
+  // The lunch-poll-vote FILE entry is the one --ignore flag on stdout.
   assertEquals(out, ["--ignore=integration/lunch-poll-vote.test.ts"]);
-  // …the report carries both remaining skips loudly…
-  assertMatch(
-    err[0],
-    /patterns: SKIP-STEP integration\/default-app\.test\.ts :: should persist and reload every rapidly created notebook note \(until phase-7; the rest of the file runs\)/,
-  );
+  // …the report carries the one remaining skip loudly…
   assertMatch(
     err[0],
     /patterns: SKIP integration\/lunch-poll-vote\.test\.ts \(until phase-7\)/,
   );
-  // …and the list holds EXACTLY these two entries — an addition or a silent
-  // lift both redden this pin.
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 2);
+  // …and the list holds EXACTLY that entry — an addition or a silent lift
+  // both redden this pin.
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 1);
   assertEquals(
     SERVER_EXECUTION_ON_SKIPS.patterns[0].file,
-    "integration/default-app.test.ts",
-  );
-  assertEquals(
-    SERVER_EXECUTION_ON_SKIPS.patterns[0].step,
-    "should persist and reload every rapidly created notebook note",
-  );
-  // The lunch-poll-vote entry is FILE-level (no step guard: every step
-  // depends on the profile-first join the class kills), same class and
-  // fork memo as the closed default-app residue.
-  assertEquals(
-    SERVER_EXECUTION_ON_SKIPS.patterns[1].file,
     "integration/lunch-poll-vote.test.ts",
   );
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[1].step, undefined);
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[1].phase, "phase-7");
-  // Its reason names the NARROWED charge the entry's own gate found
-  // (2026-08-24), the pinned never-issued mechanism, and the completed
-  // post-fix gate — not the b04 client-start class that gate closed,
-  // whose fork memo the reason keeps as history.
-  assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
-    /program-materialization|patternIdentity/,
-  );
-  assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
-    /ow45-armb-client-start-fork\.md/,
-  );
-  assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
-    /never issued/i,
-  );
-  assertMatch(SERVER_EXECUTION_ON_SKIPS.patterns[1].reason, /0\/8/);
-  // …and the 2026-08-27 lift attempt, whose local re-baseline PASSED (8/8)
-  // while the direct CI unskip probe on the same branch went RED — pinned by
-  // its CI coordinates and by the HOST-side line, so a future seat cannot
-  // read that 8/8 as a clean lift bar, nor re-derive the stage from scratch.
-  assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
-    /DIRECT CI UNSKIP PROBE ON THE SAME BRANCH FAILED/,
-  );
-  assertMatch(SERVER_EXECUTION_ON_SKIPS.patterns[1].reason, /33085668531/);
-  assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
-    /lunch-poll-vote\.test\.ts:271/,
-  );
-  assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
-    /HOST's clickCfButton/,
-  );
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[0].step, undefined);
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[0].phase, "phase-7");
+  // The reason carries the probe-accumulated map: the three supplier
+  // geometries with their fix state, the four-probe signature (so nobody
+  // chases the refusal storm or re-derives the classification), the
+  // local-vs-CI split, and the recorded-not-landed next move.
+  const reason = SERVER_EXECUTION_ON_SKIPS.patterns[0].reason;
+  assertMatch(reason, /forever-park/);
+  assertMatch(reason, /sibling replication \(FIXED, sibling-await\)/);
+  assertMatch(reason, /module-keyed fallback origins/);
+  assertMatch(reason, /still-mid-flight supplier compile \(UNFIXED residue/);
+  assertMatch(reason, /33160430927/);
+  assertMatch(reason, /33164596936/);
+  assertMatch(reason, /33165960083/);
+  assertMatch(reason, /structure-load-stuck/);
+  assertMatch(reason, /closure-replication-fallback-origin 0/);
+  assertMatch(reason, /lunch-poll-vote\.test\.ts:271/);
+  assertMatch(reason, /CI boot ORDER/);
   // The topic-board pivot-baseline entry is GONE (#6304 fixed): the
   // guard lookup for that step resolves nothing, so the case runs in
   // the ON lane — it is that issue's acceptance test.
@@ -216,45 +192,27 @@ Deno.test("main: the patterns list carries the two current phase-7 entries and k
     ),
     undefined,
   );
-  // The guard resolves the current direct-CI charge and pins its decisive
-  // discriminators so a stale launcher-era reason cannot return silently.
-  const entry = serverExecutionOnStepSkip(
-    "patterns",
-    "integration/default-app.test.ts",
-    "should persist and reload every rapidly created notebook note",
+  // The default-app reload STEP entry is GONE (LIFTED 2026-08-28 under the
+  // owner's surface reading of the ruled bar): its guard lookup resolves
+  // NOTHING, so the ON arm RUNS that step — the lift's standing proof, and the
+  // pin that makes a silent re-skip impossible.
+  assertEquals(
+    serverExecutionOnStepSkip(
+      "patterns",
+      "integration/default-app.test.ts",
+      "should persist and reload every rapidly created notebook note",
+    ),
+    undefined,
   );
-  assert(entry !== undefined, "the rapid-note step's guard entry must resolve");
-  assertEquals(entry.phase, "phase-7");
-  assertMatch(entry.reason, /66a969ca0/);
-  assertMatch(entry.reason, /33008274232/);
-  assertMatch(entry.reason, /5m22s/);
-  assertMatch(entry.reason, /300000ms/);
-  assertMatch(entry.reason, /eventInvocationCount=7/);
-  assertMatch(entry.reason, /notebookActionCount=0/);
-  assertMatch(entry.reason, /84 stored UI note chips/);
-  assertMatch(entry.reason, /zero pattern-swap-setup-error/);
-  assertMatch(entry.reason, /distinct from the split-source/);
-  assertMatch(entry.reason, /10\/10 quiet-and-loaded/);
-  // The 2026-08-27 root cause narrowed the charge: the navigation half
-  // (wrong-branch optimistic navigateTo — L2, ruled PUNT: sanctioned) is
-  // absorbed by the step's id-bound reads, so the residue that KEEPS the
-  // entry is the a04 write-side member — consequenced marks whose derived
-  // commits carry none of the effects. Pin the narrowed discriminators so
-  // a stale cause-unassigned reason (or the closed navigation charge)
-  // cannot return silently.
-  assertMatch(entry.reason, /a04/);
-  assertMatch(entry.reason, /mark-without-effects/);
-  assertMatch(entry.reason, /ruled PUNT/);
-  assertMatch(entry.reason, /keyless-diagnosis-2026-08-27\.md/);
+  // The one remaining entry is FILE-level: no SKIP-STEP line anywhere.
   assert(
-    !/cause is not yet assigned/.test(entry.reason),
-    "the reason must not claim the cause is unassigned — it was root-caused " +
-      "2026-08-27 (register OW45; keyless-diagnosis-2026-08-27.md)",
+    !/SKIP-STEP/.test(err[0]),
+    "the patterns report must carry no SKIP-STEP line — the one entry " +
+      "is lunch-poll-vote's FILE entry",
   );
   // The shard filter drops exactly the FILE entry's file (the shard
   // lanes feed explicit file lists) and passes every other candidate
-  // through untouched — remove the lunch-poll-vote entry and this
-  // assertion reds.
+  // through untouched.
   const { files, skipped } = serverExecutionOnFilterFiles("patterns", [
     "./integration/default-app.test.ts",
     "./integration/cellset-lww.test.ts",
@@ -268,7 +226,7 @@ Deno.test("main: the patterns list carries the two current phase-7 entries and k
     "./integration/convergence-storm.test.ts",
     "./integration/topics-navigation.test.ts",
   ]);
-  assertEquals(skipped, [SERVER_EXECUTION_ON_SKIPS.patterns[1]]);
+  assertEquals(skipped, [SERVER_EXECUTION_ON_SKIPS.patterns[0]]);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.shell.length, 0);
 });
 
@@ -352,7 +310,12 @@ Deno.test("validation binds a step entry: the file must name the step and call t
   ]);
 });
 
-Deno.test("main: the runner list is EMPTY — pattern-and-data-persistence LIFTED by the arrival-witness predicate (RULED 2026-08-22, candidate (B): a cover at the floor witnesses only when derived-class) on 10/10 green at the true ON topology — so the full suite runs, and the ONLY file-level skip in ANY suite is patterns' lunch-poll-vote entry (the 2026-08-24 deliberate OW45 arm-B re-skip)", async () => {
+// The runner list emptied with the arrival-witness lift (RULED 2026-08-22,
+// candidate (B) of the OW33 fork memo). This pin holds the whole-registry
+// state: the ONLY entry anywhere is the restored lunch-poll-vote FILE
+// entry, so any OTHER entry in ANY suite reddens it and a skip stays a
+// deliberate change, never a leftover.
+Deno.test("main: the runner list is EMPTY and the only entry in ANY suite is the restored lunch-poll-vote FILE entry", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["runner"], io), 0);
   // No entries: no --ignore flag on stdout…
@@ -366,21 +329,15 @@ Deno.test("main: the runner list is EMPTY — pattern-and-data-persistence LIFTE
   // …and the report says so loudly.
   assertMatch(err[0], /runner: no skips — full suite runs\./);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.runner.length, 0);
-  // A FILE-level skip is a deliberate entry, never a leftover: the
-  // arrival-witness lift cleared the last one, and the single re-skip
-  // since — patterns' lunch-poll-vote entry (2026-08-24, the OW45 arm-B
-  // client-start class its profile-first join newly exposes) — is named
-  // here so the NEXT file-level entry still reddens this pin. The flip
-  // PR's list-EMPTY bar hangs on this file and the topic-board step.
+  // The whole registry: the restored lunch-poll-vote FILE entry is the
+  // ONLY entry in any suite — the flip PR's list-EMPTY bar hangs on it.
   for (const suite of ["patterns", "runner", "runtime-client", "shell"]) {
     if (!isServerExecutionSuite(suite)) throw new Error("unreachable");
     assertEquals(
-      SERVER_EXECUTION_ON_SKIPS[suite]
-        .filter((skip) => skip.step === undefined)
-        .map((skip) => skip.file),
+      SERVER_EXECUTION_ON_SKIPS[suite].map((skip) => skip.file),
       suite === "patterns" ? ["integration/lunch-poll-vote.test.ts"] : [],
-      `${suite}: the only FILE-level skip is the deliberate ` +
-        "lunch-poll-vote OW45 arm-B entry",
+      `${suite}: the only entry is the restored lunch-poll-vote FILE ` +
+        "entry (2026-08-28)",
     );
   }
 });

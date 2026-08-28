@@ -55,6 +55,12 @@ installFakeClock({
     // (the serving side of the client-loses-derivation-commit journey)
     // under the same wall-clock policies.
     "speculation-overlay",
+    // The UI-cell-write conflict-retry suite (the group-chat :133 stall's
+    // mechanism) drives a live shared memory server with manual fan-out
+    // and waits on pull/flush edges with bounded timeouts — the same
+    // live-transport class as the executor suites above; its retry path's
+    // catch-up rides transport edges, not virtual time.
+    "ui-cell-write-conflict-retry",
     // Stage C W3.1 (S1): the drain-settle quiescence-advance pins drive
     // a live ExecutorHost under the same wall-clock policies (flush
     // deadline, renew cadence), and pins 3/5 assert QUIET-window

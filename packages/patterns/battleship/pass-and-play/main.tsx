@@ -112,8 +112,7 @@ export default pattern<Input, Output>((_input) => {
     const allSunk = areAllShipsSunk(targetBoard.ships, newShots);
 
     if (allSunk) {
-      game.set({
-        ...state,
+      game.update({
         player1: targetPlayer === 1 ? newTargetBoard : state.player1,
         player2: targetPlayer === 2 ? newTargetBoard : state.player2,
         phase: "finished",
@@ -124,8 +123,7 @@ export default pattern<Input, Output>((_input) => {
       });
     } else {
       const nextTurn = state.currentTurn === 1 ? 2 : 1;
-      game.set({
-        ...state,
+      game.update({
         player1: targetPlayer === 1 ? newTargetBoard : state.player1,
         player2: targetPlayer === 2 ? newTargetBoard : state.player2,
         currentTurn: nextTurn as 1 | 2,
@@ -140,8 +138,7 @@ export default pattern<Input, Output>((_input) => {
     const state = game.get();
     if (state.phase === "finished") return;
     if (!state.awaitingPass) return;
-    game.set({
-      ...state,
+    game.update({
       viewingAs: null,
       awaitingPass: false,
     });
@@ -151,8 +148,7 @@ export default pattern<Input, Output>((_input) => {
     const state = game.get();
     if (state.phase === "finished") return;
     if (state.viewingAs !== null) return;
-    game.set({
-      ...state,
+    game.update({
       viewingAs: state.currentTurn,
       awaitingPass: false,
       lastMessage:
