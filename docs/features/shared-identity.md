@@ -82,6 +82,21 @@ Do not use `cf id derive <mnemonic>` for this. `from-mnemonic` uses
 `cf id derive` uses `Identity.fromPassphrase()`. The same text produces
 different DIDs.
 
+### The phrase is 24 words, and the shell calls it a passphrase
+
+The shell's login offers **"Login with Passphrase"** and a field reading
+**"Enter your passphrase"**, and both take a **BIP-39 recovery phrase** —
+`XLoginView` calls `Identity.fromMnemonic()`. Anything that is not a valid
+BIP-39 phrase fails with `Invalid mnemonic`, so a passphrase in the ordinary
+sense cannot be typed there at all, whatever the field says. The CLI equivalent
+of that field is `cf id from-mnemonic`, not `cf id derive`.
+
+**It must be 24 words.** A 12-word phrase is valid BIP-39 and still fails, with
+`RangeError: expected Uint8Array of length 32, got length=16`: twelve words
+carry 128 bits of entropy and the Ed25519 signer seeds from 32 bytes. The same
+error comes out of `cf id from-mnemonic`, so a phrase that works in one works
+in the other, and a 12-word phrase works in neither.
+
 > Use `deno run -A packages/cli/mod.ts`, not `deno task cf`, when redirecting to
 > a key file: the `deno task` wrapper prints colored preamble to stdout that
 > would corrupt the key.
