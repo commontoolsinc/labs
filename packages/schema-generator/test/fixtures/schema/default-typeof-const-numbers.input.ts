@@ -31,7 +31,7 @@ interface SchemaRoot {
     typeof NON_FINITE
   >;
 
-  // Array payload: an element the reader cannot evaluate does not drop out, it
-  // becomes a hole in place, so position matters here.
+  // Array payload: every element has to be readable, or the whole default is
+  // withheld rather than shipped with a hole; position is pinned here.
   offsets: Default<number[], typeof OFFSETS>;
 }

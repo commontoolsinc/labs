@@ -22,13 +22,16 @@ import {
   type TypeWithInternals,
 } from "../type-utils.ts";
 import {
+  extractLiteralValueOfSymbol,
+  resolveAliasedSymbol,
+} from "../typescript/literal-value.ts";
+import {
   type CellWrapperKind,
   getCellBrand,
   getCellWrapperInfo,
   isCellBrand,
   wrapperKindToBrand,
 } from "../typescript/cell-brand.ts";
-import { numberFromExpression } from "../typescript/numeric-expression.ts";
 import { isDefaultAliasSymbol } from "../typescript/property-optionality.ts";
 import { dedupeByValueEqual } from "../value-equality.ts";
 import { scopeInsideUnionError } from "../scope-placement.ts";
@@ -1214,15 +1217,8 @@ export class CommonFabricFormatter implements TypeFormatter {
     symbol: ts.Symbol | undefined,
     context: GenerationContext,
   ): ts.TypeAliasDeclaration | undefined {
-    let resolved = symbol;
-    if (resolved && (resolved.flags & ts.SymbolFlags.Alias) !== 0) {
-      try {
-        resolved = context.typeChecker.getAliasedSymbol(resolved);
-      } catch {
-        // Fall back to the original symbol; some synthetic test symbols do not
-        // round-trip cleanly through getAliasedSymbol.
-      }
-    }
+    const resolved = symbol &&
+      resolveAliasedSymbol(symbol, context.typeChecker);
     return resolved?.declarations?.find(
       (decl): decl is ts.TypeAliasDeclaration =>
         ts.isTypeAliasDeclaration(decl),
@@ -1528,6 +1524,9 @@ export class CommonFabricFormatter implements TypeFormatter {
     bindingName: ts.Identifier,
     normalizeFile = true,
   ): { file: string; path: string[]; moduleIdentity?: string } {
+    // Resolved here rather than through `resolveAliasedSymbol`: the file this
+    // lands on becomes the writer's module identity, and a hop that fell back
+    // to the importing file would attribute authority to the wrong module.
     const symbol = context.typeChecker.getSymbolAtLocation(bindingName);
     const declarationSymbol = symbol && (symbol.flags & ts.SymbolFlags.Alias)
       ? context.typeChecker.getAliasedSymbol(symbol)
@@ -1932,17 +1931,9 @@ export class CommonFabricFormatter implements TypeFormatter {
     const exprName = typeQueryNode.exprName;
 
     // Get the symbol for the referenced entity
-    let symbol = context.typeChecker.getSymbolAtLocation(exprName);
+    const symbol = context.typeChecker.getSymbolAtLocation(exprName);
     if (!symbol) {
       return undefined;
-    }
-    if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) {
-      try {
-        symbol = context.typeChecker.getAliasedSymbol(symbol);
-      } catch {
-        // Fall back to the import alias; local test programs can produce
-        // synthetic symbols that do not round-trip through getAliasedSymbol.
-      }
     }
 
     return this.extractValueFromSymbol(symbol, context);
@@ -1956,93 +1947,7 @@ export class CommonFabricFormatter implements TypeFormatter {
     symbol: ts.Symbol,
     context: GenerationContext,
   ): unknown {
-    const valueDeclaration = symbol.valueDeclaration;
-    if (!valueDeclaration) {
-      return undefined;
-    }
-
-    // Check if it's a variable declaration with an initializer
-    if (
-      ts.isVariableDeclaration(valueDeclaration) &&
-      valueDeclaration.initializer
-    ) {
-      return this.extractValueFromExpression(
-        valueDeclaration.initializer,
-        context,
-      );
-    }
-
-    return undefined;
-  }
-
-  private extractValueFromExpression(
-    expr: ts.Expression,
-    context: GenerationContext,
-  ): unknown {
-    if (
-      ts.isAsExpression(expr) || ts.isTypeAssertionExpression(expr) ||
-      ts.isSatisfiesExpression(expr) || ts.isParenthesizedExpression(expr)
-    ) {
-      return this.extractValueFromExpression(expr.expression, context);
-    }
-
-    // Handle array literals like [1, 2, 3] or [{ id: "a" }, { id: "b" }]
-    if (ts.isArrayLiteralExpression(expr)) {
-      return expr.elements.map((element) =>
-        this.extractValueFromExpression(element, context)
-      );
-    }
-
-    // Handle object literals like { id: "a", name: "test" }
-    if (ts.isObjectLiteralExpression(expr)) {
-      const obj: Record<string, unknown> = {};
-      for (const property of expr.properties) {
-        if (
-          ts.isPropertyAssignment(property) && ts.isIdentifier(property.name)
-        ) {
-          const propName = property.name.text;
-          obj[propName] = this.extractValueFromExpression(
-            property.initializer,
-            context,
-          );
-        } else if (ts.isShorthandPropertyAssignment(property)) {
-          // Handle shorthand like { id } where id is a variable
-          const propName = property.name.text;
-          obj[propName] = this.extractValueFromExpression(
-            property.name,
-            context,
-          );
-        }
-      }
-      return obj;
-    }
-
-    // Handle string literals
-    if (ts.isStringLiteral(expr)) {
-      return expr.text;
-    }
-
-    // Handle numeric literals, including signed and non-finite ones
-    const numeric = numberFromExpression(expr, context.typeChecker);
-    if (numeric !== undefined) {
-      return numeric;
-    }
-
-    // Handle boolean literals
-    if (expr.kind === ts.SyntaxKind.TrueKeyword) {
-      return true;
-    }
-    if (expr.kind === ts.SyntaxKind.FalseKeyword) {
-      return false;
-    }
-
-    // Handle null
-    if (expr.kind === ts.SyntaxKind.NullKeyword) {
-      return null;
-    }
-
-    // For more complex expressions, return undefined
-    return undefined;
+    return extractLiteralValueOfSymbol(symbol, context.typeChecker)?.value;
   }
 
   private extractComplexDefaultFromTypeSymbol(
