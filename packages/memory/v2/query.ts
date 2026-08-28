@@ -106,7 +106,31 @@ export type SlowestQueryRoot = {
 
   /** Engine documents read while visiting this root. */
   reads: number;
+
+  /** The walk this root ran, as counters: how many documents it crossed
+   * (`dagTraversals`), what kind of structure it crossed them through, and
+   * how much the schema memo saved. `elapsedMs` says a root was expensive;
+   * this says what it did to get that way — a wide root crossing thousands
+   * of documents and one deep root re-walking a schema are the same
+   * duration and different bugs. */
+  walk: GraphQueryWalkStats;
 };
+
+/** One root's share of the walk counters its evaluation accumulated. */
+const walkStatsDelta = (
+  after: GraphQueryWalkStats,
+  before: GraphQueryWalkStats,
+): GraphQueryWalkStats => ({
+  coveredSelectorSkips: after.coveredSelectorSkips -
+    before.coveredSelectorSkips,
+  schemaTraversals: after.schemaTraversals - before.schemaTraversals,
+  pointerTraversals: after.pointerTraversals - before.pointerTraversals,
+  arrayTraversals: after.arrayTraversals - before.arrayTraversals,
+  objectTraversals: after.objectTraversals - before.objectTraversals,
+  dagTraversals: after.dagTraversals - before.dagTraversals,
+  getDocAtPathCalls: after.getDocAtPathCalls - before.getDocAtPathCalls,
+  schemaMemoHits: after.schemaMemoHits - before.schemaMemoHits,
+});
 
 /**
  * What one query cost: the walk's own counters, plus how many documents the
@@ -156,6 +180,7 @@ const chargeRootVisit = (
 ): void => {
   const startedAt = performance.now();
   const readsBefore = manager.readCount;
+  const walkBefore = { ...stats };
   try {
     visit();
   } finally {
@@ -177,6 +202,7 @@ const chargeRootVisit = (
         }),
         elapsedMs,
         reads: manager.readCount - readsBefore,
+        walk: walkStatsDelta(stats, walkBefore),
       };
     }
   }
