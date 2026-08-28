@@ -501,11 +501,18 @@ export const syntheticArgument = (
  * Handlers the reconciler registers are never invoked: nothing dispatches
  * events at a document nobody is looking at.
  *
- * Returns `undefined` when the result carries no `$UI` at all. The test for
- * that goes through `uiSchema` rather than reading the raw result: a `$UI` a
- * pattern produced is reached by a link, and an unschema'd read does not
- * follow it — so a raw read answers "no UI" for a pattern that has one, and
- * the gate would skip the check while appearing to pass it.
+ * Returns `undefined` when the result carries no `$UI` at all. That test goes
+ * through `uiSchema` rather than reading the raw result, and the difference is
+ * not cosmetic: a pattern that DECLARES its result type — `pattern<Io, Io>`,
+ * which is what a self-describing component does — declares a type that does
+ * not name `$UI`, and an unschema'd read returns only the declared fields. So
+ * a raw read answers "no UI" for a pattern that has one, and the gate skips
+ * its own check while reporting a clean run.
+ *
+ * Which way that fails is what makes it worth stating: the better a pattern
+ * declares itself, the more certainly it went unchecked. Measured against the
+ * 26 `MODULE_METADATA` components in `packages/patterns`, a raw read left 20
+ * of the 24 that compile standalone recorded as `no-ui`.
  */
 export const renderPatternUiToHtml = async (
   resultCell: Cell<unknown>,

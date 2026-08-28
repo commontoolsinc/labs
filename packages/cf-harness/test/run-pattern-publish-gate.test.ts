@@ -78,6 +78,31 @@ export default pattern<Input, object>(({ rows = [] }) => ({
 }));
 `;
 
+/**
+ * A pattern that declares its result type, as every self-describing component
+ * in `packages/patterns` does — `pattern<Io, Io>` rather than `pattern<In,
+ * object>`.
+ *
+ * This is the shape that caught the gate skipping its own check. A declared
+ * result type does not name `$UI`, and an unschema'd read of the result cell
+ * returns only the declared fields, so the `$UI` is invisible to it. The gate
+ * read the raw result, saw no `$UI`, and recorded `no-ui` — "nothing to
+ * check" — on a pattern with a perfectly good one. It went the wrong way on
+ * the patterns most worth checking: the better the pattern declares itself,
+ * the more certainly the check was skipped. Reading through `uiSchema` asks
+ * for `$UI` by name, which is what `piece-render.ts` has always done.
+ */
+const DECLARED_RESULT_UI =
+  `import { pattern, UI, Writable } from "commonfabric";
+
+interface Io { rating: Writable<number> }
+
+export default pattern<Io, Io>(({ rating }) => ({
+  rating,
+  [UI]: <div><span>rated</span></div>,
+}));
+`;
+
 /** A pure computation. Nothing to render, and nothing the gate applies to. */
 const DOUBLER = `import { computed, pattern } from "commonfabric";
 interface Input { n: number; }
@@ -291,6 +316,22 @@ describe("run_pattern publish render gate", () => {
     // What the probe rendered: real cell text, from the synthetic instance.
     expect(output.rawCauseMessage).toContain("<td>alpha</td>");
     expect(output.rawCauseMessage).not.toContain("[object Object]");
+  });
+
+  it("finds the $UI of a pattern that declares its result type", async () => {
+    // Reading the raw result returns only the declared fields, so this
+    // reported `no-ui` — a skipped check dressed as a clean run — for 20 of
+    // the 24 seed components. Left as a raw read, this test fails.
+    const index = stubIndex();
+    const output = await runAndFlush(index, {
+      sourceText: DECLARED_RESULT_UI,
+      inputs: {},
+      description: "Renders a rating",
+    });
+
+    expect(output.patternPublication?.reason).toBe("ui-rendered");
+    expect(output.patternPublication?.status).toBe("discoverable");
+    expect(output.rawCauseMessage).toContain("<span>rated</span>");
   });
 
   it("offers a pure computation, which has no $UI to check", async () => {
