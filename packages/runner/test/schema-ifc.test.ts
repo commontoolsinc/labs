@@ -61,6 +61,16 @@ describe("schema-ifc", () => {
       expect(ensureExternalSchemaClosure(tx, space, ref)).toBe(false);
     });
 
+    it("reports a document whose value is undefined incomplete", () => {
+      // The hasher assigns `undefined` a hash, but the registry cannot
+      // represent a registered `undefined`; registering it would report
+      // the closure complete while the ref stays unresolvable.
+      const { ref } = uniqueExternal("closure-unit-undefined-value");
+      const tx = txReading(() => ({ ok: { value: { value: undefined } } }));
+
+      expect(ensureExternalSchemaClosure(tx, space, ref)).toBe(false);
+    });
+
     it("registers nothing for a forged document and reports it incomplete", () => {
       const { ref } = uniqueExternal("closure-unit-forged");
       // A document whose content does not hash to its id: the register step

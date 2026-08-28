@@ -154,11 +154,12 @@ function _schemaHasIfcUncached(
  * every reachable ref of a well-formed stored schema resolves from the
  * local store. Returns whether they all did: `false` names a corrupt or
  * deliberately malformed declaration — a ref the referrer space holds no
- * value for (absent, or an entry that resolves to `undefined`, which
- * content addressing makes equally unusable: no value can be the bytes
- * the hash names), a document that is not a schema document, or one whose
- * content does not hash to its id — which is logged, after which the
- * declaration
+ * value for (absent, or an entry resolving to `undefined` — the hasher
+ * does assign `undefined` a hash, but a schema cannot be `undefined` and
+ * the registry cannot represent one, so such an entry is unusable
+ * whichever hash the ref carries), a document that is not a schema
+ * document, or one whose content does not hash to its id — which is
+ * logged, after which the declaration
  * SELECTS NOTHING: the traversal narrows it to `false` and a caller about
  * to walk the schema (narrowing among them) skips it instead of throwing
  * on the dangling ref.
@@ -194,7 +195,14 @@ export function ensureExternalSchemaClosure(
         complete = false;
         continue;
       }
-      if (!isObjectNotArray(doc) || !("value" in doc)) {
+      // `value === undefined` included: the hasher assigns `undefined` a
+      // hash, but the registry cannot represent a registered `undefined`
+      // (lookup reads as unregistered), so registering it would report
+      // this closure complete while the ref stays unresolvable.
+      if (
+        !isObjectNotArray(doc) ||
+        (doc as { value?: unknown }).value === undefined
+      ) {
         logger.warn("schema-closure", () => [
           "cid: document is not a schema document; ignoring it:",
           address.id,
