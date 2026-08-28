@@ -151,7 +151,7 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
 // PRE-DECLARED residue in the register with its signature and the
 // owner-court event-driven fork. Evidence chain:
 // verification-coverage.md OW45's lunch blocks.
-Deno.test("main: the patterns list is EMPTY and the flip bar's list-EMPTY precondition is met", async () => {
+Deno.test("main: the patterns list is EMPTY after the geometry-3 lift and the flip bar's list-EMPTY precondition is met", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
   // No entries: no --ignore flag on stdout…
@@ -296,7 +296,7 @@ Deno.test("validation binds a step entry: the file must name the step and call t
 // (again) with the lunch-poll-vote geometry-3 lift (2026-08-28). This pin
 // holds the whole-registry EMPTY state: any new entry in ANY suite
 // reddens it, so a skip is a deliberate change, never a leftover.
-Deno.test("main: the runner list is EMPTY and NO suite carries any entry — the ON-skip registry is EMPTY", async () => {
+Deno.test("main: the runner list is EMPTY and NO suite carries any entry — the ON-skip registry is EMPTY after the geometry-3 lift", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["runner"], io), 0);
   // No entries: no --ignore flag on stdout…

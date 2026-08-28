@@ -7711,8 +7711,12 @@ supply; OW29/OW32/OW34 closed):
     co-resident `:133` blocker in the
     OBSERVATION below is PAID by #6477, its FIXED paragraph there).
     **GEOMETRY-3 LIFT (2026-08-28, the geometry-3 close PR — the entry's
-    second and final lift; the ON-skip registry is EMPTY across all four
-    suites again):** the entry's own stated lift condition — "the
+    second lift; the ON-skip registry is EMPTY across all four
+    suites again):** this block rides the lift PR itself, so its EMPTY
+    statement is the PR's proposed state and requirement (2) below is
+    settled by that PR's own board — a red at the probed surface
+    converts this block to a LIFT-ATTEMPT record and restores the entry,
+    exactly as #6484's did. The entry's own stated lift condition — "the
     in-flight compile await … plus the ruled local-plus-CI-probe bar" —
     met on its own evidence at the fix head:
     - **Requirement (1), local:** campaign I, 8 counted runs i01–i08
