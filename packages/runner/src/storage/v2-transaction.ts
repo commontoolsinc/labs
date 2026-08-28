@@ -1279,6 +1279,15 @@ export class V2StorageTransaction implements IStorageTransaction {
     }
 
     const operations: NativeStorageCommitOperation[] = [];
+    // Unconfirmed schema documents whose staged write nets to no visible
+    // change (mustDeliverSchemaDoc; the visible copy sits on a layer the
+    // wire never carries, such as a client speculation overlay entry).
+    // They ride a commit that exports real content — whose references
+    // they back — and are dropped from one that exports nothing: a
+    // no-op-net transaction ships no references, so re-delivering there
+    // would mint a commit, and its exported read set with it, where none
+    // existed.
+    const redeliveries: NativeStorageCommitOperation[] = [];
     for (const [key, doc] of branch?.docs.entries() ?? []) {
       if (!isWritableDocument(doc)) {
         continue;
@@ -1286,20 +1295,34 @@ export class V2StorageTransaction implements IStorageTransaction {
       if (doc.writeDetails.size === 0) {
         continue;
       }
+      const { id, type, scope } = this.parseDocKey(key);
       // Doc-level no-op elision — except for authoritative transactions
       // (markAuthoritativeWrites): `doc.initial` is the transaction-START
       // view, which may extrapolate over a DOOMED sealed overlay, so a
       // written doc that "ends where it started" may still differ from
       // the store — the completion asserts it anyway (the forced
-      // full-cover path in buildPatchOperation).
+      // full-cover path in buildPatchOperation). An unconfirmed schema
+      // document steps out to the re-delivery set instead — as a
+      // whole-doc set: content addressing makes any visible copy the
+      // whole document.
       if (
         !this.#authoritativeWrites &&
         valueEqual(doc.current.value, doc.initial.value)
       ) {
+        if (
+          this.mustDeliverSchemaDoc(space, id) &&
+          doc.current.value !== undefined
+        ) {
+          redeliveries.push({
+            op: "set",
+            id,
+            type,
+            scope,
+            value: doc.current.value,
+          });
+        }
         continue;
       }
-
-      const { id, type, scope } = this.parseDocKey(key);
       // Authoritative transactions (markAuthoritativeWrites —
       // effect-completion writebacks under the serving posture) commit
       // WHOLE-DOC set/delete, never patches (round-2 thread 17): their
@@ -1361,6 +1384,12 @@ export class V2StorageTransaction implements IStorageTransaction {
           value: doc.current.value,
         },
       );
+    }
+
+    if (
+      redeliveries.length > 0 && (operations.length > 0 || sqliteOps?.length)
+    ) {
+      operations.push(...redeliveries);
     }
 
     return {
@@ -1832,6 +1861,31 @@ export class V2StorageTransaction implements IStorageTransaction {
   }
 
   /**
+   * Whether a write to `id` must be recorded — and, in a commit that
+   * exports content, re-delivered — even when its value equals the
+   * currently-visible state. True for a `cid:` schema document the
+   * space's server has not confirmed: the visible copy may sit on a
+   * layer that never reaches the wire — a client speculation overlay
+   * entry, or a sibling commit still awaiting its verdict — so
+   * visibility is no evidence the server holds the document, and a
+   * commit whose content references it would be rejected with the
+   * document neither included nor stored (the write-side delivery
+   * guarantee, `docs/specs/content-addressed-schemas.md`). Only
+   * server-confirmed persistence makes a re-delivery redundant, and
+   * content addressing makes the confirmed copy immutable, so that
+   * elision cannot race a change. A storage without persistence
+   * tracking confirms nothing and always delivers — redundant `cid:`
+   * re-sets apply as no-ops. The write layer records such writes
+   * (writeWithinBranch's elisions yield) so commit assembly can decide;
+   * getNativeCommit emits them only alongside real content, keeping a
+   * no-op-net transaction's commit empty.
+   */
+  private mustDeliverSchemaDoc(space: MemorySpace, id: string): boolean {
+    return id.startsWith("cid:") &&
+      !this.isSchemaDocPersisted(space, id.slice("cid:".length));
+  }
+
+  /**
    * Unified write entry. Handles simple writes, root writes, type-mismatch
    * errors, and create-missing-intermediates in one path, all via
    * `applyMutablePathWrite()`. `cloneForMutation()` inside that helper
@@ -1874,11 +1928,15 @@ export class V2StorageTransaction implements IStorageTransaction {
       // Authoritative mode (markAuthoritativeWrites) disables the
       // equal-VALUE elision only: the visible state being diffed against
       // may be an extrapolation over a doomed sealed overlay, so "already
-      // equal" is not evidence the store holds the value. Deletes of
-      // absent slots stay no-ops — there is nothing to assert.
+      // equal" is not evidence the store holds the value. An unconfirmed
+      // schema document (mustDeliverSchemaDoc) disables it the same way:
+      // its visible copy may sit on a speculation layer the wire never
+      // carries. Deletes of absent slots stay no-ops — there is nothing
+      // to assert.
       if (
         isDelete ? !present : (present && valueEqual(previous.value, value) &&
-          !this.#authoritativeWrites)
+          !this.#authoritativeWrites &&
+          !this.mustDeliverSchemaDoc(space, address.id))
       ) {
         return { ok: current };
       }
@@ -1937,9 +1995,15 @@ export class V2StorageTransaction implements IStorageTransaction {
       return { error: result.error.from(space) };
     }
     // Authoritative mode records the (value-unchanged) write anyway so it
-    // reaches the commit as a full-cover re-assert; delete no-ops still
-    // return (see above).
-    if (!result.ok.changed && (isDelete || !this.#authoritativeWrites)) {
+    // reaches the commit as a full-cover re-assert, and an unconfirmed
+    // schema document is recorded for the same delivery reason; delete
+    // no-ops still return (see above).
+    if (
+      !result.ok.changed &&
+      (isDelete ||
+        (!this.#authoritativeWrites &&
+          !this.mustDeliverSchemaDoc(space, address.id)))
+    ) {
       return { ok: current };
     }
 
