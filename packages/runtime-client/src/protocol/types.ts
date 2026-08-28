@@ -2184,138 +2184,22 @@ export type VDomEventNotification = BaseClientNotification & {
 };
 
 /**
- * Serialized DOM event data for IPC.
+ * The shape a DOM event crosses in, and the shape of its target within it.
+ *
+ * `serializeEvent()` in `@commonfabric/html` is what produces both, so that is
+ * where they are defined; the protocol re-exports them so a message shape and
+ * the event inside it cannot describe different things. That is the same
+ * arrangement, and for the same reason, as the VDOM op union below.
+ *
+ * The event's name here is `SerializedDomEvent`, which says which of this
+ * file's messages it belongs to; `SerializedEvent` alone would not, among the
+ * other serialized things around it.
  */
-export type SerializedDomEvent = {
-  /**
-   * The DOM event's type, as `click` or `input`.
-   */
-  type: string;
-
-  /**
-   * Where the event came from, so a handler can tell a real user
-   * gesture from a synthesized one.
-   */
-  provenance?: {
-    origin?: string;
-    trusted?: boolean;
-    ui?: {
-      pattern?: string;
-      eventIntegrity?: readonly string[];
-      uiContractDataset?: Record<string, string>;
-    };
-  };
-
-  /**
-   * The key pressed, for a keyboard event.
-   */
-  key?: string;
-
-  /**
-   * The physical key, which `key` does not identify across layouts.
-   */
-  code?: string;
-
-  /**
-   * Whether the key was being held.
-   */
-  repeat?: boolean;
-
-  /**
-   * Whether Alt was held.
-   */
-  altKey?: boolean;
-
-  /**
-   * Whether Control was held.
-   */
-  ctrlKey?: boolean;
-
-  /**
-   * Whether Meta was held.
-   */
-  metaKey?: boolean;
-
-  /**
-   * Whether Shift was held.
-   */
-  shiftKey?: boolean;
-
-  /**
-   * What kind of edit an input event was.
-   */
-  inputType?: string;
-
-  /**
-   * The text an input event inserted, `null` where it inserted none.
-   */
-  data?: string | null;
-
-  /**
-   * Which button a pointer event used.
-   */
-  button?: number;
-
-  /**
-   * Which buttons were held during a pointer event.
-   */
-  buttons?: number;
-
-  /**
-   * What the event fired on, reduced to the fields a handler reads.
-   */
-  target?: SerializedEventTarget;
-
-  /**
-   * A custom event's payload.
-   */
-  detail?: FabricValue;
-};
-
-/**
- * Serialized event target data for IPC.
- */
-export type SerializedEventTarget = {
-  /**
-   * The element's name, or its tag where it has none.
-   */
-  name?: string;
-
-  /**
-   * The element's current value. A `FabricValue` rather than a string: a custom
-   * element chooses what its `value` is, and a `cf-input`, a `cf-tabs` and a
-   * `cf-calendar` each declare theirs as `CellHandle<string> | string`, which
-   * arrives here as the sigil link the main thread resolved it to.
-   */
-  value?: FabricValue;
-
-  /**
-   * Whether a checkbox or radio is checked -- or, where the element chose to
-   * expose something else, what it chose. `cf-checkbox` and `cf-switch` each
-   * declare theirs as `CellHandle<boolean> | boolean`.
-   */
-  checked?: FabricValue;
-
-  /**
-   * Whether an option is selected.
-   */
-  selected?: boolean;
-
-  /**
-   * Which option a select is on.
-   */
-  selectedIndex?: number;
-
-  /**
-   * Every selected option's value, for a multiple select.
-   */
-  selectedOptions?: { value: string }[];
-
-  /**
-   * The element's `data-` attributes.
-   */
-  dataset?: Record<string, string>;
-};
+import type {
+  SerializedEvent as SerializedDomEvent,
+  SerializedEventTarget,
+} from "@commonfabric/html/events";
+export type { SerializedDomEvent, SerializedEventTarget };
 
 /**
  * Request to start VDOM rendering for a cell.
