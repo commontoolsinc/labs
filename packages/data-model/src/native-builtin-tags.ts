@@ -11,14 +11,14 @@
  * `native-type-tags.ts`, which asks this and then its own.
  *
  * What this file must not import is any module that knows a fabric class, since
- * that is the whole of what its callers cannot reach. `native-tags.ts` is
- * below even this one and is fine; anything else deserves a second look.
+ * that is the whole of what its callers cannot reach. `VALUE_TAGS.ts` is below
+ * even this one and is fine; anything else deserves a second look.
  */
 
 import type { FabricNativeObject } from "./interface.ts";
 import { constructorOfObject } from "@commonfabric/utils/objects";
 
-import { NATIVE_TAGS, type NativeTag } from "./native-tags.ts";
+import { VALUE_TAGS, type ValueTag } from "./VALUE_TAGS.ts";
 
 /**
  * Checks whether a value is a native `Error`.
@@ -47,14 +47,14 @@ export function isNativeError(value: unknown): value is Error {
  */
 export function tagFromNativeBuiltinClass(
   constructorFn: { prototype: unknown },
-): NativeTag | null {
+): ValueTag | null {
   switch (constructorFn) {
     // The two commonest by a distance, and a `switch` on object identity
     // compares in order, so they are asked first.
     case Object:
-      return NATIVE_TAGS.Object;
+      return VALUE_TAGS.Object;
     case Array:
-      return NATIVE_TAGS.Array;
+      return VALUE_TAGS.Array;
 
     // `Error` and standard subclasses all map to the `Error` tag.
     case Error:
@@ -64,18 +64,18 @@ export function tagFromNativeBuiltinClass(
     case ReferenceError:
     case URIError:
     case EvalError:
-      return NATIVE_TAGS.Error;
+      return VALUE_TAGS.Error;
 
     case Map:
-      return NATIVE_TAGS.Map;
+      return VALUE_TAGS.Map;
     case Set:
-      return NATIVE_TAGS.Set;
+      return VALUE_TAGS.Set;
     case Date:
-      return NATIVE_TAGS.Date;
+      return VALUE_TAGS.Date;
     case Uint8Array:
-      return NATIVE_TAGS.Uint8Array;
+      return VALUE_TAGS.Uint8Array;
     case RegExp:
-      return NATIVE_TAGS.RegExp;
+      return VALUE_TAGS.RegExp;
 
     default:
       // Catch exotic `Error` subclasses (e.g. custom subclasses with
@@ -85,7 +85,7 @@ export function tagFromNativeBuiltinClass(
         typeof constructorFn === "function" &&
         constructorFn.prototype instanceof Error
       ) {
-        return NATIVE_TAGS.Error;
+        return VALUE_TAGS.Error;
       }
       return null;
   }
@@ -122,13 +122,13 @@ export function isValidFabricNativeObject(
   const ctor = constructorOfObject(value);
   const tag = (ctor !== undefined) ? tagFromNativeBuiltinClass(ctor) : null;
 
-  switch (tag ?? (isNativeError(value) ? NATIVE_TAGS.Error : null)) {
-    case NATIVE_TAGS.Error:
-    case NATIVE_TAGS.Map:
-    case NATIVE_TAGS.Set:
-    case NATIVE_TAGS.Date:
-    case NATIVE_TAGS.Uint8Array:
-    case NATIVE_TAGS.RegExp:
+  switch (tag ?? (isNativeError(value) ? VALUE_TAGS.Error : null)) {
+    case VALUE_TAGS.Error:
+    case VALUE_TAGS.Map:
+    case VALUE_TAGS.Set:
+    case VALUE_TAGS.Date:
+    case VALUE_TAGS.Uint8Array:
+    case VALUE_TAGS.RegExp:
       return true;
     default:
       return false;

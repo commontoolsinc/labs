@@ -21,12 +21,11 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { VALUE_TAGS } from "@/VALUE_TAGS.ts";
+import { tagFromNativeClass, tagFromNativeValue } from "@/native-type-tags.ts";
 import {
   isNativeError,
-  tagFromNativeClass,
-  tagFromNativeValue,
-} from "@/native-type-tags.ts";
-import { isValidFabricNativeObject } from "@/native-conversion.ts";
+  isValidFabricNativeObject,
+} from "@/native-builtin-tags.ts";
 
 describe("native-type-tags", () => {
   describe("tagFromNativeValue()", () => {
@@ -182,6 +181,39 @@ describe("native-type-tags", () => {
         expect(tagFromNativeValue(new Map())).toBe(VALUE_TAGS.Map);
         expect(isValidFabricNativeObject(new Map())).toBe(true);
       });
+    });
+
+    describe("an array is decided by the array rule, whatever its prototype", () => {
+      // A prototype can be re-pointed, so "an array's class is `Array`" is only
+      // usually true. `Array.isArray()` is what is actually true of every array,
+      // and it is why the array rule runs before any class is consulted -- in
+      // both dispatches, since either one reporting an array as a convertible
+      // `Date` would be a walk rebuilding it as one.
+      for (
+        const [label, value] of [
+          ["an ordinary array", [1, 2]],
+          [
+            "an array wearing `Date.prototype`",
+            Object.setPrototypeOf([1, 2], Date.prototype),
+          ],
+          [
+            "an array wearing `Map.prototype`",
+            Object.setPrototypeOf([1, 2], Map.prototype),
+          ],
+          [
+            "an array whose prototype was severed",
+            Object.setPrototypeOf([1, 2], null),
+          ],
+        ] as ReadonlyArray<[string, unknown]>
+      ) {
+        it(`tags ${label} \`Array\``, () => {
+          expect(tagFromNativeValue(value)).toBe(VALUE_TAGS.Array);
+        });
+
+        it(`reports ${label} as no \`FabricNativeObject\``, () => {
+          expect(isValidFabricNativeObject(value)).toBe(false);
+        });
+      }
     });
 
     describe("`toJSON()` is intentionally not supported", () => {

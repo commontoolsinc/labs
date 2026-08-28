@@ -28,7 +28,7 @@ import {
 } from "@/type-check.ts";
 import { codecClasses } from "@/fabric-primitives/index.ts";
 import { shallowFabricFromNativeValue } from "@/native-conversion.ts";
-import { isValidFabricNativeObject } from "@/native-type-tags.ts";
+import { isValidFabricNativeObject } from "@/native-builtin-tags.ts";
 import { LAYER_CORPUS, PlainClass } from "./fabric-value-corpus.ts";
 import type { FabricValue } from "@/interface.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";

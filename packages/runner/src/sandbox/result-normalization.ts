@@ -8,7 +8,7 @@ import {
   fabricFromNativeValue,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import { isNativeError } from "@commonfabric/data-model/native-type-tags";
+import { isNativeError } from "@commonfabric/data-model/native-builtin-tags";
 
 import { isReactive } from "../builder/types.ts";
 import { hasEncodableForm } from "../encodable-form.ts";

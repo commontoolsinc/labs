@@ -16,6 +16,10 @@
 import { constructorOfPrototype } from "@commonfabric/utils/objects";
 
 import { VALUE_TAGS, type ValueTag } from "./VALUE_TAGS.ts";
+import {
+  isNativeError,
+  tagFromNativeBuiltinClass,
+} from "./native-builtin-tags.ts";
 import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
@@ -25,58 +29,23 @@ import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricInstance } from "./interface.ts";
 
 /**
- * Checks whether a value is a native `Error`.
+ * Maps a constructor to its tag. Returns the tag string if the constructor is a
+ * recognized type (JS builtins or system-defined `FabricPrimitive`s), or `null`
+ * otherwise.
  *
- * `Error.isError()` recognizes errors from other realms when the engine
- * provides it. Engines without it fall back to `instanceof`, which recognizes
- * errors that share the current realm's prototype hierarchy.
- */
-export function isNativeError(value: unknown): value is Error {
-  const isError = (Error as { isError?: (value: unknown) => boolean }).isError;
-  return typeof isError === "function"
-    ? isError(value)
-    : value instanceof Error;
-}
-
-/**
- * Maps a constructor to its native-instance tag. Returns the tag string if
- * the constructor is a recognized type (JS builtins or system-defined
- * `FabricPrimitive`s), or `null` otherwise.
- *
- * Uses a `switch` on the constructor identity for O(1) dispatch (instead of
- * sequential `instanceof` checks). Falls back to `instanceof Error` on the
- * constructor's prototype to catch exotic `Error` subclasses. (Note:
- * `Error.isError()` doesn't work on prototype objects -- it only recognizes
- * actual `Error` instances, not the prototype chain -- so we use `instanceof`.)
+ * The builtins are asked first, by `tagFromNativeBuiltinClass()`. Order decides
+ * nothing between the two -- a class is in one list or the other, never both --
+ * so what it is chosen for is cost: a `switch` on object identity compares in
+ * order, and plain objects and arrays outnumber everything else this is asked
+ * about by a wide margin.
  */
 export function tagFromNativeClass(
   constructorFn: { prototype: unknown },
 ): ValueTag | null {
-  switch (constructorFn) {
-    // `Error` and standard subclasses all map to the `Error` tag.
-    case Error:
-    case TypeError:
-    case RangeError:
-    case SyntaxError:
-    case ReferenceError:
-    case URIError:
-    case EvalError:
-      return VALUE_TAGS.Error;
+  const builtin = tagFromNativeBuiltinClass(constructorFn);
+  if (builtin !== null) return builtin;
 
-    case Array:
-      return VALUE_TAGS.Array;
-    case Object:
-      return VALUE_TAGS.Object;
-    case Map:
-      return VALUE_TAGS.Map;
-    case Set:
-      return VALUE_TAGS.Set;
-    case Date:
-      return VALUE_TAGS.Date;
-    case Uint8Array:
-      return VALUE_TAGS.Uint8Array;
-    case RegExp:
-      return VALUE_TAGS.RegExp;
+  switch (constructorFn) {
     case FabricBytes:
       return VALUE_TAGS.FabricBytes;
     case FabricEpochNsec:
@@ -89,17 +58,7 @@ export function tagFromNativeClass(
       return VALUE_TAGS.FabricKeyPair;
     case FabricRegExp:
       return VALUE_TAGS.FabricRegExp;
-
     default:
-      // Catch exotic `Error` subclasses (e.g. custom subclasses with
-      // non-standard constructors). Guard against non-function values
-      // (e.g. null-prototype objects where `constructor()` is undefined).
-      if (
-        typeof constructorFn === "function" &&
-        constructorFn.prototype instanceof Error
-      ) {
-        return VALUE_TAGS.Error;
-      }
       return null;
   }
 }

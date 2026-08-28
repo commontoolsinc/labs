@@ -59,6 +59,6 @@ export {
   shallowFabricFromNativeValue,
 } from "./native-conversion.ts";
 
-export { isValidFabricNativeObject } from "./native-type-tags.ts";
+export { isValidFabricNativeObject } from "./native-builtin-tags.ts";
 
 export { valueEqual } from "./valueEqual.ts";
