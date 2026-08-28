@@ -85,6 +85,9 @@ const spaceF = (await Identity.fromPassphrase(
 const spaceG = (await Identity.fromPassphrase(
   "replication sibling race in-flight compile target",
 )).did() as MemorySpace; // where the GATED supplier compile persists
+const spaceH = (await Identity.fromPassphrase(
+  "replication sibling race second fallback candidate",
+)).did() as MemorySpace; // the candidate AFTER the throwing one
 
 const PROGRAM: RuntimeProgram = {
   main: "/main.tsx",
@@ -137,7 +140,7 @@ describe("closure replication: the in-flight sibling supplier race", () => {
     });
     // World-writable genesis for the replication targets: the write-backs
     // into them are ordinary client-shaped commits by `signer`.
-    for (const space of [spaceB, spaceC, spaceE, spaceF, spaceG]) {
+    for (const space of [spaceB, spaceC, spaceE, spaceF, spaceG, spaceH]) {
       Engine.applyCommit(await server.engineForSpace(space), {
         sessionId: "test-genesis-session",
         space,
@@ -685,6 +688,130 @@ describe("closure replication: the in-flight sibling supplier race", () => {
         ).toBe(0);
       } finally {
         delete harnessSpy.compileToRecordGraph;
+        await rt2.dispose();
+      }
+    },
+  );
+
+  it(
+    "a THROWING fallback read is skipped loudly, never loop-aborting — " +
+      "the next recorded candidate still rescues the child (the #6484 " +
+      "review's F5-1 contract: a store-level error on one candidate " +
+      "must not cost the replication its remaining byte-identical " +
+      "copies)",
+    async () => {
+      // R1's compile supplies the pattern OBJECT; rt2 is the manager
+      // under test with its own fallback map.
+      const pattern = await runtime.patternManager.compileOrGetPattern(
+        PROGRAM,
+        spaceA,
+      );
+      const entry = runtime.patternManager.getArtifactEntryRef(pattern);
+      if (entry === undefined) throw new Error("compile produced no entry ref");
+      await runtime.patternManager.flushCompileCacheWrites();
+      await storageManager.synced();
+
+      const rt2 = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+        experimental: { serverExecution: true },
+      });
+      const editSpy = rt2 as unknown as {
+        edit?: () => ReturnType<Runtime["edit"]>;
+      };
+      try {
+        // Record TWO fallback candidates in rt2's map, in insertion
+        // order G then H: the compile persists into G; the content-cache
+        // hit for the same program then fires the sibling replication
+        // G -> H, whose persist records H.
+        await rt2.patternManager.compileOrGetPattern(PROGRAM, spaceG);
+        await rt2.patternManager.flushCompileCacheWrites();
+        await rt2.patternManager.compileOrGetPattern(PROGRAM, spaceH);
+        await rt2.patternManager.flushCompileCacheWrites();
+        await storageManager.synced();
+
+        // ARM: every transaction read that addresses G now throws a
+        // store-level error (the real shape of a flaky/broken store —
+        // NOT a clean miss). D and H reads pass through untouched, so
+        // the injection is order-independent: it fires exactly when the
+        // fallback loop reads G.
+        const realEdit = rt2.edit.bind(rt2);
+        let armed = true;
+        editSpy.edit = () => {
+          const tx = realEdit();
+          if (!armed) return tx;
+          return new Proxy(tx as object, {
+            get(target, prop, receiver) {
+              const value = Reflect.get(target, prop, receiver);
+              if (typeof value !== "function") return value;
+              return (...args: unknown[]) => {
+                let mentionsG = false;
+                try {
+                  mentionsG = JSON.stringify(args)?.includes(spaceG) ?? false;
+                } catch {
+                  // Unstringifiable args cannot address a space by DID.
+                }
+                if (armed && mentionsG) {
+                  throw new Error(
+                    "injected store failure for the armed fallback space",
+                  );
+                }
+                return (value as (...a: unknown[]) => unknown).apply(
+                  target,
+                  args,
+                );
+              };
+            },
+          }) as ReturnType<Runtime["edit"]>;
+        };
+
+        const lines = await captureManagerLines(
+          async () => {
+            // Origin D is dry; the map holds {G, H}; G's read THROWS.
+            // Unfixed (a bare `await readOrigin(fallback)`), the store
+            // error aborts the whole loop and the child one-shot-dies
+            // with H untried; fixed, the loop logs and continues to H.
+            rt2.patternManager.replicatePatternToSpace(
+              pattern,
+              spaceC,
+              spaceD,
+            );
+            await rt2.patternManager.flushCompileCacheWrites();
+            await storageManager.synced();
+          },
+          (entry) => {
+            // Disarm once the injected failure has been observed: the
+            // loop has moved past G, and the rescue's own writes must
+            // hit the real store unimpeded.
+            if (entry.key === "closure-replication-fallback-read-failed") {
+              armed = false;
+            }
+          },
+        );
+
+        // THE PIN: H rescued the child — the throwing candidate cost
+        // one warn, not the replication.
+        const target = await readableClosure(rt2, spaceC, entry.identity);
+        expect(target.source).toContain(entry.identity);
+        const failed = lines.filter((line) =>
+          line.key === "closure-replication-fallback-read-failed"
+        );
+        expect(failed.length).toBe(1);
+        expect(failed[0].line).toContain(`fallback=${spaceG}`);
+        expect(failed[0].line).toContain(
+          "injected store failure for the armed fallback space",
+        );
+        const rescued = lines.filter((line) =>
+          line.key === "closure-replication-fallback-origin"
+        );
+        expect(rescued.length).toBe(1);
+        expect(rescued[0].line).toContain(`fallback=${spaceH}`);
+        expect(
+          lines.filter((line) => line.key === "closure-replication-failed")
+            .length,
+        ).toBe(0);
+      } finally {
+        delete editSpy.edit;
         await rt2.dispose();
       }
     },
