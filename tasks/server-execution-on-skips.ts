@@ -253,7 +253,17 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
     // campaign at the fix head (4 quiet / 4 loaded, fresh store + posture
     // probe per run, ensure defaulting ON, toolshed self-sourced, LLM
     // masked) and this lift PR's own ON-lane board as the DIRECT CI UNSKIP
-    // PROBE. Full chain: verification-coverage.md OW45's lunch blocks.
+    // PROBE. The PR's FIRST board went red at the surface (probe 2, run
+    // 33160430927 — the same chain with the sibling-await inert), which
+    // withdrew that attempt and exposed the SECOND supplier geometry: on
+    // CI no compile ever targets the parent space (the in-memory artifact
+    // index, warmed by another space's compile, serves patterns with no
+    // per-space persist), so the parent is closure-less by ORDER. Second
+    // fix, red-first in the same suite: the replication falls back to
+    // reading the spaces the manager durably persisted the entry into
+    // (content-addressed; fail-closed; genuine absence still loud). The
+    // v4 board is the new attempt's probe. Full chain:
+    // verification-coverage.md OW45's lunch blocks.
     // The flip PR's list-EMPTY precondition is now MET; the flip bar
     // remains a green ON lane, not merely this empty list.
     // The sqlite identity pair's two FILE entries were LIFTED (OW53

@@ -413,6 +413,32 @@ export class PatternManager {
     Set<{ ticket: number; settled: Promise<unknown> }>
   >();
   private nextReplicationTicket = 0;
+  // Spaces this manager DURABLY persisted an entry's closure into
+  // (recorded at the two tracked persists' success; session-lifetime,
+  // record-only — a later slot invalidation forces a re-verify on read,
+  // and the fallback read below re-verifies fail-closed anyway, so a
+  // stale record costs one failed read, never a wrong copy). These are
+  // `replicateClosures`' FALLBACK ORIGINS (OW45's lunch forever-park,
+  // CI probe 2): the caller-named origin is a provenance heuristic —
+  // the in-memory artifact index serves patterns with no per-space
+  // persist, so the parent space of a running piece can lack the
+  // closure entirely — while the closure is content-addressed, so any
+  // recorded persist target holds byte-identical, integrity-gated docs.
+  private persistedClosureSpaces = new Map<string, Set<MemorySpace>>();
+
+  /** Record a durable closure persist target for {@link replicateClosures}'
+   * fallback-origin read. */
+  private recordPersistedClosureSpace(
+    entryIdentity: string,
+    space: MemorySpace,
+  ): void {
+    let spaces = this.persistedClosureSpaces.get(entryIdentity);
+    if (spaces === undefined) {
+      spaces = new Set();
+      this.persistedClosureSpaces.set(entryIdentity, spaces);
+    }
+    spaces.add(space);
+  }
   // Maps each storage slot written during this PatternManager session to its
   // complete module set. One slot can hold only one closure shape at a time.
   private persistedCompileCacheClosures = new Map<string, string>();
@@ -750,47 +776,117 @@ export class PatternManager {
       await getCompileCacheRuntimeVersion(),
       { patternCoverage: this.runtime.patternCoverage !== undefined },
     );
-    const readTx = this.runtime.edit();
-    let sourceDocs;
-    let compiledDocs;
-    try {
-      // Verification recomputes module identities with the default ("")
-      // runtimeFingerprint — the same default every compile path in the tree
-      // uses today. If a non-empty fingerprint is ever threaded into
-      // compilation, it must be threaded here too or verification will
-      // reject every closure (logged as replication failures).
-      sourceDocs = await loadVerifiedSourceClosure(
-        this.runtime,
-        fromSpace,
-        entryIdentity,
-        readTx,
-      );
-      if (runtimeVersion === undefined) {
-        compiledDocs = undefined;
-      } else {
-        const cacheOpts = { runtimeVersion };
-        compiledDocs = await loadCompiledClosure(
+    /** One origin's verified closure read, complete or classified.
+     * Verification recomputes module identities with the default ("")
+     * runtimeFingerprint — the same default every compile path in the
+     * tree uses today. If a non-empty fingerprint is ever threaded into
+     * compilation, it must be threaded here too or verification will
+     * reject every closure (logged as replication failures). */
+    const readOrigin = async (origin: MemorySpace): Promise<
+      | {
+        complete: true;
+        sourceDocs: NonNullable<
+          Awaited<ReturnType<typeof loadVerifiedSourceClosure>>
+        >;
+        compiledDocs:
+          | Awaited<ReturnType<typeof loadCompiledClosure>>
+          | undefined;
+      }
+      | { complete: false; reason: string }
+    > => {
+      const readTx = this.runtime.edit();
+      let sourceDocs;
+      let compiledDocs;
+      try {
+        sourceDocs = await loadVerifiedSourceClosure(
           this.runtime,
-          fromSpace,
+          origin,
           entryIdentity,
-          cacheOpts,
           readTx,
         );
+        if (runtimeVersion === undefined) {
+          compiledDocs = undefined;
+        } else {
+          const cacheOpts = { runtimeVersion };
+          compiledDocs = await loadCompiledClosure(
+            this.runtime,
+            origin,
+            entryIdentity,
+            cacheOpts,
+            readTx,
+          );
+        }
+      } finally {
+        readTx.abort?.("closure-replication read complete");
       }
-    } finally {
-      readTx.abort?.("closure-replication read complete");
+      if (!sourceDocs?.has(entryIdentity)) {
+        return {
+          complete: false,
+          reason: "source closure unavailable in origin space",
+        };
+      }
+      if (
+        runtimeVersion !== undefined &&
+        isPatternCoverageCacheRuntimeVersion(runtimeVersion) &&
+        (compiledDocs === undefined ||
+          !cacheEntriesIncludePatternCoverage(compiledDocs.values()))
+      ) {
+        return {
+          complete: false,
+          reason: "coverage spans unavailable in origin space",
+        };
+      }
+      if (runtimeVersion !== undefined) {
+        for (const identity of sourceDocs.keys()) {
+          if (!compiledDocs?.has(identity)) {
+            return {
+              complete: false,
+              reason: `compiled doc missing for ${identity}`,
+            };
+          }
+        }
+      }
+      return { complete: true, sourceDocs, compiledDocs };
+    };
+    let origin = await readOrigin(fromSpace);
+    if (!origin.complete) {
+      // FALLBACK ORIGINS (OW45's lunch forever-park, CI probe 2, run
+      // 33160430927): the caller-named origin — the parent piece's space —
+      // is a PROVENANCE HEURISTIC, and it can be closure-less through no
+      // fault of any writer: `loadPatternByIdentity` serves a pattern from
+      // the manager's in-memory artifact index with NO per-space persist,
+      // so when another space's compile warmed the index first (CI's boot
+      // order), the parent space never receives the closure and the
+      // one-shot read here died — the child space then parked
+      // `pattern-unloadable` forever. The closure is CONTENT-ADDRESSED:
+      // any space this manager durably persisted this entry into holds
+      // byte-identical docs (the verified read recomputes identities and
+      // the CFC integrity gate stays fail-closed), so retry the read
+      // against the recorded persist targets before failing. Loud on use:
+      // the lane log shows when the heuristic origin was dry.
+      const primaryReason = origin.reason;
+      for (
+        const fallback of this.persistedClosureSpaces.get(entryIdentity) ?? []
+      ) {
+        if (fallback === fromSpace || fallback === toSpace) continue;
+        const read = await readOrigin(fallback);
+        if (read.complete) {
+          logger.warn("closure-replication-fallback-origin", () => [
+            `entry=${entryIdentity}`,
+            `from=${fromSpace}`,
+            `to=${toSpace}`,
+            `fallback=${fallback}`,
+            `originReason=${primaryReason}`,
+          ]);
+          origin = read;
+          break;
+        }
+      }
+      if (!origin.complete) {
+        throw new Error(primaryReason);
+      }
     }
-    if (!sourceDocs?.has(entryIdentity)) {
-      throw new Error("source closure unavailable in origin space");
-    }
-    if (
-      runtimeVersion !== undefined &&
-      isPatternCoverageCacheRuntimeVersion(runtimeVersion) &&
-      (compiledDocs === undefined ||
-        !cacheEntriesIncludePatternCoverage(compiledDocs.values()))
-    ) {
-      throw new Error("coverage spans unavailable in origin space");
-    }
+    const { sourceDocs, compiledDocs } = origin;
     const modules: CacheableModule[] = [];
     const fabricDependencies = new Set<string>();
     for (const [identity, doc] of sourceDocs) {
@@ -2087,6 +2183,7 @@ export class PatternManager {
           this.failedCompileCacheRecoveries.delete(
             compileCacheRecoveryKey(space, entryIdentity),
           );
+          this.recordPersistedClosureSpace(entryIdentity, space);
           return;
         }
         this.persistedCompileCacheClosures.delete(persistenceSlotKey);
@@ -2107,6 +2204,7 @@ export class PatternManager {
       this.failedCompileCacheRecoveries.delete(
         compileCacheRecoveryKey(space, entryIdentity),
       );
+      this.recordPersistedClosureSpace(entryIdentity, space);
     })();
     this.inProgressCompileCacheWrites.set(persistenceSlotKey, {
       closureSignature,
@@ -2196,6 +2294,7 @@ export class PatternManager {
     this.pendingCacheWriteBacks.add(writeBack);
     try {
       await writeBack;
+      this.recordPersistedClosureSpace(entryIdentity, space);
     } finally {
       this.compileCacheWrites.delete(writeBack);
       this.pendingCacheWriteBacks.delete(writeBack);

@@ -80,11 +80,21 @@ green at the probed surface per the ruled SURFACE reading. The flip PR's
 list-EMPTY precondition is now MET. The flip bar remains a green ON lane —
 unlisted debt still blocks the flip on its own accountability (the
 co-resident `cfc-group-chat-demo.test.ts:133` blocker is PAID by #6477,
-the delta below). Recorded residual,
+the delta below). **PROBE 2 UPDATE (same PR): the first board went RED at the probed
+surface (run 33160430927 shard 7 — same chain, sibling-await inert), the
+attempt withdrew per the bar, and the classification found the SECOND
+supplier geometry: on CI no compile ever targets the parent space (the
+identity-home compiles warm the manager's in-memory artifact index first,
+and index hits persist NOTHING per-space), so the parent is closure-less
+by ORDER, not by race. Second fix, same PR, red-first: the replication
+records every durable persist target per entry and falls back to reading
+those spaces when the heuristic origin is dry (content-addressed —
+byte-identical, integrity-gated, fail-closed; genuine absence still fails
+loud). The v4 board is the new attempt's probe.** Recorded residual,
 flagged not filled: a CROSS-REPLICA supplier (a client/harness write-back
-arriving over the wire) is outside the fix's await — never observed in any
-red. Register: verification-coverage.md OW45's lunch ROOT-CAUSE and LIFT
-blocks.
+arriving over the wire) is outside both the await and the recorded-target
+fallback — never observed in any red. Register: verification-coverage.md
+OW45's lunch ROOT-CAUSE, PROBE-2, and LIFT blocks.
 
 **Delta 2026-08-28 (#6477): the co-resident debt is PAID —
 `cfc-group-chat-demo.test.ts:133` root-caused and green.** The unlisted

@@ -16,17 +16,28 @@
 // The race is deterministic-by-construction here: the child replication is
 // issued synchronously after the sibling, and its origin read is strictly
 // less work than the sibling's read-plus-write, so unfixed it ALWAYS reads
-// the parent space before the sibling writes it. The fix: a replication
-// awaits the earlier-registered replications INTO its origin space before
-// reading (registration-ordered tickets — acyclic, event-driven, no
-// timers).
+// the parent space before the sibling writes it. Two fixes cover the two
+// supplier geometries, and this file pins both:
 //
-// Layered-view note (why the race needs a SIBLING and not a wave): a
-// same-runtime compile's E4-awaited write-back into a wave's own space is
-// readable through the ordinary read path even before the wave commits
-// (executor-wave.ts's layered view) — verified while diagnosing this — so
-// only a supplier that has not yet ISSUED its writes can leave the origin
-// empty. The in-flight sibling is exactly that supplier.
+// - the SIBLING AWAIT: a replication awaits the earlier-registered
+//   replications INTO its origin space before reading
+//   (registration-ordered tickets — acyclic, event-driven, no timers);
+// - the FALLBACK ORIGIN (the direct-CI probe 2 geometry, run 33160430927:
+//   the parent space never receives the closure AT ALL, because
+//   `loadPatternByIdentity` serves the pattern from the in-memory
+//   artifact index with no per-space persist when another space's compile
+//   warmed it first): on a dry origin the replication retries its read
+//   against the spaces this manager durably persisted the entry into —
+//   content-addressed, so the copy is byte-identical and the verified
+//   read stays fail-closed.
+//
+// Layered-view note (why the race needs a missing SUPPLIER and not a
+// wave): a same-runtime compile's E4-awaited write-back into a wave's own
+// space is readable through the ordinary read path even before the wave
+// commits (executor-wave.ts's layered view) — verified while diagnosing
+// this — so only a supplier that never issued its writes can leave the
+// origin empty. The in-flight sibling and the never-persisting
+// index-served flow are exactly those suppliers.
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
@@ -56,6 +67,9 @@ const spaceD = (await Identity.fromPassphrase(
   "replication sibling race empty origin",
 )).did() as MemorySpace; // an origin nothing ever supplies
 const spaceE = (await Identity.fromPassphrase(
+  "replication sibling race fallback target",
+)).did() as MemorySpace; // the fallback-supplied target
+const spaceF = (await Identity.fromPassphrase(
   "replication sibling race dead target",
 )).did() as MemorySpace;
 
@@ -87,7 +101,7 @@ describe("closure replication: the in-flight sibling supplier race", () => {
     });
     // World-writable genesis for the replication targets: the write-backs
     // into them are ordinary client-shaped commits by `signer`.
-    for (const space of [spaceB, spaceC, spaceE]) {
+    for (const space of [spaceB, spaceC, spaceE, spaceF]) {
       Engine.applyCommit(await server.engineForSpace(space), {
         sessionId: "test-genesis-session",
         space,
@@ -196,8 +210,56 @@ describe("closure replication: the in-flight sibling supplier race", () => {
   );
 
   it(
-    "an origin with NO supplier still fails loud and settles — the " +
-      "sibling await must not turn genuine absence into a hang",
+    "a DRY heuristic origin falls back to a recorded persist target — the " +
+      "CI probe-2 geometry: the parent space never received the closure " +
+      "(the in-memory index served the pattern with no per-space persist), " +
+      "and the child space must still materialize from a space the manager " +
+      "durably persisted into",
+    async () => {
+      // The compile persists the closure into A — the manager records A as
+      // a durable persist target for this entry.
+      const pattern = await runtime.patternManager.compileOrGetPattern(
+        PROGRAM,
+        spaceA,
+      );
+      const entry = runtime.patternManager.getArtifactEntryRef(pattern);
+      if (entry === undefined) throw new Error("compile produced no entry ref");
+      await runtime.patternManager.flushCompileCacheWrites();
+
+      // Origin D is DRY: nothing ever persisted into it and nothing is in
+      // flight toward it — the exact CI shape (the parent ran the pattern
+      // from the in-memory index; its space holds no closure). Unfixed, the
+      // one-shot read of D dies and E parks pattern-unloadable forever.
+      runtime.patternManager.replicatePatternToSpace(pattern, spaceE, spaceD);
+      await runtime.patternManager.flushCompileCacheWrites();
+      await storageManager.synced();
+
+      // THE PIN: E holds the closure — copied from the recorded target A,
+      // byte-identical under content addressing, integrity-gated on read.
+      const target = await readableClosure(runtime, spaceE, entry.identity);
+      expect(target.source).toContain(entry.identity);
+      const rt2 = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+        experimental: { serverExecution: true },
+      });
+      try {
+        const loaded = await rt2.patternManager.loadPatternByIdentity(
+          entry.identity,
+          entry.symbol,
+          spaceE,
+        );
+        expect(loaded).toBeDefined();
+      } finally {
+        await rt2.dispose();
+      }
+    },
+  );
+
+  it(
+    "an entry with NO recorded persist anywhere still fails loud and " +
+      "settles — neither the sibling await nor the fallback may turn " +
+      "genuine absence into a hang or a fabricated copy",
     async () => {
       const pattern = await runtime.patternManager.compileOrGetPattern(
         PROGRAM,
@@ -207,17 +269,28 @@ describe("closure replication: the in-flight sibling supplier race", () => {
       if (entry === undefined) throw new Error("compile produced no entry ref");
       await runtime.patternManager.flushCompileCacheWrites();
 
-      // Origin D was never written by anyone; nothing is in flight into it.
-      runtime.patternManager.replicatePatternToSpace(pattern, spaceE, spaceD);
-      // The one-shot failure contract for genuine absence stands: the
-      // replication settles (a hang here would wedge every
-      // flushCompileCacheWrites caller — the client durability barrier's
-      // territory) and the target stays empty.
-      await runtime.patternManager.flushCompileCacheWrites();
-      await storageManager.synced();
-      const deadTarget = await readableClosure(runtime, spaceE, entry.identity);
-      expect(deadTarget.source).toEqual([]);
-      expect(deadTarget.compiled).toEqual([]);
+      // A SECOND manager holds the same pattern object (the artifact entry
+      // ref rides a module-level side table) but has persisted NOTHING —
+      // no fallback targets exist for it, and origin D is dry.
+      const rt2 = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+        experimental: { serverExecution: true },
+      });
+      try {
+        rt2.patternManager.replicatePatternToSpace(pattern, spaceF, spaceD);
+        // The loud one-shot failure contract stands: the replication
+        // settles (a hang here would wedge every flushCompileCacheWrites
+        // caller — the client durability barrier's territory) and the
+        // target stays empty.
+        await rt2.patternManager.flushCompileCacheWrites();
+        await storageManager.synced();
+        const deadTarget = await readableClosure(rt2, spaceF, entry.identity);
+        expect(deadTarget.source).toEqual([]);
+        expect(deadTarget.compiled).toEqual([]);
+      } finally {
+        await rt2.dispose();
+      }
     },
   );
 });

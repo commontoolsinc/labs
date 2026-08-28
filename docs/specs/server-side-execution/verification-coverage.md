@@ -7487,11 +7487,17 @@ supply; OW29/OW32/OW34 closed):
       storm present as ever (40 `foreign-write-refused` + 40
       `seal-space-commit-failed` per run) — the park gone with the storm
       untouched, which is exactly the discriminator this entry named.
-      The full runner suite is 1312/1312 at the rebased head. Evidence
-      on the measuring box:
+      The full runner suite is 1312/1312 at the rebased head. Campaign H
+      re-ran the same 8-run posture at the v4 head (sibling-await +
+      fallback-origin; binary `72be0363…`): 8/8 again, 17–19 s walls,
+      `structureLoadStuck` 0, `closure-replication-failed` 0, and
+      `closure-replication-fallback-origin` 0 — locally the heuristic
+      origin is always supplied (the parent compiles first), so the
+      fallback stays dormant exactly as designed; the runner suite is
+      1312/1312 at v4 too. Evidence on the measuring box:
       `/Users/berni/labs-worktrees/lunch-park-evidence/runs/lunch/`
-      (`f01…f08`, `g01…g08` — per-run ledger, test+toolshed logs, stats,
-      own store); report
+      (`f01…f08`, `g01…g08`, `h11…h18` — per-run ledger, test+toolshed
+      logs, stats, own store); report
       `/Users/berni/labs-worktrees/lunch-park-report.md`.
     - **Requirement (2), the direct-CI unskip probe — THIS lift PR's own
       board**: the registry carries no lunch entry, so the ON pattern
@@ -7499,6 +7505,49 @@ supply; OW29/OW32/OW34 closed):
       surface's verdict decides, and a red AT the surface withdraws the
       lift exactly as the bar states (captured and classified, never
       rerun-looped).
+    **PROBE 2 (this PR's first board at head `83f31e47f`, run
+    [33160430927](https://github.com/commontoolsinc/labs/actions/runs/33160430927),
+    ON shard 7, job 98813758092): RED AT THE PROBED SURFACE — that lift
+    attempt WITHDREW, and the classification found the SECOND supplier
+    geometry.** The surface itself failed (`:271`, the HOST's join,
+    "Unknown profile #a_FyQU"; 11 co-residents passed — #6477's `:133`
+    fix held); the published toolshed artifact carries the SAME chain —
+    exactly one `closure-replication-failed from=parent(z6Mkv6nW…)
+    to=profile(z6MkpPK85…)` at 09:45:39.983, then 80
+    `structure-load-stuck` (40 roots, `pattern-unloadable`) from
+    09:45:44 — with the sibling-await IN PLACE and inert. The
+    instrumented local greens (SCRATCH build, runs instr01/wdel01/wdel02
+    on the measuring box) then decomposed the supplier model:
+    (i) `compileOrGetPattern` is NEVER CALLED in this flow — the
+    content-cache-hit sibling does not exist here; local greens have
+    `olderIntoOrigin=none-registered` and still pass. (ii) The parent
+    space's closure is supplied by the FIRST home-env/sidecar compile
+    that targets it (`persistCompileCacheTracked(parent)`, whose
+    per-module docs cover the profile-home entry) — locally always the
+    session's first compile (instr01's line 1). (iii) On both CI reds
+    the fetch/activation timeline shows NO compile ever targeting the
+    parent (the two home-env compiles land on the identity-home spaces,
+    09:45:30/34): `loadPatternByIdentity` then serves the pattern from
+    the manager's IN-MEMORY ARTIFACT INDEX — which persists NOTHING
+    per-space — so the parent space never receives the closure from any
+    flow, and the child's read was never going to find it: an ORDER
+    flip, not a data race. (iv) Wave-hold experiments (45 s holds on
+    closure-carrying waves) could not falsify read-visibility — every
+    local read trailed durability — so staged-vs-durable remains
+    UNDISCRIMINATED and is NOT load-bearing for the fix. THE SECOND FIX
+    (same PR, red-first): `replicateClosures` records every durable
+    persist target per entry (`persistedClosureSpaces`) and, on a dry
+    heuristic origin, retries its verified read against those recorded
+    spaces — content-addressed, so the copy is byte-identical and the
+    integrity-gated read stays fail-closed; genuine absence (no recorded
+    target) still fails loud and settles. Pinned in the same suite
+    (fallback test watched red at the sibling-await-only head with the
+    exact production error; recording no-op mutation-killed; the
+    no-record loud-failure control keeps the absence contract). Under
+    the CI geometry the identity-home persists ARE recorded, so the
+    child replication converges order-independently. The NEW board on
+    the v4 head is this lift attempt's probe; a red at the surface
+    there withdraws again, classified honestly.
     The pin suite (`tasks/server-execution-on-skips.test.ts`) now binds
     the EMPTY registry: the patterns list length is 0, the report
     carries no SKIP line of any kind, the shard filter passes
