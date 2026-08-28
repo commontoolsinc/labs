@@ -31,7 +31,9 @@
 import { basename, fromFileUrl, join } from "@std/path";
 import {
   compileAndSavePattern,
+  type MemorySpace,
   PatternManager,
+  type Runtime,
   type RuntimeProgram,
 } from "@commonfabric/runner";
 import { resolveLocalProgram } from "@commonfabric/runner/local-program.deno";
@@ -41,6 +43,10 @@ import {
 } from "../src/pattern-index/client.ts";
 import { createHarnessFabricSessionFactory } from "../src/fabric-session.ts";
 import { patternIndexDependencies } from "../src/pattern-index/composition.ts";
+
+/** The text of a thrown value, for a message that names what went wrong. */
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
 
 /** Where the atoms live, relative to the repository root. */
 export const SEED_DIRECTORY = "packages/patterns/primitives";
@@ -174,17 +180,49 @@ export const publishRequestFor = (
   dependencies: patternIndexDependencies(entry.program.files),
 });
 
-interface SeedOptions {
-  dryRun: boolean;
-  only: readonly string[];
-  repoRoot: string;
-  apiUrl: string;
-  identityKeyPath: string;
-  space: string;
-  indexBaseUrl: string;
+/**
+ * What the seed run needs from the world, so the run itself can be exercised
+ * without a fabric or an index behind it. `main` supplies the real ones.
+ */
+export interface SeedDeps {
+  /**
+   * Assembles and compiles one atom, answering what the index needs to store
+   * it. `patternId` is absent when the compile produced no durable
+   * content-addressed identity.
+   */
+  compile: (path: string) => Promise<CompiledAtom>;
+  publish: (
+    request: PatternIndexPublishRequest,
+  ) => Promise<{ patternId: string; created: boolean }>;
+  recordCreated: (patternId: string) => Promise<void>;
+
+  /** Answers which of `paths` are not formatted as the repository formats them. */
+  checkFormatting: (paths: readonly string[]) => Promise<readonly string[]>;
+  log: (line: string) => void;
+  logError: (line: string) => void;
 }
 
-const USAGE = `Usage: deno task seed-pattern-index [options]
+/** One compiled atom, in the terms the index stores it under. */
+export interface CompiledAtom {
+  /** Absent when the compile produced no durable identity. */
+  patternId?: string;
+  program: RuntimeProgram;
+  argumentSchema?: unknown;
+  resultSchema?: unknown;
+}
+
+export interface SeedOptions {
+  dryRun: boolean;
+  only: readonly string[];
+  directory: string;
+}
+
+/** An argument the run cannot proceed without, named so `main` can print it. */
+export class SeedUsageError extends Error {
+  override name = "SeedUsageError";
+}
+
+export const USAGE = `Usage: deno task seed-pattern-index [options]
 
 Publishes the atoms under ${SEED_DIRECTORY} to the pattern index.
 
@@ -198,70 +236,222 @@ Publishes the atoms under ${SEED_DIRECTORY} to the pattern index.
   --index-url <url>  Pattern index base URL [CF_HARNESS_PATTERN_INDEX_URL]
 `;
 
-const requireOption = (value: string | undefined, name: string): string => {
-  if (value === undefined || value === "") {
-    console.error(`seed-pattern-index: ${name} is required.\n\n${USAGE}`);
-    Deno.exit(2);
-  }
-  return value;
-};
+/** Flags and repeated `--only` names, separated from where they come from. */
+export interface ParsedArguments {
+  dryRun: boolean;
+  help: boolean;
+  only: readonly string[];
+  named: ReadonlyMap<string, string>;
+}
 
-const parseOptions = (args: readonly string[]): SeedOptions => {
+/**
+ * @throws SeedUsageError on an argument the parser cannot place, so a
+ * misspelled flag stops the run rather than being silently dropped and
+ * seeding more than the caller asked for.
+ */
+export const parseArguments = (args: readonly string[]): ParsedArguments => {
   const only: string[] = [];
-  let dryRun = false;
   const named = new Map<string, string>();
+  let dryRun = false;
+  let help = false;
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--dry-run") {
       dryRun = true;
     } else if (arg === "--help" || arg === "-h") {
-      console.log(USAGE);
-      Deno.exit(0);
+      help = true;
     } else if (arg === "--only") {
-      only.push(args[++i]);
+      const value = args[++i];
+      if (value === undefined) {
+        throw new SeedUsageError("--only needs the name of an atom");
+      }
+      only.push(value);
     } else if (arg.startsWith("--")) {
-      named.set(arg.slice(2), args[++i]);
+      const value = args[++i];
+      if (value === undefined) {
+        throw new SeedUsageError(`${arg} needs a value`);
+      }
+      named.set(arg.slice(2), value);
     } else {
-      console.error(`seed-pattern-index: unexpected argument "${arg}".`);
-      Deno.exit(2);
+      throw new SeedUsageError(`unexpected argument "${arg}"`);
     }
   }
-  const env = (key: string) => Deno.env.get(key);
-  // The script lives at packages/cf-harness/scripts/, three levels below root.
-  const repoRoot = fromFileUrl(new URL("../../..", import.meta.url));
+  return { dryRun, help, only, named };
+};
+
+/**
+ * A setting from the flag, else the environment.
+ *
+ * @throws SeedUsageError when neither supplies it.
+ */
+export const requiredSetting = (
+  parsed: ParsedArguments,
+  flag: string,
+  envKey: string,
+  env: (key: string) => string | undefined,
+): string => {
+  const value = parsed.named.get(flag) ?? env(envKey);
+  if (value === undefined || value === "") {
+    throw new SeedUsageError(`--${flag} is required (or set ${envKey})`);
+  }
+  return value;
+};
+
+/** Where the run connects, and as whom. */
+export interface SeedSettings {
+  apiUrl: string;
+  identityKeyPath: string;
+  space: string;
+  indexBaseUrl: string;
+}
+
+/** @throws SeedUsageError naming the first setting nothing supplies. */
+export const resolveSettings = (
+  parsed: ParsedArguments,
+  env: (key: string) => string | undefined,
+): SeedSettings => ({
+  apiUrl: requiredSetting(parsed, "api-url", "CF_HARNESS_FABRIC_API_URL", env),
+  identityKeyPath: requiredSetting(
+    parsed,
+    "identity",
+    "CF_HARNESS_FABRIC_IDENTITY",
+    env,
+  ),
+  space: requiredSetting(parsed, "space", "CF_HARNESS_FABRIC_SPACE", env),
+  indexBaseUrl: requiredSetting(
+    parsed,
+    "index-url",
+    "CF_HARNESS_PATTERN_INDEX_URL",
+    env,
+  ),
+});
+
+/**
+ * The identity an entry may be published under, or `undefined` for one that
+ * could never be loaded by anything else. A keyless identity names a pattern
+ * only within the session that minted it — the same refusal `run_pattern`
+ * makes on its own publish path.
+ */
+export const durableEntryIdentity = (
+  identity: string | undefined,
+): string | undefined =>
+  identity !== undefined && !PatternManager.isKeylessPatternIdentity(identity)
+    ? identity
+    : undefined;
+
+/**
+ * Assembles and compiles one atom in `space`, answering what the index needs.
+ *
+ * Takes the runtime and space rather than a session, so a compile can be
+ * exercised against any runtime — the identity is a content hash, and what
+ * decides it is the source and the compiler, not what the runtime is
+ * connected to.
+ */
+export const compileAtom = async (
+  runtime: SeedRuntime,
+  space: MemorySpace,
+  path: string,
+  root: string,
+): Promise<CompiledAtom> => {
+  const program = await resolveLocalProgram(
+    (resolver) => runtime.harness.resolve(resolver),
+    { main: path, root },
+  );
+  const pattern = await compileAndSavePattern(runtime as Runtime, program, {
+    space,
+  });
+  const identity = runtime.patternManager.getArtifactEntryRef(pattern)
+    ?.identity;
+  const patternId = durableEntryIdentity(identity);
   return {
-    dryRun,
-    only,
-    repoRoot,
-    apiUrl: requireOption(
-      named.get("api-url") ?? env("CF_HARNESS_FABRIC_API_URL"),
-      "--api-url",
-    ),
-    identityKeyPath: requireOption(
-      named.get("identity") ?? env("CF_HARNESS_FABRIC_IDENTITY"),
-      "--identity",
-    ),
-    space: requireOption(
-      named.get("space") ?? env("CF_HARNESS_FABRIC_SPACE"),
-      "--space",
-    ),
-    indexBaseUrl: requireOption(
-      named.get("index-url") ?? env("CF_HARNESS_PATTERN_INDEX_URL"),
-      "--index-url",
-    ),
+    ...(patternId !== undefined ? { patternId } : {}),
+    program,
+    argumentSchema: pattern.argumentSchema,
+    resultSchema: pattern.resultSchema,
   };
 };
 
-const main = async (): Promise<number> => {
-  const options = parseOptions(Deno.args);
-  const directory = join(options.repoRoot, SEED_DIRECTORY);
-  const allPaths = await seedSourcePaths(directory);
+/** The part of a `Runtime` a seed compile uses. */
+export type SeedRuntime = Pick<Runtime, "harness" | "patternManager">;
+
+/**
+ * The atoms whose source is not formatted as the repository formats it.
+ *
+ * An entry identity is a content hash of the source bytes, so publishing
+ * unformatted source mints an identity the repository cannot reproduce: the
+ * next `deno fmt` changes the bytes, and the same atom seeds again under a
+ * second id. That is how one atom becomes two entries competing in search,
+ * which is the duplication the seed exists to counter rather than add to.
+ */
+export const unformattedPaths = async (
+  paths: readonly string[],
+  check: (paths: readonly string[]) => Promise<readonly string[]>,
+): Promise<readonly string[]> => await check(paths);
+
+/**
+ * Asks `deno fmt --check` which of `paths` it would rewrite, answering the
+ * paths IT names rather than the ones passed in. The two can differ: a path
+ * through a symlinked directory (`/tmp` on macOS) comes back resolved, so
+ * matching the input strings would answer "nothing to do" for a file deno
+ * just rejected.
+ */
+export const denoFmtCheck = async (
+  paths: readonly string[],
+): Promise<readonly string[]> => {
+  const command = new Deno.Command(Deno.execPath(), {
+    args: ["fmt", "--check", ...paths],
+    // Without this deno wraps the path it names in colour escapes, and the
+    // pattern below matches nothing — which would fall back to blaming every
+    // file for one file's formatting.
+    env: { NO_COLOR: "1" },
+    stdout: "piped",
+    stderr: "piped",
+  });
+  const { code, stdout, stderr } = await command.output();
+  if (code === 0) return [];
+  const decoder = new TextDecoder();
+  const text = decoder.decode(stdout) + decoder.decode(stderr);
+  const named = [...text.matchAll(/^from (.+):$/gm)].map((match) => match[1]);
+  // A non-zero exit deno named no file for is still a refusal to publish: the
+  // check did not pass, and seeding on an unreadable answer is the silence
+  // this guard exists to prevent.
+  return named.length > 0 ? named : [...paths];
+};
+
+/** The atoms this run seeds: every one under `directory`, or those `--only` names. */
+export const selectedPaths = async (
+  options: SeedOptions,
+): Promise<readonly string[]> => {
+  const all = await seedSourcePaths(options.directory);
   const paths = options.only.length === 0
-    ? allPaths
-    : allPaths.filter((path) => options.only.includes(basename(path, ".tsx")));
+    ? all
+    : all.filter((path) => options.only.includes(basename(path, ".tsx")));
   if (paths.length === 0) {
-    console.error(`seed-pattern-index: no atoms matched under ${directory}.`);
-    return 2;
+    throw new SeedUsageError(`no atoms matched under ${options.directory}`);
+  }
+  return paths;
+};
+
+/**
+ * Compiles every selected atom and publishes it, answering a process exit
+ * code. Answers 1 without publishing anything when an atom compiles to no
+ * durable identity.
+ */
+export const runSeed = async (
+  options: SeedOptions,
+  deps: SeedDeps,
+): Promise<number> => {
+  const paths = await selectedPaths(options);
+  // Checked before anything compiles, so an unreproducible id is never minted
+  // rather than being noticed after it reaches the shared corpus.
+  const unformatted = await unformattedPaths(paths, deps.checkFormatting);
+  if (unformatted.length > 0) {
+    deps.logError(
+      `seed-pattern-index: these atoms are not formatted, so the identity they would publish under is not reproducible from the repository. Run \`deno fmt\` on them and seed again:\n  ${
+        unformatted.join("\n  ")
+      }`,
+    );
+    return 1;
   }
   // Every atom's metadata is derived before anything is compiled or published,
   // so a doc comment that describes nothing stops the run while the index is
@@ -272,32 +462,11 @@ const main = async (): Promise<number> => {
     return { name, path, metadata: seedMetadataFromSource(name, source) };
   }));
 
-  const { pieces } = await createHarnessFabricSessionFactory({
-    apiUrl: options.apiUrl,
-    identityKeyPath: options.identityKeyPath,
-    space: options.space,
-  })();
-  const space = pieces.getSpace();
-
   const entries: SeedEntry[] = [];
   for (const { name, path, metadata } of described) {
-    const program = await resolveLocalProgram(
-      (resolver) => pieces.runtime.harness.resolve(resolver),
-      { main: path, root: join(options.repoRoot, "packages/patterns") },
-    );
-    const pattern = await compileAndSavePattern(pieces.runtime, program, {
-      space,
-    });
-    const patternId = pieces.runtime.patternManager
-      .getArtifactEntryRef(pattern)?.identity;
-    // A keyless identity names a pattern only within the session that minted
-    // it, so an entry published under one could never be loaded by anything
-    // else — the same refusal `run_pattern` makes on its own publish path.
-    if (
-      patternId === undefined ||
-      PatternManager.isKeylessPatternIdentity(patternId)
-    ) {
-      console.error(
+    const compiled = await deps.compile(path);
+    if (compiled.patternId === undefined) {
+      deps.logError(
         `seed-pattern-index: ${name} compiled to no durable content-addressed entry identity; not seeding it.`,
       );
       return 1;
@@ -306,68 +475,156 @@ const main = async (): Promise<number> => {
       name,
       path,
       metadata,
-      patternId,
-      program,
-      argumentSchema: pattern.argumentSchema,
-      resultSchema: pattern.resultSchema,
+      patternId: compiled.patternId,
+      program: compiled.program,
+      ...(compiled.argumentSchema !== undefined
+        ? { argumentSchema: compiled.argumentSchema }
+        : {}),
+      ...(compiled.resultSchema !== undefined
+        ? { resultSchema: compiled.resultSchema }
+        : {}),
     });
   }
 
   for (const entry of entries) {
     const request = publishRequestFor(entry);
-    console.log(`\n=== ${entry.name}`);
-    console.log(`  patternId:   ${entry.patternId}`);
-    console.log(`  import:      cf:pattern:${entry.patternId}`);
-    console.log(`  description: ${request.description}`);
-    console.log(`  hashtags:    ${request.hashtags.join(", ")}`);
-    console.log(`  keywords:    ${request.keywords?.join(", ")}`);
-    console.log(
+    deps.log(`\n=== ${entry.name}`);
+    deps.log(`  patternId:   ${entry.patternId}`);
+    deps.log(`  import:      cf:pattern:${entry.patternId}`);
+    deps.log(`  description: ${request.description}`);
+    deps.log(`  hashtags:    ${request.hashtags.join(", ")}`);
+    deps.log(`  keywords:    ${request.keywords?.join(", ")}`);
+    deps.log(
       `  files:       ${
         request.program.files.map((file) => file.name).join(", ")
       }`,
     );
-    console.log(
+    deps.log(
       `  argumentSchema: ${JSON.stringify(request.argumentSchema) ?? "(none)"}`,
     );
   }
 
   if (options.dryRun) {
-    console.log(
+    deps.log(
       `\nDry run: ${entries.length} atom(s) compiled, nothing published.`,
     );
     return 0;
   }
 
-  const client = await createHarnessPatternIndexClientFactory(
-    { baseUrl: options.indexBaseUrl },
-    options.identityKeyPath,
-  )();
   let created = 0;
   let held = 0;
   for (const entry of entries) {
-    const response = await client.publishPattern(publishRequestFor(entry));
+    const response = await deps.publish(publishRequestFor(entry));
     if (response.created) {
       created += 1;
       // The index ranks on recorded events, and a publication is not one. The
       // `created` event is what `run_pattern` records for a first publication,
       // and a seeded atom is entitled to exactly that and nothing more.
-      await client.recordEvent({
-        patternId: response.patternId,
-        eventType: "created",
-      });
+      await deps.recordCreated(response.patternId);
     } else {
       held += 1;
     }
-    console.log(
+    deps.log(
       `${
         response.created ? "published" : "already held"
       }: ${entry.name} (${response.patternId})`,
     );
   }
-  console.log(`\n${created} published, ${held} already held by the index.`);
+  deps.log(`\n${created} published, ${held} already held by the index.`);
   return 0;
 };
 
-if (import.meta.main) {
-  Deno.exit(await main());
+/** Builds the deps a real run uses: a fabric session and an index client. */
+export const fabricSeedDeps = async (
+  settings: SeedSettings,
+  patternsRoot: string,
+  log: (line: string) => void,
+  logError: (line: string) => void,
+): Promise<SeedDeps> => {
+  const { pieces } = await createHarnessFabricSessionFactory({
+    apiUrl: settings.apiUrl,
+    identityKeyPath: settings.identityKeyPath,
+    space: settings.space,
+  })();
+  const getClient = createHarnessPatternIndexClientFactory(
+    { baseUrl: settings.indexBaseUrl },
+    settings.identityKeyPath,
+  );
+  const space = pieces.getSpace();
+  return {
+    compile: (path) => compileAtom(pieces.runtime, space, path, patternsRoot),
+    publish: async (request) =>
+      await (await getClient()).publishPattern(request),
+    recordCreated: async (patternId) => {
+      await (await getClient()).recordEvent({
+        patternId,
+        eventType: "created",
+      });
+    },
+    checkFormatting: denoFmtCheck,
+    log,
+    logError,
+  };
+};
+
+/** What `main` reaches the world through, so a test can drive all of it. */
+export interface SeedIo {
+  env: (key: string) => string | undefined;
+  log: (line: string) => void;
+  logError: (line: string) => void;
+  repoRoot: string;
+  createDeps: (
+    settings: SeedSettings,
+    patternsRoot: string,
+    log: (line: string) => void,
+    logError: (line: string) => void,
+  ) => Promise<SeedDeps>;
 }
+
+// The script lives at packages/cf-harness/scripts/, three levels below root.
+const REPO_ROOT = fromFileUrl(new URL("../../..", import.meta.url));
+
+export const defaultSeedIo = (): SeedIo => ({
+  env: (key) => Deno.env.get(key),
+  log: (line) => console.log(line),
+  logError: (line) => console.error(line),
+  repoRoot: REPO_ROOT,
+  createDeps: fabricSeedDeps,
+});
+
+export const main = async (
+  args: readonly string[],
+  io: SeedIo = defaultSeedIo(),
+): Promise<number> => {
+  let parsed: ParsedArguments;
+  let settings: SeedSettings;
+  try {
+    parsed = parseArguments(args);
+    if (parsed.help) {
+      io.log(USAGE);
+      return 0;
+    }
+    settings = resolveSettings(parsed, io.env);
+  } catch (error) {
+    io.logError(`seed-pattern-index: ${errorMessage(error)}\n\n${USAGE}`);
+    return 2;
+  }
+  try {
+    const deps = await io.createDeps(
+      settings,
+      join(io.repoRoot, "packages/patterns"),
+      io.log,
+      io.logError,
+    );
+    return await runSeed({
+      dryRun: parsed.dryRun,
+      only: parsed.only,
+      directory: join(io.repoRoot, SEED_DIRECTORY),
+    }, deps);
+  } catch (error) {
+    io.logError(`seed-pattern-index: ${errorMessage(error)}`);
+    return error instanceof SeedUsageError ? 2 : 1;
+  }
+};
+
+if (import.meta.main) Deno.exit(await main(Deno.args));

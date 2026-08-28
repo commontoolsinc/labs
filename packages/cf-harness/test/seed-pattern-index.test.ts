@@ -1,11 +1,31 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { fromFileUrl, join } from "@std/path";
+import { Identity } from "@commonfabric/identity";
 import {
+  experimentalOptionsFromEnv,
+  Runtime,
+  runtimePresets,
+} from "@commonfabric/runner";
+import { StorageManager } from "../../runner/src/storage/cache.deno.ts";
+import {
+  compileAtom,
+  defaultSeedIo,
+  denoFmtCheck,
+  durableEntryIdentity,
+  main,
+  parseArguments,
   publishRequestFor,
+  requiredSetting,
+  resolveSettings,
+  runSeed,
   SEED_DIRECTORY,
+  type SeedDeps,
+  type SeedIo,
   seedMetadataFromSource,
   seedSourcePaths,
+  SeedUsageError,
+  USAGE,
 } from "../scripts/seed-pattern-index.ts";
 
 const REPO_ROOT = fromFileUrl(new URL("../../..", import.meta.url));
@@ -140,6 +160,523 @@ describe("seed-pattern-index", () => {
         expect(metadata.hashtags.length).toBeGreaterThan(2);
         expect(metadata.keywords.length).toBeGreaterThan(4);
       }
+    });
+  });
+
+  describe("parseArguments()", () => {
+    it("reads the dry-run flag, repeated --only names, and named settings", () => {
+      const parsed = parseArguments([
+        "--dry-run",
+        "--only",
+        "counter",
+        "--only",
+        "dice-roller",
+        "--api-url",
+        "http://localhost:8040",
+      ]);
+      expect(parsed.dryRun).toBe(true);
+      expect(parsed.only).toEqual(["counter", "dice-roller"]);
+      expect(parsed.named.get("api-url")).toBe("http://localhost:8040");
+      expect(parsed.help).toBe(false);
+    });
+
+    it("defaults to publishing every atom", () => {
+      const parsed = parseArguments([]);
+      expect(parsed.dryRun).toBe(false);
+      expect(parsed.only).toEqual([]);
+    });
+
+    it("reads both spellings of help", () => {
+      expect(parseArguments(["--help"]).help).toBe(true);
+      expect(parseArguments(["-h"]).help).toBe(true);
+    });
+
+    // A dropped flag would seed more than the caller asked for, against a
+    // shared corpus, so an argument the parser cannot place stops the run.
+    it("refuses an argument it cannot place", () => {
+      expect(() => parseArguments(["counter"])).toThrow(SeedUsageError);
+    });
+
+    it("refuses a flag whose value is missing", () => {
+      expect(() => parseArguments(["--only"])).toThrow(/needs the name/);
+      expect(() => parseArguments(["--api-url"])).toThrow(/needs a value/);
+    });
+  });
+
+  describe("requiredSetting()", () => {
+    const parsed = parseArguments(["--space", "from-flag"]);
+
+    it("prefers the flag over the environment", () => {
+      expect(requiredSetting(parsed, "space", "CF_SPACE", () => "from-env"))
+        .toBe("from-flag");
+    });
+
+    it("falls back to the environment", () => {
+      expect(
+        requiredSetting(
+          parseArguments([]),
+          "space",
+          "CF_SPACE",
+          () => "from-env",
+        ),
+      ).toBe("from-env");
+    });
+
+    it("names the flag and the variable when neither supplies it", () => {
+      expect(() =>
+        requiredSetting(
+          parseArguments([]),
+          "space",
+          "CF_SPACE",
+          () => undefined,
+        )
+      ).toThrow(/--space is required \(or set CF_SPACE\)/);
+    });
+
+    it("treats an empty environment value as absent", () => {
+      expect(() =>
+        requiredSetting(parseArguments([]), "space", "CF_SPACE", () => "")
+      ).toThrow(SeedUsageError);
+    });
+  });
+
+  describe("USAGE", () => {
+    it("names the directory the atoms are read from", () => {
+      expect(USAGE).toContain(SEED_DIRECTORY);
+    });
+  });
+
+  describe("runSeed()", () => {
+    const directory = join(REPO_ROOT, SEED_DIRECTORY);
+
+    interface Recorder {
+      deps: SeedDeps;
+      published: string[];
+      recorded: string[];
+      compiled: string[];
+      lines: string[];
+      errors: string[];
+    }
+
+    const recorder = (
+      overrides: Partial<SeedDeps> = {},
+    ): Recorder => {
+      const published: string[] = [];
+      const recorded: string[] = [];
+      const compiled: string[] = [];
+      const lines: string[] = [];
+      const errors: string[] = [];
+      const deps: SeedDeps = {
+        compile: (path) => {
+          compiled.push(path);
+          return Promise.resolve({
+            patternId: `id-for-${path.split("/").pop()}`,
+            program: {
+              main: "/main.tsx",
+              files: [{ name: "/main.tsx", contents: "export {};" }],
+            },
+            argumentSchema: { type: "object" },
+            resultSchema: { type: "object" },
+          });
+        },
+        publish: (request) => {
+          published.push(request.patternId);
+          return Promise.resolve({
+            patternId: request.patternId,
+            created: true,
+          });
+        },
+        recordCreated: (patternId) => {
+          recorded.push(patternId);
+          return Promise.resolve();
+        },
+        checkFormatting: () => Promise.resolve([]),
+        log: (line) => lines.push(line),
+        logError: (line) => errors.push(line),
+        ...overrides,
+      };
+      return { deps, published, recorded, compiled, lines, errors };
+    };
+
+    it("publishes every atom and records a created event for each", async () => {
+      const r = recorder();
+      const code = await runSeed(
+        { dryRun: false, only: [], directory },
+        r.deps,
+      );
+      expect(code).toBe(0);
+      expect(r.published.length).toBe(6);
+      expect(r.recorded).toEqual(r.published);
+      expect(r.lines.at(-1)).toContain("6 published, 0 already held");
+    });
+
+    it("publishes nothing in a dry run, having compiled everything", async () => {
+      const r = recorder();
+      const code = await runSeed({ dryRun: true, only: [], directory }, r.deps);
+      expect(code).toBe(0);
+      expect(r.compiled.length).toBe(6);
+      expect(r.published).toEqual([]);
+      expect(r.recorded).toEqual([]);
+      expect(r.lines.at(-1)).toContain("nothing published");
+    });
+
+    it("prints the import specifier a composing pattern would write", async () => {
+      const r = recorder();
+      await runSeed({ dryRun: true, only: ["counter"], directory }, r.deps);
+      expect(
+        r.lines.some((line) => line.includes("cf:pattern:id-for-counter.tsx")),
+      )
+        .toBe(true);
+    });
+
+    it("seeds only the named atom", async () => {
+      const r = recorder();
+      await runSeed({ dryRun: false, only: ["counter"], directory }, r.deps);
+      expect(r.published).toEqual(["id-for-counter.tsx"]);
+    });
+
+    // Re-running must not create duplicates: the index answers `created:false`
+    // for an identity it already holds, and that records no further event.
+    it("records no event for an atom the index already holds", async () => {
+      const r = recorder({
+        publish: (request) =>
+          Promise.resolve({ patternId: request.patternId, created: false }),
+      });
+      const code = await runSeed(
+        { dryRun: false, only: [], directory },
+        r.deps,
+      );
+      expect(code).toBe(0);
+      expect(r.recorded).toEqual([]);
+      expect(r.lines.at(-1)).toContain("0 published, 6 already held");
+    });
+
+    // An entry under a keyless identity could never be loaded by anything
+    // else, so the run stops rather than seeding one.
+    it("publishes nothing when an atom compiles to no durable identity", async () => {
+      const r = recorder({
+        compile: () =>
+          Promise.resolve({
+            program: {
+              main: "/main.tsx",
+              files: [{ name: "/main.tsx", contents: "export {};" }],
+            },
+          }),
+      });
+      const code = await runSeed(
+        { dryRun: false, only: [], directory },
+        r.deps,
+      );
+      expect(code).toBe(1);
+      expect(r.published).toEqual([]);
+      expect(r.errors.join("\n")).toContain("no durable content-addressed");
+    });
+
+    it("refuses a selection that matches no atom", async () => {
+      const r = recorder();
+      await expect(
+        runSeed({ dryRun: true, only: ["nope"], directory }, r.deps),
+      ).rejects.toThrow(SeedUsageError);
+      expect(r.compiled).toEqual([]);
+    });
+  });
+
+  describe("durableEntryIdentity()", () => {
+    it("keeps a content-addressed identity", () => {
+      expect(durableEntryIdentity("docnE_YXUkal8R92pI4Lz7zAg0w")).toBe(
+        "docnE_YXUkal8R92pI4Lz7zAg0w",
+      );
+    });
+
+    it("answers undefined for an absent identity", () => {
+      expect(durableEntryIdentity(undefined)).toBeUndefined();
+    });
+
+    // An entry published under a keyless identity could never be loaded by
+    // any other runtime, so it must not reach the index at all.
+    it("refuses a keyless identity", () => {
+      expect(durableEntryIdentity("keyless:abc123")).toBeUndefined();
+    });
+  });
+
+  describe("resolveSettings()", () => {
+    it("resolves every setting from the environment", () => {
+      const env = (key: string) =>
+        ({
+          CF_HARNESS_FABRIC_API_URL: "http://localhost:8040",
+          CF_HARNESS_FABRIC_IDENTITY: "/keys/agent.pkcs8",
+          CF_HARNESS_FABRIC_SPACE: "seeds",
+          CF_HARNESS_PATTERN_INDEX_URL: "https://index.example",
+        })[key];
+      expect(resolveSettings(parseArguments([]), env)).toEqual({
+        apiUrl: "http://localhost:8040",
+        identityKeyPath: "/keys/agent.pkcs8",
+        space: "seeds",
+        indexBaseUrl: "https://index.example",
+      });
+    });
+
+    it("names the first setting nothing supplies", () => {
+      expect(() => resolveSettings(parseArguments([]), () => undefined))
+        .toThrow(/--api-url is required/);
+    });
+  });
+
+  describe("compileAtom()", () => {
+    it("answers a durable identity and the real argument schema for an atom", async () => {
+      const signer = await Identity.fromPassphrase("seed-pattern-index test");
+      const runtime = new Runtime(runtimePresets.patternTest({
+        apiUrl: new URL(import.meta.url),
+        storageManager: StorageManager.emulate({ as: signer }),
+        experimental: experimentalOptionsFromEnv(Deno.env.get),
+      }));
+      try {
+        const root = join(REPO_ROOT, "packages/patterns");
+        const compiled = await compileAtom(
+          runtime,
+          signer.did(),
+          join(root, "primitives/counter.tsx"),
+          root,
+        );
+        // The identity is a content hash, so it is durable under any runtime.
+        expect(compiled.patternId).toBeDefined();
+        expect(durableEntryIdentity(compiled.patternId)).toBe(
+          compiled.patternId,
+        );
+        expect(compiled.program.files.length).toBeGreaterThan(0);
+        // The whole point of the seed: an atom that takes real inputs.
+        const schema = compiled.argumentSchema as {
+          properties?: Record<string, unknown>;
+        };
+        expect(Object.keys(schema.properties ?? {})).toEqual([
+          "value",
+          "step",
+          "label",
+          "min",
+          "max",
+        ]);
+      } finally {
+        await runtime.dispose?.();
+      }
+    });
+  });
+
+  describe("main()", () => {
+    const io = (
+      overrides: Partial<SeedIo> = {},
+    ): {
+      io: SeedIo;
+      lines: string[];
+      errors: string[];
+      published: string[];
+    } => {
+      const lines: string[] = [];
+      const errors: string[] = [];
+      const published: string[] = [];
+      return {
+        lines,
+        errors,
+        published,
+        io: {
+          env: (key) =>
+            ({
+              CF_HARNESS_FABRIC_API_URL: "http://localhost:8040",
+              CF_HARNESS_FABRIC_IDENTITY: "/keys/agent.pkcs8",
+              CF_HARNESS_FABRIC_SPACE: "seeds",
+              CF_HARNESS_PATTERN_INDEX_URL: "https://index.example",
+            })[key],
+          log: (line) => lines.push(line),
+          logError: (line) => errors.push(line),
+          repoRoot: REPO_ROOT,
+          createDeps: (_settings, _root, log, logError) =>
+            Promise.resolve({
+              compile: (path) =>
+                Promise.resolve({
+                  patternId: `id-${path.split("/").pop()}`,
+                  program: {
+                    main: "/main.tsx",
+                    files: [{ name: "/main.tsx", contents: "export {};" }],
+                  },
+                }),
+              publish: (request) => {
+                published.push(request.patternId);
+                return Promise.resolve({
+                  patternId: request.patternId,
+                  created: true,
+                });
+              },
+              recordCreated: () => Promise.resolve(),
+              checkFormatting: () => Promise.resolve([]),
+              log,
+              logError,
+            }),
+          ...overrides,
+        },
+      };
+    };
+
+    it("seeds every atom and answers success", async () => {
+      const h = io();
+      expect(await main([], h.io)).toBe(0);
+      expect(h.published.length).toBe(6);
+    });
+
+    it("publishes nothing on a dry run", async () => {
+      const h = io();
+      expect(await main(["--dry-run"], h.io)).toBe(0);
+      expect(h.published).toEqual([]);
+    });
+
+    it("prints usage for --help without connecting to anything", async () => {
+      const h = io({
+        createDeps: () => Promise.reject(new Error("must not connect")),
+      });
+      expect(await main(["--help"], h.io)).toBe(0);
+      expect(h.lines.join("\n")).toContain(
+        "Usage: deno task seed-pattern-index",
+      );
+    });
+
+    it("answers 2 and prints usage for an argument it cannot place", async () => {
+      const h = io();
+      expect(await main(["counter"], h.io)).toBe(2);
+      expect(h.errors.join("\n")).toContain("unexpected argument");
+      expect(h.published).toEqual([]);
+    });
+
+    it("answers 2 when a required setting is missing", async () => {
+      const h = io({ env: () => undefined });
+      expect(await main([], h.io)).toBe(2);
+      expect(h.errors.join("\n")).toContain("--api-url is required");
+    });
+
+    it("answers 2 for a selection that matches no atom", async () => {
+      const h = io();
+      expect(await main(["--only", "nope"], h.io)).toBe(2);
+      expect(h.published).toEqual([]);
+    });
+
+    it("answers 1 when the run fails for a reason that is not usage", async () => {
+      const h = io({
+        createDeps: () => Promise.reject(new Error("fabric unreachable")),
+      });
+      expect(await main([], h.io)).toBe(1);
+      expect(h.errors.join("\n")).toContain("fabric unreachable");
+    });
+
+    it("answers 1 when an atom compiles to no durable identity", async () => {
+      const h = io({
+        createDeps: (_s, _r, log, logError) =>
+          Promise.resolve({
+            compile: () =>
+              Promise.resolve({
+                program: {
+                  main: "/main.tsx",
+                  files: [{ name: "/main.tsx", contents: "export {};" }],
+                },
+              }),
+            publish: () => Promise.reject(new Error("must not publish")),
+            recordCreated: () => Promise.reject(new Error("must not record")),
+            checkFormatting: () => Promise.resolve([]),
+            log,
+            logError,
+          }),
+      });
+      expect(await main([], h.io)).toBe(1);
+    });
+  });
+
+  describe("defaultSeedIo()", () => {
+    it("reads the environment and roots itself at the repository", () => {
+      const io = defaultSeedIo();
+      expect(io.repoRoot).toBe(REPO_ROOT);
+      expect(typeof io.env).toBe("function");
+      expect(io.createDeps).toBeDefined();
+    });
+  });
+
+  describe("the formatting guard", () => {
+    const directory = join(REPO_ROOT, SEED_DIRECTORY);
+
+    // An entry identity is a hash of the source bytes, so publishing
+    // unformatted source mints an id the repository cannot reproduce: the next
+    // `deno fmt` changes the bytes and the same atom seeds again under a second
+    // id. One atom, two entries, competing in search.
+    it("publishes nothing when an atom is not formatted, and names it", async () => {
+      const published: string[] = [];
+      const errors: string[] = [];
+      const compiled: string[] = [];
+      const code = await runSeed({ dryRun: false, only: [], directory }, {
+        compile: (path) => {
+          compiled.push(path);
+          return Promise.resolve({
+            patternId: "id",
+            program: { main: "/m.tsx", files: [] },
+          });
+        },
+        publish: (request) => {
+          published.push(request.patternId);
+          return Promise.resolve({
+            patternId: request.patternId,
+            created: true,
+          });
+        },
+        recordCreated: () => Promise.resolve(),
+        checkFormatting: (paths) => Promise.resolve([paths[0]]),
+        log: () => {},
+        logError: (line) => errors.push(line),
+      });
+      expect(code).toBe(1);
+      expect(published).toEqual([]);
+      // Refused before anything compiles, so no id is minted at all.
+      expect(compiled).toEqual([]);
+      expect(errors.join("\n")).toContain(
+        "not reproducible from the repository",
+      );
+      expect(errors.join("\n")).toContain("amount-ledger.tsx");
+    });
+
+    it("proceeds when every atom is formatted", async () => {
+      const published: string[] = [];
+      const code = await runSeed({
+        dryRun: false,
+        only: ["counter"],
+        directory,
+      }, {
+        compile: () =>
+          Promise.resolve({
+            patternId: "id",
+            program: { main: "/m.tsx", files: [] },
+          }),
+        publish: (request) => {
+          published.push(request.patternId);
+          return Promise.resolve({
+            patternId: request.patternId,
+            created: true,
+          });
+        },
+        recordCreated: () => Promise.resolve(),
+        checkFormatting: () => Promise.resolve([]),
+        log: () => {},
+        logError: () => {},
+      });
+      expect(code).toBe(0);
+      expect(published).toEqual(["id"]);
+    });
+
+    // The guard is only as good as the check behind it, so the real one is
+    // exercised against the atoms as committed.
+    it("finds the committed atoms already formatted", async () => {
+      const paths = await seedSourcePaths(directory);
+      expect(await denoFmtCheck(paths)).toEqual([]);
+    });
+
+    it("names an unformatted file the repository would rewrite", async () => {
+      const unformatted = join(
+        REPO_ROOT,
+        "packages/cf-harness/test/support/seed-pattern-index/unformatted.ts",
+      );
+      expect(await denoFmtCheck([unformatted])).toEqual([unformatted]);
     });
   });
 
