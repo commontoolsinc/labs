@@ -223,65 +223,77 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
     // was fully met by the evidence above. Full chain: verification-coverage.md
     // OW45 (the PHASE 3 block and the LIFT block that follows it).
     {
-      // RESTORED 2026-08-28 after THREE direct-CI unskip probes on the
-      // lift PR (#6484) — four across the arc, counting the pre-PR
-      // phase-3 board that opened it — the last one red at the surface
-      // with the declared hard stop honored. The park's WRITE PATH is now
-      // mapped three geometries deep, each caught by its probe's own
-      // artifact and the first two FIXED red-first on that PR (kept: the
-      // fixes are real —
-      // packages/runner/test/pattern-replication-sibling-race.test.ts):
-      // (1) the in-flight SIBLING replication supplying the parent space
-      // (sibling-await, `replicationsIntoSpace` tickets); (2) the parent
-      // space closure-less BY ORDER — `loadPatternByIdentity` serves
-      // patterns from the in-memory index with no per-space persist, so
-      // the CT-1687 child replication's origin read finds nothing
-      // (module-keyed fallback origins, `persistedClosureSpaces`); (3) —
-      // probe 4's residue, UNFIXED — the supplier COMPILE itself still
-      // mid-flight at child-replication time: no persist of the
-      // profile-home MODULE had completed anywhere server-side (both
-      // identity-home compiles started 5-18s earlier were still running;
-      // the earlier profile fetches are the harness process's), so the
-      // fallback map was correctly empty and the one-shot died. Every
-      // probe: ONE closure-replication-failed (parent -> profile), 80
-      // structure-load-stuck over 40 pattern-unloadable roots, the name
-      // placeholder, :271 at 300 s; fallback counter 0. The designed next
-      // move, recorded not landed: on a dry map, await the manager's
-      // in-flight compilations once (their E4 persists record before
-      // resolving), re-consult, then throw — event-driven, no timer, no
-      // deadlock (compiles never await replications). Local evidence at
-      // the fix heads: campaigns F/G/H 8/8 each (quiet+loaded, ensure-ON,
-      // self-sourced, posture-probed; structureLoadStuck 0), runner suite
-      // 1312/1312 — the park is CI-only in all 30 runs. Full chain:
-      // verification-coverage.md OW45's lunch ROOT-CAUSE/PROBE blocks.
+      // RESTORED (again) 2026-08-28 after the geometry-3 close PR's own
+      // direct-CI unskip probe — PROBE 5 of the arc, run 33198257149,
+      // ON shard 7 job 98941298566 — went RED at the probed surface,
+      // and the red is the PRE-DECLARED GEOMETRY 3b on its exact
+      // signature: ONE closure-replication-failed (entry=Jlzs..., the
+      // same profile-home module, parent -> profile, "source closure
+      // unavailable in origin space", 18:16:15.616) with ZERO
+      // closure-replication-await-inflight lines — the once-await's
+      // announcement, which prints whenever either compile registry is
+      // non-empty at the dry consult (pattern-manager logger level
+      // "info" admits warn; verified in logger.ts) — so BOTH registries
+      // were EMPTY: the supplier compile had NOT STARTED at consult
+      // time. Fallback counters 0 (the module-keyed map correctly dry:
+      // no persist had completed anywhere), then 80 structure-load-stuck
+      // over 40 pattern-unloadable roots 18:16:50-18:20:50, "Unknown
+      // profile #AykQuk", :271 at the 300000ms bound; 11 co-residents
+      // green. What this PR CLOSED red-first (kept; pinned in
+      // packages/runner/test/pattern-replication-sibling-race.test.ts,
+      // 5 steps, every mechanism independently mutation-killed):
+      // geometry 3 — the supplier compile MID-FLIGHT at consult: on a
+      // dry origin AND dry map the replication awaits a snapshot of
+      // BOTH in-flight compile registries once, re-observes
+      // pendingCacheWriteBacks fresh, and re-consults; an empty
+      // snapshot keeps the byte-identical one-shot throw. Geometries
+      // 1+2 (#6484): sibling-await + module-keyed fallback origins.
+      // The residue is now exactly ONE geometry: 3b, the
+      // not-yet-started supplier compile, invisible to any once-await
+      // by construction. The full close — event-driven re-supply (on
+      // each recordPersistedClosureSpaces for identity I, re-issue
+      // failed replications wanting I) — TOUCHES THE ONE-SHOT CONTRACT
+      // and is recorded in the register as an OWNER-COURT fork; that
+      // fork (or a deeper supply redesign, e.g. compiling the home-env
+      // into the parent space before serving profile creation) is this
+      // entry's lift condition, plus the ruled local-plus-CI-probe bar.
+      // Local record at the close head: campaigns I and J 8/8 each
+      // (fresh store + posture probe per run, ensure defaulting ON,
+      // toolshed self-sourced, LLM masked; structureLoadStuck 0,
+      // closure-replication-failed 0, await-inflight 0 — the retry is
+      // dormant locally; the park is a CI boot ORDER). Full chain:
+      // verification-coverage.md OW45's lunch blocks (GEOMETRY-3
+      // CLOSE, LIFT-ATTEMPT, PROBE 5 / 3b CONFIRMED).
       file: "integration/lunch-poll-vote.test.ts",
       phase: "phase-7",
       reason: "OW45 arm B, the structure-load forever-park: the profile " +
         "space's program closure has NO reliable server-side supplier " +
         "when the create-profile event beats every persist of the " +
-        "profile-home module. Three supplier geometries mapped on PR " +
-        "#6484's three probe boards (runs 33160430927, 33164596936, " +
-        "33165960083; the arc's first probe, run 33138358110, ran " +
-        "pre-PR under phase 3): the in-flight sibling replication (FIXED, " +
-        "sibling-await), the by-ORDER closure-less parent (the in-memory " +
-        "index serves patterns with no per-space persist; FIXED, " +
-        "module-keyed fallback origins), and the still-mid-flight " +
-        "supplier compile (UNFIXED residue: the fallback map is " +
-        "correctly empty until a persist completes; the designed await " +
-        "of in-flight compilations is recorded in the register, not " +
-        "landed). Signature, identical in all four probes: one " +
-        "closure-replication-failed parent->profile, then 80 " +
-        "structure-load-stuck WARNs (40 roots, pattern-unloadable) on " +
-        "the profile space, 'Unknown profile #<id>' placeholder, " +
-        "lunch-poll-vote.test.ts:271 at the 300000ms bound; " +
-        "closure-replication-fallback-origin 0. Local 30/30 GREEN across " +
-        "campaigns F/G/H + smokes at the fix heads (fresh store + " +
-        "posture probe per run, ensure defaulting ON, toolshed " +
-        "self-sourced, LLM masked): the parent space's own sidecar " +
-        "compile always persists first locally — the park is a CI boot " +
-        "ORDER, not a race or a load artifact. Lifts on the in-flight " +
-        "compile await (or a deeper supply redesign) plus the ruled " +
-        "local-plus-CI-probe bar.",
+        "profile-home module. FOUR supplier geometries now mapped on " +
+        "five direct-CI probes (#6484's runs 33160430927, 33164596936, " +
+        "33165960083; the geometry-3 close PR's run 33198257149; the " +
+        "arc's first probe 33138358110 ran pre-PR): the in-flight " +
+        "sibling replication (FIXED, sibling-await), the by-ORDER " +
+        "closure-less parent (FIXED, module-keyed fallback origins), " +
+        "the MID-FLIGHT supplier compile (FIXED, the once-await over " +
+        "both in-flight compile registries with re-consult — the " +
+        "geometry-3 close, red-first), and GEOMETRY 3B: the supplier " +
+        "compile NOT YET STARTED at consult time — CONFIRMED live by " +
+        "probe 5's artifact (one closure-replication-failed with ZERO " +
+        "closure-replication-await-inflight lines = both registries " +
+        "empty at the dry consult; fallback counters 0; 80 " +
+        "structure-load-stuck, 40 roots; 'Unknown profile #AykQuk'; " +
+        ":271 at 300000ms; co-residents green). A once-await cannot " +
+        "see a compile that has not begun; the full close " +
+        "(event-driven re-issue on persist record) touches the " +
+        "one-shot contract and sits with the owner (the register's 3b " +
+        "fork). Local 46/46 GREEN across campaigns F/G/H/I/J + smokes " +
+        "at the fix heads (fresh store + posture probe per run, ensure " +
+        "defaulting ON, self-sourced, LLM masked): the parent's own " +
+        "sidecar compile always persists first locally — the park is " +
+        "a CI boot ORDER, not a race or a load artifact. Lifts on the " +
+        "owner-ruled 3b close (or a deeper supply redesign) plus the " +
+        "ruled local-plus-CI-probe bar.",
     },
     // The sqlite identity pair's two FILE entries were LIFTED (OW53
     // CLOSED, 2026-08-22): the sqlite builtins consumed the RUNTIME's
