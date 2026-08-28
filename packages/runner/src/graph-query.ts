@@ -26,12 +26,14 @@ import {
   CompoundCycleTracker,
   createSchemaMemo,
   createTraversalContext,
+  type CrossTraversalSchemaMemo,
   getAtPath,
   type IAttestation,
   type IMemorySpaceValueAttestation,
   loadMetaLinkedDocs,
   ManagedStorageTransaction,
   MapSetStringToPathSelectors,
+  type NormalizedFullLink,
   type ObjectStorageManager,
   type SchemaMemo,
   SchemaObjectTraverser,
@@ -39,13 +41,18 @@ import {
   schemaTrackerCoversSelector,
   schemaTrackerKey,
   type TraversalContext,
+  type TraverseResult,
 } from "./traverse.ts";
 
 export type {
   BaseMemoryAddress,
+  CrossTraversalSchemaMemo,
   IAttestation,
+  IMemorySpaceValueAttestation,
+  NormalizedFullLink,
   ObjectStorageManager,
   SchemaPathSelector,
+  TraverseResult,
 };
 export {
   createSchemaMemo,
@@ -65,6 +72,7 @@ export type GraphQueryWalkStats = {
   dagTraversals: number;
   getDocAtPathCalls: number;
   schemaMemoHits: number;
+  crossTraversalMemoHits: number;
 };
 
 export const createGraphQueryWalkStats = (): GraphQueryWalkStats => ({
@@ -76,6 +84,7 @@ export const createGraphQueryWalkStats = (): GraphQueryWalkStats => ({
   dagTraversals: 0,
   getDocAtPathCalls: 0,
   schemaMemoHits: 0,
+  crossTraversalMemoHits: 0,
 });
 
 export type GraphQueryWalkOptions = {
@@ -131,6 +140,11 @@ export type GraphQueryWalkOptions = {
 
   /** Schema-traversal results reused across walks that share it. */
   memo?: SchemaMemo;
+
+  /** Cross-traversal schema memo the walk's traversals consult (query
+   * path only; see {@link CrossTraversalSchemaMemo}). The walk threads it
+   * through unchanged. */
+  crossTraversalMemo?: CrossTraversalSchemaMemo;
 
   /** Counters to add into. */
   stats?: GraphQueryWalkStats;
@@ -196,6 +210,7 @@ export class GraphQueryWalk {
       },
     );
     this.#memo = options.memo ?? createSchemaMemo();
+    this.#context.crossTraversalMemo = options.crossTraversalMemo;
     this.stats = options.stats ?? createGraphQueryWalkStats();
   }
 
@@ -295,5 +310,6 @@ export class GraphQueryWalk {
     this.stats.dagTraversals += traverser.traverseDAGCalls;
     this.stats.getDocAtPathCalls += traverser.getDocAtPathCalls;
     this.stats.schemaMemoHits += traverser.schemaMemoHits;
+    this.stats.crossTraversalMemoHits += traverser.crossTraversalMemoHits;
   }
 }

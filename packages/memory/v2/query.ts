@@ -28,6 +28,11 @@ import { isSubschema } from "../../runner/src/schema-walk.ts";
 import type { MemorySpace, MIME, URI } from "../interface.ts";
 import { mapLinkSchemas } from "./schema-table-links.ts";
 import {
+  CapturingSchemaTracker,
+  SchemaWalkMemoSession,
+  type SchemaWalkMemoStore,
+} from "./schema-walk-memo.ts";
+import {
   canResolveScopeKey,
   type CellScope,
   type CommitClass,
@@ -802,6 +807,14 @@ export type TrackGraphOptions = {
    * for the sharing and rotation rules. */
   evaluationCache?: QueryEvaluationCache;
 
+  /** Serve/record per-document schema-walk subtrees through this store
+   * (docs/plans/revision-keyed-schema-memo.md). Same eligibility as the
+   * evaluation cache: current-seq reads only, and the lease-holder
+   * exemption class bypasses. A store whose engine is not this
+   * evaluation's engine is cleared first — revisions identify state only
+   * within their engine. */
+  schemaWalkMemo?: SchemaWalkMemoStore;
+
   /**
    * `queryGraph` only (server-execution v2 stage A, OW17's wire leg):
    * annotate every returned snapshot with its scope INSTANCE
@@ -1377,12 +1390,33 @@ export const trackGraph = (
     );
     reuse?.managers?.set(managerKey, manager);
   }
-  const schemaTracker = new MapSetStringToPathSelectors(true);
+  const memoStore =
+    options.readSeq === undefined && options.keyedSnapshots !== true
+      ? options.schemaWalkMemo
+      : undefined;
+  if (memoStore !== undefined && memoStore.engine !== engine) {
+    memoStore.engine = engine;
+    memoStore.entries.clear();
+  }
+  const schemaTracker = memoStore === undefined
+    ? new MapSetStringToPathSelectors(true)
+    : new CapturingSchemaTracker();
   const missState = {
     missed: new MapSetStringToPathSelectors(true),
     missedBy: new Map<string, Set<string>>(),
     missesOf: new Map<string, Set<string>>(),
   };
+  const recordMiss = missRecorderFor(missState);
+  const session = memoStore === undefined
+    ? undefined
+    : new SchemaWalkMemoSession({
+      store: memoStore,
+      engine,
+      space,
+      branch,
+      identity: identityOf(manager),
+      tracker: schemaTracker as CapturingSchemaTracker,
+    });
   const sharedMemo = createSchemaMemo();
   const stats = createQueryTraversalStats();
   const readCountBefore = manager.readCount;
@@ -1390,9 +1424,12 @@ export const trackGraph = (
     manager,
     space: space as MemorySpace,
     schemaTracker,
-    onMissedDoc: missRecorderFor(missState),
+    onMissedDoc: session === undefined
+      ? recordMiss
+      : session.wrapMissRecorder(recordMiss),
     identity: identityOf(manager),
     memo: sharedMemo,
+    crossTraversalMemo: session,
     stats,
   });
 
