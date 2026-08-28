@@ -10,6 +10,12 @@ import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts
 import type { HarnessHandleTable } from "../../src/contracts/handle-table.ts";
 import type { HarnessCfcInvocationContext } from "../../src/contracts/cfc-invocation-context.ts";
 import { createToolOutputId } from "../../src/contracts/tool-result.ts";
+import {
+  HARNESS_CELL_LABELS_TYPE,
+  type HarnessCellLabelRecord,
+  type HarnessCellLabels,
+} from "../../src/contracts/cell-labels.ts";
+import { consoleCellLabelIndex } from "../../console/cell-labels.ts";
 
 const call = (
   id: string,
@@ -39,6 +45,36 @@ const result = (
   toolCallId,
   toolName,
   content: typeof content === "string" ? content : JSON.stringify(content),
+});
+
+/** A snapshot the space was read for, holding these cells and no others. */
+const labelSnapshot = (
+  cells: readonly HarnessCellLabelRecord[],
+): HarnessCellLabels => ({
+  type: HARNESS_CELL_LABELS_TYPE,
+  version: 1,
+  generatedAt: "2026-01-01T00:00:00.000Z",
+  status: "read",
+  cells,
+});
+
+/** One cell the space labels `Secret` at its root. */
+const secretCell = (
+  entityId: string,
+  ref: string,
+): HarnessCellLabelRecord => ({
+  entityId,
+  ref,
+  entries: [
+    {
+      path: [],
+      confidentiality: [
+        { type: "https://common.tools/cfc/Secret", name: "Secret" },
+      ],
+      integrity: [],
+      origin: "declared",
+    },
+  ],
 });
 
 describe("console/steps", () => {
@@ -185,6 +221,49 @@ describe("console/steps", () => {
       expect(handles).toHaveLength(1);
       expect(handles[0].token).toBe("cfh:a:zzzzz");
       expect(handles[0].ref).toBeUndefined();
+    });
+
+    it("carries the labels the space holds for the cell a handle names", () => {
+      const steps = consoleRunSteps([
+        call("c1", "run_pattern", {}),
+        result("c1", "run_pattern", { resultRef: "cfh:a:aaaaa" }),
+      ]);
+      const handles = consoleRunHandles(
+        steps,
+        table,
+        consoleCellLabelIndex(
+          labelSnapshot([secretCell("of:fid1:aaa", "/of:fid1:aaa")]),
+        ),
+      );
+      expect(handles[0].labels?.confidentiality).toEqual(["Secret"]);
+      // What a call put on the argument is a different fact, and stays its
+      // own field: this run made no call carrying an atom.
+      expect(handles[0].confidentiality).toEqual([]);
+    });
+
+    it("tells a cell the snapshot holds no label for from one it never read", () => {
+      const steps = consoleRunSteps([
+        call("c1", "run_pattern", {}),
+        result("c1", "run_pattern", { resultRef: "cfh:a:aaaaa" }),
+      ]);
+      const read = consoleRunHandles(
+        steps,
+        table,
+        consoleCellLabelIndex(
+          labelSnapshot([
+            { entityId: "of:fid1:aaa", ref: "/of:fid1:aaa", entries: [] },
+          ]),
+        ),
+      );
+      // The space was asked and holds nothing for this cell.
+      expect(read[0].labels?.entries).toEqual([]);
+      const unread = consoleRunHandles(
+        steps,
+        table,
+        consoleCellLabelIndex(undefined),
+      );
+      // Nobody asked, which is not the same reading.
+      expect(unread[0].labels).toBeUndefined();
     });
   });
 });
@@ -741,6 +820,46 @@ describe("console/steps provenance", () => {
       const handles = consoleRunHandles(steps, table);
       const args = consoleStepArguments(steps[2], handles);
       expect(args[0].schema).toEqual(table.entries[0].schema);
+    });
+
+    it("takes an argument's labels from the handle it resolved to", () => {
+      const steps = composed("cfh:a:aaaaa");
+      const handles = consoleRunHandles(
+        steps,
+        table,
+        consoleCellLabelIndex(
+          labelSnapshot([secretCell("of:fid1:abc", "/of:fid1:abc")]),
+        ),
+      );
+      const args = consoleStepArguments(steps[2], handles);
+      expect(args[0].labels?.confidentiality).toEqual(["Secret"]);
+    });
+
+    it("labels an argument written as a whole link the run holds no handle for", () => {
+      const steps = composed("/of:fid1:zzz");
+      const args = consoleStepArguments(
+        steps[2],
+        [],
+        consoleCellLabelIndex(
+          labelSnapshot([secretCell("of:fid1:zzz", "/of:fid1:zzz")]),
+        ),
+      );
+      expect(args[0].token).toBeUndefined();
+      expect(args[0].labels?.confidentiality).toEqual(["Secret"]);
+    });
+
+    it("labels a link naming a path inside a document from the document", () => {
+      const steps = composed("/of:fid1:zzz/numbers");
+      const args = consoleStepArguments(
+        steps[2],
+        [],
+        consoleCellLabelIndex(
+          labelSnapshot([secretCell("of:fid1:zzz", "/of:fid1:zzz")]),
+        ),
+      );
+      // The labels are stored for the document, and the path resolves to it.
+      expect(args[0].ref).toBe("/of:fid1:zzz/numbers");
+      expect(args[0].labels?.confidentiality).toEqual(["Secret"]);
     });
   });
 });

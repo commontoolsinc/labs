@@ -77,6 +77,7 @@ Every environment variable has a flag, and the flag wins:
 | `--workspace`         | `CF_HARNESS_CONSOLE_WORKSPACE`       | `.cf-harness-console/workspace`       |
 | `--artifact-root`     | `CF_HARNESS_ARTIFACT_ROOT`           | `.cf-harness-console/runs`            |
 | `--session-db`        | `CF_HARNESS_CONSOLE_SESSION_DB`      | `.cf-harness-console/sessions.sqlite` |
+| `--space-db`          | `CF_HARNESS_SPACE_DB`                | the space's own database, discovered  |
 | `--max-model-turns`   | `CF_HARNESS_CONSOLE_MAX_MODEL_TURNS` | the prompt loop's default             |
 | `--skills-root`       | `CF_HARNESS_CONSOLE_SKILLS_ROOT`     | the repository's `skills/` tree       |
 
@@ -166,15 +167,56 @@ These govern the runtime `run_pattern` deploys patterns into. The harness's own
 `cfcEnforcementMode`, which governs tool policy and the sandbox, is a separate
 dial and reaches every run's `policy-snapshot.json` either way.
 
+A turn ends by reading the space it wrote into for the labels it holds on the
+cells the run touched, and records them as the run's `cell-labels.json`. That is
+what a cell chip draws its `space` row from, and what the head of the map states
+the regime of — a space that could not be read is a run whose cells are
+unasked-about rather than unlabelled. A run and the `delegate_task` children
+beneath it each record their own, and the head states what every cell on the map
+can be taken to mean, so a family whose runs did not all read the space is
+stated as read for none of them: one member's reading cannot speak for another
+member's cells.
+
+The read is one hop wide. A pattern's results are their own cells, linked from
+the piece that names them, and the derived label sits on the cell — so the
+labels of the cells a run's own cells link to are read too, at the path the link
+sits at. The walk descends through the objects and arrays of a value to find
+those links and stops at each: a linked cell's own links belong to that cell,
+not to this one.
+
+It descends a bounded way, and what it does not reach it records rather than
+passes over. The bounds sit far above the shape of any document a pattern writes
+— sixty-four levels deep, a hundred thousand values wide — and a path below that
+depth is recorded unread at the path itself, so the cells beneath it read as
+nothing known. A value large enough to exhaust the node budget is a walk that
+stopped before enumerating what was left, so it can name no path: it marks the
+whole cell's labels partial and warns as it does, because a value that size is a
+cycle far more often than it is a document. Either way, a cell the reader did
+not finish never reads as a cell with no label.
+
+It reaches one space. A reference or a link naming a space the opened file
+cannot be shown to be — another space, or any space at all where the file's own
+name proves no DID — is recorded as unread rather than resolved, because the id
+it names may also exist here and would answer with the wrong cell's labels. A
+reference is recorded unread as a whole cell; a link is recorded unread at the
+path it sits at, so the cells beneath it read as nothing known rather than as
+cells the space holds no label for. The database is opened read-only, and it is
+found by the space the fabric session names; `--space-db` points at the file
+instead, for a host whose store is not where the search looks — and a file named
+for anything but its space proves no DID, so every spaced reference and link
+goes unread against one.
+
 ## Reading a run
 
 Three columns, each scrolling on its own: the runs there are, the run being
 read, and the map of how it went. A turn produces a run, and the run's artifacts
 are the record of it, so the same view serves a run that finished an hour ago
 and one still going. The live event stream drives the status line and the
-re-reads; it is not a second feed. A run writes its artifacts as it goes, so
-every completed tool call re-reads the list, the open run and its map. The step
-the scrubber sits on survives the re-read.
+re-reads; it is not a second feed. The event that closes a turn is published
+once that turn's labels have been recorded, so the re-read it drives reads the
+snapshot rather than racing it. A run writes its artifacts as it goes, so every
+completed tool call re-reads the list, the open run and its map. The step the
+scrubber sits on survives the re-read.
 
 ### The runs
 
@@ -217,11 +259,43 @@ the handles a step holds — because two sightings of one cell have to be
 recognisable as one cell. The chip carries the name it goes by: the slug a
 person gave it, else the handle the model held, else its address. Hovering it
 gives the rest — handle, address, the shape the pattern that made it declared,
-the confidentiality atoms riding on it, and the step whose result minted it.
+the labels below, and the step whose result minted it.
 
-A cell showing no atoms under a run whose flow labels are `off` is saying what
-that run recorded, not hiding something. The regime at the top of the map is
-what makes the difference readable.
+A chip holds two label facts, and the card names them apart because they answer
+different questions:
+
+- **cfc** — the atoms the sandbox's invocation context recorded on the arguments
+  of the call this sighting belongs to. What one call saw crossing into it. The
+  count on the chip is this one.
+- **space** — the confidentiality and integrity atoms the space stores for the
+  cell itself, read from the space the run wrote into, with the labelled paths
+  read path by path and the origin of each beside it.
+
+An atom is not a claim that the value was computed from something confidential.
+A value's label can be the join of the fields of the object it was reached
+through, so a plain input reached through a labelled object carries an atom
+having been derived from nothing. What separates the two is the space's own
+account of where the value came from, and the chip wears it as a second state: a
+**derived** cell — one the space says was computed from what a function read —
+is colored apart from a merely labelled one, and its card names the
+implementation that produced it under `transformed by`.
+
+A cell whose card says the space holds no label for it is saying what the space
+holds, and only a cell read whole says it. A cell whose card says no label was
+read for it is saying nothing was read there, which is a different thing: either
+the run's labels name the cell nowhere, or the reading covered part of it. Where
+it covered part of it, a **reading** row says which part it missed and what a
+path with no entry means under it — `read but for` the paths it declined to
+follow, each named, with every other path read; or `did not finish`, which names
+no path at all, because what it missed it never reached. The chip cannot tell on
+its own whether a cell went unnamed because the space was never read. The head
+of the map carries that: `cell labels read` with how many of the cells it read
+carry one, `cell labels unavailable` with why, or `cell labels not read`. Where
+a cell of the run was read only in part it heads `cell labels read in part`
+instead, and says how many, because the count beside it is then a floor rather
+than a total. Read an empty chip against that head — under a run whose flow
+labels are `off`, or one whose space could not be read, an empty chip is a
+record of what the run recorded rather than a cell with nothing to hide.
 
 ### The run's own panes
 
@@ -263,8 +337,9 @@ what makes the difference readable.
   `record_feedback` reported, and every address `assign_slug` named.
 - **Tool outputs** — each tool result as the model read it, untruncated.
 - **Artifacts** — the run's own records: `run-state.json`, `transcript.json`,
-  `run-report.json`, the policy snapshot and trace, the capability snapshot, and
-  the skill registry and activations, whichever the run wrote.
+  `run-report.json`, the policy snapshot and trace, the capability snapshot, the
+  cell labels read back from the space, and the skill registry and activations,
+  whichever the run wrote.
 
 Handle scope is reconstructed rather than recorded. A run keeps one handle
 table, its last, so the timeline takes a handle to be in scope from the step its

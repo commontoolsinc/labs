@@ -93,6 +93,7 @@ import type {
   HarnessInputCellSpec,
 } from "./contracts/input-cells.ts";
 import { mintInputCellHandles } from "./input-cells.ts";
+import type { HarnessCellLabels } from "./contracts/cell-labels.ts";
 import {
   appendHarnessCfcModelContextObservations,
   appendHarnessFailureRecord,
@@ -262,6 +263,13 @@ export interface CreateHarnessEngineOptions
    * its space.
    */
   inputCells?: readonly HarnessInputCellSpec[];
+
+  /**
+   * The space database `snapshotCellLabels` reads, for a host where the
+   * store is not where the discovery walk looks. Absent, the space named by
+   * the fabric session is resolved against the caches on this host.
+   */
+  spaceDbPath?: string;
   now?: () => string;
 }
 
@@ -386,6 +394,7 @@ export class CfHarnessEngine {
   readonly #patternIndexClientFactory?: HarnessPatternIndexClientFactory;
   readonly #taskText?: string;
   readonly #inputCells: readonly HarnessInputCellSpec[];
+  readonly #spaceDbPath?: string;
   readonly #hostMounts: readonly HostSandboxMount[];
   readonly #ownedRunscConfig?: DockerRunscSandboxConfig;
   readonly #resumedRun: boolean;
@@ -539,6 +548,7 @@ export class CfHarnessEngine {
       : cacheHarnessPatternIndexClientFactory(patternIndexClientFactory);
     this.#taskText = options.taskText;
     this.#inputCells = options.inputCells ?? [];
+    this.#spaceDbPath = options.spaceDbPath;
     const sandboxConfig = options.sandboxRuntime === undefined
       ? resolveSandboxConfig(this.config, {
         workspaceHostPath: options.workspaceHostPath,
@@ -993,6 +1003,55 @@ export class CfHarnessEngine {
     );
     await this.persistRunState();
     return minted.inputCells;
+  }
+
+  /**
+   * Reads the run's space for what it holds about the cells this run touched,
+   * and records the answer beside the run.
+   *
+   * The run's own artifacts say which cells it made and read and what the
+   * sandbox decided about each call; the space says what each of those cells
+   * is labelled. Nothing else joins the two, so a reader working from the
+   * tree alone sees an unlabelled cell whatever the run was enforcing. The
+   * snapshot is that join, taken at the run's own space, over every cell the
+   * handle table names.
+   *
+   * Read-only and best-effort by construction: the space database is opened
+   * read-only, and a host that holds no copy of it yields an unavailable
+   * snapshot rather than a failed run. What it must never do is yield a bare
+   * one — "the space holds no label for this cell" and "nobody asked" are
+   * different findings, and the snapshot's `status` is what keeps them apart.
+   *
+   * A run with no fabric session names no space and touches no cell, so it
+   * takes no snapshot at all.
+   */
+  async snapshotCellLabels(): Promise<HarnessCellLabels | undefined> {
+    const space = this.config.fabricSession?.space;
+    const refs = (this.#runState.handleTable?.entries ?? []).map((entry) =>
+      entry.ref
+    );
+    if (space === undefined || refs.length === 0) {
+      return undefined;
+    }
+    const generatedAt = this.#now();
+    // deno-lint-ignore cf-imports/no-inline-module-import -- costs at import time: reading a space database is the one thing the engine does through a native library, and a process that never takes a snapshot must not load one to run
+    const { readSpaceCellLabels } = await import("./space-labels.ts");
+    const cellLabels = await readSpaceCellLabels({
+      space,
+      ...(this.#spaceDbPath !== undefined ? { dbPath: this.#spaceDbPath } : {}),
+      refs,
+      generatedAt,
+    });
+    const cellLabelsPath = await this.artifactStore?.persistCellLabels?.(
+      cellLabels,
+    );
+    this.#runState = patchHarnessRunState(
+      this.#runState,
+      { cellLabels, cellLabelsPath },
+      generatedAt,
+    );
+    await this.persistRunState();
+    return cellLabels;
   }
 
   async ensureRunManifestPersisted(): Promise<string | undefined> {
