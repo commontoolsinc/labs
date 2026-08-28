@@ -38,6 +38,54 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
+**Delta 2026-08-28 (this PR): the lunch forever-park ROOT-CAUSED from the
+phase-3 probe's own artifact and FIXED red-first; lunch-poll-vote's FILE
+entry LIFTED under the ruled bar — the ON-skip registry is EMPTY across
+ALL FOUR SUITES for the first time since stage F.** The park's mechanism,
+read off run 33138358110 shard 7's published toolshed log (the artifact
+the phase-3 delta added): the runner's cross-space child replication —
+the CT-1687/S-A write that supplies a child space's program closure
+(`replicate(parentSpace -> profileSpace)`) — raced the SIBLING replication
+still supplying the parent space itself (`compileOrGetPattern`'s
+content-cache hit fires `replicate(cached.space -> parentSpace)`
+fire-and-forget), one-shot-died on "source closure unavailable in origin
+space" (the shard's single pattern-manager error, 33 s before the first
+stuck warn), and nothing re-issues a failed replication — so the profile
+space never received its closure, its 40 demanded roots deferred
+`pattern-unloadable` forever (the 80 OW46 warns = 40 roots x streaks
+8+16), the name rendered the `#MjhprA` placeholder, and `#lp-join-button`
+never appeared (:271). Local greens ride the SAME machinery with the
+sibling winning by ~3 s — the store witness is the commit classes (sibling
+replications land DERIVED via the target's wave; child replications land
+AUTHORED with §2b carriage), and CI's slow boot flips the ~1 s edge, which
+is WHY two campaigns split local-8/8 vs CI-red: the park was
+CI-timing-armed, exactly as the method finding predicted. The layered view
+was verified en route (a same-runtime wave-staged write IS readable before
+the wave commits), which is what pinned the sibling — not wave durability —
+as the mechanism. FIX (runner package): a replication awaits the
+strictly-older replications registered INTO its origin space before
+reading it (`pattern-manager.ts` `replicationsIntoSpace`, monotonic
+tickets — acyclic by construction; genuine absence still fails loud and
+settles). Red-first pin
+`packages/runner/test/pattern-replication-sibling-race.test.ts`
+(deterministic-by-construction race; watched red pre-fix with the exact
+production error; mutation-killed), plus a working-tree fault injection
+that reproduced the FULL CI signature locally (80 stuck warns over 40
+`pattern-unloadable` roots, join dead, 300 s). Lift evidence: requirement
+(1) — 8/8 quiet-and-loaded at the fix head (17–18 s walls,
+`structureLoadStuck` 0, `closure-replication-failed` 0, the tolerated
+refusal storm unchanged at 40/40); requirement (2) — THIS lift PR's own
+ON-lane board runs the un-skipped file as the direct-CI unskip probe,
+green at the probed surface per the ruled SURFACE reading. The flip PR's
+list-EMPTY precondition is now MET. The flip bar remains a green ON lane —
+unlisted debt still blocks the flip on its own accountability (the
+co-resident `cfc-group-chat-demo.test.ts:133` blocker is PAID by #6477,
+the delta below). Recorded residual,
+flagged not filled: a CROSS-REPLICA supplier (a client/harness write-back
+arriving over the wire) is outside the fix's await — never observed in any
+red. Register: verification-coverage.md OW45's lunch ROOT-CAUSE and LIFT
+blocks.
+
 **Delta 2026-08-28 (#6477): the co-resident debt is PAID —
 `cfc-group-chat-demo.test.ts:133` root-caused and green.** The unlisted
 flip-blocker the surface-reading delta below leaves live is fixed. NOT
