@@ -53,8 +53,8 @@ import { cloneHelper } from "./value-clone.ts";
 import { isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 
 /**
- * Helper for `shallowFabricFromNativeObject()`, which rejects native objects
- * with extra enumerable properties.
+ * Helper for `shallowFabricFromNativeObjectElseUndefined()`, which rejects
+ * native objects with extra enumerable properties.
  */
 function rejectExtraProperties(value: object, typeName: string): void {
   if (Object.keys(value).length > 0) {
@@ -223,9 +223,9 @@ export function errorClassFromType(type: string): ErrorConstructor {
  * A native object that conversion mints from -- a `Date`, `Uint8Array`,
  * `RegExp` or `Error` -- is refused here too, and told which refusal it is:
  * that fabric form is what conversion produces, not what the value already is.
- * `shallowFabricFromNativeObject()` is what produces it, and the pair is meant
- * to be asked in that order. A `Map` and a `Set` get the ordinary refusal
- * instead, having no fabric form to be told about yet.
+ * `shallowFabricFromNativeObjectElseUndefined()` is what produces it, and the
+ * pair is meant to be asked in that order. A `Map` and a `Set` get the
+ * ordinary refusal instead, having no fabric form to be told about yet.
  *
  * @param value The value to check.
  */
@@ -373,7 +373,7 @@ export function assertValidFabricValueLayer(
  *
  * @param value The value to convert.
  */
-export function shallowFabricFromNativeObject(
+export function shallowFabricFromNativeObjectElseUndefined(
   value: unknown,
 ): FabricValueLayer | undefined {
   switch (tagFromNativeValue(value)) {
@@ -425,7 +425,7 @@ export function shallowFabricFromNativeValue(
   value: unknown,
   freeze = true,
 ): FabricValueLayer {
-  const minted = shallowFabricFromNativeObject(value);
+  const minted = shallowFabricFromNativeObjectElseUndefined(value);
 
   if (minted !== undefined) {
     // A mint is born frozen, so a caller that asked for a mutable result gets

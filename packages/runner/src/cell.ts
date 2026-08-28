@@ -16,7 +16,7 @@ import {
   type FabricValue,
   shallowCleanArray,
   shallowCleanPlainObject,
-  shallowFabricFromNativeObject,
+  shallowFabricFromNativeObjectElseUndefined,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
 import {
@@ -4072,7 +4072,7 @@ export function convertCellsToLinks(
       // `FabricError`. Anything else comes back `undefined`, which says only
       // that nothing needed minting -- so the value stands as its own answer,
       // and every test above and below runs on `value` itself.
-      const minted = shallowFabricFromNativeObject(value);
+      const minted = shallowFabricFromNativeObjectElseUndefined(value);
       if (minted instanceof FabricInstance) {
         // A `FabricError` is the one mint this walk cannot descend.
         refuseFabricInstance(minted, "when converting cells to links");

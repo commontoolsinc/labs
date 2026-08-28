@@ -14,7 +14,7 @@ import {
   type FabricPlainObject,
   FabricSpecialObject,
   type FabricValue,
-  shallowFabricFromNativeObject,
+  shallowFabricFromNativeObjectElseUndefined,
 } from "@commonfabric/data-model/fabric-value";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
@@ -1227,7 +1227,7 @@ export function normalizeAndDiff(
   // so a container keeps its own identity all the way through the walk below
   // -- and that identity is the one shared references and cycles arrive
   // under, which is what `state.seen` is keyed on.
-  const minted = shallowFabricFromNativeObject(newValue);
+  const minted = shallowFabricFromNativeObjectElseUndefined(newValue);
   if (minted === undefined) {
     assertValidFabricValueLayer(newValue);
   } else {

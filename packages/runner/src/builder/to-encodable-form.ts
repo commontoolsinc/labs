@@ -6,7 +6,7 @@ import {
   assertValidFabricValueLayer,
   FabricInstance,
   FabricPrimitive,
-  shallowFabricFromNativeObject,
+  shallowFabricFromNativeObjectElseUndefined,
 } from "@commonfabric/data-model/fabric-value";
 import { refuseFabricInstance } from "../fabric-special-object.ts";
 import { type AliasBinding } from "../sigil-types.ts";
@@ -191,7 +191,7 @@ export function withAliasBindings(
   if (
     isObjectOrArray(value) && !isPattern(value) && !isInertPlainObject(value)
   ) {
-    const minted = shallowFabricFromNativeObject(value);
+    const minted = shallowFabricFromNativeObjectElseUndefined(value);
     if (minted === undefined) {
       // Nothing was minted, so the value would have to be walkable as it
       // stands, and this is what holds it to that. Everything reaching this

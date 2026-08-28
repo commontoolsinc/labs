@@ -22,7 +22,9 @@ import { convertCellsToLinks } from "../src/cell.ts";
 /** A class with no fabric representation. */
 class PlainClass {}
 
-/** An `Array` subclass, whose instances are live code rather than inert data. */
+/**
+ * An `Array` subclass, whose instances are live code rather than inert data.
+ */
 class ArraySubclass extends Array {}
 
 /** Returns an array carrying an accessor-backed index. */

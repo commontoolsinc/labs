@@ -65,7 +65,7 @@ import {
   nativeFromFabricValue,
   shallowCleanArray,
   shallowCleanPlainObject,
-  shallowFabricFromNativeObject,
+  shallowFabricFromNativeObjectElseUndefined,
   shallowFabricFromNativeValue,
 } from "@/native-conversion.ts";
 import { isValidFabricValueLayer } from "@/type-check.ts";
@@ -82,7 +82,9 @@ function roundTrip(value: FabricValue): FabricConvertibleValue {
 /** A class with no fabric representation, wanted here by name. */
 class PlainClass {}
 
-/** An `Array` subclass, whose instances are live code rather than inert data. */
+/**
+ * An `Array` subclass, whose instances are live code rather than inert data.
+ */
 class ArraySubclass extends Array {}
 
 /** A concrete fabric class, `toBeInstanceOf()` wanting a constructor. */
@@ -647,7 +649,7 @@ describe("native-conversion", () => {
     ["a `Set`", new Set()],
   ];
 
-  describe("shallowFabricFromNativeObject()", () => {
+  describe("shallowFabricFromNativeObjectElseUndefined()", () => {
     // The `FabricNativeObject`s that have a fabric form, each with the class
     // it mints.
     const MINTED: ReadonlyArray<[string, unknown, FabricClass]> = [
@@ -660,7 +662,7 @@ describe("native-conversion", () => {
     describe("given a `FabricNativeObject` with a fabric form", () => {
       for (const [label, value, cls] of MINTED) {
         it(`returns a frozen \`${cls.name}\`, not the input, for ${label}`, () => {
-          const result = shallowFabricFromNativeObject(value);
+          const result = shallowFabricFromNativeObjectElseUndefined(value);
           expect(result).toBeInstanceOf(cls);
           expect(result).not.toBe(value);
           expect(Object.isFrozen(result)).toBe(true);
@@ -669,7 +671,7 @@ describe("native-conversion", () => {
 
       it("throws for a `Date` carrying extra enumerable properties", () => {
         const date = Object.assign(new Date(0), { extra: 1 });
-        expect(() => shallowFabricFromNativeObject(date)).toThrow(
+        expect(() => shallowFabricFromNativeObjectElseUndefined(date)).toThrow(
           "Not representable as a `FabricValue`: `Date` with extra " +
             "enumerable properties",
         );
@@ -681,7 +683,9 @@ describe("native-conversion", () => {
       for (const [label, value] of LAYER_CORPUS) {
         if (mints.has(label)) continue;
         it(`returns \`undefined\` for ${label}`, () => {
-          expect(shallowFabricFromNativeObject(value)).toBe(undefined);
+          expect(shallowFabricFromNativeObjectElseUndefined(value)).toBe(
+            undefined,
+          );
         });
       }
     });
@@ -694,7 +698,9 @@ describe("native-conversion", () => {
     // a bare `{}`.
     it("leaves a `Map` and a `Set` to the vet, which refuses them", () => {
       for (const value of [new Map(), new Set()]) {
-        expect(shallowFabricFromNativeObject(value)).toBe(undefined);
+        expect(shallowFabricFromNativeObjectElseUndefined(value)).toBe(
+          undefined,
+        );
         expect(() => assertValidFabricValueLayer(value)).toThrow(
           "not a recognized fabric type",
         );

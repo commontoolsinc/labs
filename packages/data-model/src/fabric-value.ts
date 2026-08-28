@@ -56,7 +56,7 @@ export {
   nativeFromFabricValue,
   shallowCleanArray,
   shallowCleanPlainObject,
-  shallowFabricFromNativeObject,
+  shallowFabricFromNativeObjectElseUndefined,
   shallowFabricFromNativeValue,
 } from "./native-conversion.ts";
 
