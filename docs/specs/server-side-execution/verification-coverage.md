@@ -7401,6 +7401,50 @@ supply; OW29/OW32/OW34 closed):
     lift — it is a separate unlisted defect carrying its own
     accountability, and it is still a flip blocker.**
 
+    **FIXED 2026-08-28 (PR #6477, branch
+    `claude/server-exec-v2-groupchat-stall`; red-first, store/probe-proven
+    at `23cf68e7d`).** The mechanism MIGRATED from §2b's recorded shape —
+    not the OW47 standing echo (no `speculative-basis-refused` anywhere; a
+    refill after a 300 s hang landed and enabled the button: one-shot
+    loss, not poison; the "recorded-not-built" S-E/S-F/S-G reading above
+    was stale — OW47 closed them 2026-08-21, S-G for Bob's click only).
+    Two parts, both instrumented-red-proven (4/4 taps): (1) the `:128`
+    fill's blind write is engine-rejected `stale confirmed read` — the
+    room-add wave's consequence stamps the argument doc's FIRST `/cfc`
+    labelMap and adds `/value/rooms`, structure at/above the blind write's
+    shape-read parent, against a pre-wave client basis — a RETRYABLE
+    ConflictError (the ruled vocabulary) that NO UI-write path consumed:
+    `applyCellWrite` fire-and-forgot `tx.commit()` (never pending, no log,
+    no retry; the S-G wait alone hung 300 s ×3). (2) each fill issues TWO
+    same-value writes (change-event + commit()); the second succeeds
+    VACUOUSLY (zero ops against the first's standing optimistic layer,
+    `{ok}` before any verdict), so a token-guarded retry of the first
+    declined toward a no-op owner and the revert erased the only copy
+    (8/8 red at that intermediate head). Fix: `Runtime.commitUiCellWrite`
+    — UI cell writes commit through `editWithRetry`, blind marks +
+    structural parent re-threaded per attempt, VALUE-FOLLOWING lanes
+    (every attempt writes the lane's newest requested value; refcounted
+    entry) closing LWW inversion AND the vacuous owner; a finally-lost
+    write is logged+counted (`runtime.ui-cell-write`/`lost`, the OW46-class
+    detectability); `applyCellWrite` rewired; the S-G wait added at `:133`
+    (mirrors `:203`). Pins red-first in
+    `runner/test/ui-cell-write-conflict-retry.test.ts` (the engine half
+    already pinned by `memory/test/cellset-structural-precondition.test.ts`).
+    Lift evidence: baseline 5/6 red running alone → post-fix 8/8 green →
+    6/6 green on the probe-stripped shipped binary, the draft durable in
+    every store (14/14); runner suite 1309/1310 (the one red re-ran green
+    alone — load flake). The file was never skip-listed: NO census change.
+    The surface-ruled default-app lift (the LIFT block below) never
+    waited on this fix; what it retires is the standing unlisted
+    flip-blocker itself. Review round on the PR: cubic P1/codex P1
+    (a retried CAS push could erase an intervening append) fixed —
+    non-blind writes take ONE attempt, no lane; the processor
+    set/push harness re-pinned at the new routing seam; final tally
+    18/18 green across three gate rounds. Live-class note for the
+    flip: the same race silently ate a real user's keystroke commit
+    wherever a wave landed structure mid-typing — the fix is
+    product-side, not test-side.
+
     **LIFT — default-app's reload STEP entry is REMOVED, 2026-08-28, under
     the ruled SURFACE reading of the local-plus-CI-probe bar.** The entry
     (`integration/default-app.test.ts` :: "should persist and reload every

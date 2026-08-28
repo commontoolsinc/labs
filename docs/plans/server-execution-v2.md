@@ -38,6 +38,25 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
+**Delta 2026-08-28 (#6477): the co-resident debt is PAID —
+`cfc-group-chat-demo.test.ts:133` root-caused and green.** The unlisted
+flip-blocker the surface-reading delta below leaves live is fixed. NOT
+§2b's standing echo: a `stale confirmed read` conflict on the blind
+draft write (the room-add wave's first `/cfc` stamp + sibling structure
+add on the argument doc, racing a pre-wave client basis), dropped
+because no UI-write path consumed the RETRYABLE rejection — compounded
+by the fill's second same-value write succeeding vacuously against the
+first's optimistic layer, so even a token-guarded retry declined toward
+a no-op owner. Fixed red-first in the runner: `Runtime.commitUiCellWrite`
+(`editWithRetry` + value-following supersede lanes for BLIND writes — a
+conflicted CAS push takes one attempt, never a retry — + the counted
+`runtime.ui-cell-write`/`lost` channel), `applyCellWrite` rewired, the
+S-G wait added at `:133`. Baseline 5/6 red running alone → 18/18 green
+across three post-fix gate rounds, the draft durable in every store.
+The file was never skip-listed — NO census change; the flip's
+green-ON-lane bar loses this blocker. Full mechanism + evidence:
+verification-coverage.md OW45's PHASE-3 block (the FIXED paragraph).
+
 **Delta 2026-08-28: the probe bar's OPEN interpretation question is RULED —
 "lane green" means the probed SURFACE — and default-app's reload STEP entry
 LIFTED on it. The ON skip list is now ONE entry: lunch-poll-vote's FILE
