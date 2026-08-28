@@ -581,12 +581,44 @@ export class PiecesController<T = unknown> {
       origin === deriveSystemPatternSource(this.#space, this.runtime);
   }
 
+  /** The root's `pieceRegistry` export, addressed but not yet synced. */
+  #pieceRegistryExport(root: Cell<NameSchema>): Cell<Cell<unknown>[]> {
+    const cell = root.asSchema({
+      type: "object",
+      properties: {
+        pieceRegistry: pieceListSchema,
+      },
+    });
+    return cell.key("pieceRegistry") as Cell<Cell<unknown>[]>;
+  }
+
   /**
    * Get the cell containing the registered pieces in this space.
    * This is the discovery root, not a list of every stored piece root. Reads
    * the default pattern's pieceRegistry export.
+   *
+   * A listing is a read, and a read does not need the root running. The
+   * export's only writer is {@link add}, which runs the root itself, so the
+   * persisted value is current at every quiescent moment — and resolving the
+   * root passively skips `runtime.start()`, which is the dominant phase of
+   * opening a space whose root reaches a large piece. Running is kept for the
+   * two cases that cannot be served from what is stored: a root that has
+   * never exported a registry here, and `add()`.
    */
   async getPieceRegistry(): Promise<Cell<Cell<unknown>[]>> {
+    const passiveRoot = await this.getDefaultPattern(false);
+    if (passiveRoot) {
+      const exported = this.#pieceRegistryExport(passiveRoot);
+      await this.syncPieces(exported);
+      // `pieceListSchema` carries `default: []`, so a root that never
+      // exported a registry and a root whose registry is empty read the same
+      // way through the schema. The raw value is what separates them, and
+      // only the first needs the root run.
+      if (exported.getRaw() !== undefined) {
+        return exported;
+      }
+    }
+
     const defaultPattern = await this.getDefaultPattern(true);
     if (!defaultPattern) {
       // Return empty array cell if no default pattern. Loud on purpose: any
@@ -599,13 +631,7 @@ export class PiecesController<T = unknown> {
       return this.runtime.getCell(this.#space, "empty-pieces", pieceListSchema);
     }
 
-    const cell = defaultPattern.asSchema({
-      type: "object",
-      properties: {
-        pieceRegistry: pieceListSchema,
-      },
-    });
-    const pieceRegistry = cell.key("pieceRegistry") as Cell<Cell<unknown>[]>;
+    const pieceRegistry = this.#pieceRegistryExport(defaultPattern);
     await this.syncPieces(pieceRegistry);
     return pieceRegistry;
   }
