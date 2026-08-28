@@ -255,6 +255,82 @@ describe("measure-runs", () => {
       expect(run.transcript).toEqual({ kind: "read", value: { messages: 1 } });
     });
 
+    it("records a search whose arguments are not JSON as an unread query", () => {
+      const run = measureTranscript("bad-args", "parent", [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{
+            id: "q1",
+            type: "function",
+            function: { name: "search_patterns", arguments: "{oops" },
+          }],
+        },
+      ]);
+      expect(run.searches[0].query.kind).toBe("unread");
+      expect(renderRunLines(run)[0]).toContain("search (unread:");
+    });
+
+    it("records a search reporting `ok` with no results as unread rather than as no hits", () => {
+      const run = measureTranscript("no-results", "parent", [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{
+            id: "q1",
+            type: "function",
+            function: { name: "search_patterns", arguments: "{}" },
+          }],
+        },
+        {
+          role: "tool",
+          toolCallId: "q1",
+          toolName: "search_patterns",
+          content: JSON.stringify({ status: "ok" }),
+        },
+      ]);
+      expect(run.searches[0].answer).toEqual({
+        kind: "unread",
+        reason: "a search reported `ok` and carried no results array",
+      });
+      expect(totalsOf(run).searchesUnread).toBe(1);
+      expect(totalsOf(run).searchesEmpty).toBe(0);
+    });
+
+    it("records a search reporting a status this reader does not know as unread", () => {
+      const run = measureTranscript("odd-status", "parent", [
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [{
+            id: "q1",
+            type: "function",
+            function: { name: "search_patterns", arguments: "{}" },
+          }],
+        },
+        {
+          role: "tool",
+          toolCallId: "q1",
+          toolName: "search_patterns",
+          content: JSON.stringify({ status: "throttled" }),
+        },
+      ]);
+      expect(run.searches[0].answer.kind).toBe("unread");
+      expect(
+        run.searches[0].answer.kind === "unread"
+          ? run.searches[0].answer.reason
+          : "",
+      ).toContain("throttled");
+    });
+
+    it("skips a transcript entry that is not a message rather than failing the whole report", () => {
+      const run = measureTranscript("ragged", "parent", [
+        null as unknown as HarnessTranscriptMessage,
+        { role: "user", content: "hello" },
+      ]);
+      expect(run.transcript).toEqual({ kind: "read", value: { messages: 1 } });
+    });
+
     it("records a call whose arguments are not JSON as unread rather than as a call carrying source", () => {
       const run = measureTranscript("malformed", "parent", [
         {
@@ -495,6 +571,7 @@ describe("measure-runs", () => {
         "bad-transcript",
         "fixture-run",
         "no-transcript",
+        "unreadable-transcript",
       ]);
       const family = familyNamed(report.families, "fixture-run");
       expect(family.runs.map((run) => run.role)).toEqual([
@@ -527,6 +604,19 @@ describe("measure-runs", () => {
       });
     });
 
+    it("reports a transcript that could not be read for a reason other than absence as its own reading", async () => {
+      const report = await measureArtifactRoot(FIXTURE_ROOT, [
+        "unreadable-transcript",
+      ]);
+      const transcript = report.families[0].runs[0].transcript;
+      expect(transcript.kind).toBe("unread");
+      // Not the "holds no transcript.json" reading: a run that wrote nothing
+      // and a file this reader could not open are different facts.
+      expect(transcript.kind === "unread" ? transcript.reason : "").toContain(
+        "transcript.json could not be read",
+      );
+    });
+
     it("reports a named family with no directory as a run not read", async () => {
       const report = await measureArtifactRoot(FIXTURE_ROOT, ["never-ran"]);
       expect(report.families[0].runs[0].transcript).toEqual({
@@ -538,8 +628,8 @@ describe("measure-runs", () => {
 
     it("counts the runs it did read alongside the ones it did not", async () => {
       const report = await measureArtifactRoot(FIXTURE_ROOT);
-      expect(report.totals.runs).toBe(5);
-      expect(report.totals.runsUnread).toBe(2);
+      expect(report.totals.runs).toBe(6);
+      expect(report.totals.runsUnread).toBe(3);
     });
   });
 
@@ -557,7 +647,7 @@ describe("measure-runs", () => {
       expect(code).toBe(0);
       expect(out).toContain(`artifact root: ${FIXTURE_ROOT}`);
       expect(out).toContain("===== RUN fixture-run (2 runs)");
-      expect(out).toContain("===== ALL 4 FAMILIES");
+      expect(out).toContain("===== ALL 5 FAMILIES");
     });
 
     it("reports only the families it is named", async () => {
@@ -587,10 +677,15 @@ describe("measure-runs", () => {
   describe("renderReportLines()", () => {
     it("names every reading it could not take", async () => {
       const lines = renderReportLines(await measureArtifactRoot(FIXTURE_ROOT));
-      expect(lines.filter((line) => line.includes("NOT READ"))).toEqual([
-        "  [parent] NOT READ: transcript.json is not an array of messages",
-        "  [parent] search tags=abandoned -> NOT READ (the run recorded no result for this call)",
-        "  [parent] NOT READ: the run directory holds no transcript.json",
+      expect(
+        lines.filter((line) => line.includes("NOT READ")).map((line) =>
+          line.split("(")[0].trim()
+        ),
+      ).toEqual([
+        "[parent] NOT READ: transcript.json is not an array of messages",
+        "[parent] search tags=abandoned -> NOT READ",
+        "[parent] NOT READ: the run directory holds no transcript.json",
+        "[parent] NOT READ: transcript.json could not be read: Is a directory",
       ]);
     });
 

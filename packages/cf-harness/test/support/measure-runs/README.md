@@ -5,7 +5,7 @@ extractor is pinned against transcripts whose contents are known rather than
 against whatever a machine happens to be holding under
 `.cf-harness-console/runs`.
 
-`runs/` is an artifact root of five directories:
+`runs/` is an artifact root of six directories:
 
 - `fixture-run/` — the parent run. Its searches cover every answer the extractor
   distinguishes: two hits, none, a refusal from the index, and one call the run
@@ -22,6 +22,9 @@ against whatever a machine happens to be holding under
 - `bad-transcript/` — a transcript that parses as JSON and is not a message
   list.
 - `no-transcript/` — a run directory with no `transcript.json` at all.
+- `unreadable-transcript/` — a run whose `transcript.json` is a directory, so
+  the read fails for a reason that is not "the file is missing". The two are
+  reported apart because only one of them says a run wrote no transcript.
 
 The last two exist so the report has something to say "not read" about. A run
 the extractor could not read must never count as a run that did nothing.

@@ -25,13 +25,44 @@ const FIXTURE_ROOT = fromFileUrl(
 
 const TOKEN = "cf_harness_console_token=fixture-token";
 
-const sseBody = (frames: readonly string[], keepOpen: boolean): BodyInit => {
+/**
+ * One event stream, delivered a chunk at a time.
+ *
+ * `pull` rather than `start` because a stream that enqueues everything and
+ * then calls `error()` discards the queue, which is not what a socket does: a
+ * client receives the bytes already sent and then sees the break. The
+ * difference decides whether a fault counts as progress, which is what bounds
+ * the client's reconnection.
+ */
+const sseBody = (
+  frames: readonly string[],
+  keepOpen: boolean,
+  fault = false,
+): BodyInit => {
   const encoder = new TextEncoder();
+  let index = -1;
   return new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(encoder.encode(": connected\n\n"));
-      for (const frame of frames) controller.enqueue(encoder.encode(frame));
-      if (!keepOpen) controller.close();
+    pull(controller) {
+      index += 1;
+      if (index === 0) {
+        controller.enqueue(encoder.encode(": connected\n\n"));
+        return;
+      }
+      const frame = frames[index - 1];
+      if (frame !== undefined) {
+        controller.enqueue(encoder.encode(frame));
+        return;
+      }
+      if (fault) {
+        controller.error(new Error("the socket went away"));
+        return;
+      }
+      if (!keepOpen) {
+        controller.close();
+        return;
+      }
+      // Held open with nothing more to say, which is a live but quiet turn.
+      return new Promise<void>(() => {});
     },
   });
 };
@@ -57,7 +88,11 @@ interface FakeConsoleOptions {
    * The event streams the server hands out, in the order they are asked for.
    * The last one is repeated once the list runs out.
    */
-  streams: readonly { frames: readonly string[]; keepOpen: boolean }[];
+  streams: readonly {
+    frames: readonly string[];
+    keepOpen: boolean;
+    fault?: boolean;
+  }[];
   runId?: string;
   artifactRoot?: string;
   patterns?: readonly Record<string, unknown>[];
@@ -113,12 +148,16 @@ const startFakeConsole = (options: FakeConsoleOptions): FakeConsole => {
     }
     if (url.pathname === "/api/events") {
       eventRequests.push(url.searchParams.get("afterSequence") ?? "");
-      const stream = options.streams[
-        Math.min(streamIndex++, options.streams.length - 1)
-      ];
-      return new Response(sseBody(stream.frames, stream.keepOpen), {
-        headers: { "content-type": "text/event-stream" },
-      });
+      // A server with nothing more to say closes rather than repeating
+      // itself, which is what lets a caller tell "still working" from "gone".
+      const stream = options.streams[streamIndex++] ??
+        { frames: [], keepOpen: false };
+      return new Response(
+        sseBody(stream.frames, stream.keepOpen, stream.fault ?? false),
+        {
+          headers: { "content-type": "text/event-stream" },
+        },
+      );
     }
     if (url.pathname === "/api/status") {
       return Response.json({
@@ -403,6 +442,143 @@ describe("run-measurement-batch", () => {
         }
       });
 
+      it("returns the failure the console reported for a turn that failed", async () => {
+        const console_ = startFakeConsole({
+          streams: [{
+            frames: [
+              chatFrame(5, "session-1", {
+                kind: "turn_failed",
+                turnId: "turn-1",
+                error: { message: "the model refused the request" },
+              }),
+            ],
+            keepOpen: true,
+          }],
+        });
+        try {
+          const client = await ConsoleClient.open(console_.url);
+          const started = await client.startTask("Track my books.");
+          expect(await client.awaitTurn(started)).toEqual({
+            kind: "turn_failed",
+            detail: "the model refused the request",
+          });
+        } finally {
+          await console_.close();
+        }
+      });
+
+      it("keeps reading past `turn_canceled` until the console reports the session idle", async () => {
+        const console_ = startFakeConsole({
+          streams: [{
+            frames: [
+              chatFrame(5, "session-1", {
+                kind: "turn_canceled",
+                turnId: "turn-1",
+                reason: "canceled from the console page",
+              }),
+              // The service emits the cancel while the prompt loop is still
+              // unwinding, so the run is not on disk until this arrives.
+              chatFrame(6, "session-1", {
+                kind: "status_changed",
+                session: { sessionId: "session-1", status: "idle" },
+              }),
+            ],
+            keepOpen: true,
+          }],
+        });
+        try {
+          const client = await ConsoleClient.open(console_.url);
+          const started = await client.startTask("Track my books.");
+          expect(await client.awaitTurn(started)).toEqual({
+            kind: "turn_canceled",
+            detail: "canceled from the console page",
+          });
+        } finally {
+          await console_.close();
+        }
+      });
+
+      it("reports a canceled turn as unwitnessed when the console never says the session went idle", async () => {
+        const console_ = startFakeConsole({
+          streams: [{
+            frames: [
+              chatFrame(5, "session-1", {
+                kind: "turn_canceled",
+                turnId: "turn-1",
+              }),
+            ],
+            keepOpen: false,
+          }],
+        });
+        try {
+          const client = await ConsoleClient.open(console_.url);
+          const started = await client.startTask("Track my books.");
+          const outcome = await client.awaitTurn(started);
+          expect(outcome.kind).toBe("unwitnessed");
+          expect(outcome.kind === "unwitnessed" ? outcome.reason : "")
+            .toContain("may be half written");
+        } finally {
+          await console_.close();
+        }
+      });
+
+      it("reopens a stream that faulted part way and reads the turn from the next one", async () => {
+        const console_ = startFakeConsole({
+          streams: [
+            {
+              frames: ["event: ping\ndata: 1\n\n"],
+              keepOpen: false,
+              fault: true,
+            },
+            completedStream(12),
+          ],
+        });
+        try {
+          const client = await ConsoleClient.open(console_.url);
+          const started = await client.startTask("Track my books.");
+          expect((await client.awaitTurn(started)).kind).toBe("turn_completed");
+        } finally {
+          await console_.close();
+        }
+      });
+
+      it("reports a stream that faulted having read nothing as unwitnessed", async () => {
+        const console_ = startFakeConsole({
+          streams: [{ frames: [], keepOpen: false, fault: true }],
+        });
+        try {
+          const client = await ConsoleClient.open(console_.url);
+          const started = await client.startTask("Track my books.");
+          const outcome = await client.awaitTurn(started);
+          expect(outcome.kind).toBe("unwitnessed");
+          expect(outcome.kind === "unwitnessed" ? outcome.reason : "")
+            .toContain("faulted with nothing read");
+        } finally {
+          await console_.close();
+        }
+      });
+
+      it("describes a completed turn that carried no final text", async () => {
+        const console_ = startFakeConsole({
+          streams: [{
+            frames: [
+              chatFrame(5, "session-1", {
+                kind: "turn_completed",
+                turnId: "turn-1",
+              }),
+            ],
+            keepOpen: true,
+          }],
+        });
+        try {
+          const client = await ConsoleClient.open(console_.url);
+          const started = await client.startTask("Track my books.");
+          expect((await client.awaitTurn(started)).kind).toBe("turn_completed");
+        } finally {
+          await console_.close();
+        }
+      });
+
       it("returns an unwitnessed outcome for a stream the console closes having said nothing", async () => {
         const console_ = startFakeConsole({
           streams: [{ frames: [], keepOpen: false }],
@@ -680,6 +856,60 @@ describe("run-measurement-batch", () => {
           kind: "answered",
           results: 0,
         });
+      } finally {
+        await console_.close();
+      }
+    });
+  });
+
+  describe("indexSnapshot()", () => {
+    it("returns an unread snapshot naming the status for an index the console refused", async () => {
+      const console_ = startFakeConsole({
+        streams: [completedStream()],
+        indexAnswer: { status: 404, body: { error: "no index configured" } },
+      });
+      try {
+        const client = await ConsoleClient.open(console_.url);
+        const snapshot = await client.indexSnapshot();
+        expect(snapshot.kind).toBe("unread");
+        expect(snapshot.kind === "unread" ? snapshot.reason : "").toContain(
+          "404",
+        );
+      } finally {
+        await console_.close();
+      }
+    });
+
+    it("returns an unread snapshot for an answer carrying no pattern list", async () => {
+      const console_ = startFakeConsole({
+        streams: [completedStream()],
+        indexAnswer: { status: 200, body: { ok: true } },
+      });
+      try {
+        const client = await ConsoleClient.open(console_.url);
+        expect(await client.indexSnapshot()).toEqual({
+          kind: "unread",
+          reason: "the index answered with no pattern list",
+        });
+      } finally {
+        await console_.close();
+      }
+    });
+  });
+
+  describe("dependenciesOf()", () => {
+    it("returns `undefined` for a pattern the index would not answer for, which classifies as unresolved", async () => {
+      const console_ = startFakeConsole({
+        streams: [completedStream()],
+        indexAnswer: { status: 500, body: { error: "boom" } },
+      });
+      try {
+        const client = await ConsoleClient.open(console_.url);
+        expect(await client.dependenciesOf("anything")).toBeUndefined();
+        expect(
+          (await resolveImportedPatternOrigins(client, ["anything"], ["seed"]))
+            .anything.kind,
+        ).toBe("unresolved");
       } finally {
         await console_.close();
       }
