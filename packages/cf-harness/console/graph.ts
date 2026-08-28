@@ -16,6 +16,7 @@
 import type { ConsoleDisclosure, ConsoleHandle, ConsoleStep } from "./steps.ts";
 import { matchLLMFriendlyLink } from "@commonfabric/runner/shared";
 import { HANDLE_TOKEN_PATTERN } from "../src/contracts/handle-table.ts";
+import type { ConsoleCellLabels } from "./cell-labels.ts";
 
 /** A pattern that ran, or a cell in the space. */
 export type ConsoleGraphNodeKind = "pattern" | "cell";
@@ -48,8 +49,14 @@ export interface ConsoleGraphNode {
   /** Whether any step asked what shape this cell's referent has. */
   described?: boolean;
 
-  /** Confidentiality atoms the run's labels attached to this node. */
+  /** Confidentiality atoms the invocation context attached to this node. */
   confidentiality: readonly string[];
+
+  /**
+   * For a cell: the labels the space holds for it. A fact about the cell,
+   * where `confidentiality` is a fact about the calls that touched it.
+   */
+  labels?: ConsoleCellLabels;
 }
 
 /**
@@ -183,6 +190,23 @@ export const consoleRunGraph = (
       handle.ref === undefined ? [] : [[handle.token, handle.ref] as const]
     ),
   );
+  // The same handles, read for what the space says about the cell rather than
+  // for its address: a token names one, and a whole link names the other by
+  // the address it shares with a handle's `ref`.
+  const labelsByToken = new Map(
+    handles.flatMap((handle) =>
+      handle.labels === undefined
+        ? []
+        : [[handle.token, handle.labels] as const]
+    ),
+  );
+  const labelsByAddress = new Map(
+    handles.flatMap((handle) =>
+      handle.ref === undefined || handle.labels === undefined
+        ? []
+        : [[handle.ref, handle.labels] as const]
+    ),
+  );
   const cellId = (token: string): string =>
     `cell:${addressByToken.get(token) ?? token}`;
 
@@ -196,6 +220,8 @@ export const consoleRunGraph = (
       return held;
     }
     const address = addressByToken.get(token);
+    const labels = labelsByToken.get(token) ??
+      (address === undefined ? undefined : labelsByAddress.get(address));
     const node: ConsoleGraphNode = {
       id,
       kind: "cell",
@@ -204,6 +230,7 @@ export const consoleRunGraph = (
       token,
       ...(address !== undefined ? { address } : {}),
       confidentiality: [],
+      ...(labels !== undefined ? { labels } : {}),
     };
     nodes.set(id, node);
     return node;
@@ -256,6 +283,7 @@ export const consoleRunGraph = (
           if (document !== undefined) {
             const linkId = `cell:${document}`;
             if (!nodes.has(linkId)) {
+              const linkLabels = labelsByAddress.get(document);
               nodes.set(linkId, {
                 id: linkId,
                 kind: "cell",
@@ -263,6 +291,7 @@ export const consoleRunGraph = (
                 atStep: step.index,
                 address: document,
                 confidentiality: [],
+                ...(linkLabels !== undefined ? { labels: linkLabels } : {}),
               });
             }
             read(linkId);
@@ -370,6 +399,12 @@ export const consoleRunFamilyGraph = (
         confidentiality: [
           ...new Set([...held.confidentiality, ...dated.confidentiality]),
         ],
+        // Both runs read the same space for the same cell, so a sighting
+        // that carries labels is the one to keep, and two that carry them
+        // agree.
+        ...(held.labels ?? dated.labels) !== undefined
+          ? { labels: held.labels ?? dated.labels }
+          : {},
       });
     }
     for (const edge of graph.edges) {

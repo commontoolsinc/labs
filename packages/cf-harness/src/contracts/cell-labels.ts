@@ -84,6 +84,15 @@ export interface HarnessCellLabelEntry {
    * label something to follow rather than something to take on trust.
    */
   transformedBy?: HarnessCfcAtom;
+
+  /**
+   * The entity the entry was read from, when the path crosses a link rather
+   * than sitting inside one document. A pattern's results are their own
+   * cells, linked from the piece that names them, and the derived label is on
+   * the cell — so a snapshot that read only the document a run holds a
+   * reference to would report a result with nothing on it.
+   */
+  source?: string;
 }
 
 /** Every label the space holds for one cell. */

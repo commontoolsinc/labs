@@ -989,6 +989,20 @@ button[disabled] {
   border-color: #1f4fa8;
 }
 
+/*
+ * A value the space says was computed from what a function read, which an
+ * atom on its own never says: a plain input reached through a labelled object
+ * carries an atom too. Its own color, so the two never read as one state.
+ */
+.cell.derived {
+  background: #fff6ed;
+  border-color: #b54708;
+}
+
+.cell.derived .cell-dot {
+  background: #b54708;
+}
+
 .cell-dot {
   background: var(--ok);
   border-radius: 50%;
@@ -1049,13 +1063,14 @@ button[disabled] {
   padding: 0.12rem 0;
 }
 
+/* Wide enough for `transformed by`, the longest row name the card holds. */
 .cell-label {
   color: var(--muted);
   flex: none;
   font-size: 0.7rem;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  width: 4.2rem;
+  width: 5.6rem;
 }
 
 .cell-mono {
@@ -1070,6 +1085,35 @@ button[disabled] {
 .cell-none {
   color: var(--muted);
   font-size: 0.75rem;
+}
+
+/* The space saying a value was computed, in the derived chip's own color. */
+.cell-derived {
+  color: #b54708;
+  font-size: 0.75rem;
+}
+
+/* The space's labels read path by path, one line each, wrapping inside it. */
+.cell-paths {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.cell-path {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.path-origin {
+  color: var(--muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 /* The conversation map, read top to bottom. */
@@ -1249,6 +1293,14 @@ button[disabled] {
 }
 
 .flow-posture {
+  color: var(--muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+  width: 100%;
+}
+
+/* Beneath the posture, on its own line: what the space said about the cells. */
+.flow-labels {
   color: var(--muted);
   font-size: 0.7rem;
   letter-spacing: 0.03em;

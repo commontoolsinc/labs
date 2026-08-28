@@ -24,7 +24,10 @@ The runtime has four main boundaries:
    configured space.
 4. The artifact store records run state, transcript, reports, capability and
    policy snapshots, tool outputs, child references, skills provenance, and
-   optional product run manifests.
+   optional product run manifests. It also records the per-cell CFC labels the
+   run's space holds for the cells the run touched — the one artifact a run does
+   not write out of its own knowledge, read back from the space so a reader
+   working from the tree alone can see what a cell is labelled.
 
 The Common Fabric runner or another trusted mediator owns authoritative CFC
 meaning. The harness transports prompt-slot and invocation evidence, applies the

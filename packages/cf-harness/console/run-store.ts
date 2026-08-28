@@ -29,6 +29,13 @@ import {
   consoleRunFamilyGraph,
 } from "./graph.ts";
 import { type ConsoleFlow, consoleRunFlow } from "./flow.ts";
+import {
+  type ConsoleCellLabelIndex,
+  consoleCellLabelIndex,
+  type ConsoleCellLabelsSummary,
+  consoleCellLabelsSummary,
+} from "./cell-labels.ts";
+import type { HarnessCellLabels } from "../src/contracts/cell-labels.ts";
 
 /**
  * A single path segment of the characters the artifact store itself writes.
@@ -57,6 +64,18 @@ const readJson = async <Value>(path: string): Promise<Value | undefined> => {
   }
 };
 
+/**
+ * The per-cell labels a run recorded, indexed by the addresses its cells go
+ * by. A run that wrote no snapshot indexes as `absent`, which is not the same
+ * reading as a space that had nothing to say.
+ */
+const cellLabelIndex = async (
+  root: string,
+): Promise<ConsoleCellLabelIndex> =>
+  consoleCellLabelIndex(
+    await readJson<HarnessCellLabels>(join(root, "cell-labels.json")),
+  );
+
 /** Everything `/api/runs/<run-id>` answers with. */
 export interface ConsoleRunDetail {
   summary: ConsoleRunSummary;
@@ -72,6 +91,14 @@ export interface ConsoleRunDetail {
    * that cell would otherwise read as coming from nowhere.
    */
   handles: readonly ConsoleHandle[];
+
+  /**
+   * Whether the run's space was read for per-cell labels, and what it said.
+   * The run states this once because the per-cell fact cannot: a cell with no
+   * labels means the space holds none for it under a snapshot that was taken,
+   * and means nobody asked under a run whose space could not be read.
+   */
+  cellLabels: ConsoleCellLabelsSummary;
   /** The artifacts this run wrote, by name, for the raw pane to fetch. */
   artifactNames: readonly string[];
   /** The files under `tool-outputs/`, newest call last. */
@@ -94,6 +121,7 @@ const RUN_ARTIFACT_NAMES = [
   "skill-activations.json",
   "skill-resource-reads.json",
   "skill-script-executions.json",
+  "cell-labels.json",
 ] as const;
 
 const namesPresent = async (
@@ -215,6 +243,10 @@ export const readConsoleRun = async (
   // from nowhere. The neighbours' tables are what give it an address, and so a
   // name and an origin.
   const neighbours = await neighbouringHandles(artifactRoot);
+  // The index is the run's own, and it is applied to every handle the run
+  // introduced — so a cell whose address only a neighbour's entry supplies is
+  // labelled here all the same, while the neighbour's own handles stay bare.
+  const labels = await cellLabelIndex(root);
   const table: HarnessHandleTable = {
     type: "cf-harness.handle-table",
     version: 1,
@@ -237,7 +269,8 @@ export const readConsoleRun = async (
     transcript,
     lens: consoleRunLens(transcript),
     steps,
-    handles: consoleRunHandles(steps, table),
+    handles: consoleRunHandles(steps, table, labels),
+    cellLabels: consoleCellLabelsSummary(labels),
     artifactNames: await namesPresent(root, RUN_ARTIFACT_NAMES),
     toolOutputNames: await toolOutputNames(root),
   };
@@ -283,13 +316,16 @@ export const readConsoleRunFlow = async (
       flowLabels: posture.flowLabels,
       ...(posture.posture !== undefined ? { posture: posture.posture } : {}),
     },
+    family.cellLabels,
   );
 };
 
 /**
  * A run and its `delegate_task` descendants, each reading its handles against
- * the neighbours' tables as well as its own. Both the map and the graph are
- * built from this, and neither wants to know how a family is found on disk.
+ * the neighbours' tables as well as its own, and each against its own label
+ * snapshot — a child writes its own, so a cell a child produced carries the
+ * space's labels in the family graph and in the map. Both are built from this,
+ * and neither wants to know how a family is found on disk.
  */
 const readConsoleRunFamily = async (
   artifactRoot: string,
@@ -299,6 +335,7 @@ const readConsoleRunFamily = async (
     root: ConsoleGraphRunInput;
     descendants: ConsoleGraphRunInput[];
     runState: HarnessRunState;
+    cellLabels: ConsoleCellLabelsSummary;
   }
   | undefined
 > => {
@@ -334,6 +371,7 @@ const readConsoleRunFamily = async (
     root: withNeighbours({ runId, steps: root.steps, handles: root.handles }),
     descendants: descendants.map(withNeighbours),
     runState: root.runState,
+    cellLabels: root.cellLabels,
   };
 };
 
@@ -417,7 +455,8 @@ const readNeighbouringHandles = async (
           addressKey: entryHandle.addressKey,
           introducedAtStep: 0,
           // A neighbour's entry resolves an address and nothing more; what the
-          // handle was used for belongs to the run that used it.
+          // handle was used for, and what its cell is labelled, belong to the
+          // run that used it and are left absent rather than invented here.
           uses: [],
           confidentiality: [],
         });

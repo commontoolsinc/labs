@@ -4,6 +4,7 @@ import { consoleRunFlow } from "../../console/flow.ts";
 import { type ConsoleHandle, consoleRunSteps } from "../../console/steps.ts";
 import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
 import type { HarnessPolicyEvent } from "../../src/contracts/policy.ts";
+import type { ConsoleCellLabels } from "../../console/cell-labels.ts";
 
 const call = (
   id: string,
@@ -40,6 +41,15 @@ const handle = (token: string, ref: string): ConsoleHandle => ({
   uses: [],
   confidentiality: [],
 });
+
+/** What the space says about a cell it labels `Secret` at its root. */
+const secretLabels: ConsoleCellLabels = {
+  confidentiality: ["Secret"],
+  integrity: [],
+  derived: false,
+  transformedBy: [],
+  entries: [{ path: "", confidentiality: ["Secret"], integrity: [] }],
+};
 
 describe("console/flow", () => {
   it("cuts the map into a turn for each thing a person asked", () => {
@@ -139,6 +149,47 @@ describe("console/flow", () => {
     expect(node.produces).toHaveLength(1);
     expect(node.produces[0].ref).toBe("/of:fid1:def");
     expect(flow.unwiredPatterns).toBe(0);
+  });
+
+  it("carries the labels the space holds on a cell a call read", () => {
+    const steps = consoleRunSteps([
+      { role: "user", content: "go" },
+      call("c1", "run_pattern", {
+        sourceText: "y",
+        inputs: { source: "cfh:a:aaaaa" },
+      }),
+      result("c1", "run_pattern", { status: "ok", resultRef: "cfh:a:bbbbb" }),
+    ]);
+    const flow = consoleRunFlow({
+      runId: "r",
+      steps,
+      handles: [
+        { ...handle("cfh:a:aaaaa", "/of:fid1:abc"), labels: secretLabels },
+        handle("cfh:a:bbbbb", "/of:fid1:def"),
+      ],
+    });
+    const node = flow.turns[0].nodes[0];
+    expect(node.reads[0].labels?.confidentiality).toEqual(["Secret"]);
+    // The cell the call produced carries no label of its own.
+    expect(node.produces[0].labels).toBeUndefined();
+  });
+
+  it("states the label regime once for the whole map", () => {
+    const steps = consoleRunSteps([{ role: "user", content: "go" }]);
+    const flow = consoleRunFlow(
+      { runId: "r", steps, handles: [] },
+      [],
+      undefined,
+      {
+        status: "unavailable",
+        detail: "no space database on this host",
+        cellsRead: 0,
+        cellsLabelled: 0,
+      },
+    );
+    // Without this a cell drawn bare would read as a space with nothing to say.
+    expect(flow.cellLabels?.status).toBe("unavailable");
+    expect(flow.cellLabels?.detail).toBe("no space database on this host");
   });
 
   it("holds a run that delegates to itself to one visit", () => {

@@ -7,6 +7,7 @@ import {
 } from "../../console/graph.ts";
 import { type ConsoleHandle, consoleRunSteps } from "../../console/steps.ts";
 import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
+import type { ConsoleCellLabels } from "../../console/cell-labels.ts";
 
 const call = (
   id: string,
@@ -43,6 +44,15 @@ const handle = (token: string, ref: string): ConsoleHandle => ({
   uses: [],
   confidentiality: [],
 });
+
+/** What the space says about a cell it labels `Secret` at its root. */
+const secretLabels: ConsoleCellLabels = {
+  confidentiality: ["Secret"],
+  integrity: [],
+  derived: false,
+  transformedBy: [],
+  entries: [{ path: "", confidentiality: ["Secret"], integrity: [] }],
+};
 
 describe("console/graph", () => {
   describe("consoleRunGraph()", () => {
@@ -153,6 +163,36 @@ describe("console/graph", () => {
     });
   });
 
+  describe("cell labels", () => {
+    it("carries the labels the space holds on a cell a token named", () => {
+      const steps = consoleRunSteps([
+        call("c1", "run_pattern", { sourceText: "x" }),
+        result("c1", "run_pattern", { status: "ok", resultRef: "cfh:a:aaaaa" }),
+      ]);
+      const graph = consoleRunGraph(steps, [
+        { ...handle("cfh:a:aaaaa", "/of:a"), labels: secretLabels },
+      ]);
+      const cell = graph.nodes.find((node) => node.kind === "cell");
+      expect(cell?.labels?.confidentiality).toEqual(["Secret"]);
+    });
+
+    it("carries them onto a cell an input named by whole link", () => {
+      const steps = consoleRunSteps([
+        call("c1", "run_pattern", {
+          sourceText: "x",
+          inputs: { source: "/of:fid1:abc" },
+        }),
+        result("c1", "run_pattern", { status: "ok" }),
+      ]);
+      const graph = consoleRunGraph(steps, [
+        { ...handle("cfh:a:aaaaa", "/of:fid1:abc"), labels: secretLabels },
+      ]);
+      const cell = graph.nodes.find((node) => node.kind === "cell");
+      expect(cell?.address).toBe("/of:fid1:abc");
+      expect(cell?.labels?.confidentiality).toEqual(["Secret"]);
+    });
+  });
+
   describe("consoleRunFamilyGraph()", () => {
     it("joins a parent's named cell to the child pattern that made it", () => {
       const parentSteps = consoleRunSteps([
@@ -186,6 +226,39 @@ describe("console/graph", () => {
       // per-run graph would have split in two.
       expect(graph.edges.filter((edge) => edge.kind === "produces"))
         .toHaveLength(1);
+    });
+
+    it("keeps the labels whichever run of the family read them", () => {
+      const parentSteps = consoleRunSteps([
+        call("c1", "delegate_task", { goal: "build it" }),
+        result("c1", "delegate_task", {
+          subagent: { childRunId: "r.subagent.1", status: "completed" },
+        }),
+        call("c2", "assign_slug", { token: "cfh:a:ppppp", slug: "books" }),
+        result("c2", "assign_slug", { status: "ok", slug: "books" }),
+      ]);
+      const childSteps = consoleRunSteps([
+        call("d1", "run_pattern", { sourceText: "x" }),
+        result("d1", "run_pattern", { status: "ok", resultRef: "cfh:a:kkkkk" }),
+      ]);
+      const graph = consoleRunFamilyGraph(
+        {
+          runId: "r",
+          steps: parentSteps,
+          handles: [handle("cfh:a:ppppp", "/of:same")],
+        },
+        [{
+          runId: "r.subagent.1",
+          steps: childSteps,
+          handles: [
+            { ...handle("cfh:a:kkkkk", "/of:same"), labels: secretLabels },
+          ],
+        }],
+      );
+      const cells = graph.nodes.filter((node) => node.kind === "cell");
+      // One cell, and the child is the run that read the space for it.
+      expect(cells).toHaveLength(1);
+      expect(cells[0].labels?.confidentiality).toEqual(["Secret"]);
     });
 
     it("visits a run once when a delegation points back at an ancestor", () => {

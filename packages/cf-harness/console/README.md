@@ -77,6 +77,7 @@ Every environment variable has a flag, and the flag wins:
 | `--workspace`         | `CF_HARNESS_CONSOLE_WORKSPACE`       | `.cf-harness-console/workspace`       |
 | `--artifact-root`     | `CF_HARNESS_ARTIFACT_ROOT`           | `.cf-harness-console/runs`            |
 | `--session-db`        | `CF_HARNESS_CONSOLE_SESSION_DB`      | `.cf-harness-console/sessions.sqlite` |
+| `--space-db`          | `CF_HARNESS_SPACE_DB`                | the space's own database, discovered  |
 | `--max-model-turns`   | `CF_HARNESS_CONSOLE_MAX_MODEL_TURNS` | the prompt loop's default             |
 | `--skills-root`       | `CF_HARNESS_CONSOLE_SKILLS_ROOT`     | the repository's `skills/` tree       |
 
@@ -166,6 +167,19 @@ These govern the runtime `run_pattern` deploys patterns into. The harness's own
 `cfcEnforcementMode`, which governs tool policy and the sandbox, is a separate
 dial and reaches every run's `policy-snapshot.json` either way.
 
+A turn ends by reading the space it wrote into for the labels it holds on the
+cells the run touched, and records them as the run's `cell-labels.json`. That is
+what a cell chip draws its `space` row from, and what the head of the map states
+the regime of — a space that could not be read is a run whose cells are
+unasked-about rather than unlabelled.
+
+The read is one hop wide. A pattern's results are their own cells, linked from
+the piece that names them, and the derived label sits on the cell — so the
+labels of every cell a run's own cells link to are read too, under the key that
+named them. The database is opened read-only, and it is found by the space the
+fabric session names; `--space-db` points at the file instead, for a host whose
+store is not where the search looks.
+
 ## Reading a run
 
 Three columns, each scrolling on its own: the runs there are, the run being
@@ -217,11 +231,36 @@ the handles a step holds — because two sightings of one cell have to be
 recognisable as one cell. The chip carries the name it goes by: the slug a
 person gave it, else the handle the model held, else its address. Hovering it
 gives the rest — handle, address, the shape the pattern that made it declared,
-the confidentiality atoms riding on it, and the step whose result minted it.
+the labels below, and the step whose result minted it.
 
-A cell showing no atoms under a run whose flow labels are `off` is saying what
-that run recorded, not hiding something. The regime at the top of the map is
-what makes the difference readable.
+A chip holds two label facts, and the card names them apart because they answer
+different questions:
+
+- **cfc** — the atoms the sandbox's invocation context recorded on the arguments
+  of the call this sighting belongs to. What one call saw crossing into it. The
+  count on the chip is this one.
+- **space** — the confidentiality and integrity atoms the space stores for the
+  cell itself, read from the space the run wrote into, with the labelled paths
+  read path by path and the origin of each beside it.
+
+An atom is not a claim that the value was computed from something confidential.
+A value's label can be the join of the fields of the object it was reached
+through, so a plain input reached through a labelled object carries an atom
+having been derived from nothing. What separates the two is the space's own
+account of where the value came from, and the chip wears it as a second state: a
+**derived** cell — one the space says was computed from what a function read —
+is colored apart from a merely labelled one, and its card names the
+implementation that produced it under `transformed by`.
+
+A cell whose card says the space holds no label for it is saying what the space
+holds. A cell whose card says no label was read for it is saying the run's
+labels name it nowhere, which is a different thing, and the chip cannot tell on
+its own whether that is because the space was never read. The head of the map
+carries that: `cell labels read` with how many of the cells it read carry one,
+`cell labels unavailable` with why, or `cell labels not read`. Read an empty
+chip against it — under a run whose flow labels are `off`, or one whose space
+could not be read, an empty chip is a record of what the run recorded rather
+than a cell with nothing to hide.
 
 ### The run's own panes
 
@@ -263,8 +302,9 @@ what makes the difference readable.
   `record_feedback` reported, and every address `assign_slug` named.
 - **Tool outputs** — each tool result as the model read it, untruncated.
 - **Artifacts** — the run's own records: `run-state.json`, `transcript.json`,
-  `run-report.json`, the policy snapshot and trace, the capability snapshot, and
-  the skill registry and activations, whichever the run wrote.
+  `run-report.json`, the policy snapshot and trace, the capability snapshot, the
+  cell labels read back from the space, and the skill registry and activations,
+  whichever the run wrote.
 
 Handle scope is reconstructed rather than recorded. A run keeps one handle
 table, its last, so the timeline takes a handle to be in scope from the step its

@@ -69,9 +69,9 @@ export type ConsoleCellLabelsStatus = "read" | "unavailable" | "absent";
 /**
  * The run's labels, indexed by the cell they belong to.
  *
- * `byAddress` is keyed by both the entity id and the canonical reference the
- * run held, because a cell is named one way in a handle table and another in
- * an argument written as a whole link, and both have to find the same labels.
+ * `byAddress` is keyed by entity, because that is what a label is stored per.
+ * A reference names a path inside a document as well as the document, and
+ * `cellLabelsAt` is what turns one into the other.
  */
 export interface ConsoleCellLabelIndex {
   status: ConsoleCellLabelsStatus;
@@ -163,13 +163,13 @@ export const consoleCellLabelIndex = (
   if (snapshot === undefined) {
     return { status: "absent", byAddress: new Map() };
   }
+  // Keyed by entity, and by entity alone: a reference names a path inside a
+  // document as well as the document, and two references into one document
+  // narrow to different cells. Keying a whole document's labels under one of
+  // its references would hand every cell of it the same answer.
   const byAddress = new Map<string, ConsoleCellLabels>();
   for (const record of snapshot.cells) {
-    const labels = consoleCellLabels(record);
-    byAddress.set(record.entityId, labels);
-    if (record.ref !== undefined) {
-      byAddress.set(record.ref, labels);
-    }
+    byAddress.set(record.entityId, consoleCellLabels(record));
   }
   return {
     status: snapshot.status === "read" ? "read" : "unavailable",
@@ -185,24 +185,82 @@ export const consoleCellLabelIndex = (
 export const consoleCellLabelsSummary = (
   index: ConsoleCellLabelIndex,
 ): ConsoleCellLabelsSummary => {
-  // Entity ids and refs both key the same labels, so counting the map's
-  // values would count most cells twice. The distinct label objects are the
-  // cells.
-  const cells = new Set(index.byAddress.values());
+  const cells = [...index.byAddress.values()];
   return {
     status: index.status,
     ...(index.detail !== undefined ? { detail: index.detail } : {}),
     ...(index.space !== undefined ? { space: index.space } : {}),
-    cellsRead: cells.size,
-    cellsLabelled: [...cells].filter((labels) => labels.entries.length > 0)
-      .length,
+    cellsRead: cells.length,
+    cellsLabelled: cells.filter((labels) => labels.entries.length > 0).length,
+  };
+};
+
+/** The entity a reference names, and the path inside it the reference walks. */
+const addressOf = (
+  ref: string,
+): { entityId: string; path: string[] } | undefined => {
+  const segments = ref.split("/").filter((segment) => segment !== "");
+  const at = segments.findIndex((segment) =>
+    segment.startsWith("of:") || segment.startsWith("computed:")
+  );
+  return at < 0 ? undefined : {
+    entityId: segments[at].split("@")[0],
+    path: segments.slice(at + 1),
   };
 };
 
 /**
- * The labels for the cell a reference names. A reference may address a path
- * inside a document while the labels are stored for the document, so a ref
- * that misses is retried against the document it sits in.
+ * The labels of one document, narrowed to a path inside it.
+ *
+ * Labels are stored per document, and a run holds a reference per cell — two
+ * cells of one piece are two references into one document. Handing both the
+ * document's whole label set would put one cell's atom on the other, which is
+ * the same mistake as coloring a plain input by the label of the object it
+ * was reached through. So an entry counts for a reference only where the
+ * reference's path reaches it: an entry at or under that path, re-rooted to
+ * it, or an entry above it, which governs everything beneath.
+ */
+const narrow = (
+  labels: ConsoleCellLabels,
+  path: readonly string[],
+): ConsoleCellLabels => {
+  if (path.length === 0) {
+    return labels;
+  }
+  const prefix = path.join("/");
+  const entries: ConsoleCellLabelEntry[] = [];
+  for (const entry of labels.entries) {
+    if (entry.path === prefix) {
+      entries.push({ ...entry, path: "" });
+      continue;
+    }
+    if (entry.path.startsWith(`${prefix}/`)) {
+      entries.push({ ...entry, path: entry.path.slice(prefix.length + 1) });
+      continue;
+    }
+    // An entry above the reference covers it: a label on the document itself
+    // reaches every cell of it.
+    if (entry.path === "" || prefix.startsWith(`${entry.path}/`)) {
+      entries.push({ ...entry, path: "" });
+    }
+  }
+  return {
+    confidentiality: dedupe(entries.flatMap((entry) => entry.confidentiality)),
+    integrity: dedupe(entries.flatMap((entry) => entry.integrity)),
+    derived: entries.some((entry) => entry.origin === "derived"),
+    transformedBy: dedupe(
+      entries.flatMap((entry) =>
+        entry.transformedBy === undefined ? [] : [entry.transformedBy]
+      ),
+    ),
+    entries,
+  };
+};
+
+/**
+ * The labels for the cell a reference names. A reference addresses a path
+ * inside a document while the labels are stored for the document, so the
+ * document's labels are found first and then narrowed to the path.
  */
 export const cellLabelsAt = (
   index: ConsoleCellLabelIndex,
@@ -211,17 +269,10 @@ export const cellLabelsAt = (
   if (ref === undefined) {
     return undefined;
   }
-  const direct = index.byAddress.get(ref);
-  if (direct !== undefined) {
-    return direct;
+  const address = addressOf(ref);
+  if (address === undefined) {
+    return index.byAddress.get(ref);
   }
-  // The entity id inside the reference: the segment carrying a URI scheme,
-  // which a cross-space link puts after its space DID and a path puts before
-  // its own segments.
-  const segment = ref.split("/").find((part) =>
-    part.startsWith("of:") || part.startsWith("computed:")
-  );
-  return segment === undefined
-    ? undefined
-    : index.byAddress.get(segment.split("@")[0]);
+  const document = index.byAddress.get(address.entityId);
+  return document === undefined ? undefined : narrow(document, address.path);
 };

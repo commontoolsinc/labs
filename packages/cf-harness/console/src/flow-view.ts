@@ -8,11 +8,32 @@
  */
 
 import { html, LitElement, nothing, type TemplateResult } from "lit";
+import type { ConsoleCellLabelsSummary } from "../cell-labels.ts";
 import type { ConsoleFlow, ConsoleFlowNode } from "./api.ts";
 import "./cell-chip.ts";
 
 /** How long a numeric run has to be before it reads as a channel. */
 const WIDE_NUMERIC_RUN = 32;
+
+/**
+ * What the run's per-cell labels amount to, in one line.
+ *
+ * A cell drawn with no atoms says one thing under a run whose space was read
+ * and another under a run where nobody asked, and the chip cannot tell those
+ * apart on its own. The header carries the difference, so an empty chip is
+ * read against a stated regime rather than as an absence of secrets.
+ */
+const labelRegime = (labels: ConsoleCellLabelsSummary): string => {
+  if (labels.status === "absent") {
+    return "cell labels not read";
+  }
+  if (labels.status === "unavailable") {
+    return `cell labels unavailable${
+      labels.detail === undefined ? "" : ` · ${labels.detail}`
+    }`;
+  }
+  return `cell labels read · ${labels.cellsLabelled} of ${labels.cellsRead} carry one`;
+};
 
 export class ConsoleFlowView extends LitElement {
   static override properties = {
@@ -129,6 +150,12 @@ export class ConsoleFlowView extends LitElement {
               ${flow.cfc.posture ?? "first-party"} ·
               labels ${flow.cfc.flowLabels} · ${flow.cfc.enforcementMode}
             </span>
+          `}
+          ${flow.cellLabels === undefined ? nothing : html`
+            <span
+              class="flow-labels"
+              title="what the space said about the cells this run touched"
+            >${labelRegime(flow.cellLabels)}</span>
           `}
           ${flow.failures === 0
             ? nothing

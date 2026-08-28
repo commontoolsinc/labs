@@ -14,6 +14,7 @@
  */
 
 import {
+  decodedLinkOf,
   discoverSpaceDbs,
   openSpace,
   reconstructOutcome,
@@ -142,10 +143,15 @@ export interface CellAddress {
   id: string;
 
   /**
-   * The scope the document is partitioned under. A labelMap is written at the
-   * same scope as the document it labels, so a per-user cell's labels are not
-   * in the space scope and reading only that scope would report the cell
-   * unlabelled.
+   * The scope kind the reference names, `space` unless it says otherwise. A
+   * labelMap is written at the same scope as the document it labels, so a
+   * per-user override's labels are not in the space scope.
+   *
+   * A reference names the kind and not the principal, though, while the store
+   * partitions by principal — `user:<did>`, not `user`. So a scoped reference
+   * addresses no row on its own, and the read falls back to the base scope,
+   * whose labels every scope inherits. What that cannot report is a label an
+   * override introduced and the base scope does not carry.
    */
   scope: string;
 }
@@ -170,18 +176,56 @@ export const cellAddressOfRef = (ref: string): CellAddress | undefined => {
   }
 };
 
+/**
+ * The cells one document links to, by the key that names each. A pattern's
+ * results are their own cells rather than paths inside the piece that names
+ * them, so following these one hop is what puts a derived label where a
+ * reader looks for it.
+ */
+const linkedCellsOf = (
+  document: Record<string, unknown> | undefined,
+  space: string | undefined,
+): { key: string; id: string }[] => {
+  const value = document?.value;
+  if (!isRecord(value)) {
+    return [];
+  }
+  const linked: { key: string; id: string }[] = [];
+  for (const [key, held] of Object.entries(value)) {
+    const link = decodedLinkOf(held as never);
+    if (link?.id === undefined || link.id === null) {
+      continue;
+    }
+    // A link naming another space addresses a store this reader did not
+    // open. One naming this space, or naming none, is a cell here.
+    if (
+      link.space === undefined || link.space === null || space === undefined ||
+      link.space === space
+    ) {
+      linked.push({ key, id: link.id });
+    }
+  }
+  return linked;
+};
+
 /** A space DB opened for reading labels, and the space it was resolved from. */
 export interface SpaceLabelReader {
   readonly dbPath: string;
   readonly did?: string;
 
   /**
-   * The labels stored for one cell. An entity that holds no document — never
-   * written, deleted, or undecodable — reads as no labels, the same as one
-   * whose document carries no `cfc` path: neither is a label this reader can
-   * report, and one corrupt entity does not end the walk.
+   * The labels stored for one cell, and for the cells it links to one hop
+   * out. A linked cell's entries arrive under the key that named it, and say
+   * which cell they were read from, so the two are never confused.
+   *
+   * An entity that holds no document — never written, deleted, or
+   * undecodable — reads as no labels, the same as one whose document carries
+   * no `cfc` path: neither is a label this reader can report, and one corrupt
+   * entity does not end the walk.
    */
-  read(address: CellAddress): StoredCellLabels;
+  read(address: CellAddress): StoredCellLabels & {
+    linked: { key: string; id: string }[];
+  };
   close(): void;
 }
 
@@ -205,13 +249,29 @@ export const openSpaceLabelReader = async (
     dbPath,
     ...(did !== undefined ? { did } : {}),
     read: (address) => {
-      const outcome = reconstructOutcome(opened, {
-        id: address.id,
-        scope: address.scope,
-      });
-      return outcome.status === "present"
-        ? labelsOf(outcome.document)
-        : { entries: [] };
+      // The named scope, then the base scope it inherits from: a reference
+      // carries a scope kind rather than a principal, so a scoped one
+      // addresses no stored row and would otherwise read as unlabelled.
+      const outcome = [address.scope, "space"]
+        .filter((scope, index, scopes) => scopes.indexOf(scope) === index)
+        .map((scope) => reconstructOutcome(opened, { id: address.id, scope }))
+        .find((candidate) => candidate.status === "present");
+      if (outcome === undefined || outcome.status !== "present") {
+        return { entries: [], linked: [] };
+      }
+      const own = labelsOf(outcome.document);
+      const linked = linkedCellsOf(outcome.document, did);
+      const entries = [...own.entries];
+      for (const { key, id } of linked) {
+        const target = reconstructOutcome(opened, { id, scope: "space" });
+        if (target.status !== "present") {
+          continue;
+        }
+        for (const entry of labelsOf(target.document).entries) {
+          entries.push({ ...entry, path: [key, ...entry.path], source: id });
+        }
+      }
+      return { ...own, entries, linked };
     },
     close: () => opened.close(),
   };
@@ -276,7 +336,7 @@ export const readSpaceCellLabels = async (
       if (address === undefined) {
         continue;
       }
-      const key = `${address.scope} ${address.id}`;
+      const key = `${address.scope}\x00${address.id}`;
       if (seen.has(key)) {
         continue;
       }

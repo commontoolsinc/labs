@@ -10,6 +10,10 @@ import {
 } from "../../console/run-store.ts";
 import { createHarnessRunState } from "../../src/run-state.ts";
 import type { HarnessTranscriptMessage } from "../../src/contracts/transcript.ts";
+import {
+  HARNESS_CELL_LABELS_TYPE,
+  type HarnessCellLabels,
+} from "../../src/contracts/cell-labels.ts";
 
 const runState = (runId: string, updatedAt: string) => ({
   ...createHarnessRunState({
@@ -46,6 +50,31 @@ const result = (
   toolCallId,
   toolName,
   content: typeof content === "string" ? content : JSON.stringify(content),
+});
+
+/** A snapshot the space was read for, naming one cell it labels. */
+const labelSnapshot = (): HarnessCellLabels => ({
+  type: HARNESS_CELL_LABELS_TYPE,
+  version: 1,
+  generatedAt: "2026-01-01T00:00:00.000Z",
+  status: "read",
+  space: { configured: "my-space" },
+  cells: [
+    {
+      entityId: "of:fid1:abc",
+      ref: "/of:fid1:abc",
+      entries: [
+        {
+          path: [],
+          confidentiality: [
+            { type: "https://common.tools/cfc/Secret", name: "Secret" },
+          ],
+          integrity: [],
+          origin: "declared",
+        },
+      ],
+    },
+  ],
 });
 
 /** A run that searched, failed to compile, fixed, and named the piece. */
@@ -191,6 +220,7 @@ describe("console/runs", () => {
       root: string,
       runId: string,
       updatedAt: string,
+      cellLabels?: HarnessCellLabels,
     ): Promise<void> => {
       const runRoot = join(root, runId);
       await Deno.mkdir(join(runRoot, "tool-outputs"), { recursive: true });
@@ -198,6 +228,12 @@ describe("console/runs", () => {
         join(runRoot, "run-state.json"),
         JSON.stringify(runState(runId, updatedAt)),
       );
+      if (cellLabels !== undefined) {
+        await Deno.writeTextFile(
+          join(runRoot, "cell-labels.json"),
+          JSON.stringify(cellLabels),
+        );
+      }
       await Deno.writeTextFile(
         join(runRoot, "transcript.json"),
         JSON.stringify(buildTranscript()),
@@ -291,6 +327,33 @@ describe("console/runs", () => {
         expect(
           await readConsoleRunArtifact(root, "r1", "../transcript.json"),
         ).toBeUndefined();
+      });
+    });
+
+    it("reports no label snapshot for a run that wrote none", async () => {
+      await withArtifactRoot(async (root) => {
+        await writeRun(root, "r1", "2026-01-01T00:00:01.000Z");
+        const detail = await readConsoleRun(root, "r1");
+        // Nobody asked the space, which is not a space with nothing to say.
+        expect(detail?.cellLabels.status).toBe("absent");
+        expect(detail?.cellLabels.cellsRead).toBe(0);
+      });
+    });
+
+    it("reads the label snapshot a run wrote, and offers it as an artifact", async () => {
+      await withArtifactRoot(async (root) => {
+        await writeRun(
+          root,
+          "r1",
+          "2026-01-01T00:00:01.000Z",
+          labelSnapshot(),
+        );
+        const detail = await readConsoleRun(root, "r1");
+        expect(detail?.cellLabels.status).toBe("read");
+        expect(detail?.cellLabels.cellsRead).toBe(1);
+        expect(detail?.cellLabels.cellsLabelled).toBe(1);
+        expect(detail?.cellLabels.space?.configured).toBe("my-space");
+        expect(detail?.artifactNames).toContain("cell-labels.json");
       });
     });
 

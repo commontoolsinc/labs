@@ -94,7 +94,6 @@ import type {
 } from "./contracts/input-cells.ts";
 import { mintInputCellHandles } from "./input-cells.ts";
 import type { HarnessCellLabels } from "./contracts/cell-labels.ts";
-import { readSpaceCellLabels } from "./space-labels.ts";
 import {
   appendHarnessCfcModelContextObservations,
   appendHarnessFailureRecord,
@@ -1035,6 +1034,8 @@ export class CfHarnessEngine {
       return undefined;
     }
     const generatedAt = this.#now();
+    // deno-lint-ignore cf-imports/no-inline-module-import -- costs at import time: reading a space database is the one thing the engine does through a native library, and a process that never takes a snapshot must not load one to run
+    const { readSpaceCellLabels } = await import("./space-labels.ts");
     const cellLabels = await readSpaceCellLabels({
       space,
       ...(this.#spaceDbPath !== undefined ? { dbPath: this.#spaceDbPath } : {}),

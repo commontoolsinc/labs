@@ -8,6 +8,10 @@
  */
 
 import { html, LitElement, nothing, type TemplateResult } from "lit";
+import type {
+  ConsoleCellLabelEntry,
+  ConsoleCellLabels,
+} from "../cell-labels.ts";
 
 /** What a chip needs to know to draw a cell. */
 export interface ConsoleCellFacts {
@@ -15,9 +19,86 @@ export interface ConsoleCellFacts {
   ref?: string;
   slug?: string;
   producedByStep?: number;
+
+  /**
+   * The atoms the sandbox's invocation context recorded on the arguments of
+   * the call this sighting belongs to.
+   */
   confidentiality?: readonly string[];
   schema?: unknown;
+
+  /** What the space stores for the cell itself, where the run read it. */
+  labels?: ConsoleCellLabels;
 }
+
+/**
+ * The label facts a chip draws, held apart.
+ *
+ * `onCall` is what one call's invocation context recorded; the rest is what
+ * the space stores for the cell itself. They answer different questions — what
+ * a sandbox saw crossing into a call, and what the cell is — so the card names
+ * them apart and joins them into no single list.
+ */
+export interface ConsoleCellLabelView {
+  onCall: readonly string[];
+
+  /** Every confidentiality atom the space holds at any path of the cell. */
+  confidentiality: readonly string[];
+
+  /** Every integrity atom the space holds at any path of the cell. */
+  integrity: readonly string[];
+
+  /**
+   * Whether the space says a path of this cell was computed from what a
+   * function read.
+   *
+   * This is the fact a confidentiality atom does not carry. A value's label
+   * may be the join of the fields of the object it was reached through, so a
+   * plain input reached through a labelled object holds an atom without having
+   * been derived from anything confidential. A chip that read the atom as
+   * taint reports that input as tainted; `derived`, and the provenance beside
+   * it, is what separates a computed value from a carried one, and it is why
+   * the two are separate chip states rather than degrees of one badge.
+   */
+  derived: boolean;
+
+  /** The implementations the space names as producing the derived paths. */
+  transformedBy: readonly string[];
+
+  /** The paths the space labelled, so a card can read path by path. */
+  paths: readonly ConsoleCellLabelEntry[];
+
+  /** Whether this run's labels hold a record for this cell at all. */
+  recorded: boolean;
+}
+
+/** The two facts, reduced to what the chip and its card draw. */
+export const cellLabelView = (cell: ConsoleCellFacts): ConsoleCellLabelView => {
+  const labels = cell.labels;
+  return {
+    onCall: cell.confidentiality ?? [],
+    confidentiality: labels?.confidentiality ?? [],
+    integrity: labels?.integrity ?? [],
+    derived: labels?.derived ?? false,
+    transformedBy: labels?.transformedBy ?? [],
+    paths: labels?.entries ?? [],
+    recorded: labels !== undefined,
+  };
+};
+
+/**
+ * The classes the chip wears. `labelled` is an atom from either fact;
+ * `derived` is the space saying the value was computed, which no count of
+ * atoms establishes.
+ */
+export const cellChipClasses = (cell: ConsoleCellFacts): string => {
+  const view = cellLabelView(cell);
+  const labelled = view.onCall.length > 0 || view.confidentiality.length > 0 ||
+    view.integrity.length > 0;
+  return ["cell", labelled ? "labelled" : "", view.derived ? "derived" : ""]
+    .filter((name) => name !== "")
+    .join(" ");
+};
 
 /**
  * What to call a cell. The name a person gave it wins, then the handle the
@@ -27,7 +108,8 @@ export interface ConsoleCellFacts {
 export const cellName = (cell: ConsoleCellFacts): string =>
   cell.slug ?? cell.token ?? cell.ref ?? "cell";
 
-const schemaSummary = (schema: unknown): string | undefined => {
+/** The shape a pattern declared, in as few characters as read as a shape. */
+export const schemaSummary = (schema: unknown): string | undefined => {
   const record = typeof schema === "object" && schema !== null
     ? schema as { type?: unknown; properties?: Record<string, unknown> }
     : undefined;
@@ -44,12 +126,9 @@ let cardSequence = 0;
 export class ConsoleCell extends LitElement {
   static override properties = {
     cell: { attribute: false },
-    origin: { attribute: false },
   };
 
   declare cell: ConsoleCellFacts | undefined;
-  /** Whether to offer the jump back to where the cell was produced. */
-  declare origin: boolean;
 
   /**
    * The card's id, so the chip can name it as its description rather than
@@ -57,11 +136,6 @@ export class ConsoleCell extends LitElement {
    * address and the atoms as the structure they are.
    */
   readonly #cardId = `cell-card-${++cardSequence}`;
-
-  constructor() {
-    super();
-    this.origin = true;
-  }
 
   protected override createRenderRoot(): HTMLElement {
     return this;
@@ -162,16 +236,105 @@ export class ConsoleCell extends LitElement {
     this.#close();
   }
 
+  /**
+   * The labels, as the two facts they are: what the invocation context of one
+   * call recorded, and what the space holds for the cell. The second reads
+   * path by path, because a cell labelled at one field and not at another is
+   * two different things to a reader and one blurred thing to a badge.
+   */
+  #labels(view: ConsoleCellLabelView): TemplateResult {
+    return html`
+      <span class="cell-row">
+        <span class="cell-label">cfc</span>
+        <span class="label-atoms" title="atoms recorded on this call">
+          ${view.onCall.length === 0
+            ? html`<span class="cell-none">no atom on this call</span>`
+            : view.onCall.map((name) =>
+              html`<span class="atom conf">${name}</span>`
+            )}
+        </span>
+      </span>
+      <span class="cell-row">
+        <span class="cell-label">space</span>
+        <span class="label-atoms" title="what the space holds for this cell">
+          ${!view.recorded
+            ? html`<span class="cell-none">
+              no label read for this cell; the map heads with what this run read
+            </span>`
+            : view.confidentiality.length === 0 && view.integrity.length === 0
+            ? html`<span class="cell-none">
+              the space holds no label for this cell
+            </span>`
+            : html`
+              ${view.confidentiality.map((name) =>
+                html`<span class="atom conf">${name}</span>`
+              )}
+              ${view.integrity.map((name) =>
+                html`<span class="atom integ">${name}</span>`
+              )}
+            `}
+        </span>
+      </span>
+      ${view.paths.length === 0 ? nothing : html`
+        <span class="cell-row">
+          <span class="cell-label">derived</span>
+          ${view.derived
+            ? html`<span class="cell-derived">
+              computed from what a function read
+            </span>`
+            : html`<span class="cell-none">
+              carried, not computed from a read
+            </span>`}
+        </span>
+      `}
+      ${view.transformedBy.length === 0 ? nothing : html`
+        <span class="cell-row">
+          <span class="cell-label">transformed by</span>
+          <span class="cell-mono cell-wrap">
+            ${view.transformedBy.join(", ")}
+          </span>
+        </span>
+      `}
+      ${view.paths.length === 0 ? nothing : html`
+        <span class="cell-row">
+          <span class="cell-label">paths</span>
+          <span class="cell-paths">
+            ${view.paths.map((entry) =>
+              html`
+                <span class="cell-path">
+                  <span class="label-path">
+                    ${entry.path === "" ? "(the cell)" : entry.path}
+                  </span>
+                  ${entry.origin === undefined
+                    ? nothing
+                    : html`<span class="path-origin">${entry.origin}</span>`}
+                  <span class="label-atoms">
+                    ${entry.confidentiality.map((name) =>
+                      html`<span class="atom conf">${name}</span>`
+                    )}
+                    ${entry.integrity.map((name) =>
+                      html`<span class="atom integ">${name}</span>`
+                    )}
+                  </span>
+                </span>
+              `
+            )}
+          </span>
+        </span>
+      `}
+    `;
+  }
+
   protected override render(): TemplateResult | typeof nothing {
     const cell = this.cell;
     if (cell === undefined) {
       return nothing;
     }
     const shape = schemaSummary(cell.schema);
-    const atoms = cell.confidentiality ?? [];
+    const view = cellLabelView(cell);
     return html`
       <span
-        class="cell ${atoms.length > 0 ? "labelled" : ""}"
+        class=${cellChipClasses(cell)}
         tabindex="0"
         aria-describedby=${this.#cardId}
         @mouseenter=${() => this.#open("hover")}
@@ -181,9 +344,9 @@ export class ConsoleCell extends LitElement {
       >
         <span class="cell-dot"></span>
         <span class="cell-name">${cellName(cell)}</span>
-        ${atoms.length === 0
+        ${view.onCall.length === 0
           ? nothing
-          : html`<span class="cell-atoms">${atoms.length}</span>`}
+          : html`<span class="cell-atoms">${view.onCall.length}</span>`}
         <span class="cell-card" id=${this.#cardId} role="tooltip">
           ${cell.slug === undefined ? nothing : html`
             <span class="cell-row">
@@ -209,16 +372,7 @@ export class ConsoleCell extends LitElement {
               <span class="cell-mono">${shape}</span>
             </span>
           `}
-          <span class="cell-row">
-            <span class="cell-label">cfc</span>
-            <span>
-              ${atoms.length === 0
-                ? html`<span class="cell-none">no labels recorded</span>`
-                : atoms.map((name) =>
-                  html`<span class="atom conf">${name}</span>`
-                )}
-            </span>
-          </span>
+          ${this.#labels(view)}
           ${cell.producedByStep === undefined ? nothing : html`
             <span class="cell-row">
               <span class="cell-label">from</span>
