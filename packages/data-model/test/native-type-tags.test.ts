@@ -151,11 +151,6 @@ describe("native-type-tags", () => {
       expect(tagFromNativeValue(() => {})).toBe(NATIVE_TAGS.Primitive);
     });
 
-    // `toJSON` is an ordinary property name here, with no say in what a value
-    // is. These pin that at each of the shapes it can be carried on, because a
-    // classifier that consulted it would let one assignment --
-    // `Array.prototype.toJSON`, an own key on a record -- redirect values
-    // wholesale.
     // An own `constructor` property is ordinary data that happens to share a
     // name with the thing that decides a value's class. Reading the class off
     // the value rather than off its prototype would let a plain record present
@@ -222,6 +217,11 @@ describe("native-type-tags", () => {
       }
     });
 
+    // `toJSON` is an ordinary property name here, with no say in what a value
+    // is. These pin that at each of the shapes it can be carried on, because a
+    // classifier that consulted it would let one assignment --
+    // `Array.prototype.toJSON`, an own key on a record -- redirect values
+    // wholesale.
     describe("`toJSON()` is intentionally not supported", () => {
       it("returns `Object` tag for a plain object carrying `toJSON()`", () => {
         expect(tagFromNativeValue({ toJSON: () => "converted" })).toBe(
