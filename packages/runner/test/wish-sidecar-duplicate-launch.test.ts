@@ -59,6 +59,24 @@ const identityOfPattern = (name: string) =>
     (module) => Promise.resolve(read(module.slice(PATTERNS_ROUTE.length))),
   );
 
+// The create surface's program as the route serves it, named by the pathnames
+// the worker gives modules it fetched over HTTP — the same names the identity
+// is resolved over, so compiling this produces the identity the route
+// advertises.
+const SURFACE_PROGRAM: RuntimeProgram = {
+  main: PATTERNS_ROUTE + "profile-create.tsx",
+  files: [
+    {
+      name: PATTERNS_ROUTE + "profile-create.tsx",
+      contents: read("profile-create.tsx"),
+    },
+    {
+      name: PATTERNS_ROUTE + "profile-home.tsx",
+      contents: read("profile-home.tsx"),
+    },
+  ],
+};
+
 const WISH_SRC = [
   "import { pattern, wish } from 'commonfabric';",
   "export default pattern(() => ({",
@@ -154,6 +172,28 @@ describe("wish profile-create sidecar duplicate launch", () => {
       const setupCommit = await setupTx.commit();
       expect(setupCommit.error).toBeUndefined();
       await rt1.storageManager.synced();
+
+      // Both runtimes hold the create surface's artifact before either
+      // launches. Each surface is opened on its own, so what makes the two
+      // instantiations collide is that neither has any work left to do once
+      // the gate releases: the identity route names an artifact the space
+      // already holds, so both go straight from that one response to
+      // instantiating, inside one round-trip of each other. Without this each
+      // open would fetch and compile the closure at its own pace and the
+      // duplicate this test exists to witness would be a coin toss.
+      for (const rt of [rt1, rt2]) {
+        const surface = await rt.patternManager.compilePattern(
+          SURFACE_PROGRAM,
+          { space: homeSpace },
+        );
+        expect(
+          rt.patternManager.getArtifactEntryRef(surface)?.identity,
+          "the pre-warmed surface must be the one the identity route names, " +
+            "or the open falls back to fetching and the race is a coin toss",
+        ).toBe(createIdentity);
+      }
+      await rt1.patternManager.flushCompileCacheWrites();
+      await rt2.patternManager.flushCompileCacheWrites();
 
       // Both runtimes compile the same source — content-addressed, so the
       // wish node (and with it the sidecar slot cells) shares one cause.
