@@ -435,17 +435,40 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
       "GitHub activity excludes opaque details from its shallow output",
     );
 
+    const emptySynchronizedIndex = {
+      schema: "commonfabric.github-connector.pull-request-index.v1",
+      formatVersion: 1,
+      viewer: "octocat",
+      generatedAt: "",
+      lastCompleteCollectionAt: "",
+      generation: 43,
+      pullRequests: [],
+    };
     const emptySynchronizedGithubActivity = instantiatePattern(GithubActivity, {
       repoUrl: new Writable("https://github.com/acme/project"),
-      pullRequestIndex: {
-        schema: "commonfabric.github-connector.pull-request-index.v1",
-        formatVersion: 1,
-        viewer: "octocat",
-        generatedAt: "",
-        lastCompleteCollectionAt: "",
-        generation: 43,
-        pullRequests: [],
+      pullRequestIndex: emptySynchronizedIndex,
+    });
+    const stoppedHealth = {
+      schema: "commonfabric.github-connector.health.v1",
+      service: "github-host",
+      formatVersion: 1,
+      status: "stopped",
+      startedAt: "2026-08-28T01:00:00.000Z",
+      updatedAt: "2026-08-28T02:00:00.000Z",
+      target: {
+        spaceDid: "did:key:space",
+        cells: { index: "of:index", health: "of:health" },
       },
+    };
+    const stoppedGithubActivity = instantiatePattern(GithubActivity, {
+      repoUrl: new Writable("https://github.com/acme/project"),
+      pullRequestIndex: emptySynchronizedIndex,
+      health: stoppedHealth,
+    });
+    const startingGithubActivity = instantiatePattern(GithubActivity, {
+      repoUrl: new Writable("https://github.com/acme/project"),
+      pullRequestIndex: emptySynchronizedIndex,
+      health: { ...stoppedHealth, status: "starting" },
     });
     const emptyStateMessages = elementsOfType(
       uiOf(emptySynchronizedGithubActivity),
@@ -460,6 +483,28 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
           "No connector health snapshot is connected",
         ),
       "GitHub activity renders empty synchronized states",
+    );
+    const stoppedBadges = elementsOfType(
+      uiOf(stoppedGithubActivity),
+      "cf-badge",
+    );
+    assert(
+      stoppedBadges.some((badge) =>
+        badge.props.color === "neutral" &&
+        textContent(badge).includes("stopped")
+      ) && textContent(uiOf(stoppedGithubActivity)).includes("Last sync—"),
+      "GitHub activity renders a stopped host without a sync snapshot",
+    );
+    const startingBadges = elementsOfType(
+      uiOf(startingGithubActivity),
+      "cf-badge",
+    );
+    assert(
+      startingBadges.some((badge) =>
+        badge.props.color === "accent" &&
+        textContent(badge).includes("starting")
+      ),
+      "GitHub activity renders a starting host with an accent badge",
     );
 
     setFetchJsonResult([]);
