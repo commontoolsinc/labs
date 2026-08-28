@@ -2,9 +2,9 @@
  * Reading the source facts a piece records: the pattern it runs, the origin it
  * tracks, the history metadata it carries, and its authored source files.
  *
- * An origin is the source URL a piece remembers: either an external web URL or
- * a fabric `cf:` URL. `docs/specs/piece-source-lifecycle.md` is the design of
- * record.
+ * An origin is the source URL a piece remembers: either a `system:` ref naming
+ * a pattern this deployment serves, or a fabric `cf:` URL.
+ * `docs/specs/piece-source-lifecycle.md` is the design of record.
  */
 
 import {
@@ -19,6 +19,7 @@ import {
   getPieceSourceRevisions,
   type MemorySpace,
   NAME,
+  normalizePatternSource,
   parseFabricRef,
   type PieceReconciliation,
   type ReconcileOutcome,
@@ -38,13 +39,14 @@ import { HttpProgramResolver } from "@commonfabric/js-compiler/program";
 /**
  * How an origin URL resolves.
  *
- * - `web`: an external program endpoint that can return new source later.
+ * - `system`: a pattern this deployment's toolshed serves from its patterns
+ *   directory, which a new release of the deployment can replace.
  * - `fabric-piece`: a stable, mutable fabric entity whose current pattern the
  *   origin names.
  * - `fabric-pattern`: exact content-addressed pattern source, either named
  *   directly or fixed by a trailing pin.
  */
-export type PieceOriginKind = "web" | "fabric-piece" | "fabric-pattern";
+export type PieceOriginKind = "system" | "fabric-piece" | "fabric-pattern";
 
 export interface PieceOrigin {
   /** The canonical origin URL. */
@@ -53,7 +55,7 @@ export interface PieceOrigin {
 
   /**
    * The URL as it was recorded on the piece, when normalization changed it. A
-   * legacy toolshed-relative path becomes an absolute web URL, so the recorded
+   * `system:` ref becomes the absolute route it addresses, so the recorded
    * form is kept for display.
    */
   recorded?: string;
@@ -190,7 +192,7 @@ export async function resolvePieceOriginSource(
   options: { self?: { space: MemorySpace; pieceId: string } } = {},
 ): Promise<ResolvedPieceOriginSource> {
   const origin = classifyOrigin(runtime, destinationSpace, recorded);
-  if (origin.kind === "web") {
+  if (origin.kind === "system") {
     const program = await runtime.harness.resolve(
       new HttpProgramResolver(
         origin.url,
@@ -354,12 +356,12 @@ export function classifyOrigin(
     };
   }
 
-  // A `system:` ref names a pattern this deployment's toolshed serves; it
-  // classifies as the web origin it resolves to, keeping the ref itself as the
+  // A `system:` ref names a pattern this deployment's toolshed serves. It
+  // carries the absolute route it resolves to, keeping the ref itself as the
   // recorded form so the panel shows what the piece actually stores.
   const systemRoute = resolveSystemPatternSource(source);
   if (systemRoute !== undefined) {
-    return webOrigin(
+    return systemOrigin(
       new URL(systemRoute, runtime.hostForSpace(space)),
       source,
     );
@@ -385,9 +387,24 @@ export function classifyOrigin(
           `this space; write the URL out if that is what you meant`,
       );
     }
-    return webOrigin(resolved, source);
+    // Resolving to this host is not enough. The path also has to name a file
+    // under the patterns route, because that route is the only thing this
+    // deployment serves as a program; any other path answers with whatever the
+    // site returns for it. `normalizePatternSource` yields the `system:` ref
+    // when the path names such a file and the input unchanged when it does
+    // not, which is the same test reconciliation applies before rewriting it.
+    if (normalizePatternSource(source, host) === source) {
+      throw new PieceOriginError(
+        `${source} addresses nothing under the patterns route`,
+      );
+    }
+    return systemOrigin(resolved, source);
   }
 
+  // The reasons below match `classifyPieceOriginString` word for word. The two
+  // classifiers answer different questions, and a test holds them to the same
+  // boundary; saying the same thing about a string neither can follow is what
+  // makes a panel's explanation and a reconciliation's refusal one answer.
   let url: URL;
   try {
     url = new URL(source);
@@ -395,22 +412,36 @@ export function classifyOrigin(
     throw new PieceOriginError(`${source} is not an absolute URL`);
   }
   if (url.protocol !== "https:" && url.protocol !== "http:") {
-    throw new PieceOriginError(`${source} is not a web URL`);
+    throw new PieceOriginError(`${source} names no program`);
   }
-  return webOrigin(url, source);
+
+  // The absolute spelling of a patterns-route locator on the host serving this
+  // space is the same file a `system:` ref names, and reconciliation rewrites
+  // it to that ref. It has to classify as followable here too, or the panel
+  // would call an origin unusable that reconciliation goes on following.
+  if (normalizePatternSource(source, runtime.hostForSpace(space)) !== source) {
+    return systemOrigin(url, source);
+  }
+
+  // Anything else absolute names an endpoint outside this deployment. A piece
+  // follows what the deployment serves and what the fabric holds, so such a
+  // string names no origin at all.
+  throw new PieceOriginError(
+    `${source} is an external endpoint, which is not a source origin`,
+  );
 }
 
 /**
- * A web origin at its canonical URL, keeping the recorded string whenever
- * canonicalizing changed it — a relative path resolved against a host, but also
- * an absolute URL the URL parser rewrote, such as one with no path or a default
- * port. The panel shows the recorded form beside the canonical one, so what a
- * piece stores stays visible.
+ * A deployment-served origin at its canonical route URL, keeping the recorded
+ * string whenever canonicalizing changed it — a `system:` ref, and the rooted
+ * path that is the spelling those carried before the scheme existed. The panel
+ * shows the recorded form beside the canonical one, so what a piece stores
+ * stays visible.
  */
-function webOrigin(url: URL, recorded: string): PieceOrigin {
+function systemOrigin(url: URL, recorded: string): PieceOrigin {
   return {
     url: url.href,
-    kind: "web",
+    kind: "system",
     ...(url.href === recorded ? {} : { recorded }),
   };
 }
@@ -432,13 +463,21 @@ export function acceptEnteredOrigin(
 ): string {
   const recorded = entered.trim();
   const origin = classifyOrigin(runtime, space, recorded);
-  if (origin.kind === "web") {
-    const url = new URL(origin.url);
-    if (url.username !== "" || url.password !== "") {
-      throw new PieceOriginError("a source URL may not carry credentials");
-    }
+  if (carriesCredentials(origin.url)) {
+    throw new PieceOriginError("a source URL may not carry credentials");
   }
   return recorded;
+}
+
+/**
+ * Whether a URL carries user information. A fabric URL with an authority can,
+ * the same as any other; one with no authority parses with both fields empty.
+ * Classification returns either a URL the parser has already accepted or a
+ * `cf:` reference, so parsing here cannot fail.
+ */
+function carriesCredentials(url: string): boolean {
+  const parsed = new URL(url);
+  return parsed.username !== "" || parsed.password !== "";
 }
 
 /**

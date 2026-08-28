@@ -1910,7 +1910,7 @@ export type PieceCloneRequest = BaseRequest & {
 };
 
 /** How a piece's origin URL resolves. */
-export type PieceOriginKind = "web" | "fabric-piece" | "fabric-pattern";
+export type PieceOriginKind = "system" | "fabric-piece" | "fabric-pattern";
 
 /**
  * Where a piece's source came from. `recorded` is present only when
@@ -1945,17 +1945,11 @@ export type PiecePatternRefView = {
   symbol: string;
 };
 
-/**
- * What the last attempt to follow a piece's active origin did. `unsupported`
- * says the origin is well formed and this runtime does not follow origins of
- * that kind yet, so what it holds is unexamined — neither a fault nor a piece
- * nobody has checked.
- */
+/** What the last attempt to follow a piece's active origin did. */
 export type PieceReconciliationOutcome =
   | "followed"
   | "unreachable"
-  | "refused"
-  | "unsupported";
+  | "refused";
 
 /**
  * Why a reconciliation did not adopt what its origin offered. Only

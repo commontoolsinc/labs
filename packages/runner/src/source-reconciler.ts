@@ -83,8 +83,6 @@ const logger = getLogger("runner.source-reconcile", {
  * - `detached`: nothing supplies code for this piece — it records no origin,
  *   or it runs no pattern for an origin to replace.
  * - `unusable`: it records a string no resolver can follow.
- * - `unsupported`: it records a well-formed origin of a kind this runtime does
- *   not follow yet.
  * - `current`: the origin resolved to the source already running.
  * - `migrated`: the origin was rewritten into its canonical spelling; the
  *   pattern is unchanged.
@@ -98,7 +96,6 @@ const logger = getLogger("runner.source-reconcile", {
 export type ReconcileOutcome =
   | "detached"
   | "unusable"
-  | "unsupported"
   | "current"
   | "migrated"
   | "updated"
@@ -127,7 +124,6 @@ const RECORDED_OUTCOME: Record<
   // outcome, so a second kind of refusal has to say which one it is instead
   // of inheriting this one.
   incompatible: { outcome: "refused", reason: "incompatible-schema" },
-  unsupported: { outcome: "unsupported" },
   detached: undefined,
   unusable: undefined,
 };
@@ -436,11 +432,6 @@ export class SourceReconciler {
           origin,
           signal,
         );
-      case "web":
-        // An external program endpoint is a source outside this deployment
-        // entirely. Resolving one is specified and not built.
-        this.#unwatchFabricSource(resultCell);
-        return Promise.resolve("unsupported");
       case "legacy-path":
         // Rewritten before dispatch.
         return Promise.resolve("unusable");

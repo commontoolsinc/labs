@@ -264,16 +264,17 @@ describe("piece source reconciliation", () => {
       expect(getPatternSource(piece)).toBe(PARENT_SOURCE);
     });
 
-    it("keeps the same path on another host as the web URL it is", async () => {
+    it("leaves the same path on another host unusable", async () => {
       // Re-pointing it at this toolshed would change which host the piece
-      // follows, which is a change of source rather than of spelling. Nothing
-      // follows a web origin yet, so the piece keeps what it runs.
+      // follows, which is a change of source rather than of spelling. It names
+      // an endpoint outside this deployment, which is no origin at all, so the
+      // piece keeps what it runs and carries a string a person can repair.
       const foreign = `https://elsewhere.test${PARENT_PATH}`;
       const piece = await preparePiece(refuseEveryFetch);
       const originalRef = getPatternIdentityRef(piece);
       await stampSource(piece, foreign);
 
-      expect(await reconcile(piece)).toBe("unsupported");
+      expect(await reconcile(piece)).toBe("unusable");
       expect(getPatternSource(piece)).toBe(foreign);
       expect(getPatternIdentityRef(piece)).toEqual(originalRef);
     });
@@ -706,21 +707,6 @@ describe("piece source reconciliation", () => {
       });
     });
 
-    it("records an origin whose kind nothing follows yet", async () => {
-      const piece = await preparePiece(refuseEveryFetch);
-      const origin = `https://programs.test${PARENT_PATH}`;
-      await stampSource(piece, origin);
-
-      expect(await reconcile(piece)).toBe("unsupported");
-
-      // Not a fault, and not a piece nobody has looked at: its owner can ask
-      // this origin by hand, and nothing else will.
-      expect(getPieceReconciliation(piece)).toMatchObject({
-        outcome: "unsupported",
-        origin,
-      });
-    });
-
     it("says nothing about a piece that records no origin", async () => {
       const piece = await preparePiece(refuseEveryFetch);
 
@@ -740,18 +726,23 @@ describe("piece source reconciliation", () => {
     });
   });
 
-  describe("an external web URL", () => {
-    it("recognizes the origin and does not follow it yet", async () => {
-      // Resolving a source outside this deployment is specified and not built,
-      // so the piece keeps what it runs and nothing is fetched on its behalf.
+  describe("an external endpoint", () => {
+    it("is no origin at all, so the piece keeps what it runs", async () => {
+      // A piece follows what this deployment serves and what the fabric
+      // holds. An endpoint outside both names no origin, so nothing is
+      // fetched on the piece's behalf and it carries the string unresolved.
       const piece = await preparePiece(refuseEveryFetch);
       const originalRef = getPatternIdentityRef(piece);
       const origin = `https://programs.test${PARENT_PATH}`;
       await stampSource(piece, origin);
 
-      expect(await reconcile(piece)).toBe("unsupported");
+      expect(await reconcile(piece)).toBe("unusable");
       expect(getPatternIdentityRef(piece)).toEqual(originalRef);
       expect(getPatternSource(piece)).toBe(origin);
+
+      // An unusable origin is read off the recorded string itself, so a
+      // record would only restate what the piece already says.
+      expect(getPieceReconciliation(piece)).toBeUndefined();
     });
   });
 
