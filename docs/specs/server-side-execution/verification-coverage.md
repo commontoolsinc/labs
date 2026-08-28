@@ -5290,12 +5290,13 @@ supply; OW29/OW32/OW34 closed):
   step) and was held only by a co-resident file's red in the same shard,
   while lunch-poll-vote passed its local half 8/8 and its probe went red at
   the probed surface for the second campaign running. **The current census
-  (2026-08-28, after the geometry-3 close PR's lift) is EMPTY — no entry
-  in any suite: lunch-poll-vote's FILE entry, RESTORED by #6484 after its
-  three probe boards, lifted again once the third geometry closed
-  red-first (the GEOMETRY-3 CLOSE and GEOMETRY-3 LIFT blocks at the end
-  of this row; the probe for that lift is the close PR's own ON-lane
-  board under the ruled surface reading).** default-app's reload
+  (2026-08-28, after the geometry-3 close PR's probe 5) is ONE patterns
+  entry: lunch-poll-vote's FILE entry, RESTORED a second time — the
+  geometry-3 close landed (the mid-flight-supplier once-await, red-first)
+  and its lift attempt's own probe went red at the surface with the
+  PRE-DECLARED geometry-3b signature (the GEOMETRY-3 CLOSE,
+  LIFT-ATTEMPT, and PROBE 5 blocks at the end of this row); the 3b
+  close is an owner-court fork.** default-app's reload
   STEP LIFTED 2026-08-28 — the owner ruled the SURFACE reading of the
   probe bar, under which its evidence was already complete (the LIFT block
   at the end of this row). lunch-poll-vote's lift was ATTEMPTED the same
@@ -5307,9 +5308,10 @@ supply; OW29/OW32/OW34 closed):
   it), the last exposing the still-open third geometry (the supplier
   compile mid-flight), so the entry was restored carrying the accumulated
   map (the lunch ROOT-CAUSE, PROBE-2/3/4 blocks at the end of
-  this row) — until the geometry-3 close lifted it on its own bar. The
-  FLIP's bar remains a green ON lane and every list empty; the list-EMPTY
-  half is met again (the co-resident `:133` debt the
+  this row); the geometry-3 close then fixed that third geometry and its
+  lift attempt was withdrawn by probe 5 (geometry 3b). The
+  FLIP's bar remains a green ON lane and every list empty; this entry is
+  again what holds the list (the co-resident `:133` debt the
   probe surfaced was paid by #6477 — the OBSERVATION's FIXED paragraph
   below). Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
@@ -7704,21 +7706,20 @@ supply; OW29/OW32/OW34 closed):
     its SKIP line and no SKIP-STEP line, the shard filter dropped exactly
     that file, and the whole-registry loop asserted it was the only entry
     anywhere — so any OTHER entry or a silent lift reddened a pin. [That
-    binding is superseded by the GEOMETRY-3 LIFT below: the suite is
-    rebound to the EMPTY registry, with alias bridges for the two renamed
-    pins.] The
+    binding was superseded by the GEOMETRY-3 LIFT-ATTEMPT below, and
+    PROBE 5's red re-superseded it: the suite is rebound to the
+    single-entry registry again, with acyclic alias chains for each
+    rename.] The
     flip's bar remains a green ON lane AND every list empty (the
     co-resident `:133` blocker in the
     OBSERVATION below is PAID by #6477, its FIXED paragraph there).
-    **GEOMETRY-3 LIFT (2026-08-28, the geometry-3 close PR — the entry's
-    second lift; the ON-skip registry is EMPTY across all four
-    suites again):** this block rides the lift PR itself, so its EMPTY
-    statement is the PR's proposed state and requirement (2) below is
-    settled by that PR's own board — a red at the probed surface
-    converts this block to a LIFT-ATTEMPT record and restores the entry,
-    exactly as #6484's did. The entry's own stated lift condition — "the
-    in-flight compile await … plus the ruled local-plus-CI-probe bar" —
-    met on its own evidence at the fix head:
+    **GEOMETRY-3 LIFT-ATTEMPT (2026-08-28, the geometry-3 close PR —
+    WITHDRAWN by PROBE 5, exactly per this block's own clause):** this
+    block rode the lift PR; requirement (2)'s board went RED at the
+    probed surface (the PROBE 5 block below carries the reading), so the
+    entry is restored and this record converts to a LIFT-ATTEMPT — the
+    #6484 precedent, repeated. The local half of the bar WAS met at the
+    fix head:
     - **Requirement (1), local:** campaign I, 8 counted runs i01–i08
       (4 quiet / 4 loaded interleaved, fresh store + own 97xx port +
       posture probe per run, ensure defaulting ON, toolshed self-sourced
@@ -7734,20 +7735,62 @@ supply; OW29/OW32/OW34 closed):
       ledgers, test+toolshed logs, stats, stores; the red-first and
       mutation-ladder logs under `pin/`).
     - **Requirement (2), the direct-CI unskip probe — THIS PR's own
-      ON-lane board:** the registry carries no lunch entry, so ON shard
-      7 RUNS lunch-poll-vote; per the ruled SURFACE reading the probed
-      surface's verdict decides. A red AT the surface withdraws the
-      lift and restores the entry carrying the map plus the 3b
-      classification of that red's artifact (3b's signature is
-      pre-declared above); a red elsewhere is classified, not
-      conflated. The probe run's coordinates are recorded on the PR
-      when the board settles.
-    Rebound with the lift: the pin suite asserts every list EMPTY (the
-    17 cases green), the two renamed pins carry alias-bridge lines in
-    `tasks/test-identity-aliases.jsonl`, the ON-lane workflow comment
-    states the empty-list posture, and the plan's Coordination block
-    carries the delta. The flip PR's list-EMPTY precondition is MET
-    again; its bar remains a green ON lane, not merely the empty list.
+      ON-lane board: RED AT THE PROBED SURFACE (probe 5, run
+      33198257149).** Per this block's own clause the lift is WITHDRAWN
+      and the entry restored carrying the map plus probe 5's 3b
+      classification — the PROBE 5 block below.
+    **PROBE 5 (run
+    [33198257149](https://github.com/commontoolsinc/labs/actions/runs/33198257149),
+    ON shard 7, job 98941298566, head `683477989`): RED at the surface —
+    and the artifact is GEOMETRY 3B ON ITS PRE-DECLARED SIGNATURE, the
+    first probe classified by a discriminator this arc built for it in
+    advance.** The surface: `lunch-poll-vote.test.ts:271`, the HOST's
+    `#lp-join-button` timeout at the 300000ms bound (step 5m6s; file
+    FAILED | 11 passed (40 steps) | 1 failed), body "0 joined" +
+    "Unknown profile #AykQuk"; every co-resident green. The server
+    chain, from the published toolshed artifact: ONE
+    `closure-replication-failed entry=Jlzs0wulc086…
+    from=z6Mkte7…(parent) to=z6Mkk3w…(profile) — source closure
+    unavailable in origin space` at 18:16:15.616, with **ZERO
+    `closure-replication-await-inflight` lines in the whole log** — that
+    warn prints whenever EITHER compile registry is non-empty at a dry
+    consult (the pattern-manager logger's default level is "info",
+    logger.ts:821 — warn is admitted; the same logger's ERROR printed in
+    this very log), so its absence is real: BOTH registries were EMPTY
+    at consult — the supplier compile had NOT STARTED. That is 3b's
+    defining property, pre-declared above before the probe ran.
+    Fallback counters 0 (`closure-replication-fallback-origin` and
+    `-fallback-read-failed` both absent — the module-keyed map was
+    correctly dry; no persist had completed anywhere), then the park:
+    80 `structure-load-stuck` warns 18:16:50–18:20:50 (40
+    `pattern-unloadable` roots, streaks — the OW46 signature), the
+    refusal storm present as in every green (the standing
+    non-discriminator). The only `profile-home.tsx` fetches BEFORE the
+    failure are the harness process's (Deno-UA, 18:15:18.8–18:16:10.8 —
+    probe 4 established that discrimination); the artifact carries no
+    serving-side compile/persist lines at all in the window, consistent
+    with a supplier that had not begun. NOT geometry 3 (probe 4's
+    discriminator — compile waves already in flight 5–18 s before the
+    failure — is absent here); NOT the close misbehaving (the
+    empty-snapshot short-circuit's contract IS the byte-identical
+    one-shot throw, which is what fired — the behavior pinned by the
+    suite); NOT a co-resident (11/11 green beside it). DISPOSITION: the
+    lift is withdrawn, the entry restored with the four-geometry map
+    (1: sibling-await; 2: module-keyed fallback origins; 3: the
+    once-await over both in-flight compile registries — all three
+    CLOSED, red-first, kept; 3b: CONFIRMED LIVE, the residue), the pin
+    suite rebound to the single-entry registry with acyclic alias
+    chains, the workflow lane comment and plan delta updated. **THE
+    OWNER FORK IS NOW THE LIVE DECISION:** the once-await family is
+    structurally exhausted — no await can see a supplier that has not
+    started — so closing 3b means either the event-driven re-supply
+    (on each `recordPersistedClosureSpaces` for identity I, re-issue
+    failed replications wanting I — touches the one-shot contract,
+    recorded above), or a supply-side redesign (e.g. the serving
+    runtime compiles/persists the home-env closure into the parent
+    space BEFORE serving profile creation, making the supplier
+    deterministic rather than boot-order-dependent). Both are
+    owner-court; this seat built neither, per the declared stop.
 
     **OBSERVATION, not owed by this row and NOT one of the two entries —
     `cfc-group-chat-demo.test.ts` is failing ON at current main, 4/6, and

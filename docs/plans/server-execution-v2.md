@@ -38,7 +38,32 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
-**Delta 2026-08-28 (the geometry-3 close PR): the lunch forever-park's
+**Delta 2026-08-28 (the geometry-3 close PR, FINAL disposition — PROBE 5
+red at the surface, GEOMETRY 3B CONFIRMED on its pre-declared signature;
+the entry is RESTORED and the owner fork is the live decision.** The
+close itself stands (geometry 3 fixed red-first, pinned, kept): probe 5 =
+this PR's own board, run 33198257149, ON shard 7 job 98941298566, the
+same external surface (`:271`, `#lp-join-button`, "Unknown profile
+#AykQuk", 11 co-residents green) — and the artifact discriminates it
+from every prior probe: ONE `closure-replication-failed` (same
+profile-home module Jlzs…, parent→profile, 18:16:15.616) with **ZERO
+`closure-replication-await-inflight` lines**, the once-await's
+announcement that prints whenever either compile registry is non-empty
+at a dry consult (pattern-manager logger defaults to level "info";
+verified) — so both registries were EMPTY: the supplier compile had NOT
+STARTED, the exact 3b property pre-declared in the register BEFORE the
+probe ran. Fallback counters 0; 80 `structure-load-stuck`
+18:16:50–18:20:50. A once-await structurally cannot see a compile that
+has not begun; the full close — event-driven re-supply on each persist
+record — TOUCHES THE ONE-SHOT CONTRACT and now sits with the owner (the
+register's 3b fork; alternatives include a deeper supply redesign such
+as compiling the home-env into the parent space before serving profile
+creation). The census returns to ONE patterns entry, its reason carrying
+the four-geometry map and probe 5's coordinates. The lift text below is
+this PR's superseded proposal, kept for the record.**
+
+**Delta 2026-08-28 (the geometry-3 close PR, original lift text —
+superseded above): the lunch forever-park's
 THIRD supplier geometry — the supplier COMPILE still mid-flight at
 child-replication time (probe 4's residue, run 33165960083) — is CLOSED
 red-first, and lunch-poll-vote's FILE entry is LIFTED: the ON-skip
