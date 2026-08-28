@@ -174,10 +174,18 @@ export interface PatternRenderVerdict {
    * The artifact root is not a confidentiality boundary — `bash` does not
    * reserve it the way the file tools do, and two reviewers have walked that
    * route, one with a planted marker — so the only defensible amount of
-   * rendered content to put in it is none. Nothing is lost: the synthetic
-   * instance is a deterministic function of the argument schema, and the
-   * index records the program, so anyone adjudicating an entry can reproduce
-   * the exact render rather than read a copy of it.
+   * rendered content to put in it is none.
+   *
+   * What that costs, stated rather than argued away. For a pattern whose view
+   * is a function of its arguments, nothing: the synthetic instance is
+   * deterministic and the index records the program, so an adjudicator
+   * reproduces the exact render instead of reading a copy. For a pattern that
+   * reaches the space for itself — `wish()` is the plain case — the render is
+   * NOT reproducible, because the state it read is not recorded anywhere the
+   * index can reach. For those entries the verdict and its reason are all
+   * that survives, and that is the price of the artifact root not being a
+   * boundary. It is the same class of pattern that made the probe's CFC
+   * neutrality hold only on the argument path.
    */
   readonly thrown?: string;
 }
@@ -195,7 +203,7 @@ export const PATTERN_PUBLICATION_MESSAGES: Readonly<
   "no-ui":
     "published to the pattern index and offered to search. It declares no $UI, so the render check does not apply to it.",
   "ui-default-tostring":
-    "recorded in the pattern index but NOT offered to search. Rendering its $UI host-side produced text of the form [object Object] — a value reaching the DOM through Object.prototype.toString rather than through a read. Indexing a reactive row by a reactive key is the usual cause: the index expression yields a proxy, and stringifying a proxy gives exactly this. Read the value out (a derive or a lift over the row and the key) and run it again to have the fixed version offered. The render itself is not retained anywhere: it is reproducible from the recorded program, since the synthetic instance is a deterministic function of the argument schema.",
+    "recorded in the pattern index but NOT offered to search. Rendering its $UI host-side produced text of the form [object Object] — a value reaching the DOM through Object.prototype.toString rather than through a read. Indexing a reactive row by a reactive key is the usual cause: the index expression yields a proxy, and stringifying a proxy gives exactly this. Read the value out (a derive or a lift over the row and the key) and run it again to have the fixed version offered. The render itself is not retained anywhere. For a pattern whose view is a function of its arguments it can be reproduced — the synthetic instance is deterministic and the index records the program — and for a pattern that reads the space it cannot, since that state is not recorded. Either way the verdict above is what is kept.",
   "ui-rendered-empty":
     "recorded in the pattern index but NOT offered to search: its $UI rendered a tree carrying no text and no attributes at all, against a synthetic instance of its own argument schema. That is an absence of evidence rather than a defect found — an empty-state list renders this way too — so the entry is uncertified rather than condemned.",
   "probe-failed":

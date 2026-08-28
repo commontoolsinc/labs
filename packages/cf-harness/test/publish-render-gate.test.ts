@@ -467,9 +467,12 @@ describe("publish-render-gate", () => {
       for (const message of Object.values(PATTERN_PUBLICATION_MESSAGES)) {
         expect(message).not.toContain("retained in the run artifact");
       }
-      expect(PATTERN_PUBLICATION_MESSAGES["ui-default-tostring"]).toContain(
-        "reproducible from the recorded program",
-      );
+      // And does not over-claim the other way either: a pattern that reads
+      // the space renders from state nothing records, so reproducibility is
+      // stated for the case it holds in and denied for the case it does not.
+      const withheld = PATTERN_PUBLICATION_MESSAGES["ui-default-tostring"];
+      expect(withheld).toContain("not retained anywhere");
+      expect(withheld).toContain("a pattern that reads the space it cannot");
     });
 
     it("says of every verdict that the pattern is still recorded", () => {

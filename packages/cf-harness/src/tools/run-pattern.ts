@@ -1623,11 +1623,11 @@ export const runPatternTool: HarnessToolDefinition<
         };
         // The rendered DOM is kept only for a verdict someone may have to
         // adjudicate — why an entry is not offered to search. A pass has
-        // nothing to adjudicate and the entry is discoverable, so the pattern
-        // can be looked at directly. Narrowing it this way is not a fix for
-        // the artifact root being readable through `bash` (CT-2117); it
-        // simply stops writing this into that root on the runs where it earns
-        // nothing, which is most of them.
+        // What a probe THREW, and never what it rendered: the rendered DOM
+        // is read, classified and discarded. The artifact root is readable
+        // through `bash` (CT-2117), so the only defensible amount of rendered
+        // content to put there is none; thrown text stays because it is the
+        // class that root already holds and cannot be recovered any other way.
         probeThrown = verdict.thrown;
         {
           const request: PatternIndexPublishRequest = {
