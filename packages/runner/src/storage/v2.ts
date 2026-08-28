@@ -5857,6 +5857,19 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
         continue;
       }
 
+      // A runtime-internal read of a document's CFC metadata path resolves
+      // labels. It is outside the attempt's consumed set (CFC spec §18.6.2,
+      // read exclusions for runtime-internal reads), and a derived label
+      // records the join the attempt observed rather than subscribing to its
+      // sources (§8.9.4, point-in-time semantics). The read stays in the
+      // journal, so reactivity re-runs when the envelope changes; only the
+      // commit's conflict precondition drops it. A handler's own label
+      // introspection consumes through an explicit observation record rather
+      // than through this raw read.
+      if (isInternalVerifierRead(read.meta) && isCfcLabelPath(read.path)) {
+        continue;
+      }
+
       const scope = normalizeCellScope(read.scope);
 
       const opPaths = mergeableOpPathsByEntity.get(`${read.id}\0${scope}`);

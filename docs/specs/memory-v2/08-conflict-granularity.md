@@ -150,15 +150,39 @@ remain in the journal for reactivity. A **by-value** argument (`hasAsCell` false
 is a genuine dependency and is never marked; the gate ensures by-value scalar
 reads — which are also recorded `nonRecursive` — keep their dependency.
 
+## 4. Runtime-internal CFC metadata reads are not value dependencies
+
+Resolving a label reads the document's `["cfc"]` envelope. The runtime issues
+that read itself, marked `internalVerifierRead`, and `buildReads` drops it from
+the conflict set. It stays in the journal, so reactivity still re-runs when the
+envelope changes.
+
+The CFC specification places these reads outside the attempt's consumed set
+(§18.6.2, read exclusions for runtime-internal reads), and it makes a derived
+label a record of the join the attempt observed rather than a subscription to
+its sources (§8.9.4, point-in-time semantics). A label derived from a source
+whose own label has since grown keeps the label it derived, which the
+specification names as the intended outcome.
+
+Persisting flow labels makes an append to a labeled collection rewrite that
+collection's `["cfc"]` member alongside the appended element. The drop is what
+lets a transaction resolve a label against a collection another session is
+appending to.
+
+Handler-initiated label introspection (`inspectConfLabel`) consumes through an
+explicit observation record rather than through the raw read, so its result
+carries a label independently of this drop.
+
 ## Composition
 
-The three are orthogonal and compose at one matcher:
+The four are orthogonal and compose at one matcher:
 
 | read kind | matched by | touched paths |
 |---|---|---|
 | recursive value read | `patchOverlapsRead` | leaf-only |
 | nonRecursive shape read | `patchOverlapsNonRecursiveRead` | parent-injected |
 | asCell reference-resolution read | excluded from conflict | — |
+| runtime-internal `["cfc"]` read | excluded from conflict | — |
 
 Net effect: disjoint-key writers no longer collide; same-key RMW, whole-container
 reads, keyset readers, and genuine value dependencies all still conflict.

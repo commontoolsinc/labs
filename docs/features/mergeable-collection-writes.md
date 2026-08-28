@@ -186,9 +186,11 @@ The same machinery carries three mergeable ops. `append` is described below;
   earlier path-level exclusion, which dropped any read overlapping the array path
   including the handler's. This drop sits alongside the conflict-granularity work
   (`docs/specs/memory-v2/08-conflict-granularity.md`), which separately keeps a
-  read marked `excludeReadFromConflict` (an `asCell` reference resolution) out of
-  the conflict set; the two exclusions are independent `continue`s in the same
-  loop.
+  read marked `excludeReadFromConflict` (an `asCell` reference resolution) and a
+  runtime-internal read of a document's `["cfc"]` envelope out of the conflict
+  set; the three exclusions are independent `continue`s in the same loop. The
+  `["cfc"]` one is not scoped to a mergeable-op entity, which is what lets a
+  label derivation consult a collection another session is appending to.
 
 - **Engine touched paths (`packages/memory/v2/engine.ts`)** — each op reports its
   array path (like `splice`) in both `touchedPathsForPatch` (which the
