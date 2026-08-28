@@ -27,12 +27,19 @@ import { resolveWellKnownGrantRefs } from "../src/well-known-grants.ts";
 import { CAPABILITY_PROBE_SENTINEL } from "../src/diagnostics.ts";
 import {
   asSerializableValue,
+  policyRefusalMessage,
   RUN_PATTERN_MAX_SOURCE_TEXT_BYTES,
+  runPatternPolicyRefusal,
   type RunPatternToolErrorOutput,
   type RunPatternToolInput,
   type RunPatternToolSuccessOutput,
   scrubBareFabricIdentifiers,
 } from "../src/tools/run-pattern.ts";
+import type {
+  CfcAddress,
+  CfcRefusalDetail,
+  CfcRefusalInput,
+} from "@commonfabric/runner/cfc";
 import type {
   SandboxCommandRequest,
   SandboxCommandResult,
@@ -292,6 +299,123 @@ async function seedLabelledSecret(
   const sourceId = sourceCell.getAsNormalizedFullLink().id;
   writeSeedEnvelopeDoc(seed, space);
   seed.writeOrThrow({ space, scope: "space", id: sourceId, path: [] }, {
+    value: { secret: "s3cr3t" },
+    cfc: {
+      version: 1,
+      schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+      labelMap: {
+        version: 1,
+        entries: [{ path: ["secret"], label: { confidentiality: ["secret"] } }],
+      },
+    },
+  });
+  expect((await seed.commit()).ok).toBeDefined();
+  return createLLMFriendlyLink(sourceCell.getAsNormalizedFullLink(), space);
+}
+
+/**
+ * The session's pieces with the argument-document route to an input key taken
+ * away: once the piece is running, resolving its argument cell fails. That is
+ * the state a refusal report degrades under when the argument cell of a piece
+ * that ran will not resolve, and the caller's own resolved addresses are all
+ * that is left to answer with.
+ */
+function piecesWithUnresolvableArgument(
+  pieces: PiecesController,
+): PiecesController {
+  let running = false;
+  return new Proxy(pieces, {
+    get(target, property) {
+      if (property === "runPersistent") {
+        return async (
+          ...args: Parameters<PiecesController["runPersistent"]>
+        ) => {
+          const cell = await target.runPersistent(...args);
+          running = true;
+          return cell;
+        };
+      }
+      if (property === "getArgument") {
+        return (...args: Parameters<PiecesController["getArgument"]>) => {
+          if (running) {
+            throw new Error("the piece's argument cell does not resolve");
+          }
+          return target.getArgument(...args);
+        };
+      }
+      const value = Reflect.get(target, property);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+/** The space a synthetic refusal detail addresses; never resolved. */
+const REFUSAL_SPACE = "did:key:zRunPatternRefusal" as const;
+
+/**
+ * A read of `id` at `path`, as a refusal detail addresses one. The id is a
+ * plain string rather than an `of:` URI, which the canonical entity-id seam
+ * passes through unchanged, so two details naming one id compare as one
+ * document.
+ */
+function refusalRead(id: string, path: readonly string[] = []): CfcAddress {
+  return { space: REFUSAL_SPACE, id, scope: "space", path: [...path] };
+}
+
+/** One read that carried `"secret"` into a refused operation. */
+function refusalInput(
+  id: string,
+  labelPath: readonly string[] = ["secret"],
+): CfcRefusalInput {
+  return { read: refusalRead(id), labelPath, atoms: ['"secret"'] };
+}
+
+/** A `writer-fit` refusal over one named read, with `overrides` applied. */
+function refusalDetail(
+  overrides: Partial<CfcRefusalDetail> = {},
+): CfcRefusalDetail {
+  return {
+    gate: "writer-fit",
+    offendingAtoms: ['"secret"'],
+    inputs: [],
+    attribution: "complete",
+    reason: "CFC enforcement rejected commit",
+    ...overrides,
+  };
+}
+
+/** Resolves a refused read to an input key by the document it names. */
+function inputKeyByDocument(
+  owned: Readonly<Record<string, string>>,
+): (read: CfcAddress) => string | undefined {
+  return (read) => owned[read.id];
+}
+
+/**
+ * Seeds the same labelled document as {@link seedLabelledSecret} under a
+ * COMPUTED entity id, and answers the link an agent would pass naming it. A
+ * kinded id names a different entity from the `of:` id over the same hash, so
+ * the canonical entity-id seam refuses to reduce it and nothing that compares
+ * documents by hash can place a read of one.
+ */
+async function seedLabelledComputedSecret(
+  runtime: Runtime,
+  space: ReturnType<PiecesController["getSpace"]>,
+  cause: string,
+): Promise<string> {
+  const seed = runtime.edit();
+  const plainId = runtime.getCell(space, cause, undefined, seed)
+    .getAsNormalizedFullLink().id;
+  const computedId: `${string}:${string}` = `computed:${
+    plainId.slice("of:".length)
+  }`;
+  const sourceCell = runtime.getCellFromLink(
+    { id: computedId, path: [], space, scope: "space" },
+    { type: "object", properties: { secret: { type: "string" } } },
+    seed,
+  );
+  writeSeedEnvelopeDoc(seed, space);
+  seed.writeOrThrow({ space, scope: "space", id: computedId, path: [] }, {
     value: { secret: "s3cr3t" },
     cfc: {
       version: 1,
@@ -1012,6 +1136,64 @@ describe("run-pattern", () => {
         const encoded = JSON.stringify(output.policyRefusal);
         expect(scrubBareFabricIdentifiers(encoded)).toBe(encoded);
         expect(encoded).not.toContain(space);
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("counts the reads only the argument document accounted for when the piece's argument cell will not resolve", async () => {
+      // The argument document is the second of the two routes from a refused
+      // read back to an input key. With it gone the report stands on the
+      // addresses the caller's own links resolved to, and states the gap
+      // rather than closing over it: what those addresses do not reach is
+      // counted, and the remedy drops to `partial`.
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const sourceRef = await seedLabelledSecret(
+          runtime,
+          space,
+          "refusal-without-argument-route",
+        );
+        const result = await createStrictEngine(
+          piecesWithUnresolvableArgument(pieces),
+        ).invokeBuiltinTool("run_pattern", {
+          sourceText: OPTIONAL_SECRET_PATTERN_SOURCE,
+          inputs: { amount: 2, source: sourceRef },
+          resultSchema: TOTAL_RESULT_SCHEMA,
+        });
+        const output = result.output as RunPatternToolErrorOutput;
+        expect(output.status).toBe("error");
+        expect(output.policyRefusal?.inputKeys).toEqual(["source"]);
+        expect(output.policyRefusal?.unattributedInputCount).toBe(1);
+        expect(output.policyRefusal?.attribution).toBe("partial");
+        expect(output.message).toContain("narrows the flow");
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("counts a refused read of a computed document, whose kinded id no input address can be compared against", async () => {
+      // A kinded entity id does not reduce to a hash, so neither route from a
+      // refused read to an input key can place it. The report counts it
+      // instead of guessing, and drops to `partial`.
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const sourceRef = await seedLabelledComputedSecret(
+          runtime,
+          space,
+          "refusal-over-computed-source",
+        );
+        const result = await createStrictEngine(pieces).invokeBuiltinTool(
+          "run_pattern",
+          {
+            sourceText: OPTIONAL_SECRET_PATTERN_SOURCE,
+            inputs: { amount: 2, source: sourceRef },
+            resultSchema: TOTAL_RESULT_SCHEMA,
+          },
+        );
+        const output = result.output as RunPatternToolErrorOutput;
+        expect(output.status).toBe("error");
+        expect(output.policyRefusal?.unattributedInputCount).toBe(1);
       } finally {
         await dispose();
       }
@@ -1883,6 +2065,281 @@ describe("run-pattern", () => {
       const output = result.output as RunPatternToolSuccessOutput;
       expect(output.status).toBe("ok");
       expect((output.value as { count: number }).count).toBe(0);
+    });
+  });
+
+  describe("runPatternPolicyRefusal()", () => {
+    it("returns `undefined` for an empty refusal list", () => {
+      expect(runPatternPolicyRefusal([], () => undefined)).toBeUndefined();
+    });
+
+    it("names the sink whose ceiling refused for a `sink-ceiling` detail", () => {
+      expect(
+        runPatternPolicyRefusal([
+          refusalDetail({
+            gate: "sink-ceiling",
+            sink: "fetchText",
+            inputs: [refusalInput("source-doc")],
+          }),
+        ], inputKeyByDocument({ "source-doc": "source" })),
+      ).toEqual({
+        gates: ["sink-ceiling"],
+        sinks: ["fetchText"],
+        offendingAtoms: ['"secret"'],
+        inputKeys: ["source"],
+        attribution: "complete",
+      });
+    });
+
+    it("deduplicates the gates, sinks, offending atoms and input keys of several details", () => {
+      expect(
+        runPatternPolicyRefusal(
+          [
+            refusalDetail({
+              gate: "sink-ceiling",
+              sink: "fetchText",
+              offendingAtoms: ['"secret"', '"medical"'],
+              inputs: [refusalInput("source-doc")],
+            }),
+            refusalDetail({
+              gate: "sink-ceiling",
+              sink: "fetchText",
+              offendingAtoms: ['"medical"'],
+              inputs: [refusalInput("source-doc", ["notes"])],
+            }),
+            refusalDetail({
+              gate: "writer-fit",
+              inputs: [refusalInput("other-doc")],
+            }),
+          ],
+          inputKeyByDocument({
+            "source-doc": "source",
+            "other-doc": "notes",
+          }),
+        ),
+      ).toEqual({
+        gates: ["sink-ceiling", "writer-fit"],
+        sinks: ["fetchText"],
+        offendingAtoms: ['"secret"', '"medical"'],
+        inputKeys: ["source", "notes"],
+        attribution: "complete",
+      });
+    });
+
+    it("counts a structured offending atom into `withheldAtomCount` rather than naming it", () => {
+      // A `Caveat` atom carries the principal that introduced it, and nothing
+      // redacts a principal out of an atom already rendered to a string.
+      expect(
+        runPatternPolicyRefusal([
+          refusalDetail({
+            offendingAtoms: [
+              '"secret"',
+              '{"caveat":"only-for","source":"did:key:zIntroducer"}',
+            ],
+            inputs: [refusalInput("source-doc")],
+          }),
+        ], inputKeyByDocument({ "source-doc": "source" })),
+      ).toEqual({
+        gates: ["writer-fit"],
+        sinks: [],
+        offendingAtoms: ['"secret"'],
+        withheldAtomCount: 1,
+        inputKeys: ["source"],
+        attribution: "complete",
+      });
+    });
+
+    it("counts an offending atom whose rendering is not JSON into `withheldAtomCount`", () => {
+      // `renderCfcAtom` is `JSON.stringify`, which produces no JSON text at
+      // all for an atom it cannot carry, so the rendering reaching this fold
+      // need not parse.
+      expect(
+        runPatternPolicyRefusal([
+          refusalDetail({
+            offendingAtoms: ['"secret"', "undefined"],
+            inputs: [refusalInput("source-doc")],
+          }),
+        ], inputKeyByDocument({ "source-doc": "source" })),
+      ).toEqual({
+        gates: ["writer-fit"],
+        sinks: [],
+        offendingAtoms: ['"secret"'],
+        withheldAtomCount: 1,
+        inputKeys: ["source"],
+        attribution: "complete",
+      });
+    });
+
+    it("returns `partial` with the unowned read counted when one offending read belongs to no input key", () => {
+      expect(
+        runPatternPolicyRefusal([
+          refusalDetail({
+            inputs: [refusalInput("source-doc"), refusalInput("hidden-doc")],
+          }),
+        ], inputKeyByDocument({ "source-doc": "source" })),
+      ).toEqual({
+        gates: ["writer-fit"],
+        sinks: [],
+        offendingAtoms: ['"secret"'],
+        inputKeys: ["source"],
+        unattributedInputCount: 1,
+        attribution: "partial",
+      });
+    });
+
+    it("counts two paths of one unowned document as a single unattributed input", () => {
+      expect(
+        runPatternPolicyRefusal([
+          refusalDetail({
+            inputs: [
+              refusalInput("hidden-doc", ["notes"]),
+              refusalInput("hidden-doc", ["archive", "notes"]),
+              refusalInput("source-doc"),
+            ],
+          }),
+        ], inputKeyByDocument({ "source-doc": "source" })),
+      ).toEqual({
+        gates: ["writer-fit"],
+        sinks: [],
+        offendingAtoms: ['"secret"'],
+        inputKeys: ["source"],
+        unattributedInputCount: 1,
+        attribution: "partial",
+      });
+    });
+
+    it("returns `none` when no offending read belongs to an input of the call", () => {
+      expect(
+        runPatternPolicyRefusal([
+          refusalDetail({
+            inputs: [
+              refusalInput("hidden-doc"),
+              refusalInput("other-hidden-doc"),
+            ],
+          }),
+        ], () => undefined),
+      ).toEqual({
+        gates: ["writer-fit"],
+        sinks: [],
+        offendingAtoms: ['"secret"'],
+        inputKeys: [],
+        unattributedInputCount: 2,
+        attribution: "none",
+      });
+    });
+
+    it("returns `partial` for a detail the boundary itself attributed partially, though every named read is an input key", () => {
+      expect(
+        runPatternPolicyRefusal([
+          refusalDetail({
+            attribution: "partial",
+            inputs: [refusalInput("source-doc")],
+          }),
+        ], inputKeyByDocument({ "source-doc": "source" })),
+      ).toEqual({
+        gates: ["writer-fit"],
+        sinks: [],
+        offendingAtoms: ['"secret"'],
+        inputKeys: ["source"],
+        attribution: "partial",
+      });
+    });
+  });
+
+  describe("policyRefusalMessage()", () => {
+    it("names the single sink whose ceiling refused and the one input to drop", () => {
+      const message = policyRefusalMessage({
+        gates: ["sink-ceiling"],
+        sinks: ["fetchText"],
+        offendingAtoms: ['"secret"'],
+        inputKeys: ["source"],
+        attribution: "complete",
+      });
+      expect(message).toContain(
+        'the sink "fetchText" does not admit the confidentiality ("secret")',
+      );
+      expect(message).toContain(
+        'Every label refused here came in through input "source", so the same run without it proceeds',
+      );
+    });
+
+    it("names both sinks when two ceilings refused", () => {
+      expect(policyRefusalMessage({
+        gates: ["sink-ceiling"],
+        sinks: ["fetchText", "postMessage"],
+        offendingAtoms: ['"secret"'],
+        inputKeys: ["source"],
+        attribution: "complete",
+      })).toContain('the sinks "fetchText", "postMessage" does not admit');
+    });
+
+    it("names the write it attempted and both inputs to drop when no sink refused", () => {
+      const message = policyRefusalMessage({
+        gates: ["writer-fit"],
+        sinks: [],
+        offendingAtoms: ['"secret"', '"medical"'],
+        inputKeys: ["source", "notes"],
+        attribution: "complete",
+      });
+      expect(message).toContain(
+        'the write it attempted does not admit the confidentiality ("secret", "medical")',
+      );
+      expect(message).toContain(
+        'Every label refused here came in through inputs "source", "notes", so the same run without them proceeds',
+      );
+    });
+
+    it("omits the confidentiality parenthetical when every offending atom was withheld", () => {
+      const message = policyRefusalMessage({
+        gates: ["writer-fit"],
+        sinks: [],
+        offendingAtoms: [],
+        withheldAtomCount: 2,
+        inputKeys: ["source"],
+        attribution: "complete",
+      });
+      expect(message).toContain(
+        "the write it attempted does not admit the confidentiality this run carries",
+      );
+    });
+
+    it("states that dropping the named inputs only narrows the flow for a `partial` attribution", () => {
+      expect(policyRefusalMessage({
+        gates: ["writer-fit"],
+        sinks: [],
+        offendingAtoms: ['"secret"'],
+        inputKeys: ["source", "notes"],
+        unattributedInputCount: 1,
+        attribution: "partial",
+      })).toContain(
+        'Some of what was refused came in through inputs "source", "notes"; dropping them narrows the flow without necessarily clearing it, since reads this call does not own carry refused labels too',
+      );
+    });
+
+    it("states that dropping the single named input only narrows the flow for a `partial` attribution", () => {
+      expect(policyRefusalMessage({
+        gates: ["writer-fit"],
+        sinks: [],
+        offendingAtoms: ['"secret"'],
+        inputKeys: ["source"],
+        unattributedInputCount: 1,
+        attribution: "partial",
+      })).toContain(
+        'came in through input "source"; dropping it narrows the flow',
+      );
+    });
+
+    it("states that no input of the call accounts for the refusal for a `none` attribution", () => {
+      expect(policyRefusalMessage({
+        gates: ["writer-fit"],
+        sinks: [],
+        offendingAtoms: ['"secret"'],
+        inputKeys: [],
+        unattributedInputCount: 1,
+        attribution: "none",
+      })).toContain(
+        "No input of this call accounts for what was refused, so dropping an input will not clear it",
+      );
     });
   });
 });
