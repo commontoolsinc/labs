@@ -72,6 +72,7 @@
   // process runs under Deno's native OpenTelemetry.
   "imports": {
     // Dependency guide: ../../docs/development/DEPENDENCIES.md
-    "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.1"
+    "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.1",
+    "@xyflow/react": "npm:@xyflow/react@^12.11.5"
   }
 }
