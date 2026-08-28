@@ -209,10 +209,16 @@ export class WorkerReconciler {
   readonly #onOps: (ops: VDomOp[]) => number | void;
   readonly #onError?: (error: Error) => void;
   readonly #renderDeclassificationPolicy: RenderDeclassificationPolicy;
+
+  /**
+   * TypeScript-private rather than a `#` name:
+   * `runtime-client/test/backends/runtime-processor.test.ts` reaches this
+   * member across the package boundary, through the reconciler a mount holds.
+   */
   // Root-of-tree render policy: the host's default ceiling when configured
   // (spec §8.10.6), otherwise the historical unbounded policy. Authored
   // boundaries can only narrow from here.
-  readonly #rootRenderPolicy: RenderPolicy;
+  private readonly rootRenderPolicy: RenderPolicy;
   // Runner-side display-boundary resolver (Epic H3b): rewrites a cell's
   // confidentiality label through the exchange rules before the ceiling fit,
   // admitting `Space(...)`-via-`HasRole` principal forms. Undefined = H3a
@@ -238,7 +244,7 @@ export class WorkerReconciler {
     const ceiling = normalizeRenderConfidentialityCeiling(
       options.renderConfidentialityCeiling,
     );
-    this.#rootRenderPolicy = ceiling === undefined ? DEFAULT_RENDER_POLICY : {
+    this.rootRenderPolicy = ceiling === undefined ? DEFAULT_RENDER_POLICY : {
       declassifyConfidentiality: [],
       maxConfidentiality: [...(ceiling.atoms ?? [])],
       caveatKindAllow: [...(ceiling.caveatKinds ?? [])],
@@ -330,14 +336,14 @@ export class WorkerReconciler {
         if (
           !this.canRenderCellUnderPolicy(
             vnode as Cell<unknown>,
-            this.#rootRenderPolicy,
+            this.rootRenderPolicy,
           )
         ) {
           this.#reconcileIntoWrapper(
             ctx,
             wrapperState,
             this.#blockedPlaceholderVNode(),
-            this.#rootRenderPolicy,
+            this.rootRenderPolicy,
           );
           this.#rootChildId = wrapperState.currentChild?.nodeId ?? null;
           return;
@@ -355,7 +361,7 @@ export class WorkerReconciler {
           ctx,
           wrapperState,
           resolvedVnode as WorkerRenderNode,
-          this.#rootRenderPolicy,
+          this.rootRenderPolicy,
         );
         // Track the root child for cleanup
         this.#rootChildId = wrapperState.currentChild?.nodeId ?? null;
@@ -370,7 +376,7 @@ export class WorkerReconciler {
         ctx,
         vnode,
         new Set(),
-        this.#rootRenderPolicy,
+        this.rootRenderPolicy,
       );
       if (state) {
         addCancel(state.cancel);
