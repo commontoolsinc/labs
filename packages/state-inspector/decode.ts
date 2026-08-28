@@ -20,7 +20,7 @@ import { FabricLink } from "@commonfabric/data-model/fabric-instances";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 import { isArrayIndexPropertyName } from "@commonfabric/utils/arrays";
-import { isPlainObject } from "@commonfabric/utils/types";
+import { isObjectNotArray, isPlainObject } from "@commonfabric/utils/types";
 
 /** Decode a stored payload string, routing the `data-model` codec envelope. */
 export function decodeStored(data: string): unknown {
@@ -642,6 +642,95 @@ export function summarize(v: Json): string {
     return quoteTerminalText(preview);
   }
   return escapeTerminalText(String(v));
+}
+
+/** One link found inside a value, and the path within that value it sits at. */
+export interface LinkAtPath {
+  link: DecodedLink;
+
+  /**
+   * Where the link sits, as path segments from the walked value's root. An
+   * array index is a segment like any other.
+   *
+   * Segments arrive as an array rather than as one joined string because a
+   * segment is an arbitrary key: one holding `/`, or `~`, is a key the store
+   * writes like any other, and joining it makes it indistinguishable from two
+   * segments. A caller that wants a joined form joins at the point it knows
+   * what the joined form is for.
+   */
+  at: readonly string[];
+}
+
+/**
+ * How far a link walk reaches. There is no default here, because the two
+ * bounds trade completeness against work and only the caller knows which way
+ * it wants that traded. A caller rendering a value for a reader may stop
+ * early, since a link it never shows costs the reader nothing. A caller for
+ * which a link missed is indistinguishable from a value that holds no link
+ * cannot, and sets bounds far above any value it expects to meet.
+ */
+export interface LinkWalkBounds {
+  /**
+   * The longest path the walk descends to. A value at a deeper path is not
+   * visited, so a link sitting there is not reported.
+   */
+  maxDepth: number;
+
+  /**
+   * The most values the walk visits.
+   *
+   * A decoded document is plain JSON — finite and acyclic — so the walk ends
+   * on its own, and its cost is the size of a value the store has already
+   * decoded into memory. This bound is against the value that is not that: a
+   * malformed row, or an at-rest form restoring as an object graph with a
+   * cycle in it, is otherwise walked forever. `maxDepth` settles that on its
+   * own only while it is small, because a cycle that branches two ways costs
+   * exponentially in the depth — so the node count is what makes the work
+   * finite at a large depth, and the depth is what keeps one deep chain cheap.
+   */
+  maxNodes: number;
+}
+
+/**
+ * Every link in a value, in either at-rest form, each with the path inside the
+ * value it sits at. The walk descends the objects and arrays of the value and
+ * stops at each link it meets, so a linked value's own links belong to that
+ * value rather than to this one.
+ *
+ * It is generic over shape rather than over an enumeration of the places a
+ * link may appear: `decodedLinkOf` is the whole of the link knowledge in it,
+ * which is why no caller keeps a list of link-bearing keys in step with the
+ * ones the store writes. Every link reachable within `bounds` is found.
+ *
+ * Links come back in the order the walk meets them, depth first, with an
+ * object's keys in `Object.entries` order and an array's items in index order.
+ */
+export function linksWithPaths(
+  v: Json,
+  bounds: LinkWalkBounds,
+): LinkAtPath[] {
+  const found: LinkAtPath[] = [];
+  let budget = bounds.maxNodes;
+  const walk = (held: Json, at: readonly string[]): void => {
+    if (budget <= 0 || at.length > bounds.maxDepth) return;
+    budget -= 1;
+    const link = decodedLinkOf(held);
+    if (link) {
+      found.push({ link, at });
+      return;
+    }
+    if (Array.isArray(held)) {
+      held.forEach((item, index) => walk(item, [...at, String(index)]));
+      return;
+    }
+    if (isObjectNotArray(held)) {
+      for (const [key, child] of Object.entries(held)) {
+        walk(child, [...at, key]);
+      }
+    }
+  };
+  walk(v, []);
+  return found;
 }
 
 /** Collect every link reachable in a value (does not descend into links). */

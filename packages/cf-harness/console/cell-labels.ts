@@ -312,6 +312,14 @@ const addressOf = (ref: string): ConsoleCellAddress | undefined => {
 };
 
 /**
+ * The label a stored entry crosses the rebase under, standing for "this entry
+ * carries one". Its only job is to be non-empty, because
+ * {@link rebaseCfcLabelView} keeps an entry only while its label holds
+ * something; nothing reads its interior, and no atom of it reaches the page.
+ */
+const ENTRY_PRESENT: IFCLabel = { integrity: ["cf-harness/label-entry"] };
+
+/**
  * One stored entry as a label view of its own, which is the form
  * {@link rebaseCfcLabelView} narrows. One entry per view rather than the
  * whole set in one: the canonical rebase merges the labels of entries that
@@ -319,21 +327,23 @@ const addressOf = (ref: string): ConsoleCellAddress | undefined => {
  * entry that carried them, so a merged label could no longer say which of
  * them was computed and which was declared.
  *
- * The atoms are the ones the space stored. The contract widens them to carry
- * fields no reader has a name for, which the atom types do not describe, and
- * the rebase reads no atom's interior — only whether a label carries any. So
- * they cross as they are, rather than as the names a badge writes: reducing
- * first would rebase over the last segment of a type URL, which is a display
- * string and not the atom.
+ * What crosses is {@link ENTRY_PRESENT} rather than the atoms the space
+ * stored, because the two facts this caller takes from the rebase — whether
+ * the entry reaches the path asked about, and what path it re-roots to —
+ * depend on a label only through its being non-empty. The atoms the page
+ * shows are read back off the stored entry, so the normalization and
+ * structural deduplication the rebase performs on a label it merges reach
+ * nothing a reader sees. An entry the space stored with no atoms in either
+ * dimension crosses under an empty label, which the rebase drops: a path
+ * labelled with nothing stays a path with no entry.
  */
 const labelViewOfEntry = (entry: HarnessCellLabelEntry): CfcLabelView => ({
   version: 1,
   entries: [{
     path: entry.path,
-    label: {
-      confidentiality: [...entry.confidentiality],
-      integrity: [...entry.integrity],
-    } as unknown as IFCLabel,
+    label: entry.confidentiality.length > 0 || entry.integrity.length > 0
+      ? ENTRY_PRESENT
+      : {},
     // The space is the authority on what it observed, so the recorded class
     // crosses as it stands. One it named that CFC has no rule for is not a
     // content observation, and the rebase treats it as one it cannot inherit

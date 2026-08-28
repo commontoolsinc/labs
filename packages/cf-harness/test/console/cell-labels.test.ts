@@ -213,6 +213,41 @@ const linkerSnapshot = snapshot([{
   }],
 }]);
 
+const NESTER = entity("nester");
+
+/**
+ * A cell whose links sit inside its value rather than at its top: one was
+ * followed and one reaches another space, each recorded at the whole path it
+ * sits at.
+ */
+const nesterSnapshot = snapshot([{
+  entityId: NESTER,
+  ref: `/${NESTER}`,
+  schemaHash: SCHEMA_HASH,
+  unreadPaths: [{ path: ["nested", "theirs"], reason: "cross-space" }],
+  entries: [{
+    path: ["nested", "mine"],
+    confidentiality: [atom("linked-secret")],
+    integrity: [],
+    origin: "declared",
+  }],
+}]);
+
+const BARELY = entity("barely");
+
+/**
+ * A cell the space labelled at a path with nothing in either dimension, which
+ * is a labelled path holding no label at all.
+ */
+const barelySnapshot = snapshot([
+  record(BARELY, `/${BARELY}`, [{
+    path: ["empty"],
+    confidentiality: [],
+    integrity: [],
+    origin: "declared",
+  }]),
+]);
+
 describe("console/cell-labels", () => {
   describe("consoleCellLabels()", () => {
     it("returns every atom of every path, deduplicated", () => {
@@ -519,6 +554,48 @@ describe("console/cell-labels", () => {
         const labels = cellLabelsAt(linker, `/${LINKER}`);
         expect(labels?.unreadPaths).toEqual([["theirs"], ["ours"]]);
         expect(labels?.confidentiality).toEqual(["linked-secret"]);
+      });
+    });
+
+    describe("a nested path the snapshot could not read", () => {
+      const nester = consoleCellLabelIndex(nesterSnapshot);
+
+      it("returns `undefined` for a reference at the whole path a nested unfollowed link sits at", () => {
+        expect(cellLabelsAt(nester, `/${NESTER}/nested/theirs`)).toBe(
+          undefined,
+        );
+      });
+
+      it("returns `undefined` for a reference beneath a nested unfollowed link", () => {
+        expect(cellLabelsAt(nester, `/${NESTER}/nested/theirs/summary`)).toBe(
+          undefined,
+        );
+      });
+
+      it("returns the labels of a nested link the snapshot followed", () => {
+        const labels = cellLabelsAt(nester, `/${NESTER}/nested/mine`);
+        expect(labels?.confidentiality).toEqual(["linked-secret"]);
+        expect(labels?.unreadPaths).toBe(undefined);
+      });
+
+      it("names the unread path under the container that holds it", () => {
+        const labels = cellLabelsAt(nester, `/${NESTER}/nested`);
+        expect(labels?.unreadPaths).toEqual([["theirs"]]);
+        expect(labels?.entries.map((entry) => entry.path)).toEqual([["mine"]]);
+      });
+    });
+
+    describe("an entry the space labelled with nothing", () => {
+      const barely = consoleCellLabelIndex(barelySnapshot);
+
+      it("returns no entry for the path it was stored at", () => {
+        const labels = cellLabelsAt(barely, `/${BARELY}/empty`);
+        expect(labels?.entries).toEqual([]);
+        expect(labels?.derived).toBe(false);
+      });
+
+      it("returns no entry for the cell that holds it", () => {
+        expect(cellLabelsAt(barely, `/${BARELY}`)?.entries).toEqual([]);
       });
     });
 

@@ -20,8 +20,9 @@ import {
 import type { SpaceDb } from "./db.ts";
 import {
   annotate,
-  type DecodedLink,
   decodedLinkOf,
+  linksWithPaths,
+  type LinkWalkBounds,
   parseSigilLink,
   summarize,
 } from "./decode.ts";
@@ -269,30 +270,18 @@ function declaredSchemaFor(
   return undefined;
 }
 
-/** Collect every link in a value, in either at-rest form, with its JSON path. */
-function linksWithPaths(
-  v: unknown,
-  base: string[] = [],
-  out: { link: DecodedLink; at: string }[] = [],
-  depth = 10,
-): { link: DecodedLink; at: string }[] {
-  if (depth < 0) return out;
-  const link = decodedLinkOf(v);
-  if (link) {
-    out.push({ link, at: base.join("/") });
-    return out;
-  }
-  if (isObjectNotArray(v)) {
-    for (const [k, val] of Object.entries(v)) {
-      linksWithPaths(val, [...base, k], out, depth - 1);
-    }
-  } else if (Array.isArray(v)) {
-    v.forEach((val, i) =>
-      linksWithPaths(val, [...base, String(i)], out, depth - 1)
-    );
-  }
-  return out;
-}
+/**
+ * How far a detail's link walks reach. A detail describes ONE entity for a
+ * reader, and the rendering it feeds is itself depth-bounded, so a link past
+ * ten levels of nesting is one no reader of this output would have seen
+ * anyway. That depth is small enough to bound the walk's work on its own —
+ * see `LinkWalkBounds` for why a larger one would not be — so no node count is
+ * imposed on top of it.
+ */
+const DETAIL_LINK_WALK: LinkWalkBounds = {
+  maxDepth: 10,
+  maxNodes: Number.POSITIVE_INFINITY,
+};
 
 interface DetailContext {
   ownDid: string;
@@ -353,7 +342,7 @@ function detailFromDoc(
   if (c.kind === "piece" && c.regime === "legacy" && isObjectNotArray(value)) {
     const rid = legacyResultId(value);
     if (rid) lineage.result = refTo(rid, ctx);
-    const internalIds = linksWithPaths(value.internal)
+    const internalIds = linksWithPaths(value.internal, DETAIL_LINK_WALK)
       .map((l) => l.link.id).filter((x): x is string => !!x);
     if (internalIds.length) {
       lineage.internal = internalIds.map((cid) => refTo(cid, ctx)!);
@@ -380,19 +369,21 @@ function detailFromDoc(
   }
 
   // outgoing links, resolved
-  const outLinks: LinkRef[] = linksWithPaths(value).map(({ link, at }) => {
-    const external = !!link.space && link.space !== ctx.ownDid &&
-      link.space !== `did:key:${ctx.ownDid}`;
-    return {
-      id: link.id ?? "?",
-      label: link.id ? ctx.labelOf.get(link.id)?.label : undefined,
-      kind: link.id ? ctx.labelOf.get(link.id)?.kind : undefined,
-      space: link.space,
-      path: link.path ? [...link.path] : undefined,
-      external,
-      at,
-    };
-  });
+  const outLinks: LinkRef[] = linksWithPaths(value, DETAIL_LINK_WALK).map(
+    ({ link, at }) => {
+      const external = !!link.space && link.space !== ctx.ownDid &&
+        link.space !== `did:key:${ctx.ownDid}`;
+      return {
+        id: link.id ?? "?",
+        label: link.id ? ctx.labelOf.get(link.id)?.label : undefined,
+        kind: link.id ? ctx.labelOf.get(link.id)?.kind : undefined,
+        space: link.space,
+        path: link.path ? [...link.path] : undefined,
+        external,
+        at: at.join("/"),
+      };
+    },
+  );
 
   // module source
   let code: string | undefined;

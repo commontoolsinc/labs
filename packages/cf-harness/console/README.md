@@ -179,8 +179,10 @@ member's cells.
 
 The read is one hop wide. A pattern's results are their own cells, linked from
 the piece that names them, and the derived label sits on the cell — so the
-labels of the cells a run's own cells link to are read too, under the key that
-named them.
+labels of the cells a run's own cells link to are read too, at the path the link
+sits at. The walk descends through the objects and arrays of a value to find
+those links, however deep inside one they sit, and stops at each: a linked
+cell's own links belong to that cell, not to this one.
 
 It reaches one space. A reference or a link naming a space the opened file
 cannot be shown to be — another space, or any space at all where the file's own

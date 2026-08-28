@@ -14,8 +14,9 @@
  */
 
 import {
-  decodedLinkOf,
   discoverSpaceDbs,
+  linksWithPaths,
+  type LinkWalkBounds,
   openSpace,
   reconstructOutcome,
   resolveSpace,
@@ -242,14 +243,40 @@ const unreadReasonOf = (
   return space === did ? undefined : "cross-space";
 };
 
+/** One cell a document links to, and the path inside the document it sat at. */
+interface LinkedCell {
+  path: readonly string[];
+  id: string;
+}
+
+// How far into one document's value this reader walks for links. A link it
+// stops short of renders as a path holding no entry, which is how a path the
+// space holds no label for reads — so a truncated walk here reports a cell
+// nothing looked at as a cell the space says nothing about. That is why this
+// reader buys completeness with work rather than the other way round, and why
+// both bounds sit far above the shape of any document a pattern writes: a
+// document reaching either is one no reader could enumerate the paths of
+// anyway. `LinkWalkBounds` covers why a node count is needed alongside a depth
+// this large.
+const LINK_WALK: LinkWalkBounds = {
+  maxDepth: 64,
+  maxNodes: 100_000,
+};
+
 /**
- * The cells one document links to, by the key that names each, and the keys
- * whose links were not followed. A pattern's results are their own cells
- * rather than paths inside the piece that names them, so following these one
- * hop is what puts a derived label where a reader looks for it.
+ * The cells one document links to, each at the path inside the document it
+ * sits at, and the paths whose links were not followed. A pattern's results
+ * are their own cells rather than paths inside the piece that names them, so
+ * following these one hop is what puts a derived label where a reader looks
+ * for it.
+ *
+ * The walk descends through the objects and arrays of the value — an array
+ * index is a path segment like any other — and stops at each link it meets:
+ * the read is one hop wide, so a linked document's own links are not the
+ * business of this document's labels.
  *
  * A link this store cannot answer for is returned as an unread path rather
- * than dropped. Dropped, it would leave the key holding no entry, which is
+ * than dropped. Dropped, it would leave its path holding no entry, which is
  * how a path the space holds no label for reads — so the cell nobody looked
  * at and the cell the space says nothing about would render alike.
  */
@@ -257,25 +284,20 @@ const linkedCellsOf = (
   document: Record<string, unknown> | undefined,
   space: string | undefined,
 ): {
-  linked: { key: string; id: string }[];
+  linked: LinkedCell[];
   unreadPaths: HarnessCellLabelUnreadPath[];
 } => {
-  const value = document?.value;
-  if (!isRecord(value)) {
-    return { linked: [], unreadPaths: [] };
-  }
-  const linked: { key: string; id: string }[] = [];
+  const linked: LinkedCell[] = [];
   const unreadPaths: HarnessCellLabelUnreadPath[] = [];
-  for (const [key, held] of Object.entries(value)) {
-    const link = decodedLinkOf(held as never);
-    if (link?.id === undefined || link.id === null) {
+  for (const { link, at } of linksWithPaths(document?.value, LINK_WALK)) {
+    if (link.id === undefined) {
       continue;
     }
     const reason = unreadReasonOf(link.space, space);
     if (reason === undefined) {
-      linked.push({ key, id: link.id });
+      linked.push({ path: at, id: link.id });
     } else {
-      unreadPaths.push({ path: [key], reason });
+      unreadPaths.push({ path: at, reason });
     }
   }
   return { linked, unreadPaths };
@@ -294,8 +316,9 @@ export interface SpaceLabelReader {
 
   /**
    * The labels stored for one cell, and for the cells it links to one hop
-   * out. A linked cell's entries arrive under the key that named it, and say
-   * which cell they were read from, so the two are never confused.
+   * out. A linked cell's entries arrive under the path the link sat at,
+   * however deep inside the value that was, and say which cell they were read
+   * from, so the two are never confused.
    *
    * An entity that holds no document — never written, deleted, or
    * undecodable — reads as no labels, the same as one whose document carries
@@ -305,11 +328,9 @@ export interface SpaceLabelReader {
    * An address in another space is not looked up at all: the answer comes
    * back `unread`, which is a different fact from a document with no labels.
    * A link into another space is the same fact one level down, and comes
-   * back as an `unreadPaths` entry at the key that held it.
+   * back as an `unreadPaths` entry at the path that held it.
    */
-  read(address: CellAddress): StoredCellLabels & {
-    linked: { key: string; id: string }[];
-  };
+  read(address: CellAddress): StoredCellLabels & { linked: LinkedCell[] };
   close(): void;
 }
 
@@ -350,13 +371,17 @@ export const openSpaceLabelReader = async (
       const own = labelsOf(outcome.document);
       const { linked, unreadPaths } = linkedCellsOf(outcome.document, did);
       const entries = [...own.entries];
-      for (const { key, id } of linked) {
+      for (const { path, id } of linked) {
         const target = reconstructOutcome(opened, { id, scope: "space" });
         if (target.status !== "present") {
           continue;
         }
         for (const entry of labelsOf(target.document).entries) {
-          entries.push({ ...entry, path: [key, ...entry.path], source: id });
+          entries.push({
+            ...entry,
+            path: [...path, ...entry.path],
+            source: id,
+          });
         }
       }
       return {
@@ -394,7 +419,7 @@ export interface SpaceLabelSnapshotRequest {
  * space does address a cell, so it is recorded and marked unread instead of
  * dropped: the run held it, and a reader that saw it vanish would take the
  * snapshot to cover every cell the run touched. A link the walk could not
- * follow is the same, held as an unread path at the key it sat at. Every
+ * follow is the same, held as an unread path at the path it sat at. Every
  * other failure lands on the snapshot as a whole, so a reader can tell "no
  * labels" from "not read".
  */

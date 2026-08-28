@@ -66,6 +66,14 @@ const COLLIDING = entity("colliding");
 /** A document whose links reach the colliding id in three spaces. */
 const LINKER = entity("linker");
 
+/**
+ * A document holding no link at its top level: one sits inside an object, one
+ * beside it reaches another space, and a third sits inside an array. Each is
+ * one hop from this document however deep in its value it sits, so each is
+ * either followed or recorded unread at the whole path it sits at.
+ */
+const NESTER = entity("nester");
+
 /** One stored link, in the at-rest sigil form the store holds. */
 const link = (id: string, space?: string) => ({
   "/": {
@@ -177,6 +185,16 @@ const documents: Record<string, unknown> = {
       theirs: link(COLLIDING, FOREIGN_DID),
     },
   },
+  [NESTER]: {
+    value: {
+      nested: {
+        mine: link(COLLIDING),
+        theirs: link(COLLIDING, FOREIGN_DID),
+      },
+      list: [{ ours: link(COLLIDING, OWN_DID) }],
+      plain: "no link here",
+    },
+  },
   [COMMITTED]: {
     value: { attachment: "…" },
     cfc: {
@@ -201,7 +219,7 @@ const documents: Record<string, unknown> = {
 };
 
 /** The documents written as plain JSON rather than through the codec. */
-const PLAIN = new Set([UNLABELLED, LINKER]);
+const PLAIN = new Set([UNLABELLED, LINKER, NESTER]);
 
 /**
  * A stored `revision.data` payload. Most documents go in through the codec,
@@ -421,8 +439,8 @@ describe("space-labels", () => {
     it("returns the labels of the linked cells naming no space and naming the opened one", () => {
       const read = didReader.read({ id: LINKER, scope: "space" });
       expect(read.linked).toEqual([
-        { key: "mine", id: COLLIDING },
-        { key: "ours", id: COLLIDING },
+        { path: ["mine"], id: COLLIDING },
+        { path: ["ours"], id: COLLIDING },
       ]);
       expect(read.entries).toEqual([
         {
@@ -444,7 +462,9 @@ describe("space-labels", () => {
 
     it("returns no entry under a link into another space holding an id this space also holds", () => {
       const read = didReader.read({ id: LINKER, scope: "space" });
-      expect(read.linked.map((cell) => cell.key)).not.toContain("theirs");
+      expect(read.linked.map((cell) => cell.path)).not.toContainEqual([
+        "theirs",
+      ]);
       expect(read.entries.map((entry) => entry.path[0])).not.toContain(
         "theirs",
       );
@@ -459,7 +479,7 @@ describe("space-labels", () => {
 
     it("returns only the link naming no space when the opened file proves no DID", () => {
       const read = reader.read({ id: LINKER, scope: "space" });
-      expect(read.linked).toEqual([{ key: "mine", id: COLLIDING }]);
+      expect(read.linked).toEqual([{ path: ["mine"], id: COLLIDING }]);
       expect(read.entries.map((entry) => entry.path)).toEqual([["mine"]]);
     });
 
@@ -468,6 +488,41 @@ describe("space-labels", () => {
       expect(read.unreadPaths).toEqual([
         { path: ["ours"], reason: "space-unproven" },
         { path: ["theirs"], reason: "space-unproven" },
+      ]);
+    });
+
+    it("returns the labels of a link nested inside the value under its whole path", () => {
+      const read = didReader.read({ id: NESTER, scope: "space" });
+      expect(read.entries).toEqual([
+        {
+          path: ["nested", "mine"],
+          confidentiality: [{ type: "foreign-secret", name: "foreign-secret" }],
+          integrity: [],
+          origin: "declared",
+          source: COLLIDING,
+        },
+        {
+          path: ["list", "0", "ours"],
+          confidentiality: [{ type: "foreign-secret", name: "foreign-secret" }],
+          integrity: [],
+          origin: "declared",
+          source: COLLIDING,
+        },
+      ]);
+    });
+
+    it("returns an array index as a path segment of a link held in an array", () => {
+      const read = didReader.read({ id: NESTER, scope: "space" });
+      expect(read.linked).toEqual([
+        { path: ["nested", "mine"], id: COLLIDING },
+        { path: ["list", "0", "ours"], id: COLLIDING },
+      ]);
+    });
+
+    it("returns the whole path of a nested link into another space as unread", () => {
+      const read = didReader.read({ id: NESTER, scope: "space" });
+      expect(read.unreadPaths).toEqual([
+        { path: ["nested", "theirs"], reason: "cross-space" },
       ]);
     });
 
@@ -564,6 +619,17 @@ describe("space-labels", () => {
         { path: ["theirs"], reason: "cross-space" },
       ]);
       expect(snapshot.cells[0].unreadReason).toBe(undefined);
+    });
+
+    it("records the whole path of a nested link the walk could not follow", async () => {
+      const snapshot = await readAgainstDid([`/${NESTER}`]);
+      expect(snapshot.cells[0].unreadPaths).toEqual([
+        { path: ["nested", "theirs"], reason: "cross-space" },
+      ]);
+      expect(snapshot.cells[0].entries.map((entry) => entry.path)).toEqual([
+        ["nested", "mine"],
+        ["list", "0", "ours"],
+      ]);
     });
 
     it("records every spaced link of a cell as unread against a database naming no space", async () => {
