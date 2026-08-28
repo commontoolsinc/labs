@@ -45,6 +45,7 @@ import {
   parseLink,
   type Pattern,
   type PatternCoverageCollector,
+  PatternManager,
   type PieceSourceTransition,
   preparePieceSourceTransitionBaseline,
   Runtime,
@@ -2275,11 +2276,20 @@ export class PiecesController<T = unknown> {
         officialRef,
         sourceTransition,
       );
-      rootTx.setMetaRaw("displacedPattern", {
-        identity: pinnedRef.identity,
-        symbol: pinnedRef.symbol,
-        displacedAt: sourceTransition.timestamp,
-      });
+      // A keyless displaced identity must never land durably (L3(a)):
+      // `displacedPattern` exists for recovery, recovery to a
+      // session-synthetic identity is impossible by construction, and the
+      // absent record is the honest one — the same gate
+      // `applyPieceSourceTransition`'s unavailable arm applies to ITS stamp
+      // four lines up. Reachable with a keyless `pinnedRef` when a legacy
+      // orphan pointer coincides with a start failure on a default root.
+      if (!PatternManager.isKeylessPatternIdentity(pinnedRef.identity)) {
+        rootTx.setMetaRaw("displacedPattern", {
+          identity: pinnedRef.identity,
+          symbol: pinnedRef.symbol,
+          displacedAt: sourceTransition.timestamp,
+        });
+      }
       rootTx.setMetaRaw("patternIdentity", officialRef);
       return true;
     });
