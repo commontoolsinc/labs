@@ -205,6 +205,58 @@ describe("memory.handlers", () => {
       expect(fake.closedWith?.code).toBe(1003);
     });
 
+    it("requires hello before accepting a compression control", async () => {
+      const fake = new FakeSocket();
+      const socket = fake as unknown as WebSocket;
+      const negotiation = bufferTextMessagesUntilNegotiated(socket);
+      const handedOff = Promise.withResolvers<void>();
+      const handoff = negotiation.handoff;
+      negotiation.handoff = (handlers) => {
+        handoff(handlers);
+        handedOff.resolve();
+      };
+      fake.dispatchEvent(
+        new MessageEvent("message", {
+          data: encodeMemoryBoundary({
+            type: "session.open",
+            requestId: "session-before-hello",
+            space: "did:key:z6Mk-toolshed-control-before-hello",
+            session: {},
+          }),
+        }),
+      );
+      const firstMessage = await negotiation.firstMessage;
+      expect(attachMemorySocketPipeline(
+        socket,
+        negotiation,
+        firstMessage!,
+      )).toBe(true);
+      await handedOff.promise;
+
+      fake.dispatchEvent(
+        new MessageEvent("message", {
+          data: encodeMemoryCompressionControlMessage({
+            requestId: "toolshed-control-before-hello",
+            enabled: false,
+          }),
+        }),
+      );
+      await fake.whenSent(2);
+      expect(typeof fake.sent[1]).toBe("string");
+      if (typeof fake.sent[1] !== "string") {
+        throw new Error("Expected text protocol error");
+      }
+      expect(parseMemoryCompressionControlMessage(fake.sent[1])).toBeNull();
+      expect(decodeMemoryBoundary<{
+        type: string;
+        error?: { name: string };
+      }>(fake.sent[1])).toMatchObject({
+        type: "response",
+        error: { name: "InvalidMessageError" },
+      });
+      fake.dispatchEvent(new CloseEvent("close"));
+    });
+
     it("changes compression without replacing the socket", async () => {
       const fake = new FakeSocket();
       const socket = fake as unknown as WebSocket;

@@ -207,6 +207,7 @@ export const attachMemorySocketPipeline = (
   if (parsedFirstMessage === null) {
     return false;
   }
+  const helloReceived = parsedFirstMessage.type === "hello";
   const compressionNegotiated = parsedFirstMessage.type === "hello" &&
     parsedFirstMessage.flags.messageCompressionV1 === true &&
     getMemoryProtocolFlags().messageCompressionV1;
@@ -295,7 +296,7 @@ export const attachMemorySocketPipeline = (
           }
           channel.receive(message, async (payload) => {
             const control = parseMemoryCompressionControlMessage(payload);
-            if (control) {
+            if (control && helloReceived) {
               const enabled = compressionNegotiated && control.enabled;
               channel.setSendCompressionEnabled(enabled);
               channel.send(encodeMemoryCompressionControlMessage({
