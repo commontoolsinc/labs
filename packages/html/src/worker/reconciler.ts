@@ -210,14 +210,12 @@ export class WorkerReconciler {
   readonly #onError?: (error: Error) => void;
   readonly #renderDeclassificationPolicy: RenderDeclassificationPolicy;
 
-  /**
-   * TypeScript-private rather than a `#` name:
-   * `runtime-client/test/backends/runtime-processor.test.ts` reaches this
-   * member across the package boundary, through the reconciler a mount holds.
-   */
   // Root-of-tree render policy: the host's default ceiling when configured
   // (spec §8.10.6), otherwise the historical unbounded policy. Authored
-  // boundaries can only narrow from here.
+  // boundaries can only narrow from here. TypeScript-private rather than a `#`
+  // name, because `runtime-client/test/backends/runtime-processor.test.ts`
+  // reaches it across the package boundary, through the reconciler a mount
+  // holds.
   private readonly rootRenderPolicy: RenderPolicy;
   // Runner-side display-boundary resolver (Epic H3b): rewrites a cell's
   // confidentiality label through the exchange rules before the ceiling fit,
