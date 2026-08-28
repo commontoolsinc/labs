@@ -306,8 +306,7 @@ export class SourceReconciler {
       // Re-read: a transition commits through a transaction view of its own, so
       // the pattern to run is the one the piece names after it, not before.
       const current = getPatternIdentityRef(await piece.withTx().sync());
-      if (current === undefined) return undefined;
-      return await this.#loadPattern(current, piece.space);
+      return current && await this.#loadPattern(current, piece.space);
     } catch (error) {
       logger.warn("open-failed", () => [
         "opening a piece the runtime supplies failed",
@@ -712,19 +711,19 @@ export class SourceReconciler {
    * The piece runs this source already, so nothing about what it runs changes;
    * what changes is that the piece now says where that source came from, which
    * is what puts it inside the lifecycle instead of beside it.
+   *
+   * Only reached for a piece that runs a pattern, which is what gives it a
+   * snapshot to guard the write against.
    */
   async #claimSuppliedOrigin(
     resultCell: Cell<unknown>,
     suppliedOrigin: string,
   ): Promise<void> {
-    const running = getPatternIdentityRef(resultCell);
-    const snapshot = getPieceSourceSnapshot(resultCell);
-    if (running === undefined || snapshot === undefined) return;
     const state: PieceState = {
       space: resultCell.space,
-      running,
+      running: getPatternIdentityRef(resultCell)!,
       storedSource: undefined,
-      snapshot,
+      snapshot: getPieceSourceSnapshot(resultCell)!,
     };
     await this.#recordOrigin(resultCell, state, suppliedOrigin, "follow");
   }

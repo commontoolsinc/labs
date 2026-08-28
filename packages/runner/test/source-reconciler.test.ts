@@ -1272,6 +1272,106 @@ describe("piece source reconciliation", () => {
         .toEqual([]);
     });
 
+    it("runs an artifact this space already holds without fetching source", async () => {
+      // The identity route settles what the origin names; a space that already
+      // holds the artifact for it needs no source at all. The source route
+      // refuses every request, so reaching it would fail this outright.
+      const v1Identity = await identityFor(source("v1"));
+      const requested: string[] = [];
+      const piece = emptyPiece((input) => {
+        const url = new URL(
+          input instanceof Request
+            ? input.url
+            : input instanceof URL
+            ? input.href
+            : input,
+        );
+        requested.push(url.pathname + url.search);
+        return url.searchParams.has("identity")
+          ? Promise.resolve(new Response(v1Identity))
+          : Promise.reject(new Error("this source must not be fetched"));
+      });
+      // Compiled the way the route's own file compiles: the entry export the
+      // origin names, which is what a held artifact is looked up under.
+      await runtime.patternManager.compilePattern({
+        main: PARENT_PATH,
+        files: [
+          { name: PARENT_PATH, contents: parentSource },
+          { name: SOURCE_PATH, contents: source("v1") },
+        ],
+      }, { space: signer.did() });
+
+      const pattern = await open(piece);
+
+      expect(runtime.patternManager.getArtifactEntryRef(pattern!)?.identity)
+        .toBe(v1Identity);
+      expect(requested).toEqual([`${PARENT_PATH}?identity=`]);
+    });
+
+    it("supplies nothing when the origin's source cannot be resolved", async () => {
+      // The host advertises an identity and then fails to serve the source
+      // behind it. Nothing is left to run, and the failure is the pass's.
+      const v1Identity = await identityFor(source("v1"));
+      const piece = emptyPiece((input) => {
+        const url = new URL(
+          input instanceof Request
+            ? input.url
+            : input instanceof URL
+            ? input.href
+            : input,
+        );
+        return Promise.resolve(
+          url.searchParams.has("identity")
+            ? new Response(v1Identity)
+            : new Response("gone", { status: 500 }),
+        );
+      });
+
+      expect(await open(piece)).toBeUndefined();
+    });
+
+    it("abandons an in-flight supplied resolve on disposal", async () => {
+      identityGate = defer();
+      const requested = defer();
+      const v1Identity = await identityFor(source("v1"));
+      const piece = emptyPiece(async (input) => {
+        const url = new URL(
+          input instanceof Request
+            ? input.url
+            : input instanceof URL
+            ? input.href
+            : input,
+        );
+        if (url.searchParams.has("identity")) {
+          requested.resolve();
+          await identityGate!.promise;
+          return new Response(v1Identity);
+        }
+        return new Response(parentSource);
+      });
+
+      const opening = open(piece);
+      // The request is the witness that the pass is registered: disposal has
+      // to have something in flight to abandon.
+      await requested.promise;
+      const disposing = runtime.sourceReconciler.dispose();
+      identityGate.resolve();
+
+      await disposing;
+      expect(await opening).toBeUndefined();
+    });
+
+    it("answers nothing for a piece it cannot even read", async () => {
+      // Opening starts by reading the piece, which is what says whether it
+      // exists at all. A read that fails outright — storage closing under a
+      // launch is the ordinary way — leaves nothing to answer with, and the
+      // caller is told so rather than handed a rejection.
+      const piece = emptyPiece(refuseEveryFetch);
+      await storageManager.close();
+
+      expect(await open(piece)).toBeUndefined();
+    });
+
     it("refuses source that does not compile to the advertised identity", async () => {
       // The host says one thing and serves another, so what it serves is not
       // the source that origin names.
