@@ -378,11 +378,25 @@ export type SeedRuntime = Pick<Runtime, "harness" | "patternManager">;
 /**
  * The atoms whose source is not formatted as the repository formats it.
  *
- * An entry identity is a content hash of the source bytes, so publishing
- * unformatted source mints an identity the repository cannot reproduce: the
- * next `deno fmt` changes the bytes, and the same atom seeds again under a
- * second id. That is how one atom becomes two entries competing in search,
- * which is the duplication the seed exists to counter rather than add to.
+ * An entry identity is a content hash of the source bytes, so seeding
+ * unformatted source mints an identity the next `deno fmt` changes, and the
+ * same atom seeds again under a second id. That is how one atom becomes two
+ * entries competing in search, and it is what this catches.
+ *
+ * What it does NOT establish is that the bytes it hashed are the bytes the
+ * repository holds. Two gaps, both real:
+ *
+ * - It compares against the formatter, not against `HEAD`. A formatter-clean
+ *   edit that is merely uncommitted passes, and publishes under an identity no
+ *   commit contains — which is the failure this guard was written for.
+ * - It receives only the selected entry paths, while `compileAtom` hashes the
+ *   whole closure `resolveLocalProgram` returns. A local helper contributing to
+ *   an atom's identity is never checked.
+ *
+ * The atoms seeded today are self-contained and committed, so neither gap is
+ * live for them. Closing them means resolving the closure first and refusing
+ * dirty or untracked source; until then this narrows the failure rather than
+ * removing it.
  */
 export const unformattedPaths = async (
   paths: readonly string[],
@@ -443,12 +457,14 @@ export const runSeed = async (
   deps: SeedDeps,
 ): Promise<number> => {
   const paths = await selectedPaths(options);
-  // Checked before anything compiles, so an unreproducible id is never minted
-  // rather than being noticed after it reaches the shared corpus.
+  // Checked before anything compiles, so an id the next format pass would
+  // change is never minted, rather than being noticed after it reaches the
+  // shared corpus. This does not establish that the source is committed; see
+  // `unformattedPaths` for what the check does and does not cover.
   const unformatted = await unformattedPaths(paths, deps.checkFormatting);
   if (unformatted.length > 0) {
     deps.logError(
-      `seed-pattern-index: these atoms are not formatted, so the identity they would publish under is not reproducible from the repository. Run \`deno fmt\` on them and seed again:\n  ${
+      `seed-pattern-index: these atoms are not formatted, so the identity they would publish under changes the next time \`deno fmt\` runs. Run it on them and seed again:\n  ${
         unformatted.join("\n  ")
       }`,
     );

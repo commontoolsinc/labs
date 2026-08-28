@@ -666,7 +666,7 @@ describe("seed-pattern-index", () => {
       // Refused before anything compiles, so no id is minted at all.
       expect(compiled).toEqual([]);
       expect(errors.join("\n")).toContain(
-        "not reproducible from the repository",
+        "changes the next time `deno fmt` runs",
       );
       expect(errors.join("\n")).toContain("amount-ledger.tsx");
     });
