@@ -1133,14 +1133,14 @@ export class XSchedulerGraph extends LitElement {
   @query(".graph-container")
   private accessor graphContainer: HTMLElement | null = null;
 
-  private lastGraphVersion = -1;
-  private lastPatternSourcesVersion = -1;
-  private hasInitialZoom = false;
+  #lastGraphVersion = -1;
+  #lastPatternSourcesVersion = -1;
+  #hasInitialZoom = false;
 
   /**
    * Get baseline stats from the controller (persists across tab switches)
    */
-  private get baselineStats(): Map<
+  get #baselineStats(): Map<
     string,
     { runCount: number; totalTime: number }
   > {
@@ -1151,11 +1151,11 @@ export class XSchedulerGraph extends LitElement {
   }
 
   // Minimum effective node size before we boost triggered nodes
-  private static readonly READABLE_THRESHOLD = 50;
+  static readonly #READABLE_THRESHOLD = 50;
 
   override connectedCallback() {
     super.connectedCallback();
-    this.updateLayout();
+    this.#updateLayout();
   }
 
   override updated(changedProperties: Map<string, unknown>) {
@@ -1164,27 +1164,27 @@ export class XSchedulerGraph extends LitElement {
     // Check if we need to update the graph
     if (this.debuggerController) {
       const currentVersion = this.debuggerController.getGraphUpdateVersion();
-      if (currentVersion !== this.lastGraphVersion) {
-        this.lastGraphVersion = currentVersion;
-        this.updateLayout();
+      if (currentVersion !== this.#lastGraphVersion) {
+        this.#lastGraphVersion = currentVersion;
+        this.#updateLayout();
 
         // Zoom to fit on first load
-        if (!this.hasInitialZoom && this.layoutNodes.size > 0) {
-          this.hasInitialZoom = true;
-          requestAnimationFrame(() => this.zoomToFit());
+        if (!this.#hasInitialZoom && this.layoutNodes.size > 0) {
+          this.#hasInitialZoom = true;
+          requestAnimationFrame(() => this.#zoomToFit());
         }
       }
 
       // Re-render when pattern sources arrive (for source view)
       const sourcesVersion = this.debuggerController.getPatternSourcesVersion();
-      if (sourcesVersion !== this.lastPatternSourcesVersion) {
-        this.lastPatternSourcesVersion = sourcesVersion;
+      if (sourcesVersion !== this.#lastPatternSourcesVersion) {
+        this.#lastPatternSourcesVersion = sourcesVersion;
         this.requestUpdate();
       }
     }
   }
 
-  private updateLayout(): void {
+  #updateLayout(): void {
     if (!this.debuggerController) return;
 
     const graphData = this.debuggerController.getGraphWithHistory();
@@ -1200,7 +1200,7 @@ export class XSchedulerGraph extends LitElement {
     // Infer parent relationships for sinks without parents by matching entity IDs
     // This handles the case where sinks are created outside of action execution
     // but logically belong to a pattern/module action
-    const inferredParents = this.inferParentsByEntity(graphData.nodes);
+    const inferredParents = this.#inferParentsByEntity(graphData.nodes);
 
     // Create a combined view with both explicit and inferred parents
     const effectiveParentId = (node: SchedulerGraphNode): string | undefined =>
@@ -1352,6 +1352,9 @@ export class XSchedulerGraph extends LitElement {
    * Examples:
    * - "sink:did:key:z6Mkk.../of:fid1:abc.../value" → "sink:...c.../value"
    * - "parentAction" → "parentAction"
+   *
+   * TypeScript-private rather than a `#` name:
+   * `test/entity-id-scheme-parsing.test.ts` drives this member directly.
    */
   private truncateLabel(label: string, maxLen = 20): string {
     // Simple case - short enough already
@@ -1432,6 +1435,9 @@ export class XSchedulerGraph extends LitElement {
    * Handles formats like:
    * - sink:did:key:.../of:entityId/path
    * - action:pattern:did:key:.../computed:entityId/path
+   *
+   * TypeScript-private rather than a `#` name:
+   * `test/entity-id-scheme-parsing.test.ts` drives this member directly.
    */
   private extractEntityId(actionId: string): string | undefined {
     const entityUri = entityUriFromActionId(actionId);
@@ -1455,7 +1461,7 @@ export class XSchedulerGraph extends LitElement {
    * Infer parent relationships for sinks that don't have explicit parents.
    * Groups sinks with non-sink actions that share the same entity ID.
    */
-  private inferParentsByEntity(
+  #inferParentsByEntity(
     nodes: SchedulerGraphNode[],
   ): Map<string, string> {
     const inferredParents = new Map<string, string>();
@@ -1496,12 +1502,12 @@ export class XSchedulerGraph extends LitElement {
     return inferredParents;
   }
 
-  private async handleSnapshot(): Promise<void> {
+  async #handleSnapshot(): Promise<void> {
     await this.debuggerController?.requestGraphSnapshot();
     this.requestUpdate();
   }
 
-  private handleResetBaseline(): void {
+  #handleResetBaseline(): void {
     // Capture current stats as the baseline
     const newBaseline = new Map<
       string,
@@ -1519,7 +1525,7 @@ export class XSchedulerGraph extends LitElement {
     this.debuggerController?.setSchedulerBaselineStats(newBaseline);
   }
 
-  private handleEdgeClick(e: MouseEvent, edge: LayoutEdge): void {
+  #handleEdgeClick(e: MouseEvent, edge: LayoutEdge): void {
     e.stopPropagation();
 
     this.selectedNode = null; // Clear node selection
@@ -1531,7 +1537,7 @@ export class XSchedulerGraph extends LitElement {
     }
   }
 
-  private handleNodeClick(e: MouseEvent, node: LayoutNode): void {
+  #handleNodeClick(e: MouseEvent, node: LayoutNode): void {
     e.stopPropagation();
 
     this.selectedEdge = null; // Clear edge selection
@@ -1542,12 +1548,12 @@ export class XSchedulerGraph extends LitElement {
     }
   }
 
-  private handleContainerClick(): void {
+  #handleContainerClick(): void {
     this.selectedEdge = null;
     this.selectedNode = null;
   }
 
-  private selectNodeById(nodeId: string): void {
+  #selectNodeById(nodeId: string): void {
     const node = this.layoutNodes.get(nodeId);
     if (node) {
       this.selectedEdge = null;
@@ -1555,7 +1561,7 @@ export class XSchedulerGraph extends LitElement {
     }
   }
 
-  private getInboundNodes(nodeId: string): LayoutNode[] {
+  #getInboundNodes(nodeId: string): LayoutNode[] {
     // Find edges where this node is the target (other nodes depend on this)
     const inboundEdges = this.layoutEdges.filter(
       (e) => e.to === nodeId && e.edgeType !== "parent",
@@ -1566,7 +1572,7 @@ export class XSchedulerGraph extends LitElement {
       .filter((n): n is LayoutNode => n !== undefined);
   }
 
-  private getOutboundNodes(nodeId: string): LayoutNode[] {
+  #getOutboundNodes(nodeId: string): LayoutNode[] {
     // Find edges where this node is the source (this node depends on others)
     const outboundEdges = this.layoutEdges.filter(
       (e) => e.from === nodeId && e.edgeType !== "parent",
@@ -1577,19 +1583,19 @@ export class XSchedulerGraph extends LitElement {
       .filter((n): n is LayoutNode => n !== undefined);
   }
 
-  private handleZoomIn(): void {
-    this.zoomAroundCenter(this.zoomLevel * 1.25);
+  #handleZoomIn(): void {
+    this.#zoomAroundCenter(this.zoomLevel * 1.25);
   }
 
-  private handleZoomOut(): void {
-    this.zoomAroundCenter(this.zoomLevel / 1.25);
+  #handleZoomOut(): void {
+    this.#zoomAroundCenter(this.zoomLevel / 1.25);
   }
 
-  private handleZoomReset(): void {
-    this.zoomToFit();
+  #handleZoomReset(): void {
+    this.#zoomToFit();
   }
 
-  private centerOnNode(nodeId: string): void {
+  #centerOnNode(nodeId: string): void {
     const node = this.layoutNodes.get(nodeId);
     if (!node) return;
 
@@ -1617,7 +1623,7 @@ export class XSchedulerGraph extends LitElement {
     });
   }
 
-  private switchToGraphView(): void {
+  #switchToGraphView(): void {
     const hadSelection = this.selectedNode !== null;
     const selectedId = this.selectedNode?.id;
 
@@ -1628,13 +1634,13 @@ export class XSchedulerGraph extends LitElement {
       // Wait for layout to complete before centering
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
-          this.centerOnNode(selectedId);
+          this.#centerOnNode(selectedId);
         });
       });
     }
   }
 
-  private handleWheel(e: WheelEvent): void {
+  #handleWheel(e: WheelEvent): void {
     // Only zoom if ctrl/cmd is held, otherwise allow normal scroll
     if (!e.ctrlKey && !e.metaKey) return;
 
@@ -1652,10 +1658,10 @@ export class XSchedulerGraph extends LitElement {
     const mouseX = e.clientX - rect.left + container.scrollLeft;
     const mouseY = e.clientY - rect.top + container.scrollTop;
 
-    this.zoomAroundPoint(newZoom, mouseX, mouseY);
+    this.#zoomAroundPoint(newZoom, mouseX, mouseY);
   }
 
-  private zoomAroundPoint(
+  #zoomAroundPoint(
     newZoom: number,
     pointX: number,
     pointY: number,
@@ -1686,7 +1692,7 @@ export class XSchedulerGraph extends LitElement {
     });
   }
 
-  private zoomAroundCenter(newZoom: number): void {
+  #zoomAroundCenter(newZoom: number): void {
     const container = this.graphContainer;
     if (!container) {
       this.zoomLevel = newZoom;
@@ -1718,7 +1724,7 @@ export class XSchedulerGraph extends LitElement {
     });
   }
 
-  private zoomToFit(): void {
+  #zoomToFit(): void {
     const container = this.graphContainer;
     if (!container) return;
 
@@ -1734,15 +1740,15 @@ export class XSchedulerGraph extends LitElement {
     this.zoomLevel = Math.max(0.1, fitZoom);
   }
 
-  private get effectiveNodeWidth(): number {
+  get #effectiveNodeWidth(): number {
     return NODE_WIDTH * this.zoomLevel;
   }
 
-  private get shouldBoostTriggeredNodes(): boolean {
-    return this.effectiveNodeWidth < XSchedulerGraph.READABLE_THRESHOLD;
+  get #shouldBoostTriggeredNodes(): boolean {
+    return this.#effectiveNodeWidth < XSchedulerGraph.#READABLE_THRESHOLD;
   }
 
-  private handleToggleCollapse(nodeId: string, e: Event): void {
+  #handleToggleCollapse(nodeId: string, e: Event): void {
     e.stopPropagation();
     const newCollapsed = new Set(this.collapsedParents);
     if (newCollapsed.has(nodeId)) {
@@ -1751,10 +1757,10 @@ export class XSchedulerGraph extends LitElement {
       newCollapsed.add(nodeId);
     }
     this.collapsedParents = newCollapsed;
-    this.updateLayout();
+    this.#updateLayout();
   }
 
-  private renderToolbar(): TemplateResult {
+  #renderToolbar(): TemplateResult {
     const nodeCount = this.layoutNodes.size;
     const edgeCount = this.layoutEdges.filter((e) => !e.isHistorical).length;
     const historicalCount = this.layoutEdges.filter((e) => e.isHistorical)
@@ -1771,14 +1777,14 @@ export class XSchedulerGraph extends LitElement {
     }
 
     // Calculate delta since baseline (if baseline exists)
-    const hasBaseline = this.baselineStats.size > 0;
+    const hasBaseline = this.#baselineStats.size > 0;
     let totalRunsSinceBaseline = 0;
     let totalTimeSinceBaseline = 0;
 
     if (hasBaseline) {
       for (const node of this.layoutNodes.values()) {
         if (node.stats) {
-          const baseline = this.baselineStats.get(node.id);
+          const baseline = this.#baselineStats.get(node.id);
           totalRunsSinceBaseline += node.stats.runCount -
             (baseline?.runCount ?? 0);
           totalTimeSinceBaseline += node.stats.totalTime -
@@ -1800,7 +1806,7 @@ export class XSchedulerGraph extends LitElement {
           <button
             type="button"
             class="toggle-button ${this.viewMode === "graph" ? "active" : ""}"
-            @click="${() => this.switchToGraphView()}"
+            @click="${() => this.#switchToGraphView()}"
             title="Graph view"
           >
             Graph
@@ -1841,7 +1847,7 @@ export class XSchedulerGraph extends LitElement {
         <button
           type="button"
           class="action-button"
-          @click="${this.handleResetBaseline}"
+          @click="${this.#handleResetBaseline}"
           title="Reset baseline to current stats (for delta tracking)"
         >
           Reset Baseline
@@ -1850,7 +1856,7 @@ export class XSchedulerGraph extends LitElement {
         <button
           type="button"
           class="action-button"
-          @click="${this.handleSnapshot}"
+          @click="${this.#handleSnapshot}"
           title="Capture current scheduler state"
         >
           Snapshot
@@ -1862,7 +1868,7 @@ export class XSchedulerGraph extends LitElement {
               <button
                 type="button"
                 class="zoom-button"
-                @click="${this.handleZoomOut}"
+                @click="${this.#handleZoomOut}"
                 title="Zoom out"
               >
                 -
@@ -1870,7 +1876,7 @@ export class XSchedulerGraph extends LitElement {
               <button
                 type="button"
                 class="zoom-level"
-                @click="${this.handleZoomReset}"
+                @click="${this.#handleZoomReset}"
                 title="Reset zoom"
               >
                 ${Math.round(this.zoomLevel * 100)}%
@@ -1878,7 +1884,7 @@ export class XSchedulerGraph extends LitElement {
               <button
                 type="button"
                 class="zoom-button"
-                @click="${this.handleZoomIn}"
+                @click="${this.#handleZoomIn}"
                 title="Zoom in"
               >
                 +
@@ -1898,7 +1904,7 @@ export class XSchedulerGraph extends LitElement {
           <span>Total: <span class="stat-value">${totalRuns} runs</span>
             <span class="stat-value">${formatTime(totalTime)}</span></span>
           ${hasBaseline
-            ? this.renderBaselineStats(
+            ? this.#renderBaselineStats(
               totalRunsSinceBaseline,
               totalTimeSinceBaseline,
               formatTime,
@@ -1914,7 +1920,7 @@ export class XSchedulerGraph extends LitElement {
    * The crash occurs with deeply nested ternaries in class attributes
    * combined with multiline function calls in adjacent template expressions.
    */
-  private renderBaselineStats(
+  #renderBaselineStats(
     runsDelta: number,
     timeDelta: number,
     formatTime: (ms: number) => string,
@@ -1937,12 +1943,12 @@ export class XSchedulerGraph extends LitElement {
     `;
   }
 
-  private renderNode(node: LayoutNode): TemplateResult {
+  #renderNode(node: LayoutNode): TemplateResult {
     const isTriggered = this.triggeredNodes.has(node.id) &&
       Date.now() - (this.triggeredNodes.get(node.id) ?? 0) < 2000;
 
     // Boost triggered nodes when zoomed out below readable threshold
-    const shouldBoost = isTriggered && this.shouldBoostTriggeredNodes;
+    const shouldBoost = isTriggered && this.#shouldBoostTriggeredNodes;
 
     const isSelected = this.selectedNode?.id === node.id;
 
@@ -1984,7 +1990,7 @@ export class XSchedulerGraph extends LitElement {
       <g
         class="${nodeClass}"
         transform="translate(${x}, ${y})"
-        @click="${(e: MouseEvent) => this.handleNodeClick(e, node)}"
+        @click="${(e: MouseEvent) => this.#handleNodeClick(e, node)}"
         style="cursor: pointer;"
       >
         <title>${tooltip}</title>
@@ -2022,13 +2028,13 @@ export class XSchedulerGraph extends LitElement {
         `
         : ""
     }
-        ${this.renderCollapseToggle(node)}
-        ${this.renderChildCountBadge(node)}
+        ${this.#renderCollapseToggle(node)}
+        ${this.#renderChildCountBadge(node)}
       </g>
     `;
   }
 
-  private renderCollapseToggle(node: LayoutNode): TemplateResult | null {
+  #renderCollapseToggle(node: LayoutNode): TemplateResult | null {
     // Only show toggle if node has children
     if (!node.childCount || node.childCount === 0) return null;
 
@@ -2041,14 +2047,14 @@ export class XSchedulerGraph extends LitElement {
         x="${node.width - 8}"
         y="12"
         text-anchor="middle"
-        @click="${(e: Event) => this.handleToggleCollapse(node.id, e)}"
+        @click="${(e: Event) => this.#handleToggleCollapse(node.id, e)}"
       >
         ${symbol}
       </text>
     `;
   }
 
-  private renderChildCountBadge(node: LayoutNode): TemplateResult | null {
+  #renderChildCountBadge(node: LayoutNode): TemplateResult | null {
     // Only show badge if this node has collapsed children
     if (!node.collapsedChildCount || node.collapsedChildCount === 0) {
       return null;
@@ -2066,7 +2072,7 @@ export class XSchedulerGraph extends LitElement {
     `;
   }
 
-  private computeParentGroups(): Map<
+  #computeParentGroups(): Map<
     string,
     { parent: LayoutNode; children: LayoutNode[]; bounds: DOMRect }
   > {
@@ -2125,8 +2131,8 @@ export class XSchedulerGraph extends LitElement {
     return groups;
   }
 
-  private renderParentGroups(): TemplateResult[] {
-    const groups = this.computeParentGroups();
+  #renderParentGroups(): TemplateResult[] {
+    const groups = this.#computeParentGroups();
     const results: TemplateResult[] = [];
 
     for (const group of groups.values()) {
@@ -2159,7 +2165,7 @@ export class XSchedulerGraph extends LitElement {
     return results;
   }
 
-  private renderEdge(edge: LayoutEdge): TemplateResult | null {
+  #renderEdge(edge: LayoutEdge): TemplateResult | null {
     const source = this.layoutNodes.get(edge.from);
     const target = this.layoutNodes.get(edge.to);
     if (!source || !target) return null;
@@ -2184,12 +2190,12 @@ export class XSchedulerGraph extends LitElement {
         class="${edgeClasses}"
         d="${path}"
         marker-end="url(#arrowhead)"
-        @click="${(e: MouseEvent) => this.handleEdgeClick(e, edge)}"
+        @click="${(e: MouseEvent) => this.#handleEdgeClick(e, edge)}"
       />
     `;
   }
 
-  private renderGraph(): TemplateResult {
+  #renderGraph(): TemplateResult {
     if (this.layoutNodes.size === 0) {
       return html`
         <div class="empty-state">
@@ -2197,7 +2203,7 @@ export class XSchedulerGraph extends LitElement {
           <button
             type="button"
             class="action-button"
-            @click="${this.handleSnapshot}"
+            @click="${this.#handleSnapshot}"
           >
             Load Graph
           </button>
@@ -2229,21 +2235,23 @@ export class XSchedulerGraph extends LitElement {
         </defs>
 
         <g class="parent-groups">
-          ${this.renderParentGroups()}
+          ${this.#renderParentGroups()}
         </g>
 
         <g class="edges">
-          ${this.layoutEdges.map((edge) => this.renderEdge(edge))}
+          ${this.layoutEdges.map((edge) => this.#renderEdge(edge))}
         </g>
 
         <g class="nodes">
-          ${[...this.layoutNodes.values()].map((node) => this.renderNode(node))}
+          ${[...this.layoutNodes.values()].map((node) =>
+            this.#renderNode(node)
+          )}
         </g>
       </svg>
     `;
   }
 
-  private renderTooltip(): TemplateResult | null {
+  #renderTooltip(): TemplateResult | null {
     if (!this.selectedEdge) return null;
 
     const fromNode = this.layoutNodes.get(this.selectedEdge.from);
@@ -2282,7 +2290,7 @@ export class XSchedulerGraph extends LitElement {
     `;
   }
 
-  private renderDetailPane(): TemplateResult | null {
+  #renderDetailPane(): TemplateResult | null {
     if (!this.selectedNode && !this.selectedEdge) return null;
 
     const formatTime = (ms: number) => {
@@ -2305,8 +2313,8 @@ export class XSchedulerGraph extends LitElement {
 
     if (this.selectedNode) {
       const node = this.selectedNode;
-      const baseline = this.baselineStats.get(node.id);
-      const hasBaseline = this.baselineStats.size > 0;
+      const baseline = this.#baselineStats.get(node.id);
+      const hasBaseline = this.#baselineStats.size > 0;
 
       const renderStatWithDelta = (
         label: string,
@@ -2383,7 +2391,7 @@ export class XSchedulerGraph extends LitElement {
                 </div>
               </div>
             `
-            : ""} ${node.preview || this.hasSourceLocation(node.id)
+            : ""} ${node.preview || this.#hasSourceLocation(node.id)
             ? html`
               <div class="detail-section">
                 ${node.preview
@@ -2391,7 +2399,7 @@ export class XSchedulerGraph extends LitElement {
                     <div class="detail-section-title">Code Preview</div>
                     <div class="detail-preview">${node.preview}</div>
                   `
-                  : ""} ${this.hasSourceLocation(node.id)
+                  : ""} ${this.#hasSourceLocation(node.id)
                   ? html`
                     <button
                       type="button"
@@ -2443,7 +2451,7 @@ export class XSchedulerGraph extends LitElement {
               </div>
             `
             : ""} ${(() => {
-              const inbound = this.getInboundNodes(node.id);
+              const inbound = this.#getInboundNodes(node.id);
               return inbound.length > 0
                 ? html`
                   <div class="detail-section">
@@ -2456,7 +2464,7 @@ export class XSchedulerGraph extends LitElement {
                           html`
                             <div
                               class="adjacent-node"
-                              @click="${() => this.selectNodeById(n.id)}"
+                              @click="${() => this.#selectNodeById(n.id)}"
                               title="${n.fullId}"
                             >
                               <span class="type-badge ${n.type}">${n
@@ -2471,7 +2479,7 @@ export class XSchedulerGraph extends LitElement {
                 `
                 : "";
             })()} ${(() => {
-              const outbound = this.getOutboundNodes(node.id);
+              const outbound = this.#getOutboundNodes(node.id);
               return outbound.length > 0
                 ? html`
                   <div class="detail-section">
@@ -2484,7 +2492,7 @@ export class XSchedulerGraph extends LitElement {
                           html`
                             <div
                               class="adjacent-node"
-                              @click="${() => this.selectNodeById(n.id)}"
+                              @click="${() => this.#selectNodeById(n.id)}"
                               title="${n.fullId}"
                             >
                               <span class="type-badge ${n.type}">${n
@@ -2623,7 +2631,7 @@ export class XSchedulerGraph extends LitElement {
     return null;
   }
 
-  private renderLegend(): TemplateResult {
+  #renderLegend(): TemplateResult {
     return html`
       <div class="legend">
         <div class="legend-item">
@@ -2652,33 +2660,33 @@ export class XSchedulerGraph extends LitElement {
 
   override render(): TemplateResult {
     return html`
-      ${this.renderToolbar()} ${this.viewMode === "graph"
+      ${this.#renderToolbar()} ${this.viewMode === "graph"
         ? html`
           <div class="graph-wrapper">
             <div
               class="graph-container"
-              @click="${this.handleContainerClick}"
-              @wheel="${this.handleWheel}"
+              @click="${this.#handleContainerClick}"
+              @wheel="${this.#handleWheel}"
             >
-              ${this.renderGraph()} ${this.renderTooltip()} ${this
-                .renderLegend()}
+              ${this.#renderGraph()} ${this.#renderTooltip()} ${this
+                .#renderLegend()}
             </div>
-            ${this.renderDetailPane()}
+            ${this.#renderDetailPane()}
           </div>
         `
         : this.viewMode === "flags"
-        ? this.renderFlagsView()
+        ? this.#renderFlagsView()
         : this.viewMode === "source"
-        ? this.renderSourceView()
-        : this.renderTable()}
+        ? this.#renderSourceView()
+        : this.#renderTable()}
     `;
   }
 
-  private hasSourceLocation(nodeId: string): boolean {
+  #hasSourceLocation(nodeId: string): boolean {
     return parseActionLocation(nodeId) !== null;
   }
 
-  private renderSourceView(): TemplateResult {
+  #renderSourceView(): TemplateResult {
     const sources = this.debuggerController?.getPatternSources() ?? [];
     // Build SourceViewNode map from layoutNodes
     const sourceNodes = new Map<string, SourceViewNode>();
@@ -2703,7 +2711,7 @@ export class XSchedulerGraph extends LitElement {
           .patternSources="${sources}"
           .nodes="${sourceNodes}"
           .selectedNodeId="${this.selectedNode?.id ?? null}"
-          .baselineStats="${this.baselineStats}"
+          .baselineStats="${this.#baselineStats}"
           .breakpoints="${this.debuggerController?.getBreakpoints() ??
             new Set()}"
           @node-selected="${(e: CustomEvent) => {
@@ -2722,12 +2730,12 @@ export class XSchedulerGraph extends LitElement {
             this.requestUpdate();
           }}"
         ></x-scheduler-source>
-        ${this.renderDetailPane()}
+        ${this.#renderDetailPane()}
       </div>
     `;
   }
 
-  private renderFlagsView(): TemplateResult {
+  #renderFlagsView(): TemplateResult {
     const flags = this.debuggerController?.getActiveFlags() ?? {};
     const invalidInputMap = flags["runner"]?.["action invalid input"] ?? {};
     const invalidInputIds = Object.keys(invalidInputMap);
@@ -2809,12 +2817,12 @@ export class XSchedulerGraph extends LitElement {
             `
             : ""}
         </div>
-        ${this.renderDetailPane()}
+        ${this.#renderDetailPane()}
       </div>
     `;
   }
 
-  private renderTable(): TemplateResult {
+  #renderTable(): TemplateResult {
     // Get all nodes with stats
     const allNodesWithStats = Array.from(this.layoutNodes.values())
       .filter((n) => n.type !== "input" && n.stats)
@@ -2855,7 +2863,7 @@ export class XSchedulerGraph extends LitElement {
 
     // Helper to get delta for a node
     const getNodeDelta = (id: string, runCount: number, totalTime: number) => {
-      const baseline = this.baselineStats.get(id);
+      const baseline = this.#baselineStats.get(id);
       return {
         deltaRunCount: runCount - (baseline?.runCount ?? 0),
         deltaTotalTime: totalTime - (baseline?.totalTime ?? 0),
@@ -2916,7 +2924,7 @@ export class XSchedulerGraph extends LitElement {
     }
 
     // Sort based on current column (and whether we're sorting by delta)
-    const useDelta = this.sortByDelta && this.baselineStats.size > 0;
+    const useDelta = this.sortByDelta && this.#baselineStats.size > 0;
     const sortNodes = (nodes: GroupedNode[]) => {
       nodes.sort((a, b) => {
         let cmp = 0;
@@ -2967,9 +2975,9 @@ export class XSchedulerGraph extends LitElement {
       return `${(ms / 1000).toFixed(2)}s`;
     };
 
-    const hasBaseline = this.baselineStats.size > 0;
+    const hasBaseline = this.#baselineStats.size > 0;
 
-    const getBaseline = (id: string) => this.baselineStats.get(id);
+    const getBaseline = (id: string) => this.#baselineStats.get(id);
 
     const getDelta = (
       current: number,
@@ -3279,7 +3287,7 @@ export class XSchedulerGraph extends LitElement {
             </tbody>
           </table>
         </div>
-        ${this.renderDetailPane()}
+        ${this.#renderDetailPane()}
       </div>
     `;
   }

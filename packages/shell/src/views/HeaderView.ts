@@ -523,13 +523,13 @@ export class XHeaderView extends BaseView {
   @state()
   private accessor _localIsFavorite: boolean | undefined = undefined;
 
-  private _unsubscribeFavorites: (() => void) | undefined;
+  #unsubscribeFavorites: (() => void) | undefined;
 
   /** Subscribe to the favorites list so the menu reflects current state. */
-  private _setupFavoritesSubscription(): void {
-    this._cleanupFavoritesSubscription();
+  #setupFavoritesSubscription(): void {
+    this.#cleanupFavoritesSubscription();
     if (!this.rt) return;
-    this._unsubscribeFavorites = this.rt
+    this.#unsubscribeFavorites = this.rt
       .favorites()
       .subscribeFavorites((favorites) => {
         this._serverFavorites = favorites;
@@ -550,17 +550,20 @@ export class XHeaderView extends BaseView {
    * Idempotent while a subscription is live. After teardown — a disconnect or
    * a runtime swap clears `_unsubscribeFavorites` — the next call re-subscribes,
    * so a reconnected header is not left without favorites.
+   *
+   * TypeScript-private rather than a `#` name: `test/root-view.test.ts` drives
+   * this member directly.
    */
   private _ensureFavoritesSubscription(): void {
-    if (this._unsubscribeFavorites) return;
-    this._setupFavoritesSubscription();
+    if (this.#unsubscribeFavorites) return;
+    this.#setupFavoritesSubscription();
   }
 
   /** Unsubscribe from favorites when component disconnects or runtime changes. */
-  private _cleanupFavoritesSubscription(): void {
-    if (this._unsubscribeFavorites) {
-      this._unsubscribeFavorites();
-      this._unsubscribeFavorites = undefined;
+  #cleanupFavoritesSubscription(): void {
+    if (this.#unsubscribeFavorites) {
+      this.#unsubscribeFavorites();
+      this.#unsubscribeFavorites = undefined;
     }
   }
 
@@ -568,7 +571,7 @@ export class XHeaderView extends BaseView {
    * Derive whether the current piece is favorited. Prefers optimistic
    * local state (set immediately on click) over server state.
    */
-  private _isFavorite(): boolean {
+  #isFavorite(): boolean {
     if (this._localIsFavorite !== undefined) {
       return this._localIsFavorite;
     }
@@ -583,22 +586,22 @@ export class XHeaderView extends BaseView {
     );
   }
 
-  private _resizeTimer?: ReturnType<typeof setTimeout>;
+  #resizeTimer?: ReturnType<typeof setTimeout>;
 
   override connectedCallback(): void {
     super.connectedCallback();
-    this.addEventListener("keydown", this._handleKeyDown);
-    globalThis.addEventListener("resize", this._handleResize);
-    globalThis.addEventListener("click", this._closeHeaderPieceDropdown);
+    this.addEventListener("keydown", this.#handleKeyDown);
+    globalThis.addEventListener("resize", this.#handleResize);
+    globalThis.addEventListener("click", this.#closeHeaderPieceDropdown);
   }
 
   override disconnectedCallback(): void {
     super.disconnectedCallback();
-    this._cleanupFavoritesSubscription();
-    this.removeEventListener("keydown", this._handleKeyDown);
-    globalThis.removeEventListener("resize", this._handleResize);
-    globalThis.removeEventListener("click", this._closeHeaderPieceDropdown);
-    if (this._resizeTimer) clearTimeout(this._resizeTimer);
+    this.#cleanupFavoritesSubscription();
+    this.removeEventListener("keydown", this.#handleKeyDown);
+    globalThis.removeEventListener("resize", this.#handleResize);
+    globalThis.removeEventListener("click", this.#closeHeaderPieceDropdown);
+    if (this.#resizeTimer) clearTimeout(this.#resizeTimer);
   }
 
   /**
@@ -606,17 +609,17 @@ export class XHeaderView extends BaseView {
    * prevent the menu from flashing when crossing the mobile/desktop
    * breakpoint in DevTools.
    */
-  private _handleResize = () => {
+  #handleResize = () => {
     this.classList.add("resizing");
-    if (this._resizeTimer) clearTimeout(this._resizeTimer);
-    this._resizeTimer = setTimeout(() => {
+    if (this.#resizeTimer) clearTimeout(this.#resizeTimer);
+    this.#resizeTimer = setTimeout(() => {
       this.classList.remove("resizing");
     }, 150);
   };
 
   /** Close the innermost open dropdown on Escape, prioritizing the piece
    *  switcher over the main menu. Returns focus to the trigger on menu close. */
-  private _handleKeyDown = (e: KeyboardEvent) => {
+  #handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === "Escape") {
       if (this.headerPieceDropdownOpen) {
         e.preventDefault();
@@ -627,7 +630,7 @@ export class XHeaderView extends BaseView {
         e.preventDefault();
         this.menuOpen = false;
         this.pieceListExpanded = false;
-        this._focusTrigger();
+        this.#focusTrigger();
       }
     }
   };
@@ -636,8 +639,8 @@ export class XHeaderView extends BaseView {
     if (changedProperties.has("rt")) {
       this._serverFavorites = [];
       this._localIsFavorite = undefined;
-      this._piecesCache = undefined;
-      this._cleanupFavoritesSubscription();
+      this.#piecesCache = undefined;
+      this.#cleanupFavoritesSubscription();
       // If the menu is already open when a runtime arrives, the favorites
       // surface is showing, so subscribe now; otherwise wait for the first open.
       if (this.menuOpen) this._ensureFavoritesSubscription();
@@ -646,7 +649,7 @@ export class XHeaderView extends BaseView {
     // replaces rt — the per-space pieces cache must invalidate on the
     // space itself.
     if (changedProperties.has("space")) {
-      this._piecesCache = undefined;
+      this.#piecesCache = undefined;
     }
     if (changedProperties.has("pieceId")) {
       this._localIsFavorite = undefined;
@@ -661,15 +664,15 @@ export class XHeaderView extends BaseView {
    * Fetches are parallelized with Promise.allSettled; pieces that fail
    * to resolve are silently skipped.
    */
-  private _piecesCache: PieceItem[] | undefined;
+  #piecesCache: PieceItem[] | undefined;
 
-  private _pieces = new Task(this, {
+  #pieces = new Task(this, {
     task: async ([rt, space]): Promise<PieceItem[]> => {
       if (!rt || !space) {
-        this._piecesCache = undefined;
+        this.#piecesCache = undefined;
         return [];
       }
-      if (this._piecesCache) return this._piecesCache;
+      if (this.#piecesCache) return this.#piecesCache;
 
       await rt.synced(space);
       const piecesListCell = await rt.getPiecesListCell(space);
@@ -697,19 +700,19 @@ export class XHeaderView extends BaseView {
         }),
       );
 
-      this._piecesCache = results
+      this.#piecesCache = results
         .filter(
           (r): r is PromiseFulfilledResult<PieceItem> =>
             r.status === "fulfilled",
         )
         .map((r) => r.value);
-      return this._piecesCache;
+      return this.#piecesCache;
     },
     args: () => [this.rt, this.space] as const,
   });
 
   /** Clear the keystore and identity, logging the user out. */
-  private handleAuthClick(e: Event) {
+  #handleAuthClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
     if (!this.keyStore) {
@@ -722,7 +725,7 @@ export class XHeaderView extends BaseView {
   }
 
   /** Toggle the debugger panel visibility via app state command. */
-  private handleDebuggerToggleClick(e: Event) {
+  #handleDebuggerToggleClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
     this.command({
@@ -734,7 +737,7 @@ export class XHeaderView extends BaseView {
   }
 
   /** Toggle between light and dark mode. */
-  private handleThemeToggle(e: Event) {
+  #handleThemeToggle(e: Event) {
     e.preventDefault();
     e.stopPropagation();
     toggleTheme();
@@ -743,7 +746,7 @@ export class XHeaderView extends BaseView {
   }
 
   /** Navigate to the current space root when the breadcrumb is clicked. */
-  private _handleSpaceClick(e: Event) {
+  #handleSpaceClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
     if (this.spaceName) {
@@ -753,7 +756,12 @@ export class XHeaderView extends BaseView {
     }
   }
 
-  /** Open the main dropdown menu and move focus to the close button. */
+  /**
+   * Open the main dropdown menu and move focus to the close button.
+   *
+   * TypeScript-private rather than a `#` name: `test/root-view.test.ts` drives
+   * this member directly.
+   */
   private handleLogoClick(e: Event) {
     e.preventDefault();
     e.stopPropagation();
@@ -765,44 +773,44 @@ export class XHeaderView extends BaseView {
   }
 
   /** Return focus to the logo trigger button after the menu closes. */
-  private _focusTrigger() {
+  #focusTrigger() {
     this.updateComplete.then(() => {
       this.renderRoot.querySelector<HTMLElement>(".nav-picker")?.focus();
     });
   }
 
   /** Close the main menu via the X button. */
-  private handleCloseMenu(e: Event) {
+  #handleCloseMenu(e: Event) {
     e.preventDefault();
     e.stopPropagation();
     this.menuOpen = false;
     this.pieceListExpanded = false;
-    this._focusTrigger();
+    this.#focusTrigger();
   }
 
   /** Close the main menu when the dark backdrop overlay is clicked. */
-  private handleBackdropClick() {
+  #handleBackdropClick() {
     this.menuOpen = false;
     this.pieceListExpanded = false;
-    this._focusTrigger();
+    this.#focusTrigger();
   }
 
   /** Toggle the piece list inside the mobile menu. */
-  private handleTogglePieceList(e: Event) {
+  #handleTogglePieceList(e: Event) {
     e.preventDefault();
     e.stopPropagation();
     this.pieceListExpanded = !this.pieceListExpanded;
   }
 
   /** Toggle the piece switcher dropdown in the desktop header breadcrumb. */
-  private handleToggleHeaderPieceDropdown(e: Event) {
+  #handleToggleHeaderPieceDropdown(e: Event) {
     e.preventDefault();
     e.stopPropagation();
     this.headerPieceDropdownOpen = !this.headerPieceDropdownOpen;
   }
 
   /** Close the desktop piece switcher when clicking outside of it. */
-  private _closeHeaderPieceDropdown = (e: Event) => {
+  #closeHeaderPieceDropdown = (e: Event) => {
     const path = e.composedPath();
     const wrapper = this.renderRoot.querySelector(".header-piece-wrapper");
     if (wrapper && !path.includes(wrapper)) {
@@ -811,7 +819,7 @@ export class XHeaderView extends BaseView {
   };
 
   /** Handle piece selection from either the mobile or desktop piece list. */
-  private handlePieceSelected(e: Event) {
+  #handlePieceSelected(e: Event) {
     const { id: pieceId } = (e as CustomEvent<PieceItem>).detail;
     this.menuOpen = false;
     this.pieceListExpanded = false;
@@ -827,11 +835,11 @@ export class XHeaderView extends BaseView {
    * Contextual navigation: when viewing a piece, go back to the space
    * root. When already at the space root, go to the user's home (/).
    */
-  private handleNavigateUp(e: Event) {
+  #handleNavigateUp(e: Event) {
     e.preventDefault();
     e.stopPropagation();
     this.menuOpen = false;
-    if (this._isViewingPiece) {
+    if (this.#isViewingPiece) {
       // Viewing a piece — go back to the space
       if (this.spaceName) {
         navigate({ spaceName: this.spaceName });
@@ -845,32 +853,32 @@ export class XHeaderView extends BaseView {
   }
 
   /** Whether we have a space identifier (name or DID) to navigate with. */
-  private get _hasSpace(): boolean {
+  get #hasSpace(): boolean {
     return !!(this.spaceName || this.spaceDid);
   }
 
   /** Human-readable space name, falling back to a truncated DID. */
-  private get _spaceDisplayName(): string {
+  get #spaceDisplayName(): string {
     if (this.spaceName) return this.spaceName;
     if (this.spaceDid) return this.spaceDid.slice(0, 20) + "...";
     return "";
   }
 
   /** True when viewing a specific piece (not the space's default pattern). */
-  private get _isViewingPiece(): boolean {
-    return !!(this.pieceId && this._hasSpace && !this.isViewingDefaultPattern);
+  get #isViewingPiece(): boolean {
+    return !!(this.pieceId && this.#hasSpace && !this.isViewingDefaultPattern);
   }
 
   /** Label for the navigate-up button: "Back to <space>" or "Go Home". */
-  private get _navigateUpLabel(): string {
-    if (this._isViewingPiece) {
-      return `Back to ${this._spaceDisplayName}`;
+  get #navigateUpLabel(): string {
+    if (this.#isViewingPiece) {
+      return `Back to ${this.#spaceDisplayName}`;
     }
     return "Go Home";
   }
 
   /** Copy the current page URL to the clipboard. */
-  private async handleCopyLink(e: Event) {
+  async #handleCopyLink(e: Event) {
     e.preventDefault();
     e.stopPropagation();
     try {
@@ -887,19 +895,23 @@ export class XHeaderView extends BaseView {
    * Rolls back local state on error. Guarded against double-clicks
    * with _isFavoriteLoading to prevent conflicting requests.
    */
-  private _isFavoriteLoading = false;
+  #isFavoriteLoading = false;
 
+  /**
+   * TypeScript-private rather than a `#` name: `test/root-view.test.ts` drives
+   * this member directly.
+   */
   private async handleToggleFavorite(e: Event) {
     e.preventDefault();
     e.stopPropagation();
     const space = this.space;
-    if (!this.rt || !space || !this.pieceId || this._isFavoriteLoading) {
+    if (!this.rt || !space || !this.pieceId || this.#isFavoriteLoading) {
       return;
     }
 
-    const currentlyFavorite = this._isFavorite();
+    const currentlyFavorite = this.#isFavorite();
     this._localIsFavorite = !currentlyFavorite;
-    this._isFavoriteLoading = true;
+    this.#isFavoriteLoading = true;
     // Favoriting touches the home pattern anyway; start reflecting server
     // state from here on if the menu was never opened.
     this._ensureFavoritesSubscription();
@@ -919,19 +931,19 @@ export class XHeaderView extends BaseView {
       console.error("[HeaderView] Error toggling favorite:", err);
       this._localIsFavorite = undefined;
     } finally {
-      this._isFavoriteLoading = false;
+      this.#isFavoriteLoading = false;
     }
   }
 
   /** Derive connection status from runtime availability. */
-  private getConnectionStatus(): ConnectionStatus {
+  #getConnectionStatus(): ConnectionStatus {
     return this.rt ? "connected" : "disconnected";
   }
 
   override render() {
-    const connectionStatus = this.getConnectionStatus();
+    const connectionStatus = this.#getConnectionStatus();
     const connectionColor = getConnectionColor(connectionStatus);
-    const isFavorite = this._isFavorite();
+    const isFavorite = this.#isFavorite();
 
     return html`
       <div class="header">
@@ -953,22 +965,22 @@ export class XHeaderView extends BaseView {
             </span>
           </button>
           <div class="header-breadcrumbs">
-            ${this._hasSpace
+            ${this.#hasSpace
               ? html`
                 <a
                   class="header-space"
                   href="${this.spaceName
                     ? `/${this.spaceName}`
                     : `/${this.spaceDid ?? ""}`}"
-                  @click="${this._handleSpaceClick}"
-                >${this._spaceDisplayName}</a>
+                  @click="${this.#handleSpaceClick}"
+                >${this.#spaceDisplayName}</a>
                 ${this.pieceTitle
                   ? html`
                     <span class="header-separator">/</span>
                     <span class="header-piece-wrapper">
                       <button
                         class="header-piece-trigger"
-                        @click="${this.handleToggleHeaderPieceDropdown}"
+                        @click="${this.#handleToggleHeaderPieceDropdown}"
                         aria-haspopup="true"
                         aria-expanded="${this.headerPieceDropdownOpen}"
                       >
@@ -986,10 +998,10 @@ export class XHeaderView extends BaseView {
                         ? html`
                           <div class="header-piece-dropdown">
                             <x-piece-list
-                              .pieces="${this._pieces.value ?? []}"
+                              .pieces="${this.#pieces.value ?? []}"
                               .activePieceId="${this.pieceId}"
                               @piece-selected="${this
-                                .handlePieceSelected}"
+                                .#handlePieceSelected}"
                             ></x-piece-list>
                           </div>
                         `
@@ -1004,23 +1016,23 @@ export class XHeaderView extends BaseView {
       </div>
 
       <div class="menu-container ${this.menuOpen ? "open" : ""}">
-        <div class="menu-backdrop" @click="${this.handleBackdropClick}"></div>
+        <div class="menu-backdrop" @click="${this.#handleBackdropClick}"></div>
         <div class="menu-panel" role="menu">
           <div class="menu-inner">
             <button
               class="menu-close"
-              @click="${this.handleCloseMenu}"
+              @click="${this.#handleCloseMenu}"
               aria-label="Close menu"
             >
               <span class="menu-close-icon">${iconClose()}</span>
             </button>
             <div class="menu-title">
-              ${this._hasSpace
+              ${this.#hasSpace
                 ? html`
                   <div class="breadcrumb">
                     <span class="breadcrumb-icon">${iconFolder()}</span>
                     <span class="breadcrumb-text">${this
-                      ._spaceDisplayName}</span>
+                      .#spaceDisplayName}</span>
                     <span class="breadcrumb-chevron">
                       ${iconChevronRight()}
                     </span>
@@ -1029,7 +1041,7 @@ export class XHeaderView extends BaseView {
                 : nothing}
               <button
                 class="piece-title-row"
-                @click="${this.handleTogglePieceList}"
+                @click="${this.#handleTogglePieceList}"
                 aria-expanded="${this.pieceListExpanded}"
               >
                 <span class="piece-title-text">
@@ -1046,9 +1058,9 @@ export class XHeaderView extends BaseView {
               ${this.pieceListExpanded
                 ? html`
                   <x-piece-list
-                    .pieces="${this._pieces.value ?? []}"
+                    .pieces="${this.#pieces.value ?? []}"
                     .activePieceId="${this.pieceId}"
-                    @piece-selected="${this.handlePieceSelected}"
+                    @piece-selected="${this.#handlePieceSelected}"
                   ></x-piece-list>
                 `
                 : nothing}
@@ -1058,10 +1070,10 @@ export class XHeaderView extends BaseView {
               <button
                 class="menu-item"
                 role="menuitem"
-                @click="${this.handleNavigateUp}"
+                @click="${this.#handleNavigateUp}"
               >
                 <span class="menu-item-icon">${iconArrowLeft()}</span>
-                <span class="menu-item-label">${this._navigateUpLabel}</span>
+                <span class="menu-item-label">${this.#navigateUpLabel}</span>
               </button>
 
               <div class="divider"><div class="divider-line"></div></div>
@@ -1084,7 +1096,7 @@ export class XHeaderView extends BaseView {
               <button
                 class="menu-item"
                 role="menuitem"
-                @click="${this.handleCopyLink}"
+                @click="${this.#handleCopyLink}"
               >
                 <span class="menu-item-icon">${iconLink()}</span>
                 <span class="menu-item-label">Copy link</span>
@@ -1093,7 +1105,7 @@ export class XHeaderView extends BaseView {
               <button
                 class="menu-item"
                 role="menuitem"
-                @click="${this.handleDebuggerToggleClick}"
+                @click="${this.#handleDebuggerToggleClick}"
               >
                 <span class="menu-item-icon">${iconBug()}</span>
                 <span class="menu-item-label">Toggle debug mode</span>
@@ -1102,7 +1114,7 @@ export class XHeaderView extends BaseView {
               <button
                 class="menu-item"
                 role="menuitem"
-                @click="${this.handleThemeToggle}"
+                @click="${this.#handleThemeToggle}"
               >
                 <span class="menu-item-icon">${iconThemeToggle(
                   getEffectiveTheme() === "dark",
@@ -1117,7 +1129,7 @@ export class XHeaderView extends BaseView {
               <button
                 class="menu-item"
                 role="menuitem"
-                @click="${this.handleAuthClick}"
+                @click="${this.#handleAuthClick}"
               >
                 <span class="menu-item-icon">${iconLogOut()}</span>
                 <span class="menu-item-label">Sign out</span>
