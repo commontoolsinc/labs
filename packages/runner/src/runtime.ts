@@ -2551,11 +2551,15 @@ export class Runtime {
   }
 
   /**
-   * The latest UI write issued per supersede lane (one lane per UI control's
-   * cell address). A conflict retry re-runs only while its own token is
-   * still the lane's latest — see {@link commitUiCellWrite}.
+   * Per-lane state for UI writes (one lane per UI control's cell address):
+   * the NEWEST requested value and how many write loops are still in
+   * flight. A conflict retry writes the lane's newest value — never its
+   * own — so a delayed retry can only ever re-assert the user's latest
+   * input; the entry lives until every loop that might still write settles
+   * (deleting it earlier would hand a late retry a stale fallback). See
+   * {@link commitUiCellWrite}.
    */
-  #uiWriteLanes = new Map<string, object>();
+  #uiWriteLanes = new Map<string, { value: unknown; inFlight: number }>();
 
   /**
    * Commit a UI-originated cell write — the renderer `$value`/input path
@@ -2590,12 +2594,18 @@ export class Runtime {
    * - `blind: false` is the CAS class (`CellHandle.push`): the value was
    *   resolved by the caller and the value-equality reads stay in place, so
    *   re-running against fresh state is ordinary compare-and-set retry.
-   * - `supersedeKey` makes writes to one UI control one LANE. Each attempt
-   *   re-checks, BEFORE staging, that its write is still the lane's
-   *   latest; a superseded retry resolves `ok: "superseded"` instead of
-   *   re-asserting an older input over a newer one — the LWW-inversion
-   *   hazard the OW47 report recorded against unguarded auto-retry, closed
-   *   by ordering rather than by refusing to retry.
+   * - `supersedeKey` makes writes to one UI control one LANE, and each
+   *   attempt writes the lane's NEWEST requested value rather than the
+   *   value this call was issued with. That closes both failure shapes at
+   *   once: a delayed retry can never re-assert an older input over a
+   *   newer one (the LWW-inversion hazard the OW47 report recorded
+   *   against unguarded auto-retry), and a newer same-lane call that
+   *   resolves VACUOUSLY — its `set` no-ops against the older write's
+   *   still-standing optimistic layer, so it holds no ops of its own —
+   *   cannot strand the value when that older layer is reverted: the
+   *   older call's retry is still live and re-issues the newest value on
+   *   the repaired base (the d05-diagnosed remainder of the :133 stall,
+   *   where token-based decline left the value owned by a no-op).
    * - a write that exhausts the budget or is refused non-retryably resolves
    *   `{ error }` and is LOUD: `ui-cell-write.lost` is logged at error
    *   level and counted, so a run's census can see dropped user input (the
@@ -2608,29 +2618,30 @@ export class Runtime {
     value: unknown,
     options: { blind: boolean; supersedeKey?: string },
   ): Promise<
-    | { ok: "committed" | "superseded"; error?: undefined }
+    | { ok: "committed"; error?: undefined }
     | { ok?: undefined; error: CommitError }
   > {
     const { blind, supersedeKey } = options;
-    const token = {};
+    let lane: { value: unknown; inFlight: number } | undefined;
     if (supersedeKey !== undefined) {
-      this.#uiWriteLanes.set(supersedeKey, token);
+      lane = this.#uiWriteLanes.get(supersedeKey);
+      if (lane === undefined) {
+        lane = { value, inFlight: 0 };
+        this.#uiWriteLanes.set(supersedeKey, lane);
+      } else {
+        // This call is now the lane's newest input; every still-running
+        // loop's next attempt writes this value.
+        lane.value = value;
+      }
+      lane.inFlight++;
     }
-    const superseded = (): boolean =>
-      supersedeKey !== undefined &&
-      this.#uiWriteLanes.get(supersedeKey) !== token;
     try {
-      let attempt = 0;
-      const result = await this.editWithRetry<"committed" | "superseded">(
+      const result = await this.editWithRetry<"committed">(
         (tx) => {
-          attempt++;
-          // PROBE (temporary): name the parked stage of the :133 retry.
-          console.error(
-            `[PROBE uiWrite] attempt=${attempt} superseded=${superseded()} lane=${supersedeKey}`,
-          );
-          // Per attempt, BEFORE staging: a superseded retry declines (the
-          // editWithRetry convention — nothing staged, `ok` carries it).
-          if (superseded()) return "superseded";
+          // Per attempt: write the lane's NEWEST requested value (see the
+          // supersedeKey semantics above). Without a lane, this call's own
+          // value.
+          const attemptValue = lane === undefined ? value : lane.value;
           if (blind) {
             markUiInputBlindWriteTx(tx);
             // Renderer-input provenance that survives to commit, so the
@@ -2650,15 +2661,10 @@ export class Runtime {
               path: link.path.slice(0, -1),
             });
           }
-          cell.withTx(tx).set(value);
+          cell.withTx(tx).set(attemptValue);
           if (blind) unmarkUiInputBlindWriteTx(tx);
           return "committed";
         },
-      );
-      console.error(
-        `[PROBE uiWrite] SETTLED ok=${result.ok ?? "none"} error=${
-          (result.error as { name?: string } | undefined)?.name ?? "none"
-        } lane=${supersedeKey}`,
       );
       if (result.error !== undefined) {
         uiCellWriteLogger.error("lost", () => [
@@ -2675,13 +2681,16 @@ export class Runtime {
         ]);
         return { error: result.error };
       }
-      return { ok: result.ok ?? "committed" };
+      return { ok: "committed" };
     } finally {
-      if (
-        supersedeKey !== undefined &&
-        this.#uiWriteLanes.get(supersedeKey) === token
-      ) {
-        this.#uiWriteLanes.delete(supersedeKey);
+      if (supersedeKey !== undefined && lane !== undefined) {
+        lane.inFlight--;
+        if (
+          lane.inFlight <= 0 &&
+          this.#uiWriteLanes.get(supersedeKey) === lane
+        ) {
+          this.#uiWriteLanes.delete(supersedeKey);
+        }
       }
     }
   }

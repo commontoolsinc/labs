@@ -233,7 +233,7 @@ describe("UI cell write conflict retry (the :133 stall's consumer seam)", () => 
     }
   });
 
-  it("a superseded retry declines instead of clobbering newer input (no LWW inversion)", async () => {
+  it("a retry writes the lane's newest value, never its own (no LWW inversion, no vacuous-owner strand)", async () => {
     const seed = runtime.edit();
     const cell = runtime.getCell<Doc>(space, "ui-write-lww", schema, seed);
     cell.withTx(seed).set({ drafts: { message: "seed" } });
@@ -266,11 +266,16 @@ describe("UI cell write conflict retry (the :133 stall's consumer seam)", () => 
         supersedeKey: "ui-write-lww-lane",
       });
       expect(w2Outcome.error).toBeUndefined();
-      // Release w1's retry: it must decline, not re-assert "old" over "new".
+      // Release w1's retry: it re-issues the lane's NEWEST value ("new"),
+      // never its own "old" — the LWW-inversion guard. And because the
+      // retry re-issues rather than declining, a newer call that resolved
+      // VACUOUSLY (its set no-oped against the older write's optimistic
+      // layer — the d05-diagnosed live shape) cannot strand the value:
+      // the older loop still lands the newest value on the repaired base.
       releaseRetry();
       const w1Outcome = await w1;
       expect(w1Outcome.error).toBeUndefined();
-      expect(w1Outcome.ok).toBe("superseded");
+      expect(w1Outcome.ok).toBe("committed");
     } finally {
       injection.restore();
     }
@@ -279,7 +284,7 @@ describe("UI cell write conflict retry (the :133 stall's consumer seam)", () => 
       () => leaf.get() === "new",
       "the newest input to be the surviving value",
     );
-    // And it stays "new": the released retry must not have re-landed "old".
+    // And it stays "new": the released retry re-landed "new", not "old".
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(leaf.get()).toBe("new");
   });
