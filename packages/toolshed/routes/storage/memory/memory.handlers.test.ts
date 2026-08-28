@@ -10,7 +10,7 @@ import {
 import {
   decodeCompressedMemoryMessage,
   encodeCompressedMemoryMessage,
-  MEMORY_COMPRESSION_ENVELOPE_PREFIX,
+  type EncodedMemoryMessage,
 } from "@commonfabric/memory/v2/message-compression";
 
 import {
@@ -28,10 +28,11 @@ const HELLO = encodeMemoryBoundary({
 
 class FakeSocket extends EventTarget {
   readyState: number = WebSocket.OPEN;
-  readonly sent: string[] = [];
+  binaryType: BinaryType = "blob";
+  readonly sent: EncodedMemoryMessage[] = [];
   #sentWaiters: Array<{ count: number; resolve: () => void }> = [];
 
-  send(payload: string): void {
+  send(payload: EncodedMemoryMessage): void {
     this.sent.push(payload);
     this.#sentWaiters = this.#sentWaiters.filter((waiter) => {
       if (this.sent.length >= waiter.count) {
@@ -101,7 +102,10 @@ describe("memory.handlers", () => {
       await runHelloThroughPipeline(fake, WebSocket.OPEN);
 
       expect(fake.sent.length).toBe(1);
-      const reply = decodeMemoryBoundary<{ type: string }>(fake.sent[0]);
+      const frame = fake.sent[0];
+      expect(typeof frame).toBe("string");
+      if (typeof frame !== "string") throw new Error("Expected text hello");
+      const reply = decodeMemoryBoundary<{ type: string }>(frame);
       expect(reply.type).toBe("hello.ok");
     });
 
@@ -126,16 +130,6 @@ describe("memory.handlers", () => {
 
       fake.dispatchEvent(new MessageEvent("message", { data: HELLO }));
       const firstMessage = await negotiation.firstMessage;
-      expect(attachMemorySocketPipeline(
-        socket,
-        negotiation,
-        firstMessage!,
-      )).toBe(true);
-      await handedOff.promise;
-      expect(fake.sent[0].startsWith(
-        MEMORY_COMPRESSION_ENVELOPE_PREFIX,
-      )).toBe(false);
-
       const requestId = "compressed-session-open-".repeat(100);
       const request = encodeMemoryBoundary({
         type: "session.open",
@@ -148,11 +142,16 @@ describe("memory.handlers", () => {
           data: await encodeCompressedMemoryMessage(request),
         }),
       );
+      expect(attachMemorySocketPipeline(
+        socket,
+        negotiation,
+        firstMessage!,
+      )).toBe(true);
+      await handedOff.promise;
+      expect(typeof fake.sent[0]).toBe("string");
       await fake.whenSent(2);
 
-      expect(fake.sent[1].startsWith(
-        MEMORY_COMPRESSION_ENVELOPE_PREFIX,
-      )).toBe(true);
+      expect(fake.sent[1]).toBeInstanceOf(Uint8Array);
       const response = decodeMemoryBoundary<{ requestId: string }>(
         await decodeCompressedMemoryMessage(fake.sent[1]),
       );

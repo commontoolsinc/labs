@@ -12,7 +12,8 @@ import * as MemoryClient from "@commonfabric/memory/v2/client";
 import {
   decodeCompressedMemoryMessage,
   encodeCompressedMemoryMessage,
-  MEMORY_COMPRESSION_ENVELOPE_PREFIX,
+  type EncodedMemoryMessage,
+  type MemoryMessageFrame,
 } from "@commonfabric/memory/v2/message-compression";
 import {
   createStorageAddressResolver,
@@ -269,6 +270,7 @@ class RecordingWebSocket extends EventTarget {
   static dialed: string[] = [];
   static #waiters: Array<{ count: number; resolve: () => void }> = [];
   readyState = RecordingWebSocket.CONNECTING;
+  binaryType: BinaryType = "blob";
   constructor(url: string | URL) {
     super();
     RecordingWebSocket.dialed.push(url.toString());
@@ -290,7 +292,7 @@ class RecordingWebSocket extends EventTarget {
       RecordingWebSocket.#waiters.push({ count, resolve })
     );
   }
-  send(_payload: string): void {}
+  send(_payload: EncodedMemoryMessage): void {}
   close(): void {}
 }
 
@@ -466,13 +468,14 @@ describe("WebSocketTransport failure signaling", () => {
     static readonly CLOSED = 3;
     static instances: DrivableWebSocket[] = [];
     readyState = DrivableWebSocket.CONNECTING;
-    readonly sent: string[] = [];
+    binaryType: BinaryType = "blob";
+    readonly sent: EncodedMemoryMessage[] = [];
     #sentWaiters: Array<{ count: number; resolve: () => void }> = [];
     constructor(readonly url: string | URL) {
       super();
       DrivableWebSocket.instances.push(this);
     }
-    send(payload: string): void {
+    send(payload: EncodedMemoryMessage): void {
       this.sent.push(payload);
       this.#sentWaiters = this.#sentWaiters.filter((waiter) => {
         if (this.sent.length >= waiter.count) {
@@ -492,7 +495,7 @@ describe("WebSocketTransport failure signaling", () => {
       this.readyState = DrivableWebSocket.OPEN;
       this.dispatchEvent(new Event("open"));
     }
-    receive(payload: string): void {
+    receive(payload: MemoryMessageFrame): void {
       this.dispatchEvent(new MessageEvent("message", { data: payload }));
     }
     close(): void {
@@ -521,6 +524,11 @@ describe("WebSocketTransport failure signaling", () => {
         (globalThis as { WebSocket: unknown }).WebSocket = realWebSocket;
       });
   }
+
+  const requireTextFrame = (frame: EncodedMemoryMessage): string => {
+    if (typeof frame !== "string") throw new Error("Expected text frame");
+    return frame;
+  };
 
   /**
    * Aborts `controller` at the moment the memory client stops listening for
@@ -590,7 +598,9 @@ describe("WebSocketTransport failure signaling", () => {
     socket: DrivableWebSocket,
     sessionId: string,
   ): void => {
-    const open = decodeMemoryBoundary(socket.sent[1]) as { requestId: string };
+    const open = decodeMemoryBoundary(requireTextFrame(socket.sent[1])) as {
+      requestId: string;
+    };
     socket.receive(encodeMemoryBoundary({
       type: "response",
       requestId: open.requestId,
@@ -650,12 +660,8 @@ describe("WebSocketTransport failure signaling", () => {
       const second = "second compressed message ".repeat(1_000);
       await Promise.all([transport.send(first), transport.send(second)]);
 
-      expect(activeSocket.sent[1].startsWith(
-        MEMORY_COMPRESSION_ENVELOPE_PREFIX,
-      )).toBe(true);
-      expect(activeSocket.sent[2].startsWith(
-        MEMORY_COMPRESSION_ENVELOPE_PREFIX,
-      )).toBe(true);
+      expect(activeSocket.sent[1]).toBeInstanceOf(Uint8Array);
+      expect(activeSocket.sent[2]).toBeInstanceOf(Uint8Array);
       expect(await decodeCompressedMemoryMessage(activeSocket.sent[1])).toBe(
         first,
       );
@@ -838,9 +844,9 @@ describe("WebSocketTransport failure signaling", () => {
           sessionOpen: TEST_HELLO_SESSION_OPEN,
         }));
         await initialSocket.whenSent(2);
-        const initialOpen = decodeMemoryBoundary(initialSocket.sent[1]) as {
-          requestId: string;
-        };
+        const initialOpen = decodeMemoryBoundary(
+          requireTextFrame(initialSocket.sent[1]),
+        ) as { requestId: string };
         initialSocket.receive(encodeMemoryBoundary({
           type: "response",
           requestId: initialOpen.requestId,

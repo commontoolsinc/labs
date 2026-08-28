@@ -12,7 +12,7 @@ import {
 import {
   decodeCompressedMemoryMessage,
   encodeCompressedMemoryMessage,
-  MEMORY_COMPRESSION_ENVELOPE_PREFIX,
+  type MemoryMessageFrame,
 } from "../../v2/message-compression.ts";
 import { StandaloneMemoryServer } from "../../v2/standalone.ts";
 
@@ -22,25 +22,27 @@ describe("standalone memory compression", () => {
     const address = new URL(server.url);
     address.protocol = "ws:";
     const socket = new WebSocket(address);
+    socket.binaryType = "arraybuffer";
     try {
       await opened(socket);
 
-      const helloReply = nextTextMessage(socket);
+      const helloReply = nextMessage(socket);
       socket.send(encodeMemoryBoundary({
         type: "hello",
         protocol: MEMORY_PROTOCOL,
         flags: getMemoryProtocolFlags(),
       }));
       const helloFrame = await helloReply;
-      expect(helloFrame.startsWith(MEMORY_COMPRESSION_ENVELOPE_PREFIX)).toBe(
-        false,
-      );
+      expect(typeof helloFrame).toBe("string");
+      if (typeof helloFrame !== "string") {
+        throw new Error("Expected text hello reply");
+      }
       expect(decodeMemoryBoundary<{ type: string }>(helloFrame).type).toBe(
         "hello.ok",
       );
 
       const requestId = "standalone-compressed-session-open-".repeat(100);
-      const response = nextTextMessage(socket);
+      const response = nextMessage(socket);
       socket.send(
         await encodeCompressedMemoryMessage(encodeMemoryBoundary({
           type: "session.open",
@@ -50,9 +52,7 @@ describe("standalone memory compression", () => {
         })),
       );
       const responseFrame = await response;
-      expect(responseFrame.startsWith(
-        MEMORY_COMPRESSION_ENVELOPE_PREFIX,
-      )).toBe(true);
+      expect(responseFrame).toBeInstanceOf(ArrayBuffer);
       expect(
         decodeMemoryBoundary<{ requestId: string }>(
           await decodeCompressedMemoryMessage(responseFrame),
@@ -83,15 +83,18 @@ function opened(socket: WebSocket): Promise<void> {
   });
 }
 
-/** Returns the next text message from `socket`. */
-function nextTextMessage(socket: WebSocket): Promise<string> {
+/** Returns the next supported message from `socket`. */
+function nextMessage(socket: WebSocket): Promise<MemoryMessageFrame> {
   return new Promise((resolve, reject) => {
     const onMessage = (event: MessageEvent) => {
       cleanup();
-      if (typeof event.data === "string") {
+      if (
+        typeof event.data === "string" || event.data instanceof ArrayBuffer ||
+        event.data instanceof Uint8Array || event.data instanceof Blob
+      ) {
         resolve(event.data);
       } else {
-        reject(new Error("Standalone memory WebSocket sent a binary frame"));
+        reject(new Error("Standalone memory WebSocket sent an invalid frame"));
       }
     };
     const onError = () => {

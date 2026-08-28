@@ -1078,7 +1078,7 @@ export type MemoryProtocolFlags = {
   operationCodecs?: readonly string[];
   /** Hash-keyed per-frame schema table. */
   syncSchemaTableV2: boolean;
-  /** The peer can exchange `mcmp1` gzip message envelopes. */
+  /** The peer can exchange versioned binary gzip message envelopes. */
   messageCompressionV1: boolean;
   /**
    * Server capability (CFC Phase 3.c): commit-folded `sqlite` writes to

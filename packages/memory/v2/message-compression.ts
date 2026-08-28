@@ -1,17 +1,22 @@
 /**
  * Encodes and decodes negotiated compression envelopes for memory WebSocket
- * messages. Envelopes remain text frames so proxies can forward them without
- * understanding the memory protocol.
+ * messages. Compressed envelopes use binary WebSocket frames so the gzip
+ * payload travels without another encoding layer.
  */
 
-import {
-  fromBase64url,
-  toUnpaddedBase64url,
-} from "@commonfabric/utils/base64url";
-import { isObjectNotArray } from "@commonfabric/utils/types";
+/** Frames produced by the compression encoder. */
+export type EncodedMemoryMessage = string | Uint8Array<ArrayBuffer>;
 
-/** Prefix identifying the first version of the compression envelope. */
-export const MEMORY_COMPRESSION_ENVELOPE_PREFIX = "mcmp1:";
+/** WebSocket message forms accepted by the compression decoder. */
+export type MemoryMessageFrame =
+  | EncodedMemoryMessage
+  | ArrayBuffer
+  | Uint8Array<ArrayBufferLike>
+  | Blob;
+
+const MEMORY_COMPRESSION_MAGIC = [0x6d, 0x63, 0x6d, 0x70] as const;
+const MEMORY_COMPRESSION_VERSION = 1;
+const MEMORY_COMPRESSION_HEADER_BYTES = 9;
 
 /** Messages below this UTF-8 size stay in their original wire form. */
 export const MEMORY_COMPRESSION_THRESHOLD_BYTES = 1_024;
@@ -25,31 +30,21 @@ const MAX_GZIP_MEMORY_MESSAGE_BYTES = MAX_DECOMPRESSED_MEMORY_MESSAGE_BYTES +
 const TEXT_DECODER = new TextDecoder("utf-8", { fatal: true });
 const TEXT_ENCODER = new TextEncoder();
 
-/** JSON body carried after {@link MEMORY_COMPRESSION_ENVELOPE_PREFIX}. */
-type CompressionEnvelope = {
-  /** Compression format applied to `.payload`. */
-  encoding: "gzip";
-  /** Exact UTF-8 byte length required after expansion. */
-  uncompressedBytes: number;
-  /** Unpadded base64url encoding of one compressed message. */
-  payload: string;
-};
-
 /**
  * Preserves message order while applying negotiated compression in both
- * directions of one text-frame channel.
+ * directions of one WebSocket channel.
  */
 export class MemoryMessageCompressionChannel {
   #compressionEnabled = false;
   #closed = false;
   #incoming: Promise<void> = Promise.resolve();
   #outgoing: Promise<void> = Promise.resolve();
-  #sendRaw: (payload: string) => void;
+  #sendRaw: (payload: EncodedMemoryMessage) => void;
   #onError: (error: Error) => void;
 
-  /** Constructs an instance around an ordinary text-frame sender. */
+  /** Constructs an instance around a WebSocket frame sender. */
   constructor(
-    sendRaw: (payload: string) => void,
+    sendRaw: (payload: EncodedMemoryMessage) => void,
     onError: (error: Error) => void,
   ) {
     this.#sendRaw = sendRaw;
@@ -92,7 +87,7 @@ export class MemoryMessageCompressionChannel {
 
   /** Expands one frame and delivers it after every frame submitted before it. */
   receive(
-    frame: string,
+    frame: MemoryMessageFrame,
     receiver: (payload: string) => void | Promise<void>,
   ): void {
     if (this.#closed) return;
@@ -100,7 +95,7 @@ export class MemoryMessageCompressionChannel {
       if (this.#closed) return;
       const payload = this.#compressionEnabled
         ? await decodeCompressedMemoryMessage(frame)
-        : frame;
+        : requireTextFrame(frame);
       if (!this.#closed) await receiver(payload);
     });
     this.#incoming = receive.catch((cause) => this.#fail(cause));
@@ -119,12 +114,12 @@ export class MemoryMessageCompressionChannel {
 }
 
 /**
- * Compresses `payload` into a versioned text envelope when doing so reduces
- * its UTF-8 wire size. Small and incompressible payloads remain unchanged.
+ * Compresses `payload` into a versioned binary envelope when doing so reduces
+ * its UTF-8 wire size. Small and incompressible payloads remain text.
  */
 export async function encodeCompressedMemoryMessage(
   payload: string,
-): Promise<string> {
+): Promise<EncodedMemoryMessage> {
   const source = TEXT_ENCODER.encode(payload);
   if (source.byteLength < MEMORY_COMPRESSION_THRESHOLD_BYTES) {
     return payload;
@@ -137,33 +132,29 @@ export async function encodeCompressedMemoryMessage(
     new Blob([source]).stream().pipeThrough(new CompressionStream("gzip")),
     MAX_GZIP_MEMORY_MESSAGE_BYTES,
   );
-  const envelope: CompressionEnvelope = {
-    encoding: "gzip",
-    uncompressedBytes: source.byteLength,
-    payload: toUnpaddedBase64url(compressed),
-  };
-  const encoded = MEMORY_COMPRESSION_ENVELOPE_PREFIX + JSON.stringify(envelope);
-  return encoded.length < source.byteLength ? encoded : payload;
+  const encoded = new Uint8Array(
+    MEMORY_COMPRESSION_HEADER_BYTES + compressed.byteLength,
+  );
+  encoded.set(MEMORY_COMPRESSION_MAGIC);
+  encoded[4] = MEMORY_COMPRESSION_VERSION;
+  new DataView(encoded.buffer).setUint32(5, source.byteLength);
+  encoded.set(compressed, MEMORY_COMPRESSION_HEADER_BYTES);
+  return encoded.byteLength < source.byteLength ? encoded : payload;
 }
 
 /**
- * Expands one compression envelope and returns ordinary memory wire text.
- * Payloads without the envelope prefix pass through unchanged.
+ * Expands one binary compression envelope and returns ordinary memory wire
+ * text. Text frames pass through unchanged.
  */
 export async function decodeCompressedMemoryMessage(
-  payload: string,
+  frame: MemoryMessageFrame,
 ): Promise<string> {
-  if (!payload.startsWith(MEMORY_COMPRESSION_ENVELOPE_PREFIX)) {
-    return payload;
-  }
+  if (typeof frame === "string") return frame;
 
-  const envelope = parseCompressionEnvelope(
-    payload.slice(MEMORY_COMPRESSION_ENVELOPE_PREFIX.length),
-  );
-  const compressed = fromBase64url(envelope.payload);
+  const envelope = await parseCompressionEnvelope(frame);
   const expanded = await collectReadable(
-    new Blob([compressed.buffer as ArrayBuffer]).stream().pipeThrough(
-      new DecompressionStream(envelope.encoding),
+    new Blob([envelope.compressed]).stream().pipeThrough(
+      new DecompressionStream("gzip"),
     ),
     envelope.uncompressedBytes,
   );
@@ -173,6 +164,13 @@ export async function decodeCompressedMemoryMessage(
     );
   }
   return TEXT_DECODER.decode(expanded);
+}
+
+/** Returns the wire size of a received WebSocket message. */
+export function memoryMessageFrameBytes(frame: MemoryMessageFrame): number {
+  if (typeof frame === "string") return TEXT_ENCODER.encode(frame).byteLength;
+  if (frame instanceof Blob) return frame.size;
+  return frame.byteLength;
 }
 
 /** Collects `readable`, refusing output beyond `maximumBytes`. */
@@ -203,25 +201,40 @@ async function collectReadable(
   return result;
 }
 
-/** Parses the JSON body and validates every compression-envelope field. */
-function parseCompressionEnvelope(source: string): CompressionEnvelope {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(source);
-  } catch (cause) {
-    throw new Error("Unable to parse memory compression envelope", { cause });
+/** Parses and validates the fixed binary compression-envelope header. */
+async function parseCompressionEnvelope(
+  frame: Exclude<MemoryMessageFrame, string>,
+): Promise<{ uncompressedBytes: number; compressed: Uint8Array<ArrayBuffer> }> {
+  const bytes = frame instanceof Blob
+    ? new Uint8Array(await frame.arrayBuffer())
+    : frame instanceof Uint8Array
+    ? new Uint8Array(frame)
+    : new Uint8Array(frame);
+  const headerMatches = bytes.byteLength >= MEMORY_COMPRESSION_HEADER_BYTES &&
+    MEMORY_COMPRESSION_MAGIC.every((byte, index) => bytes[index] === byte) &&
+    bytes[4] === MEMORY_COMPRESSION_VERSION;
+  if (!headerMatches) {
+    throw new Error("Invalid memory compression envelope");
   }
+  const uncompressedBytes = new DataView(
+    bytes.buffer,
+    bytes.byteOffset,
+    MEMORY_COMPRESSION_HEADER_BYTES,
+  ).getUint32(5);
+  const compressed = bytes.slice(MEMORY_COMPRESSION_HEADER_BYTES);
   if (
-    !isObjectNotArray(parsed) ||
-    parsed.encoding !== "gzip" ||
-    !Number.isSafeInteger(parsed.uncompressedBytes) ||
-    (parsed.uncompressedBytes as number) < 0 ||
-    (parsed.uncompressedBytes as number) >
-      MAX_DECOMPRESSED_MEMORY_MESSAGE_BYTES ||
-    typeof parsed.payload !== "string" ||
-    parsed.payload.length > MAX_DECOMPRESSED_MEMORY_MESSAGE_BYTES
+    uncompressedBytes > MAX_DECOMPRESSED_MEMORY_MESSAGE_BYTES ||
+    compressed.byteLength > MAX_GZIP_MEMORY_MESSAGE_BYTES
   ) {
     throw new Error("Invalid memory compression envelope");
   }
-  return parsed as CompressionEnvelope;
+  return { uncompressedBytes, compressed };
+}
+
+/** Refuses binary frames before compression has been negotiated. */
+function requireTextFrame(frame: MemoryMessageFrame): string {
+  if (typeof frame !== "string") {
+    throw new Error("Memory websocket expects text before negotiation");
+  }
+  return frame;
 }

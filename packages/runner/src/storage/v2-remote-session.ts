@@ -198,6 +198,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
     const address = toWebSocketAddress(this.address);
     const opening = new Promise<WebSocket>((resolve, reject) => {
       const socket = new WebSocket(address);
+      socket.binaryType = "arraybuffer";
       this.#socket = socket;
       this.#compressionEnabled = false;
       let opened = false;
@@ -206,29 +207,42 @@ export class WebSocketTransport implements MemoryClient.Transport {
         resolve(socket);
       }, { once: true });
       socket.addEventListener("message", (event) => {
-        if (typeof event.data === "string") {
-          const receive = this.#receiving.then(async () => {
-            if (this.#socket !== socket) return;
-            const payload = this.#compressionEnabled
-              ? await decodeCompressedMemoryMessage(event.data)
-              : event.data;
-            if (this.#socket !== socket) return;
-            this.#receiver(payload);
-          });
-          this.#receiving = receive.catch((cause) => {
-            const error = new Error(
-              "Unable to decode compressed memory websocket message",
-              { cause },
-            );
-            if (this.#socket === socket) {
-              this.#socket = null;
+        const frame = event.data;
+        const supportedFrame = typeof frame === "string" ||
+          frame instanceof ArrayBuffer || frame instanceof Uint8Array ||
+          frame instanceof Blob;
+        const receive = this.#receiving.then(async () => {
+          if (this.#socket !== socket) return;
+          if (!supportedFrame) {
+            throw new Error("Unsupported memory websocket frame type");
+          }
+          let payload: string;
+          if (this.#compressionEnabled) {
+            payload = await decodeCompressedMemoryMessage(frame);
+          } else {
+            if (typeof frame !== "string") {
+              throw new Error(
+                "Memory websocket expects text before compression negotiation",
+              );
             }
-            this.#closeReceiver(error);
-            if (socket.readyState === WebSocket.OPEN) {
-              socket.close(1007, error.message);
-            }
-          });
-        }
+            payload = frame;
+          }
+          if (this.#socket !== socket) return;
+          this.#receiver(payload);
+        });
+        this.#receiving = receive.catch((cause) => {
+          const error = new Error(
+            "Unable to decode compressed memory websocket message",
+            { cause },
+          );
+          if (this.#socket === socket) {
+            this.#socket = null;
+          }
+          this.#closeReceiver(error);
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.close(1007, error.message);
+          }
+        });
       });
       socket.addEventListener("close", () => {
         if (this.#socket === socket) {

@@ -92,19 +92,22 @@ does not mark the connection ready.
 
 `hello` and `hello.ok` are always ordinary memory text messages. When both
 peers advertise `messageCompressionV1`, either peer may send later messages as
-a versioned compression envelope:
+a versioned binary compression envelope. Its fixed header is followed directly
+by one gzip member:
 
 ```text
-mcmp1:{"encoding":"gzip","uncompressedBytes":1234,"payload":"H4sI..."}
+bytes 0..3   ASCII "mcmp"
+byte 4       envelope version 1
+bytes 5..8   uncompressed UTF-8 byte length, unsigned 32-bit big-endian
+bytes 9..    raw gzip bytes
 ```
 
-The payload is unpadded base64url containing one gzip member. A peer expands
-the envelope before decoding the memory message inside it. Messages below
-1,024 UTF-8 bytes stay in their ordinary form, as do messages whose envelope
-would not be smaller. Receivers therefore accept both ordinary and compressed
-messages after negotiation. Expansion is limited to 256 MiB per envelope and
-must produce exactly the declared byte count. Compression work preserves
-WebSocket message order in both directions.
+A peer expands the binary frame before decoding the memory message inside it.
+Messages below 1,024 UTF-8 bytes stay in their ordinary text form, as do
+messages whose binary envelope would not be smaller. Receivers therefore accept
+both ordinary text and compressed binary messages after negotiation. Expansion
+is limited to 256 MiB per envelope and must produce exactly the declared byte
+count. Compression work preserves WebSocket message order in both directions.
 
 The capability defaults to `false` when absent. A new peer connected to an old
 peer consequently keeps every message in the ordinary form. Each reconnect

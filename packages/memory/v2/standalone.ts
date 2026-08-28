@@ -78,6 +78,7 @@ export class StandaloneMemoryServer {
         return new Response("memory websocket endpoint", { status: 200 });
       }
       const { socket, response } = Deno.upgradeWebSocket(request);
+      socket.binaryType = "arraybuffer";
       const connectionTag = nextConnectionTag++;
       let compressionNegotiated = false;
       let sawFirstMessage = false;
@@ -111,13 +112,23 @@ export class StandaloneMemoryServer {
       }
       const debugWrites = Deno.env.get("CF_DEBUG_MEMORY_WRITES") === "1";
       socket.addEventListener("message", (event) => {
-        if (typeof event.data !== "string") {
-          socket.close(1003, "memory websocket expects text frames");
+        const frame = event.data;
+        const supportedFrame = typeof frame === "string" ||
+          frame instanceof ArrayBuffer || frame instanceof Uint8Array ||
+          frame instanceof Blob;
+        if (
+          !supportedFrame || (!sawFirstMessage && typeof frame !== "string")
+        ) {
+          socket.close(
+            1003,
+            sawFirstMessage
+              ? "memory websocket expects text or binary frames"
+              : "memory websocket expects text before negotiation",
+          );
           closeConnection();
           return;
         }
         if (closed) return;
-        const frame = event.data;
         channel.receive(frame, async (payload) => {
           if (!sawFirstMessage) {
             sawFirstMessage = true;

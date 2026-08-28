@@ -1,6 +1,8 @@
 import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import {
   MemoryMessageCompressionChannel,
+  type MemoryMessageFrame,
+  memoryMessageFrameBytes,
 } from "@commonfabric/memory/v2/message-compression";
 import * as MemoryServer from "@commonfabric/memory/v2/server";
 import { getLogger } from "@commonfabric/utils/logger";
@@ -13,7 +15,7 @@ import { createSpan } from "@/middlewares/opentelemetry.ts";
 import { memoryServer } from "@/routes/storage/memory.ts";
 
 type NegotiatedSocketHandlers = {
-  onMessage: (message: string) => void;
+  onMessage: (message: MemoryMessageFrame) => void;
   onClose?: () => void;
   onError?: (error: Error) => void;
 };
@@ -35,19 +37,20 @@ export const bufferTextMessagesUntilNegotiated = (
 } => {
   const maxBufferedBytes = options.maxBufferedBytes ??
     NEGOTIATION_BUFFER_MAX_BYTES;
+  socket.binaryType = "arraybuffer";
   let settled = false;
-  let bufferedMessages: string[] = [];
+  let bufferedMessages: MemoryMessageFrame[] = [];
   let bufferedBytes = 0;
   let cleanup = () => {};
   let handlers: NegotiatedSocketHandlers | null = null;
   let negotiationError: Error | null = null;
 
-  const forwardMessage = (message: string) => {
+  const forwardMessage = (message: MemoryMessageFrame) => {
     if (handlers === null) {
       if (negotiationError !== null) {
         return;
       }
-      const messageBytes = TEXT_ENCODER.encode(message).byteLength;
+      const messageBytes = memoryMessageFrameBytes(message);
       if (bufferedBytes + messageBytes > maxBufferedBytes) {
         negotiationError = new Error(
           "Memory websocket negotiation buffer exceeded",
@@ -70,25 +73,32 @@ export const bufferTextMessagesUntilNegotiated = (
 
   const firstMessage = new Promise<string | undefined>((resolve, reject) => {
     const onMessage = (event: MessageEvent) => {
-      if (typeof event.data !== "string") {
+      const frame = event.data;
+      const supportedFrame = typeof frame === "string" ||
+        frame instanceof ArrayBuffer || frame instanceof Uint8Array ||
+        frame instanceof Blob;
+      if (!supportedFrame || (!settled && typeof frame !== "string")) {
+        const error = new Error(
+          settled
+            ? "Memory websocket expects text or binary frames"
+            : "Memory websocket expects text before negotiation",
+        );
         if (!settled) {
           cleanup();
-          reject(new Error("Memory websocket expects text frames"));
+          reject(error);
         } else {
-          handlers?.onError?.(
-            new Error("Memory websocket expects text frames"),
-          );
+          handlers?.onError?.(error);
         }
         return;
       }
 
       if (!settled) {
         settled = true;
-        resolve(event.data);
+        resolve(frame as string);
         return;
       }
 
-      forwardMessage(event.data);
+      forwardMessage(frame);
     };
 
     const onClose = () => {
@@ -278,9 +288,7 @@ export const attachMemorySocketPipeline = (
         onClose: closeConnection,
         onError(error) {
           safeSocketClose(
-            error.message === "Memory websocket expects text frames"
-              ? 1003
-              : 1011,
+            error.message.startsWith("Memory websocket expects") ? 1003 : 1011,
             error.message,
           );
           closeConnection();
