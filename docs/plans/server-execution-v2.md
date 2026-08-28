@@ -38,7 +38,7 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
-**Delta 2026-08-27 (phase 3, this PR): the lift bar CHANGED by owner ruling
+**Delta 2026-08-27 (phase 3, #6469): the lift bar CHANGED by owner ruling
 — an ON-skip entry lifts only on its local campaign AND a green direct-CI
 unskip probe — and both entries were campaigned again under it. NEITHER
 lifted, and they now fail for OPPOSITE reasons.** The bar: the register had
