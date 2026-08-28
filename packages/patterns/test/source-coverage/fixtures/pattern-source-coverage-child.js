@@ -306,6 +306,122 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
       "GitHub activity renders commit and summary details",
     );
 
+    const synchronizedStatuses = [
+      "green-and-can-land",
+      "tests-running",
+      "tests-failed",
+      "merge-conflicts",
+      "merge-blocked",
+      "visibility-unknown",
+      "draft",
+    ];
+    const synchronizedGithubActivity = instantiatePattern(GithubActivity, {
+      repoUrl: new Writable("https://github.com/acme/project"),
+      pullRequestIndex: {
+        schema: "commonfabric.github-connector.pull-request-index.v1",
+        formatVersion: 1,
+        viewer: "octocat",
+        generatedAt: "2026-08-28T02:00:00.000Z",
+        lastCompleteCollectionAt: "2026-08-28T01:59:00.000Z",
+        generation: 42,
+        pullRequests: synchronizedStatuses.map((status, index) => ({
+          id: `PR_${index}`,
+          number: index + 1,
+          url: `https://github.com/acme/project/pull/${index + 1}`,
+          title: `Synchronized ${status}`,
+          repository: index === 0 ? "acme/widgets" : "acme/project",
+          repositoryUrl: index === 0
+            ? "https://github.com/acme/widgets"
+            : "https://github.com/acme/project",
+          baseRefName: "main",
+          baseRefOid: "0123456789abcdef",
+          headRefName: `feature-${index}`,
+          headRefOid: index === 0 ? null : "fedcba9876543210",
+          headRepository: index === 0 ? null : "contributor/project",
+          headRepositoryUrl: index === 0
+            ? null
+            : "https://github.com/contributor/project",
+          isDraft: status === "draft",
+          mergeable: index === 0 ? "UNKNOWN" : "MERGEABLE",
+          mergeState: index === 0 ? "" : "CLEAN",
+          reviewDecision: index === 0 ? null : "APPROVED",
+          checkState: index === 0 ? null : "SUCCESS",
+          createdAt: index === 0 ? "not-a-date" : "2026-08-27T00:00:00.000Z",
+          updatedAt: `2026-08-28T01:5${index}:00.000Z`,
+          observedAt: "2026-08-28T01:59:00.000Z",
+          visibility: status === "visibility-unknown" ? "unknown" : "visible",
+          status,
+          detail: { schema: "commonfabric.github-connector.pull-request.v1" },
+        })),
+      },
+      health: {
+        schema: "commonfabric.github-connector.health.v1",
+        service: "github-connector",
+        formatVersion: 1,
+        status: "degraded",
+        startedAt: "2026-08-28T01:00:00.000Z",
+        updatedAt: "2026-08-28T02:00:00.000Z",
+        target: {
+          spaceDid: "did:key:space",
+          cells: { index: "of:index", health: "of:health" },
+        },
+        sync: {
+          reason: "scheduled",
+          status: "completed-with-errors",
+          startedAt: "2026-08-28T01:58:00.000Z",
+          completedAt: "2026-08-28T01:59:00.000Z",
+          pullRequestCount: synchronizedStatuses.length,
+          error: "One repository was unavailable",
+        },
+        lastComplete: {
+          completedAt: "2026-08-28T01:59:00.000Z",
+          pullRequestCount: synchronizedStatuses.length,
+        },
+      },
+    });
+    const synchronizedText = textContent(uiOf(synchronizedGithubActivity));
+    assert(
+      synchronizedGithubActivity[NAME] ===
+          "GitHub pull requests: octocat" &&
+        synchronizedGithubActivity.pullRequestCount === 7 &&
+        synchronizedGithubActivity.repositoryCount === 2 &&
+        synchronizedGithubActivity.readyToLandCount === 1 &&
+        synchronizedGithubActivity.needsAttentionCount === 4,
+      "GitHub activity summarizes the synchronized index",
+    );
+    assert(
+      synchronizedText.includes("Synchronized green-and-can-land") &&
+        synchronizedText.includes("Ready to land") &&
+        synchronizedText.includes("One repository was unavailable") &&
+        synchronizedText.includes("feature-0 → main"),
+      "GitHub activity renders synchronized pull requests and health",
+    );
+    assert(
+      synchronizedGithubActivity.pullRequests.every((row) =>
+        !("detail" in row)
+      ),
+      "GitHub activity excludes opaque details from its shallow output",
+    );
+
+    const emptySynchronizedGithubActivity = instantiatePattern(GithubActivity, {
+      repoUrl: new Writable("https://github.com/acme/project"),
+      pullRequestIndex: {
+        schema: "commonfabric.github-connector.pull-request-index.v1",
+        formatVersion: 1,
+        viewer: "octocat",
+        generatedAt: "",
+        lastCompleteCollectionAt: "",
+        generation: 43,
+        pullRequests: [],
+      },
+    });
+    assert(
+      emptySynchronizedGithubActivity.pullRequestCount === 0 &&
+        emptySynchronizedGithubActivity.repositoryCount === 0 &&
+        uiOf(emptySynchronizedGithubActivity) !== undefined,
+      "GitHub activity renders empty synchronized states",
+    );
+
     setFetchJsonResult([]);
     setGenerateTextResult({
       pending: true,
