@@ -1507,12 +1507,14 @@ export const runPatternTool: HarnessToolDefinition<
      * A verdict never bears on the run: every path returns a verdict, and the
      * caller's only use for it is whether to publish.
      */
-    const renderGateVerdict = async (): Promise<{
-      status: PatternPublicationStatus;
-      reason: PatternPublicationReason;
-      syntheticInputsComplete: boolean;
-      html?: string;
-    }> => {
+    const renderGateVerdict = async (): Promise<
+      {
+        status: PatternPublicationStatus;
+        reason: PatternPublicationReason;
+        syntheticInputsComplete: boolean;
+        html?: string;
+      } | "cancelled"
+    > => {
       const synthetic = syntheticArgument(pattern.argumentSchema);
       const recorded = (reason: PatternPublicationReason, html?: string) => ({
         status: "recorded" as const,
@@ -1542,7 +1544,7 @@ export const runPatternTool: HarnessToolDefinition<
           await pieces.synced();
         })();
         if (await raceWithAbort(settle, signal) === "aborted") {
-          return recorded("probe-failed");
+          return "cancelled";
         }
         const probeResult = await new PieceController(pieces, probeCell)
           .result.getCell();
@@ -1554,7 +1556,7 @@ export const runPatternTool: HarnessToolDefinition<
           );
         })();
         if (await raceWithAbort(render, signal) === "aborted") {
-          return recorded("probe-failed");
+          return "cancelled";
         }
         if (rendered === undefined) {
           return discoverable("no-ui");
@@ -1590,9 +1592,12 @@ export const runPatternTool: HarnessToolDefinition<
       }
     };
     // Source the model wrote and successfully ran is contributed back to the
-    // index, so the next run that needs this capability finds it instead of
-    // writing it again. A run naming a `patternId` publishes nothing: it ran
-    // what the index already holds.
+    // index, so the next run that needs this capability can find it instead
+    // of writing it again — CAN, because recording and being offered to
+    // search are separate here. Everything that ran is recorded; the render
+    // gate below decides discoverability, and the session's ledger gives one
+    // discoverable entry per capability. A run naming a `patternId` records
+    // nothing: it ran what the index already holds.
     const description = input.description?.trim();
     let publication: RunPatternPublicationReport | undefined;
     let probeHtml: string | undefined;
@@ -1621,6 +1626,13 @@ export const runPatternTool: HarnessToolDefinition<
         );
       } else {
         const verdict = await renderGateVerdict();
+        // A cancelled gate is a cancelled run. Nothing is staged: an index
+        // entry is a claim about a run that finished, and this one did not.
+        if (verdict === "cancelled") {
+          return cancelledOutput(
+            `the pattern ran and created piece ${piece.id}, which is not undone; it was not contributed to the pattern index`,
+          );
+        }
         publication = {
           status: verdict.status,
           reason: verdict.reason,

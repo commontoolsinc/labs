@@ -325,6 +325,58 @@ describe("run_pattern publish render gate", () => {
     expect(published(index)[0].body.discoverable).toBe(false);
   });
 
+  it("publishes nothing and reports cancelled when the run aborts during the gate", async () => {
+    // An index entry is a claim about a run that finished. The abort is fired
+    // from inside the second `runPersistent` — the probe's — so the gate is
+    // interrupted at a determined point rather than after a wait.
+    const index = stubIndex();
+    const controller = new AbortController();
+    let instantiations = 0;
+    const abortingPieces = new Proxy(pieces, {
+      get(target, property) {
+        if (property === "runPersistent") {
+          return (...args: unknown[]) => {
+            if (++instantiations === 2) controller.abort();
+            return (target.runPersistent as (
+              ...a: unknown[]
+            ) => Promise<unknown>).apply(target, args);
+          };
+        }
+        const value = Reflect.get(target, property, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as PiecesController;
+    const engine = new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: `publish-gate-${crypto.randomUUID()}`,
+      cfcEnforcementMode: "disabled",
+      fabricSessionFactory: () => Promise.resolve({ pieces: abortingPieces }),
+      patternIndexClientFactory: () =>
+        Promise.resolve(
+          new PatternIndexClient({
+            baseUrl: "https://index.test",
+            fetchFn: index.fetchFn,
+            signer,
+          }),
+        ),
+    });
+    const result = await engine.invokeBuiltinTool("run_pattern", {
+      sourceText: WORKING_SORTABLE_TABLE,
+      inputs: { rows: [{ name: "Avery", score: 12 }] },
+      description: "Sortable table that reads its cells",
+    }, { signal: controller.signal });
+    await engine.flushPatternIndexPublications();
+
+    const output = result.output as unknown as {
+      status: string;
+      message: string;
+    };
+    expect(output.status).toBe("cancelled");
+    // The piece the run created is not undone, and the output says so.
+    expect(output.message).toContain("not undone");
+    expect(published(index)).toEqual([]);
+  });
+
   it("offers only the last iteration of a capability a session authored", async () => {
     // The duplicate flood, fixed where it is made: a pattern-author that
     // iterates leaves one search result and a record of every attempt.

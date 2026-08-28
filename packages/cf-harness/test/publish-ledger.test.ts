@@ -16,7 +16,7 @@ interface RecordedCall {
   body: Record<string, unknown>;
 }
 
-const stubClient = (options: { fail?: boolean } = {}) => {
+const stubClient = (options: { fail?: boolean; created?: boolean } = {}) => {
   const calls: RecordedCall[] = [];
   const fetchFn: HarnessFetch = (input, init) => {
     const fn = String(input).split("/").pop() ?? "";
@@ -35,7 +35,7 @@ const stubClient = (options: { fail?: boolean } = {}) => {
       new Response(
         JSON.stringify(
           fn === "publishPattern"
-            ? { patternId: body.patternId, created: true }
+            ? { patternId: body.patternId, created: options.created ?? true }
             : { ok: true },
         ),
         { status: 200 },
@@ -127,13 +127,24 @@ describe("pattern index publication ledger", () => {
     });
 
     it("publishes a displaced iteration as soon as it is displaced", async () => {
-      // Only the latest of each capability is at risk if the session dies.
+      // Only the latest of each capability is at risk if the session dies, so
+      // the displaced one has to be gone BEFORE the flush — measured before
+      // it, since after it the two sends are indistinguishable.
       const { calls, getClient } = stubClient();
       const ledger = createPatternIndexPublicationLedger(getClient);
       ledger.stage(request("first"));
       ledger.stage(request("second"));
+      // `stage` does not await, so the send is on the ledger's own chain;
+      // draining it is what a session dying mid-way would not do.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(publishes(calls).map((call) => call.body.patternId)).toEqual([
+        "first",
+      ]);
       await ledger.flush();
-      expect(publishes(calls)[0].body.patternId).toBe("first");
+      expect(publishes(calls).map((call) => call.body.patternId)).toEqual([
+        "first",
+        "second",
+      ]);
     });
 
     it("offers search each of a session's distinct capabilities", async () => {
@@ -223,7 +234,7 @@ describe("pattern index publication ledger", () => {
       expect(errors[0]).toContain("could not publish");
     });
 
-    it("records a created event only for an entry the index did not hold", async () => {
+    it("records a created event for an entry the index did not hold", async () => {
       const { calls, getClient } = stubClient();
       const ledger = createPatternIndexPublicationLedger(getClient);
       ledger.stage(request("one"));
@@ -233,6 +244,32 @@ describe("pattern index publication ledger", () => {
           call.body.eventType
         ),
       ).toEqual(["created"]);
+    });
+
+    it("records no created event for an entry the index already held", async () => {
+      const { calls, getClient } = stubClient({ created: false });
+      const ledger = createPatternIndexPublicationLedger(getClient);
+      ledger.stage(request("one"));
+      await ledger.flush();
+      expect(calls.filter((call) => call.fn === "recordEvent")).toEqual([]);
+    });
+
+    it("publishes a dependency first even when it was staged second", async () => {
+      const { calls, getClient } = stubClient();
+      const ledger = createPatternIndexPublicationLedger(getClient);
+      ledger.stage(
+        request("composite", {
+          description: "Composes the doubler",
+          dependencies: ["doubler"],
+        }),
+      );
+      ledger.stage(request("doubler", { description: "Doubles a number" }));
+      await ledger.flush();
+
+      expect(publishes(calls).map((call) => call.body.patternId)).toEqual([
+        "doubler",
+        "composite",
+      ]);
     });
   });
 });

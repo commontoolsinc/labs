@@ -231,6 +231,18 @@ export const PATTERN_DISCOVERABILITY_REASONS: Readonly<
 export const PROBE_HTML_MAX_CHARS = 4096;
 
 /**
+ * How many rendered nodes are read before the tree is cut down to size.
+ *
+ * Serializing first and truncating after would build the whole string in
+ * memory, and what a pattern renders is bounded by nothing but the pattern.
+ * So the tree is counted first and its excess children dropped before it is
+ * serialized. The cost is stated rather than hidden: a marker past the cut is
+ * not seen, so a cut tree is reported as truncated and the verdict it carries
+ * is the verdict for the part that was read.
+ */
+export const PROBE_MAX_NODES = 4000;
+
+/**
  * Text `Object.prototype.toString` produces, wherever it reaches the rendered
  * output. Matching the whole family rather than `[object Object]` alone is
  * deliberate: the defect is a value stringified by the default `toString`,
@@ -422,7 +434,13 @@ export const syntheticArgument = (
         if (additional !== undefined && additional !== false) {
           incomplete();
           for (let i = 0; i < SYNTHETIC_ARRAY_LENGTH; i++) {
-            const value = build(additional, depth + 1, seen, i);
+            // `true` admits any value and describes none, so the bag gets a
+            // name from the same vocabulary rather than no key at all — a bag
+            // with no keys exercises an indexed renderer exactly as an absent
+            // bag does, which is what this branch exists to avoid.
+            const value = additional === true
+              ? syntheticName(i)
+              : build(additional, depth + 1, seen, i);
             if (value !== undefined) out[syntheticName(i)] = value;
           }
         } else if (Object.keys(properties).length === 0) {
@@ -492,7 +510,9 @@ export const syntheticArgument = (
 export const renderPatternUiToHtml = async (
   resultCell: Cell<unknown>,
   idle: () => Promise<void>,
-): Promise<{ html: string; errors: readonly string[] } | undefined> => {
+): Promise<
+  { html: string; errors: readonly string[]; truncated: boolean } | undefined
+> => {
   const uiCell = resultCell.asSchema(uiSchema) as Cell<
     Record<string, unknown> | undefined
   >;
@@ -523,10 +543,40 @@ export const renderPatternUiToHtml = async (
     // fixes the point it reads at.
     await idle();
     render.flush();
-    return { html: container.innerHTML, errors };
+    const truncated = cutTreeToNodeBudget(container);
+    return { html: container.innerHTML, errors, truncated };
   } finally {
     render.cancel();
   }
+};
+
+/**
+ * Drops whatever of `container` sits past {@link PROBE_MAX_NODES}, and says
+ * whether it dropped anything. Counting walks the tree without building a
+ * string, so a runaway render costs the walk rather than the serialization.
+ */
+const cutTreeToNodeBudget = (container: Element): boolean => {
+  // The mock document's nodes are `domhandler` nodes carrying only the small
+  // surface the renderer needs — `children`, `remove()`, `innerHTML` — so the
+  // walk uses that and nothing more. `children` on a text node is undefined,
+  // which ends a branch.
+  const size = (node: { children?: unknown[] }, budget: number): number => {
+    let seen = 0;
+    for (const child of node.children ?? []) {
+      seen += 1 + size(child as { children?: unknown[] }, budget - seen);
+      if (seen >= budget) return seen;
+    }
+    return seen;
+  };
+  const node = container as unknown as { children?: unknown[] };
+  if (size(node, PROBE_MAX_NODES) < PROBE_MAX_NODES) return false;
+  let kept = 0;
+  for (const child of [...(node.children ?? [])]) {
+    const typed = child as { children?: unknown[]; remove?: () => void };
+    if (kept >= PROBE_MAX_NODES) typed.remove?.();
+    else kept += 1 + size(typed, PROBE_MAX_NODES);
+  }
+  return true;
 };
 
 /**

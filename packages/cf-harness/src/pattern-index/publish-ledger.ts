@@ -159,10 +159,34 @@ export const createPatternIndexPublicationLedger = (
       );
     },
     async flush() {
-      for (const [key, pending] of [...held]) {
-        held.delete(key);
-        send(key, pending, false);
+      // Dependency order, not staging order. Staging order happens to be
+      // right whenever a dependency was authored before the entry composing
+      // it — which is what a `cf:pattern:` import needing to resolve at
+      // compile time forces — but the index rejects a publication whose
+      // dependency it does not hold, so the ordering is made rather than
+      // relied upon. A cycle cannot arise from content-addressed identities,
+      // and any request whose turn never comes is still sent, after the ones
+      // that could be ordered.
+      const pending = [...held];
+      held.clear();
+      const sent = new Set<string>();
+      let progress = true;
+      while (pending.length > 0 && progress) {
+        progress = false;
+        for (let i = 0; i < pending.length; i++) {
+          const [key, request] = pending[i];
+          const waiting = (request.dependencies ?? []).some((dependency) =>
+            !sent.has(dependency) &&
+            pending.some(([, other]) => other.patternId === dependency)
+          );
+          if (waiting) continue;
+          pending.splice(i--, 1);
+          sent.add(request.patternId);
+          send(key, request, false);
+          progress = true;
+        }
       }
+      for (const [key, request] of pending) send(key, request, false);
       await chain;
     },
   };
