@@ -324,6 +324,14 @@ source has to be found. The question that generalizes is the harder one:
 sometimes a remote server, sometimes another person, sometimes a build broken
 on purpose.
 
+None of this was derivable from inside any one line of work. Four of the
+instrument failures above occurred in a single stream of it, and from inside
+that stream they read as carelessness rather than as a shape — the same four,
+agreeing with each other, were not evidence of anything. It became a method
+only when the shape reappeared in work that could not have inherited it. **A
+single source cannot distinguish a pattern from a habit**, which is this
+section's own proposition applied to the reading of one's own mistakes.
+
 Its companion, arrived at the hard way: **a regression test that has not been
 seen to fail is not evidence.** The `no-ui` fix above shipped first with a
 mechanism asserted rather than measured, and with a test that still passed when
