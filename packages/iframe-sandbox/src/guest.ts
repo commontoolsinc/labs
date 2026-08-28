@@ -190,7 +190,7 @@ export class RemoteCell<T = FabricValue> {
     return this.#enqueueOperation(() => this.#set(snapshot));
   }
 
-  /** Atomically stores a default while the cell is undefined. */
+  /** Atomically stores a default while the cell has no backing value. */
   initialize(value: T): Promise<T> {
     if (value === undefined) {
       return Promise.reject(

@@ -1138,7 +1138,7 @@ export class RuntimeProcessor {
     });
   }
 
-  /** Atomically stores a default only while the target remains undefined. */
+  /** Atomically stores a default only while the target has no backing value. */
   async handleCellInitialize(
     request: CellInitializeRequest,
   ): Promise<{ value: FabricValue }> {
@@ -1148,9 +1148,26 @@ export class RuntimeProcessor {
     const initial = mapCellRefsToSigilLinks(request.value);
     const result = await this.runtime.editWithRetry((tx) => {
       const cell = getCell(this.runtime, request.cell).withTx(tx);
-      const current = cell.get();
-      if (current !== undefined) {
-        return cellValueForClient(current);
+      // Initialization materializes the same backing value a whole-cell write
+      // targets. A schema default is a readable fallback, not proof that the
+      // cell has been stored, and a write redirect is an address rather than
+      // backing data. Treating either as an existing value leaves a later
+      // child write with no durable parent and can replace the visible default.
+      // Follow a final write redirect only for this existence check, while
+      // retaining the view schema because its scope cap controls whether that
+      // redirect is reachable. Then return the normal projected value when
+      // storage already won.
+      const stored = cell.getRaw({
+        lastNode: "writeRedirect",
+      });
+      if (stored !== undefined) {
+        const projected = cell.get();
+        if (projected === undefined) {
+          throw new TypeError(
+            "Cell backing value is incompatible with its schema.",
+          );
+        }
+        return cellValueForClient(projected);
       }
       cell.set(initial);
       return cellValueForClient(initial);
