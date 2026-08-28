@@ -319,7 +319,15 @@ there.
 
 1. **`search_skills`, read-only, not registered.** The client, the
    sanitization, the shape refusals, and tests against recorded fixtures. No
-   tool-registry entry, so nothing can call it yet.
+   tool-registry entry, so nothing can call it yet. A first cut of this exists:
+   `packages/cf-harness/src/skills-sh/search-client.ts`, its fixture-driven
+   tests, and `deno task probe-skills-sh` for the hand-run call against the
+   live registry. Running it against live data immediately paid for the
+   refusal counter — a legitimate listing with several thousand reported
+   installs uses `::` in its slug, which one character class shared across all
+   three identifier segments drops silently. The counter is what made the
+   silence visible, and the fix was a character set per segment rather than a
+   looser one for all of them.
 2. **Address resolution.** Turning a discovery hit into a pinned address, or
    refusing. This is where the honest answer is often "no pinned address
    exists for this hit", and that refusal is the feature.
