@@ -1542,3 +1542,97 @@ Deno.test("DockerRunscSandboxRuntime holds the directories its readiness verdict
     await Deno.remove(original, { recursive: true });
   }
 });
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes reads the last of two valid absolute registrations", () => {
+  // Multiplicity makes registration order semantic, and two valid absolute
+  // values are not rescued by runsc rejecting a relative one: whichever comes
+  // last is the directory the container actually reads.
+  assertEquals(
+    cfcTransportReadinessFromDockerRuntimes({
+      runtimeName: "runsc-cfc",
+      runtimes: dockerRuntimes([
+        "--cfc-invocation-context-dir=/expected",
+        "--cfc-invocation-context-dir=/other",
+      ]),
+      cfcInvocationContextDir: "/expected",
+    })["invocation-context"],
+    { status: "unwired" },
+    "the configured directory registered first, then overridden, is not read",
+  );
+  assertEquals(
+    cfcTransportReadinessFromDockerRuntimes({
+      runtimeName: "runsc-cfc",
+      runtimes: dockerRuntimes([
+        "--cfc-invocation-context-dir=/other",
+        "--cfc-invocation-context-dir=/expected",
+      ]),
+      cfcInvocationContextDir: "/expected",
+    })["invocation-context"],
+    { status: "wired" },
+    "the configured directory registered last is the one runsc reads",
+  );
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes keeps the invocation reading when the result transport is unread", () => {
+  // The reverse of the earlier mixed case, and the one that was broken: a
+  // summary let the result transport's `unwired` stand in for an invocation
+  // transport that was merely incomparable.
+  const readiness = cfcTransportReadinessFromDockerRuntimes({
+    runtimeName: "runsc-cfc",
+    runtimes: dockerRuntimes([
+      "--cfc-invocation-context-dir=/host_mnt/c/work/cfc",
+    ]),
+    cfcInvocationContextDir: "C:\\work\\cfc",
+    cfcResultDir: "/host/results",
+  });
+  assertEquals(readiness["invocation-context"]?.status, "indeterminate");
+  assertEquals(readiness.result?.status, "unwired");
+
+  // And the other way round, which was never broken but pins the symmetry.
+  const mirrored = cfcTransportReadinessFromDockerRuntimes({
+    runtimeName: "runsc-cfc",
+    runtimes: dockerRuntimes(["--cfc-result-dir=/host_mnt/c/results"]),
+    cfcInvocationContextDir: "/host/invocations",
+    cfcResultDir: "C:\\results",
+  });
+  assertEquals(mirrored["invocation-context"]?.status, "unwired");
+  assertEquals(mirrored.result?.status, "indeterminate");
+});
+
+Deno.test("DockerRunscSandboxRuntime holds the runtime identity its verdict was read against", async () => {
+  // The reading is about a named runtime reached through a named binary, so a
+  // caller-held mutable alias must not be able to redirect the launch away
+  // from the registration that was read. TypeScript accepts a mutable object
+  // where a readonly property is declared, so the type cannot hold this.
+  const mutable = {
+    ...resolveDockerRunscSandboxConfig({
+      workspaceHostPath: "/host/project",
+      cfcInvocationContextDir: "/host/invocations",
+    }),
+  };
+  const [create, start, wait, remove] = dockerLifecycleResults();
+  const runner = new FakeProcessRunner([
+    dockerInfoResult(["--cfc-invocation-context-dir=/host/invocations"]),
+    create!,
+    start!,
+    wait!,
+    remove!,
+  ]);
+  const runtime = new DockerRunscSandboxRuntime(mutable, runner);
+
+  await runtime.probeCfcTransportReadiness();
+  mutable.runtimeName = "some-other-runtime";
+  mutable.dockerBinary = "not-docker";
+
+  await runtime.run({ argv: ["/bin/echo", "hello"] });
+
+  assertEquals(runtime.describe().cfc?.runtimeName, "runsc-cfc");
+  for (const request of runner.requests) {
+    assertEquals(request.command, "docker");
+  }
+  const createRequest = runner.requests.find((request) =>
+    request.args[0] === "create"
+  );
+  const runtimeArg = createRequest?.args ?? [];
+  assertEquals(runtimeArg[runtimeArg.indexOf("--runtime") + 1], "runsc-cfc");
+});

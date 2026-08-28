@@ -778,6 +778,12 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
   // to move out from under it, rather than asking a type to be respected.
   readonly #cfcInvocationContextDir?: string;
   readonly #cfcResultDir?: string;
+  // The registration reading is about a named runtime reached through a named
+  // binary, so those identify the verdict as much as the directories do.
+  // Copied for the same reason and used on every path that either probes or
+  // launches, so the runtime a verdict describes is the runtime that runs.
+  readonly #runtimeName: string;
+  readonly #dockerBinary: string;
 
   constructor(
     readonly config: DockerRunscSandboxConfig,
@@ -785,6 +791,8 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
   ) {
     this.#cfcInvocationContextDir = config.cfcInvocationContextDir;
     this.#cfcResultDir = config.cfcResultDir;
+    this.#runtimeName = config.runtimeName;
+    this.#dockerBinary = config.dockerBinary;
   }
 
   /**
@@ -821,7 +829,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
     let result: ProcessRunResult;
     try {
       result = await this.runner.run({
-        command: this.config.dockerBinary,
+        command: this.#dockerBinary,
         args: ["info", "--format", "{{json .Runtimes}}"],
       });
     } catch (error) {
@@ -845,7 +853,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
       );
     }
     return cfcTransportReadinessFromDockerRuntimes({
-      runtimeName: this.config.runtimeName,
+      runtimeName: this.#runtimeName,
       runtimes,
       ...this.#configuredTransportDirs(),
     });
@@ -906,7 +914,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
       defaultWorkingDirectory: this.defaultWorkingDirectory(),
       cfc: {
         runtimeRequested: true,
-        runtimeName: this.config.runtimeName,
+        runtimeName: this.#runtimeName,
         image: this.config.image,
         workspaceMountPath: this.config.workspaceMountPath,
         mounts: this.#mountDescriptions(),
@@ -958,7 +966,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
       "create",
       ...(request.stdinText !== undefined ? ["-i"] : []),
       "--runtime",
-      this.config.runtimeName,
+      this.#runtimeName,
       "--network",
       this.config.dockerNetworkMode,
       ...(this.config.containerUser !== undefined
@@ -977,7 +985,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
       ...request.argv,
     ];
     const createResult = await this.runner.run({
-      command: this.config.dockerBinary,
+      command: this.#dockerBinary,
       args: createArgs,
     });
     if (createResult.exitCode !== 0) {
@@ -1005,7 +1013,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
         return sidecarFailure;
       }
       const startResult = await this.runner.run({
-        command: this.config.dockerBinary,
+        command: this.#dockerBinary,
         args: [
           "start",
           "--attach",
@@ -1016,7 +1024,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
         timeoutMs: request.timeoutMs,
       });
       const waitResult = await this.runner.run({
-        command: this.config.dockerBinary,
+        command: this.#dockerBinary,
         args: ["wait", containerID],
       });
       const exitCode = parseDockerWaitExitCode(waitResult.stdout) ??
@@ -1037,7 +1045,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
         : { ...commandResult, cfcResult };
     } finally {
       await this.runner.run({
-        command: this.config.dockerBinary,
+        command: this.#dockerBinary,
         args: ["rm", "-f", containerID],
       });
     }
@@ -1163,7 +1171,7 @@ export class DockerRunscSandboxRuntime implements SandboxRuntime {
       return undefined;
     }
     return refuse(
-      `the '${this.config.runtimeName}' docker runtime is not registered with ` +
+      `the '${this.#runtimeName}' docker runtime is not registered with ` +
         `--${CFC_INVOCATION_CONTEXT_DIR_RUNTIME_FLAG}=${dir}, so this invocation's ` +
         `CFC input labels would be written and never read`,
     );
