@@ -288,6 +288,60 @@ export function dropQueuedEvent(
   notifyEventDropped(state, event, reason, servedKind, options);
 }
 
+/**
+ * events.md §2's per-space ARRIVAL-ORDER BARRIER, carried by a deferral
+ * (the in-queue sweep `failHeadEventLoadPark` performs in facade.ts,
+ * shared here by the deferral arms that live in this module — the
+ * handler-not-run withdrawal and the piece-start deferral): when a
+ * served event DEFERS — its durable entry left pending for a later
+ * drain — every later-arrived durable served entry queued behind it in
+ * the SAME SPACE defers with it, or a later arrival's consequence lands
+ * ahead of an earlier one (the b01 register class, re-demonstrated on
+ * the handler-not-run withdrawal as review-6459 F1: the drain queues a
+ * pass's pending entries together, so a healthy follower dispatches —
+ * and SEALS — right behind the deferred head). The exclusions mirror
+ * the load-park arm's, deliberately: cross-space queue neighbours
+ * (§2's order is per-space) and LT1 in-process copies (`served` with
+ * no `streamEntry`) — a running event's same-wave cascade children,
+ * not later arrivals. The enqueueSeq guard scopes the sweep to LATER
+ * arrivals, which the facade arm gets implicitly (its failing event is
+ * the un-dispatched queue head, so everything queued is later): these
+ * arms run after the deferring event left the queue (dispatch) or off
+ * the head slot (piece load), and an earlier event requeued by a
+ * concurrent commit verdict must not be barred behind an event that
+ * arrived after it. Sweeping is order-safe by construction — a swept
+ * entry re-drains in arrival order on a later pass — so a spurious
+ * sweep costs one deferral round, never disorder.
+ */
+export function deferLaterSameSpaceServedEvents(
+  state:
+    & Pick<SchedulerEventQueueState, "runtime" | "eventQueue">
+    & Partial<Pick<SchedulerEventQueueState, "releaseLineageEvent">>,
+  behind: Pick<QueuedEvent, "id" | "eventLink" | "enqueueSeq">,
+  deferralReason: string,
+): void {
+  for (const later of [...state.eventQueue]) {
+    if (later.eventLink.space !== behind.eventLink.space) continue;
+    if (later.served?.streamEntry === undefined) continue;
+    if (later.enqueueSeq <= behind.enqueueSeq) continue;
+    dropQueuedEvent(
+      state,
+      later,
+      `Event deferred: held behind ${behind.id}, ${deferralReason}; ` +
+        `later-arrived events wait behind it`,
+      "deferred",
+      {
+        quiet: true,
+        servedOutcome: {
+          kind: "deferred",
+          cause: "arrival-barrier",
+          blockedBy: behind.id,
+        },
+      },
+    );
+  }
+}
+
 function findEventHandler(
   handlers: readonly [NormalizedFullLink, EventHandler][],
   eventLink: NormalizedFullLink,
@@ -595,8 +649,25 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
             `Event dropped: no handler registered for ${args.eventLink.id} and its piece could not be started`,
             queuedEvent.served !== undefined ? "deferred" : "dropped",
           );
+          if (queuedEvent.served !== undefined) {
+            // A deferral carries the drain's arrival-order barrier
+            // (events.md §2; review-6459 F1's sibling arm), exactly as
+            // the handler-not-run withdrawal and the facade's load-park
+            // arm do.
+            deferLaterSameSpaceServedEvents(
+              state,
+              queuedEvent,
+              "whose piece could not be started",
+            );
+          }
         }
       } catch (error) {
+        // Unlike the arms above, this one is reachable with the event
+        // ALREADY SETTLED: the finalOutcomeNotified/queue-membership
+        // recheck runs after the load await resolves, and a rejection
+        // never crosses it. A settled head holds no barrier — its
+        // disposition was someone else's (e.g. a lineage drop mid-load).
+        const alreadySettled = queuedEvent.finalOutcomeNotified === true;
         dropQueuedEvent(
           state,
           queuedEvent,
@@ -605,6 +676,14 @@ export function queueSchedulerEvent(state: SchedulerEventQueueState, args: {
           }`,
           queuedEvent.served !== undefined ? "deferred" : "dropped",
         );
+        if (!alreadySettled && queuedEvent.served !== undefined) {
+          // Same deferral disposition as the arm above — same barrier.
+          deferLaterSameSpaceServedEvents(
+            state,
+            queuedEvent,
+            "whose piece failed to start",
+          );
+        }
       } finally {
         state.queueExecution();
       }
@@ -1562,6 +1641,18 @@ export async function dispatchQueuedEvent(state: {
         cause: "handler-not-run",
         message: reason,
       });
+      // The withdrawal is a deferral, and a deferral carries the
+      // drain's arrival-order BARRIER (events.md §2; review-6459 F1):
+      // the drain queues a pass's pending entries together, so
+      // same-space followers already sit behind this head and would
+      // dispatch — and SEAL — next, landing a later arrival's
+      // consequence ahead of the withdrawn entry's re-drain (the b01
+      // overtake: durable log ["B","A"] against arrival [a1, b1]).
+      deferLaterSameSpaceServedEvents(
+        state,
+        queuedEvent,
+        `whose served handler did not run (${reason})`,
+      );
       runFinalCommitCallback();
       return;
     }

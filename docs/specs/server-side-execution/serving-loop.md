@@ -1448,9 +1448,11 @@ late-seal split with a surviving intent sibling — W3 review B1).
 The `events` block's DISPOSITION counters:
 
 - `loadParkDeferrals` counts every load-park decision, including the
-  failed head and each same-space arrival-barrier follower;
-  `loadParkFailures` counts only heads whose required load actually
-  failed.
+  failed head and each same-space arrival-barrier follower — and a
+  barrier follower may also have been swept behind a handler-not-run
+  withdrawal or a piece-start deferral (events.md §5: every deferral
+  arm carries §2's barrier); `loadParkFailures` counts only heads
+  whose required load actually failed.
 - `deliveryDeferralsActive`, `deliveryFailuresActive`, and
   `maxAccumulatedDeliveryFailureMs` expose the current durable
   checkpoint population without treating settlement as failure.

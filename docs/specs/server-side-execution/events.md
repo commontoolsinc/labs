@@ -473,7 +473,16 @@ loop's duty).
   armed, counted `handlerNotRunDeferrals`, serving-loop.md §7), so a
   PERMANENTLY unresolvable argument hardens through the bounded
   deferral budget into the visible T3 drop notice instead of wedging
-  the stream. (α) preserved: the mark still commits exactly once, only
+  the stream. The withdrawal carries §2's per-space arrival-order
+  BARRIER with it, exactly as the load-park failure arm does: every
+  later-arrived durable served entry queued behind the withdrawn
+  dispatch in the same space defers too (`cause: "arrival-barrier"`,
+  counted with the other barrier followers), or a later arrival's
+  consequence lands ahead of the withdrawn entry's re-drain — the b01
+  inversion. The piece-start deferral (a served entry whose piece
+  could not be started) carries the same barrier; cross-space
+  neighbours and LT1 in-process copies are excluded from the sweep,
+  as everywhere. (α) preserved: the mark still commits exactly once, only
   never without its effects. An LT1 in-process copy takes the same
   withdrawal through its abort alone — the batch marks only a
   SURVIVING lt1 run (§4), so the durable entry lands unmarked and the

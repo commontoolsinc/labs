@@ -420,7 +420,10 @@ export type ServingLoopStats = {
      * failure hook; its entry lands unmarked and the drain's own later
      * copy counts if still unresolvable). The entry stays pending and
      * re-drains (the deferral threshold hardens a permanently
-     * unresolvable argument into the visible §5 DROP notice). A count
+     * unresolvable argument into the visible §5 DROP notice). The
+     * withdrawal carries events.md §2's arrival-order barrier
+     * (review-6459 F1): same-space followers it sweeps count into
+     * `loadParkDeferrals` as arrival-barrier work, not here. A count
      * that grows without `processed` settling names a handler whose
      * argument never resolves. */
     handlerNotRunDeferrals: number;
@@ -431,7 +434,11 @@ export type ServingLoopStats = {
      * event behind it in the same space — deferred to a later drain
      * instead of being sealed `{status: "dropped"}`. Counted per
      * DEFERRAL, head and barrier alike, so a persistently failing load
-     * reads as a growing count rather than a single event. Nonzero is
+     * reads as a growing count rather than a single event. A barrier
+     * follower may also have been swept behind a handler-not-run
+     * withdrawal or a piece-start deferral (events.md §5: every
+     * deferral arm carries §2's barrier), so read a nonzero count with
+     * `handlerNotRunDeferrals` beside it. Nonzero is
      * not by itself a fault (a revoked-then-remounted session heals in
      * a cycle or two); a count that grows without `processed` moving
      * names a load that never heals. The head's debug record carries the
