@@ -40,9 +40,10 @@ route parser when they register a hint.
 
 This lifecycle slice is partial. Revisions retain the existing verified
 `pattern:<identity>` source-document closure rather than the complete authored
-program manifest specified below. Fabric URL creation, host-qualified fabric-link receipt, live mutable fabric
-subscriptions, complete cross-space policy enforcement, forking, and
-runtime-fingerprint handling still require work. Cross-space history repoint is
+program manifest specified below. Fabric URL creation, host-qualified
+fabric-link receipt, live mutable fabric subscriptions, complete cross-space
+policy enforcement, forking, and runtime-fingerprint handling still require
+work. Cross-space history repoint is
 rejected until the checked source-replication path exists.
 
 Following an origin is ONE mechanism, triggered by a user opening a piece. No
@@ -115,13 +116,38 @@ origin names source this deployment serves or source inside the fabric:
   tentative policy below does not accept a slug-shaped piece origin, even when
   the slug carries a pin.
 
+An arbitrary external program endpoint is not an origin. A piece follows only
+source this deployment serves or source inside the fabric, so `https://` names
+no origin kind, and an `https://` string recorded on a piece is an unusable
+origin like any other string nothing can follow.
+
+What a piece may follow is a whitelist, and the two kinds above are it. A rule
+admitting any fetchable location cannot distinguish a place that serves
+programs from one that answers for every path it is asked about, so under such
+a rule a piece can be pointed at a location that returns something other than
+the program it names and compile whatever comes back. Requiring a scheme means
+provenance is claimed rather than inferred, and everything unclaimed is
+skipped.
+
+The two kinds also carry what following requires. A `system:` ref names a file
+the deployment serves and gates the releases of. A fabric URL is authenticated,
+access-controlled, and carries CFC provenance labels and a source revision a
+follower can accept, record, and subscribe to. Both are checked against the
+identity their origin advertises. An arbitrary endpoint carries none of that,
+cannot be observed while the piece runs, and establishes nothing beyond the
+transport, while needing a network policy of its own covering schemes,
+redirects, address ranges, response and closure limits, and credentials. Source
+published elsewhere reaches a piece through a host-qualified fabric URL
+instead.
+
 Two states a recorded origin can be in are neither of these. A rooted path is
 the spelling system origins carried before the `system:` ref existed; it is
 rewritten to the ref naming the same file the next time the piece is opened. A
 string no resolver can follow — a rooted path addressing nothing under the
 patterns route, a relative string, an external endpoint, a URL whose scheme
-serves no program, a malformed fabric URL — is not an origin and is not detachment either: the piece
-carries something a person can read and repair, and nothing follows it.
+serves no program, a malformed fabric URL — is not an origin and is not
+detachment either: the piece carries something a person can read and repair,
+and nothing follows it.
 
 For example, a host-qualified fabric URL can resolve through
 `cf://toolshed.example/<space-did>/of:fid1:<piece-id>` to a piece, or through
@@ -211,30 +237,6 @@ A hint naming another host is then a conflict. A hint matching the default host
 makes the route authoritative without reconnecting. After the first hint is
 accepted, a different hint remains a conflict. A later load hydrates the
 durable route before resolving the canonical fabric target.
-
-An arbitrary external program endpoint is not an origin. A piece follows only
-source this deployment serves or source inside the fabric, so `https://` names
-no origin kind, and an `https://` string recorded on a piece is an unusable
-origin like any other string nothing can follow.
-
-What a piece may follow is a whitelist, and the two kinds above are it. A rule
-admitting any fetchable location cannot distinguish a place that serves
-programs from one that answers for every path it is asked about, so under such
-a rule a piece can be pointed at a location that returns something other than
-the program it names and compile whatever comes back. Requiring a scheme means
-provenance is claimed rather than inferred, and everything unclaimed is
-skipped.
-
-The two kinds also carry what following requires. A `system:` ref names a file
-the deployment serves and gates the releases of. A fabric URL is authenticated,
-access-controlled, and carries CFC provenance labels and a source revision a
-follower can accept, record, and subscribe to. Both are checked against the
-identity their origin advertises. An arbitrary endpoint carries none of that,
-cannot be observed while the piece runs, and establishes nothing beyond the
-transport, while needing a network policy of its own covering schemes,
-redirects, address ranges, response and closure limits, and credentials. Source
-published elsewhere reaches a piece through a host-qualified fabric URL
-instead.
 
 An origin is not proof of the bytes currently running. The content-addressed
 `patternIdentity` is that proof. A fabric URL that names a content-addressed
