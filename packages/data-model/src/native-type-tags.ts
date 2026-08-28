@@ -22,8 +22,6 @@ import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricInstance } from "./interface.ts";
 
-export { VALUE_TAGS, type ValueTag } from "./VALUE_TAGS.ts";
-
 /**
  * Checks whether a value is a native `Error`.
  *

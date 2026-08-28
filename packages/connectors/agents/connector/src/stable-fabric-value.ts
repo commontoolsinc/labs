@@ -13,10 +13,8 @@ import {
   type FabricPlainObject,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import {
-  tagFromNativeValue,
-  VALUE_TAGS,
-} from "@commonfabric/data-model/native-type-tags";
+import { VALUE_TAGS } from "@commonfabric/data-model/VALUE_TAGS";
+import { tagFromNativeValue } from "@commonfabric/data-model/native-type-tags";
 import {
   getCellOrThrow,
   isCell,
