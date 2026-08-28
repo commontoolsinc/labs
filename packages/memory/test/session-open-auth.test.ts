@@ -1,6 +1,8 @@
 import { assertEquals, assertRejects } from "@std/assert";
+import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
+import type { FabricPlainObject, FabricValue } from "@commonfabric/api";
 import { hashOf } from "@commonfabric/data-model";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 
@@ -45,7 +47,7 @@ const buildOpen = async (
   session: { sessionId?: string; seenSeq?: number; sessionToken?: string } = {},
 ) => {
   const sub = space.did();
-  const invocation: Record<string, unknown> = {
+  const invocation: Record<string, FabricValue> = {
     iss: identity.did(),
     cmd: "session.open",
     sub,
@@ -76,9 +78,13 @@ describe("wireAuthorizationOf", () => {
 
   it("rejects a signature that is not `FabricBytes`", () => {
     // Raw bytes are what the in-process `Signature<T>` looks like; the wire
-    // form must be the `FabricPrimitive`, so this must not narrow.
+    // form must be the `FabricPrimitive`, so this must not narrow. The
+    // declared `FabricValue` does not keep a `Uint8Array` out of the
+    // argument position; the check does.
     assertEquals(
-      wireAuthorizationOf({ signature: new Uint8Array([1, 2, 3]) }),
+      wireAuthorizationOf(
+        { signature: new Uint8Array([1, 2, 3]) } as unknown as FabricValue,
+      ),
       undefined,
     );
     assertEquals(wireAuthorizationOf({}), undefined);
@@ -283,5 +289,60 @@ describe("verifySessionOpenAuthorization", () => {
       Error,
       "audience mismatch",
     );
+  });
+
+  // --- record shape ---
+
+  // A class instance reads as carrying no properties, so a descriptor
+  // comparison over one compares nothing against nothing. `FabricBytes` is
+  // the instance a peer can put there: the codec decodes it at any position
+  // in the invocation, which the issuer then signs like any other content.
+  it("rejects an open whose signed session descriptor is a class instance", async () => {
+    const msg = await buildOpen(signedFields(), alice, {
+      sessionId: "session:resume",
+    });
+    const invocation = {
+      ...msg.invocation,
+      args: {
+        protocol: MEMORY_PROTOCOL,
+        session: new FabricBytes(new Uint8Array([1, 2, 3])),
+      },
+    };
+    const signature = await alice.sign(hashOf(invocation).bytes);
+    if (signature.error) throw signature.error;
+    await assertRejects(
+      () =>
+        verifySessionOpenAuthorization({
+          space: msg.space,
+          session: {},
+          invocation,
+          authorization: { signature: new FabricBytes(signature.ok) },
+        }, verifyOptions()),
+      Error,
+      "authorization mismatch",
+    );
+  });
+
+  // The declared `FabricPlainObject` is what the wire parser establishes,
+  // not something this function may assume of its own argument.
+  it("rejects an open whose invocation is a class instance", async () => {
+    const msg = await buildOpen(signedFields());
+    await assertRejects(
+      () =>
+        verifySessionOpenAuthorization({
+          ...msg,
+          invocation: new FabricBytes(
+            new Uint8Array([1, 2, 3]),
+          ) as unknown as FabricPlainObject,
+        }, verifyOptions()),
+      Error,
+      "requires authorization",
+    );
+  });
+
+  it("returns `undefined` from `wireAuthorizationOf` for a class-instance authorization", () => {
+    expect(
+      wireAuthorizationOf(new FabricBytes(new Uint8Array([1, 2, 3]))),
+    ).toBe(undefined);
   });
 });
