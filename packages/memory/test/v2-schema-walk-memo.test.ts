@@ -505,6 +505,90 @@ describe("v2 schema walk memo", () => {
     ).toEqual({ entries: 0, hits: 0, misses: 0, evictions: 0, poisons: 0 });
   });
 
+  it("evicts the least-recently-evaluated space's memo beyond the space bound", async () => {
+    const server = new Server({
+      store: new URL("memory://walk-memo-space-lru"),
+      experimentalSchemaWalkMemo: true,
+      subscriptionRefreshDelayMs: 0,
+      authorizeSessionOpen: () => "did:key:z6Mk-walk-memo-lru-principal",
+      sessionOpenAuth: { audience: TEST_AUDIENCE },
+    });
+    const connections: ReturnType<Server["connect"]>[] = [];
+    try {
+      const spaces = Array.from(
+        { length: 9 },
+        (_, index) => `did:key:z6Mk-walk-memo-lru-${index}`,
+      );
+      for (const space of spaces) {
+        const messages: ServerMessage[] = [];
+        const connection = server.connect((message) => messages.push(message));
+        connections.push(connection);
+        await connection.receive(encodeMemoryBoundary({
+          type: "hello",
+          protocol: MEMORY_PROTOCOL,
+          flags: getMemoryProtocolFlags(),
+        }));
+        const hello = messages.shift() as {
+          sessionOpen?: SessionOpenAuthMetadata;
+        };
+        await connection.receive(encodeMemoryBoundary({
+          type: "session.open",
+          requestId: `${space}-open`,
+          space,
+          session: {},
+          invocation: {
+            aud: hello.sessionOpen!.audience,
+            challenge: hello.sessionOpen!.challenge.value,
+          },
+        }));
+        const opened = messages.shift() as ResponseMessage<
+          { sessionId: string }
+        >;
+        expect(opened.ok).toBeDefined();
+        // A space with no documents opens no frames and stores nothing, so
+        // each space needs something for the walk to memoize.
+        const seeded = await server.transact({
+          type: "transact",
+          requestId: crypto.randomUUID(),
+          space,
+          sessionId: opened.ok!.sessionId,
+          commit: {
+            localSeq: 1,
+            reads: { confirmed: [], pending: [] },
+            operations: [{
+              op: "set",
+              id: "of:doc:1",
+              value: { value: { leaf: 1 } },
+            }],
+          },
+        });
+        expect(seeded.error).toBeUndefined();
+        messages.length = 0;
+        await connection.receive(encodeMemoryBoundary({
+          type: "session.watch.add",
+          requestId: `${space}-watch`,
+          space,
+          sessionId: opened.ok!.sessionId,
+          watches: [{
+            id: `${space}-watch-id`,
+            kind: "graph",
+            query: QUERY_FOR("of:doc:1"),
+          }],
+        }));
+        const response = messages.shift() as ResponseMessage<WatchAddResult>;
+        expect(response.ok).toBeDefined();
+      }
+      // Nine spaces evaluated against a bound of eight: the first space's
+      // memo is gone, and a peek at it reads empty rather than minting one.
+      expect(server.schemaWalkMemoDiagnostics(spaces[0]).entries).toBe(0);
+      expect(
+        server.schemaWalkMemoDiagnostics(spaces[8]).entries,
+      ).toBeGreaterThan(0);
+    } finally {
+      for (const connection of connections) connection.close();
+    }
+  });
+
   it("refuses a negative entry bound instead of evicting forever", () => {
     expect(() => createSchemaWalkMemoStore(-1)).toThrow(RangeError);
     expect(() => createSchemaWalkMemoStore(1.5)).toThrow(RangeError);
