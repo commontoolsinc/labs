@@ -105,14 +105,13 @@ describe("convert-cells-to-links-vetting", () => {
     });
   });
 
-  // A `Map` is a `FabricNativeObject` whose fabric form has yet to be built,
-  // which is a different refusal from the ones above: it says the value is
-  // recognized and unbuilt rather than unrepresentable. Letting one through
-  // would land it in the record branch, which would rebuild it -- a `Map`
-  // having no enumerable own properties -- as a bare `{}`.
-  it("throws for a `Map`, naming it as unbuilt rather than unrecognized", () => {
+  // A `Map` mints nothing, so what refuses it is the vet, the same as for
+  // anything else with no fabric form. Letting one through would land it in
+  // the record branch, which would rebuild it -- a `Map` having no enumerable
+  // own properties -- as a bare `{}`.
+  it("throws for a `Map`", () => {
     expect(() => convertCellsToLinks({ x: new Map() } as never)).toThrow(
-      "`Map` (a `FabricNativeObject` whose fabric form is not built yet)",
+      "`Map` (not a recognized fabric type)",
     );
   });
 });

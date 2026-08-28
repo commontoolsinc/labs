@@ -216,26 +216,16 @@ export function errorClassFromType(type: string): ErrorConstructor {
 }
 
 /**
- * Helper for the conversion and the vet alike, which refuses a
- * `FabricNativeObject` whose fabric form has yet to be built.
- */
-function refuseUnbuiltNativeObject(value: object): never {
-  throw new Error(
-    `Not representable as a \`FabricValue\`: ${
-      backtickQuote(value.constructor?.name ?? typeof value)
-    } (a \`FabricNativeObject\` whose fabric form is not built yet)`,
-  );
-}
-
-/**
  * Throws unless the given value is already usable as a `FabricValueLayer`,
  * naming what is wrong with it when it is not. This accepts exactly what
  * `isValidFabricValueLayer()` accepts; what it adds is the reason.
  *
- * A `FabricNativeObject` is refused even though it has a fabric form, that
- * form being what conversion mints rather than what the value already is.
- * `shallowFabricFromNativeObject()` is what mints it, and the pair is meant to
- * be asked in that order.
+ * A native object that conversion mints from -- a `Date`, `Uint8Array`,
+ * `RegExp` or `Error` -- is refused here too, and told which refusal it is:
+ * that fabric form is what conversion produces, not what the value already is.
+ * `shallowFabricFromNativeObject()` is what produces it, and the pair is meant
+ * to be asked in that order. A `Map` and a `Set` get the ordinary refusal
+ * instead, having no fabric form to be told about yet.
  *
  * @param value The value to check.
  */
@@ -303,16 +293,17 @@ export function assertValidFabricValueLayer(
     case NATIVE_TAGS.Date:
     case NATIVE_TAGS.Uint8Array:
     case NATIVE_TAGS.RegExp: {
+      // Representable, and so refused on different grounds from the
+      // unrecognized types below -- which is worth telling apart, one saying
+      // to convert first and the other that there is nothing to convert to. A
+      // `Map` and a `Set` belong with those below rather than here: their
+      // fabric form has yet to be built, so there is nothing to send a caller
+      // back for.
       throw new Error(
         `Not yet in \`FabricValue\` form: ${
           backtickQuote((value as object).constructor?.name ?? typeof value)
         } (a \`FabricNativeObject\`; conversion mints one)`,
       );
-    }
-
-    case NATIVE_TAGS.Map:
-    case NATIVE_TAGS.Set: {
-      return refuseUnbuiltNativeObject(value as object);
     }
 
     // deno-lint-ignore no-fallthrough
@@ -364,29 +355,21 @@ export function assertValidFabricValueLayer(
 }
 
 /**
- * Returns the freshly-minted fabric form of the given value when it is a
- * `FabricNativeObject` that has one -- a `Date`, `Uint8Array`, `RegExp` or
- * `Error` -- and `undefined` when it is not a `FabricNativeObject` at all. The
- * result is always frozen and always a new value: the split is on whether
- * conversion produces one. An inert array or plain object is already a fabric
- * layer and so never mints; these four always do.
+ * Returns the freshly-minted fabric form of a `Date`, `Uint8Array`, `RegExp`
+ * or `Error`, and `undefined` for every other value. The result is always
+ * frozen and always new: the whole of what this decides is whether conversion
+ * produces a value, and for these four it does. An inert array or plain object
+ * is already a fabric layer and mints nothing; so, at the other end, does a
+ * value with no fabric representation at all.
  *
- * The `undefined` is a kind answer rather than a failure. It says only that
- * nothing needs minting, leaving what the value *is* -- a container, a
- * primitive, something already in fabric form, or something with no fabric
- * representation at all -- for the caller to settle;
- * `assertValidFabricValueLayer()` is the usual next question.
- *
- * A `FabricNativeObject` whose fabric form has yet to be built -- a `Map` or a
- * `Set` -- throws rather than answering `undefined`.
- * `isValidFabricNativeObject()` counts both as members, so `undefined` would
- * state something false about one, quite apart from letting it reach a walk
- * that would rebuild it as `{}`. Membership and convertibility are separate
- * questions, and the throw is the tripwire guiding the work that builds those
- * forms. That tripwire is de facto rather than flag-gated -- nothing gates a
- * `Map` from arriving here, and what makes refusing right is that no caller
- * writes one. See "Flag-gated tripwires" in
- * `docs/development/EXPERIMENTAL_OPTIONS.md`.
+ * **The `undefined` says nothing about whether the value is usable.** It
+ * reports only that there was nothing to mint, which is as true of a `Map` --
+ * a `FabricNativeObject` whose fabric form has yet to be built -- as it is of
+ * a function. Membership and convertibility are separate questions, and this
+ * answers neither: `assertValidFabricValueLayer()` decides what a value that
+ * minted nothing may do next, and the pair is meant to be asked in that order.
+ * A caller that skips the vet walks straight into a container it has not
+ * vetted, and a `Map` rebuilt from its (empty) entries is a bare `{}`.
  *
  * @param value The value to convert.
  */
@@ -421,11 +404,6 @@ export function shallowFabricFromNativeObject(
     case NATIVE_TAGS.Uint8Array: {
       // A native `Uint8Array` becomes a `FabricBytes`.
       return new FabricBytes(value as Uint8Array);
-    }
-
-    case NATIVE_TAGS.Map:
-    case NATIVE_TAGS.Set: {
-      return refuseUnbuiltNativeObject(value as object);
     }
 
     default: {

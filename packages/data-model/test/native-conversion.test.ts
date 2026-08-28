@@ -676,44 +676,28 @@ describe("native-conversion", () => {
       });
     });
 
-    describe("given a `FabricNativeObject` whose fabric form is not built", () => {
-      it("throws for a `Map`", () => {
-        expect(() => shallowFabricFromNativeObject(new Map())).toThrow(
-          "Not representable as a `FabricValue`: `Map` (a " +
-            "`FabricNativeObject` whose fabric form is not built yet)",
-        );
-      });
-
-      it("throws for a `Set`", () => {
-        expect(() => shallowFabricFromNativeObject(new Set())).toThrow(
-          "Not representable as a `FabricValue`: `Set` (a " +
-            "`FabricNativeObject` whose fabric form is not built yet)",
-        );
-      });
+    describe("given a value with nothing to mint", () => {
+      const mints = new Set(MINTED.map(([label]) => label));
+      for (const [label, value] of LAYER_CORPUS) {
+        if (mints.has(label)) continue;
+        it(`returns \`undefined\` for ${label}`, () => {
+          expect(shallowFabricFromNativeObject(value)).toBe(undefined);
+        });
+      }
     });
 
-    // The split this function makes is on whether conversion produces a new
-    // value, which is NOT the same question as membership: a `Map` is a
-    // `FabricNativeObject` and still has no fabric form. So `undefined` has to
-    // mean "not a member" and nothing else -- for a member it would state
-    // something false, quite apart from letting one reach a caller's walk.
-    describe("returns `undefined` for exactly what is not a `FabricNativeObject`", () => {
-      for (const [label, value] of LAYER_CORPUS) {
-        if (isValidFabricNativeObject(value)) {
-          it(`does not return \`undefined\` for ${label}`, () => {
-            let result: unknown;
-            try {
-              result = shallowFabricFromNativeObject(value);
-            } catch {
-              return; // A refusal is the other allowed answer for a member.
-            }
-            expect(result).not.toBe(undefined);
-          });
-        } else {
-          it(`returns \`undefined\` for ${label}`, () => {
-            expect(shallowFabricFromNativeObject(value)).toBe(undefined);
-          });
-        }
+    // The `undefined` is not a verdict on the value: it reports that there was
+    // nothing to mint, which is as true of a `Map` -- a `FabricNativeObject`
+    // whose fabric form has yet to be built -- as of a function. What protects
+    // a caller is the pair, so this pins the pair rather than either half. A
+    // `Map` that reached a walk would be rebuilt from its (empty) entries as
+    // a bare `{}`.
+    it("leaves a `Map` and a `Set` to the vet, which refuses them", () => {
+      for (const value of [new Map(), new Set()]) {
+        expect(shallowFabricFromNativeObject(value)).toBe(undefined);
+        expect(() => assertValidFabricValueLayer(value)).toThrow(
+          "not a recognized fabric type",
+        );
       }
     });
   });
@@ -809,10 +793,13 @@ describe("native-conversion", () => {
         );
       });
 
-      it("names a `Map` as having no fabric form yet", () => {
+      // A `Map` IS a `FabricNativeObject`, but its fabric form has yet to be
+      // built, so there is nothing to send a caller back for and it gets the
+      // ordinary refusal rather than the one above.
+      it("names a `Map` as an unrecognized type", () => {
         expect(() => assertValidFabricValueLayer(new Map())).toThrow(
-          "Not representable as a `FabricValue`: `Map` (a " +
-            "`FabricNativeObject` whose fabric form is not built yet)",
+          "Not representable as a `FabricValue`: `Map` (not a recognized " +
+            "fabric type)",
         );
       });
     });
