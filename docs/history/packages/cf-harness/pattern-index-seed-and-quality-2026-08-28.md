@@ -250,8 +250,17 @@ produced it.
   while the decisive gate has never started. The workflow run is the level at
   which "complete" means complete.
 
+  Comparing `returned` against `total_count` does not close it either, and for
+  a reason distinct from paging: the list **materializes progressively**. Early
+  in a run the endpoint answers `total=1, returned=1` — one check run existed,
+  and the count agrees that one was all there was. The API is not truncating;
+  it is answering completely about a state that is not final. Both read as
+  "nothing more to see", and only the second survives a completeness check.
+
   Nor does the workflow level close it by itself: it reports that the runs
-  which *exist* have finished, not that every run exists. What closes it is an
+  which *exist* have finished, not that every run exists. An empty list of
+  workflow runs satisfies "all complete" vacuously, which is exactly the state
+  a just-pushed commit is in. What closes it is an
   expected set — naming the gate, and knowing the number of checks a complete
   answer carries — because until then "the coverage gate is absent" and "the
   coverage gate passed" are the same observation.
