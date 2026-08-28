@@ -1474,6 +1474,65 @@ describe("Phase 3 events-down (serving side)", () => {
     cancelDemand();
   });
 
+  it("a permanently unresolvable argument hardens into a §5 DROP whose notice names the REAL class (review-6459 F2): the handler was runnable and dispatched — the deferrals were withdrawn dispatches, not load attempts, and the durable drop record must not say otherwise", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const { result } = await standUp(clientRuntime, GATED_BUMP_PATTERN, {
+      arg: "notice-arg",
+      result: "notice-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    (result.key("bump") as unknown as { send(value: unknown): unknown })
+      .send({});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    await waitUntil(
+      () => sidecarIdsIn(engine).length === 1,
+      "the event append to land",
+    );
+    const sidecarId = sidecarIdsIn(engine)[0];
+    const readEntry = () =>
+      (Engine.read(engine, { id: sidecarId })?.value as
+        | StreamEventsDocValue
+        | undefined)?.entries?.[0];
+
+    // NEVER heal the gate: the 250ms backstop re-dispatches the entry
+    // through the whole 8-deferral budget (~2s), each dispatch
+    // withdrawn (handler-not-run), and the terminal §5 notice seals.
+    // This also exercises the threshold machinery end-to-end with THIS
+    // cause (the review's coverage gap: it was code-traced, not
+    // test-run).
+    await waitUntil(
+      () => readEntry()?.status === "dropped",
+      "the terminal §5 DROP notice to seal",
+      30_000,
+    );
+    const entry = readEntry()!;
+    // THE PIN: the drop record names the real class. The old
+    // boilerplate — "no runnable handler after 8 deferred load
+    // attempts" — was false in both clauses for this cause: a handler
+    // existed, loaded and runnable, and the deferrals were dispatches
+    // whose transaction was withdrawn, not load attempts.
+    expect(entry.reason).toContain(
+      "handler did not run after 8 withdrawn dispatches",
+    );
+    expect(entry.reason).not.toContain("no runnable handler");
+    // The underlying runner reason still rides the notice.
+    expect(entry.reason).toContain("argument is undefined");
+    // The disposition machinery is unchanged: counted, and the entry is
+    // terminally consumed (the notice IS the consequence).
+    expect(
+      (host!.stats().events as { dropped?: number }).dropped ?? 0,
+    ).toBeGreaterThanOrEqual(1);
+    expect(entry.consequenced).toBe(true);
+    cancelDemand();
+  });
+
   it("the ERROR arm: a throwing handler's error IS the consequence — the entry carries it and the stream does not wedge (events.md §5)", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);

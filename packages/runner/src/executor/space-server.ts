@@ -3381,13 +3381,20 @@ export class SpaceServer implements TransactionSealDestination {
                       this.#armDeferredRescan();
                       return;
                     }
-                    // The race window is long past: no runnable handler
-                    // exists — events.md §5's drop predicate. The
-                    // notice un-renders the echo and un-wedges the
-                    // stream (and the park criterion). Its mark is
-                    // being STAGED for a wave: the copy is `marked`
-                    // until the wave outcome (or the notice's own
-                    // failure) releases it.
+                    // The race window is long past — events.md §5's
+                    // terminal drop. The notice un-renders the echo and
+                    // un-wedges the stream (and the park criterion).
+                    // Its mark is being STAGED for a wave: the copy is
+                    // `marked` until the wave outcome (or the notice's
+                    // own failure) releases it. A §5 DROP notice is the
+                    // user-facing record of a permanently lost action,
+                    // so its message names the CAUSE of the final
+                    // deferral honestly (review-6459 F2): for
+                    // handler-not-run the handler was runnable and
+                    // DISPATCHED — the deferrals were withdrawn
+                    // dispatches, not load attempts — while the classic
+                    // cold-view shape keeps §5's no-runnable-handler
+                    // drop predicate wording.
                     this.#eventDeferrals.delete(entry.eventId);
                     this.#drainInFlight.set(eventId, "marked");
                     this.#sealEventConsequenceNotice(
@@ -3396,8 +3403,12 @@ export class SpaceServer implements TransactionSealDestination {
                       streamEntry,
                       {
                         kind: "dropped",
-                        message: "no runnable handler after " +
-                          `${deferrals} deferred load attempts: ` +
+                        message: ("cause" in outcome &&
+                            outcome.cause === "handler-not-run"
+                          ? "handler did not run after " +
+                            `${deferrals} withdrawn dispatches: `
+                          : "no runnable handler after " +
+                            `${deferrals} deferred load attempts: `) +
                           outcome.message,
                       },
                     );
