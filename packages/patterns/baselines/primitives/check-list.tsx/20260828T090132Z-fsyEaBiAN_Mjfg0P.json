@@ -1,0 +1,178 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "CheckItem": {
+        "properties": {
+          "done": {
+            "default": false,
+            "type": "boolean"
+          },
+          "quantity": {
+            "default": 1,
+            "type": "number"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "done",
+          "quantity"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "emptyMessage": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "Nothing here yet.",
+        "description": "Shown in place of the rows while the list is empty.",
+        "type": "string"
+      },
+      "items": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "description": "The list itself. A host passes its own cell to share it.",
+        "items": {
+          "$ref": "#/$defs/CheckItem"
+        },
+        "type": "array"
+      },
+      "placeholder": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "Add an item…",
+        "description": "Placeholder in the add-item field.",
+        "type": "string"
+      },
+      "showQuantity": {
+        "asCell": [
+          "cell"
+        ],
+        "default": false,
+        "description": "Whether each row carries an editable quantity.",
+        "type": "boolean"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "primitives/check-list.tsx",
+  "resultSchema": {
+    "$defs": {
+      "CheckItem": {
+        "properties": {
+          "done": {
+            "default": false,
+            "type": "boolean"
+          },
+          "quantity": {
+            "default": 1,
+            "type": "number"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "done",
+          "quantity"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "addItem": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "quantity": {
+            "type": "number"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      },
+      "clearCompleted": {
+        "asCell": [
+          "stream",
+          "opaque"
+        ]
+      },
+      "completedCount": {
+        "type": "number"
+      },
+      "items": {
+        "items": {
+          "$ref": "#/$defs/CheckItem"
+        },
+        "type": "array"
+      },
+      "remainingCount": {
+        "type": "number"
+      },
+      "removeItem": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "item": {
+            "$ref": "#/$defs/CheckItem"
+          }
+        },
+        "required": [
+          "item"
+        ],
+        "type": "object"
+      },
+      "summary": {
+        "type": "string"
+      },
+      "toggleItem": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "item": {
+            "$ref": "#/$defs/CheckItem"
+          }
+        },
+        "required": [
+          "item"
+        ],
+        "type": "object"
+      }
+    },
+    "required": [
+      "items",
+      "remainingCount",
+      "completedCount",
+      "summary",
+      "addItem",
+      "toggleItem",
+      "removeItem",
+      "clearCompleted",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}
