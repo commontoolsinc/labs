@@ -185,6 +185,7 @@ describe("console/flow", () => {
         detail: "no space database on this host",
         cellsRead: 0,
         cellsLabelled: 0,
+        cellsPartial: 0,
       },
     );
     // Without this a cell drawn bare would read as a space with nothing to say.

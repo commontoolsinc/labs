@@ -412,6 +412,29 @@ describe("console/cell-labels", () => {
       expect(summary.cellsLabelled).toBe(1);
     });
 
+    it("counts a cell the reading did not finish as one read in part", () => {
+      // The header reads this count as its licence to state a total: a cell
+      // here may hold a label at a path nothing was read at.
+      expect(
+        consoleCellLabelsSummary(consoleCellLabelIndex(truncatedSnapshot))
+          .cellsPartial,
+      ).toBe(1);
+    });
+
+    it("counts a cell holding a path nothing was read at as one read in part", () => {
+      expect(
+        consoleCellLabelsSummary(consoleCellLabelIndex(linkerSnapshot))
+          .cellsPartial,
+      ).toBe(1);
+    });
+
+    it("counts no cell of a snapshot read whole as read in part", () => {
+      expect(
+        consoleCellLabelsSummary(consoleCellLabelIndex(readSnapshot))
+          .cellsPartial,
+      ).toBe(0);
+    });
+
     it("carries the status, detail and space of the index it summarizes", () => {
       const summary = consoleCellLabelsSummary(
         consoleCellLabelIndex(readSnapshot),

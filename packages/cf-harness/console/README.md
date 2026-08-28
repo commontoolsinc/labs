@@ -281,14 +281,21 @@ is colored apart from a merely labelled one, and its card names the
 implementation that produced it under `transformed by`.
 
 A cell whose card says the space holds no label for it is saying what the space
-holds. A cell whose card says no label was read for it is saying the run's
-labels name it nowhere, which is a different thing, and the chip cannot tell on
-its own whether that is because the space was never read. The head of the map
-carries that: `cell labels read` with how many of the cells it read carry one,
-`cell labels unavailable` with why, or `cell labels not read`. Read an empty
-chip against it — under a run whose flow labels are `off`, or one whose space
-could not be read, an empty chip is a record of what the run recorded rather
-than a cell with nothing to hide.
+holds, and only a cell read whole says it. A cell whose card says no label was
+read for it is saying nothing was read there, which is a different thing: either
+the run's labels name the cell nowhere, or the reading covered part of it. Where
+it covered part of it, a **reading** row says which part it missed and what a
+path with no entry means under it — `read but for` the paths it declined to
+follow, each named, with every other path read; or `did not finish`, which names
+no path at all, because what it missed it never reached. The chip cannot tell on
+its own whether a cell went unnamed because the space was never read. The head
+of the map carries that: `cell labels read` with how many of the cells it read
+carry one, `cell labels unavailable` with why, or `cell labels not read`. Where
+a cell of the run was read only in part it heads `cell labels read in part`
+instead, and says how many, because the count beside it is then a floor rather
+than a total. Read an empty chip against that head — under a run whose flow
+labels are `off`, or one whose space could not be read, an empty chip is a
+record of what the run recorded rather than a cell with nothing to hide.
 
 ### The run's own panes
 

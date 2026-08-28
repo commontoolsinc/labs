@@ -86,6 +86,60 @@ describe("console/src/cell-chip", () => {
       expect(view.confidentiality).toEqual([]);
     });
 
+    it("reads a cell the whole of which was read as read in full", () => {
+      const view = cellLabelView({
+        labels: {
+          confidentiality: [],
+          integrity: [],
+          derived: false,
+          transformedBy: [],
+          entries: [],
+        },
+      });
+      // The card says the space holds no label for such a cell, which is a
+      // claim only a reading that covered the whole of it can make.
+      expect(view.partial).toBe(false);
+      expect(view.unfinished).toBe(false);
+      expect(view.unreadPaths).toEqual([]);
+    });
+
+    it("reads a cell whose reading ran out as read in part", () => {
+      const view = cellLabelView({
+        labels: {
+          confidentiality: [],
+          integrity: [],
+          derived: false,
+          transformedBy: [],
+          entries: [],
+          truncationReason: "node-budget-exhausted",
+        },
+      });
+      // An empty entry list under a reading that stopped is not a space with
+      // no label for the cell; it is a reading that cannot say either way.
+      expect(view.partial).toBe(true);
+      expect(view.unfinished).toBe(true);
+      // What it missed it never reached, so it names no path.
+      expect(view.unreadPaths).toEqual([]);
+    });
+
+    it("reads a cell holding a path nothing was read at as read in part", () => {
+      const view = cellLabelView({
+        labels: {
+          confidentiality: [],
+          integrity: [],
+          derived: false,
+          transformedBy: [],
+          entries: [],
+          unreadPaths: [["notes"]],
+        },
+      });
+      expect(view.partial).toBe(true);
+      // A declined path is named, which is more than a reading that ran out
+      // can say, so the two reach the card as separate facts.
+      expect(view.unreadPaths).toEqual([["notes"]]);
+      expect(view.unfinished).toBe(false);
+    });
+
     it("carries the paths and the implementations that produced them", () => {
       const view = cellLabelView({
         labels: {

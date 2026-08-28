@@ -70,11 +70,37 @@ export interface ConsoleCellLabelView {
 
   /** Whether this run's labels hold a record for this cell at all. */
   recorded: boolean;
+
+  /**
+   * The paths inside this cell nothing was read at, named. Each is a place
+   * the reading declined to go — a link out of the space it opened, or a path
+   * below the depth it descends to — so a path under one of them is unknown
+   * while every other path of the cell was read.
+   */
+  unreadPaths: readonly (readonly string[])[];
+
+  /**
+   * Whether the reading of this cell stopped before it had finished. It says
+   * less than a named unread path does: what was left was never enumerated,
+   * so the entries are some of what the space holds and any path carrying no
+   * entry is unknown rather than unlabelled.
+   */
+  unfinished: boolean;
+
+  /**
+   * Whether either of the two above holds. A card reads it as the licence to
+   * say what the space holds: without it an empty entry list is the space
+   * holding no label, and with it an empty entry list is a reading that did
+   * not cover the cell.
+   */
+  partial: boolean;
 }
 
 /** The two facts, reduced to what the chip and its card draw. */
 export const cellLabelView = (cell: ConsoleCellFacts): ConsoleCellLabelView => {
   const labels = cell.labels;
+  const unreadPaths = labels?.unreadPaths ?? [];
+  const unfinished = labels?.truncationReason !== undefined;
   return {
     onCall: cell.confidentiality ?? [],
     confidentiality: labels?.confidentiality ?? [],
@@ -83,6 +109,9 @@ export const cellLabelView = (cell: ConsoleCellFacts): ConsoleCellLabelView => {
     transformedBy: labels?.transformedBy ?? [],
     paths: labels?.entries ?? [],
     recorded: labels !== undefined,
+    unreadPaths,
+    unfinished,
+    partial: unreadPaths.length > 0 || unfinished,
   };
 };
 
@@ -119,6 +148,10 @@ export const schemaSummary = (schema: unknown): string | undefined => {
   }
   return typeof record?.type === "string" ? record.type : undefined;
 };
+
+/** A path inside a cell, joined for showing; the cell itself names itself. */
+const pathText = (path: readonly string[]): string =>
+  path.length === 0 ? "(the cell)" : path.join("/");
 
 /** Distinguishes one chip's card from another's, for `aria-describedby`. */
 let cardSequence = 0;
@@ -241,6 +274,12 @@ export class ConsoleCell extends LitElement {
    * call recorded, and what the space holds for the cell. The second reads
    * path by path, because a cell labelled at one field and not at another is
    * two different things to a reader and one blurred thing to a badge.
+   *
+   * Only a cell read whole says what the space holds. A reading that covered
+   * part of the cell says no label was read for it — the same words as a cell
+   * the run's labels name nowhere, because it is the same claim — and the
+   * `reading` row beneath says which part it missed and what a path with no
+   * entry means under it.
    */
   #labels(view: ConsoleCellLabelView): TemplateResult {
     return html`
@@ -262,9 +301,11 @@ export class ConsoleCell extends LitElement {
               no label read for this cell; the map heads with what this run read
             </span>`
             : view.confidentiality.length === 0 && view.integrity.length === 0
-            ? html`<span class="cell-none">
-              the space holds no label for this cell
-            </span>`
+            ? view.partial
+              ? html`<span class="cell-none">no label read for this cell</span>`
+              : html`<span class="cell-none">
+                the space holds no label for this cell
+              </span>`
             : html`
               ${view.confidentiality.map((name) =>
                 html`<span class="atom conf">${name}</span>`
@@ -275,6 +316,26 @@ export class ConsoleCell extends LitElement {
             `}
         </span>
       </span>
+      ${!view.partial ? nothing : html`
+        <span class="cell-row">
+          <span class="cell-label">reading</span>
+          <span class="cell-reading">
+            ${view.unreadPaths.length === 0 ? nothing : html`
+              <span>
+                read but for ${view.unreadPaths.map(pathText).join(", ")} —
+                a path under one of those is unknown, and every other one was
+                read
+              </span>
+            `}
+            ${!view.unfinished ? nothing : html`
+              <span>
+                did not finish — these are some of the labels the space holds,
+                and a path with no entry is unknown
+              </span>
+            `}
+          </span>
+        </span>
+      `}
       ${view.paths.length === 0 ? nothing : html`
         <span class="cell-row">
           <span class="cell-label">derived</span>
@@ -302,11 +363,7 @@ export class ConsoleCell extends LitElement {
             ${view.paths.map((entry) =>
               html`
                 <span class="cell-path">
-                  <span class="label-path">
-                    ${entry.path.length === 0
-                      ? "(the cell)"
-                      : entry.path.join("/")}
-                  </span>
+                  <span class="label-path">${pathText(entry.path)}</span>
                   ${entry.origin === undefined
                     ? nothing
                     : html`<span class="path-origin">${entry.origin}</span>`}

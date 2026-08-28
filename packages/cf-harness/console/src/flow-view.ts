@@ -22,8 +22,13 @@ const WIDE_NUMERIC_RUN = 32;
  * and another under a run where nobody asked, and the chip cannot tell those
  * apart on its own. The header carries the difference, so an empty chip is
  * read against a stated regime rather than as an absence of secrets.
+ *
+ * "So many of so many carry one" is a count over a reading that covered every
+ * cell it names. Where a cell of the run was read only in part, the count is
+ * a floor — another label may sit at a path nothing was read at — so the line
+ * leads with the reading being partial rather than with a total.
  */
-const labelRegime = (labels: ConsoleCellLabelsSummary): string => {
+export const labelRegime = (labels: ConsoleCellLabelsSummary): string => {
   if (labels.status === "absent") {
     return "cell labels not read";
   }
@@ -32,7 +37,10 @@ const labelRegime = (labels: ConsoleCellLabelsSummary): string => {
       labels.detail === undefined ? "" : ` · ${labels.detail}`
     }`;
   }
-  return `cell labels read · ${labels.cellsLabelled} of ${labels.cellsRead} carry one`;
+  const carry = `${labels.cellsLabelled} of ${labels.cellsRead} carry one`;
+  return labels.cellsPartial === 0
+    ? `cell labels read · ${carry}`
+    : `cell labels read in part · ${carry}, ${labels.cellsPartial} only partly read`;
 };
 
 export class ConsoleFlowView extends LitElement {

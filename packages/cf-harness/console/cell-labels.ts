@@ -138,6 +138,15 @@ export interface ConsoleCellLabelsSummary {
   /** How many cells the snapshot read, and how many of them carry a label. */
   cellsRead: number;
   cellsLabelled: number;
+
+  /**
+   * How many of those cells it read only part of — one holding a path it
+   * declined to follow, or one whose read ran out before it finished. It is
+   * what stops the count beside it reading as a complete reading: a cell
+   * counted here may hold a label at a path nothing was read at, so
+   * `cellsLabelled` is a floor rather than a total wherever this is not zero.
+   */
+  cellsPartial: number;
 }
 
 const dedupe = (names: readonly string[]): string[] => [...new Set(names)];
@@ -252,6 +261,15 @@ export const consoleCellLabelIndex = (
   };
 };
 
+/**
+ * Whether a record holds either of the two facts that make its entries some
+ * of what the space holds rather than all of it — a path nothing was read at,
+ * or a read that stopped before it finished.
+ */
+const readInPart = (record: HarnessCellLabelRecord): boolean =>
+  record.truncationReason !== undefined ||
+  (record.unreadPaths ?? []).length > 0;
+
 /** The run-level fact the map and the run header state. */
 export const consoleCellLabelsSummary = (
   index: ConsoleCellLabelIndex,
@@ -263,6 +281,7 @@ export const consoleCellLabelsSummary = (
     ...(index.space !== undefined ? { space: index.space } : {}),
     cellsRead: cells.length,
     cellsLabelled: cells.filter((record) => record.entries.length > 0).length,
+    cellsPartial: cells.filter(readInPart).length,
   };
 };
 
