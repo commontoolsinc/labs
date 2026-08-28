@@ -6,6 +6,8 @@
  */
 
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { SigilLink } from "@commonfabric/runner/shared";
+import { isCellHandle } from "@commonfabric/runtime-client";
 import {
   type EventProvenance,
   getEventProvenance,
@@ -56,16 +58,16 @@ export type { EventProvenance };
  * Contains common input element properties.
  */
 export type SerializedEventTarget = {
-  /**
-   * The element's name, or whatever it chose to expose under that name.
-   */
-  name?: FabricValue;
+  /** The element's name, or the link to a cell bound in its place. */
+  name?: string | SigilLink;
 
   /**
-   * The element's current value. A `FabricValue` rather than a string: a custom
-   * element chooses what its `value` is, and a `cf-input`, a `cf-tabs` and a
-   * `cf-calendar` each declare theirs as `CellHandle<string> | string`, which
-   * arrives here as the sigil link the conversion resolved it to.
+   * The element's current value, or the link to a cell bound in its place.
+   *
+   * The one member here that no scalar covers, and so the one still typed as
+   * wide as the domain. Components declare theirs `string` and
+   * `CellHandle<string> | string` mostly, but also `string | string[]`,
+   * `number`, and in one case `CellHandle<unknown> | unknown`.
    */
   value?: FabricValue;
 
@@ -74,19 +76,16 @@ export type SerializedEventTarget = {
    * something else, what it chose. `cf-checkbox` and `cf-switch` each declare
    * theirs as `CellHandle<boolean> | boolean`.
    */
-  checked?: FabricValue;
+  checked?: boolean | SigilLink;
+
+  /** Whether the element reports itself selected, or the link bound in place. */
+  selected?: boolean | SigilLink;
 
   /**
-   * Whether the element reports itself selected -- or, again, what it chose.
+   * Which option a select is on, or the link bound in its place -- `cf-picker`
+   * declares its `selectedIndex` a `CellHandle<number>`.
    */
-  selected?: FabricValue;
-
-  /**
-   * Which option a select is on -- or, where the element chose to expose
-   * something else, what it chose. `cf-picker` declares its `selectedIndex` as
-   * a `CellHandle<number>`, which arrives here as the link that reaches it.
-   */
-  selectedIndex?: FabricValue;
+  selectedIndex?: number | SigilLink;
 
   /** Every selected option's value, for a multiple select. */
   selectedOptions?: { value: string }[];
@@ -171,12 +170,11 @@ export const ALLOWLISTED_EVENT_PROPERTIES = {
 /**
  * Target properties that cross.
  *
- * Every one is a `FabricValue`, and none can be narrowed past that: the JSX
- * contract admits a cell for any attribute of any element --
+ * Each may be the link that reaches a cell bound in its place, whatever else it
+ * may be. The JSX contract admits a cell for any attribute of any element --
  * `DetailedHTMLProps` maps each prop to `E[K] | CellLike<E[K]>` -- and a bound
- * one reaches the element as a `CellHandle`, whatever the component declares
- * its own property to be. So what crosses is whatever
- * {@link toSerializableValue} makes of what is found.
+ * one reaches the element as a `CellHandle`, regardless of what the component
+ * declares its own property to be.
  */
 export const ALLOWLISTED_TARGET_PROPERTIES = [
   "name",
@@ -185,6 +183,23 @@ export const ALLOWLISTED_TARGET_PROPERTIES = [
   "selected",
   "selectedIndex",
 ] as const satisfies readonly (keyof SerializedEventTarget)[];
+
+/**
+ * What each target property may be when it is *not* a link, where one type
+ * covers it.
+ *
+ * `value` has no entry, no scalar covering what components declare theirs to
+ * be: `string` and `CellHandle<string> | string` mostly, but also
+ * `string | string[]`, `number`, and in one case `CellHandle<unknown> |
+ * unknown`. So it is the one that crosses as whatever
+ * {@link toSerializableValue} makes of it.
+ */
+const TARGET_PROPERTY_SCALARS = {
+  name: "string",
+  checked: "boolean",
+  selected: "boolean",
+  selectedIndex: "number",
+} as const satisfies Partial<Record<keyof SerializedEventTarget, DomScalar>>;
 
 /**
  * Serialize a DOM event for IPC transmission.
@@ -220,10 +235,13 @@ export function serializeEvent(event: Event): SerializedEvent {
 
     for (const prop of ALLOWLISTED_TARGET_PROPERTIES) {
       const value = from[prop];
-      if (value !== undefined) {
-        to[prop] = toSerializableValue(value);
-        hasTargetProps = true;
-      }
+      if (value === undefined) continue;
+
+      const carried = carriedTargetValue(prop, value);
+      if (carried === undefined) continue;
+
+      to[prop] = carried;
+      hasTargetProps = true;
     }
 
     // Handle select element's selectedOptions
@@ -287,6 +305,38 @@ function copyDomScalars(
       to[prop] = value;
     }
   }
+}
+
+/**
+ * What one target property crosses as, or `undefined` where it crosses as
+ * nothing.
+ *
+ * A `CellHandle` goes first and is recognized by its class rather than by its
+ * offering a `toJSON()`, so that nothing else defining one is taken for a cell.
+ * It is what a bound property holds: the applicator installs the handle on the
+ * element (`setBinding()` in `./applicator.ts`) and the components leave it
+ * there, `cf-input`'s controller binding `value` without replacing it and
+ * `cf-checkbox`'s doing the same with `checked`. What crosses is the link that
+ * reaches the cell, which is what makes each of these `T | SigilLink`.
+ *
+ * Otherwise the property is whatever its own scalar admits. One that admits
+ * nothing else -- `value`, per {@link TARGET_PROPERTY_SCALARS} -- goes to the
+ * general conversion; one that fails its scalar crosses as nothing, rather than
+ * landing in a field that says it cannot hold it.
+ */
+function carriedTargetValue(
+  prop: typeof ALLOWLISTED_TARGET_PROPERTIES[number],
+  value: unknown,
+): FabricValue | undefined {
+  if (isCellHandle(value)) return value.toJSON();
+
+  const scalar: DomScalar | undefined = TARGET_PROPERTY_SCALARS[
+    prop as keyof typeof TARGET_PROPERTY_SCALARS
+  ];
+
+  if (scalar === undefined) return toSerializableValue(value);
+
+  return matchesDomScalar(value, scalar) ? value as FabricValue : undefined;
 }
 
 /**

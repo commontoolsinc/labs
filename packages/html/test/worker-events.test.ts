@@ -4,10 +4,23 @@
 
 import { assertEquals } from "@std/assert";
 import {
+  $conn,
+  CellHandle,
+  type RuntimeClient,
+} from "@commonfabric/runtime-client";
+import {
   type DomEventMessage,
   isDomEventMessage,
   serializeEvent,
 } from "../src/main/events.ts";
+
+/** A handle standing in for a bound one; only its ref and class are read. */
+function makeHandle(): CellHandle {
+  return new CellHandle(
+    { [$conn]: () => ({}) } as unknown as RuntimeClient,
+    { id: "of:fid1:abc", space: "did:key:z6Mk", scope: "space", path: [] },
+  );
+}
 
 // Mock Event class for testing (Deno doesn't have full DOM by default)
 class MockEvent {
@@ -174,19 +187,33 @@ Deno.test("events - serializeEvent", async (t) => {
     assertEquals(serialized.type, "click");
   });
 
-  await t.step("resolves a target's `toJSON()`-bearing value", () => {
-    // A `cf-input`, a `cf-tabs` and a `cf-calendar` each declare `value` as
-    // `CellHandle<string> | string`, and a `CellHandle` renders as its sigil
-    // link. Modelled here rather than imported: `html` does not depend on
-    // `runtime-client`'s class, and what the conversion acts on is `toJSON()`.
+  await t.step("carries a bound `value` as the link to its cell", () => {
+    // The case this arm exists for: `cf-input`, `cf-tabs` and `cf-calendar`
+    // each declare `value` as `CellHandle<string> | string`, and a bound one
+    // holds the handle the applicator installed.
+    const handle = makeHandle();
+    const event = new MockEvent("input", {
+      target: { value: handle },
+    }) as unknown as Event;
+
+    const serialized = serializeEvent(event);
+
+    assertEquals(serialized.target?.value, handle.toJSON());
+  });
+
+  await t.step("resolves a `toJSON()` on a target's `value`", () => {
+    // `value` is the one target property no scalar covers, so what is neither a
+    // cell nor a scalar still reaches the general conversion -- which resolves
+    // a `toJSON()`. The other four judge such a value by their own scalar and
+    // leave it out instead.
     const link = { "/": { "link@1": { id: "of:fid1:abc" } } };
-    const handle = new (class {
+    const speaksForItself = new (class {
       toJSON() {
         return link;
       }
     })();
     const event = new MockEvent("input", {
-      target: { value: handle },
+      target: { value: speaksForItself },
     }) as unknown as Event;
 
     const serialized = serializeEvent(event);
@@ -394,24 +421,47 @@ Deno.test("events - serializeEvent", async (t) => {
     assertEquals("key" in serialized, false);
   });
 
-  await t.step("carries a cell-bound target property as its link", () => {
-    // No target property can be narrowed past `FabricValue`. The JSX contract
-    // admits a cell for any attribute of any element, and a bound one reaches
-    // the element as a `CellHandle` whatever the component declares -- `cf-tab`
-    // declares `selected` a `boolean` and can still be handed a cell for it.
-    const link = { "/": { "link@1": { id: "of:fid1:abc" } } };
-    const handle = new (class {
-      toJSON() {
-        return link;
-      }
-    })();
+  await t.step("carries a cell-bound target property as the link to it", () => {
+    // A bound property holds the handle the applicator installed, and what
+    // crosses is the link that reaches the cell. `cf-tab` declares `selected` a
+    // `boolean` and can still be handed a cell for it, which is why every
+    // target property is `T | SigilLink` rather than `T`.
+    const handle = makeHandle();
     const event = new MockEvent("cf-tab-select", {
       target: { selected: handle },
     }) as unknown as Event;
 
     const serialized = serializeEvent(event);
 
-    assertEquals(serialized.target?.selected, link);
+    assertEquals(serialized.target?.selected, handle.toJSON());
+  });
+
+  await t.step("does not take a `toJSON()` of its own for a cell", () => {
+    // The recognition is by class. Something merely offering a `toJSON()` is
+    // not a cell, so `selected` is judged by its scalar, which it fails.
+    const notAHandle = new (class {
+      toJSON() {
+        return { "/": { "link@1": { id: "of:fid1:abc" } } };
+      }
+    })();
+    const event = new MockEvent("cf-tab-select", {
+      target: { selected: notAHandle },
+    }) as unknown as Event;
+
+    const serialized = serializeEvent(event);
+
+    assertEquals(serialized.target?.selected, undefined);
+  });
+
+  await t.step("omits a target property that fails its own scalar", () => {
+    const event = new MockEvent("input", {
+      target: { name: 42, value: "kept" },
+    }) as unknown as Event;
+
+    const serialized = serializeEvent(event);
+
+    assertEquals(serialized.target?.name, undefined);
+    assertEquals(serialized.target?.value, "kept");
   });
 
   await t.step("omits undefined properties", () => {
