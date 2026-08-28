@@ -6,11 +6,13 @@
  */
 
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import type { SigilLink } from "@commonfabric/runner/shared";
+import { isCellHandle } from "@commonfabric/runtime-client";
 import {
   type EventProvenance,
   getEventProvenance,
   getEventTargetDataset,
-} from "../event-provenance.ts";
+} from "./event-provenance.ts";
 
 /**
  * Serialized DOM event data.
@@ -56,13 +58,16 @@ export type { EventProvenance };
  * Contains common input element properties.
  */
 export type SerializedEventTarget = {
-  name?: string;
+  /** The element's name, or the link to a cell bound in its place. */
+  name?: string | SigilLink;
 
   /**
-   * The element's current value. A `FabricValue` rather than a string: a custom
-   * element chooses what its `value` is, and a `cf-input`, a `cf-tabs` and a
-   * `cf-calendar` each declare theirs as `CellHandle<string> | string`, which
-   * arrives here as the sigil link the conversion resolved it to.
+   * The element's current value, or the link to a cell bound in its place.
+   *
+   * The one member here that no scalar covers, and so the one still typed as
+   * wide as the domain. Components declare theirs `string` and
+   * `CellHandle<string> | string` mostly, but also `string | string[]`,
+   * `number`, and in one case `CellHandle<unknown> | unknown`.
    */
   value?: FabricValue;
 
@@ -71,10 +76,21 @@ export type SerializedEventTarget = {
    * something else, what it chose. `cf-checkbox` and `cf-switch` each declare
    * theirs as `CellHandle<boolean> | boolean`.
    */
-  checked?: FabricValue;
-  selected?: boolean;
-  selectedIndex?: number;
+  checked?: boolean | SigilLink;
+
+  /** Whether the element reports itself selected, or the link bound in place. */
+  selected?: boolean | SigilLink;
+
+  /**
+   * Which option a select is on, or the link bound in its place -- `cf-picker`
+   * declares its `selectedIndex` a `CellHandle<number>`.
+   */
+  selectedIndex?: number | SigilLink;
+
+  /** Every selected option's value, for a multiple select. */
   selectedOptions?: { value: string }[];
+
+  /** The element's `data-` attributes. */
   dataset?: Record<string, string>;
 };
 
@@ -112,26 +128,53 @@ export function isDomEventMessage(value: unknown): value is DomEventMessage {
 }
 
 /**
- * Allowlisted event properties that can be serialized.
- * These are the standard properties we copy from events.
+ * The type the DOM defines for a property, as a tag a read can be checked
+ * against. `"string?"` is `string | null`, which is what an input event's
+ * `data` is when there is no inserted text.
  */
-export const ALLOWLISTED_EVENT_PROPERTIES = [
-  "type",
-  "key",
-  "code",
-  "repeat",
-  "altKey",
-  "ctrlKey",
-  "metaKey",
-  "shiftKey",
-  "inputType",
-  "data",
-  "button",
-  "buttons",
-] as const;
+type DomScalar = "string" | "string?" | "boolean" | "number";
+
+/** Whether a value is what its {@link DomScalar} tag says it is. */
+function matchesDomScalar(value: unknown, tag: DomScalar): boolean {
+  switch (tag) {
+    case "string":
+      return typeof value === "string";
+    case "string?":
+      return (value === null) || (typeof value === "string");
+    case "boolean":
+      return typeof value === "boolean";
+    case "number":
+      return typeof value === "number";
+  }
+}
 
 /**
- * Allowlisted event target properties that can be serialized.
+ * Event properties that cross, each with the type the DOM defines for it. Every
+ * one is a `FabricValue`, which is what lets them cross as they are.
+ */
+export const ALLOWLISTED_EVENT_PROPERTIES = {
+  type: "string",
+  key: "string",
+  code: "string",
+  repeat: "boolean",
+  altKey: "boolean",
+  ctrlKey: "boolean",
+  metaKey: "boolean",
+  shiftKey: "boolean",
+  inputType: "string",
+  data: "string?",
+  button: "number",
+  buttons: "number",
+} as const satisfies Partial<Record<keyof SerializedEvent, DomScalar>>;
+
+/**
+ * Target properties that cross.
+ *
+ * Each may be the link that reaches a cell bound in its place, whatever else it
+ * may be. The JSX contract admits a cell for any attribute of any element --
+ * `DetailedHTMLProps` maps each prop to `E[K] | CellLike<E[K]>` -- and a bound
+ * one reaches the element as a `CellHandle`, regardless of what the component
+ * declares its own property to be.
  */
 export const ALLOWLISTED_TARGET_PROPERTIES = [
   "name",
@@ -139,7 +182,24 @@ export const ALLOWLISTED_TARGET_PROPERTIES = [
   "checked",
   "selected",
   "selectedIndex",
-] as const;
+] as const satisfies readonly (keyof SerializedEventTarget)[];
+
+/**
+ * What each target property may be when it is *not* a link, where one type
+ * covers it.
+ *
+ * `value` has no entry, no scalar covering what components declare theirs to
+ * be: `string` and `CellHandle<string> | string` mostly, but also
+ * `string | string[]`, `number`, and in one case `CellHandle<unknown> |
+ * unknown`. So it is the one that crosses as whatever
+ * {@link toSerializableValue} makes of it.
+ */
+const TARGET_PROPERTY_SCALARS = {
+  name: "string",
+  checked: "boolean",
+  selected: "boolean",
+  selectedIndex: "number",
+} as const satisfies Partial<Record<keyof SerializedEventTarget, DomScalar>>;
 
 /**
  * Serialize a DOM event for IPC transmission.
@@ -154,13 +214,15 @@ export function serializeEvent(event: Event): SerializedEvent {
     serialized.provenance = provenance;
   }
 
-  // Copy allowlisted event properties
-  for (const prop of ALLOWLISTED_EVENT_PROPERTIES) {
-    const value = (event as unknown as Record<string, unknown>)[prop];
-    if (value !== undefined) {
-      (serialized as unknown as Record<string, unknown>)[prop] = value;
-    }
-  }
+  // Each checked against the type the DOM defines for it, which is what makes
+  // the write the field type `SerializedEvent` declares rather than a claim
+  // about it. A property of some other type is one no producer here dispatches,
+  // and is left out rather than carried into a field that cannot hold it.
+  copyDomScalars(
+    event as unknown as Record<string, unknown>,
+    serialized as unknown as Record<string, unknown>,
+    ALLOWLISTED_EVENT_PROPERTIES,
+  );
 
   // Copy target properties
   const target = event.target;
@@ -168,18 +230,18 @@ export function serializeEvent(event: Event): SerializedEvent {
     const serializedTarget: SerializedEventTarget = {};
     let hasTargetProps = false;
 
+    const from = target as unknown as Record<string, unknown>;
+    const to = serializedTarget as unknown as Record<string, unknown>;
+
     for (const prop of ALLOWLISTED_TARGET_PROPERTIES) {
-      const value = (target as unknown as Record<string, unknown>)[prop];
-      if (value !== undefined) {
-        // Converted like `detail` below, and for the same reason: a `value` is
-        // a whole value a component chose to expose, not necessarily a string.
-        // A `cf-input`, a `cf-tabs` and a `cf-calendar` each declare theirs as
-        // `CellHandle<string> | string`, and a `CellHandle` reaches the pattern
-        // as the sigil link its `toJSON()` produces, which the worker resolves.
-        (serializedTarget as unknown as Record<string, unknown>)[prop] =
-          toSerializableValue(value);
-        hasTargetProps = true;
-      }
+      const value = from[prop];
+      if (value === undefined) continue;
+
+      const carried = carriedTargetValue(prop, value);
+      if (carried === undefined) continue;
+
+      to[prop] = carried;
+      hasTargetProps = true;
     }
 
     // Handle select element's selectedOptions
@@ -223,6 +285,58 @@ export function serializeEvent(event: Event): SerializedEvent {
   }
 
   return serialized;
+}
+
+/**
+ * Copies each named property that is present and is what its tag says.
+ *
+ * The two casts are the loop's rather than a claim about the values: what is
+ * read is a property of whatever object was dispatched, and what is written has
+ * been checked before it goes.
+ */
+function copyDomScalars(
+  from: Record<string, unknown>,
+  to: Record<string, unknown>,
+  tags: Readonly<Record<string, DomScalar>>,
+): void {
+  for (const [prop, tag] of Object.entries(tags)) {
+    const value = from[prop];
+    if ((value !== undefined) && matchesDomScalar(value, tag)) {
+      to[prop] = value;
+    }
+  }
+}
+
+/**
+ * What one target property crosses as, or `undefined` where it crosses as
+ * nothing.
+ *
+ * A `CellHandle` goes first and is recognized by its class rather than by its
+ * offering a `toJSON()`, so that nothing else defining one is taken for a cell.
+ * It is what a bound property holds: the applicator installs the handle on the
+ * element (`setBinding()` in `./applicator.ts`) and the components leave it
+ * there, `cf-input`'s controller binding `value` without replacing it and
+ * `cf-checkbox`'s doing the same with `checked`. What crosses is the link that
+ * reaches the cell, which is what makes each of these `T | SigilLink`.
+ *
+ * Otherwise the property is whatever its own scalar admits. One that admits
+ * nothing else -- `value`, per {@link TARGET_PROPERTY_SCALARS} -- goes to the
+ * general conversion; one that fails its scalar crosses as nothing, rather than
+ * landing in a field that says it cannot hold it.
+ */
+function carriedTargetValue(
+  prop: typeof ALLOWLISTED_TARGET_PROPERTIES[number],
+  value: unknown,
+): FabricValue | undefined {
+  if (isCellHandle(value)) return value.toJSON();
+
+  const scalar: DomScalar | undefined = TARGET_PROPERTY_SCALARS[
+    prop as keyof typeof TARGET_PROPERTY_SCALARS
+  ];
+
+  if (scalar === undefined) return toSerializableValue(value);
+
+  return matchesDomScalar(value, scalar) ? value as FabricValue : undefined;
 }
 
 /**
