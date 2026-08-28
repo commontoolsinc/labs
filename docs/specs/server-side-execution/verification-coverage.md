@@ -6328,7 +6328,20 @@ supply; OW29/OW32/OW34 closed):
     copies stay queued). Mutations killed arm by arm: finalize sweep
     disabled → ordering pin red at the ["B"] overtake with the piece
     sweeps still active; piece sweeps disabled → unit pin red with
-    the finalize sweep still active. **F2 landed** — the terminal §5
+    the finalize sweep still active. The barrier's MID-PASS half
+    landed with it: the sweep can only hold entries already queued,
+    and a withdrawal landing while the drain pass awaits a later
+    sidecar's sync let the pass queue the next arrival behind the
+    barrier's back (the load-park fix's P1 gap, reopened for this
+    cause) — the plain-deferral arm now sets
+    `#loadParkDeferredInPass` for handler-not-run, and the drain's
+    existing past-every-await check stops the pass. Deterministic
+    pin, red-first (watched): the load-park mid-pass construction —
+    pass held at B's sidecar sync, A2's withdrawal counted inside the
+    hold, gate healed before release — pre-fix durable log
+    ["A","B","A"], fixed ["A","A","B"]; the watched red is the
+    mutation evidence (that tree was the final code minus exactly the
+    flag-set). **F2 landed** — the terminal §5
     notice branches on the final deferral's cause ("handler did not
     run after N withdrawn dispatches"; the old
     no-runnable-handler/load-attempt boilerplate was false in both
