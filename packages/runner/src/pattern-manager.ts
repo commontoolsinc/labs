@@ -390,6 +390,29 @@ export class PatternManager {
   // origin space. Tracked separately because the replication promise also
   // lives in `compileCacheWrites` and cannot await itself.
   private pendingCacheWriteBacks = new Set<Promise<unknown>>();
+  // In-flight replications keyed by TARGET space, ordered by a monotonic
+  // ticket (OW45's lunch forever-park; CI run 33138358110 ON shard 7). A
+  // replication OUT OF a space can race the SIBLING replication still
+  // supplying that space: the content-cache hit's
+  // `replicate(cached.space -> space)` fires fire-and-forget, and the
+  // runner's cross-space child replication (`replicate(space -> child)`)
+  // follows within the same handler run. The one-shot origin read then
+  // found the origin empty, threw "source closure unavailable in origin
+  // space", and nothing ever re-issued it (the documented retry is "the
+  // next child creation", which never comes for a create-once flow like a
+  // user profile): the child space never received its program closure and
+  // every demanded root parked `pattern-unloadable` forever — the OW46
+  // detector's exact shape. The sibling lives in `compileCacheWrites`,
+  // the one set the origin read must NOT await wholesale (it would await
+  // itself), so replications also register HERE and the read awaits only
+  // the STRICTLY OLDER entries targeting its origin — registration order
+  // makes the await graph acyclic (no from/to mutual wait), and genuine
+  // absence still throws loudly after the awaited siblings settle.
+  private replicationsIntoSpace = new Map<
+    MemorySpace,
+    Set<{ ticket: number; settled: Promise<unknown> }>
+  >();
+  private nextReplicationTicket = 0;
   // Maps each storage slot written during this PatternManager session to its
   // complete module set. One slot can hold only one closure shape at a time.
   private persistedCompileCacheClosures = new Map<string, string>();
@@ -639,12 +662,19 @@ export class PatternManager {
 
     const entryRef = this.getArtifactEntryRef(pattern);
     if (!entryRef) return;
+    // Ticket + registration BEFORE the async body starts, so a replication
+    // issued later in the same synchronous stretch (the runner's child
+    // replication inside the handler run that content-hit this one's
+    // sibling) observes this entry when it awaits its origin's suppliers
+    // (see `replicationsIntoSpace`).
+    const ticket = this.nextReplicationTicket++;
     const replication = this.replicateClosures(
       entryRef.identity,
       fromSpace,
       toSpace,
       undefined,
       delegated,
+      ticket,
     ).catch((error) => {
       logger.error("closure-replication-failed", () => [
         `entry=${entryRef.identity}`,
@@ -652,6 +682,19 @@ export class PatternManager {
         `to=${toSpace}`,
         String(error),
       ]);
+    });
+    let intoTarget = this.replicationsIntoSpace.get(toSpace);
+    if (intoTarget === undefined) {
+      intoTarget = new Set();
+      this.replicationsIntoSpace.set(toSpace, intoTarget);
+    }
+    const registration = { ticket, settled: replication };
+    intoTarget.add(registration);
+    replication.finally(() => {
+      const entries = this.replicationsIntoSpace.get(toSpace);
+      if (entries === undefined) return;
+      entries.delete(registration);
+      if (entries.size === 0) this.replicationsIntoSpace.delete(toSpace);
     });
     this.compileCacheWrites.add(replication);
     replication.finally(() => this.compileCacheWrites.delete(replication));
@@ -673,6 +716,7 @@ export class PatternManager {
     toSpace: MemorySpace,
     visited = new Set<string>(),
     delegated?: WritebackDelegation,
+    ticket?: number,
   ): Promise<void> {
     const visitKey = `${fromSpace}\0${toSpace}\0${entryIdentity}`;
     if (visited.has(visitKey)) return;
@@ -684,6 +728,21 @@ export class PatternManager {
     // not flushCompileCacheWrites: this replication promise is tracked there and
     // would await itself.
     await Promise.allSettled([...this.pendingCacheWriteBacks]);
+    // Then the SIBLING suppliers (OW45's lunch forever-park — the field
+    // comment on `replicationsIntoSpace` carries the incident): the origin
+    // may itself be mid-supply by an earlier-registered replication INTO it
+    // (the content-cache hit's fire-and-forget sibling). Await strictly
+    // older tickets only — acyclic by construction — then read; genuine
+    // absence still throws loudly below. Event-driven (the siblings' own
+    // completion), never a timer. Re-check per pass: a sibling can register
+    // between this replication's registration and this await.
+    const intoOrigin = this.replicationsIntoSpace.get(fromSpace);
+    if (intoOrigin !== undefined) {
+      const older = [...intoOrigin]
+        .filter((entry) => ticket === undefined || entry.ticket < ticket)
+        .map((entry) => entry.settled);
+      if (older.length > 0) await Promise.allSettled(older);
+    }
     // Replicate the same cached variant the compile path uses — the coverage
     // suffix keeps an instrumented closure from being served under an ordinary
     // key (and vice versa).
@@ -799,6 +858,7 @@ export class PatternManager {
         toSpace,
         visited,
         delegated,
+        ticket,
       );
     }
   }
