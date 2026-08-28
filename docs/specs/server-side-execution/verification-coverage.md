@@ -6335,7 +6335,13 @@ supply; OW29/OW32/OW34 closed):
     barrier's back (the load-park fix's P1 gap, reopened for this
     cause) — the plain-deferral arm now sets
     `#loadParkDeferredInPass` for handler-not-run, and the drain's
-    existing past-every-await check stops the pass. Deterministic
+    existing past-every-await check stops the pass. RESIDUAL,
+    recorded (scoped-verify SV1): the piece-start (cold-view)
+    deferral arms carry NO cause, so they never set the pass flag —
+    their in-queue half is swept by the shared helper, but a
+    piece-start deferral landing mid-pass keeps the pre-existing
+    mid-pass window (their deferrals usually land outside a pass;
+    same one-flag shape if ever taken up). Deterministic
     pin, red-first (watched): the load-park mid-pass construction —
     pass held at B's sidecar sync, A2's withdrawal counted inside the
     hold, gate healed before release — pre-fix durable log
