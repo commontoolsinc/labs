@@ -2235,6 +2235,216 @@ Deno.test("CfHarnessPromptLoop withholds the pattern-index tools from the patter
   ]);
 });
 
+/**
+ * A scripted loop that delegates once and then finishes: the child answers
+ * its profile's own return contract, and the parent says it is done. The
+ * request bodies are collected, so `requestBodies[1]` is the child's.
+ */
+const delegateThenFinishFetch = (
+  requestBodies: unknown[],
+  delegateArguments: Record<string, unknown>,
+): typeof fetch =>
+(_input, init) => {
+  requestBodies.push(JSON.parse(String(init?.body)));
+  const assistant = (message: Record<string, unknown>) => ({
+    choices: [{ index: 0, message: { role: "assistant", ...message } }],
+  });
+  const payload = requestBodies.length === 1
+    ? assistant({
+      content: "",
+      tool_calls: [{
+        id: "call-delegate",
+        type: "function",
+        function: {
+          name: "delegate_task",
+          arguments: JSON.stringify(delegateArguments),
+        },
+      }],
+    })
+    : requestBodies.length === 2
+    ? assistant({
+      content: JSON.stringify({
+        ok: true,
+        resultRef: `of:fid1:${"A".repeat(43)}`,
+        describes: "Counts things.",
+      }),
+    })
+    : assistant({ content: "Parent done." });
+  return Promise.resolve(
+    new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+      status: 200,
+    }),
+  );
+};
+
+Deno.test("CfHarnessPromptLoop delegates in a run configured with a pattern index", async () => {
+  await using fixture = await createPatternSkillsFixture();
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedSubagentProfiles: ["pattern-author"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "pattern-index-delegation",
+      model: "gpt-5.4",
+      skillsRoot: fixture.skillsRoot,
+      // The shape a console or CLI run has: a session and an index together,
+      // which is the pair the config layer requires of anything holding an
+      // index. The child is configured from the same pair rather than from
+      // the factory alone.
+      fabricSession: {
+        apiUrl: "http://localhost:8000",
+        identityKeyPath: "/dev/null",
+        space: "index-demo",
+      },
+      patternIndex: { baseUrl: "https://index.example/" },
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+      patternIndexClientFactory: () =>
+        Promise.reject(new Error("index client is never built in this test")),
+    }),
+    fetchFn: (() => {
+      let turn = 0;
+      const assistant = (message: Record<string, unknown>) => ({
+        choices: [{ index: 0, message: { role: "assistant", ...message } }],
+      });
+      return () => {
+        turn += 1;
+        const payload = turn === 1
+          ? assistant({
+            content: "",
+            tool_calls: [{
+              id: "call-delegate",
+              type: "function",
+              function: {
+                name: "delegate_task",
+                arguments: JSON.stringify({
+                  goal: "Author a counter.",
+                  profile: "pattern-author",
+                }),
+              },
+            }],
+          })
+          : turn === 2
+          ? assistant({
+            content: JSON.stringify({
+              ok: true,
+              resultRef: `of:fid1:${"A".repeat(43)}`,
+              describes: "Counts things.",
+              hashtags: ["counter"],
+            }),
+          })
+          : assistant({ content: "Parent done." });
+        return Promise.resolve(
+          new Response(JSON.stringify(responsesBodyFromChatFixture(payload)), {
+            status: 200,
+          }),
+        );
+      };
+    })(),
+  });
+
+  const result = await loop.runPrompt({
+    prompt: "Delegate the authoring.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  // The delegation reached a child rather than failing the run: a child given
+  // an index and no session is a configuration the config layer refuses.
+  assertEquals(result.runState.status, "completed");
+  assertEquals(result.runState.subagentRuns?.length, 1);
+  assertEquals(
+    result.runState.subagentRuns?.[0]?.manifest.allowedToolIds.includes(
+      "search_patterns",
+    ),
+    true,
+  );
+});
+
+Deno.test("CfHarnessPromptLoop tells an index-backed pattern-author child to publish and to return the hashtags it published under", async () => {
+  await using fixture = await createPatternSkillsFixture();
+  const requestBodies: unknown[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedSubagentProfiles: ["pattern-author"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "pattern-index-child-prompt",
+      model: "gpt-5.4",
+      skillsRoot: fixture.skillsRoot,
+      fabricSession: {
+        apiUrl: "http://localhost:8000",
+        identityKeyPath: "/dev/null",
+        space: "index-demo",
+      },
+      patternIndex: { baseUrl: "https://index.example/" },
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+      patternIndexClientFactory: () =>
+        Promise.reject(new Error("index client is never built in this test")),
+    }),
+    fetchFn: delegateThenFinishFetch(requestBodies, {
+      goal: "Author a counter.",
+      profile: "pattern-author",
+    }),
+  });
+
+  await loop.runPrompt({
+    prompt: "Delegate the authoring.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  const childSystemPrompt =
+    chatViewOfRequest(requestBodies[1]).messages[0]!.content ?? "";
+  // The index is what makes a hashtag mean anything: it is where the atom is
+  // published and where the next run finds it.
+  assertStringIncludes(
+    childSystemPrompt,
+    "plus the hashtags you published it under",
+  );
+  assertStringIncludes(
+    childSystemPrompt,
+    "Give every atom its own description and hashtags",
+  );
+  assertStringIncludes(
+    childSystemPrompt,
+    "A search hit is a component to wire, not a specification to rebuild.",
+  );
+});
+
+Deno.test("CfHarnessPromptLoop leaves publishing out of a pattern-author child's prompt when the run has no index", async () => {
+  await using fixture = await createPatternSkillsFixture();
+  const requestBodies: unknown[] = [];
+  const loop = new CfHarnessPromptLoop({
+    apiKey: "test-key",
+    allowedSubagentProfiles: ["pattern-author"],
+    engine: new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: "no-index-child-prompt",
+      model: "gpt-5.4",
+      skillsRoot: fixture.skillsRoot,
+      fabricSessionFactory: () =>
+        Promise.reject(new Error("session is never built in this test")),
+    }),
+    fetchFn: delegateThenFinishFetch(requestBodies, {
+      goal: "Author a counter.",
+      profile: "pattern-author",
+    }),
+  });
+
+  await loop.runPrompt({
+    prompt: "Delegate the authoring.",
+    promptSlotBinding: directPromptSlotBinding,
+  });
+
+  // A run that publishes nothing asks for no hashtags anywhere, including in
+  // the sentence naming the deliverable: the return contract leaves them out
+  // too, so a child told to supply them would be told to supply nothing.
+  const childSystemPrompt =
+    chatViewOfRequest(requestBodies[1]).messages[0]!.content ?? "";
+  assertStringIncludes(childSystemPrompt, "You never return source.");
+  assertEquals(childSystemPrompt.includes("hashtags"), false);
+});
+
 Deno.test("CfHarnessPromptLoop delegates one fresh child run and returns a summary-only result", async () => {
   await using fixture = await createPatternSkillsFixture();
   const requestBodies: Array<{

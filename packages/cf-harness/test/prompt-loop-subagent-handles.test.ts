@@ -656,7 +656,16 @@ describe("prompt-loop cross-agent address handles", () => {
       "You own the write, compile-error, fix",
     );
     expect(childSystemPrompt).toContain(
-      "Return the result reference run_pattern gave you",
+      "Return the resultRef run_pattern gave you for the pattern you ran last",
+    );
+    // The deliverable is a reference to something that ran, and source is
+    // refused rather than merely discouraged: an encoding is still source.
+    expect(childSystemPrompt).toContain("You never return source.");
+    expect(childSystemPrompt).toContain(
+      "not as an array of code points or bytes",
+    );
+    expect(childSystemPrompt).toContain(
+      "Build up in atoms rather than in one leap.",
     );
   });
 
