@@ -18,23 +18,23 @@ export interface ResizableDrawerConfig {
  * - Configurable resize direction
  */
 export class ResizableDrawerController implements ReactiveController {
-  private host: ReactiveControllerHost;
-  private config: Required<ResizableDrawerConfig>;
+  #host: ReactiveControllerHost;
+  #config: Required<ResizableDrawerConfig>;
 
-  private _drawerHeight: number;
-  private _isResizing = false;
-  private resizeStartY: number | null = null;
-  private startHeight: number | null = null;
-  private overlayElement: HTMLDivElement | null = null;
+  #drawerHeight: number;
+  #isResizing = false;
+  #resizeStartY: number | null = null;
+  #startHeight: number | null = null;
+  #overlayElement: HTMLDivElement | null = null;
 
   constructor(
     host: ReactiveControllerHost,
     config: ResizableDrawerConfig = {},
   ) {
-    this.host = host;
-    this.host.addController(this);
+    this.#host = host;
+    this.#host.addController(this);
 
-    this.config = {
+    this.#config = {
       initialHeight: config.initialHeight ?? 240,
       minHeight: config.minHeight ?? 150,
       maxHeightFactor: config.maxHeightFactor ?? 0.8,
@@ -42,60 +42,60 @@ export class ResizableDrawerController implements ReactiveController {
       storageKey: config.storageKey ?? "drawerHeight",
     };
 
-    this._drawerHeight = this.config.initialHeight;
+    this.#drawerHeight = this.#config.initialHeight;
   }
 
   hostConnected() {
     // Load saved height from localStorage
-    const savedHeight = localStorage.getItem(this.config.storageKey);
+    const savedHeight = localStorage.getItem(this.#config.storageKey);
     if (savedHeight) {
       const height = parseInt(savedHeight, 10);
-      if (!isNaN(height) && height >= this.config.minHeight) {
-        this._drawerHeight = height;
+      if (!isNaN(height) && height >= this.#config.minHeight) {
+        this.#drawerHeight = height;
       }
     }
   }
 
   hostDisconnected() {
-    this.cleanup();
+    this.#cleanup();
   }
 
   get drawerHeight(): number {
-    return this._drawerHeight;
+    return this.#drawerHeight;
   }
 
   get isResizing(): boolean {
-    return this._isResizing;
+    return this.#isResizing;
   }
 
   handleResizeStart = (e: MouseEvent) => {
     e.preventDefault();
-    this.startResize(e.clientY);
+    this.#startResize(e.clientY);
 
-    document.addEventListener("mousemove", this.handleResizeMove);
-    document.addEventListener("mouseup", this.handleResizeEnd);
+    document.addEventListener("mousemove", this.#handleResizeMove);
+    document.addEventListener("mouseup", this.#handleResizeEnd);
   };
 
   handleTouchResizeStart = (e: TouchEvent) => {
     e.preventDefault();
     if (e.touches.length === 1) {
-      this.startResize(e.touches[0].clientY);
+      this.#startResize(e.touches[0].clientY);
 
-      document.addEventListener("touchmove", this.handleTouchMove, {
+      document.addEventListener("touchmove", this.#handleTouchMove, {
         passive: false,
       });
-      document.addEventListener("touchend", this.handleTouchEnd);
+      document.addEventListener("touchend", this.#handleTouchEnd);
     }
   };
 
-  private startResize(clientY: number) {
-    this.resizeStartY = clientY;
-    this.startHeight = this._drawerHeight;
-    this._isResizing = true;
+  #startResize(clientY: number) {
+    this.#resizeStartY = clientY;
+    this.#startHeight = this.#drawerHeight;
+    this.#isResizing = true;
 
     // Create overlay to capture all mouse events
-    this.overlayElement = document.createElement("div");
-    this.overlayElement.style.cssText = `
+    this.#overlayElement = document.createElement("div");
+    this.#overlayElement.style.cssText = `
       position: fixed;
       top: 0;
       left: 0;
@@ -104,70 +104,70 @@ export class ResizableDrawerController implements ReactiveController {
       z-index: 9999;
       cursor: ns-resize;
     `;
-    document.body.appendChild(this.overlayElement);
+    document.body.appendChild(this.#overlayElement);
 
-    this.host.requestUpdate();
+    this.#host.requestUpdate();
   }
 
-  private handleResizeMove = (e: MouseEvent) => {
-    this.updateHeight(e.clientY);
+  #handleResizeMove = (e: MouseEvent) => {
+    this.#updateHeight(e.clientY);
   };
 
-  private handleTouchMove = (e: TouchEvent) => {
+  #handleTouchMove = (e: TouchEvent) => {
     if (e.touches.length === 1) {
-      this.updateHeight(e.touches[0].clientY);
+      this.#updateHeight(e.touches[0].clientY);
     }
   };
 
-  private updateHeight(clientY: number) {
-    if (this.resizeStartY !== null && this.startHeight !== null) {
+  #updateHeight(clientY: number) {
+    if (this.#resizeStartY !== null && this.#startHeight !== null) {
       // Calculate the difference based on resize direction
-      const diff = this.config.resizeDirection === "up"
-        ? this.resizeStartY - clientY // Moving up increases height
-        : clientY - this.resizeStartY; // Moving down increases height
+      const diff = this.#config.resizeDirection === "up"
+        ? this.#resizeStartY - clientY // Moving up increases height
+        : clientY - this.#resizeStartY; // Moving down increases height
 
       const newHeight = Math.max(
-        this.config.minHeight,
+        this.#config.minHeight,
         Math.min(
-          globalThis.innerHeight * this.config.maxHeightFactor,
-          this.startHeight + diff,
+          globalThis.innerHeight * this.#config.maxHeightFactor,
+          this.#startHeight + diff,
         ),
       );
 
-      this._drawerHeight = newHeight;
+      this.#drawerHeight = newHeight;
 
       // Save to localStorage
-      localStorage.setItem(this.config.storageKey, String(newHeight));
+      localStorage.setItem(this.#config.storageKey, String(newHeight));
 
-      this.host.requestUpdate();
+      this.#host.requestUpdate();
     }
   }
 
-  private handleResizeEnd = () => {
-    this.cleanup();
+  #handleResizeEnd = () => {
+    this.#cleanup();
   };
 
-  private handleTouchEnd = () => {
-    this.cleanup();
+  #handleTouchEnd = () => {
+    this.#cleanup();
   };
 
-  private cleanup() {
-    this.resizeStartY = null;
-    this.startHeight = null;
-    this._isResizing = false;
+  #cleanup() {
+    this.#resizeStartY = null;
+    this.#startHeight = null;
+    this.#isResizing = false;
 
     // Remove overlay
-    if (this.overlayElement) {
-      document.body.removeChild(this.overlayElement);
-      this.overlayElement = null;
+    if (this.#overlayElement) {
+      document.body.removeChild(this.#overlayElement);
+      this.#overlayElement = null;
     }
 
     // Remove event listeners
-    document.removeEventListener("mousemove", this.handleResizeMove);
-    document.removeEventListener("mouseup", this.handleResizeEnd);
-    document.removeEventListener("touchmove", this.handleTouchMove);
-    document.removeEventListener("touchend", this.handleTouchEnd);
+    document.removeEventListener("mousemove", this.#handleResizeMove);
+    document.removeEventListener("mouseup", this.#handleResizeEnd);
+    document.removeEventListener("touchmove", this.#handleTouchMove);
+    document.removeEventListener("touchend", this.#handleTouchEnd);
 
-    this.host.requestUpdate();
+    this.#host.requestUpdate();
   }
 }

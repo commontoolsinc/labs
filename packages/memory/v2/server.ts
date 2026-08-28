@@ -107,7 +107,9 @@ import {
   queryEvaluationCacheDiagnostics,
   queryGraph,
   type QueryGraphReuseContext,
+  type QueryTraversalStats,
   refreshTrackedGraph,
+  type SlowestQueryRoot,
   toDirtyKey,
   type TrackedGraphState,
   trackGraph,
@@ -247,6 +249,76 @@ export type SlowQuery = {
    * that took this long is at least as interesting as an applied one), or
    * "threw" when evaluation raised instead of responding. */
   outcome?: string;
+
+  /** Query and watch operations: how many roots the request's evaluations
+   * visited across every branch group. Zero means no root was traversed,
+   * which has two causes and the same consequence: the evaluation cache
+   * served the request, or the session's existing graph already covered
+   * every added root. Either way none of the elapsed time was traversal,
+   * so a slow entry reporting zero spent it somewhere else — assembling
+   * the response, or attaching operation fields.
+   *
+   * `session.watch.refresh` carries none of these fields. It re-evaluates
+   * by dirty document rather than by root, so it has no roots to
+   * attribute; absent is the honest answer there, not zero. */
+  rootsVisited?: number;
+
+  /** Query and watch operations: summed elapsed time of those root visits.
+   * Against the entry's own `elapsed` this is the share of the request
+   * that traversal accounts for; the remainder is entity assembly,
+   * schema-closure staging, and operation-field attachment. */
+  rootsElapsedMs?: number;
+
+  /** Query and watch operations: the costliest single root, which is what
+   * a watch COUNT cannot say. A `watch.add` unions the roots of every
+   * watch it carries, so 78 watches and 5,377 watches are the same
+   * measurement until this names which declaration spent the time.
+   *
+   * The root that paid, not necessarily the root to blame — see
+   * {@link SlowestQueryRoot} for why overlapping closures charge whichever
+   * root ran first, and what to check before calling one the cause. */
+  slowestRoot?: SlowestQueryRoot;
+};
+
+/** The root attribution accumulated across one request's branch groups. */
+type RootAttribution = {
+  rootsVisited: number;
+  rootsElapsedMs: number;
+  slowestRoot?: SlowestQueryRoot;
+};
+
+const createRootAttribution = (): RootAttribution => ({
+  rootsVisited: 0,
+  rootsElapsedMs: 0,
+});
+
+/**
+ * Fold one evaluation's root attribution into a request's running total.
+ *
+ * The counts sum because a request's groups are evaluated in sequence; the
+ * slowest root is a max rather than a sum, because it names one place in
+ * one query and merging two would name neither.
+ */
+const foldRootAttribution = (
+  into: RootAttribution,
+  stats: QueryTraversalStats,
+): void => {
+  into.rootsVisited += stats.rootsVisited;
+  into.rootsElapsedMs += stats.rootsElapsedMs;
+  if (
+    stats.slowestRoot !== undefined &&
+    (into.slowestRoot === undefined ||
+      stats.slowestRoot.elapsedMs > into.slowestRoot.elapsedMs)
+  ) {
+    into.slowestRoot = stats.slowestRoot;
+  }
+};
+
+/** The attribution for a request that evaluated exactly one query. */
+const rootAttributionOf = (stats: QueryTraversalStats): RootAttribution => {
+  const attribution = createRootAttribution();
+  foldRootAttribution(attribution, stats);
+  return attribution;
 };
 
 const slowQueries: SlowQuery[] = [];
@@ -4322,6 +4394,7 @@ export class Server {
           entry,
         );
       };
+      const attribution = createRootAttribution();
       for (const [branch, query] of groupedQueries(newWatches)) {
         const existing = graphs.get(branch);
         if (existing === undefined) {
@@ -4336,6 +4409,7 @@ export class Server {
               evaluationCache: this.#evaluationCacheFor(message.space),
             },
           );
+          foldRootAttribution(attribution, tracked.stats);
           // Enforced per evaluation, not per request: a later group's
           // failure (or a failing operation-field attachment) must not
           // leave an already-inserted entry over budget.
@@ -4359,6 +4433,7 @@ export class Server {
           staged,
           query,
         );
+        foldRootAttribution(attribution, extended.stats);
         for (const [docKey, entity] of extended.updates) {
           recordUpdate(docKey, entity);
         }
@@ -4416,7 +4491,7 @@ export class Server {
         "session.watch.add",
         message.space,
         startedAt,
-        { watches: message.watches.length },
+        { watches: message.watches.length, ...attribution },
       );
       return {
         type: "response",
@@ -4537,7 +4612,9 @@ export class Server {
     const cacheEligible = query.atSeq === undefined &&
       scopeContext.keyedSnapshots !== true;
     try {
-      const result = queryGraph(
+      // `stats` is diagnostics, not wire: split it off here so the
+      // response carries exactly the declared result shape.
+      const { stats, ...result } = queryGraph(
         space,
         engine ?? await this.openEngine(space),
         query,
@@ -4551,6 +4628,7 @@ export class Server {
       );
       recordSlowQueryDuration("graph.query", space, startedAt, {
         roots: query.roots.length,
+        ...rootAttributionOf(stats),
       });
       return result;
     } finally {
@@ -4581,6 +4659,7 @@ export class Server {
     const entities = new Map<string, SessionCacheEntry>();
     let serverSeq = Engine.serverSeq(resolvedEngine);
 
+    const attribution = createRootAttribution();
     for (const [branch, query] of groupedQueries(watches)) {
       const result = trackGraph(
         space,
@@ -4592,6 +4671,7 @@ export class Server {
           evaluationCache: this.#evaluationCacheFor(space),
         },
       );
+      foldRootAttribution(attribution, result.stats);
       serverSeq = result.serverSeq;
       this.#enforceEvaluationCacheBudget();
       graphs.set(branch, result.state);
@@ -4612,6 +4692,7 @@ export class Server {
 
     recordSlowQueryDuration("session.watch.set", space, startedAt, {
       watches: watches.length,
+      ...attribution,
     });
     return {
       serverSeq,

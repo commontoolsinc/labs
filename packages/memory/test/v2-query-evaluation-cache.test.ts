@@ -834,6 +834,51 @@ describe("v2 query evaluation cache", () => {
     expect(hit.stats.managerReads).toBe(1);
   });
 
+  it("reports no visited roots when it serves the evaluation", async () => {
+    const space = "did:key:z6Mk-eval-cache-roots-visited";
+    const engine = await openEngine({
+      url: new URL("memory:///eval-cache-roots-visited"),
+    });
+    applyCommit(engine, {
+      sessionId: "session:test",
+      invocation: {
+        iss: "did:key:test",
+        aud: "did:key:service",
+        cmd: "/memory/transact",
+        sub: space,
+      },
+      authorization: { proof: "ok" },
+      commit: {
+        localSeq: 1,
+        reads: { confirmed: [], pending: [] },
+        operations: [{
+          op: "set" as const,
+          id: "of:doc:served",
+          value: { value: { n: 1 } },
+        }],
+      },
+    });
+    const cache = createQueryEvaluationCache();
+    const query = {
+      roots: [{ id: "of:doc:served", selector: { path: [], schema: true } }],
+    };
+    const miss = trackGraph(space, engine, query, undefined, {
+      evaluationCache: cache,
+    });
+    const hit = trackGraph(space, engine, query, undefined, {
+      evaluationCache: cache,
+    });
+
+    expect(queryEvaluationCacheDiagnostics(cache).hits).toBe(1);
+    expect(miss.stats.rootsVisited).toBe(1);
+    // A served evaluation walked nothing, and its stats have to say so:
+    // `rootsVisited: 0` beside a long duration is what tells a slow-query
+    // reader the time went somewhere other than traversal.
+    expect(hit.stats.rootsVisited).toBe(0);
+    expect(hit.stats.rootsElapsedMs).toBe(0);
+    expect(hit.stats.slowestRoot).toBeUndefined();
+  });
+
   it("evicts by weight across spaces until the budget fits", async () => {
     const server = createServer("memory://eval-cache-budget", 3);
     const spaces = [
