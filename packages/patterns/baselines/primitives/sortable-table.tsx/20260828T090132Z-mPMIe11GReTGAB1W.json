@@ -1,0 +1,157 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "TableColumn": {
+        "properties": {
+          "label": {
+            "description": "Header text, and the handle a sort request names the column by.",
+            "type": "string"
+          },
+          "numeric": {
+            "default": false,
+            "description": "Whether this column's cells compare as numbers rather than as text.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "label",
+          "numeric"
+        ],
+        "type": "object"
+      },
+      "TableRow": {
+        "properties": {
+          "cells": {
+            "description": "One string per column, in the order `columns` declares them.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "cells"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "columns": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "items": {
+          "$ref": "#/$defs/TableColumn"
+        },
+        "type": "array"
+      },
+      "emptyMessage": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "No rows.",
+        "description": "Shown in place of the table while there are no rows.",
+        "type": "string"
+      },
+      "rows": {
+        "asCell": [
+          "cell"
+        ],
+        "default": [],
+        "description": "The rows, in the order they are displayed. Sorting reorders this array in\nplace, so a host that passes its own cell sees the order it clicked and\nkeeps it.",
+        "items": {
+          "$ref": "#/$defs/TableRow"
+        },
+        "type": "array"
+      }
+    },
+    "type": "object"
+  },
+  "pattern": "primitives/sortable-table.tsx",
+  "resultSchema": {
+    "$defs": {
+      "TableRow": {
+        "properties": {
+          "cells": {
+            "description": "One string per column, in the order `columns` declares them.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "cells"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "addRow": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "cells": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "cells"
+        ],
+        "type": "object"
+      },
+      "ascending": {
+        "type": "boolean"
+      },
+      "rowCount": {
+        "type": "number"
+      },
+      "rows": {
+        "items": {
+          "$ref": "#/$defs/TableRow"
+        },
+        "type": "array"
+      },
+      "sortBy": {
+        "description": "Label of the column the rows are currently ordered by, if any.",
+        "type": "string"
+      },
+      "sortByColumn": {
+        "asCell": [
+          "stream"
+        ],
+        "properties": {
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "type": "object"
+      }
+    },
+    "required": [
+      "rows",
+      "sortBy",
+      "ascending",
+      "rowCount",
+      "sortByColumn",
+      "addRow",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}
