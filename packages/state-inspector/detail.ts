@@ -342,9 +342,14 @@ function detailFromDoc(
   if (c.kind === "piece" && c.regime === "legacy" && isObjectNotArray(value)) {
     const rid = legacyResultId(value);
     if (rid) lineage.result = refTo(rid, ctx);
-    // The links alone: a detail is a rendering, and this one is bounded to a
-    // depth its own output would not have shown past, so where the walk
-    // stopped changes nothing a reader of it could act on.
+    // The links alone. A detail is a rendering bounded to a depth its own
+    // output would not have shown past, so `tooDeep` and `budgetExhausted`
+    // change nothing a reader could act on. `opaque` is not covered by that
+    // argument — a `ProblematicValue` holds the state it wrapped out of a
+    // structural walk's reach, so a link inside one is missing from this list
+    // and nothing here says so. Reporting it needs a field on `EntityDetail`
+    // and a place in what renders it, which is a change to the detail rather
+    // than to the walk.
     const internalIds = linksWithPaths(value.internal, DETAIL_LINK_WALK).links
       .map((l) => l.link.id).filter((x): x is string => !!x);
     if (internalIds.length) {
@@ -371,8 +376,9 @@ function detailFromDoc(
     lineage.pattern = ref;
   }
 
-  // outgoing links, resolved. The links alone, for the reason above: this
-  // list is shown to a reader rather than reasoned over.
+  // outgoing links, resolved. The links alone, for the reason above — and
+  // with the same gap: a link inside a value the walk could read only in part
+  // is absent from this list without the list saying so.
   const outLinks: LinkRef[] = linksWithPaths(value, DETAIL_LINK_WALK).links.map(
     ({ link, at }) => {
       const external = !!link.space && link.space !== ctx.ownDid &&
