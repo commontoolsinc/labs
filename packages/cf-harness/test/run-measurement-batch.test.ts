@@ -1671,7 +1671,7 @@ describe("run-measurement-batch", () => {
       expect(report).toContain("No task imported a published pattern.");
     });
 
-    it("names a superseded seed that was still findable when the batch started", async () => {
+    it("names a superseded seed that was still findable when the batch started", () => {
       const report = renderBatchReport({
         suite: {
           label: "l",
