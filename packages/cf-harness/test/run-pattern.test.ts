@@ -31,6 +31,7 @@ import {
   type RunPatternToolErrorOutput,
   type RunPatternToolInput,
   type RunPatternToolSuccessOutput,
+  scrubBareFabricIdentifiers,
 } from "../src/tools/run-pattern.ts";
 import type {
   SandboxCommandRequest,
@@ -244,6 +245,65 @@ async function createStrictFabric() {
       await storage.close();
     },
   };
+}
+
+/**
+ * A pattern over one plain input and one optional referenced input, where the
+ * referenced one only widens the answer. Run with the reference it derives
+ * from labelled data; run without it, it still computes a result — which is
+ * what makes dropping a refused input a replan rather than an abandonment.
+ */
+const OPTIONAL_SECRET_PATTERN_SOURCE = [
+  "import { computed, pattern, Reactive } from 'commonfabric';",
+  "interface Source { secret: string; }",
+  "interface Input { amount: number; source?: Reactive<Source>; }",
+  "interface Output { total: number; }",
+  "export default pattern<Input, Output>(({ amount, source }) => ({",
+  "  total: computed(() => {",
+  "    const secret = source?.secret;",
+  "    return amount + (typeof secret === 'string' ? secret.length : 0);",
+  "  }),",
+  "}));",
+  "",
+].join("\n");
+
+const TOTAL_RESULT_SCHEMA = {
+  type: "object",
+  properties: { total: { type: "number" } },
+  required: ["total"],
+} as const;
+
+/**
+ * Seeds a document whose `secret` field carries confidentiality, and answers
+ * the LLM-friendly link an agent would pass as an input naming it.
+ */
+async function seedLabelledSecret(
+  runtime: Runtime,
+  space: ReturnType<PiecesController["getSpace"]>,
+  cause: string,
+): Promise<string> {
+  const seed = runtime.edit();
+  const sourceCell = runtime.getCell(
+    space,
+    cause,
+    { type: "object", properties: { secret: { type: "string" } } },
+    seed,
+  );
+  const sourceId = sourceCell.getAsNormalizedFullLink().id;
+  writeSeedEnvelopeDoc(seed, space);
+  seed.writeOrThrow({ space, scope: "space", id: sourceId, path: [] }, {
+    value: { secret: "s3cr3t" },
+    cfc: {
+      version: 1,
+      schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
+      labelMap: {
+        version: 1,
+        entries: [{ path: ["secret"], label: { confidentiality: ["secret"] } }],
+      },
+    },
+  });
+  expect((await seed.commit()).ok).toBeDefined();
+  return createLLMFriendlyLink(sourceCell.getAsNormalizedFullLink(), space);
 }
 
 function createStrictEngine(pieces: PiecesController): CfHarnessEngine {
@@ -851,6 +911,109 @@ describe("run-pattern", () => {
       } finally {
         await strictRuntime.dispose();
         await strictStorage.close();
+      }
+    });
+
+    it("names the input key that carried the refused label, in the message and in `policyRefusal`", async () => {
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const sourceRef = await seedLabelledSecret(
+          runtime,
+          space,
+          "refusal-names-input",
+        );
+        const result = await createStrictEngine(pieces).invokeBuiltinTool(
+          "run_pattern",
+          {
+            sourceText: OPTIONAL_SECRET_PATTERN_SOURCE,
+            inputs: { amount: 2, source: sourceRef },
+            resultSchema: TOTAL_RESULT_SCHEMA,
+          },
+        );
+        const output = result.output as RunPatternToolErrorOutput;
+        expect(output.status).toBe("error");
+        expect(output.message).toContain("policy refused to commit");
+        expect(output.message).toContain('input "source"');
+        expect(output.message).toContain("without it proceeds");
+        expect(output.message).not.toContain('"amount"');
+        expect(output.policyRefusal).toEqual({
+          gates: ["writer-fit"],
+          sinks: [],
+          offendingAtoms: ['"secret"'],
+          inputKeys: ["source"],
+          attribution: "complete",
+        });
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("lands a result when the run is repeated without the input its refusal named", async () => {
+      // The replan an actionable refusal is for: the first run is refused
+      // and names one of its own input keys as the whole remedy, and the
+      // second run — the same pattern, that key dropped — commits.
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const sourceRef = await seedLabelledSecret(
+          runtime,
+          space,
+          "refusal-replan",
+        );
+        const engine = createStrictEngine(pieces);
+        const inputs: Record<string, unknown> = {
+          amount: 2,
+          source: sourceRef,
+        };
+        const refused = (await engine.invokeBuiltinTool("run_pattern", {
+          sourceText: OPTIONAL_SECRET_PATTERN_SOURCE,
+          inputs,
+          resultSchema: TOTAL_RESULT_SCHEMA,
+        })).output as RunPatternToolErrorOutput;
+        expect(refused.status).toBe("error");
+        expect(refused.policyRefusal?.attribution).toBe("complete");
+        const named = refused.policyRefusal?.inputKeys ?? [];
+        expect(named).toEqual(["source"]);
+
+        // Drop exactly the keys the refusal named, changing nothing else.
+        const replanned: Record<string, unknown> = { ...inputs };
+        for (const key of named) delete replanned[key];
+        const retried = (await engine.invokeBuiltinTool("run_pattern", {
+          sourceText: OPTIONAL_SECRET_PATTERN_SOURCE,
+          inputs: replanned,
+          resultSchema: TOTAL_RESULT_SCHEMA,
+        })).output as RunPatternToolSuccessOutput;
+        expect(retried.status).toBe("ok");
+        expect((retried.value as { total: number }).total).toBe(2);
+      } finally {
+        await dispose();
+      }
+    });
+
+    it("leaves `policyRefusal` unchanged under the bare-fabric-identifier scrub", async () => {
+      // `policyRefusal` reaches the model as it stands — the prompt loop
+      // scrubs `message` and `valueError` and nothing else — so it must
+      // already hold no document id, space, or path into a document.
+      const { runtime, pieces, space, dispose } = await createStrictFabric();
+      try {
+        const sourceRef = await seedLabelledSecret(
+          runtime,
+          space,
+          "refusal-carries-no-identifier",
+        );
+        const result = await createStrictEngine(pieces).invokeBuiltinTool(
+          "run_pattern",
+          {
+            sourceText: OPTIONAL_SECRET_PATTERN_SOURCE,
+            inputs: { amount: 2, source: sourceRef },
+            resultSchema: TOTAL_RESULT_SCHEMA,
+          },
+        );
+        const output = result.output as RunPatternToolErrorOutput;
+        const encoded = JSON.stringify(output.policyRefusal);
+        expect(scrubBareFabricIdentifiers(encoded)).toBe(encoded);
+        expect(encoded).not.toContain(space);
+      } finally {
+        await dispose();
       }
     });
 
