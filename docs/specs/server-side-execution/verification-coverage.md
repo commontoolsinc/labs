@@ -7554,7 +7554,10 @@ supply; OW29/OW32/OW34 closed):
     target) still fails loud and settles. Pinned in the same suite
     (fallback test watched red at the sibling-await-only head with the
     exact production error; recording no-op mutation-killed; the
-    no-record loud-failure control keeps the absence contract). Under
+    no-record loud-failure control keeps the absence contract and — since
+    the PR's fix round — the loudness too: a logger spy pins the single
+    `closure-replication-failed` line, so a throw-to-silent-return
+    mutation reds it). Under
     the CI geometry the identity-home persists ARE recorded, so the
     child replication converges order-independently.
     **PROBE 3 (the v4 board, run
@@ -7602,7 +7605,9 @@ supply; OW29/OW32/OW34 closed):
     record into the map before the compile promise resolves),
     re-consult the map, then throw; event-driven, no timers, no
     deadlock (compiles never await replications; the content-hit
-    replication call is fire-and-forget). WHAT THE PR KEEPS: both
+    replication call is fire-and-forget). [LANDED by the geometry-3
+    close PR — the GEOMETRY-3 CLOSE block below carries the landed
+    record.] WHAT THE PR KEEPS: both
     landed fixes are real, pinned defect classes (the sibling race and
     the by-ORDER dry origin with module keying); the pin suite is
     rebound to the RESTORED single-entry registry; the entry's reason
@@ -7615,6 +7620,78 @@ supply; OW29/OW32/OW34 closed):
     one geometry — the probe is not a gate ceremony but the arc's only
     instrument that SEES the CI boot order; and a declared hard stop
     kept the loop honest.
+    **GEOMETRY-3 CLOSE (this PR, off #6484's merge `bd9b1c10b`;
+    review-sharpened, red-first, LANDED):** on a dry origin AND dry
+    fallback map, `replicateClosures` snapshots BOTH in-flight compile
+    registries — `inProgressCompilations` AND
+    `inProgressByIdentityLoads` (a supplier can be a by-identity load's
+    recovery compile; NEVER `compileCacheWrites`, the replication's own
+    set — awaiting it would await itself), `Promise.allSettled`s the
+    snapshot ONCE (a failing compile neither hangs nor rejects the
+    replication; post-snapshot registrations are the next consult's
+    business), then re-observes a FRESH `pendingCacheWriteBacks`
+    snapshot — a settled load's recovery persist is fire-and-forget but
+    REGISTERS there synchronously before the load resolves (verified in
+    code; replications are never in that set) — and re-runs the
+    primary-then-fallbacks read once. Still dry throws the same
+    production reason string: the one-shot contract is byte-identical
+    on the still-failing path. An EMPTY registry snapshot deliberately
+    takes NO retry: every `pendingCacheWriteBacks` member belongs to a
+    compile or load (registry-covered) or to a sibling replication
+    (ticket-covered at registration), so an empty-registry retry adds
+    no designed coverage — and it measurably re-rescues the sibling
+    race nondeterministically, masking the sibling-await pin: the
+    build's unconditional-retry draft turned the sibling-await
+    mutation kill GREEN (the F1 masking class, recreated); the
+    short-circuit restored the kill (step 1 red 3/3). Acyclic (compiles
+    and loads never await replications — the content-hit replication is
+    fire-and-forget; the wholesale barrier is scheduler/facade-only).
+    The dry-consult path announces itself:
+    `closure-replication-await-inflight entry=… from=… to=…
+    compilations=N byIdentityLoads=N` (warn) fires exactly when the
+    registries are non-empty, BEFORE the await. RED-FIRST + MUTATION
+    EVIDENCE: pin step 5 in
+    `packages/runner/test/pattern-replication-sibling-race.test.ts`
+    latch-gates the supplier compile mid-flight (a harness
+    `compileToRecordGraph` gate, released by the replication's own
+    announcement — no sleeps anywhere) on a SECOND runtime with an
+    empty map and a never-supplied origin, so neither the ticket await
+    nor a pre-populated map can rescue (the F1 lesson applied at
+    birth); watched RED at pre-fix `bd9b1c10b` with the production
+    `closure-replication-failed … source closure unavailable in origin
+    space` line and an empty target; with the fix, 5/5. The once-await
+    mutation (both awaits removed, warn + re-read kept) reds step 5
+    ALONE, 5/5 stable; the four existing kills re-verified at the new
+    head (sibling-await neutralized → step 1 red alone 3/3; fallback
+    consult emptied → steps 2+3 red, plus step 5 whose rescue path
+    consults the map by design; throw→silent-return → step 4 red
+    alone). From the #6484 review's F5 list, landed alongside:
+    per-candidate try/continue on fallback reads (loud:
+    `closure-replication-fallback-read-failed`), the dead
+    ticket-undefined await-all branch removed by making the private
+    params required (proven dead: exactly two call sites, both thread
+    tickets), and the map's session-growth note at the field; the
+    dependency-recursion re-read nit is recorded, NOT changed
+    (rerouting the recursion's origin is not provably safe — a
+    dependency can live in the primary origin but not in the fallback
+    space, and the map only holds THIS manager's persists).
+    **GEOMETRY 3b — PRE-DECLARED RESIDUE (recorded, NOT built):** a
+    supplier compile that has not STARTED by consult time is invisible
+    to a once-await — the throw fires and the park recurs. Signature,
+    readable in any future red's artifact: the same
+    `closure-replication-failed` chain with NO
+    `closure-replication-await-inflight` line for that entry (nothing
+    in the registries at consult), fallback counter 0, and the closure
+    appearing shortly after. A probe red with that signature is 3b —
+    classify it as such, never conflate it with 3. The full close is
+    event-driven re-supply: on every `recordPersistedClosureSpaces`
+    for identity I, re-issue any failed replication registered as
+    wanting I (once per persist event — no timers, no polling,
+    bounded). That closes ALL supplier-timing geometries at once but
+    TOUCHES THE ONE-SHOT CONTRACT ("a failure is logged and retried on
+    the next child creation" would become "…and on the next persist
+    event") — an OWNER-LEVEL DESIGN FORK, recorded here for the
+    owner's ruling; deliberately not built by this seat.
     The pin suite (`tasks/server-execution-on-skips.test.ts`) is bound,
     post-restore, to the SINGLE-entry registry: the patterns list holds
     exactly the restored FILE entry (reason pinned to the
