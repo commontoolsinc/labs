@@ -5279,20 +5279,23 @@ supply; OW29/OW32/OW34 closed):
   starvation, so the entry now names that product charge, not a test
   flake). That 2026-08-26 census — THREE patterns entries: default-app's
   reload STEP, lunch-poll-vote's FILE entry, and the topic-board
-  pivot-baseline STEP — is now TWO: #6316 (2026-08-26) lifted the
-  topic-board STEP with its content-addressed arrival-witness fix, without
-  updating this sentence. **The current census (2026-08-27) is TWO patterns
-  entries: default-app's reload STEP and lunch-poll-vote's FILE entry.**
-  BOTH were campaigned for a lift on 2026-08-27 and NEITHER lifted (the
-  STEP-ENTRY and LUNCH-POLL blocks below), and **both were campaigned AGAIN
-  the same day under the newly ruled local-plus-CI-probe bar (the PHASE-3
-  block at the end of this row) — again neither lifted, but the two now
-  fail for OPPOSITE reasons**: the default-app step passed BOTH halves of
-  its own evidence (10/10 local, and a GREEN direct-CI run of the exact
-  step) and is held only by a co-resident file's red in the same shard,
+  pivot-baseline STEP — fell to TWO with #6316 (2026-08-26, the topic-board
+  STEP lifted by its content-addressed arrival-witness fix, without updating
+  this sentence), and both of those two were campaigned for a lift on
+  2026-08-27 and neither lifted (the STEP-ENTRY and LUNCH-POLL blocks
+  below), then campaigned AGAIN the same day under the newly ruled
+  local-plus-CI-probe bar (the PHASE-3 block at the end of this row) — where
+  they split for OPPOSITE reasons: the default-app step passed BOTH halves
+  of its own evidence (10/10 local, and a GREEN direct-CI run of the exact
+  step) and was held only by a co-resident file's red in the same shard,
   while lunch-poll-vote passed its local half 8/8 and its probe went red at
-  the probed surface for the second campaign running. They gate the FLIP —
-  whose bar is the list EMPTY — not the land. Rows, one per
+  the probed surface for the second campaign running. **The current census
+  (2026-08-28) is ONE patterns entry: lunch-poll-vote's FILE entry.**
+  default-app's reload STEP LIFTED 2026-08-28 — the owner ruled the SURFACE
+  reading of the probe bar, under which its evidence was already complete
+  (the LIFT block at the end of this row). That one entry, and the unlisted
+  co-resident debt the probe surfaced, gate the FLIP — whose bar is the list
+  EMPTY *and* a green ON lane — not the land. Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
   lifts:
   - **OW45 — the profile piece's PROGRAM-materialization write path
@@ -5388,7 +5391,12 @@ supply; OW29/OW32/OW34 closed):
     and loads (4.3–5.9) recorded per run, `warmRequests` 4–6 per run
     in the live stats. The row's REMAINING charge: it gates
     `integration/default-app.test.ts`'s "persist and reload every
-    rapidly created notebook note" STEP — the OW51 fix (2026-08-21)
+    rapidly created notebook note" STEP — **which is NO LONGER
+    SKIP-LISTED as of 2026-08-28 (OW45's LIFT block: 10/10 local plus a
+    green direct-CI probe of that exact step), so the ON lanes run it and
+    any recurrence surfaces as a lane red rather than behind a skip.
+    Whether that closes this charge is this row's own call, flagged not
+    taken** — the OW51 fix (2026-08-21)
     lifted that file's FILE skip and UNMASKED this same
     reload-durability surface there — the reloaded notebook's
     `noteCount` reads `undefined` past the step's wait (1/10 local ON
@@ -6748,6 +6756,22 @@ supply; OW29/OW32/OW34 closed):
     against this row's recorded members, and any sibling entry's lift stands
     or falls on its own probe. No rerun-looping — one probe board,
     classified honestly.
+    **SURFACE READING — RULED 2026-08-28.** The bar was ruled hours before
+    its first use, and the case that distinguishes its two readings arrived
+    immediately: the default-app probe's own step passed while its shard went
+    red on a CO-RESIDENT file the entry has nothing to do with. The
+    coordinator's recommendation — that requirement (2) binds the PROBED
+    SURFACE, so a green probed surface satisfies it, and a co-resident
+    failure is a separate defect carrying its own accountability rather than
+    a veto on an unrelated entry's lift — went to the owner, who ruled
+    **"agreed with your recommendations, proceed" (2026-08-28)**. So
+    requirement (2) reads: the CI board demonstrably RAN the un-skipped
+    surface and THAT SURFACE was green. Two things the reading does not
+    license, both live: a co-resident red is not thereby forgiven — it is a
+    defect owed its own row, seat, or entry (the flip's bar is a green ON
+    lane, not merely an empty skip list, so unlisted co-resident debt still
+    blocks the flip); and a probe that reds AT THE PROBED SURFACE still
+    withdraws the lift exactly as written above.
     **THE ENSURE-ON PROFILE-SURFACE MEMBER ROOT-CAUSED AND FIXED
     2026-08-25 (PR #6312) — the n=3 side probe's "create surface never renders"
     shape and the #6248 board's profile-shard family, reproduced
@@ -7284,15 +7308,15 @@ supply; OW29/OW32/OW34 closed):
     same head running ALONE on a fresh store with the same signature
     (line 133, same retarget chain)**, so it is neither this entry's charge
     nor a probe artifact — see the OW31-adjacent observation below.
-    **DISPOSITION: NO LIFT, on the literal reading of the ruled bar.** The
-    entry and its bound guard stay, reworded to say exactly this. **OPEN
-    QUESTION FOR THE COORDINATOR/OWNER, flagged not filled: does "the
+    **DISPOSITION AT THE TIME: NO LIFT, on the literal reading of the ruled
+    bar** — the entry and its bound guard stayed, reworded to say exactly
+    this, with an OPEN QUESTION referred to the coordinator/owner: does "the
     probed lane GREEN" mean the probed SURFACE green, or every test in the
-    shard green?** The bar was ruled hours before its first use and the
-    case that distinguishes the two readings arrived immediately. Under the
-    surface reading this entry lifts today; under the shard reading it
-    cannot lift until an unrelated file is fixed. The next seat should
-    RE-PROBE this step, not re-run a local campaign.
+    shard green? The bar was ruled hours before its first use and the case
+    that distinguishes the two readings arrived immediately. **THAT QUESTION
+    IS NOW RULED (2026-08-28): the SURFACE reading** (the bar's SURFACE
+    READING paragraph above), **and this entry LIFTED on the evidence above
+    — see the LIFT block at the end of this row.**
 
     **lunch-poll-vote's FILE entry: LOCAL 8/8, CI PROBE RED AT THE PROBED
     SURFACE — and the mechanism is now OBSERVED SERVER-SIDE for the first
@@ -7370,9 +7394,67 @@ supply; OW29/OW32/OW34 closed):
     all recorded-not-built. Main's own board at `1fc841b6e` was green on
     that shard, so CI sees it less often than this box does; either way it
     is a FLIP blocker in its own right (the flip's bar is a green ON lane,
-    not merely an empty skip list) and it is what currently holds the
-    default-app lift. Recorded here because the phase-3 probe is where it
-    surfaced; whether it earns its own row is the coordinator's call.
+    not merely an empty skip list) and it is what held the default-app lift
+    under the shard reading. Recorded here because the phase-3 probe is
+    where it surfaced; whether it earns its own row is the coordinator's
+    call. **Under the 2026-08-28 surface ruling it no longer holds that
+    lift — it is a separate unlisted defect carrying its own
+    accountability, and it is still a flip blocker.**
+
+    **LIFT — default-app's reload STEP entry is REMOVED, 2026-08-28, under
+    the ruled SURFACE reading of the local-plus-CI-probe bar.** The entry
+    (`integration/default-app.test.ts` :: "should persist and reload every
+    rapidly created notebook note") and its bound in-file
+    `serverExecutionOnStepSkip` guard are both gone from
+    `tasks/server-execution-on-skips.ts` and
+    `packages/patterns/integration/default-app.test.ts`. No new measurement
+    was taken for this lift; the bar was already met by evidence in hand,
+    and the only thing that changed is which reading of requirement (2)
+    governs. The chain, in full:
+    - **Requirement (1), the local campaign bar — MET, 10/10
+      quiet-and-loaded.** Phase 3's campaign at main `1fc841b6e` on one
+      ON-built binary (sha256 `a93047a461c0c4d8…`, re-verified into every
+      run's ledger), fresh store + own 97xx port + ON posture probe per run,
+      ensure defaulting ON, toolshed self-sourced on the run port, LLM
+      masked, PID-only teardown, `gtimeout 600` never approached, 5 quiet / 5
+      loaded interleaved: 13–14 s wall per run against 313–315 s for every
+      red the earlier 2026-08-27 campaign recorded, with EVERY fixed-mechanism
+      counter zero (`pattern-load-error`, `pattern-swap-setup-error` and
+      recursive-schema, `deferred-start-catchup(-failed)`, terminal `Error
+      committing deferred`, `session-remount`, load-park deferrals and drops,
+      `piece-start-commit-failed`, `sidecar-run-raced`,
+      `schema-doc-quarantine`, `structure-load-stuck`, `contribution-dropped`,
+      `events.handlerNotRunDeferrals`) and `events.appended` 14 =
+      `events.processed` 14 in all ten. Ledger: the PHASE 3 block above; the
+      campaign's own report is PR #6469's (merged `23cf68e7d`) record.
+    - **Requirement (2), the direct-CI unskip probe — MET at the probed
+      SURFACE.** Probe head `95f313835`, CI run
+      [33138358110](https://github.com/commontoolsinc/labs/actions/runs/33138358110),
+      ON shard 5, job 98743591519: the registry carried no default-app entry,
+      the job ran this exact step, and it **PASSED — `ok (18s)`** — the whole
+      `default-app flow test` file green, the shard's published toolshed log
+      clean across the file's window (4 `event-view-lag`, nothing else).
+    - **The shard's red was CO-RESIDENT, not this surface.**
+      `cfc-group-chat-demo.test.ts:133` — not skip-listed, untouched by the
+      probe diff, and 4/6 RED locally at the same head running ALONE with the
+      same signature (the OBSERVATION paragraph above). It is a separate
+      defect with its own accountability and its own flip-blocking weight.
+    - **The ruling.** The coordinator recommended that the probe proves the
+      unskipped SURFACE and that co-resident debt carries its own
+      accountability; the owner ruled **2026-08-28: "agreed with your
+      recommendations, proceed"**. Recorded verbatim, with its date, because
+      it is the whole difference between this entry's 2026-08-27
+      NO-LIFT disposition and its lift.
+    - **The lift's own final proof runs on the lift PR's board**: with the
+      entry gone, the ON pattern lanes execute this step on that PR. A red
+      there would be new information against the surface evidence and is
+      captured and reported rather than rerun-looped.
+    The pin suite (`tasks/server-execution-on-skips.test.ts`) is updated to
+    bind the lift rather than the entry: the patterns list holds exactly ONE
+    entry (lunch-poll-vote's FILE entry), the step's guard lookup resolves to
+    `undefined`, and the report carries no `SKIP-STEP` line — so a silent
+    re-skip reds, and a re-listing without a restored in-file guard fails the
+    registry's own step-entry binding check.
   - **OW46 — the silent forever-park is invisible (seat S-D;
     OW19-adjacent detectability). CLOSED 2026-08-21 (optimize-on-main
     client-durability pass; report:
