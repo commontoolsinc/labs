@@ -146,6 +146,9 @@ export interface RunPatternToolSuccessOutput {
    * lands in is reachable by `bash`, which does not reserve the artifact root
    * the way the file tools do — a property of that root, which already holds
    * `rawValue` and every withheld thrown message, rather than of this field.
+   * CT-2117 carries the structural fix. Until it lands, the DOM is written
+   * only for a verdict that withheld discoverability, so a passing run adds
+   * nothing to that root.
    */
   rawCauseMessage?: string;
 }
@@ -1639,7 +1642,14 @@ export const runPatternTool: HarnessToolDefinition<
           message: PATTERN_PUBLICATION_MESSAGES[verdict.reason],
           syntheticInputsComplete: verdict.syntheticInputsComplete,
         };
-        probeHtml = verdict.html;
+        // The rendered DOM is kept only for a verdict someone may have to
+        // adjudicate — why an entry is not offered to search. A pass has
+        // nothing to adjudicate and the entry is discoverable, so the pattern
+        // can be looked at directly. Narrowing it this way is not a fix for
+        // the artifact root being readable through `bash` (CT-2117); it
+        // simply stops writing this into that root on the runs where it earns
+        // nothing, which is most of them.
+        probeHtml = verdict.status === "recorded" ? verdict.html : undefined;
         {
           const request: PatternIndexPublishRequest = {
             patternId: entryIdentity,

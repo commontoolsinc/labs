@@ -313,9 +313,10 @@ describe("run_pattern publish render gate", () => {
     // Absent rather than `true`: a caller that does not set it produces the
     // request every caller produced before the gate existed.
     expect(published(index)[0].body.discoverable).toBeUndefined();
-    // What the probe rendered: real cell text, from the synthetic instance.
-    expect(output.rawCauseMessage).toContain("<td>alpha</td>");
-    expect(output.rawCauseMessage).not.toContain("[object Object]");
+    // A pass keeps no DOM. There is no verdict to adjudicate, and the run
+    // artifact is readable through `bash` (CT-2117), so a passing run writes
+    // nothing there that it does not need.
+    expect(output.rawCauseMessage).toBeUndefined();
   });
 
   it("finds the $UI of a pattern that declares its result type", async () => {
@@ -331,7 +332,7 @@ describe("run_pattern publish render gate", () => {
 
     expect(output.patternPublication?.reason).toBe("ui-rendered");
     expect(output.patternPublication?.status).toBe("discoverable");
-    expect(output.rawCauseMessage).toContain("<span>rated</span>");
+    expect(output.rawCauseMessage).toBeUndefined();
   });
 
   it("offers a pure computation, which has no $UI to check", async () => {
