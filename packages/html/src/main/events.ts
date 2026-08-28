@@ -5,7 +5,10 @@
  * sent to the worker thread for dispatch to the appropriate handler.
  */
 
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import {
+  type FabricValue,
+  isValidFabricValue,
+} from "@commonfabric/data-model/fabric-value";
 import type { SigilLink } from "@commonfabric/runner/shared";
 import { isCellHandle } from "@commonfabric/runtime-client";
 import {
@@ -340,18 +343,43 @@ function carriedTargetValue(
 }
 
 /**
- * Converts one value a component exposed to the event into a form the VDOM
- * event notification can carry, substituting a description for anything with
- * no conversion at all. Handing the pattern something is the point: an event
- * whose value cannot cross is still an event the handler should see.
+ * Converts one value a component exposed to the event into the form the VDOM
+ * event notification carries.
+ *
+ * A `FabricValue` crosses as itself. The connection carries that whole domain,
+ * so there is nothing to convert, and walking one would only be a chance to
+ * lose something -- which the round trip below does lose: a `bigint` throws out
+ * of `JSON.stringify()`, taking the whole value with it, and a `FabricBytes`
+ * renders as `{}`, its state not being enumerable properties. A cycle is a
+ * `FabricValue` too, and crosses as one; whether it can be carried further is
+ * the encoding's question at the crossing rather than this seam's.
+ *
+ * A `CellHandle` is the one thing a component exposes that is not fabric and
+ * has a representation anyway: the link that reaches its cell. Recognized by
+ * its class, so that nothing else defining a `toJSON()` is taken for a cell.
+ *
+ * Everything else is a native with no fabric form, and the round trip is what
+ * renders it -- `{}` for an `Error` or a file, and a description where even
+ * that fails. Handing the pattern something is the point: an event whose value
+ * cannot cross whole is still an event the handler should see.
+ *
+ * TODO(danfuzz): a `FabricInstance` is a `FabricValue`, so one exposed directly
+ * crosses here and is then refused by the worker's event ingress
+ * (`stripSigilCfcLabelViews()` in `@commonfabric/runner/cfc`), which drops the
+ * event. No component exposes one -- what they raise is a native `Error`, which
+ * is not fabric and takes the round trip -- so nothing arrives there today. It
+ * resolves when that ingress descends an instance rather than refusing one,
+ * which is the next step its own refusal records.
  */
 function toSerializableValue(value: unknown): FabricValue {
+  if (isValidFabricValue(value)) return value;
+
+  if (isCellHandle(value)) return value.toJSON();
+
   try {
-    // The round trip resolves whatever `toJSON()` a value defines -- a
-    // `CellHandle` becomes its sigil link -- and drops what JSON has no
-    // representation for. `undefined` comes back from `JSON.stringify()` for a
-    // function or a symbol, and a circular reference or a throwing `toJSON()`
-    // throws out of it.
+    // Resolves whatever `toJSON()` the value defines, and drops what JSON has
+    // no representation for. `undefined` comes back for a function or an
+    // uninterned symbol, and a throwing `toJSON()` throws out of it.
     const jsonString = JSON.stringify(value);
     if (jsonString !== undefined) return JSON.parse(jsonString);
   } catch {

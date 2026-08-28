@@ -3,6 +3,8 @@
  */
 
 import { assertEquals } from "@std/assert";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   $conn,
   CellHandle,
@@ -221,7 +223,10 @@ Deno.test("events - serializeEvent", async (t) => {
     assertEquals(serialized.target?.value, link);
   });
 
-  await t.step("describes a target value with no JSON form", () => {
+  await t.step("carries a circular target value through untouched", () => {
+    // A value with cycles is a `FabricValue`, so it crosses as one. Whether it
+    // can be carried further is the encoding's question at the crossing, and
+    // nothing here walks a value looking for one.
     const circular: Record<string, unknown> = {};
     circular.self = circular;
     const event = new MockEvent("input", {
@@ -230,7 +235,7 @@ Deno.test("events - serializeEvent", async (t) => {
 
     const serialized = serializeEvent(event);
 
-    assertEquals(serialized.target?.value, "[object Object]");
+    assertEquals(serialized.target?.value, circular as FabricValue);
   });
 
   await t.step("describes a target value that refuses coercion too", () => {
@@ -462,6 +467,61 @@ Deno.test("events - serializeEvent", async (t) => {
 
     assertEquals(serialized.target?.name, undefined);
     assertEquals(serialized.target?.value, "kept");
+  });
+
+  await t.step(
+    "carries a `bigint` in a detail rather than losing the detail",
+    () => {
+      // The whole detail used to go: a `bigint` throws out of `JSON.stringify()`,
+      // and what answered was a description of the value it was handed rather
+      // than of the member that could not be rendered.
+      const event = new MockCustomEvent("custom", {
+        detail: { message: "hello", count: 42n },
+      }) as unknown as Event;
+
+      const serialized = serializeEvent(event);
+
+      assertEquals(serialized.detail, { message: "hello", count: 42n });
+    },
+  );
+
+  await t.step("carries a `bigint` exposed as a target's value", () => {
+    // Quieter than losing a detail and worse for it: this used to arrive as the
+    // string `"42"`, which a handler has no way to tell from a real one.
+    const event = new MockEvent("input", {
+      target: { value: 42n },
+    }) as unknown as Event;
+
+    const serialized = serializeEvent(event);
+
+    assertEquals(serialized.target?.value, 42n);
+  });
+
+  await t.step("carries a `FabricBytes` in a detail as its own bytes", () => {
+    // A fabric primitive's state is not enumerable properties, so the round
+    // trip rendered one as `{}`.
+    const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+    const event = new MockCustomEvent("custom", {
+      detail: { blob: bytes },
+    }) as unknown as Event;
+
+    const serialized = serializeEvent(event);
+
+    assertEquals((serialized.detail as { blob: unknown }).blob, bytes);
+  });
+
+  await t.step("renders an `Error` in a detail as a bare record", () => {
+    // An `Error` is not a `FabricValue` and is not a cell, so it reaches the
+    // round trip, whose rendering of one is `{}` -- its state living in
+    // properties JSON does not enumerate. `cf-file-input` dispatches `cf-error`
+    // with one.
+    const event = new MockCustomEvent("cf-error", {
+      detail: { error: new Error("boom"), message: "upload failed" },
+    }) as unknown as Event;
+
+    const serialized = serializeEvent(event);
+
+    assertEquals(serialized.detail, { error: {}, message: "upload failed" });
   });
 
   await t.step("omits undefined properties", () => {
