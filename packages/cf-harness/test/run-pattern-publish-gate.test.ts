@@ -229,6 +229,14 @@ describe("run_pattern publish render gate", () => {
   let runtime: Runtime;
   let pieces: PiecesController;
 
+  /**
+   * Runtimes a single test stood up for itself, disposed alongside the shared
+   * one. Inline disposal is skipped whenever an earlier await throws, which
+   * leaks the runtime's schema-registry lease into every test after it — the
+   * kind of cross-test noise that makes an unrelated failure look real.
+   */
+  let extraRuntimes: Runtime[];
+
   beforeEach(async () => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
@@ -243,9 +251,11 @@ describe("run_pattern publish render gate", () => {
       runtime,
     );
     await pieces.synced();
+    extraRuntimes = [];
   });
 
   afterEach(async () => {
+    for (const extra of extraRuntimes ?? []) await extra.dispose();
     await runtime?.dispose();
     await storageManager?.close();
   });
@@ -624,6 +634,7 @@ describe("run_pattern publish render gate", () => {
       storageManager,
       cfcEnforcementMode: "enforce-explicit",
     });
+    extraRuntimes.push(enforcing);
     const enforcingPieces = new PiecesController(
       await createSession({
         identity: signer,
@@ -669,7 +680,6 @@ describe("run_pattern publish render gate", () => {
     });
     await engine.flushPatternIndexPublications();
     const output = result.output as RunPatternToolSuccessOutput;
-    await enforcing.dispose();
 
     // A verdict, not `probe-failed` — the composed import resolved inside the
     // isolated runtime.
