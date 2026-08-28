@@ -336,13 +336,6 @@ export function convergence(
 }
 
 /**
- * Build a cross-space link index over the given spaces: every link whose `space`
- * field names a DIFFERENT space than the one holding it. Only entities whose
- * stored data carries an explicit `"space":"did:key:` are reconstructed, which
- * keeps the index cheap (most links omit `space` = same-space and can't be
- * cross-space). Decode failures on individual entities are skipped, not fatal.
- */
-/**
  * How far the cross-space index's link walk reaches. The index's answer is
  * which entities in one space name another, and a link it misses is an edge
  * the index reports as absent, so the walk wants every link a document holds
@@ -359,6 +352,13 @@ const CROSS_SPACE_LINK_WALK: LinkWalkBounds = {
   maxNodes: Number.POSITIVE_INFINITY,
 };
 
+/**
+ * Build a cross-space link index over the given spaces: every link whose `space`
+ * field names a DIFFERENT space than the one holding it. Only entities whose
+ * stored data carries an explicit `"space":"did:key:` are reconstructed, which
+ * keeps the index cheap (most links omit `space` = same-space and can't be
+ * cross-space). Decode failures on individual entities are skipped, not fatal.
+ */
 export function buildCrossSpaceLinkIndex(
   spaces: SpaceRef[],
   opts: { scope?: string; branch?: string } = {},
