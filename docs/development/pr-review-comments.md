@@ -95,18 +95,28 @@ in a couple of minutes.
   null, as does a file-level comment. Any numeric comparison drops them.
 - **By author** — see above.
 
-## A review body describes the reviews before it
+## A review body is a mutable status, not a record
 
-A summary body is written against the state carried into its review, not
-against what that review is in the process of raising. The two can be one
-second apart: a body reading "all reported issues were addressed" has been
-observed timestamped one second before an inline comment of the same review
-raising a new one.
+The inline comments are the durable record of what a review found. The body is
+a live status display carrying a historical timestamp, and the two do not
+correspond.
 
-The blocking state lives here too — a body can carry "auto-approval blocked
-because this review re-detected an unresolved issue" — and it is per review, so
-it needs reading in sequence. The newest body alone can miss that it ever
-fired; a search across all bodies can report a state three reviews stale.
+It says nothing reliable about the review it heads. A body reading "all
+reported issues were addressed" has been observed with the *same* `submitted_at`
+as inline comments of that review raising a P1 — to the second, twice on one
+pull request.
+
+And it is rewritten afterwards. The same review body, read twice about twenty
+minutes apart with a push in between, went from "1 issue found across 2 files"
+to "all reported issues were addressed", with `submitted_at` unchanged. So
+reading bodies in timestamp order does not repair the problem: the ordering is
+historical and the content is current. A body from three reviews ago saying
+everything is addressed is a statement about now, stamped then — and an
+"auto-approval blocked" body may equally have been rewritten since, or not.
+
+**Never read a body as evidence of what a review found, and never as evidence
+that nothing was found.** Its only safe use is as a prompt to go and read the
+inline comments.
 
 ## Where else a pull request carries a verdict
 
