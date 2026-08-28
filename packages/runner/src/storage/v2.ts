@@ -21,6 +21,7 @@ import {
 import {
   type ApplyOpOperation,
   type ApplyOpResolution,
+  type BranchName,
   canResolveScopeKey,
   type CellScope,
   type ClientCommit,
@@ -41,6 +42,7 @@ import {
   resolveScopeKey,
   type ScopeKey,
   type ScopeKeyIdentity,
+  type SessionHolding,
   type SessionSync,
   type SqliteDbRef,
   type SqliteOperation,
@@ -2799,6 +2801,26 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     () => this.#scopeKeyIdentity(),
   );
   #watchedIds = new Set<string>();
+  // The last SessionSync snapshot ABSORBED for each watched key — its
+  // address as the frame named it and the seq and deletedness it carried —
+  // kept so the replica can DECLARE its holdings on a reconnect
+  // (`holdings()`). Delivery-backed on purpose: `record.confirmed` also
+  // advances by local promotion (`confirmPending`, an own accepted write
+  // extrapolated over the pending base), and a holding declared at a
+  // promoted seq would let the server elide the authoritative snapshot at
+  // that seq — a `patch` head's merged foreign content the promotion
+  // cannot reproduce. Only a frame this replica absorbed writes here.
+  readonly #delivered = new Map<
+    string,
+    {
+      id: URI;
+      scope: CellScope | undefined;
+      scopeKey: ScopeKey | undefined;
+      branch: BranchName;
+      seq: number;
+      deleted: boolean;
+    }
+  >();
   #nextLocalSeq = 1;
 
   /** The Phase-3 event-intent queue (events.md §5, LT9), created on the
@@ -4615,6 +4637,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     }
     this.#docs.clear();
     this.#watchedIds.clear();
+    this.#delivered.clear();
     this.resetConflictAdmissionState();
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica reset"));
     this.cancelQueuedWatchRefresh();
@@ -5950,9 +5973,11 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
    * absorb/ordering defect (a dropped, reordered, or un-retained
    * earlier delivery — the defect class OW61's investigation owns).
    * Quarantine contains that defect loudly; the heal arrives with the
-   * next FULL evaluation (a watch.set, a reconnect — those frames carry
-   * the whole assembled closure), since under elision an unchanged
-   * quarantined doc is rightly never re-delivered mid-session.
+   * next reconnect — the replica declares its holdings then (`holdings`),
+   * a quarantined doc is not among them, and the server re-delivers it
+   * with its closure — or with the next `watch.set`, whose frame carries
+   * the whole assembled closure. Under elision an unchanged quarantined
+   * doc is rightly never re-delivered mid-session on its own.
    *
    * Direct refs suffice: a stored verified dependency was itself validated
    * when it arrived, and a locally written one carried its closure in its
@@ -6085,8 +6110,9 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
               `within the delivered set ` +
               `(docs/specs/content-addressed-schemas.md). The document ` +
               `is quarantined — this replica keeps its previous state ` +
-              `for it until the next full evaluation (a watch.set or ` +
-              `reconnect) re-delivers it with its closure. This ` +
+              `for it until the next reconnect (which declares this ` +
+              `replica's holdings, so the server re-delivers it) or ` +
+              `watch.set re-delivers it with its closure. This ` +
               `indicates a client-side absorb/ordering defect ` +
               `(verification-coverage.md OW61).`,
             ]);
@@ -6262,6 +6288,14 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
         this.instanceKey(upsert.scope, undefined, upsert.scopeKey),
       );
       this.#watchedIds.add(key);
+      this.#delivered.set(key, {
+        id: upsert.id as URI,
+        scope: upsert.scope,
+        scopeKey: upsert.scopeKey,
+        branch: upsert.branch,
+        seq: upsert.seq,
+        deleted: upsert.deleted === true,
+      });
       // The settle input barrier's shadow case (Phase 2 revisit (a)):
       // a FOREIGN value integrating UNDER an own pending write is
       // invisible through the materialized view — and the change
@@ -6315,6 +6349,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
         this.instanceKey(remove.scope, undefined, remove.scopeKey),
       );
       this.#watchedIds.delete(key);
+      this.#delivered.delete(key);
       if (record.pending.length > 0) {
         // A shadowed remove carries no seq on the wire: the sentinel 1
         // holds W entirely until the shadow clears (see the field doc).
@@ -6737,6 +6772,42 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
         clearTimeout(timer);
       }
     }
+  }
+
+  /**
+   * What this replica holds, stated for a reconnect (the wire
+   * `SessionHolding`; 04-protocol.md §4.1.2): every watched document at
+   * the seq of the last frame this replica ABSORBED for it, a tombstone
+   * marked as such, on the branch the frame named. The server takes the
+   * list as the delivery diff base in place of its own memory of the
+   * session, so a document absent here — never absorbed, quarantined, or
+   * wiped with a replaced replica — is delivered again, and one present
+   * stays elided. Delivered state only, never `record.confirmed`: a local
+   * promotion advances the confirmed seq with a value the server never
+   * sent, and claiming that seq would elide the authoritative snapshot
+   * (INV-14's over-declare direction). An own write the server elided as
+   * this session's echo therefore declares the older delivered seq and is
+   * re-delivered — redundant, never a gap. A document delivered under an
+   * explicit foreign instance key (lease-holder frames) is left unstated
+   * — the wire declares instances by scope name — so it is re-delivered
+   * rather than wrongly claimed for the session's own instance.
+   */
+  holdings(): SessionHolding[] {
+    const holdings: SessionHolding[] = [];
+    for (const delivered of this.#delivered.values()) {
+      if (delivered.scopeKey !== undefined) continue;
+      if (delivered.seq <= 0) continue;
+      holdings.push({
+        id: delivered.id,
+        ...(delivered.scope !== undefined ? { scope: delivered.scope } : {}),
+        ...(delivered.branch === DEFAULT_BRANCH
+          ? {}
+          : { branch: delivered.branch }),
+        seq: delivered.seq,
+        ...(delivered.deleted ? { deleted: true } : {}),
+      });
+    }
+    return holdings;
   }
 
   private record(
@@ -7260,6 +7331,9 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
             // eventId dedupe keeps a landed original sound — events.md §5).
             this.#eventAppendQueue?.kick();
           };
+          // A reconnect declares what this replica holds, so the server
+          // re-delivers exactly what it lacks (see `holdings`).
+          resolved.session.holdingsProvider = () => this.holdings();
           return resolved;
         },
       ).catch((error) => {

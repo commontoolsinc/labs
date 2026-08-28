@@ -8982,7 +8982,13 @@ supply; OW29/OW32/OW34 closed):
     yes: cf-harness is also that shape, and the containment covers
     all three. Residual trigger: any live `schema-doc-quarantine` log
     — each occurrence is evidence that another client absorb/ordering
-    defect remains, not a server-side hole.
+    defect remains, not a server-side hole. The LOSS no longer outlives
+    a reconnect: a reconnecting client declares its holdings
+    (memory-v2/04-protocol.md §4.1.2), and a quarantined document is not
+    among them, so the resume's catch-up (or the re-establishing
+    watch.set) re-delivers it with its closure — the diagnostic still
+    names the defect to find; the replica no longer stays incomplete
+    until the session lapses.
     SHIPPING SIDE, current state: the closure pass stages what a
     delivered document's refs name, and the memory package now PINS both
     halves of that guarantee —

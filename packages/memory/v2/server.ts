@@ -61,6 +61,7 @@ import {
   type SessionAckRequest,
   type SessionAckResult,
   type SessionEffectMessage,
+  type SessionHolding,
   type SessionOpenAuthMetadata,
   type SessionOpenChallenge,
   type SessionOpenRequest,
@@ -124,13 +125,16 @@ import {
   buildDiffSync,
   buildFullSync,
   cacheKeyForEntity,
+  compareSyncAddress,
   groupedQueries,
+  holdingsToCacheEntries,
   isEmptySync,
   mergeWatchesById,
   sameSnapshot,
   sameWatchSpec,
   type SessionCacheEntry,
   toCacheEntry,
+  toWireRemove,
   toWireUpsert,
   trackedIdsFromEntries,
 } from "./server-sync.ts";
@@ -2886,6 +2890,28 @@ export class Server {
           "taken-over",
         );
       }
+      // A resuming client that declares its holdings REPLACES the
+      // server's delivery memory of it: the catch-up below diffs against
+      // what the client says it holds, so a document the server remembers
+      // sending but the client never absorbed (or lost with a replaced
+      // replica) is delivered again, and everything the client does hold
+      // stays elided. Without holdings the memory stands as before.
+      if (opened.resumed === true && message.holdings !== undefined) {
+        const resumed = this.#sessions.get(message.space, opened.sessionId);
+        if (resumed !== null) {
+          resumed.entities = holdingsToCacheEntries(
+            message.holdings,
+            this.#sessionScopeIdentity(resumed),
+          );
+          resumed.trackedIds = trackedIdsFromEntries(
+            resumed.entities.values(),
+          );
+          // The catch-up below evaluates only when something is dirty or
+          // owed; a replaced diff base is neither, so the full evaluation
+          // that diffs against it is forced explicitly.
+          resumed.forceFullResync = true;
+        }
+      }
       // A resumed session's catch-up (below) is a FULL watch evaluation,
       // and every evaluation pass judges the lease-holder read exemption
       // against the CURRENT lease before it builds a frame
@@ -4099,18 +4125,39 @@ export class Server {
           sessionId: message.sessionId,
         },
       );
-      const sync = buildFullSync(
-        session.entities,
-        entities,
-        session.seenSeq,
-        serverSeq,
-        // Stage A (OW17's wire leg): a session whose lease-holder read
-        // exemption is live receives instance-KEYED frames — it may
-        // name two instances of one (branch, id, scope), which the
-        // scope name alone cannot distinguish. Every other session's
-        // frames are byte-identical to before.
-        session.leaseHolderReads === true,
-      );
+      // Stage A (OW17's wire leg): a session whose lease-holder read
+      // exemption is live receives instance-KEYED frames — it may
+      // name two instances of one (branch, id, scope), which the
+      // scope name alone cannot distinguish. Every other session's
+      // frames are byte-identical to before.
+      const keyed = session.leaseHolderReads === true;
+      // A client that declares its holdings gets the DIFFERENCE between
+      // the new union and what it says it holds: a re-establishing
+      // reconnect (the server forgot the session) then re-delivers only
+      // what the client lacks or has stale, and retracts what it holds
+      // that the union no longer covers, instead of the whole union. A
+      // request without holdings is the full union as before — the
+      // server's memory of a session it forgot is empty, and a client
+      // that did not speak is not assumed to hold anything.
+      const sync = message.holdings === undefined
+        ? buildFullSync(
+          session.entities,
+          entities,
+          session.seenSeq,
+          serverSeq,
+          keyed,
+        )
+        : buildDiffSync(
+          holdingsToCacheEntries(
+            message.holdings,
+            this.#sessionScopeIdentity(session),
+          ),
+          entities,
+          session.seenSeq,
+          serverSeq,
+          undefined,
+          keyed,
+        );
       await this.#attachOperationFields(
         message.space,
         message.sessionId,
@@ -4467,9 +4514,9 @@ export class Server {
     space: string,
   ): QueryEvaluationCacheDiagnostics {
     const cache = this.#queryEvaluationCaches.get(space);
-    return cache === undefined
-      ? { seq: -1, entries: 0, weight: 0, hits: 0, misses: 0, rotations: 0 }
-      : queryEvaluationCacheDiagnostics(cache);
+    return queryEvaluationCacheDiagnostics(
+      cache ?? createQueryEvaluationCache(),
+    );
   }
 
   async evaluateGraphQuery(
@@ -4840,7 +4887,30 @@ export class Server {
             return message;
           };
           if (session.watches.length === 0) {
-            return await emptyCatchUp();
+            // A session with no watches covers nothing: whatever its
+            // delivery memory still lists — a lost frame's rolled-back
+            // tombstones, a resuming client's declared holdings — is
+            // retracted, and the memory and the tracked set are cleared,
+            // so nothing outside the empty union lingers as demand.
+            if (session.entities.size === 0) {
+              return await emptyCatchUp();
+            }
+            const serverSeq = Engine.serverSeq(await this.openEngine(space));
+            const sync: SessionSync = {
+              type: "sync",
+              fromSeq: session.lastSyncedSeq,
+              toSeq: serverSeq,
+              upserts: [],
+              removes: [...session.entities.values()]
+                .map((entry) =>
+                  toWireRemove(entry, session.leaseHolderReads === true)
+                )
+                .sort(compareSyncAddress),
+            };
+            session.entities = new Map();
+            session.trackedIds = new Set();
+            session.lastSyncedSeq = Math.max(session.lastSyncedSeq, serverSeq);
+            return await finishCatchUp(sync);
           }
           // The lease-holder read exemption for THIS pass, judged ONCE
           // on CURRENT holdership (protocol.md §2's read row is
@@ -6545,6 +6615,43 @@ export class Server {
   }
 }
 
+/**
+ * The `holdings` a request may carry (`SessionHolding[]`): absent stays
+ * absent; a present value must be a list of well-formed holdings, and a
+ * malformed one fails the whole message as unparseable — a client that
+ * declares holdings it cannot spell is not silently delivered in full.
+ */
+const parseHoldings = (
+  value: unknown,
+): SessionHolding[] | undefined | null => {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value)) return null;
+  const holdings: SessionHolding[] = [];
+  for (const entry of value) {
+    if (
+      !isObjectNotArray(entry) ||
+      typeof entry.id !== "string" ||
+      !isNonNegativeInteger(entry.seq) ||
+      (entry.scope !== undefined && !isCellScope(entry.scope)) ||
+      (entry.branch !== undefined && typeof entry.branch !== "string") ||
+      (entry.deleted !== undefined && entry.deleted !== true)
+    ) {
+      return null;
+    }
+    holdings.push({
+      id: entry.id as SessionHolding["id"],
+      ...(entry.scope === undefined ? {} : { scope: entry.scope }),
+      ...(entry.branch === undefined ? {} : { branch: entry.branch }),
+      seq: entry.seq,
+      ...(entry.deleted === true ? { deleted: true } : {}),
+    });
+  }
+  return holdings;
+};
+
+const isCellScope = (value: unknown): value is CellScope =>
+  value === "space" || value === "user" || value === "session";
+
 function isSqliteNamedParamEntries(
   value: unknown,
 ): value is SqliteNamedParamsWire {
@@ -6588,10 +6695,13 @@ export const parseClientMessage = (
     typeof parsed.space === "string" &&
     isObjectNotArray(parsed.session)
   ) {
+    const holdings = parseHoldings(parsed.holdings);
+    if (holdings === null) return null;
     return {
       type: "session.open",
       requestId: parsed.requestId,
       space: parsed.space,
+      ...(holdings === undefined ? {} : { holdings }),
       session: {
         sessionId: typeof parsed.session.sessionId === "string"
           ? parsed.session.sessionId
@@ -6779,12 +6889,15 @@ export const parseClientMessage = (
     typeof parsed.sessionId === "string" &&
     Array.isArray(parsed.watches)
   ) {
+    const holdings = parseHoldings(parsed.holdings);
+    if (holdings === null) return null;
     return {
       type: "session.watch.set",
       requestId: parsed.requestId,
       space: parsed.space,
       sessionId: parsed.sessionId,
       watches: parsed.watches as WatchSpec[],
+      ...(holdings === undefined ? {} : { holdings }),
     };
   }
 

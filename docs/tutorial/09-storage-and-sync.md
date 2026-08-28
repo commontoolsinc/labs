@@ -101,8 +101,10 @@ current data, not after another round trip.
 Client-side resilience details worth knowing
 (`packages/memory/v2/client.ts`): unacknowledged commits are kept and
 **replayed on reconnect** (safe by idempotence), and a connection drop
-leaves commits queued rather than failed. Offline-tolerant by construction,
-within a session's lifetime.
+leaves commits queued rather than failed. On the way back the client also
+declares what its replica holds, so the server re-delivers exactly what it
+lacks — never the whole watch union again, never less than the gap.
+Offline-tolerant by construction, within a session's lifetime.
 
 ## Subscriptions: watches over schema-shaped graphs
 

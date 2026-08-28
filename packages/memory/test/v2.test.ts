@@ -149,6 +149,7 @@ describe("memory v2 flags", () => {
       entityIdListing: true,
       entityIdPagination: true,
       entityIdLookup: true,
+      sessionHoldings: true,
       syncSchemaTableV2: false,
     });
 
@@ -169,6 +170,7 @@ describe("memory v2 flags", () => {
       entityIdListing: true,
       entityIdPagination: true,
       entityIdLookup: true,
+      sessionHoldings: true,
       syncSchemaTableV2: true,
     });
 
@@ -192,6 +194,7 @@ describe("memory v2 flags", () => {
         entityIdListing: true,
         entityIdPagination: true,
         entityIdLookup: true,
+        sessionHoldings: false,
       },
       {
         modernCellRep: true,
@@ -208,6 +211,7 @@ describe("memory v2 flags", () => {
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
+        sessionHoldings: false,
       },
     ));
   });
@@ -227,6 +231,7 @@ describe("parseMemoryProtocolFlags", () => {
       entityIdListing: false,
       entityIdPagination: false,
       entityIdLookup: false,
+      sessionHoldings: false,
     });
     assertEquals(parseMemoryProtocolFlags({ modernCellRep: false }), {
       modernCellRep: false,
@@ -240,6 +245,7 @@ describe("parseMemoryProtocolFlags", () => {
       entityIdListing: false,
       entityIdPagination: false,
       entityIdLookup: false,
+      sessionHoldings: false,
     });
   });
 
@@ -260,6 +266,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
+        sessionHoldings: false,
       },
     );
   });
@@ -318,6 +325,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
+        sessionHoldings: false,
       },
     );
   });
@@ -339,6 +347,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
+        sessionHoldings: false,
       },
     );
   });
@@ -368,6 +377,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
+        sessionHoldings: false,
       },
     );
   });
@@ -390,6 +400,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdListing: false,
         entityIdPagination: false,
         entityIdLookup: false,
+        sessionHoldings: false,
       },
     );
   });
@@ -409,6 +420,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdListing: true,
         entityIdPagination: false,
         entityIdLookup: false,
+        sessionHoldings: false,
       },
     );
   });
@@ -418,6 +430,7 @@ describe("parseMemoryProtocolFlags", () => {
       parseMemoryProtocolFlags({
         entityIdPagination: true,
         entityIdLookup: true,
+        sessionHoldings: false,
       }),
       {
         modernCellRep: false,
@@ -431,6 +444,7 @@ describe("parseMemoryProtocolFlags", () => {
         entityIdListing: false,
         entityIdPagination: true,
         entityIdLookup: true,
+        sessionHoldings: false,
       },
     );
   });
@@ -465,6 +479,7 @@ describe("parseMemoryProtocolFlags", () => {
       null,
     );
     assertEquals(parseMemoryProtocolFlags({ entityIdLookup: "true" }), null);
+    assertEquals(parseMemoryProtocolFlags({ sessionHoldings: "true" }), null);
     assertEquals(
       parseMemoryProtocolFlags({
         modernCellRep: true,
