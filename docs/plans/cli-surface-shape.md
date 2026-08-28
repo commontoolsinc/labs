@@ -9,6 +9,30 @@ does not make, which misdirects design work before it starts.
 This document is about the command surface, not the machinery underneath.
 Nothing here blocks [Shaped reads and verb results](shaped-reads-and-verb-results.md).
 
+## Where this stands — read this first
+
+This block is LIVE: the change that moves a step updates it here, so the plan
+says what the surface has rather than only what it wants. The steps themselves
+are in [How to get there](#how-to-get-there); this says only which of them
+have landed.
+
+**Arc one — what the commands are called.**
+
+| step | state |
+| --- | --- |
+| 1–5 — the shared read step, the read options on every arrival, `--piece` taking the `of:` form, positional addresses with the `#argument` suffix, and `cf get`/`set`/`call` | on main |
+| 6a — the old spellings warn, each naming its end date | on main |
+| 6b — the old spellings are removed | pending, on the date `PIECE_DATA_SPELLING_END_DATE` names |
+| 7 — the duplicated nouns are merged | not started; it is last because each pair is two working commands |
+
+**Arc two — how a caller writes what a command acts on.**
+
+| step | state |
+| --- | --- |
+| 8 — `CF_SPACE` is ambient, and a write names the space it wrote to | not started |
+| 9 — a reference takes a space by name and a piece by slug, positionally | not started |
+| 10 — the verb opens the callable's section and `--` closes it | not started; `PIECE_DATA_SPELLING_END_DATE` is the thing to check first |
+
 ## What the surface is for
 
 Sorting commands by what they are for makes the trouble visible. Seven
