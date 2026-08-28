@@ -411,7 +411,6 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
     );
     for (
       const [label, color] of [
-        ["degraded", "danger"],
         ["Ready to land", "primary"],
         ["Tests running", "accent"],
         ["Tests failed", "danger"],
@@ -460,16 +459,20 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
         cells: { index: "of:index", health: "of:health" },
       },
     };
-    const stoppedGithubActivity = instantiatePattern(GithubActivity, {
-      repoUrl: new Writable("https://github.com/acme/project"),
-      pullRequestIndex: emptySynchronizedIndex,
-      health: stoppedHealth,
-    });
-    const startingGithubActivity = instantiatePattern(GithubActivity, {
-      repoUrl: new Writable("https://github.com/acme/project"),
-      pullRequestIndex: emptySynchronizedIndex,
-      health: { ...stoppedHealth, status: "starting" },
-    });
+    const hostActivity = (status) =>
+      instantiatePattern(GithubActivity, {
+        repoUrl: new Writable("https://github.com/acme/project"),
+        pullRequestIndex: emptySynchronizedIndex,
+        health: { ...stoppedHealth, status },
+      });
+    const stoppedGithubActivity = hostActivity("stopped");
+    const hostStatusCases = [
+      ["ready", "primary", hostActivity("ready")],
+      ["degraded", "danger", synchronizedGithubActivity],
+      ["starting", "accent", hostActivity("starting")],
+      ["syncing", "accent", hostActivity("syncing")],
+      ["stopped", "neutral", stoppedGithubActivity],
+    ];
     const emptyStateMessages = elementsOfType(
       uiOf(emptySynchronizedGithubActivity),
       "cf-empty-state",
@@ -484,28 +487,34 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
         ),
       "GitHub activity renders empty synchronized states",
     );
-    const stoppedBadges = elementsOfType(
+    for (const [status, color, activity] of hostStatusCases) {
+      const badges = elementsOfType(uiOf(activity), "cf-badge");
+      assert(
+        badges.some((badge) =>
+          badge.props.color === color && textContent(badge).includes(status)
+        ),
+        `GitHub activity renders ${status} with the ${color} host badge`,
+      );
+    }
+    const stoppedRows = elementsOfType(
       uiOf(stoppedGithubActivity),
-      "cf-badge",
-    );
-    assert(
-      stoppedBadges.some((badge) =>
-        badge.props.color === "neutral" &&
-        textContent(badge).includes("stopped")
-      ) && textContent(uiOf(stoppedGithubActivity)).includes("Last sync—"),
-      "GitHub activity renders a stopped host without a sync snapshot",
-    );
-    const startingBadges = elementsOfType(
-      uiOf(startingGithubActivity),
-      "cf-badge",
-    );
-    assert(
-      startingBadges.some((badge) =>
-        badge.props.color === "accent" &&
-        textContent(badge).includes("starting")
-      ),
-      "GitHub activity renders a starting host with an accent badge",
-    );
+      "tr",
+    ).map(textContent);
+    for (
+      const label of [
+        "Last sync",
+        "Reason",
+        "Sync started",
+        "Sync completed",
+        "Reported PR count",
+        "Error",
+      ]
+    ) {
+      assert(
+        stoppedRows.some((row) => row.includes(label) && row.includes("—")),
+        `GitHub activity renders the missing ${label.toLowerCase()} value`,
+      );
+    }
 
     setFetchJsonResult([]);
     setGenerateTextResult({
