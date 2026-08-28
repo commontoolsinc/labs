@@ -222,6 +222,13 @@ produced it.
   green while the code beneath it was failing for an unrelated reason. It was
   written to satisfy a coverage gate, which is the pressure that produces
   exactly this.
+- A test named "the fixture is the whole live corpus" passed against a fixture
+  that was provably not the whole live corpus. Its body checked non-emptiness,
+  duplicate ids, and the presence of particular entries; it never checked
+  completeness, and could not check freshness. **A test's name is a claim, and
+  nothing checks it.** That is a third shape a gate fails in, beside not
+  running and running vacuously: running, passing, and reporting something
+  narrower than its own label.
 - One reported figure ("no empty searches across six runs") was contradicted by
   the tool's own printed output, and lost in a total summed by eye.
 - An instrument answered confidently about a subject nobody had asked it
