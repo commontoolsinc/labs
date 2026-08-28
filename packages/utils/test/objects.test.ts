@@ -20,6 +20,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
   constructorOfObject,
+  constructorOfPrototype,
   isInertPlainObject,
 } from "@commonfabric/utils/objects";
 
@@ -238,6 +239,40 @@ describe("objects", () => {
             : Object.getOwnPropertyDescriptor(target, key),
       });
       expect(isInertPlainObject(ghosted)).toBe(false);
+    });
+  });
+
+  describe("constructorOfPrototype()", () => {
+    // The form for a caller holding the prototype already, which the value-tag
+    // dispatch is: it needs the prototype for its own null test, so asking it
+    // to hand the object over and have the prototype read again would be one
+    // read too many and a second answer to disagree with.
+    it("returns the constructor a prototype names", () => {
+      expect(constructorOfPrototype(Object.prototype)).toBe(Object);
+      expect(constructorOfPrototype(Map.prototype)).toBe(Map);
+      expect(constructorOfPrototype(Object.getPrototypeOf(new Date())))
+        .toBe(Date);
+    });
+
+    it("returns `undefined` for a `null` prototype", () => {
+      expect(constructorOfPrototype(null)).toBe(undefined);
+    });
+
+    it("returns `undefined` when the constructor is not callable", () => {
+      const proto = Object.create(null) as { constructor?: unknown };
+      proto.constructor = "not a function";
+      expect(constructorOfPrototype(proto)).toBe(undefined);
+    });
+
+    it("agrees with `constructorOfObject()` on the same object", () => {
+      // The two are one question asked from two places, so an object's answer
+      // must not depend on which of them was asked.
+      for (
+        const value of [{}, [], new Map(), new Date(), Object.create(null)]
+      ) {
+        expect(constructorOfPrototype(Object.getPrototypeOf(value)))
+          .toBe(constructorOfObject(value));
+      }
     });
   });
 

@@ -26,7 +26,7 @@ import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricInstance } from "./interface.ts";
-import { constructorOfObject } from "@commonfabric/utils/objects";
+import { constructorOfPrototype } from "@commonfabric/utils/objects";
 
 import { NATIVE_TAGS, type NativeTag } from "./native-tags.ts";
 import {
@@ -95,7 +95,21 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     return NATIVE_TAGS.Array;
   }
 
-  const ctor = constructorOfObject(value);
+  const proto = Object.getPrototypeOf(value);
+
+  // A `null` prototype settles the value here, both ways it can go. It names
+  // no class, so nothing below could recognize one; and `instanceof` walks a
+  // chain that is empty, so the `FabricInstance` test below cannot claim it
+  // either. What is left is an `Error` whose prototype was severed -- still an
+  // error, and `Error.isError()` is what sees it -- or a bare record, which is
+  // tagged `Object` so the object rule decides it by name, the same way an
+  // indirect array is decided by the array rule.
+  if (proto === null) {
+    return isNativeError(value) ? NATIVE_TAGS.Error : NATIVE_TAGS.Object;
+  }
+
+  const ctor = constructorOfPrototype(proto);
+
   if (ctor !== undefined) {
     const tag = tagFromNativeClass(ctor);
     if (tag !== null) return tag;
@@ -103,21 +117,13 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
 
   // Reaching here means the value's class went unrecognized.
 
-  // `Error`s with no reachable constructor -- e.g. one whose prototype has
-  // been severed, or one from another realm. An ordinary subclass (including
-  // `DOMException`) never gets here: the class lookup matches it via
-  // `prototype instanceof Error`.
+  // `Error`s with no reachable constructor -- e.g. one from another realm. An
+  // ordinary subclass (including `DOMException`) never gets here: the class
+  // lookup matches it via `prototype instanceof Error`.
   if (isNativeError(value)) return NATIVE_TAGS.Error;
 
   // `FabricInstance` values (object-like protocol types).
   if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;
-
-  // Null-prototype objects (`Object.create(null)`), which have no constructor
-  // to have been recognized. Tagged `Object` so the object rule decides them
-  // by name, the same way an indirect array is tagged `Array`.
-  if (Object.getPrototypeOf(value as object) === null) {
-    return NATIVE_TAGS.Object;
-  }
 
   return null;
 }
