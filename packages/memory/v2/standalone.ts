@@ -14,8 +14,11 @@
 
 import { Identity } from "@commonfabric/identity";
 
-import { encodeMemoryBoundary } from "../v2.ts";
-import { MemoryMessageCompressionChannel } from "./message-compression.ts";
+import { encodeMemoryBoundary, getMemoryProtocolFlags } from "../v2.ts";
+import {
+  isMemoryMessageFrame,
+  MemoryMessageCompressionChannel,
+} from "./message-compression.ts";
 import * as MemoryServer from "./server.ts";
 import { verifySessionOpenAuthorization } from "./session-open-auth.ts";
 
@@ -113,29 +116,38 @@ export class StandaloneMemoryServer {
       const debugWrites = Deno.env.get("CF_DEBUG_MEMORY_WRITES") === "1";
       socket.addEventListener("message", (event) => {
         const frame = event.data;
-        const supportedFrame = typeof frame === "string" ||
-          frame instanceof ArrayBuffer || frame instanceof Uint8Array ||
-          frame instanceof Blob;
-        if (
-          !supportedFrame || (!sawFirstMessage && typeof frame !== "string")
-        ) {
+        if (!isMemoryMessageFrame(frame)) {
           socket.close(
             1003,
-            sawFirstMessage
-              ? "memory websocket expects text or binary frames"
-              : "memory websocket expects text before negotiation",
+            "memory websocket expects text or binary frames",
+          );
+          closeConnection();
+          return;
+        }
+        if (!sawFirstMessage) {
+          if (typeof frame !== "string") {
+            socket.close(
+              1003,
+              "memory websocket expects text before negotiation",
+            );
+            closeConnection();
+            return;
+          }
+          sawFirstMessage = true;
+          const first = MemoryServer.parseClientMessage(frame);
+          compressionNegotiated = first?.type === "hello" &&
+            first.flags.messageCompressionV1 === true &&
+            getMemoryProtocolFlags().messageCompressionV1;
+        } else if (!compressionNegotiated && typeof frame !== "string") {
+          socket.close(
+            1003,
+            "memory websocket expects text without compression negotiation",
           );
           closeConnection();
           return;
         }
         if (closed) return;
         channel.receive(frame, async (payload) => {
-          if (!sawFirstMessage) {
-            sawFirstMessage = true;
-            const first = MemoryServer.parseClientMessage(payload);
-            compressionNegotiated = first?.type === "hello" &&
-              first.flags.messageCompressionV1 === true;
-          }
           await connection.receive(payload);
           if (debugWrites) {
             logCommitOperations(connectionTag, payload);

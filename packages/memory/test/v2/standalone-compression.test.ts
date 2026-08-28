@@ -69,6 +69,79 @@ describe("standalone memory compression", () => {
       await server.close();
     }
   });
+
+  it("keeps messages textual when the client omits the capability", async () => {
+    const server = StandaloneMemoryServer.start();
+    const address = new URL(server.url);
+    address.protocol = "ws:";
+    const socket = new WebSocket(address);
+    socket.binaryType = "arraybuffer";
+    try {
+      await opened(socket);
+      const helloReply = nextMessage(socket);
+      socket.send(encodeMemoryBoundary({
+        type: "hello",
+        protocol: MEMORY_PROTOCOL,
+        flags: {
+          ...getMemoryProtocolFlags(),
+          messageCompressionV1: false,
+        },
+      }));
+      expect(typeof await helloReply).toBe("string");
+
+      const requestId = "standalone-text-session-open-".repeat(100);
+      const response = nextMessage(socket);
+      socket.send(encodeMemoryBoundary({
+        type: "session.open",
+        requestId,
+        space: "did:key:z6Mk-standalone-text-test",
+        session: {},
+      }));
+      const responseFrame = await response;
+      expect(typeof responseFrame).toBe("string");
+      if (typeof responseFrame !== "string") {
+        throw new Error("Expected text response");
+      }
+      expect(
+        decodeMemoryBoundary<{ requestId: string }>(responseFrame).requestId,
+      ).toBe(requestId);
+    } finally {
+      await closeSocket(socket);
+      await server.close();
+    }
+  });
+
+  it("closes with 1003 for binary data without negotiated compression", async () => {
+    const server = StandaloneMemoryServer.start();
+    const address = new URL(server.url);
+    address.protocol = "ws:";
+    const socket = new WebSocket(address);
+    socket.binaryType = "arraybuffer";
+    try {
+      await opened(socket);
+      const helloReply = nextMessage(socket);
+      socket.send(encodeMemoryBoundary({
+        type: "hello",
+        protocol: MEMORY_PROTOCOL,
+        flags: {
+          ...getMemoryProtocolFlags(),
+          messageCompressionV1: false,
+        },
+      }));
+      await helloReply;
+
+      const closed = new Promise<CloseEvent>((resolve) => {
+        socket.addEventListener("close", resolve, { once: true });
+      });
+      socket.send(
+        await encodeCompressedMemoryMessage("unexpected binary ".repeat(200)),
+      );
+      expect((await closed).code).toBe(1003);
+    } finally {
+      await closeSocket(socket);
+      await server.close();
+    }
+  });
 });
 
 /** Resolves when `socket` opens and rejects if opening fails. */
@@ -114,4 +187,13 @@ function nextMessage(socket: WebSocket): Promise<MemoryMessageFrame> {
     socket.addEventListener("error", onError, { once: true });
     socket.addEventListener("close", onClose, { once: true });
   });
+}
+
+async function closeSocket(socket: WebSocket): Promise<void> {
+  if (socket.readyState >= WebSocket.CLOSING) return;
+  const closed = new Promise<void>((resolve) => {
+    socket.addEventListener("close", () => resolve(), { once: true });
+  });
+  socket.close();
+  await closed;
 }

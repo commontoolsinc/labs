@@ -1664,6 +1664,7 @@ const memoryLiveEnvironment = new NullLiveEnvironment(
 // Update that registry when adding or removing one.
 let commitPreconditionsEnabled = true;
 let syncSchemaTableEnabled = true;
+let messageCompressionEnabled = true;
 let ownWriteEchoEnabled = true;
 
 export {
@@ -1786,6 +1787,22 @@ export function resetSyncSchemaTableConfig(): void {
 }
 
 /**
+ * Ambient capability for binary gzip envelopes on memory WebSocket messages.
+ * Disabling it keeps both peers on ordinary text frames as a rollout backstop.
+ */
+export function setMessageCompressionConfig(enabled?: boolean): void {
+  messageCompressionEnabled = enabled ?? true;
+}
+
+export function getMessageCompressionConfig(): boolean {
+  return messageCompressionEnabled;
+}
+
+export function resetMessageCompressionConfig(): void {
+  messageCompressionEnabled = true;
+}
+
+/**
  * Ambient server behavior for own-write echo on sync frames (CT-1965): a
  * session's own accepted patch-produced heads ride the covering frame as full
  * post-apply documents, so promotion retires the pending overlay against
@@ -1811,7 +1828,7 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   commitPreconditions: getCommitPreconditionsConfig(),
   applyOp: true,
   operationCodecs: [CODEMIRROR_CHANGESET_CODEC],
-  messageCompressionV1: true,
+  messageCompressionV1: getMessageCompressionConfig(),
   // A build-inherent capability, not configuration: this build's engine always
   // evaluates row-label rules at commit (sqlite/commit-eval.ts), so it always
   // advertises the fact. Peers that see it absent (an older server) keep their

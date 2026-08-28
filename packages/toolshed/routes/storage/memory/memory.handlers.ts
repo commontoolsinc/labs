@@ -1,5 +1,10 @@
-import { encodeMemoryBoundary } from "@commonfabric/memory/v2";
 import {
+  encodeMemoryBoundary,
+  getMemoryProtocolFlags,
+} from "@commonfabric/memory/v2";
+import {
+  type EncodedMemoryMessage,
+  isMemoryMessageFrame,
   MemoryMessageCompressionChannel,
   type MemoryMessageFrame,
   memoryMessageFrameBytes,
@@ -25,7 +30,6 @@ type NegotiationOptions = {
 };
 
 const NEGOTIATION_BUFFER_MAX_BYTES = 1_048_576;
-const TEXT_ENCODER = new TextEncoder();
 
 export const bufferTextMessagesUntilNegotiated = (
   socket: WebSocket,
@@ -74,10 +78,9 @@ export const bufferTextMessagesUntilNegotiated = (
   const firstMessage = new Promise<string | undefined>((resolve, reject) => {
     const onMessage = (event: MessageEvent) => {
       const frame = event.data;
-      const supportedFrame = typeof frame === "string" ||
-        frame instanceof ArrayBuffer || frame instanceof Uint8Array ||
-        frame instanceof Blob;
-      if (!supportedFrame || (!settled && typeof frame !== "string")) {
+      if (
+        !isMemoryMessageFrame(frame) || (!settled && typeof frame !== "string")
+      ) {
         const error = new Error(
           settled
             ? "Memory websocket expects text or binary frames"
@@ -161,27 +164,24 @@ const frameSizeLogger = getLogger("memory-socket", {
   level: "warn",
 });
 
-// Deno's WebSocket client rejects any incoming message over 64 MiB
-// ("Frame too large") and closes the connection, so an outbound frame
-// approaching that cap is an outage in the making, not a curiosity — and a
-// payload regression looks like timeouts from the outside (labs#6319).
-// Warning at a quarter of the cap surfaces the growth while every client
-// still loads. The cap is in bytes, so the check measures encoded bytes;
-// a string's UTF-8 byte length falls in [length, 3 × length], and the
-// cheap code-unit bound spares ordinary frames the encode pass.
+// Deno's WebSocket client rejects a wire frame over 64 MiB ("Frame too large")
+// and closes the connection. Compression raises the logical message ceiling to
+// 256 MiB only when its actual binary frame remains below that transport cap.
+// Warning at a quarter of the cap surfaces uncompressed or poorly-compressing
+// payload growth while every client still loads (labs#6319).
 const OUTBOUND_FRAME_WARN_BYTES = 16 * 1024 * 1024;
 
 export const warnOnOversizedOutboundFrame = (
-  encoded: string,
+  frame: EncodedMemoryMessage,
   message: unknown,
   warnBytes: number = OUTBOUND_FRAME_WARN_BYTES,
   warn: (key: string, lazyArgs: () => unknown[]) => void = (key, lazyArgs) =>
     frameSizeLogger.warn(key, lazyArgs),
 ): void => {
-  if (encoded.length * 3 <= warnBytes) {
+  if (typeof frame === "string" && frame.length * 3 <= warnBytes) {
     return;
   }
-  const frameBytes = TEXT_ENCODER.encode(encoded).byteLength;
+  const frameBytes = memoryMessageFrameBytes(frame);
   if (frameBytes <= warnBytes) {
     return;
   }
@@ -206,7 +206,8 @@ export const attachMemorySocketPipeline = (
     return false;
   }
   const compressionNegotiated = parsedFirstMessage.type === "hello" &&
-    parsedFirstMessage.flags.messageCompressionV1 === true;
+    parsedFirstMessage.flags.messageCompressionV1 === true &&
+    getMemoryProtocolFlags().messageCompressionV1;
 
   const safeSocketClose = (code: number, reason: string) => {
     if (
@@ -235,8 +236,10 @@ export const attachMemorySocketPipeline = (
   );
   const connection = memoryServer.connect((message) => {
     const encoded = encodeMemoryBoundary(message);
-    warnOnOversizedOutboundFrame(encoded, message);
-    channel.send(encoded);
+    channel.send(
+      encoded,
+      (frame) => warnOnOversizedOutboundFrame(frame, message),
+    );
     if (compressionNegotiated && message.type === "hello.ok") {
       channel.enable();
     }
@@ -280,6 +283,14 @@ export const attachMemorySocketPipeline = (
       negotiation.handoff({
         onMessage(message) {
           if (closed) return;
+          if (!compressionNegotiated && typeof message !== "string") {
+            safeSocketClose(
+              1003,
+              "Memory websocket expects text without compression negotiation",
+            );
+            closeConnection();
+            return;
+          }
           channel.receive(message, async (payload) => {
             await connection.receive(payload);
             logMemWrites(payload);

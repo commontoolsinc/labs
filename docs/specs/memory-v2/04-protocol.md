@@ -113,6 +113,9 @@ The capability defaults to `false` when absent. A new peer connected to an old
 peer consequently keeps every message in the ordinary form. Each reconnect
 starts again with an uncompressed `hello`; compression from the previous
 connection does not carry across WebSocket boundaries.
+The local `setMessageCompressionConfig(false)` rollback override suppresses
+advertisement on clients and servers, keeping connections text-only even when
+both builds support compression.
 
 Memory hosts include `sessionOpen.audience` and `sessionOpen.challenge` in
 `hello.ok`. The audience is the server DID the client must sign for. Toolshed

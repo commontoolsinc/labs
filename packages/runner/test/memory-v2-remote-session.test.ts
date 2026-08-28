@@ -498,9 +498,23 @@ describe("WebSocketTransport failure signaling", () => {
     receive(payload: MemoryMessageFrame): void {
       this.dispatchEvent(new MessageEvent("message", { data: payload }));
     }
+    fail(error: Error): void {
+      this.dispatchEvent(new ErrorEvent("error", { error }));
+    }
     close(): void {
       this.readyState = DrivableWebSocket.CLOSED;
       this.dispatchEvent(new Event("close"));
+    }
+  }
+
+  class DeferredInvalidBlob extends Blob {
+    readonly started = Promise.withResolvers<void>();
+    readonly released = Promise.withResolvers<void>();
+
+    override async arrayBuffer(): Promise<ArrayBuffer> {
+      this.started.resolve();
+      await this.released.promise;
+      return new Uint8Array([0]).buffer;
     }
   }
 
@@ -656,23 +670,112 @@ describe("WebSocketTransport failure signaling", () => {
       await opening;
       transport.setMessageCompressionEnabled(true);
 
-      const first = "first compressed message ".repeat(1_000);
-      const second = "second compressed message ".repeat(1_000);
-      await Promise.all([transport.send(first), transport.send(second)]);
+      const payloads = [
+        "first compressed message ".repeat(1_000),
+        "small second",
+        "third compressed message ".repeat(1_000),
+        "small fourth",
+      ];
+      await Promise.all(payloads.map((payload) => transport.send(payload)));
 
       expect(activeSocket.sent[1]).toBeInstanceOf(Uint8Array);
-      expect(activeSocket.sent[2]).toBeInstanceOf(Uint8Array);
-      expect(await decodeCompressedMemoryMessage(activeSocket.sent[1])).toBe(
-        first,
-      );
-      expect(await decodeCompressedMemoryMessage(activeSocket.sent[2])).toBe(
-        second,
-      );
+      expect(typeof activeSocket.sent[2]).toBe("string");
+      expect(activeSocket.sent[3]).toBeInstanceOf(Uint8Array);
+      expect(typeof activeSocket.sent[4]).toBe("string");
+      expect(
+        await Promise.all(
+          activeSocket.sent.slice(1).map(decodeCompressedMemoryMessage),
+        ),
+      ).toEqual(payloads);
 
       const received = Promise.withResolvers<string>();
       transport.setReceiver(received.resolve);
-      activeSocket.receive(await encodeCompressedMemoryMessage(first));
-      expect(await received.promise).toBe(first);
+      activeSocket.receive(await encodeCompressedMemoryMessage(payloads[0]));
+      expect(await received.promise).toBe(payloads[0]);
+    });
+  });
+
+  it("ignores stale close events after a replacement socket enables compression", async () => {
+    await withTransport(async (transport, socket) => {
+      const firstOpening = transport.send("first hello");
+      const firstSocket = socket();
+      firstSocket.openConnection();
+      await firstOpening;
+      transport.setMessageCompressionEnabled(true);
+      const closes: Array<Error | undefined> = [];
+      transport.setCloseReceiver((error) => closes.push(error));
+
+      firstSocket.fail(new Error("replace first socket"));
+      const replacementOpening = transport.send("replacement hello");
+      const replacementSocket = socket();
+      replacementSocket.openConnection();
+      await replacementOpening;
+      transport.setMessageCompressionEnabled(true);
+      firstSocket.close();
+
+      await transport.send("replacement compressed message ".repeat(1_000));
+      expect(replacementSocket.sent.at(-1)).toBeInstanceOf(Uint8Array);
+      expect(closes).toHaveLength(1);
+    });
+  });
+
+  it("ignores a stale decode failure after the socket is replaced", async () => {
+    await withTransport(async (transport, socket) => {
+      const firstOpening = transport.send("first hello");
+      const firstSocket = socket();
+      firstSocket.openConnection();
+      await firstOpening;
+      transport.setMessageCompressionEnabled(true);
+      const closes: Array<Error | undefined> = [];
+      transport.setCloseReceiver((error) => closes.push(error));
+      const staleFrame = new DeferredInvalidBlob();
+      firstSocket.receive(staleFrame);
+      await staleFrame.started.promise;
+
+      firstSocket.fail(new Error("replace decoding socket"));
+      const replacementOpening = transport.send("replacement hello");
+      const replacementSocket = socket();
+      replacementSocket.openConnection();
+      await replacementOpening;
+      transport.setMessageCompressionEnabled(true);
+      const received = Promise.withResolvers<string>();
+      transport.setReceiver(received.resolve);
+      staleFrame.released.resolve();
+      replacementSocket.receive("replacement response");
+
+      expect(await received.promise).toBe("replacement response");
+      expect(closes).toHaveLength(1);
+      await transport.send("replacement compressed message ".repeat(1_000));
+      expect(replacementSocket.sent.at(-1)).toBeInstanceOf(Uint8Array);
+    });
+  });
+
+  it("reports receiver failures without labeling them as decode failures", async () => {
+    await withTransport(async (transport, socket) => {
+      const opening = transport.send("hello");
+      const activeSocket = socket();
+      activeSocket.openConnection();
+      await opening;
+      const failure = new Error("receiver failed");
+      const reported = Promise.withResolvers<unknown>();
+      const onError = (event: ErrorEvent) => {
+        event.preventDefault();
+        reported.resolve(event.error);
+      };
+      globalThis.addEventListener("error", onError, { once: true });
+      const closes: Array<Error | undefined> = [];
+      transport.setCloseReceiver((error) => closes.push(error));
+      transport.setReceiver(() => {
+        throw failure;
+      });
+      try {
+        activeSocket.receive("ordinary response");
+        expect(await reported.promise).toBe(failure);
+        expect(closes).toEqual([]);
+        expect(activeSocket.readyState).toBe(WebSocket.OPEN);
+      } finally {
+        globalThis.removeEventListener("error", onError);
+      }
     });
   });
 

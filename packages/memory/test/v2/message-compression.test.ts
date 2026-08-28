@@ -7,6 +7,7 @@ import {
   decodeCompressedMemoryMessage,
   encodeCompressedMemoryMessage,
   MAX_DECOMPRESSED_MEMORY_MESSAGE_BYTES,
+  MemoryMessageCompressionChannel,
 } from "../../v2/message-compression.ts";
 
 describe("message-compression", () => {
@@ -63,6 +64,37 @@ describe("message-compression", () => {
     ).rejects.toThrow("expands beyond its limit");
   });
 
+  it("rejects an envelope whose declared expansion is too large", async () => {
+    const payload = "repeated memory message ".repeat(1_000);
+    const encoded = await encodeCompressedMemoryMessage(payload);
+    expect(encoded).toBeInstanceOf(Uint8Array);
+    if (!(encoded instanceof Uint8Array)) throw new Error("Expected binary");
+    const envelope = encoded.slice();
+    new DataView(envelope.buffer).setUint32(
+      5,
+      new TextEncoder().encode(payload).byteLength + 1,
+    );
+
+    await expect(decodeCompressedMemoryMessage(envelope)).rejects.toThrow(
+      "expanded to an unexpected size",
+    );
+  });
+
+  it("rejects unknown envelope magic and versions", async () => {
+    const payload = "repeated memory message ".repeat(1_000);
+    const encoded = await encodeCompressedMemoryMessage(payload);
+    expect(encoded).toBeInstanceOf(Uint8Array);
+    if (!(encoded instanceof Uint8Array)) throw new Error("Expected binary");
+
+    for (const offset of [0, 4]) {
+      const envelope = encoded.slice();
+      envelope[offset] ^= 0xff;
+      await expect(decodeCompressedMemoryMessage(envelope)).rejects.toThrow(
+        "Invalid memory compression envelope",
+      );
+    }
+  });
+
   it("rejects an envelope declaring an expansion beyond the maximum", async () => {
     const payload = "repeated memory message ".repeat(1_000);
     const encoded = await encodeCompressedMemoryMessage(payload);
@@ -76,6 +108,30 @@ describe("message-compression", () => {
 
     await expect(decodeCompressedMemoryMessage(envelope)).rejects.toThrow(
       "Invalid memory compression envelope",
+    );
+  });
+
+  it("preserves submission order across compressed and text messages", async () => {
+    const sent: Array<string | Uint8Array<ArrayBuffer>> = [];
+    const errors: Error[] = [];
+    const channel = new MemoryMessageCompressionChannel(
+      (frame) => sent.push(frame),
+      (error) => errors.push(error),
+    );
+    channel.enable();
+    const payloads = [
+      "large-first ".repeat(1_000),
+      "small-second",
+      "large-third ".repeat(1_000),
+      "small-fourth",
+    ];
+
+    for (const payload of payloads) channel.send(payload);
+    await channel.idle();
+
+    expect(errors).toEqual([]);
+    expect(await Promise.all(sent.map(decodeCompressedMemoryMessage))).toEqual(
+      payloads,
     );
   });
 });

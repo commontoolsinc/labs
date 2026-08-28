@@ -30,6 +30,7 @@ class FakeSocket extends EventTarget {
   readyState: number = WebSocket.OPEN;
   binaryType: BinaryType = "blob";
   readonly sent: EncodedMemoryMessage[] = [];
+  closedWith: { code?: number; reason?: string } | undefined;
   #sentWaiters: Array<{ count: number; resolve: () => void }> = [];
 
   send(payload: EncodedMemoryMessage): void {
@@ -43,7 +44,9 @@ class FakeSocket extends EventTarget {
     });
   }
 
-  close(): void {}
+  close(code?: number, reason?: string): void {
+    this.closedWith = { code, reason };
+  }
 
   /** Resolves once the socket has sent `count` messages. */
   whenSent(count: number): Promise<void> {
@@ -158,6 +161,47 @@ describe("memory.handlers", () => {
       expect(response.requestId).toBe(requestId);
       fake.dispatchEvent(new CloseEvent("close"));
     });
+
+    it("closes with 1003 for binary data without negotiated compression", async () => {
+      const fake = new FakeSocket();
+      const socket = fake as unknown as WebSocket;
+      const negotiation = bufferTextMessagesUntilNegotiated(socket);
+      const handedOff = Promise.withResolvers<void>();
+      const handoff = negotiation.handoff;
+      negotiation.handoff = (handlers) => {
+        handoff(handlers);
+        handedOff.resolve();
+      };
+      fake.dispatchEvent(
+        new MessageEvent("message", {
+          data: encodeMemoryBoundary({
+            type: "hello",
+            protocol: MEMORY_PROTOCOL,
+            flags: {
+              ...getMemoryProtocolFlags(),
+              messageCompressionV1: false,
+            },
+          }),
+        }),
+      );
+      const firstMessage = await negotiation.firstMessage;
+      expect(attachMemorySocketPipeline(
+        socket,
+        negotiation,
+        firstMessage!,
+      )).toBe(true);
+      await handedOff.promise;
+
+      fake.dispatchEvent(
+        new MessageEvent("message", {
+          data: await encodeCompressedMemoryMessage(
+            "binary request ".repeat(200),
+          ),
+        }),
+      );
+
+      expect(fake.closedWith?.code).toBe(1003);
+    });
   });
 
   describe("warnOnOversizedOutboundFrame", () => {
@@ -175,6 +219,17 @@ describe("memory.handlers", () => {
       warnOnOversizedOutboundFrame("a".repeat(30), {}, 30, warn);
 
       expect(calls).toEqual([]);
+    });
+
+    it("measures a binary frame by its compressed wire bytes", () => {
+      const { calls, warn } = captureWarn();
+
+      warnOnOversizedOutboundFrame(new Uint8Array(30), {}, 30, warn);
+      expect(calls).toEqual([]);
+
+      warnOnOversizedOutboundFrame(new Uint8Array(31), {}, 30, warn);
+      expect(calls).toHaveLength(1);
+      expect(calls[0].args).toContain(31);
     });
 
     it("warns past the threshold with the byte size, type, and space", () => {

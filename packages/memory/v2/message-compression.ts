@@ -19,7 +19,7 @@ const MEMORY_COMPRESSION_VERSION = 1;
 const MEMORY_COMPRESSION_HEADER_BYTES = 9;
 
 /** Messages below this UTF-8 size stay in their original wire form. */
-export const MEMORY_COMPRESSION_THRESHOLD_BYTES = 1_024;
+const MEMORY_COMPRESSION_THRESHOLD_BYTES = 1_024;
 
 /** Maximum expanded size accepted from one compression envelope. */
 export const MAX_DECOMPRESSED_MEMORY_MESSAGE_BYTES = 256 * 1_024 * 1_024;
@@ -67,10 +67,14 @@ export class MemoryMessageCompressionChannel {
   }
 
   /** Sends one payload after every payload submitted before it. */
-  send(payload: string): void {
+  send(
+    payload: string,
+    beforeSend?: (frame: EncodedMemoryMessage) => void,
+  ): void {
     if (this.#closed) return;
     if (!this.#compressionEnabled) {
       try {
+        beforeSend?.(payload);
         this.#sendRaw(payload);
       } catch (cause) {
         this.#fail(cause);
@@ -80,7 +84,13 @@ export class MemoryMessageCompressionChannel {
     const send = this.#outgoing.then(async () => {
       if (this.#closed) return;
       const frame = await encodeCompressedMemoryMessage(payload);
-      if (!this.#closed) this.#sendRaw(frame);
+      if (!this.#closed) {
+        // Every post-negotiation send stays on this queue, even when the
+        // encoder returns a small text frame. That preserves submission order
+        // behind earlier messages whose compression is still asynchronous.
+        beforeSend?.(frame);
+        this.#sendRaw(frame);
+      }
     });
     this.#outgoing = send.catch((cause) => this.#fail(cause));
   }
@@ -129,7 +139,7 @@ export async function encodeCompressedMemoryMessage(
   }
 
   const compressed = await collectReadable(
-    new Blob([source]).stream().pipeThrough(new CompressionStream("gzip")),
+    new Response(source).body!.pipeThrough(new CompressionStream("gzip")),
     MAX_GZIP_MEMORY_MESSAGE_BYTES,
   );
   const encoded = new Uint8Array(
@@ -153,7 +163,7 @@ export async function decodeCompressedMemoryMessage(
 
   const envelope = await parseCompressionEnvelope(frame);
   const expanded = await collectReadable(
-    new Blob([envelope.compressed]).stream().pipeThrough(
+    new Response(envelope.compressed).body!.pipeThrough(
       new DecompressionStream("gzip"),
     ),
     envelope.uncompressedBytes,
@@ -171,6 +181,14 @@ export function memoryMessageFrameBytes(frame: MemoryMessageFrame): number {
   if (typeof frame === "string") return TEXT_ENCODER.encode(frame).byteLength;
   if (frame instanceof Blob) return frame.size;
   return frame.byteLength;
+}
+
+/** Returns whether a WebSocket event carries a supported memory frame. */
+export function isMemoryMessageFrame(
+  frame: unknown,
+): frame is MemoryMessageFrame {
+  return typeof frame === "string" || frame instanceof ArrayBuffer ||
+    frame instanceof Uint8Array || frame instanceof Blob;
 }
 
 /** Collects `readable`, refusing output beyond `maximumBytes`. */

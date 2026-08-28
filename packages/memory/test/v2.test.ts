@@ -17,8 +17,10 @@ import {
   MEMORY_PROTOCOL,
   parseMemoryProtocolFlags,
   resetCommitPreconditionsConfig,
+  resetMessageCompressionConfig,
   resetSyncSchemaTableConfig,
   setCommitPreconditionsConfig,
+  setMessageCompressionConfig,
   setSyncSchemaTableConfig,
   toDocumentPath,
   toDocumentSelector,
@@ -127,9 +129,11 @@ describe("memory v2 flags", () => {
   it("reflects the active runtime storage flags", () => {
     resetModernCellRepConfig();
     resetCommitPreconditionsConfig();
+    resetMessageCompressionConfig();
     resetSyncSchemaTableConfig();
     setModernCellRepConfig(false);
     setCommitPreconditionsConfig(false);
+    setMessageCompressionConfig(false);
     setSyncSchemaTableConfig(false);
 
     assertEquals(getMemoryProtocolFlags(), {
@@ -137,7 +141,7 @@ describe("memory v2 flags", () => {
       commitPreconditions: false,
       applyOp: true,
       operationCodecs: ["codemirror-changeset@1"],
-      messageCompressionV1: true,
+      messageCompressionV1: false,
       // Build-inherent capability, not configuration: always advertised.
       sqliteCommitRowLabelEval: true,
       pendingReadStacks: true,
@@ -150,6 +154,7 @@ describe("memory v2 flags", () => {
 
     setModernCellRepConfig(true);
     setCommitPreconditionsConfig(true);
+    setMessageCompressionConfig(true);
     setSyncSchemaTableConfig(true);
 
     assertEquals(getMemoryProtocolFlags(), {
@@ -169,6 +174,7 @@ describe("memory v2 flags", () => {
 
     resetModernCellRepConfig();
     resetCommitPreconditionsConfig();
+    resetMessageCompressionConfig();
     resetSyncSchemaTableConfig();
   });
 

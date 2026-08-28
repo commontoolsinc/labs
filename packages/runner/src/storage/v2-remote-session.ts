@@ -6,6 +6,7 @@ import * as MemoryClient from "@commonfabric/memory/v2/client";
 import {
   decodeCompressedMemoryMessage,
   encodeCompressedMemoryMessage,
+  isMemoryMessageFrame,
 } from "@commonfabric/memory/v2/message-compression";
 import { normalizeSpaceHost, SpaceHostValidationError } from "../space-host.ts";
 
@@ -208,68 +209,77 @@ export class WebSocketTransport implements MemoryClient.Transport {
       }, { once: true });
       socket.addEventListener("message", (event) => {
         const frame = event.data;
-        const supportedFrame = typeof frame === "string" ||
-          frame instanceof ArrayBuffer || frame instanceof Uint8Array ||
-          frame instanceof Blob;
         const receive = this.#receiving.then(async () => {
           if (this.#socket !== socket) return;
-          if (!supportedFrame) {
-            throw new Error("Unsupported memory websocket frame type");
-          }
-          let payload: string;
-          if (this.#compressionEnabled) {
-            payload = await decodeCompressedMemoryMessage(frame);
-          } else {
-            if (typeof frame !== "string") {
-              throw new Error(
-                "Memory websocket expects text before compression negotiation",
-              );
+          try {
+            if (!isMemoryMessageFrame(frame)) {
+              throw new Error("Unsupported memory websocket frame type");
             }
-            payload = frame;
-          }
-          if (this.#socket !== socket) return;
-          this.#receiver(payload);
-        });
-        this.#receiving = receive.catch((cause) => {
-          const error = new Error(
-            "Unable to decode compressed memory websocket message",
-            { cause },
-          );
-          if (this.#socket === socket) {
+            let payload: string;
+            if (this.#compressionEnabled) {
+              payload = await decodeCompressedMemoryMessage(frame);
+            } else {
+              if (typeof frame !== "string") {
+                throw new Error(
+                  "Memory websocket expects text before compression negotiation",
+                );
+              }
+              payload = frame;
+            }
+            if (this.#socket !== socket) return;
+            try {
+              this.#receiver(payload);
+            } catch (cause) {
+              reportError(cause);
+            }
+          } catch (cause) {
+            if (this.#socket !== socket) return;
+            const error = new Error(
+              "Unable to decode compressed memory websocket message",
+              { cause },
+            );
             this.#socket = null;
-          }
-          this.#closeReceiver(error);
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.close(1007, error.message);
+            this.#compressionEnabled = false;
+            this.#closeReceiver(error);
+            if (socket.readyState === WebSocket.OPEN) {
+              socket.close(1007, error.message);
+            }
           }
         });
+        this.#receiving = receive.catch(reportError);
       });
       socket.addEventListener("close", () => {
-        if (this.#socket === socket) {
+        const isCurrentSocket = this.#socket === socket;
+        if (isCurrentSocket) {
           this.#socket = null;
+          this.#compressionEnabled = false;
         }
         if (this.#opening === opening) {
           this.#opening = null;
         }
-        this.#compressionEnabled = false;
-        this.#closeReceiver();
+        if (isCurrentSocket) {
+          this.#closeReceiver();
+        }
         if (!opened) {
           reject(new Error("memory websocket transport closed before opening"));
         }
       });
       socket.addEventListener("error", (event) => {
-        if (this.#socket === socket) {
+        const isCurrentSocket = this.#socket === socket;
+        if (isCurrentSocket) {
           this.#socket = null;
+          this.#compressionEnabled = false;
         }
         if (this.#opening === opening) {
           this.#opening = null;
         }
-        this.#compressionEnabled = false;
-        this.#closeReceiver(
-          event instanceof ErrorEvent && event.error instanceof Error
-            ? event.error
-            : new Error("memory websocket transport error"),
-        );
+        if (isCurrentSocket) {
+          this.#closeReceiver(
+            event instanceof ErrorEvent && event.error instanceof Error
+              ? event.error
+              : new Error("memory websocket transport error"),
+          );
+        }
         reject(event);
       }, { once: true });
     });

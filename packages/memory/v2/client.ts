@@ -375,14 +375,15 @@ export class Client {
     this.transport.setMessageCompressionEnabled?.(false);
     const ack = Promise.withResolvers<void>();
     this.#helloPending = ack;
+    const expectedFlags = getMemoryProtocolFlags();
     try {
       await Promise.all([
         this.transport.send(encodeMemoryBoundary({
           type: "hello",
           protocol: MEMORY_PROTOCOL,
           flags: {
-            ...getMemoryProtocolFlags(),
-            messageCompressionV1:
+            ...expectedFlags,
+            messageCompressionV1: expectedFlags.messageCompressionV1 &&
               this.transport.supportsMessageCompression === true,
           },
         })),
@@ -441,7 +442,8 @@ export class Client {
         // these; absent-on-old-server keys parse to false — fail closed.
         this.#serverFlags = helloOk.flags;
         this.transport.setMessageCompressionEnabled?.(
-          this.transport.supportsMessageCompression === true &&
+          expectedFlags.messageCompressionV1 &&
+            this.transport.supportsMessageCompression === true &&
             helloOk.flags.messageCompressionV1,
         );
         try {
