@@ -5020,7 +5020,15 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
           commit,
           source,
           { commitOptions },
-        ),
+        ).then((result) => {
+          // PROBE (temporary): name the parked stage of the :133 retry.
+          console.error(
+            `[PROBE pushCommit] returned localSeq=${localSeq} error=${
+              (result.error as { name?: string } | undefined)?.name ?? "none"
+            }`,
+          );
+          return result;
+        }),
     );
     this.#commitPromises.add(promise);
     // Keyed registration for the old-server scalarization hold: a later
@@ -5583,6 +5591,12 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     rejection: StorageTransactionRejected,
     identity?: ScopeKeyIdentity,
   ): Promise<Result<Unit, StorageTransactionRejected>> {
+    // PROBE (temporary): name the parked stage of the :133 retry.
+    console.error(
+      `[PROBE finalizeRejection] enter localSeq=${localSeq} name=${rejection.name} msg=${
+        String((rejection as { message?: string }).message ?? "").slice(0, 70)
+      }`,
+    );
     // The verdict is known from here on, but this commit's optimistic layer
     // stands in `record.pending` for as long as the read repair below runs.
     // Mark the layer dead for that window so no new commit is minted and sent
@@ -5612,7 +5626,13 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
           this.#scopeKeyIdentity(),
         )
         : undefined;
+      console.error(
+        `[PROBE finalizeRejection] read-repair ENTER localSeq=${localSeq}`,
+      );
       await this.waitForConflictReadRepair(rejection);
+      console.error(
+        `[PROBE finalizeRejection] read-repair EXIT localSeq=${localSeq}`,
+      );
       this.dropPending(localSeq);
       // Every drop funnels through here (server conflict, preempt, cascade,
       // reset — this is dropPending's only call site), so scanning right

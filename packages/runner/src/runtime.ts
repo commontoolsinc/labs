@@ -2457,9 +2457,26 @@ export class Runtime {
     }
     this.prepareTxForCommit(tx);
     return tx.commit().then(async ({ error }) => {
+      // PROBE (temporary): name the parked stage of the :133 retry.
+      console.error(
+        `[PROBE editWithRetry] settled error=${
+          (error as { name?: string } | undefined)?.name ?? "none"
+        } retriesLeft=${maxRetries}`,
+      );
       if (error) {
         if (maxRetries > 0 && isRetryableCommitRejection(error)) {
+          // PROBE (temporary): name the parked stage of the :133 retry.
+          console.error(
+            `[PROBE editWithRetry] rejected name=${
+              (error as { name?: string }).name
+            } msg=${
+              String((error as { message?: string }).message ?? "").slice(0, 80)
+            } retriesLeft=${maxRetries} awaiting readiness`,
+          );
           await this.awaitCommitRetryReadiness(error);
+          console.error(
+            `[PROBE editWithRetry] readiness RESOLVED retriesLeft=${maxRetries}`,
+          );
           return this.editWithRetry<T>(fn, maxRetries - 1);
         } else {
           return { error };
@@ -2603,8 +2620,14 @@ export class Runtime {
       supersedeKey !== undefined &&
       this.#uiWriteLanes.get(supersedeKey) !== token;
     try {
+      let attempt = 0;
       const result = await this.editWithRetry<"committed" | "superseded">(
         (tx) => {
+          attempt++;
+          // PROBE (temporary): name the parked stage of the :133 retry.
+          console.error(
+            `[PROBE uiWrite] attempt=${attempt} superseded=${superseded()} lane=${supersedeKey}`,
+          );
           // Per attempt, BEFORE staging: a superseded retry declines (the
           // editWithRetry convention — nothing staged, `ok` carries it).
           if (superseded()) return "superseded";
@@ -2631,6 +2654,11 @@ export class Runtime {
           if (blind) unmarkUiInputBlindWriteTx(tx);
           return "committed";
         },
+      );
+      console.error(
+        `[PROBE uiWrite] SETTLED ok=${result.ok ?? "none"} error=${
+          (result.error as { name?: string } | undefined)?.name ?? "none"
+        } lane=${supersedeKey}`,
       );
       if (result.error !== undefined) {
         uiCellWriteLogger.error("lost", () => [
