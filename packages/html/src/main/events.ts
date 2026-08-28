@@ -5,7 +5,10 @@
  * sent to the worker thread for dispatch to the appropriate handler.
  */
 
-import type { FabricValue } from "@commonfabric/data-model/fabric-value";
+import {
+  type FabricValue,
+  isValidFabricValueLayer,
+} from "@commonfabric/data-model/fabric-value";
 import type { SigilLink } from "@commonfabric/runner/shared";
 import { isCellHandle } from "@commonfabric/runtime-client";
 import {
@@ -328,7 +331,7 @@ function carriedTargetValue(
   prop: typeof ALLOWLISTED_TARGET_PROPERTIES[number],
   value: unknown,
 ): FabricValue | undefined {
-  if (isCellHandle(value)) return value.toJSON();
+  if (isCellHandle(value)) return value.toSigilLink();
 
   const scalar: DomScalar | undefined = TARGET_PROPERTY_SCALARS[
     prop as keyof typeof TARGET_PROPERTY_SCALARS
@@ -340,25 +343,66 @@ function carriedTargetValue(
 }
 
 /**
- * Converts one value a component exposed to the event into a form the VDOM
- * event notification can carry, substituting a description for anything with
- * no conversion at all. Handing the pattern something is the point: an event
- * whose value cannot cross is still an event the handler should see.
+ * Converts one value a component exposed to the event into the form the VDOM
+ * event notification carries, and refuses what has no such form.
+ *
+ * A `FabricValue` crosses as itself. The connection carries that whole domain,
+ * so there is nothing to convert, and walking one would only be a chance to
+ * lose something. A cycle is a `FabricValue` too, and crosses as one; whether
+ * it can be carried further is the encoding's question at the crossing rather
+ * than this seam's.
+ *
+ * Only the top layer is examined, which is what keeps this off the per-event
+ * cost of a walk. A container whose members are not fabric is the producer's
+ * bug and fails at the crossing, where the encoding names the member it cannot
+ * take -- so a deep check here would spend a walk on every correct value to
+ * reach a verdict the encoding reaches anyway.
+ *
+ * A `CellHandle` is the one thing a component exposes that is not fabric and
+ * has a representation anyway: the link that reaches its cell. Recognized by
+ * its class, and asked for its link by name -- nothing here reaches for a
+ * serialization protocol that happens to yield one.
+ *
+ * Anything else is refused: a value whose very top layer has no fabric form.
+ * What reaches this is enumerable, and none of it is something a handler could
+ * act on:
+ *
+ * * an `Error`, from `cf-error` -- `cf-code-editor` raises six, and
+ *   `cf-file-input`, `cf-file-download` and `cf-copy-button` one apiece.
+ * * a `Blob`, from `cf-voice-input`'s `cf-recording-stop`, as `audioData`.
+ * * a `FileList`, from `cf-input`'s own `cf-input` event, which carries `files`
+ *   when the input's `type` is `file`.
+ * * an `Element`, from `cf-radio`, `cf-tab` and `cf-tab-bar-item`, each of
+ *   which puts itself in its own detail.
+ * * a `Date`, a `Map`, a `Set`, a `RegExp`, or an object that merely defines a
+ *   `toJSON()`. No component exposes one.
+ *
+ * Nothing binds a handler to any of those events, so nothing reaches this
+ * today. Deliberately absent from the list, being already answered above: the
+ * file inputs' `cf-change`, which carries `StoredFile` records -- plain records
+ * of scalars, which cross as themselves.
+ *
+ * The refusal is a tripwire rather than a verdict on any of them. The set this
+ * accepts is expected to grow, and where each refused value should go instead
+ * is undecided: a `Blob` and a `FileList` want records or `FabricBytes` at the
+ * producer, an `Error` wants a `FabricError` once the worker's event ingress
+ * descends an instance rather than refusing one, and an `Element` cannot cross
+ * at all and wants its producer to name what it means instead.
+ *
+ * @throws If the value is neither of the two that cross. It leaves the DOM
+ *   listener that called this, which loses the event and reports as an uncaught
+ *   page error -- and which is what makes a reachable case unmissable, the
+ *   browser suites failing a test on any uncaught page exception.
  */
 function toSerializableValue(value: unknown): FabricValue {
-  try {
-    // The round trip resolves whatever `toJSON()` a value defines -- a
-    // `CellHandle` becomes its sigil link -- and drops what JSON has no
-    // representation for. `undefined` comes back from `JSON.stringify()` for a
-    // function or a symbol, and a circular reference or a throwing `toJSON()`
-    // throws out of it.
-    const jsonString = JSON.stringify(value);
-    if (jsonString !== undefined) return JSON.parse(jsonString);
-  } catch {
-    // Described below, as a value with no JSON form at all is.
-  }
+  if (isValidFabricValueLayer(value)) return value as FabricValue;
 
-  return describeUnconvertible(value);
+  if (isCellHandle(value)) return value.toSigilLink();
+
+  throw new Error(
+    "Cannot yet carry this value on a DOM event, it being neither a " +
+      `\`FabricValue\` nor a \`CellHandle\`: ${describeUnconvertible(value)}`,
+  );
 }
 
 /**

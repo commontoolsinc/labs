@@ -1,4 +1,4 @@
-# TLA+ model: pending-stack commit protocol
+# TLA+ models: pending-stack commits and session delivery
 
 `PendingStacks.tla` is a bounded, model-checked specification of the Memory v2
 pending-stack commit protocol (`03-commit-model.md` §3.3–3.6), built to check
@@ -77,6 +77,23 @@ neither is vendored.
 java -cp tla2tools.jar tlc2.TLC -config PendingStacks_Current.cfg \
   -workers auto PendingStacks.tla
 ```
+
+The delivery model runs the same way, one command per config:
+
+```bash
+java -cp tla2tools.jar tlc2.TLC -config SessionDelivery_Holdings.cfg \
+  -workers auto SessionDelivery.tla
+java -cp tla2tools.jar tlc2.TLC -config SessionDelivery_Memory.cfg \
+  -workers auto SessionDelivery.tla
+java -cp tla2tools.jar tlc2.TLC -config SessionDelivery_MemoryFull.cfg \
+  -workers auto SessionDelivery.tla
+```
+
+Only the Holdings run is expected to pass. The Memory and MemoryFull runs
+are regression witnesses: each MUST report the violation its table row
+describes and exits nonzero doing so — a clean exit from either means the
+old design's defect became unreproducible and the model needs examining,
+exactly as a new violation in Holdings means the shipped design does.
 
 A violated invariant prints the full state trace — each `State N` is one
 atomic action (`Build`, `Process`, `Deliver`, `Integrate`); the last state's `log` entry
@@ -164,13 +181,82 @@ or missed contributor directly.
 - **No branches, scopes, preconditions, or schema sync.** Orthogonal to the
   pending-stack machinery under study.
 
-## Changing the model
+## Model: session delivery across a reconnect
+
+`SessionDelivery.tla` is a second, deliberately small model of the delivery
+side that `PendingStacks.tla` leaves out of scope: one session's watch union,
+the server's per-session delivery memory (`session.entities`), the client's
+replica, and the diff base a reconnect's frame is computed against
+(`04-protocol.md` §4.1.2, §4.3.5, §4.6). Pushes can be LOST by the client (the
+OW61 absorb-defect class, bounded by `MaxLoss`), the replica can be WIPED under
+a live session (`SpaceReplica.reset()` on route replacement, `AllowReset`), the
+session can EXPIRE while disconnected (a re-establishing reconnect instead of a
+resume), and the watch union can SHRINK — a lossy `Unwatch` whose removal frame
+the client may fail to absorb, down to the zero-watch union, so a reconnect can
+face a declared holding the union no longer covers (union growth is not
+modeled: a grown union's never-held documents are ordinary deliveries,
+indistinguishable from initial delivery). `Mode` selects the diff base:
+`memory` is the server's own memory on resume and nothing on re-establishment
+(the design before client-declared holdings); `holdings` is the client's
+declaration on both paths.
+
+Checked with TLC 2.19; every config finishes in seconds:
+
+| Config | Mode | MaxLoss | AllowReset | Result |
+| --- | --- | --- | --- | --- |
+| `SessionDelivery_Memory.cfg` | `memory` | 1 | yes | **ReconnectConverges violated** at depth 4 — a push the server records as delivered and the client loses, a disconnect, a resume: the diff against the server's memory elides the lost document, and the replica stays behind. This is the schema-doc quarantine residual (verification-coverage.md OW61) as a machine-found trace; kept as the regression witness. (The same base fails the removal direction too — a lost removal the memory believes absorbed is never retracted — at greater depth; the reported trace is the shortest.) |
+| `SessionDelivery_MemoryFull.cfg` | `memory` | 0 | no | **NoRedundantDelivery violated** — with a perfect client the old design converges (`ReconnectConverges` holds at 602 distinct states when checked alone), but a re-established session is delivered in full: the whole union again, held or not. |
+| `SessionDelivery_Holdings.cfg` | `holdings` | 1 | yes | **All invariants hold** (2,164 distinct states, exhaustive at `MaxWrites = 3`): every reconnect — resumed or re-established, after any loss, wipe, or union shrink — brings the replica to the union's current state, retracts what the union no longer covers (the zero-watch reconcile included), and re-delivers nothing it holds. Negative control: emptying `Reconnect`'s `removed` set — the zero-watch shortcut — violates `ReconnectConverges` within a second (a lost removal, a disconnect, a resume: the stale document survives as held state), so the retraction clause is load-bearing, not decorative. |
+
+`ReconnectConverges` is INV-14 of `09-invariants.md`, its uncovered-document
+clause included; `NoRedundantDelivery` is its efficiency companion, stated as
+an invariant so the full re-download the old design performed on a lapsed
+session is a checked witness rather than an anecdote.
+
+**Scope of the certification.** What the Holdings result certifies is the
+SERVER's diff rule against a truthful declaration. The CLIENT's construction
+of that declaration is an assumed input — the declaration IS the replica,
+exactly — and each construction obligation is enforced by a unit test, not by
+TLC:
+
+- **Delivered state only.** The runtime derives the declaration from the last
+  frame the replica absorbed per document, never from a locally promoted
+  confirmed seq the server never sent — the replica in the model advances
+  only by absorbed delivery, so a promotion-shaped over-declaration is
+  unreachable here. Pinned by
+  `packages/runner/test/memory-v2-reconnect-holdings.test.ts` (an own
+  accepted write leaves the declared seq at the delivered frame's).
+- **Branch identity.** Document state is a bare seq, so a same-id document on
+  another branch is not representable; the wire type carries `branch` and the
+  diff keys by it. Pinned by the cross-branch case in
+  `packages/memory/test/v2-session-holdings.test.ts`.
+- **The parse.** Malformed holdings fail the message rather than degrade to
+  full delivery. Pinned at the wire boundary in the same file, with
+  `v2-client-holdings.test.ts` covering which requests carry the declaration
+  — and that a declaration-bearing session terminally fails restore against
+  a server that cannot take one, rather than silently rejoining the `memory`
+  row of this table.
+
+A client declaring documents it does not hold is outside the model, in the
+same trust class as a client fabricating reads. Catch-up frames are absorbed:
+the pre-watch loss they were once subject to is fixed and pinned separately
+(#6292, `precedingSyncs`), and the residual loss class the model exercises is
+the steady-state push and the removal frame. Commit replay (INV-11) remains
+outside both models.
+
+## Changing the models
 
 Per the change discipline in `09-invariants.md`: if a change introduces a new
 dependency-recording shape or staleness basis, add it as a `DepMode` /
 `BasisMode` variant plus a config, and record the expected/observed result in
-the table above. Keep the existing modes — the violated configs are
-regression witnesses (they document *why* the current shape is what it is),
-not dead code. If TLC finds a violation in a mode expected to pass, the trace
-is the ticket: minimal, complete, and replayable against the real engine as a
-unit test (compare `packages/memory/test/v2-engine.test.ts` harness).
+the table above. The delivery model has the same obligation on its own axes:
+a change to the reconnect diff base, to what a declaration may claim or how
+the server reads one, or to removal semantics (union shrink, the zero-watch
+reconcile, uncovered-document retraction) is a reason to rerun all three
+`SessionDelivery` configs, and a new base or declaration shape is added as a
+`Mode` variant plus a config with its expected/observed row. Keep the
+existing modes in both models — the violated configs are regression witnesses
+(they document *why* the current shape is what it is), not dead code. If TLC
+finds a violation in a mode expected to pass, the trace is the ticket:
+minimal, complete, and replayable against the real engine as a unit test
+(compare `packages/memory/test/v2-engine.test.ts` harness).

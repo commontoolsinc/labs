@@ -162,4 +162,216 @@ describe("stored-link-schema-precedence", () => {
       expect(elementByPath(holder)).toBeUndefined();
     });
   });
+
+  // Read within the array, the reader's item schema takes precedence over
+  // the stored one (`combineSchemaForLink`): a property the reader did not
+  // select stays out of the read, and the stored schema's `required` for
+  // that property cannot void the row.
+  describe("a stored schema that describes more than the reader selects", () => {
+    const wideStoredSchema = {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        glaze: { type: "string" },
+      },
+      required: ["title", "glaze"],
+    } as const satisfies JSONSchema;
+
+    it("excludes a stored-schema property the reader did not select", () => {
+      const holder = holderOverLinkCarrying(wideStoredSchema);
+
+      expect(projectionOf(elementWithinArray(holder))).toEqual({
+        title: "cruller",
+      });
+    });
+
+    it("reads a row missing a field only the stored schema requires", () => {
+      const row = runtime.getCell(space, `row-${seq}-narrow`, undefined, tx);
+      row.setRaw({ title: "cruller" });
+      const holder = runtime.getCell<Holder>(
+        space,
+        `holder-${seq}-narrow`,
+        holderSchema,
+        tx,
+      );
+      holder.setRaw({ rows: [linkCarrying(row, wideStoredSchema)] } as never);
+
+      expect(projectionOf(elementWithinArray(holder))).toEqual({
+        title: "cruller",
+      });
+    });
+
+    // An asCell reader crossing the link gets a handle whose schema keeps
+    // reader precedence: the stored schema's extra requirement must not
+    // ride the handle and void a read of a target that satisfies
+    // everything the reader itself demanded.
+    it("hands an asCell reader a handle that reads a row missing a stored-required field", () => {
+      const row = runtime.getCell(space, `row-${seq}-handle`, undefined, tx);
+      row.setRaw({ title: "cruller" });
+      const holder = runtime.getCell<Holder>(
+        space,
+        `holder-${seq}-handle`,
+        holderSchema,
+        tx,
+      );
+      holder.setRaw({ rows: [linkCarrying(row, wideStoredSchema)] } as never);
+
+      const handle = holder.key("rows").key(0)
+        .asSchema(
+          {
+            type: "object",
+            properties: { title: { type: "string" } },
+            required: ["title"],
+            asCell: ["cell"],
+          } as const satisfies JSONSchema,
+        )
+        .get() as unknown as Cell<Row>;
+      expect(projectionOf(handle.get())).toEqual({ title: "cruller" });
+    });
+
+    // A stored schema can be NOTHING BUT a default — a top-level `default`
+    // is otherwise a true schema, and narrowing can reduce a stored schema
+    // to one. The resolution carry must not treat that as saying nothing:
+    // the default is the nearest declaration and stands in for the absent
+    // value.
+    it("inherits a default-only stored schema's default across the crossing", () => {
+      const target = runtime.getCell(space, `row-${seq}-seed`, undefined, tx);
+      // Deliberately never written: the stored default is all a read has.
+      const holder = runtime.getCell<Holder>(
+        space,
+        `holder-${seq}-seed`,
+        holderSchema,
+        tx,
+      );
+      holder.setRaw(
+        {
+          rows: [linkCarrying(target, { default: { title: "seeded" } })],
+        } as never,
+      );
+
+      expect(projectionOf(elementByPath(holder))).toEqual({ title: "seeded" });
+    });
+
+    it("carries a trivial stored default onto a boolean-true reader at resolution", () => {
+      const target = runtime.getCell(
+        space,
+        `row-${seq}-truecarry`,
+        undefined,
+        tx,
+      );
+      const holder = runtime.getCell<Holder>(
+        space,
+        `holder-${seq}-truecarry`,
+        holderSchema,
+        tx,
+      );
+      holder.setRaw(
+        {
+          rows: [linkCarrying(target, { default: { title: "seeded" } })],
+        } as never,
+      );
+      const readerLink = {
+        ...holder.getAsNormalizedFullLink(),
+        path: ["rows", "0"],
+        schema: true as JSONSchema,
+      };
+
+      expect(resolveLink(runtime, tx, readerLink).schema).toEqual({
+        default: { title: "seeded" },
+      });
+    });
+
+    it("keeps a false reader false across a defaulted trivial stored schema", () => {
+      const target = runtime.getCell(
+        space,
+        `row-${seq}-falsecarry`,
+        undefined,
+        tx,
+      );
+      const holder = runtime.getCell<Holder>(
+        space,
+        `holder-${seq}-falsecarry`,
+        holderSchema,
+        tx,
+      );
+      holder.setRaw(
+        {
+          rows: [linkCarrying(target, { default: { title: "seeded" } })],
+        } as never,
+      );
+      const readerLink = {
+        ...holder.getAsNormalizedFullLink(),
+        path: ["rows", "0"],
+        schema: false as JSONSchema,
+      };
+
+      // The reader selected nothing; no default stands in.
+      expect(resolveLink(runtime, tx, readerLink).schema).toBe(false);
+    });
+
+    it("inherits a default the narrowing reduced the stored schema to", () => {
+      const storedSchema = {
+        type: "object",
+        properties: { glaze: { default: "seed" } },
+      } as const satisfies JSONSchema;
+      const row = runtime.getCell(
+        space,
+        `row-${seq}-narrow-seed`,
+        undefined,
+        tx,
+      );
+      row.setRaw({ title: "cruller" });
+      const holder = runtime.getCell<Holder>(
+        space,
+        `holder-${seq}-narrow-seed`,
+        holderSchema,
+        tx,
+      );
+      holder.setRaw({ rows: [linkCarrying(row, storedSchema)] } as never);
+
+      const glaze = holder.key("rows").key(0)
+        .asSchema(
+          {
+            type: "object",
+            properties: { glaze: { type: "string" } },
+          } as const satisfies JSONSchema,
+        )
+        .key("glaze").get();
+      expect(glaze).toEqual("seed");
+    });
+
+    // `default` crosses the precedence line: narrowed to the read path, the
+    // stored schema's default is inherited onto the reader's schema and
+    // stands in for the absent value.
+    it("inherits the stored schema's default for an absent selected field", () => {
+      const defaultedStoredSchema = {
+        type: "object",
+        properties: {
+          title: { type: "string" },
+          glaze: { type: "string", default: "maple" },
+        },
+      } as const satisfies JSONSchema;
+      const row = runtime.getCell(space, `row-${seq}-default`, undefined, tx);
+      row.setRaw({ title: "cruller" });
+      const holder = runtime.getCell<Holder>(
+        space,
+        `holder-${seq}-default`,
+        holderSchema,
+        tx,
+      );
+      holder.setRaw(
+        { rows: [linkCarrying(row, defaultedStoredSchema)] } as never,
+      );
+
+      const glaze = holder.key("rows").key(0)
+        .asSchema(
+          {
+            type: "object",
+            properties: { glaze: { type: "string" } },
+          } as const satisfies JSONSchema,
+        )
+        .key("glaze").get();
+      expect(glaze).toEqual("maple");
+    });
+  });
 });

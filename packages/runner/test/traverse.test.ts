@@ -23,7 +23,7 @@ import { ExtendedStorageTransaction } from "../src/storage/extended-storage-tran
 import { StoreObjectManager } from "../src/storage/query.ts";
 import {
   canBranchMatch,
-  combineSchema,
+  combineSchemaForLink,
   CompoundCycleTracker,
   createDefaultTraversalContext,
   createSchemaMemo,
@@ -2752,13 +2752,25 @@ describe("link schema path narrowing", () => {
       expected: 2,
     },
     {
-      name: "preserves a false link schema at the exact link path",
+      name: "ignores a false link schema when the reader has its own schema",
       targetPath: [],
       targetValue: "Rejected",
       selectorPath: [],
       selectorSchema: { type: "string" },
       linkSchema: false,
-      expected: undefined,
+      expected: "Rejected",
+    },
+    {
+      // The permissive traversal's placeholder for a link it will not
+      // descend into is null, so the false link schema withholds the target
+      // value without voiding the read.
+      name: "adopts a false link schema for a permissive reader",
+      targetPath: [],
+      targetValue: "Rejected",
+      selectorPath: [],
+      selectorSchema: true,
+      linkSchema: false,
+      expected: null,
     },
   ];
 
@@ -2793,7 +2805,11 @@ describe("link schema path narrowing", () => {
     });
   }
 
-  it("voids a linked object missing a field required only by the link schema", () => {
+  // The link describes more of its target than the reader asked for. The
+  // reader's schema takes precedence at the hop (`combineSchemaForLink`), so
+  // the link's extra `required` entry must not void the reader's narrower
+  // view of a target that satisfies everything the reader itself demanded.
+  it("returns a linked object missing a field required only by the link schema", () => {
     const store = new Map<string, Revision<State>>();
     const rootUri = "of:link-schema-required-union-root" as URI;
     const targetUri = "of:link-schema-required-union-target" as URI;
@@ -2836,8 +2852,70 @@ describe("link schema path narrowing", () => {
       value: rootValue,
     });
 
-    expect(ok).toBeUndefined();
-    expect(error).toBeDefined();
+    expect(error).toBeUndefined();
+    expect(ok).toEqual({ item: { a: "present" } });
+  });
+
+  // The reader's schema keeps the unselected key out of the combined
+  // schema's `properties`, so the traversal treats it like any other key the
+  // reader did not ask for: the query system carries the raw value through
+  // without descending, and the link under it is neither followed nor
+  // tracked for the subscription.
+  it("does not traverse a link-schema property the reader did not select", () => {
+    const store = new Map<string, Revision<State>>();
+    const rootUri = "of:link-schema-projection-root" as URI;
+    const targetUri = "of:link-schema-projection-target" as URI;
+    const unselectedUri = "of:link-schema-projection-unselected" as URI;
+    const linkSchema = {
+      type: "object",
+      properties: {
+        a: { type: "string" },
+        b: { type: "string" },
+      },
+      required: ["a", "b"],
+    } as const satisfies JSONSchema;
+    const rootValue = {
+      item: makeLink(targetUri, [], linkSchema),
+    };
+    const targetValue = {
+      a: "present",
+      b: makeLink(unselectedUri, [], { type: "string" }),
+    };
+    putDoc(store, rootUri, rootValue);
+    putDoc(store, targetUri, targetValue);
+    putDoc(store, unselectedUri, "unselected");
+
+    const readerSchema = {
+      type: "object",
+      properties: {
+        item: {
+          type: "object",
+          properties: { a: { type: "string" } },
+          required: ["a"],
+        },
+      },
+      required: ["item"],
+    } as const satisfies JSONSchema;
+    const context = createDefaultTraversalContext(TEST_SCOPE_IDENTITY);
+    const traverser = getTraverser(store, {
+      path: ["value"],
+      schema: readerSchema,
+    }, context);
+    const { ok, error } = traverser.traverse({
+      address: {
+        space: SPACE,
+        id: rootUri,
+        type: TYPE,
+        path: ["value"],
+      },
+      value: rootValue,
+    });
+
+    expect(error).toBeUndefined();
+    expect(ok).toEqual({ item: { a: "present", b: targetValue.b } });
+    expect(context.schemaTracker.has(`${SPACE}/space/${unselectedUri}`)).toBe(
+      false,
+    );
   });
 
   // A graph can contain records of one recursive type: for example, every
@@ -2965,9 +3043,10 @@ describe("link schema path narrowing", () => {
 
   // This parent schema corresponds to the projected type
   // `{ id: string; friends?: never }`. The stored link still carries a full
-  // User schema with an optional friends list. Intersecting the two should
-  // keep `friends: false` without making it required. Traversal can then omit
-  // that property while retaining the direct friend record itself.
+  // User schema with an optional friends list. Combining the two for the
+  // link hop should keep `friends: false` without making it required.
+  // Traversal can then omit that property while retaining the direct friend
+  // record itself.
   it("omits an optional nested friends property narrowed to false", () => {
     const {
       store,
@@ -2989,7 +3068,7 @@ describe("link schema path narrowing", () => {
       required: ["id"],
     } as const satisfies JSONSchema;
 
-    expect(combineSchema(directFriendSchema, fullUserSchema)).toEqual({
+    expect(combineSchemaForLink(directFriendSchema, fullUserSchema)).toEqual({
       type: "object",
       properties: {
         id: { type: "string" },

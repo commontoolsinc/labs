@@ -106,6 +106,12 @@ export enum RequestType {
   CellPull = "cell:pull",
 
   /**
+   * Stores a value only when the cell is currently undefined, using the read
+   * as an optimistic-concurrency precondition. Returns the value that won.
+   */
+  CellInitialize = "cell:initialize",
+
+  /**
    * Overwrites a cell's value blindly: the write carries no value-equality
    * precondition, so a concurrent write to the same cell does not make it
    * fail. That is not the same as unconditional. A blind write still carries
@@ -670,6 +676,12 @@ export type InitializationData = {
     // materialized in the carrying transaction (content-addressed schemas
     // Phase 1). Default on; an explicit false is the rollback override.
     contentAddressedSchemas?: boolean;
+    // Link crossings resolve schemas by reader precedence
+    // (combineSchemaForLink). Server-authoritative: the host declares the
+    // deployment's posture so the worker resolves hops under the same
+    // combine rule as the server that ships its subscriptions. Default on;
+    // an explicit false is the rollback override.
+    readerSchemaPrecedence?: boolean;
   };
   // Commit-boundary CFC mode for the worker runtime.
   cfcEnforcementMode?:
@@ -802,6 +814,17 @@ export type CellPullRequest = BaseRequest & {
    * The cell whose producers to demand before reading its current value.
    */
   cell: CellRef;
+};
+
+/** The {@link RequestType.CellInitialize} request. */
+export type CellInitializeRequest = BaseRequest & {
+  type: RequestType.CellInitialize;
+
+  /** The cell to initialize when it is currently undefined. */
+  cell: CellRef;
+
+  /** The non-undefined default to store. */
+  value: FabricValue;
 };
 
 /**
@@ -2316,6 +2339,7 @@ export type IPCClientRequest =
   | DisposeRequest
   | CellGetRequest
   | CellPullRequest
+  | CellInitializeRequest
   | CellSetRequest
   | CellPushRequest
   | CellSendRequest
@@ -2947,6 +2971,10 @@ export type Commands = {
   [RequestType.CellPull]: {
     request: CellPullRequest;
     response: CellGetResponse;
+  };
+  [RequestType.CellInitialize]: {
+    request: CellInitializeRequest;
+    response: CellValueResponse;
   };
   [RequestType.CellSet]: {
     request: CellSetRequest;

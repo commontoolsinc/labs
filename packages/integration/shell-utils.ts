@@ -260,19 +260,19 @@ export class ShellIntegration {
   }
 
   page(): Page {
-    this.checkIsOk();
+    this.#checkIsOk();
     return this.#page!;
   }
 
   // Browser-level CDP websocket endpoint, for attaching a second CDP client
   // (e.g. `CdpWorkerProfiler`).
   wsEndpoint(): string {
-    this.checkIsOk();
+    this.#checkIsOk();
     return this.#browser!.wsEndpoint();
   }
 
   async newPage(url?: string): Promise<Page> {
-    this.checkIsOk();
+    this.#checkIsOk();
     const page = await this.#browser!.newPage(url);
     this.#attachPage(page);
     // Astral navigates to `url` inside its own `newPage`, before this wrapper
@@ -283,7 +283,7 @@ export class ShellIntegration {
   }
 
   async state(): Promise<AppStateSerialized | undefined> {
-    this.checkIsOk();
+    this.#checkIsOk();
     const page = this.page();
     return await page.evaluate(() => {
       return globalThis.app ? globalThis.app.serialize() : undefined;
@@ -322,7 +322,7 @@ export class ShellIntegration {
       );
     }
 
-    this.checkIsOk();
+    this.#checkIsOk();
 
     // The last state the poll below managed to read. A failure reports it, so
     // the message says what the wait actually saw rather than only that it
@@ -370,7 +370,7 @@ export class ShellIntegration {
       identity?: Identity;
     },
   ): Promise<void> {
-    this.checkIsOk();
+    this.#checkIsOk();
 
     // Strip the proceeding "/" in the url path
     const path = appViewToUrlPath(view).substring(1);
@@ -468,7 +468,7 @@ export class ShellIntegration {
     await this.#browser?.close();
   };
 
-  private checkIsOk() {
+  #checkIsOk() {
     if (!this.#page) throw new Error("Page not initialized.");
   }
 

@@ -70,6 +70,9 @@ const config: Config = {
       "$EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS": Deno.env.get(
         "EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS",
       ),
+      "$EXPERIMENTAL_READER_SCHEMA_PRECEDENCE": Deno.env.get(
+        "EXPERIMENTAL_READER_SCHEMA_PRECEDENCE",
+      ),
       "globalThis.__cfCompileCacheRuntimeVersion":
         COMPILE_CACHE_RUNTIME_VERSION,
     },

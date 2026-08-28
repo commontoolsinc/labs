@@ -25,6 +25,10 @@ import {
   getContentAddressedSchemasConfig,
   setContentAddressedSchemasConfig,
 } from "./schema-doc-config.ts";
+import {
+  getReaderSchemaPrecedenceConfig,
+  setReaderSchemaPrecedenceConfig,
+} from "./reader-schema-precedence-config.ts";
 import { StaticCache } from "@commonfabric/static";
 import {
   type AsyncLocalStore,
@@ -281,6 +285,19 @@ export interface ExperimentalOptions {
    * `docs/plans/lazy-cell-materialization.md`.
    */
   lazyMaterialization?: boolean | undefined;
+
+  /**
+   * Resolve the schema at a link crossing by reader precedence
+   * (`combineSchemaForLink`): the reader's schema stands as-is, and the
+   * link's schema is adopted only where the reader is agnostic (true or
+   * empty; a false reader stays false). Server-authoritative for deployed
+   * CLIs (`EXPERIMENTAL_FLAG_AUTHORITY`); the browser shell bakes it at
+   * build time. On by default; an explicit `false` is a temporary rollback
+   * override, ambient with last-construction-wins semantics. Dispose does
+   * NOT reset it: serving runtimes are per-space and idle-disposed, so a
+   * teardown reset would lift a live rollback from under the survivors.
+   */
+  readerSchemaPrecedence?: boolean | undefined;
 
   /**
    * Server-execution v2 (docs/specs/server-side-execution/): one flag, two
@@ -1323,6 +1340,11 @@ export class Runtime {
     );
     this.experimental.contentAddressedSchemas =
       getContentAddressedSchemasConfig();
+    setReaderSchemaPrecedenceConfig(
+      this.experimental.readerSchemaPrecedence,
+    );
+    this.experimental.readerSchemaPrecedence =
+      getReaderSchemaPrecedenceConfig();
     // The sync schema table stays negotiated under this flag: the two
     // mechanisms dedupe the same link-schema positions and compose (the
     // table encoder skips reference-only positions), and stored links
@@ -1807,10 +1829,13 @@ export class Runtime {
    * `await using` / `[Symbol.asyncDispose]` always takes the closing path.
    *
    * Either way this resets the PROCESS-GLOBAL experimental config to defaults
-   * (`resetModernCellRepConfig` and friends). Under a non-default flag that is
-   * visible to a second runtime still running against the same store, which is
-   * exactly the caller this option serves — so set the flags per process, not
-   * per runtime, if two of them must agree.
+   * (`resetModernCellRepConfig` and friends) — except
+   * `readerSchemaPrecedence`, which dispose leaves standing: serving
+   * runtimes are per-space and idle-disposed, so a teardown reset would
+   * lift a live rollback from under the survivors. Under a non-default
+   * flag that is visible to a second runtime still running against the
+   * same store, which is exactly the caller this option serves — so set
+   * the flags per process, not per runtime, if two of them must agree.
    */
   async dispose(
     { closeStorage = true }: { closeStorage?: boolean } = {},
@@ -1944,6 +1969,11 @@ export class Runtime {
       // catch), so a REJECTING async teardown cannot leak the enabler.
       resetModernCellRepConfig();
       resetCommitPreconditionsConfig();
+      // readerSchemaPrecedence deliberately does NOT reset here: a server
+      // runs one serving runtime per space and disposes idle ones while
+      // the rest live, so a dispose-time reset would lift a rollback out
+      // from under them. The ambient changes only when a construction
+      // sets it (last construction wins).
     }
   }
 

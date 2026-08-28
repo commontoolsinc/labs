@@ -344,29 +344,65 @@ type PointerCycleTracker = CompoundCycleTracker<
 
 ### 5.3.4 Schema Narrowing
 
-When following a reference from entity A to entity B, the schema applicable to B
-is the **intersection** of:
+When following a reference from entity A to entity B, the schema applicable to
+B is decided by precedence, not by intersection. The schema context from A's
+traversal (what A expects B to look like) governs whenever it says anything at
+all; the schema embedded in the reference itself (what the reference declares
+B to contain) fills in only where the traversal is agnostic.
 
-1. The schema context from A's traversal (what A expects B to look like).
-2. Any schema embedded in the reference itself (what the reference declares B to
-   contain).
+`combineSchemaForLink` implements the rule, gated by the
+`readerSchemaPrecedence` experimental flag (default on; off restores the
+strict pseudo-intersection at reference crossings — see
+`docs/development/EXPERIMENTAL_OPTIONS.md`).
+[`link-schema-precedence.md`](../link-schema-precedence.md) is the
+consolidated specification of the rule, the `default` exception, and the
+flow-control crossing seam. A reference routinely describes
+more of its target than the traversal asked for, and none of that description
+— extra properties, extra `required` entries, a different shape — reaches the
+combined schema:
 
-`combineSchema` computes a best-effort pseudo-intersection. False schemas and
+- A `false` traversal schema stays `false`: the traversal selected nothing,
+  and the reference cannot widen that.
+- A true or empty traversal schema (`true`, `{}`, or a flag-only wrapper such
+  as `{asCell: [...]}`) adopts the reference's schema, keeping its own
+  `asCell` wrapper. This is what types a schemaless read by the references it
+  crosses, and what lets a reference's `false` schema attenuate an open read
+  to nothing.
+- Any other traversal schema is used as it stands and the reference's schema
+  is ignored — a `false` reference schema blocks only traversals that brought
+  no shape of their own.
+
+`default` is the one keyword that crosses the precedence line: a value's
+default is inherited from the last crossed schema that declares one. Each
+hop's stored schema describes that hop's target, so the nearest declaration
+wins — a reference's top-level `default` overrides earlier references' and
+the traversal's own, and where no reference declares one the traversal's
+stands.
+
+A discarded reference schema's `ifc` does not ride onto the result: flow
+control never travels through combined schemas. A transaction is instead
+marked cfc-relevant at each crossing whose stored schema declares `ifc`,
+independently of which side won the combination, and enforcement reads
+stored cfc metadata and label views rather than combined schemas.
+[`link-schema-precedence.md`](../link-schema-precedence.md) specifies that
+crossing seam: the marking sites, the `cid:` closure registry warming, and
+the broken-declaration rule.
+
+The sibling `combineSchema` is the strict best-effort pseudo-intersection,
+used to merge a compound schema's base keywords with its own `anyOf`/`oneOf`
+branches, where both parts were authored as one constraint. Object schemas
+combine shared properties recursively, retain properties allowed by only one
+side, and preserve every property required by either input. False schemas and
 disjoint types produce a false schema, while an unconstrained schema yields to
-the other input. Integer is treated as a subtype of number. For combinations
-that do not receive more specific handling, the parent schema takes precedence
-while retaining relevant flags from the link schema.
+the other input, and integer is treated as a subtype of number. Array schemas
+combine their `items` schemas recursively; their positional `prefixItems`
+extend to the longer input prefix, each position combining the two positional
+schemas and falling back to that input's `items` schema after its prefix ends,
+with `prefixItems` omitted when the merged prefix is empty.
 
-Object schemas combine shared properties recursively, retain properties allowed
-by only one side, and preserve every property required by either input. Array
-schemas combine their `items` schemas recursively. Their positional
-`prefixItems` extend to the longer input prefix: each position combines the two
-positional schemas, falling back to that input's `items` schema after its prefix
-ends. The result omits `prefixItems` when the merged prefix is empty.
-
-The operation is intentionally not a complete JSON Schema intersection and does
-not resolve `$ref` values. See `combineSchema` and `narrowSchema` in
-`packages/runner/src/traverse.ts` for the implementation.
+Neither operation is a complete JSON Schema intersection, and neither resolves
+`$ref` values. See `combineSchemaForLink`, `combineSchema`, and `narrowSchema`
+in `packages/runner/src/traverse.ts` for the implementation.
 
 ### 5.3.5 Schema Tracker
 
@@ -485,6 +521,11 @@ The server deduplicates at the session layer:
 - one entity appears once in the session cache even if multiple watches include
   it
 - `seenSeq` acts as the primary watermark
+- on a reconnect the client's declared `holdings` (04-protocol.md section
+  4.1.2) replace the server's per-session delivery memory as the diff base:
+  the server's memory of what it sent is a claim about the client the client
+  itself can contradict, and a held-at-seq statement from the replica is the
+  exact vocabulary the diff compares
 - optional `sentEntities` bookkeeping MAY still be used for watch-local
   optimizations like `excludeSent`
 

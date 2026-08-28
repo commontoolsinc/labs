@@ -27,7 +27,11 @@ const TEST_AUDIENCE = "did:key:z6Mk-toolshed-acl-harness-audience";
 /** Speaks the wire protocol in-process — no socket, no server process. */
 export class LoopbackSessionFactory implements SessionFactory {
   readonly supportsAclBootstrap = true;
-  constructor(private readonly server: MemoryV2Server.Server) {}
+  readonly #server: MemoryV2Server.Server;
+
+  constructor(server: MemoryV2Server.Server) {
+    this.#server = server;
+  }
 
   async create(
     space: MemorySpace,
@@ -35,7 +39,7 @@ export class LoopbackSessionFactory implements SessionFactory {
     requested: MemoryV2Client.MountOptions = {},
   ) {
     const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.server),
+      transport: MemoryV2Client.loopback(this.#server),
     });
     const session = await client.mount(
       space,

@@ -106,6 +106,12 @@ export function isGuestError(e: object): e is GuestError {
 }
 
 export const BRIDGE_PROTOCOL = "common-fabric-bridge";
+
+/**
+ * Exact encoding revision. An additive operation stays within this revision
+ * only when a current guest negotiates it through describe() before sending
+ * it, so an older host can reject the unsupported capability without hanging.
+ */
 export const BRIDGE_VERSION = 2;
 
 export type BridgeError = {
@@ -133,6 +139,7 @@ export type BridgeOperation =
   | "describe"
   | "disconnect"
   | "pull"
+  | "initialize"
   | "set"
   | "push"
   | "resolve"
@@ -165,6 +172,8 @@ export type BridgeCellIdentity = {
 export type BridgeResolvedCell = {
   handle: string;
   hasValue: true;
+  /** Operations the host authorizes on this resolved capability. */
+  operations?: string[];
   identity?: BridgeCellIdentity;
   value?: FabricValue;
 };
@@ -231,6 +240,9 @@ export function isBridgeRequest(message: unknown): message is BridgeRequest {
     case "set":
     case "resolve":
       return hasCellTarget(message) && hasCellPath(message);
+    case "initialize":
+      return hasCellTarget(message) && hasCellPath(message) &&
+        Object.hasOwn(message, "value") && message.value !== undefined;
     case "push":
       return hasCellTarget(message) && hasCellPath(message) &&
         Array.isArray(message.values);

@@ -31,13 +31,17 @@ class ReconnectableOperationTransport implements Transport {
   lastOperationAfter: { epoch: number; version: number } | undefined;
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
-  #connection: ReturnType<Server["connect"]> | null = null;
+  #connectionCache: ReturnType<Server["connect"]> | null = null;
   #reconnected = defer<void>();
   #secondWatchSet = defer<void>();
   #reconnectGate: ReturnType<typeof defer<void>> | undefined;
   #failNextEffect = false;
 
-  constructor(private readonly server: Server) {}
+  readonly #server: Server;
+
+  constructor(server: Server) {
+    this.#server = server;
+  }
 
   get reconnected(): Promise<void> {
     return this.#reconnected.promise;
@@ -56,13 +60,13 @@ class ReconnectableOperationTransport implements Transport {
       }>;
     };
     if (
-      this.#connection === null && this.connectionCount > 0 &&
+      this.#connectionCache === null && this.connectionCount > 0 &&
       this.#reconnectGate !== undefined
     ) {
       await this.#reconnectGate.promise;
       this.#reconnectGate = undefined;
     }
-    await this.connection().receive(payload);
+    await this.#connection().receive(payload);
     if (message.type === "session.watch.set") {
       this.watchSetCount++;
       this.lastOperationAfter = message.watches?.find((watch) =>
@@ -86,8 +90,8 @@ class ReconnectableOperationTransport implements Transport {
   }
 
   disconnect(): void {
-    this.#connection?.close();
-    this.#connection = null;
+    this.#connectionCache?.close();
+    this.#connectionCache = null;
     this.#closeReceiver(new Error("disconnect"));
   }
 
@@ -103,11 +107,11 @@ class ReconnectableOperationTransport implements Transport {
     this.#failNextEffect = true;
   }
 
-  private connection(): ReturnType<Server["connect"]> {
-    if (this.#connection === null) {
+  #connection(): ReturnType<Server["connect"]> {
+    if (this.#connectionCache === null) {
       this.connectionCount++;
       if (this.connectionCount >= 2) this.#reconnected.resolve();
-      this.#connection = this.server.connect((message) => {
+      this.#connectionCache = this.#server.connect((message) => {
         if (this.#failNextEffect && message.type === "session/effect") {
           this.#failNextEffect = false;
           throw new Error("synthetic operation effect failure");
@@ -115,7 +119,7 @@ class ReconnectableOperationTransport implements Transport {
         this.#receiver(encodeMemoryBoundary(message));
       });
     }
-    return this.#connection;
+    return this.#connectionCache;
   }
 }
 

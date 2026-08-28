@@ -13,7 +13,7 @@ import {
   FabricBridgeHost,
 } from "../src/bridge.ts";
 import { connectFabric } from "../src/guest.ts";
-import { GUEST_PORT_HANDOFF } from "../src/ipc.ts";
+import { type BridgeResolvedCell, GUEST_PORT_HANDOFF } from "../src/ipc.ts";
 
 function handOff(port: MessagePort): void {
   globalThis.dispatchEvent(
@@ -39,6 +39,7 @@ function nextTask(): Promise<void> {
 function cellResource(
   get: () => FabricValue | undefined,
   options: {
+    initialize?: (value: FabricValue) => FabricValue | Promise<FabricValue>;
     set?: (value: FabricValue) => void | Promise<void>;
     sink?: (listener: (value: FabricValue | undefined) => void) => BridgeCancel;
     push?: (...values: FabricValue[]) => void | Promise<void>;
@@ -49,6 +50,7 @@ function cellResource(
     cell: {
       get,
       pull: get,
+      ...(options.initialize && { initialize: options.initialize }),
       ...(options.set && { set: options.set }),
       ...(options.sink && { sink: options.sink }),
       ...(options.push && { push: options.push }),
@@ -65,6 +67,10 @@ describe("Fabric iframe bridge", () => {
         ...cellResource(
           () => count,
           {
+            initialize: (value) => {
+              if (count === undefined) count = value as number;
+              return count;
+            },
             set: (value) => {
               count = value as number;
               for (const listener of listeners) listener(count);
@@ -92,7 +98,7 @@ describe("Fabric iframe bridge", () => {
         resources: [{
           name: "count",
           kind: "cell",
-          operations: ["get", "pull", "set", "sink"],
+          operations: ["get", "initialize", "pull", "set", "sink"],
           methods: [],
           schema: { type: "number", description: "Visible counter" },
         }],
@@ -100,6 +106,7 @@ describe("Fabric iframe bridge", () => {
 
       const remote = client.cell<number>("count");
       await expect(remote.pull()).resolves.toBe(1);
+      await expect(remote.initialize(99)).resolves.toBe(1);
       const updates: number[] = [];
       const unsubscribe = remote.sink((value) => {
         if (value !== undefined) updates.push(value);
@@ -268,6 +275,99 @@ describe("Fabric iframe bridge", () => {
       expect(records[order[1]!]!.title).toBe("A moved");
       expect(seen).toEqual(["A", "A moved"]);
       cancel();
+    } finally {
+      client.disconnect();
+      host.disconnect();
+    }
+  });
+
+  it("does not expand a resolved handle after its operations are minted", async () => {
+    let initialized = false;
+    const leaf: BridgeCell = {
+      get: () => 1,
+      pull: () => 1,
+    };
+    const root: BridgeCell = {
+      get: () => 1,
+      pull: () => 1,
+      resolve: () => leaf,
+    };
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(
+      createFabricBridge({ reader: { kind: "cell", cell: root } }),
+      channel.port1,
+    );
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    try {
+      const descriptor = await client.request("resolve", {
+        resource: "reader",
+        path: [],
+      }) as BridgeResolvedCell;
+      Object.defineProperty(leaf, "initialize", {
+        configurable: true,
+        enumerable: true,
+        value: () => {
+          initialized = true;
+          return 9;
+        },
+      });
+      Object.defineProperty(leaf, "key", {
+        configurable: true,
+        enumerable: true,
+        value: () => ({
+          get: () => "secret",
+          pull: () => "secret",
+        }),
+      });
+      const forged = client.resolvedCell<number>({
+        ...descriptor,
+        operations: [...(descriptor.operations ?? []), "initialize"],
+      });
+
+      await expect(forged.initialize(9)).rejects.toMatchObject({
+        code: "method-not-supported",
+        resource: "reader",
+      });
+      expect(initialized).toBe(false);
+      await expect(forged.key("secret").pull()).rejects.toMatchObject({
+        code: "method-not-supported",
+        resource: "reader",
+      });
+    } finally {
+      client.disconnect();
+      host.disconnect();
+    }
+  });
+
+  it("rejects an operation removed after its resolved authority is minted", async () => {
+    const leaf: BridgeCell = {
+      get: () => 1,
+      initialize: () => 1,
+      pull: () => 1,
+    };
+    const root: BridgeCell = {
+      get: () => 1,
+      pull: () => 1,
+      resolve: () => leaf,
+    };
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(
+      createFabricBridge({ reader: { kind: "cell", cell: root } }),
+      channel.port1,
+    );
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    try {
+      const resolved = await client.cell<number>("reader").resolve();
+      delete leaf.initialize;
+
+      await expect(resolved.initialize(0)).rejects.toMatchObject({
+        code: "method-not-supported",
+        resource: "reader",
+      });
     } finally {
       client.disconnect();
       host.disconnect();

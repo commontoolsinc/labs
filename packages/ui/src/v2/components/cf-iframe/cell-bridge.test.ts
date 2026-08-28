@@ -69,6 +69,9 @@ describe("cf-iframe cell bridge", () => {
           ) {
             return Promise.resolve({ value: 2 });
           }
+          if (request.type === RequestType.CellInitialize) {
+            return Promise.resolve({ value: 1 });
+          }
           return Promise.resolve({});
         },
         subscribe: () => Promise.resolve(),
@@ -86,6 +89,7 @@ describe("cf-iframe cell bridge", () => {
     expect(count.kind).toBe("cell");
     expect(count.description).toBe("Shared counter");
     await expect(count.cell!.pull()).resolves.toBe(2);
+    await expect(count.cell!.initialize!(0)).resolves.toBe(1);
     await count.cell!.set!(3);
     expect(requests).toEqual([{
       type: RequestType.CellPull,
@@ -94,6 +98,14 @@ describe("cf-iframe cell bridge", () => {
         path: ["count"],
         schema: { type: "number", description: "Shared counter" },
       },
+    }, {
+      type: RequestType.CellInitialize,
+      cell: {
+        ...ref,
+        path: ["count"],
+        schema: { type: "number", description: "Shared counter" },
+      },
+      value: 0,
     }, {
       type: RequestType.CellSet,
       cell: {

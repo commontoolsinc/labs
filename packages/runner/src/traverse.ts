@@ -56,6 +56,8 @@ import {
   onSchemaRegistryClear,
   registerSchemaDocument,
 } from "./schema-registry.ts";
+import { getReaderSchemaPrecedenceConfig } from "./reader-schema-precedence-config.ts";
+import { markIfcBearingLinkCrossing } from "./schema-ifc.ts";
 import type {
   CellScope,
   JSONObject,
@@ -158,6 +160,9 @@ export type IMemorySpaceValueAttestation = IMemorySpaceAttestation & {
 const INTERN_CACHE_MAX = 10_000;
 const _mergeSchemaOptionCache = new Map<string, JSONSchema>();
 const _combineSchemaCache = new Map<string, JSONSchema>();
+// combineSchemaForLink's minting arms only (a carried `default` builds a new
+// schema); its pass-through arms return existing references uncached.
+const _combineLinkSchemaCache = new Map<string, JSONSchema>();
 const _mergeSchemaFlagsCache = new Map<string, JSONSchema>();
 const _mergeAnyOfBranchCache = new Map<string, JSONSchema | null>();
 
@@ -293,8 +298,9 @@ function schemaMemoLinkKey(link: NormalizedFullLink | undefined): string {
  * Memoized `narrowSchema()` + `combineOptionalSchema()` for link hops
  * (`followPointer` / `isLinkedDocumentCovered`).
  *
- * Without this, every pointer follow mints a fresh selector (and often a
- * fresh combined schema), so each downstream structural hash — the
+ * Without this, every pointer follow mints a fresh selector (and, for a
+ * hop whose reader schema is agnostic, a fresh flag-merged schema), so
+ * each downstream structural hash — the
  * schemaTracker `MapSet` add, coverage checks, `traverseWithSchema` memo
  * keys — re-walks a brand-new object. Memoizing returns one canonical
  * `internPathSelector`-interned (deep-frozen) selector per repeat hop, so
@@ -324,9 +330,15 @@ function narrowAndCombineSelectorForLink(
   targetPath: readonly string[],
   linkSchema: JSONSchema | undefined,
 ): SchemaPathSelector {
+  // The combine mode leads the key: the cached selector embeds
+  // `combineOptionalSchema`'s output, which the `readerSchemaPrecedence`
+  // flag changes, and the cache outlives a mid-process toggle (tests
+  // exercise both arms).
   const key = isMemoizableSchemaInput(selector.schema) &&
       isMemoizableSchemaInput(linkSchema)
-    ? `${pathKey(selector.path)}|${pathKey(docPath)}|${pathKey(targetPath)}|${
+    ? `${getReaderSchemaPrecedenceConfig() ? "p" : "s"}|${
+      pathKey(selector.path)
+    }|${pathKey(docPath)}|${pathKey(targetPath)}|${
       hashSchema(selector.schema)
     }|${hashSchema(linkSchema)}`
     : undefined;
@@ -1849,9 +1861,9 @@ export abstract class BaseObjectTraverser {
         // We can follow all the links, since we don't need to track cells
         const [valueDoc, _] = this.getDocAtPath(redirDoc, [], DEFAULT_SELECTOR);
         this.tx.read(valueDoc.address, READ_FOR_SCHEDULING);
-        // Same entry gate as followPointer: a link schema whose document
-        // closure this space does not hold selects nothing (the delivery
-        // guarantee) — the loader's tracked reads re-run this on arrival.
+        // Same entry gate as followPointer: an unresolvable ref names a
+        // corrupt or malformed declaration (the loader logs it), and such
+        // a declaration selects nothing.
         const linkSchemaCollected = link?.schema === undefined ||
           loadExternalSchemaDocs(
             this.tx,
@@ -2002,9 +2014,9 @@ export abstract class BaseObjectTraverser {
    * `internPathSelector()`. A schema-less (`undefined`) selector is treated as
    * `false` ("reject").
    *
-   * The memo matters: `combineOptionalSchema()` mints a new un-interned schema
-   * on every call, so without it each repeated coverage check would
-   * re-deep-freeze, re-clone, and re-hash that schema — measurably (~2x) slower
+   * The memo matters: `narrowAndCombineSelectorForLink()` mints a fresh
+   * selector per call, so without it each repeated coverage check would
+   * re-deep-freeze, re-clone, and re-hash its schema — measurably (~2x) slower
    * on link-heavy refreshes. The cache key joins the path with a single schema
    * hash rather than hashing the whole selector: hashing the path array (vs a
    * string join) is pure added cost on the hot cache-hit path.
@@ -2352,26 +2364,32 @@ function followPointer(
     // The link.path doesn't include the initial "value", so prepend it
     path: ["value", ...link.path as string[]],
   };
-  // A link schema carrying external refs needs its schema documents loaded
-  // before the narrowing below consults it — and a schema whose closure
-  // this space does not hold must not select data here (the delivery
-  // guarantee): narrow with a false schema instead, which selects nothing.
-  // The loader's reads are tracked, so the documents' arrival re-runs this.
-  if (link.schema !== undefined) {
-    const collected = loadExternalSchemaDocs(
-      tx,
+  // A link schema carrying external refs needs its schema documents
+  // registered before the narrowing below consults them; they travel with
+  // the referring document, so a well-formed declaration resolves from the
+  // local store.
+  const collected = link.schema === undefined || loadExternalSchemaDocs(
+    tx,
+    doc.address,
+    link.schema,
+    context,
+  );
+  // The crossing's own marking runs after the registration above, so a
+  // declaration the registry had not yet registered from the local store
+  // is resolvable when the predicate walks it; it marks off whatever the
+  // schema legibly declares.
+  markIfcBearingLinkCrossing(tx, doc.address.space, link.schema, link.id);
+  if (!collected) {
+    // Closure documents travel WITH the documents that refer to them, so
+    // an unresolvable ref names a corrupt or deliberately malformed
+    // declaration. Such a declaration selects nothing: narrow with a
+    // false schema, which a reader with a shape of its own ignores.
+    logger.warn("traverse", () => [
+      "Link schema names cid: documents this space does not hold — a " +
+      "corrupt or malformed declaration; it selects nothing:",
       doc.address,
-      link.schema,
-      context,
-    );
-    if (!collected) {
-      logger.warn("traverse", () => [
-        "Link schema references documents this space does not hold; " +
-        "selecting nothing until they arrive:",
-        doc.address,
-      ]);
-      link = { ...link, schema: false };
-    }
+    ]);
+    link = { ...link, schema: false };
   }
   const schemaScope = schemaScopeForSelector(selector);
   if (!canFollowScopedLink(schemaScope, link.scope)) {
@@ -2867,12 +2885,8 @@ export function combineOptionalSchema(
     return linkSchema;
   } else if (linkSchema === undefined) {
     return parentSchema;
-  } else if (ContextualFlowControl.isTrueSchema(parentSchema)) {
-    return combineSchema(parentSchema, linkSchema);
-  } else if (ContextualFlowControl.isTrueSchema(linkSchema)) {
-    return parentSchema;
   }
-  return combineSchema(parentSchema, linkSchema);
+  return combineSchemaForLink(parentSchema, linkSchema);
 }
 
 // Merge the asCell values from flagSchema into schema.
@@ -2900,8 +2914,12 @@ function _mergeSchemaFlagsUncached(
  * Generate a schema that represents the pseudo-intersection of two other
  * schemas.
  *
- * This lets us combine the schema that we entered this doc with a schema
- * encountered within a link in the doc.
+ * This is the strict combination: everything either schema demands stays
+ * demanded (e.g. `required` entries from both sides are unioned). It fits
+ * merging a compound schema's base keywords with one of its own
+ * anyOf/oneOf branches, where both parts were authored together as one
+ * constraint. For combining a traversal's schema with a schema found on a
+ * link it follows, use {@link combineSchemaForLink} instead.
  *
  * We could handle this with an allOf (implemented with state snapshots),
  * and be JSONSchema compliant, but that leaves an unclear strategy for
@@ -2930,6 +2948,108 @@ export function combineSchema(
   if (cached !== undefined) return cached;
   const result = _combineSchemaUncached(parentSchema, linkSchema);
   return internSet(_combineSchemaCache, key, result);
+}
+
+/**
+ * The schema a traversal continues with after crossing a link: the reader's
+ * schema (`parentSchema`) takes precedence over the schema stored on the
+ * link (`linkSchema`).
+ *
+ * Unlike {@link combineSchema}, nothing is intersected. A link routinely
+ * describes more of its target than the reader asked for, and that
+ * description must not widen what the read loads, demand more than the
+ * reader requires, or reshape what the reader declared. The link schema is
+ * consulted only where the reader is agnostic:
+ *
+ * - A `false` reader schema stays `false`: the reader selected nothing,
+ *   and the link cannot widen that.
+ * - A true or empty reader schema (`true`, `{}`, or flag-only wrappers
+ *   such as `{asCell: [...]}`) adopts the link schema, keeping the
+ *   reader's own `asCell` wrapper. This is what types a schemaless or
+ *   handle-only read by the link it crossed — a piece typed by its own
+ *   registration — and what lets a link's `false` schema attenuate an
+ *   open read to nothing.
+ * - Any other reader schema is used as it stands, and the link schema is
+ *   ignored — including a `false` link schema, which blocks only readers
+ *   that brought no shape of their own.
+ *
+ * `default` is the one keyword that crosses the precedence line: a value's
+ * default is inherited from the LAST crossed schema that declares one. Each
+ * hop's stored schema describes that hop's target, so the nearest
+ * declaration is the aptest — a link's top-level `default` overrides
+ * earlier links' and the reader's own, and where no link declares one the
+ * reader's (including a default-only reader's, which is otherwise a true
+ * schema) stands.
+ *
+ * A discarded link schema's `ifc` does NOT ride onto the result. Write
+ * policy consumes declared schemas verbatim (`recordSchemaWritePolicyInput`),
+ * so transplanting flow-control clauses between schemas corrupts the
+ * declaration they came from — an `ownerPrincipal` clause grafted onto a
+ * reader's schema reads as a different declaration than the one the owner
+ * authored. The marking is independent of the combination instead: the
+ * read entry point gates off the resolved link schemas directly
+ * (`validateAndTransform`'s `schemaHasIfc` checks), the traversal marks
+ * every link hop it crosses whose stored schema carries `ifc`
+ * (`followPointer`), and enforcement reads stored cfc metadata and label
+ * views rather than combined schemas.
+ */
+export function combineSchemaForLink(
+  parentSchema: JSONSchema,
+  linkSchema: JSONSchema,
+): JSONSchema {
+  // The `readerSchemaPrecedence` experimental flag
+  // (docs/development/EXPERIMENTAL_OPTIONS.md) is the rollback override:
+  // off restores the strict pseudo-intersection at link crossings. The
+  // flag is server-authoritative — deployed clients adopt the server's
+  // published posture, so both sides resolve hops under one rule.
+  if (!getReaderSchemaPrecedenceConfig()) {
+    return combineSchema(parentSchema, linkSchema);
+  }
+  if (ContextualFlowControl.isFalseSchema(parentSchema)) {
+    return parentSchema;
+  }
+  // A value's `default` is inherited from the last crossed schema that
+  // declares one: each hop's stored schema describes that hop's target, so
+  // the nearest declaration is the aptest, overriding earlier links' and
+  // the reader's own. Hops compose left to right, so carrying the link's
+  // default over the accumulated schema at each hop yields exactly that.
+  if (ContextualFlowControl.isTrueSchema(parentSchema)) {
+    const adopted = mergeSchemaFlags(parentSchema, linkSchema);
+    // A default-only reader is a true schema; its declared default is
+    // still the latest one when the adopted link schema carries none.
+    const parentDefault = isObjectOrArray(parentSchema)
+      ? parentSchema.default
+      : undefined;
+    if (
+      parentDefault === undefined ||
+      (isObjectOrArray(adopted) && adopted.default !== undefined) ||
+      ContextualFlowControl.isFalseSchema(adopted)
+    ) {
+      return adopted;
+    }
+    const key = internSchemaPairAsKey(parentSchema, linkSchema);
+    const cached = _combineLinkSchemaCache.get(key);
+    if (cached !== undefined) return cached;
+    return internSet(
+      _combineLinkSchemaCache,
+      key,
+      schemaWithProperties(adopted, { default: parentDefault }),
+    );
+  }
+  const linkDefault = isObjectOrArray(linkSchema)
+    ? linkSchema.default
+    : undefined;
+  if (linkDefault === undefined) {
+    return parentSchema;
+  }
+  const key = internSchemaPairAsKey(parentSchema, linkSchema);
+  const cached = _combineLinkSchemaCache.get(key);
+  if (cached !== undefined) return cached;
+  return internSet(
+    _combineLinkSchemaCache,
+    key,
+    schemaWithProperties(parentSchema, { default: linkDefault }),
+  );
 }
 
 function schemaTypesAreDisjoint(
@@ -4607,13 +4727,24 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // let createdDataURI = false;
       // const maybeLink = parseLink(item, arrayLink);
       if (isSigilLink(item)) {
+        // The element hop is a crossing whichever machinery dereferences
+        // it — including the prepared fast path below, which bypasses
+        // followPointer — so the seam runs here.
+        const elementLink = parseLink(item, curDoc.address);
+        if (elementLink !== undefined) {
+          markIfcBearingLinkCrossing(
+            this.tx,
+            curDoc.address.space,
+            elementLink.schema,
+            elementLink.id,
+          );
+        }
         if (this.traverseCells) {
           const alreadyTracked = this.isLinkedDocumentCovered(
             curDoc,
             curSelector,
           );
-          const link = parseLink(item, curDoc.address);
-          if (alreadyTracked && link?.id !== doc.address.id) {
+          if (alreadyTracked && elementLink?.id !== doc.address.id) {
             this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
             arrayObj[index] = null;
             return;
@@ -4749,10 +4880,9 @@ export class SchemaObjectTraverser<V extends FabricValue>
         const isLink = isSigilLink(curDoc.value);
         if (isLink) this.tx.read(curDoc.address, READ_FOR_SCHEDULING);
         const cellLink = isLink
-          ? getNextCellLink(curDoc, curSelector.schema!)
+          ? getNextCellLink(this.tx, curDoc, curSelector.schema!)
           : getNormalizedLink(curDoc.address, curSelector.schema);
-        const val = this.objectCreator.createObject(cellLink, undefined);
-        arrayObj[index] = val;
+        arrayObj[index] = this.objectCreator.createObject(cellLink, undefined);
       } else {
         // We want those links to point directly at the linked cells, instead
         // of using our path (e.g. ["items", "0"]), so don't pass in a
@@ -4984,7 +5114,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     // This means we don't follow any redirects
     const asCellValues = ContextualFlowControl.getAsCellValues(schema);
     if (ContextualFlowControl.getAsCellKind(asCellValues.at(0)) === "opaque") {
-      const cellLink = getNextCellLink(doc, schema);
+      const cellLink = getNextCellLink(this.tx, doc, schema);
       return { ok: this.objectCreator.createObject(cellLink, undefined) };
     }
 
@@ -5066,7 +5196,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       if (isSigilLink(redirDoc.value)) {
         this.tx.read(redirDoc.address, READ_FOR_SCHEDULING);
       }
-      const cellLink = getNextCellLink(redirDoc, combinedSchema);
+      const cellLink = getNextCellLink(this.tx, redirDoc, combinedSchema);
       logger.debug(
         "traverse",
         () => ["Next cell link:", {
@@ -5489,6 +5619,7 @@ function _mergeAnyOfBranchSchemasUncached(
  *   information that we should use for the cell.
  */
 function getNextCellLink(
+  tx: IExtendedStorageTransaction,
   doc: IMemorySpaceValueAttestation,
   schema: JSONSchema,
 ): NormalizedFullLink {
@@ -5497,10 +5628,20 @@ function getNextCellLink(
   // that location, so we effectively follow one more link if available.
   const lastLink = parseLink(doc.value, doc.address);
   if (lastLink !== undefined) {
-    // The link may not have the asCell flags, so pull that from itemSchema
+    // This extra hop bypasses followPointer, so it carries the crossing
+    // seam itself.
+    markIfcBearingLinkCrossing(
+      tx,
+      doc.address.space,
+      lastLink.schema,
+      lastLink.id,
+    );
+    // The link may not have the asCell flags, so pull that from itemSchema.
+    // Reader precedence, like every other crossing: the handle must not
+    // carry the link's wider schema past the reader's.
     return {
       ...lastLink,
-      schema: combineSchema(schema, lastLink.schema ?? true),
+      schema: combineSchemaForLink(schema, lastLink.schema ?? true),
     };
   }
   // It's fine if we don't have a pointer. In that case, just use the doc

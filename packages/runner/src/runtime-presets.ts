@@ -129,6 +129,7 @@ import type {
   SinkMaxConfidentiality,
   TrustSnapshot,
 } from "./cfc/mod.ts";
+import { parseFlagValue } from "./experimental-posture.ts";
 import { STANDARD_PROMPT_CAVEAT_POLICY } from "./cfc/mod.ts";
 import type { CommitBackpressurePolicy } from "./scheduler/backpressure.ts";
 import type { PatternCoverageCollector } from "./pattern-coverage.ts";
@@ -205,6 +206,11 @@ const _unclassifiedOptions: never[] = [] as MissingOptionKeys[];
 // Gate 2: the canonical experimental-flag env mapping.
 //
 
+// The parse itself lives in the slim `experimental-posture.ts` module, so
+// the browser shell's build-define reading imports no more of this module's
+// dependency graph; it is re-exported here beside the mapping it parses.
+export { parseFlagValue };
+
 /** Reads one environment variable; pass `Deno.env.get` in Deno contexts. */
 export type EnvReader = (name: string) => string | undefined;
 
@@ -236,6 +242,9 @@ export const EXPERIMENTAL_ENV_VARS = {
   plainResultReceipts: "EXPERIMENTAL_PLAIN_RESULT_RECEIPTS",
   computedCellIds: "EXPERIMENTAL_COMPUTED_CELL_IDS",
   lazyMaterialization: "EXPERIMENTAL_LAZY_MATERIALIZATION",
+  // Reader precedence at link crossings is default-on; env-reachable so a
+  // process can opt out with an explicit "false" while the flag exists.
+  readerSchemaPrecedence: "EXPERIMENTAL_READER_SCHEMA_PRECEDENCE",
   // Server-execution v2 (docs/specs/server-side-execution/): the
   // deployed-topology presets below resolve an unset flag to
   // `SERVER_EXECUTION_DEFAULT_ENABLED`, so such a process always runs a
@@ -243,16 +252,6 @@ export const EXPERIMENTAL_ENV_VARS = {
   // either way, and an explicit value always wins over the constant.
   serverExecution: "EXPERIMENTAL_SERVER_EXECUTION",
 } as const satisfies Record<keyof ExperimentalOptions, string | null>;
-
-/** The canonical parse: exactly `"true"` / `"false"`, anything else ignored. */
-function parseFlagValue(raw: string, source: string): boolean | undefined {
-  if (raw === "true" || raw === "false") return raw === "true";
-  console.warn(
-    `[runtime-presets] Ignoring ${source}="${raw}" — ` +
-      `expected "true" or "false" (unset = default).`,
-  );
-  return undefined;
-}
 
 /**
  * Read `ExperimentalOptions` from the environment via the canonical mapping.
@@ -310,9 +309,10 @@ export type ExperimentalFlagAuthority = "server" | "client";
  * Every flag is server-authoritative today. That is the safe direction rather
  * than a coincidence — each one is visible in what gets written (the link and
  * entity-id encodings, receipt contents, schema references), in what the
- * server admits (commit preconditions, per-class admission), or in which side
- * runs the compute at all. `"client"` is here for the flag that gates a
- * purely local experiment; nothing qualifies yet.
+ * server admits (commit preconditions, per-class admission), in which side
+ * runs the compute at all, or in which documents a subscription ships.
+ * `"client"` is here for the flag that gates a purely local experiment;
+ * nothing qualifies yet.
  */
 export const EXPERIMENTAL_FLAG_AUTHORITY = {
   // Link serialization: the two encodings are a hard mismatch, which the
@@ -337,6 +337,12 @@ export const EXPERIMENTAL_FLAG_AUTHORITY = {
   lazyMaterialization: "server",
   // The whole point of the flag is which side computes what is stored.
   serverExecution: "server",
+  // The server's traversal decides what a subscription loads, tracks, and
+  // ships; a client resolving hops under the other combine rule expects
+  // documents the server did not send (or ignores ones it did). The arms
+  // read the same stored data, so adoption is safe either way — but both
+  // sides must run the same one.
+  readerSchemaPrecedence: "server",
 } as const satisfies Record<
   keyof ExperimentalOptions,
   ExperimentalFlagAuthority
@@ -366,12 +372,32 @@ export const ADOPT_SERVER_FLAGS_ENV = "CF_ADOPT_SERVER_FLAGS";
  * coerced. Neither is grounds for refusing to run — a client that cannot read
  * the posture keeps its built-in defaults, which is what it did before the
  * server published anything at all.
+ *
+ * The one asymmetry is `readerSchemaPrecedence`: a pre-flag document shape —
+ * a posture record without the field, or a meta document with no
+ * `experimental` field at all — reads as the legacy declared `false`, since
+ * such a server necessarily runs the strict combine (the in-function comment
+ * draws the full line, `experimental: null` included).
  */
 export function parseServerExperimentalOptions(
   declared: unknown,
 ): ExperimentalOptions {
-  if (declared === null || typeof declared !== "object") return {};
-  const opts: ExperimentalOptions = {};
+  // Field presence decides the legacy arm. A server that published a
+  // posture RECORD but declares no readerSchemaPrecedence in it predates
+  // the flag and necessarily runs the strict combine: that absence adopts
+  // as the legacy `false` until the compatibility window closes. A meta
+  // document with NO experimental field at all — handed in as `undefined`
+  // — is the same pre-flag document shape and takes the legacy arm too.
+  // An explicit `experimental: null` is different: toolshed publishes
+  // null until a Runtime exists, so the server is not pre-flag, it just
+  // has no posture yet — that adopts nothing, as does a malformed
+  // declaration. A client that could not reach the server never calls
+  // this at all and keeps its built-in defaults.
+  if (declared === null) return {};
+  if (typeof declared !== "object") {
+    return declared === undefined ? { readerSchemaPrecedence: false } : {};
+  }
+  const opts: ExperimentalOptions = { readerSchemaPrecedence: false };
   for (const key of Object.keys(EXPERIMENTAL_FLAG_AUTHORITY)) {
     const value = (declared as Record<string, unknown>)[key];
     if (value === undefined) continue;
@@ -396,8 +422,11 @@ export function parseServerExperimentalOptions(
  *    it would leave neither mechanism working;
  * 2. otherwise a `"server"` flag takes the published value;
  * 3. otherwise the flag stays unset and the built-in default governs, which
- *    is exactly what an old server, an unreachable one, or a `"client"` flag
- *    leaves behind.
+ *    is exactly what an unreachable server or a `"client"` flag leaves
+ *    behind. An OLD server is not that case for `readerSchemaPrecedence`:
+ *    {@link parseServerExperimentalOptions} reads a pre-flag posture's
+ *    silence on it as the legacy declared `false`, so rule 2 adopts it as a
+ *    published value.
  */
 export function adoptServerExperimentalOptions(
   server: ExperimentalOptions,
@@ -454,13 +483,18 @@ export interface DeployedClientExperimentalParams {
  * Call it in place of {@link experimentalOptionsFromEnv} wherever a runtime
  * talks to a deployed API — `cf`, the pieces controller, the agents host, the
  * admin CLIs. The presets that run against LOCAL emulated storage have no
- * server to ask and keep reading the environment alone.
+ * server to ask and keep reading the environment alone; the browser shell
+ * reads its build-time defines and never fetches a posture.
  *
- * Every way of not getting an answer — an old server with no posture on its
- * meta document, an unreachable one, a body that will not parse — resolves to
- * the environment alone. Absence of a declaration is not a declaration, and
- * the caller is about to fail loudly on its real work if the server is
- * genuinely down; failing here first would only obscure that.
+ * An unreachable server or a body that will not parse resolves to the
+ * environment alone — the caller is about to fail loudly on its real work if
+ * the server is genuinely down, and failing here first would only obscure
+ * that. A server that ANSWERS with a pre-flag document — a meta document
+ * without an `experimental` field, or a posture record silent on
+ * `readerSchemaPrecedence` — is different: it necessarily runs the strict
+ * combine, so that flag adopts as the legacy declared `false`
+ * ({@link parseServerExperimentalOptions}). For every other flag, absence of
+ * a declaration is not a declaration.
  *
  * An aborted `signal` is the one case that does NOT resolve: the caller
  * asked to stop, so this throws the abort reason rather than handing back a

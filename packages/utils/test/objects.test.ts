@@ -297,11 +297,11 @@ describe("objects", () => {
       expect(constructorOfObject(value)).toBe(Map);
     });
 
-    // The case the function exists for. An own `constructor` is ordinary data
-    // that happens to share a name with the thing that decides a class, and a
-    // caller dispatching on the answer would otherwise let a plain record pass
-    // for whatever it named.
     describe("an own `constructor` property does not answer", () => {
+      // The case the function exists for. An own `constructor` is ordinary data
+      // that happens to share a name with the thing that decides a class, and a
+      // caller dispatching on the answer would otherwise let a plain record pass
+      // for whatever it named.
       for (
         const [label, forged] of [
           ["`Error`", Error],
