@@ -1,4 +1,10 @@
-import { assertEquals, assertRejects, assertThrows } from "@std/assert";
+import {
+  assertEquals,
+  assertRejects,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
+import { fromFileUrl } from "@std/path";
 import {
   createHarnessChatEventEnvelope,
   createHarnessChatSessionStatus,
@@ -10,21 +16,27 @@ import {
   type HarnessChatRequestEnvelope,
   type HarnessChatTurnRecord,
 } from "../src/contracts/interactive-chat.ts";
+import { PATTERN_AUTHOR_SUBAGENT_SKILL_NAMES } from "../src/contracts/subagent.ts";
 import {
   HarnessInteractiveChatService,
   type HarnessInteractivePromptLoopFactory,
 } from "../src/interactive-chat-service.ts";
 import { HarnessControlError } from "../src/control-errors.ts";
-import type {
-  CreateHarnessPromptLoopOptions,
-  HarnessPromptLoopResult,
-  RunHarnessTranscriptOptions,
+import {
+  CfHarnessPromptLoop,
+  type CreateHarnessPromptLoopOptions,
+  type HarnessPromptLoopResult,
+  type RunHarnessTranscriptOptions,
 } from "../src/prompt-loop.ts";
 import type { HarnessChatSessionStore } from "../src/session-store.ts";
 import {
   type HarnessTranscriptMessage,
   inspectHarnessTranscriptPairing,
 } from "../src/contracts/transcript.ts";
+import {
+  chatViewOfRequest,
+  responsesBodyFromChatFixture,
+} from "./support/responses-fixture.ts";
 import {
   FAULT_KINDS,
   FAULT_POINTS,
@@ -1827,4 +1839,157 @@ Deno.test("a normalization whose write fails leaves the record on the stored his
     started.ok === false ? started.error.code : "",
     "incomplete_transcript",
   );
+});
+
+Deno.test("an interactive turn scans its configured skills root into the run and a pattern-author child inherits it", async () => {
+  const skillsRoot = fromFileUrl(new URL("../../../skills", import.meta.url));
+  const loopOptions: CreateHarnessPromptLoopOptions[] = [];
+  const requestBodies: unknown[] = [];
+  const service = new HarnessInteractiveChatService({
+    basePromptLoopOptions: {
+      apiKey: "test-key",
+      skillsRoot,
+      runId: "run-interactive-skills",
+      cfcEnforcementMode: "observe",
+      fetchFn: (_input, init) => {
+        const body = JSON.parse(String(init?.body));
+        requestBodies.push(body);
+        const payload = requestBodies.length === 1
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [{
+                  id: "call-delegate-pattern-author",
+                  type: "function",
+                  function: {
+                    name: "delegate_task",
+                    arguments: JSON.stringify({
+                      goal: "Author a counter pattern.",
+                      profile: "pattern-author",
+                    }),
+                  },
+                }],
+              },
+            }],
+          }
+          : requestBodies.length === 2
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "",
+                tool_calls: [{
+                  id: "call-read-skill-resource",
+                  type: "function",
+                  function: {
+                    name: "read_skill_resource",
+                    arguments: JSON.stringify({
+                      skill: "lit-component",
+                      path: "references/component-patterns.md",
+                    }),
+                  },
+                }],
+              },
+            }],
+          }
+          : requestBodies.length === 3
+          ? {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "Read the component patterns reference.",
+              },
+            }],
+          }
+          : {
+            choices: [{
+              index: 0,
+              message: {
+                role: "assistant",
+                content: "Pattern authored.",
+              },
+            }],
+          };
+        return Promise.resolve(
+          new Response(
+            JSON.stringify(
+              responsesBodyFromChatFixture(payload, init?.body ?? null),
+            ),
+            { status: 200 },
+          ),
+        );
+      },
+    },
+    createPromptLoop: (options) => {
+      loopOptions.push(options);
+      return new CfHarnessPromptLoop(options);
+    },
+    now: nextIsoNow(),
+    randomUUID: () => "generated-id",
+  });
+
+  const startSession = await service.handleRequest({
+    type: HARNESS_CHAT_REQUEST_TYPE,
+    protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+    requestId: "req-1",
+    method: "start_session",
+    params: {
+      sessionId: "session-1",
+      workspace: { hostPath: "/workspace" },
+      model: "gpt-test",
+      policy: {
+        type: "cf-harness.chat-policy",
+        toolMode: "workspace-write",
+        allowedToolIds: ["delegate_task"],
+        allowedSubagentProfiles: ["pattern-author"],
+      },
+    },
+  });
+  assertEquals(startSession.ok, true);
+
+  const startTurn = await service.handleRequest({
+    type: HARNESS_CHAT_REQUEST_TYPE,
+    protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+    requestId: "req-2",
+    method: "start_turn",
+    params: {
+      sessionId: "session-1",
+      turnId: "turn-1",
+      input: { text: "Author a counter pattern." },
+    },
+  });
+  assertEquals(startTurn.ok, true);
+  await service.waitForTurn("session-1", "turn-1");
+
+  const registry = loopOptions[0].engine?.getRunState().skillRegistry;
+  assertEquals(registry?.skillsRoot, skillsRoot);
+  for (const name of PATTERN_AUTHOR_SUBAGENT_SKILL_NAMES) {
+    assertEquals(
+      registry?.skills.some((skill) => skill.name === name),
+      true,
+      `run-start registry names ${name}`,
+    );
+  }
+
+  // The child's first request carries the profile's preloaded skills, which
+  // it can only have inherited from the parent run's registry.
+  assertStringIncludes(
+    chatViewOfRequest(requestBodies[1]).messages[1].content,
+    '<skill_context name="pattern-dev"',
+  );
+  const readMessage = chatViewOfRequest(requestBodies[2]).messages.at(-1);
+  assertEquals(readMessage?.role, "tool");
+  const readOutput = JSON.parse(readMessage?.content ?? "") as {
+    status: string;
+    digestMatchesRegistry?: boolean;
+    content?: string;
+  };
+  assertEquals(readOutput.status, "read");
+  assertEquals(readOutput.digestMatchesRegistry, true);
+  assertEquals((readOutput.content ?? "").length > 0, true);
 });
