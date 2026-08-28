@@ -105,8 +105,8 @@ Three rules decide whether such a read reaches the value:
 **Name the property.** Naming it is what reliably overrides a declared field
 schema. An operand of `entries?: any[]` can lower to `items: true`, and a `true`
 schema defers to the schema the cell itself carries (`traverse.ts`,
-`combineOptionalSchema`: a true parent falls through to
-`combineSchema(parentSchema, linkSchema)`) — with `piece: unknown` still inside
+`combineSchemaForLink`: a true reader schema adopts the link's schema) — with
+`piece: unknown` still inside
 it, so `entries[0].piece` is undefined. `entries?: { piece: any }[]` names the
 property, and the piece materializes: the same read of
 `entries[0].piece.nickname` yields the module's real nickname under the second

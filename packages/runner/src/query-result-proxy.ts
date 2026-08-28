@@ -274,7 +274,17 @@ function createViewProxy<T>(
   // Resolve path and follow links to actual value. The resolution hands back
   // the dereference traces it recorded, so the label view below costs no read
   // of the transaction's CFC state.
-  const resolved = resolveLinkTracingDereferences(runtime, viewTx, link);
+  // A proxy access is a content read: the crossing seam marks labeled hops
+  // (schema-less readers carry no schema of their own to catch them).
+  const resolved = resolveLinkTracingDereferences(
+    runtime,
+    viewTx,
+    link,
+    "value",
+    {
+      markIfcCrossings: true,
+    },
+  );
 
   // Everything from here down — the label view, the value read, the stream and
   // primitive dispatch, the proxy — is a function of this transaction's

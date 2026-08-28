@@ -262,10 +262,10 @@ id, and the validation reads through the query's manager, so a
 historical query (`atSeq`) requires the closure to exist and verify at
 that same sequence. A reference that fails this validation fails the
 query loudly (a QueryError), never silently as an empty match — the
-lenient selects-nothing gate is for LINK schemas inside delivered
-documents, where a hole is a wait-for-arrival state; an unresolvable
-selector reference is a client bug, and matching nothing would mask
-it. Past validation, resolution flows through the shared traversal
+lenient logged-and-selects-nothing rule is for LINK schemas inside
+delivered documents, where a broken declaration is corruption to note
+and read past; an unresolvable selector reference is the query's own
+naming, a client bug, and matching nothing would mask it. Past validation, resolution flows through the shared traversal
 with the documents already registered. What remains for clients is
 the sending half: a client may send a reference only for a schema
 whose documents it knows are persisted in that space — one it wrote,
@@ -276,8 +276,8 @@ as today.
 
 Reading a reference must produce the schema synchronously wherever schemas
 are consumed today (traversal, narrowing, CFC label derivation). The
-mechanism follows the module-loading precedent (session-lifetime strong
-index, async storage-backed fallback):
+mechanism is a session-lifetime strong index warmed synchronously from the
+local store at the reading seams:
 
 - A **session schema registry**: a strong `Map` from tagged hash to interned
   schema. Populated from both directions: decomposition on the write path
@@ -296,11 +296,14 @@ index, async storage-backed fallback):
   fragment), resolving through the registry. An unresolvable ref keeps the
   existing fail-closed contract: `resolveSchema` returns `false`, and
   traversal treats the value as unmatched.
-- A cold miss (a reference read before its documents arrived) is recovered
-  by an async storage-backed load of the reference closure, after which
-  resolution retries. The sync paths never block: they fail closed and the
-  load triggers re-evaluation, the same shape as any other not-yet-synced
-  document dependency.
+- A cold miss is a REGISTRY miss, never a store miss: closure documents
+  travel with their referrers, so the store backs every reference of a
+  readable document, and the reading seams warm the per-process registry
+  from the store synchronously before walking a schema
+  (`ensureExternalSchemaClosure`; `loadExternalSchemaDocs` in traversal
+  contexts). A reference the store cannot back is corruption or a
+  deliberately malformed declaration — logged, with the declaration
+  selecting nothing (the fail-closed contract above).
 
 Verification happens at registration: a schema document's value is
 re-hashed and must match its id (the `loadSchemaDocument` precedent);
@@ -344,12 +347,15 @@ content verifies against its id, transitively through the closure. A
 commit that references what it does not supply, or supplies content
 that does not hash to its id, is rejected. The commit API therefore
 cannot create a missing or forged closure for any reference this
-collection sees; readers treat a broken closure that exists anyway as
-the patch shape below, out-of-band tampering, or a store that predates
-this validation, and fail loudly on it. The
-writer's obligation to install the closure atomically with the referrer
-remains normative — the boundary is its enforcement, not a substitute
-for it.
+collection sees; a broken closure that exists anyway — the patch shape
+below, out-of-band tampering, or a store that predates this validation
+— is a corrupt or deliberately malformed declaration. A reader logs it
+and ignores it: the declaration selects nothing, which voids only a
+reader that adopted it, while a reader with a schema of its own reads
+on under reader precedence
+([link-schema-precedence.md](link-schema-precedence.md)). The writer's
+obligation to install the closure atomically with the referrer remains
+normative — the boundary is its enforcement, not a substitute for it.
 
 One patch shape escapes the collection: an edit INSIDE an existing
 link's schema (replacing a `$ref` string at a sub-path) introduces a
@@ -365,10 +371,10 @@ transitive closure is not fully registered resolves as a miss, exactly
 like an unregistered document. Resolving it partially would let derived
 results — an IFC scan, a path narrowing — be memoized over the hole,
 keyed by the root's stable identity, and the missing child's later
-arrival would never invalidate them. Completeness is monotonic, so the
-gate opens by itself once the closure lands; caches that memoize derived
-results by schema identity populate only for schemas whose external
-closure is complete.
+registration would never invalidate them. Completeness is monotonic, so
+the gate opens by itself once the closure registers; caches that memoize
+derived results by schema identity populate only for schemas whose
+external closure is complete.
 
 ### Space boundaries
 
@@ -396,8 +402,12 @@ exactly two guarantees, both about delivery rather than about values:
   closure against the delivering space's own store, and joins the whole
   closure to the delivered set and watch set. A missing or forged
   closure document fails the query loudly: the write-side guarantee
-  installed closures with their referrers, so a hole is a consistency
-  bug to surface, never to repair around. Scans are document-granular
+  installed closures with their referrers, so a hole here is a
+  consistency bug the boundary surfaces. A reader that meets one
+  anyway — tampering behind the boundary, a store predating the
+  validation — logs it and reads on with the declaration selecting
+  nothing, per the reader rule above; the boundary's loudness is what
+  keeps that leniency safe. Scans are document-granular
   (delivery is), so no selected path can shadow another, and their
   results are cached per document version, so in steady state a version
   is scanned once however many sessions or refreshes deliver it.
@@ -527,7 +537,8 @@ any document-level caching.
 
 - **Link identity**: `areNormalizedLinksSame` and `addressKey` exclude
   schema today and continue to.
-- **Schema semantics**: combination (pseudo-intersection), narrowing,
+- **Schema semantics**: combination (reader precedence at link hops,
+  pseudo-intersection for compound branches), narrowing,
   `additionalProperties` handling, and the CFC `ifc` vocabulary operate on
   the dereferenced schema and behave identically. `ifc` annotations are
   ordinary schema content, covered by the hash.
@@ -601,10 +612,12 @@ playbook:
   session, not once per frame.
 - Fail closed: a forged schema document (content not matching id) never
   enters the registry; a query with an unresolvable selector reference
-  errors loudly; a link with an unresolvable reference reads as unmatched.
+  errors loudly; a link with an unresolvable reference is logged and its
+  declaration selects nothing — voiding a reader that adopted it, while a
+  reader with a schema of its own reads on under reader precedence.
 - Round trip: a piece written with reference links, resumed in a fresh
   session, resolves schemas through sync alone; the same with a cold
-  registry exercises the async recovery path.
+  registry exercises the store-backed registry warming.
 - Walker agreement: the existing mechanical test extended to
   reference-only schema positions.
 
