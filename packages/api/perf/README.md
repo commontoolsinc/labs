@@ -13,6 +13,9 @@ when rolling it.
 The profiling projects use TypeScript's own module resolver rather than Deno's.
 `tsconfig.base.json` therefore maps the workspace imports reached from the API
 source. Add a path there when the API begins importing another workspace entry.
+Its `target` is `ESNext`, matching the `esnext` lib the workspace's `deno.jsonc`
+names. A narrower target rejects source that type-checks everywhere else in the
+tree.
 
 ## Quick Metrics
 
