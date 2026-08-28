@@ -1,4 +1,4 @@
-// Why: the runnability backstop (`PiecesController.healDefaultRootByRollForward`)
+// Why: the runnability backstop (`PiecesController.#healDefaultRootByRollForward`)
 // must distinguish the ONE CFC-rejection class it can safely recover from — an
 // old document that cannot migrate onto a now-required field that carries no
 // default (the estuary `favorites` case) — from every OTHER CFC rejection

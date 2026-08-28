@@ -60,6 +60,7 @@ export class CommonIframeSandboxElement extends LitElement {
 
   /** The capability session belonging to the currently loaded guest. */
   #guestHost: FabricBridgeHost | undefined;
+
   /**
    * The frame this element renders, held so the guest can be reached through
    * it. TypeScript-private rather than `#`, as `readyWindow` and

@@ -150,7 +150,7 @@ function filterOutCell(
  * preserved input or unclassified document data onto a now-required field that
  * carries no default. Generated result fields are not in this class: pattern
  * setup materializes them. This is ONE of the two repair-failure classes the
- * runnability backstop ({@link PiecesController.healDefaultRootByRollForward})
+ * runnability backstop (`PiecesController.#healDefaultRootByRollForward`)
  * acts on — the other is a refused stored argument
  * ({@link isStoredArgumentSchemaRefusal}); every other failure stays
  * fail-closed.
