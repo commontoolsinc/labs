@@ -72,9 +72,21 @@ export type SerializedEventTarget = {
    * theirs as `CellHandle<boolean> | boolean`.
    */
   checked?: FabricValue;
+
+  /** Whether the element reports itself selected. */
   selected?: boolean;
-  selectedIndex?: number;
+
+  /**
+   * Which option a select is on -- or, where the element chose to expose
+   * something else, what it chose. `cf-picker` declares its `selectedIndex` as
+   * a `CellHandle<number>`, which arrives here as the link that reaches it.
+   */
+  selectedIndex?: FabricValue;
+
+  /** Every selected option's value, for a multiple select. */
   selectedOptions?: { value: string }[];
+
+  /** The element's `data-` attributes. */
   dataset?: Record<string, string>;
 };
 
@@ -112,34 +124,65 @@ export function isDomEventMessage(value: unknown): value is DomEventMessage {
 }
 
 /**
- * Allowlisted event properties that can be serialized.
- * These are the standard properties we copy from events.
+ * The type the DOM defines for a property, as a tag a read can be checked
+ * against. `"string?"` is `string | null`, which is what an input event's
+ * `data` is when there is no inserted text.
  */
-export const ALLOWLISTED_EVENT_PROPERTIES = [
-  "type",
-  "key",
-  "code",
-  "repeat",
-  "altKey",
-  "ctrlKey",
-  "metaKey",
-  "shiftKey",
-  "inputType",
-  "data",
-  "button",
-  "buttons",
-] as const;
+type DomScalar = "string" | "string?" | "boolean" | "number";
+
+/** Whether a value is what its {@link DomScalar} tag says it is. */
+function matchesDomScalar(value: unknown, tag: DomScalar): boolean {
+  switch (tag) {
+    case "string":
+      return typeof value === "string";
+    case "string?":
+      return (value === null) || (typeof value === "string");
+    case "boolean":
+      return typeof value === "boolean";
+    case "number":
+      return typeof value === "number";
+  }
+}
 
 /**
- * Allowlisted event target properties that can be serialized.
+ * Event properties that cross, each with the type the DOM defines for it. Every
+ * one is a `FabricValue`, which is what lets them cross as they are.
  */
-export const ALLOWLISTED_TARGET_PROPERTIES = [
-  "name",
+export const ALLOWLISTED_EVENT_PROPERTIES = {
+  type: "string",
+  key: "string",
+  code: "string",
+  repeat: "boolean",
+  altKey: "boolean",
+  ctrlKey: "boolean",
+  metaKey: "boolean",
+  shiftKey: "boolean",
+  inputType: "string",
+  data: "string?",
+  button: "number",
+  buttons: "number",
+} as const satisfies Partial<Record<keyof SerializedEvent, DomScalar>>;
+
+/**
+ * Target properties whose type the DOM fixes, which therefore cross the way the
+ * event's own properties do.
+ */
+export const ALLOWLISTED_TARGET_SCALARS = {
+  name: "string",
+  selected: "boolean",
+} as const satisfies Partial<Record<keyof SerializedEventTarget, DomScalar>>;
+
+/**
+ * Target properties a custom element chooses the value of. Each is declared
+ * `CellHandle<T> | T` by at least one component -- `value` by eight of them,
+ * `checked` by two, `selectedIndex` by `cf-picker` -- so what crosses is
+ * whatever {@link toSerializableValue} makes of what is found.
+ */
+export const ALLOWLISTED_TARGET_EXPOSED = [
   "value",
   "checked",
-  "selected",
   "selectedIndex",
-] as const;
+] as const satisfies readonly (keyof SerializedEventTarget)[];
 
 /**
  * Serialize a DOM event for IPC transmission.
@@ -154,13 +197,15 @@ export function serializeEvent(event: Event): SerializedEvent {
     serialized.provenance = provenance;
   }
 
-  // Copy allowlisted event properties
-  for (const prop of ALLOWLISTED_EVENT_PROPERTIES) {
-    const value = (event as unknown as Record<string, unknown>)[prop];
-    if (value !== undefined) {
-      (serialized as unknown as Record<string, unknown>)[prop] = value;
-    }
-  }
+  // Each checked against the type the DOM defines for it, which is what makes
+  // the write the field type `SerializedEvent` declares rather than a claim
+  // about it. A property of some other type is one no producer here dispatches,
+  // and is left out rather than carried into a field that cannot hold it.
+  copyDomScalars(
+    event as unknown as Record<string, unknown>,
+    serialized as unknown as Record<string, unknown>,
+    ALLOWLISTED_EVENT_PROPERTIES,
+  );
 
   // Copy target properties
   const target = event.target;
@@ -168,16 +213,19 @@ export function serializeEvent(event: Event): SerializedEvent {
     const serializedTarget: SerializedEventTarget = {};
     let hasTargetProps = false;
 
-    for (const prop of ALLOWLISTED_TARGET_PROPERTIES) {
-      const value = (target as unknown as Record<string, unknown>)[prop];
+    const from = target as unknown as Record<string, unknown>;
+    const to = serializedTarget as unknown as Record<string, unknown>;
+
+    // The ones the DOM fixes the type of, copied as the event's own are.
+    hasTargetProps = copyDomScalars(from, to, ALLOWLISTED_TARGET_SCALARS) ||
+      hasTargetProps;
+
+    // The ones a custom element chooses the value of, so that what crosses is
+    // whatever the conversion makes of what it finds.
+    for (const prop of ALLOWLISTED_TARGET_EXPOSED) {
+      const value = from[prop];
       if (value !== undefined) {
-        // Converted like `detail` below, and for the same reason: a `value` is
-        // a whole value a component chose to expose, not necessarily a string.
-        // A `cf-input`, a `cf-tabs` and a `cf-calendar` each declare theirs as
-        // `CellHandle<string> | string`, and a `CellHandle` reaches the pattern
-        // as the sigil link its `toJSON()` produces, which the worker resolves.
-        (serializedTarget as unknown as Record<string, unknown>)[prop] =
-          toSerializableValue(value);
+        to[prop] = toSerializableValue(value);
         hasTargetProps = true;
       }
     }
@@ -223,6 +271,32 @@ export function serializeEvent(event: Event): SerializedEvent {
   }
 
   return serialized;
+}
+
+/**
+ * Copies each named property that is present and is what its tag says, and
+ * reports whether any was copied.
+ *
+ * The two casts are the loop's rather than a claim about the values: what is
+ * read is a property of whatever object was dispatched, and what is written has
+ * been checked before it goes.
+ */
+function copyDomScalars(
+  from: Record<string, unknown>,
+  to: Record<string, unknown>,
+  tags: Readonly<Record<string, DomScalar>>,
+): boolean {
+  let copied = false;
+
+  for (const [prop, tag] of Object.entries(tags)) {
+    const value = from[prop];
+    if ((value !== undefined) && matchesDomScalar(value, tag)) {
+      to[prop] = value;
+      copied = true;
+    }
+  }
+
+  return copied;
 }
 
 /**

@@ -22,7 +22,8 @@ export type { VDomRendererOptions } from "./renderer.ts";
 
 export {
   ALLOWLISTED_EVENT_PROPERTIES,
-  ALLOWLISTED_TARGET_PROPERTIES,
+  ALLOWLISTED_TARGET_EXPOSED,
+  ALLOWLISTED_TARGET_SCALARS,
   isDomEventMessage,
   serializeEvent,
 } from "./events.ts";

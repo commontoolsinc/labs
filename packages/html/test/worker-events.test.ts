@@ -381,6 +381,33 @@ Deno.test("events - serializeEvent", async (t) => {
     assertEquals((serialized.detail as { count: number }).count, 42);
   });
 
+  await t.step("omits an event property whose type is not the DOM's", () => {
+    // `SerializedEvent` declares `key` a `string`. What is read is a property of
+    // whatever object was dispatched, so the copy checks rather than trusts, and
+    // a value of some other type is left out instead of landing in a field that
+    // cannot hold it.
+    const event = new MockEvent("keydown") as unknown as Event;
+    (event as unknown as Record<string, unknown>).key = { not: "a string" };
+
+    const serialized = serializeEvent(event);
+
+    assertEquals("key" in serialized, false);
+  });
+
+  await t.step("omits a target property whose type is not the DOM's", () => {
+    // The same for a target's `name`, which every component declaring one
+    // declares a `string`. Its `value` is a different question, the element
+    // choosing what that is, so it crosses regardless.
+    const event = new MockEvent("input", {
+      target: { name: 42, value: "kept" },
+    }) as unknown as Event;
+
+    const serialized = serializeEvent(event);
+
+    assertEquals(serialized.target?.name, undefined);
+    assertEquals(serialized.target?.value, "kept");
+  });
+
   await t.step("omits undefined properties", () => {
     const event = new MockEvent("click") as unknown as Event;
     const serialized = serializeEvent(event);
