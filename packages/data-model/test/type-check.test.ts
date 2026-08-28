@@ -1,8 +1,12 @@
 /**
- * Membership in the `FabricValue` type asked all the way down, plus the
- * plain-record question asked as membership and as a narrowing. The
- * single-level form of the same question is in `native-conversion.test.ts`,
- * beside the conversion whose result it describes.
+ * Membership in the `FabricValue` type, asked one level deep and asked all the
+ * way down, plus the plain-record question asked as membership and as a
+ * narrowing. The one-level question also has a throwing form, whose group is
+ * in `native-conversion.test.ts` because the reasons it gives are about
+ * conversion.
+ *
+ * The two depths ask the same question at different scopes, and the cases are
+ * arranged around where that difference tells.
  *
  * Frozen-ness is deliberately not part of membership, and a group here says so
  * outright -- the two are easy to conflate when nearly every `FabricValue`
@@ -17,6 +21,7 @@ import {
   isFabricPlainObject,
   isValidFabricPlainObject,
   isValidFabricValue,
+  isValidFabricValueLayer,
 } from "@/type-check.ts";
 import type { FabricValue } from "@/interface.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
@@ -24,6 +29,244 @@ import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 
 describe("type-check", () => {
+  describe("isValidFabricValueLayer()", () => {
+    describe("given a scalar `FabricValue`", () => {
+      it("returns `true` for a boolean", () => {
+        expect(isValidFabricValueLayer(true)).toBe(true);
+        expect(isValidFabricValueLayer(false)).toBe(true);
+      });
+
+      it("returns `true` for a string", () => {
+        expect(isValidFabricValueLayer("")).toBe(true);
+        expect(isValidFabricValueLayer("hello")).toBe(true);
+        expect(isValidFabricValueLayer("with\nnewlines")).toBe(true);
+      });
+
+      it("returns `true` for a finite number (including `-0`)", () => {
+        expect(isValidFabricValueLayer(0)).toBe(true);
+        expect(isValidFabricValueLayer(-0)).toBe(true);
+        expect(isValidFabricValueLayer(1)).toBe(true);
+        expect(isValidFabricValueLayer(-1)).toBe(true);
+        expect(isValidFabricValueLayer(3.14159)).toBe(true);
+        expect(isValidFabricValueLayer(Number.MAX_VALUE)).toBe(true);
+        expect(isValidFabricValueLayer(Number.MIN_VALUE)).toBe(true);
+      });
+
+      it("returns `true` for a non-finite number", () => {
+        expect(isValidFabricValueLayer(NaN)).toBe(true);
+        expect(isValidFabricValueLayer(Infinity)).toBe(true);
+        expect(isValidFabricValueLayer(-Infinity)).toBe(true);
+      });
+
+      it("returns `true` for a `bigint`", () => {
+        expect(isValidFabricValueLayer(0n)).toBe(true);
+        expect(isValidFabricValueLayer(123n)).toBe(true);
+      });
+
+      it("returns `true` for an interned symbol", () => {
+        expect(isValidFabricValueLayer(Symbol.for("k"))).toBe(true);
+      });
+
+      it("returns `true` for `null`", () => {
+        expect(isValidFabricValueLayer(null)).toBe(true);
+      });
+
+      it("returns `true` for `undefined`", () => {
+        expect(isValidFabricValueLayer(undefined)).toBe(true);
+      });
+    });
+
+    describe("given a container or `FabricSpecialObject`", () => {
+      it("returns `true` for a plain object", () => {
+        expect(isValidFabricValueLayer({})).toBe(true);
+        expect(isValidFabricValueLayer({ a: 1 })).toBe(true);
+        expect(isValidFabricValueLayer({ nested: { object: true } })).toBe(
+          true,
+        );
+      });
+
+      it("returns `true` for a dense array", () => {
+        expect(isValidFabricValueLayer([])).toBe(true);
+        expect(isValidFabricValueLayer([1, 2, 3])).toBe(true);
+        expect(isValidFabricValueLayer([{ a: 1 }, { b: 2 }])).toBe(true);
+        expect(isValidFabricValueLayer([null, "test", null])).toBe(true);
+      });
+
+      it("returns `true` for an array with `undefined` elements", () => {
+        expect(isValidFabricValueLayer([1, undefined, 3])).toBe(true);
+        expect(isValidFabricValueLayer([undefined])).toBe(true);
+      });
+
+      it("returns `true` for a sparse array (with holes)", () => {
+        const sparse: unknown[] = [];
+        sparse[0] = 1;
+        sparse[2] = 3; // hole at index 1
+        expect(isValidFabricValueLayer(sparse)).toBe(true);
+      });
+
+      it("returns `true` for a `FabricInstance`", () => {
+        const fe = FabricError.fromNativeError(new Error("test"));
+        expect(isValidFabricValueLayer(fe)).toBe(true);
+      });
+
+      it("returns `true` for a `FabricPrimitive`", () => {
+        const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+        expect(isValidFabricValueLayer(bytes)).toBe(true);
+      });
+
+      it("returns `true` without recursively validating contents", () => {
+        // `isValidFabricValueLayer()` is a shallow, per-se check; deep
+        // validation is `isValidFabricConvertibleValue()`'s job. A nested
+        // value that is not a `FabricValue` does not make the container itself
+        // fail the per-se check.
+        expect(isValidFabricValueLayer({ a: Symbol("x") })).toBe(true);
+        expect(isValidFabricValueLayer([Symbol("x")])).toBe(true);
+      });
+    });
+
+    describe("given a plain object with unrepresentable keys", () => {
+      // A symbol is a valid `FabricValue` but not a valid property *name*:
+      // `FabricPlainObject` is keyed by `string`. A non-enumerable string key
+      // has no representation either, being dropped by every encoding.
+
+      it("returns `false` for a symbol-keyed property", () => {
+        const obj = { a: 1 } as Record<string | symbol, unknown>;
+        obj[Symbol("s")] = 2;
+        expect(isValidFabricValueLayer(obj)).toBe(false);
+      });
+
+      it("returns `false` for a registered symbol-keyed property", () => {
+        const obj = { a: 1 } as Record<string | symbol, unknown>;
+        obj[Symbol.for("s")] = 2;
+        expect(isValidFabricValueLayer(obj)).toBe(false);
+      });
+
+      it("returns `false` for a non-enumerable string-keyed property", () => {
+        const obj = { a: 1 };
+        Object.defineProperty(obj, "hidden", { value: 2, enumerable: false });
+        expect(isValidFabricValueLayer(obj)).toBe(false);
+      });
+
+      it("returns `false` for an accessor-backed property", () => {
+        // An accessor is live code, not inert data: a read executes it and can
+        // return a different value every time. Freezing does not change that.
+        const obj = { a: 1 };
+        Object.defineProperty(obj, "g", { get: () => 2, enumerable: true });
+        expect(isValidFabricValueLayer(obj)).toBe(false);
+        expect(isValidFabricValueLayer(Object.freeze(obj))).toBe(false);
+      });
+
+      it("returns `false` for a setter-only property", () => {
+        const obj = { a: 1 };
+        Object.defineProperty(obj, "s", { set: () => {}, enumerable: true });
+        expect(isValidFabricValueLayer(obj)).toBe(false);
+      });
+
+      it("returns `true` for an object whose keys are all enumerable strings", () => {
+        expect(isValidFabricValueLayer({ a: 1, b: 2 })).toBe(true);
+        expect(isValidFabricValueLayer({})).toBe(true);
+      });
+
+      it("returns `false` for a property name this runtime reserves", () => {
+        // Not a statement about the data model: such an object is perfectly
+        // inert, and a runtime that does not route assignment through a
+        // prototype chain would carry it fine. It is refused because in this
+        // host the name cannot survive the copy that every boundary performs.
+        expect(isValidFabricValueLayer({ ["__proto__"]: 1, other: 2 })).toBe(
+          false,
+        );
+        expect(isValidFabricValueLayer({ ["constructor"]: 1 })).toBe(false);
+      });
+
+      it("returns `false` for a null-prototype object", () => {
+        // A record has one shape here: `Object.prototype`-rooted. A prototype
+        // is not part of what a value says as data and would not survive
+        // encoding, so a value carrying a different one is refused rather than
+        // accepted and quietly changed.
+        const obj = Object.create(null) as Record<string, unknown>;
+        obj.a = 1;
+        expect(isValidFabricValueLayer(obj)).toBe(false);
+        expect(isValidFabricValueLayer(Object.create(null))).toBe(false);
+      });
+    });
+
+    describe("given a non-`FabricValue`", () => {
+      it("returns `false` for an array with extra non-numeric properties", () => {
+        const arr = [1, 2, 3] as unknown[] & { foo?: string };
+        arr.foo = "bar";
+        expect(isValidFabricValueLayer(arr)).toBe(false);
+      });
+
+      it("returns `false` for an array with a symbol-keyed property", () => {
+        const arr = [1, 2, 3];
+        (arr as unknown as Record<symbol, unknown>)[Symbol("foo")] = "bar";
+        expect(isValidFabricValueLayer(arr)).toBe(false);
+      });
+
+      it("returns `false` for an array with an accessor-backed index", () => {
+        // An accessor is live code, not inert data: a read executes it and can
+        // return a different value every time. Freezing does not change that.
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 1, {
+          get: () => 22,
+          enumerable: true,
+          configurable: false,
+        });
+        expect(isValidFabricValueLayer(arr)).toBe(false);
+        expect(isValidFabricValueLayer(Object.freeze(arr))).toBe(false);
+      });
+
+      it("returns `false` for an array with a setter-only index", () => {
+        const arr = [1, 2, 3];
+        Object.defineProperty(arr, 2, { set: () => {}, enumerable: true });
+        expect(isValidFabricValueLayer(arr)).toBe(false);
+      });
+
+      it("returns `false` for an `Array` subclass instance", () => {
+        // A subclass prototype is live code just as an accessor is, and
+        // freezing the instance does not change that.
+        class Sub extends Array {}
+        const sub = new Sub();
+        sub.push(1, 2);
+        expect(isValidFabricValueLayer(sub)).toBe(false);
+        expect(isValidFabricValueLayer(Object.freeze(sub))).toBe(false);
+      });
+
+      it("returns `false` for an array whose prototype was severed", () => {
+        const severed: unknown[] = [1, 2];
+        Object.setPrototypeOf(severed, null);
+        expect(isValidFabricValueLayer(severed)).toBe(false);
+      });
+
+      it("returns `false` for a sparse array with extra named properties", () => {
+        // Length 3, hole at index 1, plus a named property "foo": still
+        // `false` because the named property isn't a valid array index.
+        const sparse = [] as unknown[] & { foo?: string };
+        sparse[0] = 1;
+        sparse[2] = 3;
+        sparse.foo = "bar";
+        expect(isValidFabricValueLayer(sparse)).toBe(false);
+      });
+
+      it("returns `false` for a function", () => {
+        expect(isValidFabricValueLayer(() => {})).toBe(false);
+        expect(isValidFabricValueLayer(function () {})).toBe(false);
+        expect(isValidFabricValueLayer(async () => {})).toBe(false);
+      });
+
+      it("returns `false` for a class instance", () => {
+        expect(isValidFabricValueLayer(new Date())).toBe(false);
+        expect(isValidFabricValueLayer(new Map())).toBe(false);
+        expect(isValidFabricValueLayer(new Set())).toBe(false);
+        expect(isValidFabricValueLayer(/regex/)).toBe(false);
+      });
+
+      it("returns `false` for a unique (uninterned) symbol", () => {
+        expect(isValidFabricValueLayer(Symbol("k"))).toBe(false);
+      });
+    });
+  });
+
   describe("isValidFabricValue()", () => {
     it("returns `true` for a schema using the `if` / `then` / `else` keywords", () => {
       // This system's schemas are themselves `FabricValue`s, and JSON Schema

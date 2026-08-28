@@ -14,6 +14,7 @@ import {
   FabricPrimitive,
   FabricSpecialObject,
   type FabricValue,
+  type FabricValueLayer,
   shallowCleanArray,
   shallowCleanPlainObject,
   shallowFabricFromNativeObjectElseUndefined,
@@ -4059,37 +4060,38 @@ export function convertCellsToLinks(
         : shallowCleanPlainObject(value as object, false)) as
           | unknown[]
           | Record<string, unknown>;
-    } else if (value instanceof FabricPrimitive) {
-      // An opaque scalar whose state lives in private fields, so it has zero
-      // enumerable own properties and the object branch below would rebuild it
-      // from its (empty) entries as a bare `{}`. It leaves whole instead.
-      return value;
-    } else if (value instanceof FabricInstance) {
-      refuseFabricInstance(value, "when converting cells to links");
     } else {
       // A native object carrying a fabric form is minted into it here: a
       // `Date` or `Uint8Array` becomes a `FabricPrimitive`, an `Error` a
       // `FabricError`. Anything else comes back `undefined`, which says only
-      // that nothing needed minting -- so the value stands as its own answer,
-      // and every test above and below runs on `value` itself.
+      // that nothing needed minting.
       const minted = shallowFabricFromNativeObjectElseUndefined(value);
-      if (minted instanceof FabricInstance) {
-        // A `FabricError` is the one mint this walk cannot descend.
-        refuseFabricInstance(minted, "when converting cells to links");
-      } else if (minted !== undefined) {
-        // A `FabricPrimitive`, which is a leaf. The cast is the gap between
-        // `FabricValueLayer` and `FabricValue` -- the former's containers hold
-        // `unknown` -- rather than a claim about the value.
-        return minted as FabricValue;
+
+      if (minted === undefined) {
+        // Nothing was minted, so the value has to be usable as it stands. This
+        // is what refuses a function, a class instance, a container that is
+        // not inert, and a `FabricPrimitive` subclass this system does not
+        // recognize -- and it runs BEFORE the leaf return below, since a leaf
+        // that is refused here is one nothing downstream could have encoded.
+        assertValidFabricValueLayer(value);
       }
 
-      // Nothing was minted, so the value has to be walkable as it stands. This
-      // is what refuses a function, a class instance, and a container that is
-      // not inert; it is also what keeps the walk below from rebuilding such a
-      // container out of `Object.entries()` and quietly dropping a named
-      // property or a symbol key.
-      assertValidFabricValueLayer(value);
-      container = value as unknown[] | Record<string, unknown>;
+      // A fresh mint or the value as vetted; either way a decided fabric
+      // layer, so the two tests below run once over the pair.
+      const layer = minted ?? (value as FabricValueLayer);
+
+      if (layer instanceof FabricPrimitive) {
+        // An opaque scalar whose state lives in private fields, so it has zero
+        // enumerable own properties and the object branch below would rebuild
+        // it from its (empty) entries as a bare `{}`. It leaves whole instead.
+        return layer;
+      } else if (layer instanceof FabricInstance) {
+        // Not a leaf: a container reached by its codec contents, which this
+        // walk cannot do.
+        refuseFabricInstance(layer, "when converting cells to links");
+      }
+
+      container = layer as unknown[] | Record<string, unknown>;
     }
 
     // A member arrives here `unknown`: only the top level has been decided, so

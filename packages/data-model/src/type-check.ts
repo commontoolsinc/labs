@@ -1,8 +1,12 @@
 /**
- * The recursive predicates deciding whether a value belongs to the
- * `FabricValue` type, and the narrowings that ask a shape question about one
- * that already does. The single-level `isValidFabricValueLayer()` lives with
- * the conversion whose result it describes, in `native-conversion.ts`.
+ * The predicates deciding whether a value belongs to the `FabricValue` type,
+ * and the narrowings that ask a shape question about one that already does.
+ * `assertValidFabricValueLayer()` is the throwing form of the single-level
+ * predicate here, and decides nothing this file has not already decided. It
+ * lives in `native-conversion.ts` because the reason it gives turns on a
+ * question this file cannot ask: which native class a value is. That answer
+ * comes from `native-type-tags.ts`, which is layered above this file rather
+ * than below it.
  *
  * Membership turns on inertness: a `FabricValue` is data, so anything that is
  * live code is refused -- a function, an accessor-backed property, the
@@ -29,10 +33,72 @@ import {
   type FabricContainerValue,
   FabricInstance,
   type FabricPlainObject,
+  FabricSpecialObject,
   type FabricValue,
+  type FabricValueLayer,
 } from "./interface.ts";
 import { BaseFabricInstance } from "./fabric-bases/BaseFabricInstance.ts";
 import { BaseFabricPrimitive } from "./fabric-bases/BaseFabricPrimitive.ts";
+
+/**
+ * Indicates whether the value is a `FabricValue`, accepting
+ * `FabricSpecialObject`s (both `FabricInstance` and `FabricPrimitive`),
+ * `undefined`, and arrays with `undefined` elements or sparse holes -- in
+ * addition to the base fabric types (`null`, `boolean`, `number`, `string`,
+ * plain objects, dense arrays). An array must be a direct `Array` instance; a
+ * subclass instance is not a `FabricValue`.
+ *
+ * This function is a TypeScript type guard for `FabricValueLayer`.
+ */
+export function isValidFabricValueLayer(
+  value: unknown,
+): value is FabricValueLayer {
+  switch (typeof value) {
+    case "boolean":
+    case "string":
+    case "number":
+    case "bigint":
+    case "undefined": {
+      return true;
+    }
+
+    case "object": {
+      if (value === null) {
+        return true;
+      }
+      // `FabricSpecialObject` -- already a valid `FabricValue`.
+      if (value instanceof FabricSpecialObject) {
+        return true;
+      }
+      if (Array.isArray(value)) {
+        // Arrays with `undefined` elements and sparse holes are accepted, but
+        // not arrays carrying named or symbol-keyed properties, nor an
+        // accessor-backed index, nor an indirect instance such as an `Array`
+        // subclass (all live code rather than inert data).
+        return isInertArray(value);
+      }
+      // Plain objects are accepted; class instances are not (except
+      // `FabricSpecialObject`, handled above). `FabricPlainObject` is keyed by
+      // `string`, so a symbol key has no representation either, and neither
+      // does a non-enumerable string key; an accessor-backed property is live
+      // code rather than inert data. The names this runtime reserves are a
+      // separate question from inertness -- see `unsafeObjectKeyIn()`.
+      return isInertPlainObject(value) &&
+        (unsafeObjectKeyIn(value) === undefined);
+    }
+
+    case "symbol": {
+      // Registry-interned symbols are valid `FabricValue`s; unique ones are
+      // not.
+      return Symbol.keyFor(value) !== undefined;
+    }
+
+    case "function":
+    default: {
+      return false;
+    }
+  }
+}
 
 /**
  * Indicates whether the value is a `FabricValue` -- a recursive check of exact

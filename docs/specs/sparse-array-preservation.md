@@ -114,12 +114,12 @@ because their sparse support was part of the original design:
 - **`packages/data-model/src/value-hash.ts`** — Feeds holes to the hash
   directly, coalescing each run into one hole entry.
 
-### Value validation (`packages/data-model/src/native-conversion.ts`, `type-check.ts`)
+### Value validation (`packages/data-model/src/type-check.ts`)
 
-`isValidFabricValueLayer()` (in `native-conversion.ts`) and
-`isValidFabricValue()` (in `type-check.ts`) accept sparse arrays — holes are
-valid fabric structure. `isValidFabricValue()` uses `for` + `i in` because it
-needs early return, skipping holes rather than validating them as values.
+`isValidFabricValueLayer()` and `isValidFabricValue()` accept sparse arrays —
+holes are valid fabric structure. `isValidFabricValue()` uses `for` + `i in`
+because it needs early return, skipping holes rather than validating them as
+values.
 
 ### v2-transaction write path (`packages/runner/src/storage/v2-transaction.ts`)
 
@@ -240,8 +240,9 @@ the preferred entry point in runner code.
 
 Test coverage verifies sparse preservation at each layer:
 
-- **`packages/data-model/test/native-conversion.test.ts`** —
-  `isValidFabricValueLayer()` accepts sparse arrays, and
+- **`packages/data-model/test/type-check.test.ts`** —
+  `isValidFabricValueLayer()` accepts sparse arrays.
+- **`packages/data-model/test/native-conversion.test.ts`** — 
   `fabricFromNativeValue()` preserves holes.
 - **`packages/runner/test/cell-core.test.ts`** — sparse-array writes through
   the full Cell write path (which lands in `applyMutablePathWrite`) preserve
