@@ -120,11 +120,13 @@ export interface MeasuredSlug {
   slug: TranscriptJson<string>;
 
   /**
-   * What the tool answered. A slug the tool refused was requested and not
-   * assigned, so counting the request as an assignment would report a name
-   * nothing answers to.
+   * What the tool answered, and what it said. A slug the tool refused was
+   * requested and not assigned, so counting the request as an assignment would
+   * report a name nothing answers to — and the message is what separates a
+   * name already taken in this space, which is a fact about the space, from a
+   * tool that failed, which is a fact about the run.
    */
-  outcome: TranscriptJson<{ status: string }>;
+  outcome: TranscriptJson<{ status: string; message?: string }>;
 }
 
 /**
@@ -604,6 +606,19 @@ const runPatternTargetOf = (
   return unread("a run_pattern call named neither patternId nor sourceText");
 };
 
+/** A tool's status together with whatever it said about a non-`ok` one. */
+const statusAndMessageOf = (
+  output: TranscriptJson<Record<string, unknown>>,
+): TranscriptJson<{ status: string; message?: string }> => {
+  const status = statusOf(output);
+  if (status.kind === "unread" || output.kind === "unread") return status;
+  const message = output.value.message;
+  return read({
+    status: status.value.status,
+    ...(typeof message === "string" ? { message } : {}),
+  });
+};
+
 const statusOf = (
   output: TranscriptJson<Record<string, unknown>>,
 ): TranscriptJson<{ status: string }> => {
@@ -701,7 +716,7 @@ export const measureTranscript = (
         case "assign_slug":
           slugs.push({
             slug: stringFieldOf(args, "slug"),
-            outcome: statusOf(outputFor(call.id)),
+            outcome: statusAndMessageOf(outputFor(call.id)),
           });
           break;
       }
@@ -939,7 +954,11 @@ export const renderRunLines = (run: RunMeasurement): readonly string[] => {
           : `NOT READ (${slug.slug.reason})`
       } -> ${
         slug.outcome.kind === "read"
-          ? slug.outcome.value.status
+          ? `${slug.outcome.value.status}${
+            slug.outcome.value.message === undefined
+              ? ""
+              : ` (${slug.outcome.value.message})`
+          }`
           : `NOT READ (${slug.outcome.reason})`
       }`,
     );

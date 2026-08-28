@@ -87,6 +87,17 @@ export interface MeasurementSuite {
   label: string;
   notes?: string;
   tasks: readonly MeasurementTask[];
+
+  /**
+   * Patterns seeded into the index for this batch to find.
+   *
+   * A composition of one of these is a different claim from a composition of
+   * an entry an earlier run happened to leave behind: the first says the loop
+   * composes *what was seeded*, which is what seeding was for, and the second
+   * only says the loop composes. Naming them here makes the report mark which
+   * is which rather than leaving a reader to recognize identifiers by eye.
+   */
+  seededPatternIds?: readonly string[];
 }
 
 /**
@@ -100,7 +111,10 @@ export const parseMeasurementSuite = (input: unknown): MeasurementSuite => {
   if (typeof input !== "object" || input === null) {
     throw new Error("a task suite must be a JSON object");
   }
-  const { label, notes, tasks } = input as Record<string, unknown>;
+  const { label, notes, tasks, seededPatternIds } = input as Record<
+    string,
+    unknown
+  >;
   if (typeof label !== "string" || label.trim() === "") {
     throw new Error("a task suite must carry a non-empty label");
   }
@@ -109,6 +123,15 @@ export const parseMeasurementSuite = (input: unknown): MeasurementSuite => {
   }
   if (!Array.isArray(tasks) || tasks.length === 0) {
     throw new Error("a task suite must carry at least one task");
+  }
+  if (
+    seededPatternIds !== undefined &&
+    (!Array.isArray(seededPatternIds) ||
+      seededPatternIds.some((id) => typeof id !== "string"))
+  ) {
+    throw new Error(
+      "a task suite's seededPatternIds must be a list of strings",
+    );
   }
   const seen = new Set<string>();
   const parsed = tasks.map((task, index) => {
@@ -132,6 +155,9 @@ export const parseMeasurementSuite = (input: unknown): MeasurementSuite => {
     label,
     ...(notes !== undefined ? { notes } : {}),
     tasks: parsed,
+    ...(seededPatternIds !== undefined
+      ? { seededPatternIds: seededPatternIds as readonly string[] }
+      : {}),
   };
 };
 
@@ -1168,6 +1194,69 @@ const renderPreflight = (preflight: IndexPreflight): string =>
         : ` over ${preflight.candidates} candidates examined`
     }. So a run that found nothing below was answered and found nothing, rather than refused.\n`;
 
+/**
+ * Which task imported which published pattern.
+ *
+ * The count alone cannot tell one claim from another: composing a pattern an
+ * earlier run happened to leave in the index says the loop composes, and
+ * composing a curated, seeded atom says the loop composes *what was seeded*,
+ * which is the stronger claim and the one the seeding was for. Only the
+ * identifiers separate them, and only a per-task listing shows whether several
+ * compositions are several tasks or one task repeating itself.
+ */
+const renderComposition = (
+  results: readonly TaskResult[],
+  seeded: readonly string[] = [],
+): readonly string[] => {
+  const isSeeded = new Set(seeded);
+  const mark = (id: string): string =>
+    isSeeded.size === 0
+      ? `\`${id}\``
+      : isSeeded.has(id)
+      ? `\`${id}\` **(seeded)**`
+      : `\`${id}\` (pre-existing)`;
+  const composed = results
+    .map((result) => ({
+      id: result.task.id,
+      totals: result.measurement?.totals,
+    }))
+    .filter((entry) =>
+      entry.totals !== undefined && entry.totals.importedPatternIds.length > 0
+    );
+  const lines = [
+    "## What composed what",
+    "",
+  ];
+  if (composed.length === 0) {
+    lines.push(
+      "No task imported a published pattern. Every `run_pattern` call either",
+      "named a pattern by id or carried source of its own.",
+      "",
+    );
+    return lines;
+  }
+  for (const entry of composed) {
+    const totals = entry.totals!;
+    lines.push(
+      `- **${entry.id}** — ${totals.runPatternsComposing} composing, ${totals.runPatternsReexporting} bare re-export, importing ${
+        totals.importedPatternIds.map(mark).join(", ")
+      }`,
+    );
+  }
+  lines.push(
+    "",
+    `That is ${composed.length} of ${results.length} tasks. Several compositions in one task are one task, not several — read the list, not the total.`,
+  );
+  if (isSeeded.size === 0) {
+    lines.push(
+      "",
+      "The suite named no seeded patterns, so nothing here separates composing a seeded atom from composing an entry an earlier run left behind.",
+    );
+  }
+  lines.push("");
+  return lines;
+};
+
 /** The batch report, as Markdown. */
 export const renderBatchReport = (batch: BatchResult): string => {
   const lines: string[] = [
@@ -1213,6 +1302,7 @@ export const renderBatchReport = (batch: BatchResult): string => {
       batch.results.filter((result) => result.measurement === undefined).length
     } were not measured.`,
     "",
+    ...renderComposition(batch.results, batch.suite.seededPatternIds),
     "## The index, before and after",
     "",
     "How much of it a run could find, going in:",

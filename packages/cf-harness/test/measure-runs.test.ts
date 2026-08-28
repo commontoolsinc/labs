@@ -13,6 +13,7 @@ import {
   measureTranscript,
   mergeTotals,
   renderReportLines,
+  renderRunLines,
   renderToolSurfaceLines,
   runFamiliesOf,
   type RunFamilyMeasurement,
@@ -20,6 +21,7 @@ import {
   toolOutcomeOf,
   totalsOf,
 } from "../scripts/measure-runs.ts";
+import { main } from "../scripts/measure-runs.ts";
 import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
 
 const FIXTURE_ROOT = fromFileUrl(
@@ -411,6 +413,11 @@ describe("measure-runs", () => {
       expect(totals.slugsAssigned).toBe(0);
       expect(totals.slugsRefused).toBe(1);
       expect(totals.slugNames).toEqual([]);
+      // The message is what separates a name already taken in this space from
+      // a tool that failed, and only one of those is a fact about the run.
+      expect(renderRunLines(run)).toContain(
+        "  [parent] assign_slug taken -> error (slug in use)",
+      );
     });
 
     it("counts every tool the run called by how each call ended", async () => {
@@ -533,6 +540,47 @@ describe("measure-runs", () => {
       const report = await measureArtifactRoot(FIXTURE_ROOT);
       expect(report.totals.runs).toBe(5);
       expect(report.totals.runsUnread).toBe(2);
+    });
+  });
+
+  describe("main()", () => {
+    const runMain = async (
+      args: readonly string[],
+    ): Promise<{ code: number; out: string }> => {
+      const logs: string[] = [];
+      const code = await main(args, (line) => logs.push(line));
+      return { code, out: logs.join("\n") };
+    };
+
+    it("returns 0 and reports every family under the root it is given", async () => {
+      const { code, out } = await runMain([`--artifact-root=${FIXTURE_ROOT}`]);
+      expect(code).toBe(0);
+      expect(out).toContain(`artifact root: ${FIXTURE_ROOT}`);
+      expect(out).toContain("===== RUN fixture-run (2 runs)");
+      expect(out).toContain("===== ALL 4 FAMILIES");
+    });
+
+    it("reports only the families it is named", async () => {
+      const { out } = await runMain([
+        `--artifact-root=${FIXTURE_ROOT}`,
+        "alias-run",
+      ]);
+      expect(out).toContain("===== RUN alias-run");
+      expect(out).not.toContain("===== RUN fixture-run");
+      expect(out).toContain("===== ALL 1 FAMILIES");
+    });
+
+    it("returns the whole report as JSON when asked", async () => {
+      const { out } = await runMain([
+        `--artifact-root=${FIXTURE_ROOT}`,
+        "--json",
+        "fixture-run",
+      ]);
+      const report = JSON.parse(out);
+      expect(report.artifactRoot).toBe(FIXTURE_ROOT);
+      expect(report.families[0].familyId).toBe("fixture-run");
+      expect(report.totals.searches).toBe(5);
+      expect(report.totals.toolOutcomes.bash).toEqual({ denied: 1 });
     });
   });
 

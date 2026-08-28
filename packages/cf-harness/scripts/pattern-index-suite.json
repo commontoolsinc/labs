@@ -1,6 +1,6 @@
 {
   "label": "pattern index discovery and composition",
-  "notes": "The standing suite named by docs/pattern-index-measurement.md. No task names the pattern index, names a published pattern, or says the word \"reuse\". Each is a thing a person would ask for, worded so that a part the index already holds would answer part of it. Edit a task's text and the runs before and after are no longer comparable; add a task rather than reword one.",
+  "notes": "The standing suite named by docs/pattern-index-measurement.md. No task names the pattern index, names a published pattern, or says the word \"reuse\". Each is a thing a person would ask for, worded so that a part the index already holds would answer part of it. Edit a task's text and the runs before and after are no longer comparable; add a task rather than reword one. The seeded atoms this batch was run against, by identifier: SortableTable = 1iaNBnIVU-vBRC3u01ciyrLjGM3YzH9xN4GYbUUMuLU; CheckList = AUIdfFdRbRcwyjms_C50_gndz4NP5pTuHPEZhn3OFRA; OptionPicker = KEL-gKzWRo32qpOtnjjjeKX1DvvUTeLfHHvSSn93WyY; AmountLedger = SvS30JCaGf2JsTXeLgd77F40GG0vJmGTaK7TCJjDhLg; Counter = docnE_YXUkal8R92pI4Lz7zAg0w_3J_6_RQmLYLUT2o; DiceRoller = zyovq-u-j6X3gxU2ZTChMwhTx4IvjoBickAoGy4_MEk. The report marks each imported identifier as seeded or pre-existing, because composing a seeded atom is the claim the seeding was for and composing an entry an earlier run left behind is not.",
   "tasks": [
     {
       "id": "counter",
@@ -26,5 +26,13 @@
       "id": "monthly-expenses",
       "text": "Give me a page where I can enter my monthly expenses and sort them by amount."
     }
+  ],
+  "seededPatternIds": [
+    "1iaNBnIVU-vBRC3u01ciyrLjGM3YzH9xN4GYbUUMuLU",
+    "AUIdfFdRbRcwyjms_C50_gndz4NP5pTuHPEZhn3OFRA",
+    "KEL-gKzWRo32qpOtnjjjeKX1DvvUTeLfHHvSSn93WyY",
+    "SvS30JCaGf2JsTXeLgd77F40GG0vJmGTaK7TCJjDhLg",
+    "docnE_YXUkal8R92pI4Lz7zAg0w_3J_6_RQmLYLUT2o",
+    "zyovq-u-j6X3gxU2ZTChMwhTx4IvjoBickAoGy4_MEk"
   ]
 }

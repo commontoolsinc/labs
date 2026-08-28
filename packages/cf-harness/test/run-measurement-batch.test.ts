@@ -15,6 +15,7 @@ import {
   renderBatchReport,
   runTask,
 } from "../scripts/run-measurement-batch.ts";
+import { main } from "../scripts/run-measurement-batch.ts";
 
 const FIXTURE_ROOT = fromFileUrl(
   new URL("./support/measure-runs/runs", import.meta.url),
@@ -61,6 +62,9 @@ interface FakeConsoleOptions {
 
   /** What `/api/index/call` answers, and with what status. */
   indexAnswer?: { status: number; body: unknown };
+
+  /** What `/api/meta` answers, standing in for the fabric server. */
+  meta?: unknown;
 }
 
 interface FakeConsole {
@@ -85,6 +89,11 @@ const startFakeConsole = (options: FakeConsoleOptions): FakeConsole => {
           "set-cookie": `${TOKEN}; SameSite=Strict; HttpOnly; Path=/`,
         },
       });
+    }
+    // The fabric server is a different host from the console and gates
+    // nothing on the console's token, so this answers before the gate.
+    if (url.pathname === "/api/meta") {
+      return Response.json(options.meta ?? META);
     }
     if (request.headers.get("cookie") !== TOKEN) {
       return new Response("forbidden", { status: 403 });
@@ -227,6 +236,26 @@ describe("run-measurement-batch", () => {
     it("throws for a task carrying no text", () => {
       expect(() => parseMeasurementSuite({ label: "l", tasks: [{ id: "a" }] }))
         .toThrow("task a carries no text");
+    });
+
+    it("returns the seeded pattern identifiers a suite names", () => {
+      expect(
+        parseMeasurementSuite({
+          label: "l",
+          tasks: [{ id: "a", text: "one" }],
+          seededPatternIds: ["seed-1", "seed-2"],
+        }).seededPatternIds,
+      ).toEqual(["seed-1", "seed-2"]);
+    });
+
+    it("throws for seeded pattern identifiers that are not strings", () => {
+      expect(() =>
+        parseMeasurementSuite({
+          label: "l",
+          tasks: [{ id: "a", text: "one" }],
+          seededPatternIds: [1],
+        })
+      ).toThrow("must be a list of strings");
     });
 
     it("throws for two tasks sharing an id", () => {
@@ -641,6 +670,155 @@ describe("run-measurement-batch", () => {
     });
   });
 
+  describe("main()", () => {
+    /**
+     * Runs the command against a stand-in console, in a temporary directory
+     * holding the suite it is given and receiving the report it writes.
+     * `/api/meta` is served by the same stand-in, so the whole command runs
+     * without a fabric server, a model, or an index.
+     */
+    const runMain = async (
+      options: FakeConsoleOptions,
+      suite: unknown,
+      extraArgs: readonly string[] = [],
+    ): Promise<{ code: number; logs: string[]; dir: string }> => {
+      const console_ = startFakeConsole(options);
+      const dir = await Deno.makeTempDir();
+      try {
+        const suitePath = `${dir}/suite.json`;
+        await Deno.writeTextFile(suitePath, JSON.stringify(suite));
+        const logs: string[] = [];
+        const code = await main([
+          suitePath,
+          `--console=${console_.url}`,
+          `--fabric-api-url=${console_.url}`,
+          `--out=${dir}/out`,
+          ...extraArgs,
+        ], (line) => logs.push(line));
+        return { code, logs, dir };
+      } finally {
+        await console_.close();
+      }
+    };
+
+    const ONE_TASK = {
+      label: "one task",
+      tasks: [{ id: "books", text: "Track the books I am reading." }],
+    };
+
+    it("returns 0 and writes both reports for a batch whose tasks all completed", async () => {
+      const { code, dir, logs } = await runMain({
+        streams: [completedStream()],
+        runId: "fixture-run",
+        artifactRoot: FIXTURE_ROOT,
+      }, ONE_TASK);
+      try {
+        expect(code).toBe(0);
+        const report = await Deno.readTextFile(`${dir}/out/report.md`);
+        expect(report).toContain("# Pattern index measurement — one task");
+        expect(report).toContain("Track the books I am reading.");
+        expect(report).toContain("## What composed what");
+        const json = JSON.parse(
+          await Deno.readTextFile(`${dir}/out/report.json`),
+        );
+        expect(json.results).toHaveLength(1);
+        expect(json.results[0].outcome.kind).toBe("turn_completed");
+        expect(logs.some((line) => line.startsWith("fabric server at"))).toBe(
+          true,
+        );
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("returns 3 and runs no task when the index does not answer the pre-flight", async () => {
+      const { code, dir, logs } = await runMain({
+        streams: [completedStream()],
+        indexAnswer: { status: 403, body: { error: "DID is not allowlisted" } },
+      }, ONE_TASK);
+      try {
+        expect(code).toBe(3);
+        const report = await Deno.readTextFile(`${dir}/out/report.md`);
+        expect(report).toContain(
+          "**The index did not answer, and the batch refused to start.**",
+        );
+        expect(report).toContain("Nothing below ran.");
+        expect(
+          logs.some((line) => line.includes("the index did not answer")),
+        ).toBe(true);
+        const json = JSON.parse(
+          await Deno.readTextFile(`${dir}/out/report.json`),
+        );
+        expect(json.results).toHaveLength(0);
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("returns 4 and does not ask the index when the server is not the expected commit", async () => {
+      const { code, dir } = await runMain(
+        { streams: [completedStream()] },
+        ONE_TASK,
+        ["--expect-git-sha=0000000"],
+      );
+      try {
+        expect(code).toBe(4);
+        const report = await Deno.readTextFile(`${dir}/out/report.md`);
+        expect(report).toContain(
+          "**The fabric server was not the one this batch was told to expect",
+        );
+        // Pin the reason, not just the header: a `/api/meta` this stand-in
+        // refused outright would print the same header and mean something
+        // else entirely.
+        expect(report).toContain(
+          `told to expect the fabric server on 0000000, and it reports ${META.gitSha}`,
+        );
+        expect(report).toContain(
+          "the commit pre-flight refused first, so the index was not asked",
+        );
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("returns 1 for a batch whose task did not complete", async () => {
+      const { code, dir } = await runMain({
+        streams: [{ frames: [], keepOpen: false }],
+        runId: "fixture-run",
+        artifactRoot: FIXTURE_ROOT,
+      }, ONE_TASK);
+      try {
+        expect(code).toBe(1);
+        expect(await Deno.readTextFile(`${dir}/out/report.md`)).toContain(
+          "**unwitnessed**",
+        );
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+
+    it("returns 2 and names its usage when given no suite", async () => {
+      const logs: string[] = [];
+      expect(await main([], (line) => logs.push(line))).toBe(2);
+      expect(logs[0]).toContain("usage: measure-batch <suite.json>");
+    });
+
+    it("marks a composed pattern as seeded when the suite named it", async () => {
+      const { dir } = await runMain({
+        streams: [completedStream()],
+        runId: "fixture-run",
+        artifactRoot: FIXTURE_ROOT,
+      }, { ...ONE_TASK, seededPatternIds: ["pub-rating"] });
+      try {
+        expect(await Deno.readTextFile(`${dir}/out/report.md`)).toContain(
+          "`pub-rating` **(seeded)**",
+        );
+      } finally {
+        await Deno.remove(dir, { recursive: true });
+      }
+    });
+  });
+
   describe("renderBatchReport()", () => {
     const reportOf = async (): Promise<string> => {
       const console_ = startFakeConsole({
@@ -683,6 +861,71 @@ describe("run-measurement-batch", () => {
 
     it("quotes each task's text exactly as the session was given it", async () => {
       expect(await reportOf()).toContain("Track the books I am reading.");
+    });
+
+    it("names which task imported which published pattern", async () => {
+      const report = await reportOf();
+      expect(report).toContain("## What composed what");
+      expect(report).toContain(
+        "- **books** — 2 composing, 0 bare re-export, importing `pub-rating`, `pub-reading-shelf`",
+      );
+      expect(report).toContain("That is 1 of 1 tasks.");
+      expect(report).toContain(
+        "The suite named no seeded patterns, so nothing here separates",
+      );
+    });
+
+    it("marks a composed pattern as seeded or pre-existing when the suite named the seeds", async () => {
+      const console_ = startFakeConsole({
+        streams: [completedStream()],
+        runId: "fixture-run",
+        artifactRoot: FIXTURE_ROOT,
+      });
+      try {
+        const client = await ConsoleClient.open(console_.url);
+        const result = await runTask(
+          client,
+          { id: "books", text: "Track the books I am reading." },
+          () => {},
+        );
+        const report = renderBatchReport({
+          suite: {
+            label: "l",
+            tasks: [result.task],
+            seededPatternIds: ["pub-rating"],
+          },
+          consoleUrl: console_.url,
+          indexUrl: null,
+          startedAt: "2026-08-28T21:00:00.000Z",
+          endedAt: "2026-08-28T21:00:01.000Z",
+          preflight: { kind: "answered", results: 1 },
+          posture: POSTURE,
+          indexBefore: { kind: "read", patterns: [] as never },
+          indexAfter: { kind: "read", patterns: [] as never },
+          results: [result],
+        });
+        expect(report).toContain(
+          "`pub-rating` **(seeded)**, `pub-reading-shelf` (pre-existing)",
+        );
+      } finally {
+        await console_.close();
+      }
+    });
+
+    it("says plainly that no task composed when none did", () => {
+      const report = renderBatchReport({
+        suite: { label: "l", tasks: [{ id: "a", text: "do a thing" }] },
+        consoleUrl: "http://127.0.0.1:1",
+        indexUrl: null,
+        startedAt: "2026-08-28T21:00:00.000Z",
+        endedAt: "2026-08-28T21:00:01.000Z",
+        preflight: { kind: "answered", results: 1 },
+        posture: POSTURE,
+        indexBefore: { kind: "read", patterns: [] as never },
+        indexAfter: { kind: "read", patterns: [] as never },
+        results: [],
+      });
+      expect(report).toContain("No task imported a published pattern.");
     });
 
     it("names what the batch added to the index", async () => {
