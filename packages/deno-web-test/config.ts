@@ -2,6 +2,7 @@ import { exists } from "@std/fs/exists";
 import * as path from "@std/path";
 
 import { LaunchOptions } from "@astral/astral";
+import { astralBinaryPath } from "@commonfabric/integration/astral-adapter";
 import { build } from "@commonfabric/felt";
 
 // These configurations can be applied
@@ -95,6 +96,14 @@ export const extractAstralConfig = (config: Config): LaunchOptions => {
   if ("headless" in config) astralConfig.headless = config.headless;
   if ("product" in config) astralConfig.product = config.product;
   if ("args" in config) astralConfig.args = config.args;
+
+  // Left unset, astral downloads a browser of its own choosing, whose version
+  // is a constant inside astral rather than anything decided here. A system
+  // browser is preferred so that a local run drives what CI drives; when there
+  // is none, this stays unset and astral decides as before.
+  const path = astralBinaryPath();
+  if (path !== undefined) astralConfig.path = path;
+
   return astralConfig;
 };
 
