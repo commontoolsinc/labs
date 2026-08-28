@@ -274,17 +274,23 @@ function tokenizePredicate(source: string): Token[] {
 class PredicateParser {
   #index = 0;
 
+  readonly #source: string;
+  readonly #tokens: Token[];
+
   constructor(
-    private readonly source: string,
-    private readonly tokens: Token[],
-  ) {}
+    source: string,
+    tokens: Token[],
+  ) {
+    this.#source = source;
+    this.#tokens = tokens;
+  }
 
   parse(): SelectionPredicate {
     const result = this.#parseOr();
     const trailing = this.#peek();
     if (trailing.kind !== "eof") {
       throw expressionError(
-        this.source,
+        this.#source,
         trailing.position,
         "unexpected trailing input",
       );
@@ -293,17 +299,17 @@ class PredicateParser {
   }
 
   #peek(): Token {
-    return this.tokens[this.#index];
+    return this.#tokens[this.#index];
   }
 
   #take(): Token {
-    return this.tokens[this.#index++];
+    return this.#tokens[this.#index++];
   }
 
   #takeKind(kind: TokenKind, message: string): Token {
     const token = this.#peek();
     if (token.kind !== kind) {
-      throw expressionError(this.source, token.position, message);
+      throw expressionError(this.#source, token.position, message);
     }
     return this.#take();
   }
@@ -393,7 +399,7 @@ class PredicateParser {
       }
     }
     throw expressionError(
-      this.source,
+      this.#source,
       token.position,
       "expected a path, literal, or parenthesized expression",
     );
@@ -426,7 +432,7 @@ class PredicateParser {
         const segment = this.#peek();
         if (segment.kind !== "string" && segment.kind !== "number") {
           throw expressionError(
-            this.source,
+            this.#source,
             segment.position,
             "expected a string or number inside brackets",
           );

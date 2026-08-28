@@ -8,7 +8,11 @@ import type { SchemaGenerator } from "../schema-generator.ts";
 import { getArrayElementInfo } from "../type-utils.ts";
 
 export class ArrayFormatter implements TypeFormatter {
-  constructor(private schemaGenerator: SchemaGenerator) {}
+  #schemaGenerator: SchemaGenerator;
+
+  constructor(schemaGenerator: SchemaGenerator) {
+    this.#schemaGenerator = schemaGenerator;
+  }
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
     return !!getArrayElementInfo(type, context.typeChecker, context.typeNode);
@@ -63,7 +67,7 @@ export class ArrayFormatter implements TypeFormatter {
 
     // Use formatChildType - it will auto-detect whether to use type-based
     // or node-based analysis based on whether the type is reliable
-    const items = this.schemaGenerator.formatChildType(
+    const items = this.#schemaGenerator.formatChildType(
       info.elementType,
       context,
       info.elementNode,

@@ -882,7 +882,7 @@ canonical; update prose from it, not the other way around. Paths relative to
 
 | Spec content | Canonical source | Guard / note |
 | --- | --- | --- |
-| Formatter chain + order (§3) | `SchemaGenerator.formatters` (`src/schema-generator.ts`) | array literal is the order; routing tests in `test/schema-generator.test.ts` |
+| Formatter chain + order (§3) | `SchemaGenerator.#formatters` (`src/schema-generator.ts`) | array literal is the order; routing tests in `test/schema-generator.test.ts` |
 | Core keyword mappings (§4) | `PrimitiveFormatter.getSchemaType` (`src/formatters/primitive-formatter.ts`); node table `analyzeTypeNodeStructure` (`src/schema-generator.ts`) | void-type / array-special-types tests |
 | Hoisting exclusion rule (§5.1) | `getNamedTypeKey` (`src/type-utils.ts`) | recursion/shared-type/alias fixtures |
 | Native leaf table + guard (§5.2) | `NATIVE_TYPE_SCHEMAS` / `LIB_DECLARED_NATIVE_TYPES` (`src/formatters/native-type-formatter.ts`) | `test/native-type-parameters.test.ts` |
