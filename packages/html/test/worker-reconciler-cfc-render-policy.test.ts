@@ -267,21 +267,21 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     const CellImplConstructor = dummyCell.constructor;
 
     class MockCell extends (CellImplConstructor as any) {
-      private subscribers = new Set<(value: unknown) => void>();
+      #subscribers = new Set<(value: unknown) => void>();
 
       constructor(public value: unknown) {
         super(runtime, undefined, undefined, false, undefined, "cell");
       }
 
       sink(callback: (value: unknown) => void) {
-        this.subscribers.add(callback);
+        this.#subscribers.add(callback);
         callback(this.value);
-        return () => this.subscribers.delete(callback);
+        return () => this.#subscribers.delete(callback);
       }
 
       set(newValue: unknown) {
         this.value = newValue;
-        for (const subscriber of this.subscribers) {
+        for (const subscriber of this.#subscribers) {
           subscriber(newValue);
         }
       }
@@ -292,62 +292,70 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     }
 
     class MockPropsCell extends MockCell {
-      private propCells = new Map<string, MockPropCell>();
+      #propCells = new Map<string, MockPropCell>();
 
-      constructor(value: unknown, private rawValue: unknown = value) {
+      #rawValue: unknown;
+
+      constructor(value: unknown, rawValue: unknown = value) {
         super(value);
+        this.#rawValue = rawValue;
       }
 
       key(propName: string) {
-        if (!this.propCells.has(propName)) {
-          this.propCells.set(propName, new MockPropCell(this, propName));
+        if (!this.#propCells.has(propName)) {
+          this.#propCells.set(propName, new MockPropCell(this, propName));
         }
-        return this.propCells.get(propName)!;
+        return this.#propCells.get(propName)!;
       }
 
       getRawUntyped() {
-        return this.rawValue;
+        return this.#rawValue;
       }
 
       override set(newValue: unknown) {
-        this.rawValue = newValue;
+        this.#rawValue = newValue;
         super.set(newValue);
-        for (const propCell of this.propCells.values()) {
+        for (const propCell of this.#propCells.values()) {
           propCell.refresh();
         }
       }
     }
 
     class DeferredInitialPropsCell extends MockPropsCell {
-      private ready = false;
-      private propsSubscribers = new Set<(value: unknown) => void>();
+      #ready = false;
+      #propsSubscribers = new Set<(value: unknown) => void>();
 
       override sink(callback: (value: unknown) => void) {
-        this.propsSubscribers.add(callback);
-        if (this.ready) {
+        this.#propsSubscribers.add(callback);
+        if (this.#ready) {
           callback(this.value);
         }
-        return () => this.propsSubscribers.delete(callback);
+        return () => this.#propsSubscribers.delete(callback);
       }
 
       override getRawUntyped() {
-        if (!this.ready) {
+        if (!this.#ready) {
           throw new Error("props not loaded yet");
         }
         return super.getRawUntyped();
       }
 
       flushInitial() {
-        this.ready = true;
-        for (const subscriber of this.propsSubscribers) {
+        this.#ready = true;
+        for (const subscriber of this.#propsSubscribers) {
           subscriber(this.value);
         }
       }
     }
 
     class MockPropCell extends MockCell {
-      constructor(private parentCell: MockPropsCell, private propKey: string) {
+      #parentCell: MockPropsCell;
+      #propKey: string;
+
+      constructor(parentCell: MockPropsCell, propKey: string) {
         super((parentCell.value as Record<string, unknown>)?.[propKey]);
+        this.#parentCell = parentCell;
+        this.#propKey = propKey;
       }
 
       asSchema(_schema: unknown) {
@@ -360,8 +368,8 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       }
 
       getRawUntyped() {
-        return (this.parentCell.value as Record<string, unknown> | undefined)
-          ?.[this.propKey];
+        return (this.#parentCell.value as Record<string, unknown> | undefined)
+          ?.[this.#propKey];
       }
 
       refresh() {
