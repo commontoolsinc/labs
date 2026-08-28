@@ -1379,3 +1379,53 @@ Deno.test("cfcTransportReadinessFromDockerRuntimes prefers positive evidence ove
     { status: "unwired", unread: ["invocation-context"] },
   );
 });
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes resolves every absolute/non-absolute pairing the same way", () => {
+  // The two path-shape questions are asked in a fixed order, and the ordering
+  // is the part that was wrong once: a reading of the registration outranks a
+  // reading of the harness path style, because only the first is evidence
+  // about whether anything reads the directory. Four combinations, closed.
+  const cases: Array<
+    { registered: string; configured: string; expected: string; why: string }
+  > = [
+    {
+      registered: "/host/invocations",
+      configured: "/host/invocations",
+      expected: "wired",
+      why: "both absolute and naming one directory",
+    },
+    {
+      registered: "",
+      configured: "/host/invocations",
+      expected: "unwired",
+      why: "registration names nothing; harness path is readable",
+    },
+    {
+      registered: "/host_mnt/c/work/cfc",
+      configured: "C:\\work\\cfc",
+      expected: "indeterminate",
+      why: "registration is readable; harness path style is not comparable",
+    },
+    {
+      registered: "",
+      configured: "C:\\work\\cfc",
+      expected: "unwired",
+      why:
+        "registration names nothing, which outranks an unreadable harness path",
+    },
+  ];
+
+  for (const { registered, configured, expected, why } of cases) {
+    assertEquals(
+      cfcTransportReadinessFromDockerRuntimes({
+        runtimeName: "runsc-cfc",
+        runtimes: dockerRuntimes([
+          `--cfc-invocation-context-dir=${registered}`,
+        ]),
+        cfcInvocationContextDir: configured,
+      }).status,
+      expected,
+      why,
+    );
+  }
+});

@@ -68,8 +68,11 @@ export interface DockerRunscSandboxConfig {
   dockerNetworkMode: DockerNetworkMode;
   additionalMounts: readonly DockerRunscAdditionalMount[];
   extraDockerArgs: readonly string[];
-  cfcResultDir?: string;
-  cfcInvocationContextDir?: string;
+  // Read once per sandbox and then memoized, so a verdict outlives the read
+  // that produced it. `readonly` keeps the directory it was read against from
+  // moving underneath it.
+  readonly cfcResultDir?: string;
+  readonly cfcInvocationContextDir?: string;
 }
 
 export interface ResolveDockerRunscSandboxConfigOptions {
