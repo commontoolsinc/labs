@@ -63,12 +63,14 @@ async function readDurable(
 // `storedMetadataFor`, and its result schema through `setupResultSchemaFor`.
 // Both must read the member surface they want — `["cfc"]` and `["schema"]` —
 // rather than the document root: a recursive root read depends on every path
-// in the document, so it enters the commit's confirmed conflict reads. The
-// read-set builder exempts only exact `["cfc"]` reads, the mergeable
-// operation's own reads, and reads below the operation's path. A root read
-// therefore survives on a document a mergeable operation targets, and two
-// concurrent appends — writes the mergeable machinery exists to let both land
-// — conflict, silently dropping one side's data.
+// in the document, so it enters the commit's confirmed conflict reads. Two
+// exemptions keep a member read out of that set. A runtime-internal read at
+// `["cfc"]` is dropped wherever it is made, and on a document a mergeable
+// operation targets the builder drops that operation's own reads together
+// with the reads below its path. Neither exemption reaches a read of the
+// root. A root read therefore survives on a document a mergeable operation
+// targets, and two concurrent appends — writes the mergeable machinery
+// exists to let both land — conflict, silently dropping one side's data.
 describe("CFC metadata probes under mergeable appends", () => {
   let server: MemoryV2Server.Server;
   let storage1: EmulatedStorageManager;
