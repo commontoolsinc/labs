@@ -5,7 +5,9 @@
  * A prototype can be severed, an `Error` can arrive from another realm or from
  * a subclass nobody here knows, an array can be an `Array` subclass, and an
  * object can have no prototype at all. Each still has a right answer, so these
- * cases are mostly the awkward shapes rather than the ordinary ones.
+ * cases are mostly the awkward shapes rather than the ordinary ones --
+ * including a run with `Error.isError` removed, to reach the fallback beneath
+ * it.
  *
  * One group pins where the class is read FROM: a value's own `constructor`
  * property is data, and must not be able to present a plain record as an
@@ -20,7 +22,10 @@ import { expect } from "@std/expect";
 
 import { VALUE_TAGS } from "@/VALUE_TAGS.ts";
 import { tagFromNativeClass, tagFromNativeValue } from "@/native-type-tags.ts";
-import { isValidFabricNativeObject } from "@/native-builtin-tags.ts";
+import {
+  isNativeError,
+  isValidFabricNativeObject,
+} from "@/native-builtin-tags.ts";
 
 describe("native-type-tags", () => {
   describe("tagFromNativeValue()", () => {
@@ -112,6 +117,28 @@ describe("native-type-tags", () => {
     it("returns `Object` tag for null-prototype objects (no constructor)", () => {
       const obj = Object.create(null);
       expect(tagFromNativeValue(obj)).toBe(VALUE_TAGS.Object);
+    });
+
+    it("classifies values when `Error.isError` is unavailable", () => {
+      const descriptor = Object.getOwnPropertyDescriptor(Error, "isError");
+      Object.defineProperty(Error, "isError", {
+        value: undefined,
+        writable: true,
+        configurable: true,
+      });
+
+      try {
+        expect(isNativeError(new Error("test"))).toBe(true);
+        expect(tagFromNativeValue(Object.create(null))).toBe(
+          VALUE_TAGS.Object,
+        );
+      } finally {
+        if (descriptor) {
+          Object.defineProperty(Error, "isError", descriptor);
+        } else {
+          delete (Error as { isError?: unknown }).isError;
+        }
+      }
     });
 
     it("returns `null` for class instances", () => {

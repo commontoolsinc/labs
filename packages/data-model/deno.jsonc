@@ -53,6 +53,7 @@
     "./fabric-primitives": "./src/fabric-primitives/index.ts",
     "./fabric-value": "./src/fabric-value.ts",
     "./frozen-builtins": "./src/frozen-builtins.ts",
+    "./native-builtin-tags": "./src/native-builtin-tags.ts",
     "./native-type-tags": "./src/native-type-tags.ts",
     "./value-clone": "./src/value-clone.ts",
     "./value-debug": "./src/value-debug.ts",
