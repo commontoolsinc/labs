@@ -81,6 +81,13 @@ a record: archive it to `docs/history/plans/` following the procedure in
   intent listener, the ruled double-dispatch implementation, the
   acceptance and the owner ruling set); it archives beside the stage-C
   closeout when that build lands.
+- [Revision-keyed schema memo](revision-keyed-schema-memo.md) designs a
+  cross-evaluation, per-document memo of schema-walk computation on the
+  memory server, keyed by each document's revision so validity needs no
+  invalidation machinery, sitting under the query evaluation cache to make
+  post-commit and cross-shape evaluations cost what changed instead of the
+  whole corpus. Carries the measured baseline and the staged path to a
+  per-revision snapshot cache.
 - [Retention and CFC execution provenance](retention-and-provenance.md)
   sequences how long an invocation record is kept and what the runtime knows
   about who caused it — the `AgentActor` mint, trusted ingress, and metadata
