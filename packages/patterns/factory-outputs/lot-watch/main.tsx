@@ -9,17 +9,15 @@ import {
   NAME,
   pattern,
   type PerSpace,
-  type PerUser,
   type RequiresIntegrity,
   Stream,
   UI,
   type VNode,
   wish,
   Writable,
+  type WriteAuthorizedBy,
 } from "commonfabric";
 import {
-  type AdminManagerCredential,
-  adminManagerCredentialIsActive,
   adminRegistryEntries,
   type EmptyAdminRegistryValue,
 } from "../../cfc/admin/mod.ts";
@@ -125,8 +123,6 @@ type PeopleCell = Writable<PersonWithVehicles[] | Default<[]>>;
 // ============================================================
 
 export const LOT_WATCH_ADMIN_INTEGRITY = "lot-watch-admin" as const;
-export const LOT_WATCH_ADMIN_MANAGER_INTEGRITY =
-  "lot-watch-admin-manager" as const;
 
 export interface LotWatchAdminSubject {
   personName: string;
@@ -142,13 +138,33 @@ export type LotWatchAdminRole = AddIntegrity<
   readonly [typeof LOT_WATCH_ADMIN_INTEGRITY]
 >;
 
-export type LotWatchAdminManagerCredential = AdminManagerCredential<
-  typeof LOT_WATCH_ADMIN_MANAGER_INTEGRITY
->;
-
+/**
+ * The roster of lot-watch admin roles. One atom, `lot-watch-admin`, runs
+ * through the roles, the roster and the floor, so a floored roster write may
+ * consume the roster read it needs to decide the change. The list carries
+ * three contracts:
+ *
+ * - `RequiresIntegrity` is the floor: a value landing at this path has to
+ *   carry the endorsement, and every labeled value read on the way to writing
+ *   here has to carry it too;
+ * - `AddIntegrity` on the list mints that endorsement, so a write through
+ *   this schema meets the floor. The endorsement each entry carries through
+ *   `LotWatchAdminRole` labels the entries, and does not reach the list path
+ *   the roster is written at;
+ * - `WriteAuthorizedBy`, so `commitLotWatchAdminChange` is the only handler
+ *   that may write the roster, whichever pattern holds a link to the registry
+ *   cell. That binding is what decides where a write may come from; the mint
+ *   only says the written value carries what the floor asks for.
+ */
 export type LotWatchAdminList = RequiresIntegrity<
-  LotWatchAdminRole[],
-  readonly [typeof LOT_WATCH_ADMIN_MANAGER_INTEGRITY]
+  WriteAuthorizedBy<
+    AddIntegrity<
+      LotWatchAdminRole[],
+      readonly [typeof LOT_WATCH_ADMIN_INTEGRITY]
+    >,
+    typeof commitLotWatchAdminChange
+  >,
+  readonly [typeof LOT_WATCH_ADMIN_INTEGRITY]
 >;
 
 export interface LotWatchAdminRegistryStoredValue {
@@ -159,9 +175,16 @@ export type LotWatchAdminRegistryValue =
   | LotWatchAdminRegistryStoredValue
   | Default<EmptyAdminRegistryValue>;
 export type LotWatchAdminRegistryCell = Writable<LotWatchAdminRegistryValue>;
-export type LotWatchAdminManagerCredentialCell = Writable<
-  LotWatchAdminManagerCredential | null
->;
+
+/**
+ * Per-user switch that reveals the admin-management controls, and the only
+ * check the roster's commit handler makes on the acting user. Any viewer can
+ * turn it on for themselves, so it carries no integrity: a self-granted value
+ * that claimed one would endorse every protected write that consulted it. The
+ * roster's `writeAuthorizedBy` binding decides which code may write the
+ * roster. Nothing here decides which person may.
+ */
+export type LotWatchAdminManagerModeCell = Writable<boolean>;
 
 // ============================================================
 // Pattern I/O (DESIGN §12, trimmed to Phase 1)
@@ -176,7 +199,6 @@ export interface LotWatchInput {
   knownVehicles?: PerSpace<KnownVehiclesCell>;
   // Phase 3c: admin gating (DESIGN §6)
   adminRegistry?: PerSpace<LotWatchAdminRegistryCell>;
-  adminManagerCredential?: PerUser<LotWatchAdminManagerCredentialCell>;
 }
 
 export interface LotWatchOutput {
@@ -213,6 +235,8 @@ export interface LotWatchOutput {
   saveGuest: Stream<void>;
   enableAdminManager: Stream<void>;
   togglePersonAdmin: Stream<{ name: string }>;
+  becomeCurator: Stream<void>;
+  stepDownCurator: Stream<void>;
   toggleAdminMode: Stream<void>;
 }
 
@@ -404,12 +428,12 @@ const personIsLotWatchAdmin = (
 };
 
 const prepareLotWatchAdminToggle = (
-  credential: LotWatchAdminManagerCredential | null | undefined,
+  managerMode: boolean,
   registry: LotWatchAdminRegistryCell,
   rawName: string,
 ): LotWatchAdminRole[] | null => {
   const personName = rawName.trim();
-  if (!adminManagerCredentialIsActive(credential) || personName === "") {
+  if (managerMode !== true || personName === "") {
     return null;
   }
   const adminRoles = lotWatchAdminRolesValue(registry);
@@ -428,6 +452,58 @@ const prepareLotWatchAdminToggle = (
   ];
 };
 
+type LotWatchAdminChangeKind = "toggle" | "grant" | "revoke";
+
+interface LotWatchAdminChangeState {
+  kind: LotWatchAdminChangeKind;
+  adminRegistry: LotWatchAdminRegistryCell;
+  adminManagerMode: LotWatchAdminManagerModeCell;
+}
+
+/**
+ * The one place the admin roster is written. `LotWatchAdminList` names this
+ * handler in its `writeAuthorizedBy` contract, so a write from anywhere else
+ * — another action in this pattern, or another pattern that holds the
+ * registry cell under this schema — is rejected by the runtime rather than
+ * by a convention. Two writes reach the roster without passing through it:
+ * pattern setup and seed materialization install a value at a bound path,
+ * and a holder that declares the same cell under a schema of its own brings
+ * no contract for the runtime to check.
+ *
+ * It stays private to this module. Its checks read the cells it is bound to,
+ * so a module that could import it could bind it to a registry it wants to
+ * change and to a manager flag of its own that says the change is allowed.
+ * Private, the only bindings are the three below, against this pattern's own
+ * cells.
+ *
+ * `grant` and `revoke` are the one-directional forms the curator buttons
+ * need: each is a no-op when the person is already on the side it would move
+ * them to, so a second click cannot step the actor back the other way.
+ *
+ * What none of this reaches is who the acting person is: that is the
+ * free-text `reporterName`, per the demo identity model above, and the
+ * manager flag it checks is one the actor turns on for themselves. Real
+ * authority here needs a stable user identity first.
+ */
+const commitLotWatchAdminChange = handler<
+  { name: string },
+  LotWatchAdminChangeState
+>((event, { kind, adminRegistry, adminManagerMode }) => {
+  const personName = (event?.name ?? "").trim();
+  if (personName === "") return;
+  if (kind !== "toggle") {
+    const isAdmin = personIsLotWatchAdmin(adminRegistry, personName);
+    if (kind === "grant" ? isAdmin : !isAdmin) return;
+  }
+  const nextAdmins = prepareLotWatchAdminToggle(
+    adminManagerMode.get(),
+    adminRegistry,
+    personName,
+  );
+  if (nextAdmins === null) return;
+  adminRegistry.key("admins").set(nextAdmins as LotWatchAdminList);
+});
+
 // ============================================================
 // Pattern
 // ============================================================
@@ -440,10 +516,8 @@ export default pattern<LotWatchInput, LotWatchOutput>(
     // when the caller wires nothing; a parent that owns the cells (e.g.
     // lot-with-coordinator-demo) shares them by passing them in.
 
-    // DESIGN §6: admin manager credential (mirror coordinator)
-    const adminManagerCredential = new Writable.perUser<
-      LotWatchAdminManagerCredential | null
-    >(null);
+    // DESIGN §6: admin manager mode (mirror coordinator)
+    const adminManagerMode = new Writable.perUser(false);
 
     // PerUser: who is reporting. Set from the viewer's shared profile (the
     // `#profile` wish's built-in UI covers profile create/pick); tests and
@@ -568,21 +642,25 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       },
     );
 
-    // DESIGN §6: admin actions — mirror coordinator exactly
+    // DESIGN §6: admin actions
     const enableAdminManager = action(() => {
-      adminManagerCredential.set({
-        canManageAdmins: true,
-      } as LotWatchAdminManagerCredential);
+      adminManagerMode.set(true);
     });
 
-    const togglePersonAdmin = action<{ name: string }>(({ name }) => {
-      const nextAdmins = prepareLotWatchAdminToggle(
-        adminManagerCredential.get(),
-        adminRegistry,
-        name,
-      );
-      if (nextAdmins === null) return;
-      adminRegistry.set({ admins: nextAdmins as LotWatchAdminList });
+    // Every roster write goes through the one handler the roster's
+    // `writeAuthorizedBy` contract names.
+    const adminChangeState = { adminRegistry, adminManagerMode };
+    const togglePersonAdmin = commitLotWatchAdminChange({
+      kind: "toggle",
+      ...adminChangeState,
+    });
+    const grantPersonAdmin = commitLotWatchAdminChange({
+      kind: "grant",
+      ...adminChangeState,
+    });
+    const revokePersonAdmin = commitLotWatchAdminChange({
+      kind: "revoke",
+      ...adminChangeState,
     });
 
     const toggleAdminMode = action(() => {
@@ -599,29 +677,18 @@ export default pattern<LotWatchInput, LotWatchOutput>(
 
     // One-shot curator promotion — the lot demo has no separate "admin
     // manager" persona, so the full CFC ceremony (enable manager → toggle
-    // role → flip view) collapses to a single button. Sets the credential,
-    // promotes the current `reporterName` to lot-watch admin (if not
-    // already), and turns admin view on. `personIsLotWatchAdmin` then
+    // role → flip view) collapses to a single button. Turns the manager
+    // switch on, sends the grant that promotes the current `reporterName`
+    // to lot-watch admin, and turns admin view on. The grant reaches the
+    // roster in its own transaction, so a refused grant leaves the switch
+    // and the view set without a role. `personIsLotWatchAdmin` then
     // gates curation actions exactly as before — only the UX collapses,
     // not the underlying integrity model.
     const becomeCurator = action(() => {
       const name = (reporterName.get() || "").trim();
       if (!name) return; // need a reporter identity to bind the role to
-      adminManagerCredential.set({
-        canManageAdmins: true,
-      } as LotWatchAdminManagerCredential);
-      // Toggle the role only if not already an admin (so an already-admin
-      // user clicking "Become curator" doesn't accidentally step down).
-      if (!personIsLotWatchAdmin(adminRegistry, name)) {
-        const nextAdmins = prepareLotWatchAdminToggle(
-          adminManagerCredential.get(),
-          adminRegistry,
-          name,
-        );
-        if (nextAdmins !== null) {
-          adminRegistry.set({ admins: nextAdmins as LotWatchAdminList });
-        }
-      }
+      adminManagerMode.set(true);
+      grantPersonAdmin.send({ name });
       adminMode.set(true);
     });
 
@@ -631,16 +698,7 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       adminMode.set(false);
       const name = (reporterName.get() || "").trim();
       if (!name) return;
-      if (personIsLotWatchAdmin(adminRegistry, name)) {
-        const nextAdmins = prepareLotWatchAdminToggle(
-          adminManagerCredential.get(),
-          adminRegistry,
-          name,
-        );
-        if (nextAdmins !== null) {
-          adminRegistry.set({ admins: nextAdmins as LotWatchAdminList });
-        }
-      }
+      revokePersonAdmin.send({ name });
     });
 
     // Quick-pick: set the assignPersonName cell to a known name. Used by
@@ -2450,6 +2508,8 @@ export default pattern<LotWatchInput, LotWatchOutput>(
       saveGuest,
       enableAdminManager,
       togglePersonAdmin,
+      becomeCurator,
+      stepDownCurator,
       toggleAdminMode,
     };
   },
