@@ -2,7 +2,10 @@
  * Tests for VDOM event serialization.
  */
 
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
+import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
+import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
+import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
   $conn,
   CellHandle,
@@ -198,30 +201,30 @@ Deno.test("events - serializeEvent", async (t) => {
 
     const serialized = serializeEvent(event);
 
-    assertEquals(serialized.target?.value, handle.toJSON());
+    assertEquals(serialized.target?.value, handle.toSigilLink());
   });
 
-  await t.step("resolves a `toJSON()` on a target's `value`", () => {
-    // `value` is the one target property no scalar covers, so what is neither a
-    // cell nor a scalar still reaches the general conversion -- which resolves
-    // a `toJSON()`. The other four judge such a value by their own scalar and
-    // leave it out instead.
-    const link = { "/": { "link@1": { id: "of:fid1:abc" } } };
+  await t.step("refuses a value that merely defines a `toJSON()`", () => {
+    // The whole of "no wide-open `toJSON()`": a cell is recognized by its
+    // class, and something that only knows how to render itself as JSON is not
+    // one. `value` is the property with no scalar to fall back on, so nothing
+    // catches this short of the refusal.
     const speaksForItself = new (class {
       toJSON() {
-        return link;
+        return { "/": { "link@1": { id: "of:fid1:abc" } } };
       }
     })();
     const event = new MockEvent("input", {
       target: { value: speaksForItself },
     }) as unknown as Event;
 
-    const serialized = serializeEvent(event);
-
-    assertEquals(serialized.target?.value, link);
+    assertThrows(() => serializeEvent(event), Error, "Cannot yet carry");
   });
 
-  await t.step("describes a target value with no JSON form", () => {
+  await t.step("carries a circular target value through untouched", () => {
+    // A value with cycles is a `FabricValue`, so it crosses as one. Whether it
+    // can be carried further is the encoding's question at the crossing, and
+    // nothing here walks a value looking for one.
     const circular: Record<string, unknown> = {};
     circular.self = circular;
     const event = new MockEvent("input", {
@@ -230,22 +233,20 @@ Deno.test("events - serializeEvent", async (t) => {
 
     const serialized = serializeEvent(event);
 
-    assertEquals(serialized.target?.value, "[object Object]");
+    assertEquals(serialized.target?.value, circular as FabricValue);
   });
 
-  await t.step("describes a target value that refuses coercion too", () => {
-    // `String()` reaches for `toString` and `valueOf`; a null-prototype object
-    // has neither, and a circular one has no JSON form either, so both routes
-    // out of the conversion throw. The event still has to reach the worker.
+  await t.step("names a value that refuses even to be described", () => {
+    // The refusal has to say what it refused, and `String()` reaches for
+    // `toString` and `valueOf`, which an object made with `Object.create(null)`
+    // has neither of. A fixed token stands in, so the refusal does not fail in
+    // turn from inside its own message.
     const bare = Object.create(null);
-    bare.self = bare;
     const event = new MockEvent("input", {
       target: { value: bare },
     }) as unknown as Event;
 
-    const serialized = serializeEvent(event);
-
-    assertEquals(serialized.target?.value, "/unconvertible");
+    assertThrows(() => serializeEvent(event), Error, "/unconvertible");
   });
 
   await t.step("captures trusted provenance", () => {
@@ -433,7 +434,7 @@ Deno.test("events - serializeEvent", async (t) => {
 
     const serialized = serializeEvent(event);
 
-    assertEquals(serialized.target?.selected, handle.toJSON());
+    assertEquals(serialized.target?.selected, handle.toSigilLink());
   });
 
   await t.step("does not take a `toJSON()` of its own for a cell", () => {
@@ -463,6 +464,89 @@ Deno.test("events - serializeEvent", async (t) => {
     assertEquals(serialized.target?.name, undefined);
     assertEquals(serialized.target?.value, "kept");
   });
+
+  await t.step(
+    "carries a `bigint` in a detail rather than losing the detail",
+    () => {
+      // The whole detail used to go: a `bigint` throws out of `JSON.stringify()`,
+      // and what answered was a description of the value it was handed rather
+      // than of the member that could not be rendered.
+      const event = new MockCustomEvent("custom", {
+        detail: { message: "hello", count: 42n },
+      }) as unknown as Event;
+
+      const serialized = serializeEvent(event);
+
+      assertEquals(serialized.detail, { message: "hello", count: 42n });
+    },
+  );
+
+  await t.step("carries a `bigint` exposed as a target's value", () => {
+    // Quieter than losing a detail and worse for it: this used to arrive as the
+    // string `"42"`, which a handler has no way to tell from a real one.
+    const event = new MockEvent("input", {
+      target: { value: 42n },
+    }) as unknown as Event;
+
+    const serialized = serializeEvent(event);
+
+    assertEquals(serialized.target?.value, 42n);
+  });
+
+  await t.step("carries a `CellHandle` handed over as a whole detail", () => {
+    // The one way a handle reaches the general conversion: a target property is
+    // checked for one before delegating, so this is a component emitting a
+    // handle as the detail itself rather than inside a record.
+    const handle = makeHandle();
+    const event = new MockCustomEvent("custom", {
+      detail: handle,
+    }) as unknown as Event;
+
+    const serialized = serializeEvent(event);
+
+    assertEquals(serialized.detail, handle.toSigilLink());
+  });
+
+  await t.step("carries a `FabricBytes` in a detail as its own bytes", () => {
+    // A fabric primitive's state is not enumerable properties, so the round
+    // trip rendered one as `{}`.
+    const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
+    const event = new MockCustomEvent("custom", {
+      detail: { blob: bytes },
+    }) as unknown as Event;
+
+    const serialized = serializeEvent(event);
+
+    assertEquals((serialized.detail as { blob: unknown }).blob, bytes);
+  });
+
+  await t.step(
+    "hands on a detail the crossing will refuse, unfabricated",
+    () => {
+      // `cf-error` carries an `Error`, and `cf-code-editor` alone raises six. Its
+      // top layer is a plain record, so it crosses this seam; the member with no
+      // fabric form is the producer's bug and is named by the encoding, which is
+      // where a deep check here would have reached the same verdict at the cost
+      // of a walk on every correct value.
+      //
+      // What matters is the half this seam owns: the value is handed on as it
+      // was, not rendered into an empty record that a handler cannot tell from
+      // real data.
+      const error = new Error("boom");
+      const event = new MockCustomEvent("cf-error", {
+        detail: { error, message: "upload failed" },
+      }) as unknown as Event;
+
+      const serialized = serializeEvent(event);
+
+      assertEquals((serialized.detail as { error: unknown }).error, error);
+      assertThrows(
+        () => realmFromFabricValue(serialized.detail!),
+        Error,
+        "Cannot encode instance",
+      );
+    },
+  );
 
   await t.step("omits undefined properties", () => {
     const event = new MockEvent("click") as unknown as Event;
