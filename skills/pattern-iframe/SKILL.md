@@ -1,19 +1,28 @@
 ---
 name: pattern-iframe
-description: Build or generate a Common Fabric pattern whose primary UI is a self-contained `cf-iframe` guest. Use when an agent should turn an input-data shape and a small state/output contract into a working iframe-first pattern without learning the broader pattern framework, including React guests, PerSpace/PerUser/PerSession data, path-scoped Cell access, stable array-item handles, mergeable pushes, or bridged SQLite.
+description: Build or generate a Common Fabric pattern whose primary UI is a self-contained `cf-iframe` guest. Use when an agent should turn an input-data shape and a small state/output contract into a working iframe-first pattern without learning the broader pattern framework, including plain DOM, React, D3, Phaser 2D games, Babylon.js 3D scenes, PerSpace/PerUser/PerSession data, path-scoped Cell access, stable array-item handles, mergeable pushes, or bridged SQLite.
 ---
 
 # Iframe-first patterns
 
-Choose one self-contained authoring contract before writing code:
+Choose one self-contained authoring contract before writing code. Route by the
+primary rendering owner, in this order:
 
+- For a 3D game, world, simulation, or WebGL scene, read
+  `docs/common/ai/iframe-pattern-babylon-guide.md` in full.
+- For a primarily 2D HTML5 game, read
+  `docs/common/ai/iframe-pattern-phaser-guide.md` in full.
+- For a data visualization whose DOM or SVG is owned by D3, read
+  `docs/common/ai/iframe-pattern-d3-guide.md` in full.
 - For a React component tree, hooks, or an explicitly requested React guest,
   read `docs/common/ai/iframe-pattern-react-guide.md` in full.
 - Otherwise read `docs/common/ai/iframe-pattern-guide.md` in full for a plain
   DOM guest.
 
-Do not load both guides unless the task is a migration between those styles. Do
-not load the general pattern-development guides unless the requested behavior
+For an explicit hybrid, choose the guide for the framework that owns the DOM or
+canvas lifecycle. Load a second guide only when the request genuinely combines
+two owners, such as React mounting and unmounting a D3-managed subtree. Do not
+load the general pattern-development guides unless the requested behavior
 extends beyond the generated wrapper.
 
 Keep the authored surface small:

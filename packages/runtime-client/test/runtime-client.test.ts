@@ -138,6 +138,29 @@ describe("RuntimeClient", () => {
     });
   });
 
+  describe("setMemoryMessageCompression", () => {
+    it("asks the worker to change live memory WebSocket compression", async () => {
+      const requests: unknown[] = [];
+      const conn = {
+        on: () => {},
+        request: (message: unknown) => {
+          requests.push(message);
+          return Promise.resolve(undefined);
+        },
+      } as unknown as never;
+      const client = new (RuntimeClient as unknown as {
+        new (conn: never, options: unknown): RuntimeClient;
+      })(conn, {});
+
+      await client.setMemoryMessageCompression(false);
+
+      expect(requests).toEqual([{
+        type: RequestType.SetMemoryMessageCompression,
+        enabled: false,
+      }]);
+    });
+  });
+
   describe("getPieceSource", () => {
     it("asks the worker for one piece's source state", async () => {
       const source = {

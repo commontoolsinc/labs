@@ -21,7 +21,7 @@ in the same change.
 flags](#appendix-a-removed-and-never-shipped-flags) rather than deleting the
 > record, so the history stays discoverable.
 
-**Last reviewed:** 2026-07-23. Each flag's section carries the date its status
+**Last reviewed:** 2026-08-28. Each flag's section carries the date its status
 was last checked against the code.
 
 ## Summary table
@@ -47,6 +47,7 @@ was last checked against the code.
 | [`cfcLabelMetadataProtection`](#cfclabelmetadataprotection)                 | `RuntimeOptions.cfcLabelMetadataProtection`                                                                                                     | `off`                                                                                | Bernhard Seefeld (#4638)                              | `observe` (divergence counting) first, then `enforce`                                                                                                                                                                             | implemented, staged rollout                                                     |
 | [`conflictAdmissionMode`](#conflictadmissionmode)                           | `CF_CONFLICT_ADMISSION` env, or `setConflictAdmissionMode()`                                                                                    | `off`                                                                                | William Kelly (#4237); `hold` removed CT-1925 (#5110) | keep `preempt` as a tuning dial or remove after re-measurement                                                                                                                                                                    | implemented, off by default, measured net-negative                              |
 | [`syncSchemaTableV2`](#syncschematablev2)                                   | `setSyncSchemaTableConfig()` (negotiated per connection)                                                                                        | on                                                                                   | Ben Follington (#4292)                                | retire the negotiation once every peer speaks v2                                                                                                                                                                                  | implemented, on by default                                                      |
+| [`messageCompressionV1`](#messagecompressionv1)                             | `setMessageCompressionConfig()` (negotiated per connection)                                                                                     | on                                                                                   | PR #6474                                             | retire the rollback switch after the binary WebSocket envelope has field-soaked                                                                                                                                                   | implemented, on by default                                                      |
 | [`ownWriteEcho`](#ownwriteecho)                                             | `setOwnWriteEchoConfig()` (server-side only, not negotiated)                                                                                    | on                                                                                   | Robin McCollum (CT-1965)                              | remove the switch once the echo has field-soaked                                                                                                                                                                                  | implemented, on by default                                                      |
 | [`experimentalConcurrentWatchRefresh`](#experimentalconcurrentwatchrefresh) | `IRemoteStorageProviderSettings`; in the shell, the `commonfabric.concurrentWatchRefresh()` console command (localStorage, per browser profile) | off                                                                                  | Ben Follington (#4937; shell toggle #4974)            | graduate to always-on after live measurement, or remove if superseded                                                                                                                                                             | implemented behind the flag, off by default, not yet measured over real latency |
 | [`cfcRenderCeiling`](#cfcrenderceiling)                                     | `commonfabric.cfcRenderCeiling()` in the browser (localStorage)                                                                                 | off                                                                                  | Bernhard Seefeld (#4550)                              | graduate once exchange resolution lands                                                                                                                                                                                           | implemented, off by default, dogfood only                                       |
@@ -938,6 +939,28 @@ the per-epic implementation notes).
 - **Path to removal.** Confirm no peer still needs the expanded payload, then
   delete the negotiation and the expanded-form encoder and always send the
   compact form.
+
+### `messageCompressionV1`
+
+- **Toggle via.** `setMessageCompressionConfig()` in
+  [`packages/memory/v2.ts`](../../packages/memory/v2.ts). It is advertised as a
+  capability in the memory `hello` handshake and enabled only when both peers
+  advertise it and the transport supports compression streams.
+- **Added by.** PR #6474, "compress memory WebSocket messages."
+- **Purpose.** Compresses eligible memory messages into versioned binary
+  WebSocket frames whose fixed header is followed directly by gzip bytes. Small
+  and incompressible messages remain ordinary text frames. This raises the
+  effective logical-message ceiling above Deno's 64 MiB frame limit when the
+  compressed frame remains below that limit.
+- **Current default and planned end state.** On by default. An explicit `false`
+  is the programmatic rollback override: both clients and servers omit the
+  capability and keep every frame textual. Remove the switch after the binary
+  path and known relays have field-soaked; keep compression itself always on.
+- **Status on 2026-08-28.** Implemented and on by default, negotiated per
+  connection, with an explicit rollback override.
+- **Path to removal.** Confirm all deployed peers and relays preserve binary
+  WebSocket frames, then delete the config trio and advertise the capability
+  unconditionally.
 
 > Two neighbors in the same handshake are related but are not
 > runtime-toggleable experimental flags:

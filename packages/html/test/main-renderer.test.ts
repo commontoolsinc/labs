@@ -11,8 +11,8 @@ import { VDomRenderer } from "../src/main/renderer.ts";
 import { getActiveRenders, render } from "../src/render.ts";
 
 class MockConnection {
-  private listeners = new Map<string, Set<(payload: unknown) => void>>();
-  private lifetime = new AbortController();
+  #listeners = new Map<string, Set<(payload: unknown) => void>>();
+  #lifetime = new AbortController();
   public unmountCalls: number[] = [];
   public acknowledgedBatches: Array<{ mountId: number; batchId: number }> = [];
   public sentEvents: Array<{
@@ -23,21 +23,21 @@ class MockConnection {
   }> = [];
 
   get signal(): AbortSignal {
-    return this.lifetime.signal;
+    return this.#lifetime.signal;
   }
 
   /** Dispose the connection, as a logout/runtime-swap would. */
   abort(): void {
-    this.lifetime.abort();
+    this.#lifetime.abort();
   }
 
   onDispose(teardown: () => void): () => void {
-    if (this.lifetime.signal.aborted) {
+    if (this.#lifetime.signal.aborted) {
       teardown();
       return () => {};
     }
-    this.lifetime.signal.addEventListener("abort", teardown, { once: true });
-    return () => this.lifetime.signal.removeEventListener("abort", teardown);
+    this.#lifetime.signal.addEventListener("abort", teardown, { once: true });
+    return () => this.#lifetime.signal.removeEventListener("abort", teardown);
   }
 
   // The renderer obtains VDOM capability only through attachVDom; the session
@@ -66,16 +66,16 @@ class MockConnection {
   }
 
   on(event: string, callback: (payload: unknown) => void): void {
-    let set = this.listeners.get(event);
+    let set = this.#listeners.get(event);
     if (!set) {
       set = new Set();
-      this.listeners.set(event, set);
+      this.#listeners.set(event, set);
     }
     set.add(callback);
   }
 
   off(event: string, callback: (payload: unknown) => void): void {
-    this.listeners.get(event)?.delete(callback);
+    this.#listeners.get(event)?.delete(callback);
   }
 
   /** What the next `mountVDom` reports as the tree's root. */
@@ -107,7 +107,7 @@ class MockConnection {
   }
 
   emit(event: string, payload: unknown): void {
-    for (const listener of this.listeners.get(event) ?? []) {
+    for (const listener of this.#listeners.get(event) ?? []) {
       listener(payload);
     }
   }

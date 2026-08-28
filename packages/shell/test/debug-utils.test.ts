@@ -192,6 +192,7 @@ describe("runtime debug globals", () => {
 
   it("exposeCommonfabricGlobals installs the console globals", async () => {
     let idleCalls = 0;
+    const compressionModes: boolean[] = [];
     const detectResult = { nonIdempotent: [], cycles: 0 };
     const runtime = {
       idle: () => {
@@ -199,6 +200,10 @@ describe("runtime debug globals", () => {
         return Promise.resolve();
       },
       detectNonIdempotent: () => Promise.resolve(detectResult),
+      setMemoryMessageCompression: (enabled: boolean) => {
+        compressionModes.push(enabled);
+        return Promise.resolve();
+      },
     } as unknown as RuntimeClient;
     const global: Globals = {};
 
@@ -209,6 +214,7 @@ describe("runtime debug globals", () => {
     expect(typeof cf.viewSettled).toBe("function");
     expect(typeof cf.vdom).toBe("object");
     expect(typeof cf.detectNonIdempotent).toBe("function");
+    expect(typeof cf.setMemoryMessageCompression).toBe("function");
     expect(typeof cf.readCell).toBe("function");
     expect(typeof cf.watchWrites).toBe("function");
 
@@ -223,18 +229,22 @@ describe("runtime debug globals", () => {
       table.restore();
       log.restore();
     }
+    await cf.setMemoryMessageCompression!(false);
+    expect(compressionModes).toEqual([false]);
   });
 
-  it("clearRuntimeDebugGlobals clears rt and viewSettled", () => {
+  it("clearRuntimeDebugGlobals clears runtime-bound helpers", () => {
     const global: Globals = {
       commonfabric: {
         rt: {} as RuntimeClient,
         viewSettled: () => Promise.resolve(),
+        setMemoryMessageCompression: () => Promise.resolve(),
       },
     };
     clearRuntimeDebugGlobals(global);
     expect(global.commonfabric!.rt).toBeUndefined();
     expect(global.commonfabric!.viewSettled).toBeUndefined();
+    expect(global.commonfabric!.setMemoryMessageCompression).toBeUndefined();
   });
 
   it("clearRuntimeDebugGlobals is a no-op without a commonfabric global", () => {

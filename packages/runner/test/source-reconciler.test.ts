@@ -8,6 +8,7 @@ import {
   getPatternIdentityRef,
   getPatternSetupIdentityRef,
   getPatternSource,
+  getPieceReconciliation,
   getPieceSourceRevisions,
   resolveEntryIdentity,
   Runtime,
@@ -559,6 +560,183 @@ describe("piece source reconciliation", () => {
       expect(await reconcile(piece)).toBe("unavailable");
       expect(getPatternIdentityRef(piece)).toEqual(originalRef);
       expect(getPieceSourceRevisions(piece)).toEqual([]);
+    });
+  });
+
+  describe("what a reconciliation leaves behind", () => {
+    it("records reaching an origin that offers what the piece runs", async () => {
+      const v1Identity = await identityFor(source("v1"));
+      const piece = await preparePiece(
+        servingFetch(() => v1Identity, () => source("v1")),
+      );
+      await stampSource(piece, PARENT_SOURCE);
+
+      expect(await reconcile(piece)).toBe("current");
+
+      expect(getPieceReconciliation(piece)).toMatchObject({
+        outcome: "followed",
+        origin: PARENT_SOURCE,
+        offered: { identity: v1Identity, symbol: SYMBOL },
+      });
+    });
+
+    it("reaching the same conclusion again rewrites nothing", async () => {
+      const v1Identity = await identityFor(source("v1"));
+      const piece = await preparePiece(
+        servingFetch(() => v1Identity, () => source("v1")),
+      );
+      await stampSource(piece, PARENT_SOURCE);
+      expect(await reconcile(piece)).toBe("current");
+      const first = getPieceReconciliation(piece);
+
+      expect(await reconcile(piece)).toBe("current");
+
+      // Opening a piece that is up to date stays a read.
+      expect(getPieceReconciliation(piece)).toEqual(first);
+    });
+
+    it("records an origin it could not reach, and what it answered", async () => {
+      const piece = await preparePiece(() =>
+        Promise.resolve(new Response("nope", { status: 503 }))
+      );
+      await stampSource(piece, PARENT_SOURCE);
+
+      expect(await reconcile(piece)).toBe("unavailable");
+
+      expect(getPieceReconciliation(piece)).toMatchObject({
+        outcome: "unreachable",
+        origin: PARENT_SOURCE,
+        detail: "the origin answered 503",
+      });
+    });
+
+    it("records a refusal, its reason, and what was offered", async () => {
+      const piece = await preparePiece(refuseEveryFetch);
+      const changed = await runtime.patternManager.compilePattern(
+        parentProgram(sourceWithChangedContract("v2")),
+        { space: piece.space },
+      );
+      const changedRef = runtime.patternManager.getArtifactEntryRef(changed)!;
+      const origin = `cf:pattern:${changedRef.identity}`;
+      await stampSource(piece, origin);
+
+      expect(await reconcile(piece)).toBe("incompatible");
+
+      // A refusal leaves no revision, so without this record it would look
+      // exactly like a piece running what its origin offers.
+      expect(getPieceReconciliation(piece)).toMatchObject({
+        outcome: "refused",
+        reason: "incompatible-schema",
+        origin,
+        offered: changedRef,
+      });
+      expect(getPieceReconciliation(piece)?.detail).toContain("schema differs");
+    });
+
+    it("records an origin whose route refused the connection", async () => {
+      // The commonest way an origin is out of reach is a request that throws
+      // rather than answering. Its caller turns that into `unavailable`, so
+      // recording has to happen before it gets there.
+      const piece = await preparePiece(() =>
+        Promise.reject(new Error("connection refused"))
+      );
+      await stampSource(piece, PARENT_SOURCE);
+
+      // The caller reports it as unavailable, which is what a reader of the
+      // outcome sees; the record is what survives past this call.
+      expect(await reconcile(piece)).toBe("unavailable");
+
+      expect(getPieceReconciliation(piece)).toMatchObject({
+        outcome: "unreachable",
+        origin: PARENT_SOURCE,
+        detail: "connection refused",
+      });
+    });
+
+    it("settles on a failure that arrives without a message", async () => {
+      // An empty reason is dropped when the record is read, so recording one
+      // would leave every later attempt rewriting the same conclusion.
+      const piece = await preparePiece(() => Promise.reject(new Error()));
+      await stampSource(piece, PARENT_SOURCE);
+
+      expect(await reconcile(piece)).toBe("unavailable");
+      const first = getPieceReconciliation(piece);
+      expect(first).toMatchObject({ outcome: "unreachable" });
+      expect(first?.detail).toBe("Error");
+
+      expect(await reconcile(piece)).toBe("unavailable");
+      expect(getPieceReconciliation(piece)).toEqual(first);
+    });
+
+    it("names a failure that is not an Error at all", async () => {
+      const piece = await preparePiece(() => Promise.reject("nope"));
+      await stampSource(piece, PARENT_SOURCE);
+
+      expect(await reconcile(piece)).toBe("unavailable");
+
+      expect(getPieceReconciliation(piece)?.detail).toBe("nope");
+    });
+
+    it("falls back to a phrase when a failure says nothing at all", async () => {
+      // An error with neither message nor name, and nothing else to read.
+      const silent = new Error();
+      silent.name = "";
+      const piece = await preparePiece(() => Promise.reject(silent));
+      await stampSource(piece, PARENT_SOURCE);
+
+      expect(await reconcile(piece)).toBe("unavailable");
+
+      // Non-empty, so it survives being read back and the record settles.
+      expect(getPieceReconciliation(piece)?.detail).toBe(
+        "the origin could not be reached",
+      );
+    });
+
+    it("names what a fabric origin holds even when nothing moved", async () => {
+      const piece = await preparePiece(refuseEveryFetch);
+      const runningRef = getPatternIdentityRef(piece)!;
+      await stampSource(piece, `cf:pattern:${runningRef.identity}`);
+
+      expect(await reconcile(piece)).toBe("current");
+
+      // Nothing moved, and the record still says which source was weighed.
+      expect(getPieceReconciliation(piece)).toMatchObject({
+        outcome: "followed",
+        offered: runningRef,
+      });
+    });
+
+    it("records an origin whose kind nothing follows yet", async () => {
+      const piece = await preparePiece(refuseEveryFetch);
+      const origin = `https://programs.test${PARENT_PATH}`;
+      await stampSource(piece, origin);
+
+      expect(await reconcile(piece)).toBe("unsupported");
+
+      // Not a fault, and not a piece nobody has looked at: its owner can ask
+      // this origin by hand, and nothing else will.
+      expect(getPieceReconciliation(piece)).toMatchObject({
+        outcome: "unsupported",
+        origin,
+      });
+    });
+
+    it("says nothing about a piece that records no origin", async () => {
+      const piece = await preparePiece(refuseEveryFetch);
+
+      expect(await reconcile(piece)).toBe("detached");
+
+      // The absent origin already says it; a record would only restate it.
+      expect(getPieceReconciliation(piece)).toBeUndefined();
+    });
+
+    it("says nothing about an origin nothing can follow", async () => {
+      const piece = await preparePiece(refuseEveryFetch);
+      await stampSource(piece, "not a url");
+
+      expect(await reconcile(piece)).toBe("unusable");
+
+      expect(getPieceReconciliation(piece)).toBeUndefined();
     });
   });
 

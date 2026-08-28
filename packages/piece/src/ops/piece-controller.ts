@@ -29,6 +29,7 @@ import {
   parseLinkOrThrow,
   type Pattern,
   PIECE_SOURCE_MOVED,
+  type PieceReconciliation,
   type PieceSourceRevision,
   type PieceSourceSnapshot,
   type PieceSourceTransition,
@@ -39,7 +40,9 @@ import {
   type RuntimeProgram,
   sanitizeSchemaForLinks,
   schemaAcceptsOpaqueCellValue,
+  setPieceReconciliation,
 } from "@commonfabric/runner";
+import { storedArgumentRefusalDetail } from "@commonfabric/runner/shared";
 import {
   cfcSchemaChildRoot,
   cfcSchemaMergeIssue,
@@ -65,6 +68,7 @@ import {
   snapshotCloneValue,
 } from "./clone-data-snapshot.ts";
 import {
+  acceptEnteredOrigin,
   qualifyFabricOrigin,
   readPieceOrigin,
   resolvePieceOriginSource,
@@ -422,7 +426,9 @@ export function pinnedSourceMoved(
 export type PieceSourceAction =
   | { kind: "detach" }
   | { kind: "restore"; revisionId: string }
-  | { kind: "follow"; revisionId: string };
+  | { kind: "follow"; revisionId: string }
+  | { kind: "repoint"; url: string }
+  | { kind: "adopt" };
 
 /** What one {@link PieceController.setPattern} write did beyond landing. */
 export interface PieceSourceSetResult {
@@ -3747,8 +3753,101 @@ export class PieceController<T = unknown> {
   }
 
   /**
-   * Detach from the current origin, restore an exact retained source revision,
-   * or follow an origin recorded by an earlier revision.
+   * Record what asking the origin just concluded.
+   *
+   * An explicit update is a reconciliation like any other, and the source
+   * panel reads one state whether a background check or its owner performed
+   * it. Without this, asking an origin and being refused would leave the piece
+   * saying nothing had looked.
+   *
+   * A failure to record is dropped. The outcome describes the attempt; it is
+   * not the attempt's result, and losing it changes nothing the piece runs.
+   */
+  async #recordReconciliation(
+    expected: PieceSourceSnapshot,
+    origin: string,
+    reconciliation: Omit<PieceReconciliation, "at" | "origin">,
+  ): Promise<void> {
+    // The result is not read. A commit that does not land leaves the piece
+    // with whatever it recorded before, which is a worse answer than this one
+    // and not a wrong one, and the caller's own result is what says whether
+    // the change happened. `editWithRetry` reports a failed commit in that
+    // result rather than by throwing, and the history this reads was already
+    // read at the top of the change that led here, so there is nothing left
+    // to throw either.
+    await this.#pieces.runtime.editWithRetry((tx) => {
+      // An outcome describes the piece the attempt reasoned about. A
+      // concurrent detach, edit, or repoint has moved it somewhere this
+      // conclusion does not describe, so the write is dropped rather than
+      // landing on the piece that replaced it.
+      const candidate = this.#cell.withTx(tx);
+      // The session pointer too: a keyless piece keeps no durable identity, so
+      // without it every comparison here would find no state and drop every
+      // record such a piece ever reaches.
+      const current = getPieceSourceSnapshot(
+        candidate,
+        this.#pieces.runtime.runner.sessionPatternPointerFor(this.#cell),
+      );
+      if (
+        current === undefined ||
+        current.pattern.identity !== expected.pattern.identity ||
+        current.pattern.symbol !== expected.pattern.symbol ||
+        current.origin !== expected.origin ||
+        current.revisionId !== expected.revisionId
+      ) return false;
+      setPieceReconciliation(this.#cell, tx, {
+        ...reconciliation,
+        origin,
+        at: Date.now(),
+      });
+      return true;
+    });
+  }
+
+  /**
+   * Refuse a candidate whose contract the piece's stored data does not
+   * satisfy, recording that refusal before raising it.
+   *
+   * This refusal is the one that cannot be overruled: the piece would not be
+   * able to run the source, so there is no warning to accept. Recording it is
+   * what separates it, on the source panel, from the refusal that can — and
+   * from a piece nothing has looked at, which is how it read while this was
+   * only ever thrown.
+   */
+  async #refuseUnusableArgument(
+    review: NonNullable<PreparedPieceSourceChange["review"]>,
+    expected: PieceSourceSnapshot,
+    origin: string | null,
+    candidate: { identity: string; symbol: string },
+    active: boolean,
+  ): Promise<void> {
+    const issue = review.issues.argument;
+    if (issue === undefined) return;
+    // Only an update from the piece's own active origin describes a
+    // relationship the piece has; being pointed somewhere new does not.
+    if (active && origin !== null) {
+      // The panel already says the data does not fit; what it needs from the
+      // message is which part of it, so the classifying prefix comes off.
+      await this.#recordReconciliation(expected, origin, {
+        outcome: "refused",
+        reason: "argument-mismatch",
+        offered: candidate,
+        detail: storedArgumentRefusalDetail(issue),
+      });
+    }
+    throw new Error(issue);
+  }
+
+  /**
+   * Change which source a piece follows.
+   *
+   * Five operations share this path because they share a shape: detach from
+   * the current origin, restore an exact retained source revision, follow an
+   * origin recorded by an earlier revision, take what the active origin
+   * offers now, or move to an origin its owner supplied. The last three all
+   * resolve an origin and adopt what it holds, differing only in which origin
+   * that is, which export it selects, and what the revision calls the
+   * transition.
    *
    * `expectedPattern` pins the reference this change may run over. The
    * snapshot read below becomes the transition's precondition, checked
@@ -3859,7 +3958,13 @@ export class PieceController<T = unknown> {
           "the piece source compatibility confirmation is incomplete",
         );
       }
-      assertPieceSourceArgumentUsable(confirmed.review);
+      await this.#refuseUnusableArgument(
+        confirmed.review,
+        expected,
+        confirmed.origin,
+        confirmed.candidate,
+        action.kind === "adopt",
+      );
       const loaded = await this.#pieces.runtime.patternManager
         .loadPatternByIdentity(
           confirmed.candidate.identity,
@@ -3877,7 +3982,13 @@ export class PieceController<T = unknown> {
         this.#cell,
         this.#pieces,
       );
-      assertPieceSourceArgumentUsable(currentReview);
+      await this.#refuseUnusableArgument(
+        currentReview,
+        expected,
+        confirmed.origin,
+        confirmed.candidate,
+        action.kind === "adopt",
+      );
       if (
         currentReview.argumentEvidence !==
           confirmed.review.argumentEvidence ||
@@ -3907,8 +4018,8 @@ export class PieceController<T = unknown> {
       let origin: string | null;
       let operation: PieceSourceTransition["operation"];
       let selectedRevisionId: string | undefined;
-      const selected = sourceRevision(revisions, action.revisionId);
       if (action.kind === "restore") {
+        const selected = sourceRevision(revisions, action.revisionId);
         const retained = await this.#pieces.runtime.patternManager
           .getPatternSourceProgramByIdentity(
             selected.pattern.identity,
@@ -3924,21 +4035,60 @@ export class PieceController<T = unknown> {
         operation = "revert";
         selectedRevisionId = selected.revisionId;
       } else {
-        if (selected.origin === undefined) {
-          throw new Error(
-            `source revision ${selected.revisionId} has no origin to follow`,
+        // Every remaining action resolves an origin and adopts what it offers
+        // now. They differ in which origin that is, which export it selects,
+        // and what the revision calls the transition: following an origin the
+        // piece used before, adopting what the active origin offers today, or
+        // moving to one a person supplied.
+        let symbol: string;
+        if (action.kind === "follow") {
+          const selected = sourceRevision(revisions, action.revisionId);
+          if (selected.origin === undefined) {
+            throw new Error(
+              `source revision ${selected.revisionId} has no origin to follow`,
+            );
+          }
+          origin = selected.origin;
+          symbol = selected.pattern.symbol;
+          operation = "repoint";
+          selectedRevisionId = selected.revisionId;
+        } else if (action.kind === "adopt") {
+          if (expected.origin === null) {
+            throw new Error("piece is not following a source");
+          }
+          origin = expected.origin;
+          symbol = previousRef.symbol;
+          operation = "origin-update";
+        } else {
+          origin = acceptEnteredOrigin(
+            this.#pieces.runtime,
+            this.#pieces.getSpace(),
+            action.url,
           );
+          symbol = previousRef.symbol;
+          operation = "repoint";
         }
-        const resolved = await resolvePieceOriginSource(
-          this.#pieces.runtime,
-          this.#pieces.getSpace(),
-          selected.origin,
-          selected.pattern.symbol,
-        );
-        program = resolved.program;
-        origin = selected.origin;
-        operation = "repoint";
-        selectedRevisionId = selected.revisionId;
+        try {
+          const resolved = await resolvePieceOriginSource(
+            this.#pieces.runtime,
+            this.#pieces.getSpace(),
+            origin,
+            symbol,
+            { self: { space: this.#pieces.getSpace(), pieceId: this.id } },
+          );
+          program = resolved.program;
+        } catch (error) {
+          // Only for `adopt`: the other two are being pointed at an origin the
+          // piece does not follow yet, and an outcome recorded against one
+          // would describe a relationship it does not have.
+          if (action.kind === "adopt") {
+            await this.#recordReconciliation(expected, origin, {
+              outcome: "unreachable",
+              detail: pieceSourceErrorMessage(error),
+            });
+          }
+          throw error;
+        }
       }
 
       candidate = await compileProgram(this.#pieces, program, {
@@ -3948,6 +4098,22 @@ export class PieceController<T = unknown> {
         .getArtifactEntryRef(candidate);
       if (candidateRef === undefined) {
         throw new Error("the candidate source has no pattern identity");
+      }
+      if (
+        action.kind === "adopt" &&
+        candidateRef.identity === previousRef.identity &&
+        candidateRef.symbol === previousRef.symbol
+      ) {
+        // The origin offers exactly what the piece runs, so there is no
+        // source transition to make. Recording the outcome is the whole
+        // result: it is what turns an unexamined origin into a current one.
+        // `origin` is the active one, which the adopt branch above refused to
+        // proceed without.
+        await this.#recordReconciliation(expected, origin!, {
+          outcome: "followed",
+          offered: candidateRef,
+        });
+        return { status: "applied" };
       }
       prepared = {
         action,
@@ -3964,9 +4130,24 @@ export class PieceController<T = unknown> {
         this.#cell,
         this.#pieces,
       );
-      assertPieceSourceArgumentUsable(review);
+      await this.#refuseUnusableArgument(
+        review,
+        expected,
+        origin,
+        candidateRef,
+        action.kind === "adopt",
+      );
       if (hasPieceSourceCompatibilityIssues(review.issues)) {
         prepared.review = review;
+        if (action.kind === "adopt") {
+          // Again the active origin, non-null since the adopt branch above.
+          await this.#recordReconciliation(expected, origin!, {
+            outcome: "refused",
+            reason: "incompatible-schema",
+            offered: candidateRef,
+            detail: pieceSourceCompatibilityMessage(review.issues),
+          });
+        }
         return {
           status: "incompatible",
           message: pieceSourceCompatibilityMessage(review.issues),
@@ -4026,9 +4207,36 @@ export class PieceController<T = unknown> {
           },
         ) as Cell<T>;
       });
+      // The transition cleared whatever the last reconciliation concluded,
+      // and this is the fresh answer: the piece now runs what this origin
+      // offered a moment ago. The guard is the state the transition left, read
+      // back rather than reconstructed, because recording an origin normalizes
+      // it and this has to match what the piece now stores.
+      const settled = getPieceSourceSnapshot(
+        this.#cell,
+        this.#pieces.runtime.runner.sessionPatternPointerFor(this.#cell),
+      );
+      // Only when the piece is still on the revision this transition wrote.
+      // Another transition landing in between describes a different piece
+      // than the candidate below, and recording against it would say that
+      // piece adopted source it never saw.
+      if (
+        settled !== undefined && settled.revisionId === transition.revisionId &&
+        settled.origin !== null
+      ) {
+        await this.#recordReconciliation(settled, settled.origin, {
+          outcome: "followed",
+          offered: prepared.candidate,
+        });
+      }
       return { status: "applied" };
     } catch (error) {
       if (await this.#sourceTransitionCommitted(transition.revisionId)) {
+        // The transition committed and running its source then failed, so
+        // neither outcome is true: the piece did not decline this source, and
+        // it is not demonstrably running it either. The warning below says
+        // what happened, and the next reconciliation settles what the piece
+        // is doing rather than this guessing now.
         return {
           status: "applied",
           executionWarning: pieceSourceErrorMessage(error),
@@ -4041,7 +4249,13 @@ export class PieceController<T = unknown> {
           this.#cell,
           this.#pieces,
         );
-        assertPieceSourceArgumentUsable(review);
+        await this.#refuseUnusableArgument(
+          review,
+          expected,
+          prepared.origin,
+          prepared.candidate,
+          action.kind === "adopt",
+        );
         if (hasPieceSourceCompatibilityIssues(review.issues)) {
           prepared.review = review;
           return {
@@ -4405,7 +4619,11 @@ function isPieceSourceAction(action: unknown): action is PieceSourceAction {
   if (typeof action !== "object" || action === null || !("kind" in action)) {
     return false;
   }
-  if (action.kind === "detach") return true;
+  if (action.kind === "detach" || action.kind === "adopt") return true;
+  if (action.kind === "repoint") {
+    return "url" in action && typeof action.url === "string" &&
+      action.url.trim().length > 0;
+  }
   return (action.kind === "restore" || action.kind === "follow") &&
     "revisionId" in action &&
     typeof action.revisionId === "string" &&
@@ -4416,9 +4634,14 @@ function samePieceSourceAction(
   left: PieceSourceAction,
   right: PieceSourceAction,
 ): boolean {
-  return left.kind === right.kind &&
-    (left.kind === "detach" ||
-      right.kind !== "detach" && left.revisionId === right.revisionId);
+  if (left.kind !== right.kind) return false;
+  if (left.kind === "detach" || left.kind === "adopt") return true;
+  if (left.kind === "repoint") {
+    return right.kind === "repoint" && left.url === right.url;
+  }
+  return right.kind === "restore" || right.kind === "follow"
+    ? left.revisionId === right.revisionId
+    : false;
 }
 
 function samePieceSourceSnapshot(
@@ -4646,14 +4869,6 @@ function hasPieceSourceCompatibilityIssues(
     issues.argument !== undefined ||
     issues.retainedLinks !== undefined ||
     issues.cfc !== undefined;
-}
-
-function assertPieceSourceArgumentUsable(
-  review: NonNullable<PreparedPieceSourceChange["review"]>,
-): void {
-  if (review.issues.argument !== undefined) {
-    throw new Error(review.issues.argument);
-  }
 }
 
 function pieceSourceCompatibilityMessage(

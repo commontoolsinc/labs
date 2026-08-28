@@ -47,10 +47,14 @@ import { expandServerMessageSchemas } from "./sync-schema-table.ts";
 import { type ArmedTurn, armTurn } from "./turn.ts";
 
 export type Transport = {
+  /** Whether this transport can exchange negotiated compression envelopes. */
+  readonly supportsMessageCompression?: boolean;
   send(payload: string): Promise<void>;
   close(): Promise<void>;
   setReceiver(receiver: (payload: string) => void): void;
   setCloseReceiver?(receiver: (error?: Error) => void): void;
+  /** Enables compression after a successful capability handshake. */
+  setMessageCompressionEnabled?(enabled: boolean): void;
 };
 
 export type ConnectOptions = {
@@ -377,14 +381,20 @@ export class Client {
   }
 
   async #hello(): Promise<void> {
+    this.#transport.setMessageCompressionEnabled?.(false);
     const ack = Promise.withResolvers<void>();
     this.#helloPending = ack;
+    const expectedFlags = getMemoryProtocolFlags();
     try {
       await Promise.all([
         this.#transport.send(encodeMemoryBoundary({
           type: "hello",
           protocol: MEMORY_PROTOCOL,
-          flags: getMemoryProtocolFlags(),
+          flags: {
+            ...expectedFlags,
+            messageCompressionV1: expectedFlags.messageCompressionV1 &&
+              this.#transport.supportsMessageCompression === true,
+          },
         })),
         ack.promise,
       ]);
@@ -440,6 +450,11 @@ export class Client {
         // consumers (e.g. the runner's sqlite write-gate relaxation) read
         // these; absent-on-old-server keys parse to false — fail closed.
         this.#serverFlags = helloOk.flags;
+        this.#transport.setMessageCompressionEnabled?.(
+          expectedFlags.messageCompressionV1 &&
+            this.#transport.supportsMessageCompression === true &&
+            helloOk.flags.messageCompressionV1,
+        );
         try {
           this.#sessionOpenAuthContext = requireSessionOpenAuthMetadata(
             helloOk.sessionOpen,

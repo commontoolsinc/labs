@@ -11,6 +11,13 @@ import { hashOf, hashStringOf } from "@commonfabric/data-model/value-hash";
 import { BoundedKeyMap } from "@commonfabric/utils/cache";
 import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { getLogger } from "@commonfabric/utils/logger";
+
+import { STORED_ARGUMENT_SCHEMA_REFUSAL } from "./stored-argument-refusal.ts";
+
+export {
+  isStoredArgumentSchemaRefusal,
+  STORED_ARGUMENT_SCHEMA_REFUSAL,
+} from "./stored-argument-refusal.ts";
 import {
   isObjectNotArray,
   isObjectOrArray,
@@ -873,6 +880,63 @@ export interface PieceSourceSnapshot {
   revisionId: string | null;
 }
 
+/**
+ * What the last attempt to follow a piece's active origin did.
+ *
+ * `unsupported` is its own outcome rather than a kind of failure: the origin
+ * is well formed and nothing is wrong with the piece, but this runtime does
+ * not follow origins of that kind yet, so what it holds is unexamined. Told as
+ * an error it would send someone looking for a fault; left unsaid it reads as
+ * a piece nobody has checked, which is a different thing again.
+ */
+export type PieceReconciliationOutcome =
+  | "followed"
+  | "unreachable"
+  | "refused"
+  | "unsupported";
+
+/**
+ * Why a reconciliation did not adopt what its origin offered.
+ *
+ * `incompatible-schema` and `argument-mismatch` are different refusals and
+ * only one of them can be overruled. The first says the candidate is not an
+ * acceptable replacement for what the piece runs, which its owner may decide
+ * to accept anyway. The second says the piece's own stored data does not
+ * satisfy the candidate, so the piece could not run it — there is nothing to
+ * accept, and the data has to change first.
+ */
+export type PieceReconciliationReason =
+  | "incompatible-schema"
+  | "argument-mismatch"
+  | "source-invalid"
+  | "identity-mismatch"
+  | "apply-failed";
+
+/**
+ * The outcome of the last attempt to follow a piece's active origin, kept on
+ * the piece so a reader can tell a piece that runs what its origin offers from
+ * one that does not. It is not a revision: a refused candidate was never
+ * accepted, and the revision log records only what the piece adopted.
+ */
+export interface PieceReconciliation {
+  outcome: PieceReconciliationOutcome;
+
+  /** When the piece reached this outcome. */
+  at: number;
+
+  /** The origin the attempt was following. */
+  origin: string;
+
+  /** The pattern the origin offered, when one was resolved. */
+  offered?: { identity: string; symbol: string };
+
+  /** Why the candidate was refused. Absent unless `outcome` is `refused`. */
+  reason?: PieceReconciliationReason;
+
+  /** What the attempt reported, in its own words. */
+  detail?: string;
+}
+
 export type PieceSourceTransitionBaseline =
   | { kind: "retain"; revisionId: string }
   | { kind: "unavailable" };
@@ -1335,31 +1399,6 @@ function overlayUnreadableLinkPlaceholders(
     return result ?? materialized;
   }
   return materialized;
-}
-
-/**
- * Prefix of the error setup throws when a piece's stored argument does not
- * satisfy the argument schema of the pattern being installed.
- *
- * Exported so a caller can CLASSIFY that failure rather than match on prose. It
- * is code-controlled and sits at the START of the message — a validation detail
- * carrying user-influenced text is appended after it — so a value that merely
- * contains this string cannot forge the classification.
- */
-export const STORED_ARGUMENT_SCHEMA_REFUSAL =
-  "updated arguments do not match the candidate schema";
-
-/**
- * Whether `error` is setup refusing a piece's stored argument.
- *
- * Distinct from a transient commit or storage failure, and callers must treat
- * it differently: re-running the same identity refuses identically, so a boot
- * repair that hits this has to escalate rather than retry (or a root pinned to
- * a version whose schema cannot read its own document never opens again).
- */
-export function isStoredArgumentSchemaRefusal(error: unknown): boolean {
-  return error instanceof Error &&
-    error.message.startsWith(`${STORED_ARGUMENT_SCHEMA_REFUSAL}:`);
 }
 
 /**
@@ -8748,6 +8787,82 @@ export function getPieceSourceRevisions(
 }
 
 /**
+ * Read the outcome of the last attempt to follow this piece's active origin.
+ *
+ * A value this runtime cannot read is reported as absent. This state describes
+ * a piece rather than guarding a write, so an unreadable one leaves the panel
+ * saying nothing instead of failing the read that carries it.
+ */
+export function getPieceReconciliation(
+  resultCell: Cell<unknown>,
+): PieceReconciliation | undefined {
+  const raw = resultCell.getMetaRaw("pieceReconciliation", {
+    meta: ignoreReadForScheduling,
+  });
+  if (!isObjectOrArray(raw)) return undefined;
+  const { outcome, at, origin, offered, reason, detail } = raw;
+  if (
+    !isPieceReconciliationOutcome(outcome) ||
+    typeof at !== "number" || !Number.isFinite(at) || at < 0 ||
+    typeof origin !== "string" || origin.length === 0
+  ) {
+    return undefined;
+  }
+  const offeredRef = asPatternIdentityRef(offered);
+  return {
+    outcome,
+    at,
+    origin,
+    ...(offeredRef === undefined ? {} : { offered: offeredRef }),
+    ...(isPieceReconciliationReason(reason) ? { reason } : {}),
+    ...(typeof detail === "string" && detail.length > 0 ? { detail } : {}),
+  };
+}
+
+/**
+ * Record what following the active origin just did. Meta writes are
+ * transactional, so a transaction is required.
+ */
+export function setPieceReconciliation(
+  resultCell: Cell<unknown>,
+  tx: IExtendedStorageTransaction,
+  reconciliation: PieceReconciliation,
+): void {
+  resultCell.withTx(tx).setMetaRaw(
+    "pieceReconciliation",
+    reconciliation as unknown as FabricValue,
+  );
+}
+
+/** Whether two recorded outcomes say the same thing, ignoring when. */
+export function samePieceReconciliation(
+  left: PieceReconciliation | undefined,
+  right: PieceReconciliation | undefined,
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return left.outcome === right.outcome && left.origin === right.origin &&
+    left.reason === right.reason && left.detail === right.detail &&
+    (left.offered === undefined || right.offered === undefined
+      ? left.offered === right.offered
+      : patternIdentityKey(left.offered) === patternIdentityKey(right.offered));
+}
+
+function isPieceReconciliationOutcome(
+  value: unknown,
+): value is PieceReconciliationOutcome {
+  return value === "followed" || value === "unreachable" ||
+    value === "refused" || value === "unsupported";
+}
+
+function isPieceReconciliationReason(
+  value: unknown,
+): value is PieceReconciliationReason {
+  return value === "incompatible-schema" || value === "argument-mismatch" ||
+    value === "source-invalid" || value === "identity-mismatch" ||
+    value === "apply-failed";
+}
+
+/**
  * The source state guarded by a lifecycle transition. `sessionPattern` is a
  * KEYLESS piece's session-side pointer (the never-durable contract; L3(a),
  * RULED 2026-08-27 — the durable meta legitimately holds nothing for one):
@@ -9057,6 +9172,10 @@ export function applyPieceSourceTransition(
     "pieceSourceHistory",
     history as unknown as FabricValue,
   );
+  // An accepted transition supersedes whatever the last reconciliation
+  // concluded: the piece has moved, and the recorded outcome describes a state
+  // it has left.
+  candidate.setMetaRaw("pieceReconciliation", undefined);
 }
 
 /** Read an explicitly supplied repository locator for a piece's source. */

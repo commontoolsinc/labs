@@ -87,14 +87,14 @@ const LIB_DECLARED_NATIVE_TYPES = new Set([
  */
 export class NativeTypeFormatter implements TypeFormatter {
   supportsType(type: ts.Type, context: GenerationContext): boolean {
-    const typeName = NativeTypeFormatter.getTypeName(type);
+    const typeName = NativeTypeFormatter.#getTypeName(type);
     if (!NativeTypeFormatter.isNativeType(typeName)) {
       return false;
     }
     if (
       typeName !== undefined && LIB_DECLARED_NATIVE_TYPES.has(typeName)
     ) {
-      return NativeTypeFormatter.hasLibraryDeclaration(type, context);
+      return NativeTypeFormatter.#hasLibraryDeclaration(type, context);
     }
     if (NativeTypeFormatter.isFabricPrimitiveTypeName(typeName)) {
       return NativeTypeFormatter.declaresFabricSpecialObjectBrand(type);
@@ -106,7 +106,7 @@ export class NativeTypeFormatter implements TypeFormatter {
     type: ts.Type,
     _context: GenerationContext,
   ): MutableJSONSchema {
-    const typeName = NativeTypeFormatter.getTypeName(type);
+    const typeName = NativeTypeFormatter.#getTypeName(type);
     const schema = NATIVE_TYPE_SCHEMAS[typeName!];
     // TODO(danfuzz): `structuredClone()` mangles non-JSON `FabricValue`s —
     // harmless while `NATIVE_TYPE_SCHEMAS` are plain JSON, but a problem once
@@ -116,7 +116,7 @@ export class NativeTypeFormatter implements TypeFormatter {
     return (typeof schema === "boolean" ? schema : structuredClone(schema!));
   }
 
-  private static getTypeName(type: ts.Type): string | undefined {
+  static #getTypeName(type: ts.Type): string | undefined {
     // Prefer direct symbol name; fall back to target symbol for TypeReference
     const symbol = type.symbol;
     let name = symbol?.name;
@@ -156,7 +156,7 @@ export class NativeTypeFormatter implements TypeFormatter {
     return name;
   }
 
-  private static getTypeSymbol(type: ts.Type): ts.Symbol | undefined {
+  static #getTypeSymbol(type: ts.Type): ts.Symbol | undefined {
     if (type.symbol) return type.symbol;
 
     const objectFlags = (type as ts.ObjectType).objectFlags ?? 0;
@@ -190,11 +190,11 @@ export class NativeTypeFormatter implements TypeFormatter {
     return type.getProperty(FABRIC_SPECIAL_OBJECT_BRAND) !== undefined;
   }
 
-  private static hasLibraryDeclaration(
+  static #hasLibraryDeclaration(
     type: ts.Type,
     context: GenerationContext,
   ): boolean {
-    const symbol = NativeTypeFormatter.getTypeSymbol(type);
+    const symbol = NativeTypeFormatter.#getTypeSymbol(type);
     return symbol?.declarations?.some((declaration) => {
       const sourceFile = declaration.getSourceFile();
       const program = (

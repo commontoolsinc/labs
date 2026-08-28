@@ -231,9 +231,10 @@ export class CellHandle<T = unknown> {
   }
 
   /**
-   * Atomically stores `value` only if the cell is undefined, then returns the
-   * value selected by that transaction. Concurrent initializers converge on
-   * one winner instead of replacing it with a blind write.
+   * Atomically stores `value` only if the cell has no backing value, then
+   * returns the value selected by that transaction. A readable schema fallback
+   * does not count as stored. Concurrent initializers converge on one winner
+   * instead of replacing it with a blind write.
    */
   async initialize(value: T): Promise<Readonly<T>> {
     this.#requireSchema("initialize");

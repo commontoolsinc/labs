@@ -6,6 +6,11 @@
 
 export { refuseFabricInstance } from "./fabric-special-object.ts";
 export {
+  isStoredArgumentSchemaRefusal,
+  STORED_ARGUMENT_SCHEMA_REFUSAL,
+  storedArgumentRefusalDetail,
+} from "./stored-argument-refusal.ts";
+export {
   addressKey,
   CELL_SCOPE_VALUES,
   createLLMFriendlyLink,

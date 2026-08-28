@@ -148,17 +148,19 @@ or sibling elements outside the React root.
 - `{ status: "error", error }` when the resource cannot be read.
 
 It also returns `initialize(defaultValue)`, `set(valueOrUpdater)`, and
-`refresh()`. `initialize()` atomically stores the default only while the Cell is
-undefined and returns the value selected by that transaction. `refresh()` is
-the explicit host `Cell.pull()` boundary. The hook subscribes through
-`useSyncExternalStore`, so host updates rerender the component.
+`refresh()`. `initialize()` atomically stores the default only while the Cell
+has no backing value and returns the value selected by that transaction. A
+readable schema fallback does not count as stored. `refresh()` is the explicit
+host `Cell.pull()` boundary. The hook subscribes through `useSyncExternalStore`,
+so host updates rerender the component.
 
 `ready` means the pull completed; a newly scoped or optional Cell can therefore
 be ready with the value `undefined`. Include `undefined` in the hook type. Use
 the declared input default for an absent read-only input. For writable state or
-output, initialize only after that Cell's authoritative pull reports
-`undefined`; do not replace a value that another session may already have
-materialized. Use `initialize()` rather than `set()` for that default write.
+output, initialize only after that Cell's authoritative pull completes. Call
+`initialize()` once even when the compiled schema fallback is already visible:
+the idempotent operation materializes the backing value without replacing a
+value another session won.
 Bridge `set()` reports commit failure, but its write remains an intentional
 last-writer-wins replacement.
 
@@ -191,26 +193,51 @@ function Editor() {
   const outputValue = output.status === "ready" ? output.value : undefined;
   const actionTail = React.useRef(Promise.resolve());
   const [pending, setPending] = React.useState(false);
+  const [materialized, setMaterialized] = React.useState(false);
+  const [initializationError, setInitializationError] = React.useState<Error>();
   const [actionError, setActionError] = React.useState<Error>();
   React.useEffect(() => {
-    if (state.status === "ready" && stateValue === undefined) {
-      void state.initialize(DEFAULT_STATE).catch(() => {});
+    if (
+      input.status !== "ready" || state.status !== "ready" ||
+      output.status !== "ready"
+    ) {
+      return;
     }
-  }, [state.status, stateValue, state.initialize]);
-  React.useEffect(() => {
-    if (output.status === "ready" && outputValue === undefined) {
-      void output.initialize(DEFAULT_OUTPUT).catch(() => {});
-    }
-  }, [output.status, outputValue, output.initialize]);
+    let active = true;
+    void Promise.all([
+      state.initialize(DEFAULT_STATE),
+      output.initialize(DEFAULT_OUTPUT),
+    ]).then(() => {
+      if (active) setMaterialized(true);
+    }).catch((cause) => {
+      if (active) {
+        setInitializationError(
+          cause instanceof Error ? cause : new Error(String(cause)),
+        );
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, [
+    input.status,
+    state.status,
+    output.status,
+    state.initialize,
+    output.initialize,
+  ]);
   const resources = [input, state, output];
   const failure = resources.find((resource) => resource.status === "error");
 
   if (failure?.status === "error") {
     return <p role="alert">{failure.error.message}</p>;
   }
+  if (initializationError) {
+    return <p role="alert">{initializationError.message}</p>;
+  }
   if (
     input.status !== "ready" || state.status !== "ready" ||
-    stateValue === undefined || output.status !== "ready" ||
+    stateValue === undefined || output.status !== "ready" || !materialized ||
     outputValue === undefined
   ) {
     return <button type="button" disabled>Loading</button>;
@@ -264,10 +291,10 @@ function Editor() {
 
 The hooks load Cells independently, but the component owns one joint readiness
 predicate. An individual resource becoming ready must not enable an action that
-still reads fallback input, state, or output. Initialization rejections are
-consumed because the hook exposes them through its `error` snapshot. Action
-rejections are rendered separately, and the ref-backed tail keeps rapid actions
-serialized across rerenders.
+still reads fallback input, state, or output. The materialization phase keeps
+actions disabled until both writable initializers settle, and renders an
+initialization rejection. Action rejections use the same visible error region,
+and the ref-backed tail keeps rapid actions serialized across rerenders.
 
 Functional setters are serialized for the same remote Cell inside one guest.
 They are not a transaction across users or across resources. Prefer a narrow

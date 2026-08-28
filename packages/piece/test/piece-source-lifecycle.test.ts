@@ -6,10 +6,12 @@ import { linkRefFrom } from "@commonfabric/data-model/cell-rep";
 import {
   getPatternIdentityRef,
   getPatternSource,
+  getPieceReconciliation,
   getPieceSourceSnapshot,
   Runtime,
   type RuntimeProgram,
   setPatternSource,
+  setPieceReconciliation,
 } from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import {
@@ -339,6 +341,289 @@ describe("piece source lifecycle", () => {
         revisionId: state.history[0].revisionId,
       }),
     ).rejects.toThrow("has no origin to follow");
+    await expect(
+      piece.changeSource({ kind: "repoint", url: "   " } as never),
+    ).rejects.toThrow("unsupported piece source action");
+    await expect(
+      piece.changeSource({ kind: "adopt" }),
+    ).rejects.toThrow("piece is not following a source");
+  });
+
+  it("refuses an entered origin the source URL policy does not allow", async () => {
+    const piece = await pieces.create(versionProgram("current"), { input: {} });
+
+    await expect(
+      piece.changeSource({ kind: "repoint", url: "../pattern.tsx" }),
+    ).rejects.toThrow("is not an absolute URL");
+    await expect(
+      piece.changeSource({ kind: "repoint", url: "ftp://source.test/p.tsx" }),
+    ).rejects.toThrow("is not a web URL");
+    await expect(
+      piece.changeSource({
+        kind: "repoint",
+        url: "https://user:secret@source.test/p.tsx",
+      }),
+    ).rejects.toThrow("may not carry credentials");
+    // A protocol-relative string reads as a path on this host and resolves to
+    // another authority, and nothing follows one, so a piece that accepted it
+    // would report an origin as fine that no reconciliation can ever reach.
+    await expect(
+      piece.changeSource({ kind: "repoint", url: "//evil.example/p.tsx" }),
+    ).rejects.toThrow("resolves to http://evil.example");
+    // A backslash is a separator to the URL parser, so this one swaps hosts
+    // too while looking even more like a local path.
+    await expect(
+      piece.changeSource({ kind: "repoint", url: "/\\evil.example/p.tsx" }),
+    ).rejects.toThrow("resolves to http://evil.example");
+    expect(getPatternSource(piece.getCell())).toBeUndefined();
+    const state = await readPieceSourceState(runtime, piece.getCell());
+    expect(state.history.map((revision) => revision.operation)).toEqual([
+      "create",
+    ]);
+  });
+
+  it("refuses to point a piece at itself", async () => {
+    const piece = await pieces.create(versionProgram("current"), { input: {} });
+
+    await expect(
+      piece.changeSource({
+        kind: "repoint",
+        url: `cf:/${pieces.getSpace()}/${piece.id}`,
+      }),
+    ).rejects.toThrow("a piece cannot follow itself");
+    expect(getPatternSource(piece.getCell())).toBeUndefined();
+  });
+
+  it("points a piece at a web origin it has never followed", async () => {
+    webSources["/entered.tsx"] = versionProgram("entered-v1");
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+
+    expect(
+      await piece.changeSource({
+        kind: "repoint",
+        url: "https://source.test/entered.tsx",
+      }),
+    ).toEqual({ status: "applied" });
+
+    expect(getPatternSource(piece.getCell())).toBe(
+      "https://source.test/entered.tsx",
+    );
+    expect(await piece.result.get(["version"])).toBe("entered-v1");
+    const state = await readPieceSourceState(runtime, piece.getCell());
+    expect(state.history.at(-1)).toMatchObject({ operation: "repoint" });
+    expect(state.origin).toEqual({
+      url: "https://source.test/entered.tsx",
+      kind: "web",
+    });
+  });
+
+  it("points a piece at a fabric piece it has never followed", async () => {
+    const source = await pieces.create(versionProgram("source-v1"), {
+      input: {},
+    });
+    const target = await pieces.create(versionProgram("target-v1"), {
+      input: {},
+    });
+    const url = `cf:/${pieces.getSpace()}/${source.id}`;
+
+    expect(
+      await target.changeSource({ kind: "repoint", url }),
+    ).toEqual({ status: "applied" });
+
+    expect(getPatternSource(target.getCell())).toBe(url);
+    expect(await target.result.get(["version"])).toBe("source-v1");
+  });
+
+  it("drops a recorded outcome when a transition supersedes it", async () => {
+    const origin = "https://source.test/superseded.tsx";
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    await stampOrigin(piece, origin);
+    const { error } = await runtime.editWithRetry((tx) => {
+      setPieceReconciliation(piece.getCell(), tx, {
+        outcome: "refused",
+        at: Date.now(),
+        origin,
+        reason: "incompatible-schema",
+      });
+    });
+    expect(error).toBeUndefined();
+    expect(getPieceReconciliation(piece.getCell())).toBeDefined();
+
+    expect(await piece.changeSource({ kind: "detach" })).toEqual({
+      status: "applied",
+    });
+
+    // The recorded outcome describes a relationship the piece has left.
+    expect(getPieceReconciliation(piece.getCell())).toBeUndefined();
+  });
+
+  it("adopts what the active origin offers now, keeping the origin", async () => {
+    const origin = "https://source.test/adopted.tsx";
+    webSources["/adopted.tsx"] = versionProgram("origin-v1");
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    await stampOrigin(piece, origin);
+
+    expect(await piece.changeSource({ kind: "adopt" })).toEqual({
+      status: "applied",
+    });
+
+    expect(getPatternSource(piece.getCell())).toBe(origin);
+    expect(await piece.result.get(["version"])).toBe("origin-v1");
+    const state = await readPieceSourceState(runtime, piece.getCell());
+    expect(state.history.at(-1)).toMatchObject({ operation: "origin-update" });
+    expect(state.history.at(-1)?.origin?.url).toBe(origin);
+  });
+
+  it("records an update that found the origin already current", async () => {
+    const origin = "https://source.test/already-current.tsx";
+    webSources["/already-current.tsx"] = versionProgram("origin-v1");
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    await stampOrigin(piece, origin);
+
+    // The first ask moves the piece onto what the origin serves.
+    expect(await piece.changeSource({ kind: "adopt" })).toEqual({
+      status: "applied",
+    });
+    expect(await piece.result.get(["version"])).toBe("origin-v1");
+    const before = await readPieceSourceState(runtime, piece.getCell());
+    expect(before.history.at(-1)?.operation).toBe("origin-update");
+
+    // The second finds the same source there.
+    expect(await piece.changeSource({ kind: "adopt" })).toEqual({
+      status: "applied",
+    });
+
+    // Nothing moved, so nothing is appended: the whole result is the piece
+    // saying its origin has been asked and offers what it runs.
+    const after = await readPieceSourceState(runtime, piece.getCell());
+    expect(after.history).toEqual(before.history);
+    expect(after.currentRevisionId).toBe(before.currentRevisionId);
+    expect(getPieceReconciliation(piece.getCell())).toMatchObject({
+      outcome: "followed",
+      origin,
+    });
+  });
+
+  it("records an update that could not reach the origin", async () => {
+    const origin = "https://source.test/missing.tsx";
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    await stampOrigin(piece, origin);
+
+    await expect(piece.changeSource({ kind: "adopt" })).rejects.toThrow();
+
+    expect(await piece.result.get(["version"])).toBe("v1");
+    expect(getPieceReconciliation(piece.getCell())).toMatchObject({
+      outcome: "unreachable",
+      origin,
+    });
+  });
+
+  it("drops an outcome about a piece that moved while it was being reached", async () => {
+    const origin = "https://source.test/moves-underneath.tsx";
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    await stampOrigin(piece, origin);
+    // Repoint the piece from inside the fetch, so that by the time the
+    // attempt concludes it describes an origin the piece no longer records.
+    // Stamping rather than transitioning is what makes this test say
+    // something: a transition would clear the record on its own, and then an
+    // absent record would prove nothing about the guard.
+    const moved = "https://source.test/moved-to.tsx";
+    const original = globalThis.fetch;
+    globalThis.fetch =
+      (() =>
+        stampOrigin(piece, moved).then(() =>
+          new Response("not found", { status: 404 })
+        )) as typeof globalThis.fetch;
+    try {
+      await expect(piece.changeSource({ kind: "adopt" })).rejects.toThrow();
+    } finally {
+      globalThis.fetch = original;
+    }
+
+    expect(getPatternSource(piece.getCell())).toBe(moved);
+    expect(getPieceReconciliation(piece.getCell())).toBeUndefined();
+  });
+
+  it("applies the exact candidate a confirmed entered origin reviewed", async () => {
+    const origin = "https://source.test/entered-changing.tsx";
+    webSources["/entered-changing.tsx"] = incompatibleSeedProgram("reviewed");
+    const piece = await pieces.create(versionProgram("current"), { input: {} });
+    const action = { kind: "repoint" as const, url: origin };
+
+    const warning = await piece.changeSource(action);
+    expect(warning.status).toBe("incompatible");
+    if (warning.status !== "incompatible") {
+      throw new Error("expected an incompatibility warning");
+    }
+
+    // The origin moves between the review and the confirmation. Consent was
+    // given for what was reviewed, so that is what lands.
+    webSources["/entered-changing.tsx"] = incompatibleSeedProgram("later");
+    expect(
+      await piece.changeSource(action, { confirmedChange: warning.prepared }),
+    ).toEqual({ status: "applied" });
+    expect(await piece.result.get(["version"])).toBe("reviewed");
+    expect(getPatternSource(piece.getCell())).toBe(origin);
+  });
+
+  it("records an update the piece refused, and clears it on acceptance", async () => {
+    const origin = "https://source.test/refused.tsx";
+    webSources["/refused.tsx"] = incompatibleSeedProgram("candidate");
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    await stampOrigin(piece, origin);
+
+    const refused = await piece.changeSource({ kind: "adopt" });
+    expect(refused.status).toBe("incompatible");
+    expect(getPieceReconciliation(piece.getCell())).toMatchObject({
+      outcome: "refused",
+      reason: "incompatible-schema",
+      origin,
+    });
+
+    expect(
+      await piece.changeSource({ kind: "adopt" }, {
+        confirmedChange: refused.status === "incompatible"
+          ? refused.prepared
+          : undefined,
+      }),
+    ).toEqual({ status: "applied" });
+
+    // The piece now runs what the origin offered, which is the fresh answer
+    // and not the refusal it replaces.
+    expect(await piece.result.get(["version"])).toBe("candidate");
+    expect(getPieceReconciliation(piece.getCell())).toMatchObject({
+      outcome: "followed",
+      origin,
+    });
+  });
+
+  it("keeps the origin when an incompatible candidate is adopted anyway", async () => {
+    const origin = "https://source.test/incompatible-origin.tsx";
+    webSources["/incompatible-origin.tsx"] = incompatibleSeedProgram(
+      "candidate",
+    );
+    const piece = await pieces.create(versionProgram("v1"), { input: {} });
+    await stampOrigin(piece, origin);
+
+    const refused = await piece.changeSource({ kind: "adopt" });
+    expect(refused.status).toBe("incompatible");
+    expect(await piece.result.get(["version"])).toBe("v1");
+    expect(getPatternSource(piece.getCell())).toBe(origin);
+
+    expect(
+      await piece.changeSource({ kind: "adopt" }, {
+        confirmedChange: refused.status === "incompatible"
+          ? refused.prepared
+          : undefined,
+      }),
+    ).toEqual({ status: "applied" });
+
+    // An accepted refusal is the owner choosing to go on following the
+    // origin, which is what separates it from a manual replacement.
+    expect(getPatternSource(piece.getCell())).toBe(origin);
+    expect(await piece.result.get(["version"])).toBe("candidate");
+    const state = await readPieceSourceState(runtime, piece.getCell());
+    expect(state.history.at(-1)).toMatchObject({ operation: "origin-update" });
   });
 
   it("rejects a source action if its pattern identity disappears while loading", async () => {
@@ -842,6 +1127,46 @@ describe("piece source lifecycle", () => {
     );
     expect(getPatternSource(piece.getCell())).toBeUndefined();
     expect(await piece.result.get(["version"])).toBe("current");
+  });
+
+  it("records a refusal over data the new source cannot run on", async () => {
+    const origin = "https://source.test/needs-argument.tsx";
+    webSources["/needs-argument.tsx"] = incompatibleProgram();
+    const piece = await pieces.create(versionProgram("current"), { input: {} });
+    await stampOrigin(piece, origin);
+
+    await expect(piece.changeSource({ kind: "adopt" })).rejects.toThrow(
+      "missing required property required",
+    );
+
+    // Refusing this one is a reconciliation outcome like any other. Raised
+    // and not recorded, it left the piece reporting that nothing had looked.
+    expect(await piece.result.get(["version"])).toBe("current");
+    expect(getPatternSource(piece.getCell())).toBe(origin);
+    // The classifying prefix is dropped from what the panel shows: it
+    // restates the state's own name, and the part worth reading is which
+    // property does not fit.
+    expect(getPieceReconciliation(piece.getCell())).toMatchObject({
+      outcome: "refused",
+      reason: "argument-mismatch",
+      origin,
+      detail: "missing required property required",
+    });
+  });
+
+  it("leaves an origin the piece does not follow out of its outcomes", async () => {
+    const origin = "https://source.test/entered-needs-argument.tsx";
+    webSources["/entered-needs-argument.tsx"] = incompatibleProgram();
+    const piece = await pieces.create(versionProgram("current"), { input: {} });
+
+    await expect(
+      piece.changeSource({ kind: "repoint", url: origin }),
+    ).rejects.toThrow("missing required property required");
+
+    // Being pointed somewhere new is not a relationship the piece has, so
+    // there is no outcome about it to record.
+    expect(getPieceReconciliation(piece.getCell())).toBeUndefined();
+    expect(getPatternSource(piece.getCell())).toBeUndefined();
   });
 
   it("applies the exact candidate that produced a compatibility warning", async () => {

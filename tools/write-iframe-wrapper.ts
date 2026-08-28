@@ -352,8 +352,11 @@ ${
     config.outputScope === "space"
       ? "  const output = new Writable<IframeOutputData>(DEFAULT_OUTPUT);\n"
       : ""
-  }${databaseSource(config.databases)}  const context = IframeContext({
-    input,
+  }${
+    databaseSource(config.databases)
+  }  const iframeInput = input ?? DEFAULT_INPUT;
+  const context = IframeContext({
+    input: iframeInput,
     state,
     output,
 ${contextDatabaseValues}
@@ -488,7 +491,7 @@ async function main(): Promise<void> {
         `${htmlPath} must contain ${SCRIPT_MARKER} exactly once; found ${markerCount}.`,
       );
     }
-    guestHtml = html.replace(SCRIPT_MARKER, script);
+    guestHtml = html.replace(SCRIPT_MARKER, () => script);
   } else {
     guestHtml = `<!doctype html>
 <html lang="en">
