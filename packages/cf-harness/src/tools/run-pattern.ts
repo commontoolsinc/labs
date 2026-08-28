@@ -51,6 +51,7 @@ import {
   renderPatternUiToHtml,
   syntheticArgument,
 } from "../pattern-index/publish-render-gate.ts";
+import { openProbeRuntime } from "../pattern-index/probe-runtime.ts";
 import {
   composedPatternIds,
   materializeComposedPatterns,
@@ -1505,34 +1506,60 @@ export const runPatternTool: HarnessToolDefinition<
         reason,
         syntheticInputsComplete: synthetic.complete,
       });
-      let probeCell: Cell<unknown> | undefined;
-      // One race over the whole probe rather than a check between each await.
-      // Cancellation has a single meaning here and therefore a single place
-      // that says so; an abort landing inside an await it does not interrupt
-      // arrives at the catch as an ordinary throw, which is why the catch
-      // consults the signal too.
+      // The probe runs in an isolated, in-memory runtime — never the
+      // session's space. `probe-runtime.ts` carries the whole reason; the
+      // short version is that a probe in the live space persists its inputs
+      // and its result graph there, `stop()` does not delete them, and the
+      // orphan is reachable from the sandbox's Fabric mount.
+      let probe_: Awaited<ReturnType<typeof openProbeRuntime>>;
       const probe = async () => {
-        probeCell = await pieces.runPersistent(
-          pattern,
+        probe_ = await openProbeRuntime(
+          session.identity,
+          pieces.runtime.apiUrl,
+        );
+        // No identity, no isolated runtime, and therefore no probe. Falling
+        // back to the live space would re-enter the leak this exists to close
+        // through the error path, so the gate abstains instead.
+        if (probe_ === undefined) return recorded("probe-failed");
+        const probePieces = probe_.pieces;
+        // A composed source needs its imports in the probe's space too, or
+        // the compile below cannot resolve them. Same helper the live path
+        // uses, pointed at the isolated runtime — which is why composed
+        // patterns still get a verdict instead of degrading to "no verdict".
+        const composed = composedPatternIds(program);
+        if (composed.length > 0 && getPatternIndexClient !== undefined) {
+          await materializeComposedPatterns({
+            runtime: probePieces.runtime,
+            space: probePieces.getSpace(),
+            patternIds: composed,
+            getClient: getPatternIndexClient,
+          });
+        }
+        const probePattern = await compileAndSavePattern(
+          probePieces.runtime,
+          program,
+          { space: probePieces.getSpace() },
+        );
+        const probeCell = await probePieces.runPersistent(
+          probePattern,
           synthetic.value,
           undefined,
           { start: true },
         );
-        await pieces.runtime.settled();
-        await pieces.synced();
-        const probeResult = await new PieceController(pieces, probeCell)
+        await probePieces.runtime.settled();
+        await probePieces.synced();
+        const probeResult = await new PieceController(probePieces, probeCell)
           .result.getCell();
         const rendered = await renderPatternUiToHtml(
           probeResult,
-          () => pieces.runtime.idle(),
+          () => probePieces.runtime.idle(),
         );
         if (rendered === undefined) return discoverable("no-ui");
         // What the render means is decided by `classifyRenderedHtml`; what
         // that meaning costs is decided here. Only a default-`toString` is
         // positive evidence of a defect — the rest are absences, recorded
         // uncertified rather than condemned. The DOM itself is read and
-        // discarded: see `PatternRenderVerdict.thrown` for why none of it is
-        // persisted.
+        // discarded, and the runtime that produced it is discarded with it.
         const reason = classifyRenderedHtml(rendered.html, rendered.errors);
         return reason === "ui-rendered"
           ? discoverable(reason)
@@ -1562,7 +1589,9 @@ export const runPatternTool: HarnessToolDefinition<
         // the failure this gate exists to remove.
         outcome = recorded("probe-failed", errorMessage(error));
       } finally {
-        if (probeCell !== undefined) stopPiece(probeCell);
+        // Discarding the runtime discards everything the probe wrote: there
+        // is no store left to clean up rather than a cleanup to get right.
+        await probe_?.close().catch(() => {});
       }
       return signal?.aborted === true ? "cancelled" : outcome;
     };

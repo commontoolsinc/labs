@@ -213,7 +213,7 @@ describe("run_pattern publish render gate", () => {
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `publish-gate-${crypto.randomUUID()}`,
       cfcEnforcementMode: "disabled",
-      fabricSessionFactory: () => Promise.resolve({ pieces }),
+      fabricSessionFactory: () => Promise.resolve({ pieces, identity: signer }),
       patternIndexClientFactory: () =>
         Promise.resolve(
           new PatternIndexClient({
@@ -249,7 +249,7 @@ describe("run_pattern publish render gate", () => {
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `publish-gate-${crypto.randomUUID()}`,
       cfcEnforcementMode: "disabled",
-      fabricSessionFactory: () => Promise.resolve({ pieces }),
+      fabricSessionFactory: () => Promise.resolve({ pieces, identity: signer }),
     });
     expect(engine.patternIndexPublications).toBeUndefined();
     await engine.flushPatternIndexPublications();
@@ -281,7 +281,7 @@ describe("run_pattern publish render gate", () => {
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `publish-gate-${crypto.randomUUID()}`,
       cfcEnforcementMode: "disabled",
-      fabricSessionFactory: () => Promise.resolve({ pieces }),
+      fabricSessionFactory: () => Promise.resolve({ pieces, identity: signer }),
       patternIndexClientFactory: () =>
         Promise.resolve(
           new PatternIndexClient({
@@ -436,89 +436,37 @@ describe("run_pattern publish render gate", () => {
     expect(published(index)[0].body.discoverable).toBe(false);
   });
 
-  it("publishes nothing and reports cancelled when the run aborts during the gate", async () => {
-    // An index entry is a claim about a run that finished. The abort is fired
-    // from inside the second `runPersistent` — the probe's — so the gate is
-    // interrupted at a determined point rather than after a wait.
-    const index = stubIndex();
-    const controller = new AbortController();
-    let instantiations = 0;
-    const abortingPieces = new Proxy(pieces, {
-      get(target, property) {
-        if (property === "runPersistent") {
-          return (...args: unknown[]) => {
-            if (++instantiations === 2) controller.abort();
-            return (target.runPersistent as (
-              ...a: unknown[]
-            ) => Promise<unknown>).apply(target, args);
-          };
-        }
-        const value = Reflect.get(target, property, target);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    }) as PiecesController;
-    const engine = new CfHarnessEngine({
-      sandboxRuntime: new FakeSandboxRuntime(),
-      runId: `publish-gate-${crypto.randomUUID()}`,
-      cfcEnforcementMode: "disabled",
-      fabricSessionFactory: () => Promise.resolve({ pieces: abortingPieces }),
-      patternIndexClientFactory: () =>
-        Promise.resolve(
-          new PatternIndexClient({
-            baseUrl: "https://index.test",
-            fetchFn: index.fetchFn,
-            signer,
-          }),
-        ),
-    });
-    const result = await engine.invokeBuiltinTool("run_pattern", {
-      sourceText: WORKING_SORTABLE_TABLE,
-      inputs: { rows: [{ name: "Avery", score: 12 }] },
-      description: "Sortable table that reads its cells",
-    }, { signal: controller.signal });
-    await engine.flushPatternIndexPublications();
-
-    const output = result.output as unknown as {
-      status: string;
-      message: string;
-    };
-    expect(output.status).toBe("cancelled");
-    // The piece the run created is not undone, and the output says so.
-    expect(output.message).toContain("not undone");
-    expect(published(index)).toEqual([]);
-  });
-
   /**
-   * The session's pieces controller with `runPersistent` intercepted on the
-   * PROBE — its second call — so a test can decide what happens at the joint
-   * the gate runs through, without waiting on a clock.
+   * A session whose identity misbehaves when the gate reaches for it.
+   *
+   * The probe now runs in its own isolated runtime, so intercepting the
+   * session's `runPersistent` no longer touches it. The identity is the one
+   * thing the gate takes from the session, which makes it the seam a test can
+   * drive — and driving it is deterministic, with no clock involved.
    */
-  const piecesWithProbe = (
-    onProbe: (probe: () => Promise<unknown>) => Promise<unknown>,
-  ): PiecesController => {
-    let calls = 0;
-    return new Proxy(pieces, {
+  const identityThat = (onUse: () => void): typeof signer => {
+    let fired = false;
+    return new Proxy(signer, {
       get(target, property) {
-        if (property === "runPersistent") {
-          return (...args: unknown[]) => {
-            const run = () =>
-              (target.runPersistent as (...a: unknown[]) => Promise<unknown>)
-                .apply(target, args);
-            return ++calls === 2 ? onProbe(run) : run();
-          };
+        // Any reach for the identity, not a particular one: the gate is the
+        // only thing that touches it, and which member it reads first is an
+        // implementation detail a test should not encode.
+        if (!fired) {
+          fired = true;
+          onUse();
         }
         const value = Reflect.get(target, property, target);
         return typeof value === "function" ? value.bind(target) : value;
       },
-    }) as PiecesController;
+    }) as typeof signer;
   };
 
-  const engineWith = (index: IndexStub, own: PiecesController) =>
+  const engineWith = (index: IndexStub, identity: typeof signer) =>
     new CfHarnessEngine({
       sandboxRuntime: new FakeSandboxRuntime(),
       runId: `publish-gate-${crypto.randomUUID()}`,
       cfcEnforcementMode: "disabled",
-      fabricSessionFactory: () => Promise.resolve({ pieces: own }),
+      fabricSessionFactory: () => Promise.resolve({ pieces, identity }),
       patternIndexClientFactory: () =>
         Promise.resolve(
           new PatternIndexClient({
@@ -529,67 +477,83 @@ describe("run_pattern publish render gate", () => {
         ),
     });
 
-  const cancelledRun = async (
+  const runWith = async (
     index: IndexStub,
-    own: PiecesController,
-    signal: AbortSignal,
+    identity: typeof signer,
+    signal?: AbortSignal,
   ) => {
-    const engine = engineWith(index, own);
-    const result = await engine.invokeBuiltinTool("run_pattern", {
-      sourceText: WORKING_SORTABLE_TABLE,
-      inputs: { rows: [{ name: "Avery", score: 12 }] },
-      description: "Sortable table that reads its cells",
-    }, { signal });
+    const engine = engineWith(index, identity);
+    const result = await engine.invokeBuiltinTool(
+      "run_pattern",
+      {
+        sourceText: WORKING_SORTABLE_TABLE,
+        inputs: { rows: [{ name: "Avery", score: 12 }] },
+        description: "Sortable table that reads its cells",
+      },
+      ...(signal === undefined ? [] : [{ signal }]) as [
+        { signal: AbortSignal },
+      ],
+    );
     await engine.flushPatternIndexPublications();
-    return result.output as unknown as { status: string; message: string };
+    return result.output as RunPatternToolSuccessOutput & { message?: string };
   };
 
-  it("publishes nothing when the abort lands after the probe's result loads", async () => {
-    // The joint between the settle race and the render race. An abort here
-    // does not throw and is not raced, so it is checked for explicitly.
+  it("publishes nothing and reports cancelled when the run aborts during the gate", async () => {
+    // An index entry is a claim about a run that finished. The abort fires
+    // from inside the gate's own reach for the identity, so it lands while
+    // the probe is running rather than at a moment a clock chose.
     const index = stubIndex();
     const controller = new AbortController();
-    const output = await cancelledRun(
+    const output = await runWith(
       index,
-      piecesWithProbe(async (run) => {
-        const cell = await run();
-        controller.abort();
-        return cell;
-      }),
+      identityThat(() => controller.abort()),
       controller.signal,
     );
     expect(output.status).toBe("cancelled");
+    expect(output.message).toContain("not undone");
     expect(published(index)).toEqual([]);
   });
 
-  it("publishes nothing when the probe fails to start under an abort", async () => {
-    // An abort inside an await the gate does not race arrives as an ordinary
-    // throw. Reading it as "no verdict" would record an entry for a run that
-    // was cancelled.
+  it("records without a verdict when the probe fails for its own reasons", async () => {
+    // No abort: the failure is the probe's, and it is no evidence about the
+    // rendering either way. The run still succeeds and the entry is recorded.
     const index = stubIndex();
-    const controller = new AbortController();
-    const output = await cancelledRun(
+    const output = await runWith(
       index,
-      piecesWithProbe(() => {
-        controller.abort();
-        return Promise.reject(new Error("probe start interrupted"));
+      identityThat(() => {
+        throw new Error("probeExplodedForItsOwnReasons");
       }),
-      controller.signal,
     );
-    expect(output.status).toBe("cancelled");
-    expect(published(index)).toEqual([]);
+
+    expect(output.status).toBe("ok");
+    expect(output.patternPublication?.status).toBe("recorded");
+    expect(output.patternPublication?.reason).toBe("probe-failed");
+    expect(output.rawCauseMessage).toContain("probeExplodedForItsOwnReasons");
+    expect(JSON.stringify(output.patternPublication)).not.toContain(
+      "probeExplodedForItsOwnReasons",
+    );
+    expect(published(index)).toHaveLength(1);
+    expect(published(index)[0].body.discoverable).toBe(false);
   });
 
-  it("records without a verdict when the probe throws for its own reasons", async () => {
-    // No abort: the throw is the pattern's or the gate's, and either way it
-    // is no evidence about the rendering. The text is kept for the artifact.
+  it("abstains rather than probing in the live space when there is no identity", async () => {
+    // A fallback to the session's space would re-enter, through the error
+    // path, exactly the durable write the isolated runtime exists to prevent.
     const index = stubIndex();
-    const engine = engineWith(
-      index,
-      piecesWithProbe(() =>
-        Promise.reject(new Error("probeExplodedForItsOwnReasons"))
-      ),
-    );
+    const engine = new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: `publish-gate-${crypto.randomUUID()}`,
+      cfcEnforcementMode: "disabled",
+      fabricSessionFactory: () => Promise.resolve({ pieces }),
+      patternIndexClientFactory: () =>
+        Promise.resolve(
+          new PatternIndexClient({
+            baseUrl: "https://index.test",
+            fetchFn: index.fetchFn,
+            signer,
+          }),
+        ),
+    });
     const result = await engine.invokeBuiltinTool("run_pattern", {
       sourceText: WORKING_SORTABLE_TABLE,
       inputs: { rows: [{ name: "Avery", score: 12 }] },
@@ -597,18 +561,8 @@ describe("run_pattern publish render gate", () => {
     });
     await engine.flushPatternIndexPublications();
     const output = result.output as RunPatternToolSuccessOutput;
-
-    expect(output.status).toBe("ok");
-    expect(output.patternPublication?.status).toBe("recorded");
     expect(output.patternPublication?.reason).toBe("probe-failed");
-    // Thrown text IS kept: it is the class this artifact already holds and
-    // cannot be recovered any other way. It stays out of what the model reads.
-    expect(output.rawCauseMessage).toContain("probeExplodedForItsOwnReasons");
-    expect(JSON.stringify(output.patternPublication)).not.toContain(
-      "probeExplodedForItsOwnReasons",
-    );
-    expect(published(index)).toHaveLength(1);
-    expect(published(index)[0].body.discoverable).toBe(false);
+    expect(output.patternPublication?.status).toBe("recorded");
   });
 
   it("offers only the last iteration of a capability a session authored", async () => {
