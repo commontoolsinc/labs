@@ -21,7 +21,7 @@ import {
   describeOrigin,
   describeSourceFailure,
   formatTimestamp,
-  shortIdentity,
+  patternRefLabel,
 } from "./origin-view.ts";
 import {
   clearPieceBoundary,
@@ -1799,7 +1799,12 @@ describe("the origin and history panel", () => {
     expect(rendered).toContain(
       "https://toolshed.test/api/patterns/recipe.tsx",
     );
-    expect(rendered).toContain(shortIdentity("pattern-identity-value"));
+    expect(rendered).toContain(
+      patternRefLabel({
+        identity: "pattern-identity-value",
+        symbol: "default",
+      }),
+    );
     expect(rendered).toContain("/main.tsx");
     expect(rendered).toContain("of:fid1:piece");
     expect(rendered).toContain(SPACE);
@@ -2019,7 +2024,9 @@ describe("the origin and history panel", () => {
     expect(rendered).toContain(formatTimestamp(at));
     expect(rendered).toContain("Reason:");
     expect(rendered).toContain("inputs or outputs do not match");
-    expect(rendered).toContain(shortIdentity("offered-identity"));
+    expect(rendered).toContain(
+      patternRefLabel({ identity: "offered-identity", symbol: "default" }),
+    );
     expect(rendered).toContain("Update from the origin now");
     expect(rendered).toContain("Update, ignoring the compatibility check");
   });
@@ -3180,6 +3187,34 @@ describe("source history actions", () => {
     expect(shows(menu)).not.toContain("the main file");
   });
 
+  it("names the revision's pattern whole in the panel subject", async () => {
+    const menu = openMenu(pieceCell(
+      () =>
+        Promise.resolve({
+          ...historySource,
+          history: [{
+            revisionId: "older",
+            timestamp: 1,
+            pattern: SOURCE.pattern!,
+            operation: "baseline",
+          }],
+        }),
+      {
+        readRevision: () =>
+          Promise.resolve({
+            pattern: SOURCE.pattern!,
+            files: [{ name: "/main.tsx", contents: "the older source" }],
+          }),
+      },
+    ));
+    await menu.showPanel("origin");
+    await clickTestId(menu, "piece-source-view-older");
+
+    expect(shows(menu)).toContain(
+      'Pattern pattern-identity-value (export symbol "default")',
+    );
+  });
+
   it("starts one revision read for rapid repeated activations", async () => {
     let finish!: (source: PieceSourceRevisionSourceView) => void;
     let reads = 0;
@@ -4044,10 +4079,19 @@ describe("describeOrigin", () => {
   });
 });
 
-describe("shortIdentity", () => {
-  it("abbreviates a content identity but keeps short values whole", () => {
-    expect(shortIdentity("abcdefghijklmnopqrstuvwxyz")).toBe("abcdefghijkl…");
-    expect(shortIdentity("abcdef")).toBe("abcdef");
+describe("patternRefLabel", () => {
+  it("names the export as an identifier rather than as prose", () => {
+    expect(patternRefLabel({ identity: "short", symbol: "default" })).toBe(
+      'short (export symbol "default")',
+    );
+  });
+
+  it("abbreviates the identity unless the whole value is asked for", () => {
+    const ref = { identity: "abcdefghijklmnopqrstuvwxyz", symbol: "main" };
+    expect(patternRefLabel(ref)).toBe('abcdefghijkl… (export symbol "main")');
+    expect(patternRefLabel(ref, { whole: true })).toBe(
+      'abcdefghijklmnopqrstuvwxyz (export symbol "main")',
+    );
   });
 });
 
