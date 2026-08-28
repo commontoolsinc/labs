@@ -2,7 +2,6 @@ import type { Identity } from "@commonfabric/identity";
 import { createSession } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { Runtime } from "@commonfabric/runner";
-import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 
 /**
  * An isolated runtime for the render gate's probe, and the reason it exists.
@@ -53,6 +52,16 @@ export const openProbeRuntime = async (
   apiUrl: URL,
 ): Promise<ProbeRuntime | undefined> => {
   if (identity === undefined) return undefined;
+  // Imported here rather than at module scope on purpose. `cache.deno` reaches
+  // SQLite through FFI, and a static import puts that in the module graph of
+  // everything that transitively imports `run_pattern` — including the
+  // interactive-chat entrypoint, which is spawned as a subprocess with no FFI
+  // and fails at LOAD rather than at use. A probe is the only thing that needs
+  // storage, so the cost is paid when one runs and not before.
+  // deno-lint-ignore cf-imports/no-inline-module-import -- costs at import time: this module reaches SQLite through FFI, and a static import puts that in the graph of every entrypoint that transitively imports run_pattern, including one spawned without FFI.
+  const { StorageManager } = await import(
+    "@commonfabric/runner/storage/cache.deno"
+  );
   const storageManager = StorageManager.emulate({ as: identity });
   const runtime = new Runtime({ apiUrl, storageManager });
   try {
