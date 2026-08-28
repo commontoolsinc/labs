@@ -101,6 +101,13 @@ import {
 } from "./migration-reason.ts";
 import { verdictReason } from "./verdict-reason.ts";
 import {
+  type ConsumedAtomSource,
+  consumedAtomSourceKey,
+  refusalAttribution,
+  refusalInputsFor,
+  renderCfcAtom,
+} from "./refusal-detail.ts";
+import {
   type ReadClassSelection,
   readConsumesEntry,
   type ReadObservationShape,
@@ -120,6 +127,7 @@ import { createTrustResolver } from "./trust.ts";
 import {
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
+  type CfcAddress,
   cfcEnforcementStrictness,
   type CfcMetadata,
   type IFCLabel,
@@ -4879,9 +4887,36 @@ const collectConsumedLabel = (
   confidentiality: readonly CfcConfClause[];
   integrity: readonly CfcAtom[];
   modulePolicySpaces: ReadonlyMap<string, ReadonlySet<MemorySpace>>;
+
+  /**
+   * Rendered confidentiality atom -> the reads that carried it in, in
+   * first-seen order and deduplicated by (address, label path). This is the
+   * provenance a refusal needs to name an offending INPUT rather than only an
+   * offending atom (`cfc/refusal-detail.ts`); the gates' fits-decisions
+   * themselves stay transaction-global and read only the unioned label above.
+   */
+  sources: ReadonlyMap<string, readonly ConsumedAtomSource[]>;
 } => {
   const atoms: unknown[] = [];
   const modulePolicySpaces = new Map<string, Set<MemorySpace>>();
+  const sources = new Map<string, ConsumedAtomSource[]>();
+  const noteSource = (
+    atom: unknown,
+    read: CfcAddress,
+    labelPath: readonly string[],
+  ): void => {
+    const key = renderCfcAtom(atom);
+    const existing = sources.get(key);
+    const source: ConsumedAtomSource = { read, labelPath };
+    if (existing === undefined) {
+      sources.set(key, [source]);
+      return;
+    }
+    const sourceKey = consumedAtomSourceKey(source);
+    if (!existing.some((seen) => consumedAtomSourceKey(seen) === sourceKey)) {
+      existing.push(source);
+    }
+  };
   // Integrity evidence riding the same consumed entries: the guard pool the
   // exchange evaluator matches rule preconditions against (Epic B5). Same
   // transaction-global over-approximation as the confidentiality union —
@@ -4934,7 +4969,16 @@ const collectConsumedLabel = (
         : (isPrefix(entryPath, path) ||
           (read.nonRecursive !== true && isPrefix(path, entryPath)));
       if (!overlapsRead) continue;
-      atoms.push(...(entry.label.confidentiality ?? []));
+      const contributed = entry.label.confidentiality ?? [];
+      atoms.push(...contributed);
+      for (const atom of contributed) {
+        noteSource(atom, {
+          space: read.space,
+          id: read.id,
+          scope: normalizeCellScope(read.scope),
+          path,
+        } as CfcAddress, entryPath);
+      }
       for (
         const reference of modulePolicyReferencesIn(
           entry.label.confidentiality,
@@ -4957,12 +5001,16 @@ const collectConsumedLabel = (
   // pool.
   for (const observation of tx.getCfcState().labelMetadataObservations) {
     atoms.push(...observation.confidentiality);
+    for (const atom of observation.confidentiality) {
+      noteSource(atom, observation.target, observation.target.path);
+    }
   }
   // Structural dedup (deep-equal) — the same dedup the rest of CFC uses.
   return {
     confidentiality: uniqueCfcAtoms(atoms),
     integrity: uniqueCfcAtoms(integrityAtoms),
     modulePolicySpaces,
+    sources,
   };
 };
 
@@ -5203,10 +5251,24 @@ const verifySinkRequestCeilings = (
     if (offending.length > 0) {
       // Name the offending atom(s) so an observe-mode diagnostic identifies the
       // exact (sink, atom) pair that needs a ceiling entry (review on #3993).
+      const offendingAtoms = offending.map(renderCfcAtom);
       const reason = `sink-request confidentiality exceeds ceiling for ` +
         `${sink}: ` +
-        offending.map((atom) => JSON.stringify(atom)).join(", ");
+        offendingAtoms.join(", ");
       reasons.push(verdict ? verdictReason(reason) : reason);
+      // The remedy channel (cfc/refusal-detail.ts): which reads carried the
+      // atoms this ceiling refused. Recorded for every mode — an observe-mode
+      // rollout wants the same answer a refusal does, and the commit boundary
+      // keeps only the details whose reason actually refused.
+      const inputs = refusalInputsFor(offendingAtoms, consumed.sources);
+      tx.recordCfcRefusalDetail?.({
+        gate: "sink-ceiling",
+        sink,
+        offendingAtoms,
+        inputs,
+        attribution: refusalAttribution(offendingAtoms, inputs),
+        reason,
+      });
     }
   }
   return reasons;
@@ -5532,6 +5594,21 @@ export const prepareBoundaryCommit = (
         : undefined,
     );
   const flowConfidentiality = flowJoin.confidentiality;
+  // Read provenance for a refusal's remedy channel, computed only if a gate
+  // below actually refuses. `collectConsumedLabel` walks every read against
+  // every label-map entry of the document it resolved to, which is work no
+  // committing transaction should do just in case; a misfit is rare and pays
+  // for it then. The set is transaction-global — wider than the per-write
+  // prefix the writer-fit decision itself runs on — so a named input is a
+  // read that genuinely carried the atom, while `attribution` stays the
+  // honest statement of whether the named ones account for all of them.
+  let memoizedRefusalSources:
+    | ReadonlyMap<string, readonly ConsumedAtomSource[]>
+    | undefined;
+  const refusalSources = (): ReadonlyMap<
+    string,
+    readonly ConsumedAtomSource[]
+  > => memoizedRefusalSources ??= collectConsumedLabel(tx).sources;
   const flowIntegrity = flowJoin.integrity;
   const flowLabeledSpaces = flowJoin.labeledSpaces;
   const flowHasLabels = flowConfidentiality.length > 0 ||
@@ -6642,11 +6719,29 @@ export const prepareBoundaryCommit = (
             // SC-18c error contract: a stable reason naming the rule id and
             // the target path, plus the offending clause(s) so a flag names
             // exactly what the store would need to declare (§8.12.5).
+            const offendingAtoms = offending.map(renderCfcAtom);
             const misfit =
               `writer-fit confidentiality misfit for ${id} at /${
                 path.join("/")
               } (canWrite, §8.12.4): ` +
-              offending.map((atom) => JSON.stringify(atom)).join(", ");
+              offendingAtoms.join(", ");
+            const refusalInputs = refusalInputsFor(
+              offendingAtoms,
+              refusalSources(),
+            );
+            tx.recordCfcRefusalDetail?.({
+              gate: "writer-fit",
+              target: {
+                space: target.space,
+                id,
+                scope: target.scope,
+                path: [...path],
+              } as CfcAddress,
+              offendingAtoms,
+              inputs: refusalInputs,
+              attribution: refusalAttribution(offendingAtoms, refusalInputs),
+              reason: misfit,
+            });
             if (writerFitRejects) {
               reasons.push(verdictReason(misfit));
             } else {

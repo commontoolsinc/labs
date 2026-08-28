@@ -1987,8 +1987,20 @@ export class Runtime {
       onPreparedTx: () => {
         this.cfcStats.cfcPreparedTx += 1;
       },
-      onPrepareReject: () => {
+      onPrepareReject: (refusal) => {
         this.cfcStats.cfcPrepareRejects += 1;
+        // Every refusal is reported here, terminal or not. The scheduler's
+        // error channel carries only the terminal ones (a refusal a fresh
+        // attempt may resolve is retried rather than surfaced), so without
+        // this a mixed-reason refusal — one verdict plus one unevaluable
+        // input — reaches a host as nothing but a graph that stopped
+        // converging.
+        this.telemetry.submit({
+          type: "cfc.prepare-reject",
+          reasons: [...refusal.reasons],
+          refusals: [...refusal.refusals],
+          terminal: refusal.terminal,
+        });
       },
       onDigestInvalidation: () => {
         this.cfcStats.cfcDigestInvalidations += 1;

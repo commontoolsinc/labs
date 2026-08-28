@@ -1,5 +1,6 @@
 import { getLogger } from "@commonfabric/utils/logger";
 import { resolveScopeKey, type ScopeKey } from "@commonfabric/memory/v2";
+import type { CfcRefusalDetail } from "../cfc/refusal-detail.ts";
 import type { Runtime } from "../runtime.ts";
 import { normalizeCellScope } from "../scope.ts";
 import type {
@@ -894,8 +895,9 @@ function normalizeThrownError(error: unknown): Error {
 /**
  * A commit rejection is a plain result object, not an Error, so the error
  * channel gets a constructed one preserving the rejection's name and, for a
- * CFC refusal, its structured `reasons` — the discriminants a consumer needs
- * to tell a policy refusal from a thrown computation. A thrown computation
+ * CFC refusal, its structured `reasons` and `refusals` — the discriminants a
+ * consumer needs to tell a policy refusal from a thrown computation, and the
+ * remedy detail that names the inputs behind it. A thrown computation
  * carries a pattern frame the error decoration reads piece attribution from;
  * a commit rejection has none, so the attribution comes from the action's own
  * observation identity, with the scope prefix stripped back to the result
@@ -906,6 +908,7 @@ function toTerminalRejectionError(error: unknown, action: Action): Error {
     name?: string;
     message?: string;
     reasons?: readonly string[];
+    refusals?: readonly CfcRefusalDetail[];
   };
   const surfaced = new Error(
     typeof rejection?.message === "string" ? rejection.message : String(error),
@@ -913,6 +916,10 @@ function toTerminalRejectionError(error: unknown, action: Action): Error {
   if (typeof rejection?.name === "string") surfaced.name = rejection.name;
   if (rejection?.reasons !== undefined) {
     (surfaced as { reasons?: readonly string[] }).reasons = rejection.reasons;
+  }
+  if (rejection?.refusals !== undefined) {
+    (surfaced as { refusals?: readonly CfcRefusalDetail[] }).refusals =
+      rejection.refusals;
   }
   const identity = (action as Partial<TelemetryAnnotations>)
     .schedulerObservationIdentity;
