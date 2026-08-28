@@ -153,9 +153,11 @@ function _schemaHasIfcUncached(
  * Closure documents travel WITH the documents that refer to them, so
  * every reachable ref of a well-formed stored schema resolves from the
  * local store. Returns whether they all did: `false` names a corrupt or
- * deliberately malformed declaration — a ref to a document the referrer
- * space does not hold, a document that is not a schema document, or one
- * whose content does not hash to its id — which is logged, after which the
+ * deliberately malformed declaration — a ref the referrer space holds no
+ * value for (absent, or an entry that resolves to `undefined`, which
+ * content addressing makes equally unusable: no value can be the bytes
+ * the hash names), a document that is not a schema document, or one whose
+ * content does not hash to its id — which is logged, after which the
  * declaration
  * SELECTS NOTHING: the traversal narrows it to `false` and a caller about
  * to walk the schema (narrowing among them) skips it instead of throwing
@@ -185,8 +187,8 @@ export function ensureExternalSchemaClosure(
       const doc = result.error === undefined ? result.ok.value : undefined;
       if (doc === undefined) {
         logger.warn("schema-closure", () => [
-          "Stored schema names a cid: document this space does not hold — " +
-          "a corrupt or malformed declaration; ignoring it:",
+          "Stored schema names a cid: document this space holds no value " +
+          "for — a corrupt or malformed declaration; ignoring it:",
           address.id,
         ]);
         complete = false;
