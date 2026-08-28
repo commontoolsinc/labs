@@ -1055,10 +1055,15 @@ export const renderTotalsLines = (
   `  run_pattern outcomes: ${
     formatCounts(totals.runPatternOutcomes)
   } (${totals.runPatternOutcomesUnread} not read)`,
-  `  imported patterns: ${
+  `  referenced patterns: ${
     totals.importedPatternIds.length === 0
       ? "none"
       : totals.importedPatternIds.join(" ")
+  }`,
+  `  composed patterns: ${
+    totals.composedPatternIds.length === 0
+      ? "none"
+      : totals.composedPatternIds.join(" ")
   }`,
   `  delegations: ${totals.delegations} by profile ${
     formatCounts(totals.delegationProfiles)

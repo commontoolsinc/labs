@@ -394,6 +394,17 @@ describe("run-measurement-batch", () => {
       ).toThrow("reason for old must be a string");
     });
 
+    it("throws for supersession reasons given as an array, which `typeof` calls an object", () => {
+      expect(() =>
+        parseMeasurementSuite({
+          label: "l",
+          tasks: [{ id: "a", text: "one" }],
+          supersededPatternIds: ["old"],
+          supersededReasons: ["a reason"],
+        })
+      ).toThrow("supersededReasons must be a JSON object");
+    });
+
     it("throws for supersession reasons that are not an object", () => {
       expect(() =>
         parseMeasurementSuite({
@@ -1898,6 +1909,41 @@ describe("run-measurement-batch", () => {
       }
     });
 
+    it("says a referenced-but-uncomposed pattern was referenced rather than that none was imported", () => {
+      const report = renderBatchReport({
+        suite: { label: "l", tasks: [{ id: "a", text: "do a thing" }] },
+        consoleUrl: "http://127.0.0.1:1",
+        indexUrl: null,
+        startedAt: "2026-08-28T21:00:00.000Z",
+        endedAt: "2026-08-28T21:00:01.000Z",
+        preflight: { kind: "answered", results: 1 },
+        posture: POSTURE,
+        importedPatternOrigins: {},
+        indexBefore: { kind: "read", patterns: [] as never },
+        indexAfter: { kind: "read", patterns: [] as never },
+        results: [{
+          task: { id: "a", text: "do a thing" },
+          sessionId: "s",
+          turnId: "t",
+          outcome: { kind: "turn_completed", detail: "done" },
+          configuration: {},
+          measurement: {
+            familyId: "f",
+            runs: [],
+            totals: {
+              ...emptyMeasurementTotals(),
+              importedPatternIds: ["referenced-only"],
+              composedPatternIds: [],
+              runPatternsBareImporting: 1,
+            },
+          },
+        }],
+      });
+      expect(report).toContain("No task composed a published pattern.");
+      expect(report).toContain("neither puts a pattern to work");
+      expect(report).not.toContain("No task imported a published pattern");
+    });
+
     it("says plainly that no task composed when none did", () => {
       const report = renderBatchReport({
         suite: { label: "l", tasks: [{ id: "a", text: "do a thing" }] },
@@ -1912,7 +1958,7 @@ describe("run-measurement-batch", () => {
         indexAfter: { kind: "read", patterns: [] as never },
         results: [],
       });
-      expect(report).toContain("No task imported a published pattern.");
+      expect(report).toContain("No task imported a published pattern at all.");
     });
 
     it("names a superseded seed that was still findable when the batch started", () => {

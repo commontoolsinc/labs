@@ -16,6 +16,7 @@ import {
   renderReportLines,
   renderRunLines,
   renderToolSurfaceLines,
+  renderTotalsLines,
   runFamiliesOf,
   type RunFamilyMeasurement,
   type RunMeasurement,
@@ -541,6 +542,11 @@ describe("measure-runs", () => {
       // report's account of what composed what.
       expect(totals.importedPatternIds).toEqual(["pub-rating"]);
       expect(totals.composedPatternIds).toEqual([]);
+      // The two lines are what stop a reference reading as a composition in
+      // the totals block, where only one label used to carry both.
+      const lines = renderTotalsLines(totals);
+      expect(lines).toContain("  referenced patterns: pub-rating");
+      expect(lines).toContain("  composed patterns: none");
       expect(renderRunLines(run)[0]).toContain("bare-imports pub-rating");
     });
 

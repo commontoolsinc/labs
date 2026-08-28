@@ -189,7 +189,10 @@ export const parseMeasurementSuite = (input: unknown): MeasurementSuite => {
     (supersededPatternIds ?? []) as readonly string[],
   );
   if (supersededReasons !== undefined) {
-    if (typeof supersededReasons !== "object" || supersededReasons === null) {
+    if (
+      typeof supersededReasons !== "object" || supersededReasons === null ||
+      Array.isArray(supersededReasons)
+    ) {
       throw new Error("a task suite's supersededReasons must be a JSON object");
     }
     for (const [id, reason] of Object.entries(supersededReasons)) {
@@ -1575,9 +1578,13 @@ const renderComposition = (
     "",
   ];
   if (composed.length === 0) {
+    const referenced = results.some((result) =>
+      (result.measurement?.totals.importedPatternIds.length ?? 0) > 0
+    );
     lines.push(
-      "No task imported a published pattern. Every `run_pattern` call either",
-      "named a pattern by id or carried source of its own.",
+      referenced
+        ? "No task composed a published pattern. Some task did reference one — by a bare import or a bare re-export — and neither puts a pattern to work; the per-task blocks name which."
+        : "No task imported a published pattern at all. Every `run_pattern` call either named a pattern by id or carried source of its own.",
       "",
     );
     return lines;
