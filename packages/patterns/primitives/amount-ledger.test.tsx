@@ -28,9 +28,10 @@ export default pattern(() => {
   const ledger = AmountLedger({ budget: 500 });
   const free = AmountLedger({});
   // A sub-cent amount a host passed directly rather than through `addEntry`,
-  // which rounds on the way in. `toFixed` and `Math.round` disagree on a
-  // half-cent, so a row formatted from the raw amount reads $0.01 while it
-  // contributes $0.02 to the total.
+  // which rounds on the way in. Rows and total are both formatted from the
+  // same rounded cents, so 0.015 reads $0.02 in both — never the $0.01 that
+  // formatting the raw amount would give, since `toFixed` and `Math.round`
+  // split a half-cent differently.
   const subCent = AmountLedger({ entries: [{ label: "Odd", amount: 0.015 }] });
 
   const addHotel = action(() =>
