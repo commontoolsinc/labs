@@ -1131,9 +1131,13 @@ export type MemoryProtocolFlags = {
    * re-establishing `session.watch.set` may carry (04-protocol.md §4.1.2,
    * §4.3.5) — instead of against its own per-session delivery memory or
    * from nothing. Inherent to the build, so a server of this version always
-   * advertises it; a client that sees it absent sends no holdings and gets
-   * the older behavior (a resumed session diffed against the server's
-   * memory of it, a fresh one delivered in full).
+   * advertises it. A client that sees it absent splits by consumer
+   * (04-protocol.md §4.1.1): a session with no holdings provider declares
+   * nothing and keeps the declaration-less paths (a resumed session diffed
+   * against the server's memory of it, a fresh one delivered in full),
+   * while a provider-bearing session connects initially but terminates at
+   * restore rather than silently rejoining those paths
+   * (`SpaceSession.restore`).
    */
   sessionHoldings: boolean;
 };
@@ -2058,8 +2062,9 @@ export const parseMemoryProtocolFlags = (
     entityIdListing: entityIdListing === true,
     entityIdPagination: entityIdPagination === true,
     entityIdLookup: entityIdLookup === true,
-    // Absent (an older server) parses to false: the client sends no
-    // holdings, and a reconnect takes the older delivery paths.
+    // Absent (an older server) parses to false: a provider-less session
+    // declares nothing and reconnects on the declaration-less paths; a
+    // provider-bearing one terminates at restore (see the flag's doc).
     sessionHoldings: sessionHoldings === true,
   };
 };

@@ -101,7 +101,8 @@ export const toCacheEntry = (
  * own terms. Each holding names a document instance the client confirms
  * it holds at `seq` (a tombstone when `deleted`); the instance resolves
  * from the session identity as every wire frame's does, and the branch is
- * the runner's single default. A holding the diff then finds unchanged is
+ * the holding's own declaration, the default branch when it declares
+ * none. A holding the diff then finds unchanged is
  * elided, a changed or unlisted document is delivered, and a held
  * document the watch union no longer covers is removed — the same rules
  * the server's own delivery memory drives, with the client's statement

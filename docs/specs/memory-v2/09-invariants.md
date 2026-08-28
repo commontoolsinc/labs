@@ -568,7 +568,10 @@ scanning, cascade scope, or retry behavior:
 3. If the change touches pending-stack recording, resolution ordering, or
    staleness bases, run the corresponding TLA+ configs (see
    `docs/specs/memory-v2/tla/README.md`) — add a mode to the model if the
-   change introduces a new recording/basis shape.
+   change introduces a new recording/basis shape. The same holds on the
+   delivery side: a change to the reconnect diff base, the holdings
+   declaration, or removal semantics runs the `SessionDelivery` configs,
+   and a new base or declaration shape becomes a `Mode` variant there.
 4. Run the differential harness; if the change makes the engine accept
    strictly more histories, the naive validator must agree on every newly
    accepted one.
