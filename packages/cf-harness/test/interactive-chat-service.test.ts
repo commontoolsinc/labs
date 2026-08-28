@@ -25,6 +25,12 @@ import {
   type HarnessInteractivePromptLoopFactory,
 } from "../src/interactive-chat-service.ts";
 import { HarnessControlError } from "../src/control-errors.ts";
+import { CfHarnessEngine } from "../src/engine.ts";
+import type {
+  SandboxCommandResult,
+  SandboxRuntime,
+  SandboxRuntimeDescription,
+} from "../src/sandbox/types.ts";
 import {
   CfHarnessPromptLoop,
   type CreateHarnessPromptLoopOptions,
@@ -1996,4 +2002,111 @@ Deno.test("an interactive turn scans its configured skills root into the run and
   assertEquals(readOutput.status, "read");
   assertEquals(readOutput.digestMatchesRegistry, true);
   assertEquals((readOutput.content ?? "").length > 0, true);
+});
+
+/** A sandbox a no-tool turn never drives; enough to build an engine. */
+class StubSandboxRuntime implements SandboxRuntime {
+  describe(): SandboxRuntimeDescription {
+    return {
+      kind: "docker-runsc-cfc",
+      defaultWorkingDirectory: "/workspace",
+      cfc: { runtimeRequested: true, workspaceMountPath: "/workspace" },
+    };
+  }
+  resolvePath(path: string): string {
+    return path.startsWith("/") ? path : `/workspace/${path}`;
+  }
+  isPathWithinWorkspace(path: string): boolean {
+    return path === "/workspace" || path.startsWith("/workspace/");
+  }
+  isPathWithinAllowedRoots(path: string): boolean {
+    return this.isPathWithinWorkspace(path);
+  }
+  defaultWorkingDirectory(): string {
+    return "/workspace";
+  }
+  run(): Promise<SandboxCommandResult> {
+    return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
+  }
+  runShell(): Promise<SandboxCommandResult> {
+    return Promise.resolve({ stdout: "", stderr: "", exitCode: 0 });
+  }
+}
+
+Deno.test("an interactive turn scans a skills root carried on an injected engine's config", async () => {
+  // The console passes the skills root on the options directly; an injected
+  // engine carries it on `engine.config` instead, with no top-level
+  // `skillsRoot`. Both must scan — reading the options alone would miss this.
+  await using fixture = await createPatternSkillsFixture();
+  const engine = new CfHarnessEngine({
+    sandboxRuntime: new StubSandboxRuntime(),
+    runId: "run-interactive-injected-engine",
+    model: "gpt-test",
+    skillsRoot: fixture.skillsRoot,
+  });
+  const service = new HarnessInteractiveChatService({
+    basePromptLoopOptions: {
+      apiKey: "test-key",
+      engine,
+      cfcEnforcementMode: "observe",
+      fetchFn: (_input, init) =>
+        Promise.resolve(
+          new Response(
+            JSON.stringify(
+              responsesBodyFromChatFixture(
+                {
+                  choices: [{
+                    index: 0,
+                    message: { role: "assistant", content: "Done." },
+                  }],
+                },
+                init?.body ?? null,
+              ),
+            ),
+            { status: 200 },
+          ),
+        ),
+    },
+    createPromptLoop: (options) => new CfHarnessPromptLoop(options),
+    now: nextIsoNow(),
+    randomUUID: () => "generated-id",
+  });
+
+  const startSession = await service.handleRequest({
+    type: HARNESS_CHAT_REQUEST_TYPE,
+    protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+    requestId: "req-1",
+    method: "start_session",
+    params: {
+      sessionId: "session-1",
+      workspace: { hostPath: "/workspace" },
+      model: "gpt-test",
+      policy: {
+        type: "cf-harness.chat-policy",
+        toolMode: "workspace-write",
+        allowedToolIds: ["read_file"],
+        allowedSubagentProfiles: [],
+      },
+    },
+  });
+  assertEquals(startSession.ok, true);
+
+  const startTurn = await service.handleRequest({
+    type: HARNESS_CHAT_REQUEST_TYPE,
+    protocolVersion: HARNESS_CHAT_PROTOCOL_VERSION,
+    requestId: "req-2",
+    method: "start_turn",
+    params: {
+      sessionId: "session-1",
+      turnId: "turn-1",
+      input: { text: "Say hi." },
+    },
+  });
+  assertEquals(startTurn.ok, true);
+  await service.waitForTurn("session-1", "turn-1");
+
+  // The scan ran against the injected engine even though no top-level
+  // skillsRoot was set, so its run state now carries the registry.
+  const registry = engine.getRunState().skillRegistry;
+  assertEquals(registry?.skillsRoot, fixture.skillsRoot);
 });

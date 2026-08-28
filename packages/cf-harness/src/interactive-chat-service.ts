@@ -1518,18 +1518,19 @@ export class HarnessInteractiveChatService {
   async #startPromptLoop(
     options: CreateHarnessPromptLoopOptions,
   ): Promise<HarnessInteractivePromptLoop> {
-    if (options.skillsRoot === undefined) {
+    // The skills root reaches this either way: on the options directly, or on
+    // an injected engine's own config (where `options.skillsRoot` is unset).
+    // Read both so neither shape is missed.
+    const skillsRoot = options.engine?.config.skillsRoot ?? options.skillsRoot;
+    if (skillsRoot === undefined) {
       return this.#createPromptLoop(options);
     }
-    // Scan whichever engine will run — an injected one included, since its
-    // presence is not proof the registry was already recorded. Idempotent:
-    // an engine that already carries a registry is left as it is.
+    // A turn is its own run, so the scan happens every turn: it records the
+    // registry the skill tools read before the first model call, and a run
+    // that reuses an engine still refreshes it, so a skill added or removed
+    // mid-session is not stale.
     const engine = options.engine ?? new CfHarnessEngine(options);
-    if (engine.getRunState().skillRegistry === undefined) {
-      await persistHarnessRunSkillRegistry(engine, {
-        skillsRoot: options.skillsRoot,
-      });
-    }
+    await persistHarnessRunSkillRegistry(engine, { skillsRoot });
     return this.#createPromptLoop({ ...options, engine });
   }
 
