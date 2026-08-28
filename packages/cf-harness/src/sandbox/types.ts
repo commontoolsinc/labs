@@ -99,21 +99,35 @@ export interface ResolveDockerRunscSandboxConfigOptions {
 export type CfcSidecarTransportKind = "invocation-context" | "result";
 
 /**
- * Whether the installed Docker runtime is registered to use the sidecar
- * directories `cf-harness` is configured with.
+ * One transport's reading.
  *
- * The three states stay distinct in the type rather than collapsing into a
- * boolean because the evidence behind them differs. `unwired` is a positive
- * reading of the runtime's registered arguments; `indeterminate` is the
- * absence of any reading. Folding the second into the first refuses a host
- * whose registration simply could not be read, and folding it into `wired`
- * excuses a broken one — the same substitution of a check that did no work for
- * a check that ran and found nothing that hid this defect to begin with.
+ * The three states stay distinct rather than collapsing into a boolean because
+ * the evidence behind them differs. `unwired` is a positive reading of the
+ * runtime's registered arguments; `indeterminate` is the absence of any
+ * reading. Folding the second into the first refuses a host whose registration
+ * simply could not be read, and folding it into `wired` excuses a broken one.
  */
-export type CfcTransportReadiness =
+export type CfcSidecarTransportReading =
   | { status: "wired" }
-  | { status: "unwired"; unread: readonly CfcSidecarTransportKind[] }
+  | { status: "unwired" }
   | { status: "indeterminate"; reason: string };
+
+/**
+ * Whether the installed Docker runtime is registered to use the sidecar
+ * directories `cf-harness` is configured with — **one reading per transport**,
+ * with an entry present exactly when that transport is configured.
+ *
+ * The pair is read in a single pass but must not be summarized into a single
+ * verdict. The two transports are registered independently and can disagree,
+ * and a summary has to pick one answer: an `unwired` result directory would
+ * otherwise outrank and erase an `indeterminate` invocation-context one, so a
+ * consumer asking about input taint would be told about output mediation
+ * instead, and an enforcing invocation would start carrying exactly the
+ * uncertainty the third state exists to preserve.
+ */
+export type CfcTransportReadiness = {
+  readonly [K in CfcSidecarTransportKind]?: CfcSidecarTransportReading;
+};
 
 export interface SandboxCommandRequest {
   argv: string[];
