@@ -1,7 +1,7 @@
 # Commit-conflict granularity
 
 This note describes how Memory v2 decides whether a committing transaction's
-**reads** conflict with concurrent **writes**, and the three refinements that
+**reads** conflict with concurrent **writes**, and the four refinements that
 make distinct, non-interacting operations stop colliding.
 
 ## The model
