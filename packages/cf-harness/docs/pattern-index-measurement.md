@@ -57,9 +57,11 @@ never merge its numbers into a discovery batch's.
 
 ## What a comparable run is
 
-Five things have to match for two batches to be compared. A batch report records
-the four it can read, and names the fifth as not recorded, so a reader checks
-rather than assumes.
+Six things have to match for two batches to be compared, and a batch report
+records every one of them: the tasks verbatim, the index readings either side,
+the model, the CFC posture the sessions ran under, the skills tree the runs
+scanned, and what the fabric server reported it was running. A reading that
+could not be taken is named as not taken rather than left out.
 
 1. **The tasks, worded identically.** The standing suite is
    [`scripts/pattern-index-suite.json`](../scripts/pattern-index-suite.json).
