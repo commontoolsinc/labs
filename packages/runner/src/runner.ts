@@ -1,5 +1,8 @@
 import { isDeepFrozen } from "@commonfabric/data-model/deep-freeze";
-import { resolveSchemaRefsCanonical } from "./traverse.ts";
+import {
+  combineSchemaForLink,
+  resolveSchemaRefsCanonical,
+} from "./traverse.ts";
 import {
   fabricFromNativeValue,
   FabricInstance,
@@ -294,6 +297,16 @@ function isReferenceOnlySchema(
 ): boolean {
   if (depth <= 0 || !isObjectOrArray(schema)) return false;
   if (schema.asCell !== undefined) return true;
+  // `unknown` is the deliberate request for reference semantics — a value
+  // compared by identity rather than read through, opaque at this hop and
+  // every deeper one (docs/specs/link-schema-precedence.md). The board's
+  // `mentions` and crossref rows are declared this way.
+  if (
+    schema.type === "unknown" ||
+    (Array.isArray(schema.type) && schema.type.includes("unknown"))
+  ) {
+    return true;
+  }
   if ("$ref" in schema) {
     return isReferenceOnlySchema(
       resolveSchemaRefsCanonical(schema as JSONSchemaObj),
@@ -4945,39 +4958,44 @@ export class Runner {
    * Pre-sync the documents linked from stored arguments that a resumed
    * pattern's first runs read through.
    *
-   * Collection follows each root's declared schema, walking value and schema
-   * in lockstep: a link on a schema-named path has its target synced, and
-   * the walk continues INTO that target under the same path schema — a
-   * declared read through a link reaches the linked document's fields, so
-   * the pre-sync does too, two link hops deep — the reach the undeclared
-   * walk has always had, kept while declared depth stays unmeasured. A path whose
-   * schema carries `asCell` is handed to the run as a reference, so its
-   * target document is synced and its contents are not walked. A property a
-   * `properties`-bearing schema does not select is invisible to the run and
-   * is not walked at all.
+   * Collection walks value and schema in lockstep, so what is warmed is what
+   * the declaration says a run can reach. A property a `properties`-bearing
+   * schema does not select is invisible to the run and is not walked.
+   *
+   * A link is crossed the way a read crosses it, through
+   * `combineSchemaForLink`: a shaped reader carries its own schema into the
+   * target and the link cannot widen it, while a permissive reader adopts
+   * what the link declares. Following the runtime's own rule is what keeps
+   * this walk and the reader in agreement, including under the rollback
+   * posture that rule answers to.
+   *
+   * A value the run holds rather than reads through is synced and not
+   * walked: `asCell` names a handle, and `unknown` asks for reference
+   * semantics — compared by identity, opaque at this hop and every deeper
+   * one.
    *
    * Where a declaration runs out — a `true` schema, an object schema with no
-   * `properties`, a root with no schema — the walk falls back to the
-   * undeclared form: every link in the raw value within the same overall
-   * two-link-hop bound, which covers the measured defaultProfile container
-   * chain and any read the transformer could not see. Deduped, values only;
-   * an unloadable target is skipped rather than failing the resume.
+   * `properties`, a link that declares nothing — the walk falls back to
+   * scanning the raw value, which covers the measured defaultProfile
+   * container chain and any read the transformer could not see. Either form
+   * reaches two link hops, the bound the undeclared walk has always had.
+   * Deduped per document for syncing and per subtree for walking; values
+   * only, and an unloadable target is skipped rather than failing the
+   * resume.
    */
   private async syncArgumentLinkTargets(
     roots: readonly ArgumentLinkRoot[],
     timingLabel: "resumeArgumentLinkTargetSync" | "setupArgumentLinkTargetSync",
     initialValues?: readonly (FabricValue | undefined)[],
   ): Promise<void> {
-    // Link-hop budgets: how many further documents a walk may step INTO from
-    // a synced target. Both keep the two-hop reach the defaultProfile
-    // regression fixed. Declared descent could in principle go as deep as the
-    // declaration, but deployed schemas declare reference GRAPHS (a topic's
-    // mentions reach topics whose mentions reach topics), and following them
-    // syncs documents no first run reads — measured on the topics board, a
-    // deeper declared budget collected more than the undeclared walk it
-    // replaced. Raising it is evidence-driven tuning, not headroom.
-    const UNDECLARED_LINK_HOPS = 2;
-    const DECLARED_LINK_HOPS = 2;
+    // How many further documents a walk may step INTO from a synced target.
+    // Two keeps the reach the defaultProfile regression fixed. A declaration
+    // could in principle be followed as far as it goes, but deployed schemas
+    // declare reference GRAPHS (a topic's mentions reach topics whose
+    // mentions reach topics), and a deeper budget measured on the topics
+    // board collected more than the undeclared walk it replaced. Raising it
+    // is evidence-driven tuning, not headroom.
+    const LINK_HOPS = 2;
     // Syncing is document-granular and walking is subtree-granular, so they
     // dedupe separately: one sync per document, one walk per (document, path,
     // declared/undeclared) subtree. A reference visit (`asCell`, no walk)
@@ -4988,15 +5006,16 @@ export class Runner {
     const walkedSubtrees = new Set<string>();
     type PendingTarget = {
       cell: Cell<any>;
-      schema: JSONSchema | undefined;
+      schema: JSONSchema;
       hopsLeft: number;
     };
+    // A root without a declaration enters as the permissive reader it is:
+    // `true` crosses links by adopting what they declare, so an undeclared
+    // root is typed by the first link it follows rather than scanned blind.
     let frontier: PendingTarget[] = roots.map((root) => ({
       cell: root.cell,
-      schema: root.schema,
-      hopsLeft: root.schema !== undefined
-        ? DECLARED_LINK_HOPS
-        : UNDECLARED_LINK_HOPS,
+      schema: root.schema ?? true,
+      hopsLeft: LINK_HOPS,
     }));
     let wave = 0;
     while (frontier.length > 0) {
@@ -5004,7 +5023,7 @@ export class Runner {
       const targetPromises: Promise<any>[] = [];
       const enqueue = (
         link: NormalizedFullLink,
-        schema: JSONSchema | undefined,
+        schema: JSONSchema,
         hopsLeft: number,
       ) => {
         const docKey = `${link.space}\0${link.id}\0${link.scope ?? "space"}`;
@@ -5044,7 +5063,7 @@ export class Runner {
         // encoded injectively, since joining segments lets `["a/b"]` and
         // `["a", "b"]` collide.
         const walkKey = `${docKey}\0${JSON.stringify(link.path)}\0${
-          schema === undefined ? "undeclared" : hashStringOf(schema)
+          hashStringOf(schema)
         }`;
         if (walkedSubtrees.has(walkKey)) return;
         walkedSubtrees.add(walkKey);
@@ -5053,28 +5072,32 @@ export class Runner {
       const collect = (
         value: any,
         base: Cell<any>,
-        schema: JSONSchema | undefined,
+        schema: JSONSchema,
         hopsLeft: number,
       ) => {
         if (schema === false) return;
-        // A `true` or absent schema is where the declaration ran out; scan
-        // from here in the undeclared form with the remaining overall budget.
-        const declared = schema !== undefined && schema !== true;
+        // A `true` schema is where the declaration ran out; scan from here in
+        // the undeclared form with the remaining overall budget.
+        const declared = schema !== true;
         const link = parseLink(value, base);
         if (link) {
-          // `asCell` marks a reference the run holds rather than reads
-          // through: sync the target document, walk no further. The marker
-          // usually rides the declared property schema beside any `$ref`;
-          // where the declaration is a union or ends in a reference, any
-          // resolved arm carrying the marker makes the value a handle.
-          const reference = declared && isReferenceOnlySchema(schema);
+          // Cross the link the way a read crosses it. `combineSchemaForLink`
+          // is the runtime's own rule and follows the same
+          // `readerSchemaPrecedence` posture, so the pre-sync covers what the
+          // reader will reach under whichever posture is in force: a shaped
+          // reader keeps its own schema and the link cannot widen it, while a
+          // permissive one adopts what the link declares rather than falling
+          // back to scanning everything behind it.
+          const crossed = combineSchemaForLink(schema, link.schema ?? true);
+          // Nothing is selected past this point, so no first run reads it.
+          if (crossed === false) return;
+          // A handle is held rather than read through — sync the document it
+          // names, and stop.
+          const opaque = isReferenceOnlySchema(crossed);
           enqueue(
             link,
-            declared ? schema : undefined,
-            reference ? 0 : Math.min(
-              hopsLeft - 1,
-              declared ? DECLARED_LINK_HOPS : UNDECLARED_LINK_HOPS,
-            ),
+            crossed,
+            opaque ? 0 : Math.min(hopsLeft - 1, LINK_HOPS),
           );
           return;
         }
@@ -5088,12 +5111,7 @@ export class Runner {
           for (const key in value) {
             // The undeclared scan keeps the remaining share of the overall
             // two-hop budget; the clamp states that transition explicitly.
-            collect(
-              value[key],
-              base,
-              undefined,
-              Math.min(hopsLeft, UNDECLARED_LINK_HOPS),
-            );
+            collect(value[key], base, true, Math.min(hopsLeft, LINK_HOPS));
           }
           return;
         }
