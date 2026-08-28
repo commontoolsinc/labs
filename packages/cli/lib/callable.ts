@@ -1489,8 +1489,8 @@ function circularResultPath(value: unknown): string | undefined {
  * it hands back is the case: the row re-enters nowhere, and the piece carries
  * a view that reaches every piece it renders and back again. The stronger
  * bound answers that one by reading the declaration as the shape it states —
- * each object position held to the fields it declares, which is the boundary
- * an author writing a narrow result already believes they drew.
+ * each object position it CLOSES held to the fields it declares, which is the
+ * boundary an author writing a narrow result already believes they drew.
  *
  * Both are applied to `value` — the result already in hand — and never read a
  * second one. That is what lets them bound a result a caller ALREADY shaped

@@ -154,6 +154,35 @@ describe("declaredResultProjection", () => {
     });
   });
 
+  it("keeps the keys an index signature declares beside the position it cuts", () => {
+    // An interface carrying an index signature over its own members lowers to
+    // `properties` AND `additionalProperties`, which says the value holds keys
+    // the declaration does not name. A projection stating no
+    // `additionalProperties` of its own is supplied `false`, so writing
+    // `properties` alone would close the position and drop them — an answer
+    // narrower than the verb declared, over a bound that is only supposed to
+    // remove the circle.
+    const declared: JSONSchema = {
+      type: "object",
+      properties: { item: { $ref: "#/$defs/Item" } },
+      additionalProperties: { type: "string" },
+      $defs: {
+        Item: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            parent: { $ref: "#/$defs/Item" },
+          },
+        },
+      },
+    };
+    expect(declaredResultProjection(declared)?.schema).toEqual({
+      type: "object",
+      properties: { item: CUT_ITEM },
+      additionalProperties: true,
+    });
+  });
+
   describe('the `"shape"` bound', () => {
     /**
      * A verb that hands back a piece and declares a compact row over it: two
@@ -189,6 +218,149 @@ describe("declaredResultProjection", () => {
       });
     });
 
+    it("reads every key stored at an object the declaration leaves open", () => {
+      // The shape bound holds an object to the fields it declares, and a
+      // declaration carrying an index signature declares the rest of them too.
+      // Closing that position would hand back less than the verb states it
+      // returns, which is the one thing a bound over a committed handling must
+      // not do.
+      expect(
+        declaredResultProjection({
+          type: "object",
+          properties: {
+            row: {
+              type: "object",
+              properties: { title: { type: "string" } },
+              additionalProperties: { type: "string" },
+            },
+            other: {
+              type: "object",
+              properties: { note: { type: "string" } },
+            },
+          },
+        }, "shape")?.schema,
+      ).toEqual({
+        type: "object",
+        properties: {
+          // Nothing below `row` narrows and the position itself narrows
+          // nothing, so it reads whatever is stored — the same answer an
+          // unbounded readback gives there.
+          row: true,
+          other: {
+            type: "object",
+            properties: { note: true },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
+      });
+    });
+
+    it("writes an open object open where something below it narrows", () => {
+      // The position still has to be written, because the closed object under
+      // it is the bound. Written closed it would drop the keys the index
+      // signature declares; written open they read as they always did, and the
+      // narrowing below still stands.
+      expect(
+        declaredResultProjection({
+          type: "object",
+          properties: {
+            row: {
+              type: "object",
+              properties: {
+                inner: {
+                  type: "object",
+                  properties: { note: { type: "string" } },
+                },
+              },
+              additionalProperties: { type: "string" },
+            },
+          },
+        }, "shape")?.schema,
+      ).toEqual({
+        type: "object",
+        properties: {
+          row: {
+            type: "object",
+            properties: {
+              inner: {
+                type: "object",
+                properties: { note: true },
+                additionalProperties: false,
+              },
+            },
+            additionalProperties: true,
+          },
+        },
+        additionalProperties: false,
+      });
+    });
+
+    it("holds an object the declaration closes with `false` to its fields", () => {
+      // A declaration writing `additionalProperties: false` closed the
+      // position itself, so the shape bound is stating what the author already
+      // stated rather than narrowing anything.
+      expect(
+        declaredResultProjection({
+          type: "object",
+          properties: {
+            row: {
+              type: "object",
+              properties: { title: { type: "string" } },
+              additionalProperties: false,
+            },
+          },
+        }, "shape")?.schema,
+      ).toEqual({
+        type: "object",
+        properties: {
+          row: {
+            type: "object",
+            properties: { title: true },
+            additionalProperties: false,
+          },
+        },
+        additionalProperties: false,
+      });
+    });
+
+    it("holds an object the declaration closes over no fields to `{}`", () => {
+      // Naming no fields and saying the value has none are different
+      // statements. `Record<string, never>` lowers to `properties: {}` beside
+      // `additionalProperties: false` and is the second, so the shape bound
+      // has something to hold the position to and `{}` is what comes back —
+      // which is a bound, and bounds a circle sitting at that position.
+      expect(
+        declaredResultProjection({
+          type: "object",
+          properties: {},
+          additionalProperties: false,
+        }, "shape")?.schema,
+      ).toEqual({
+        type: "object",
+        properties: {},
+        additionalProperties: false,
+      });
+      expect(
+        declaredResultProjection({
+          type: "object",
+          properties: {
+            ack: {
+              type: "object",
+              properties: {},
+              additionalProperties: false,
+            },
+          },
+        }, "shape")?.schema,
+      ).toEqual({
+        type: "object",
+        properties: {
+          ack: { type: "object", properties: {}, additionalProperties: false },
+        },
+        additionalProperties: false,
+      });
+    });
+
     it("derives nothing from the same declaration under the recursion bound", () => {
       // The contrast is the whole reason the stronger bound exists, and the
       // default is the weaker one: a declaration that re-enters nowhere bounds
@@ -213,7 +385,9 @@ describe("declaredResultProjection", () => {
       // Bare types and an unconstrained object read no less than the value
       // does, so there is nothing here that a readback does not already do —
       // and answering with a projection that changes nothing would report a
-      // bound where none was found.
+      // bound where none was found. `{ type: "object", properties: {} }` is
+      // what an empty interface lowers to: it names no fields and closes
+      // nothing, which accepts whatever is stored.
       expect(declaredResultProjection({ type: "object" }, "shape"))
         .toBeUndefined();
       expect(declaredResultProjection({}, "shape")).toBeUndefined();
@@ -225,6 +399,16 @@ describe("declaredResultProjection", () => {
       ).toBeUndefined();
       expect(declaredResultProjection({ type: "string" }, "shape"))
         .toBeUndefined();
+      // An object naming fields beside an index signature reads every key
+      // stored at it, which is what a readback already does, so a projection
+      // written from it would report a bound that bounds nothing.
+      expect(
+        declaredResultProjection({
+          type: "object",
+          properties: { title: { type: "string" } },
+          additionalProperties: { type: "string" },
+        }, "shape"),
+      ).toBeUndefined();
     });
 
     it("leaves a union position as wide as it was declared", () => {

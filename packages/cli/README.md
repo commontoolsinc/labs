@@ -763,7 +763,10 @@ from expanding that piece's prose and every sibling it references. The circle a
 readback of that piece closes is then at a position the declaration does not
 name at all, and the declaration re-enters nowhere, so there is no address to
 render anywhere in it. The bound for that one is the declared shape itself:
-every object position is held to the fields it declares, and the row comes back.
+every object position the declaration closes is held to the fields it declares,
+and the row comes back. A position the declaration leaves open — an index
+signature beside its named members — still reads every key stored at it, because
+those keys are declared too.
 
 ```json
 { "topic": { "title": "Rotate signing key", "createdAt": 1756400000000 } }
@@ -782,8 +785,11 @@ Three things follow:
   whole — `--select item` — keeps the circle it selected and is bounded on the
   way out, but the bound is a cut into what was selected rather than a shape
   that replaces it: the closing position renders its address, and no position
-  the caller did not name comes back beside it. `--select item.parent` names the
-  closing position itself, and is answered with that one address alone.
+  the caller did not name comes back beside it. A position they asked for the
+  address of — `--select 'item@,item.parent'` — is still answered with that
+  address, which was their whole answer there and is not a field of what sits
+  behind it. `--select item.parent` names the closing position itself, and is
+  answered with that one address alone.
 - **Nothing else pays for it.** A result that renders is written out exactly as
   it was read, and the compiled pattern a declared result is matched through is
   loaded only where a readback cannot render. The bound itself is a cut into the

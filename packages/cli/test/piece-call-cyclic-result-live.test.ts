@@ -342,6 +342,70 @@ describe("cf piece call on a piece that points back at its container", () => {
     });
   });
 
+  // The pair below is the other half of "a caller's own shape wins": a
+  // selection that asks for an ADDRESS at one position and keeps the circle at
+  // another. The address is the caller's whole answer where they asked for it,
+  // and a bound that closed the object over the declared fields instead would
+  // answer `{}` there — contents where an address was asked for, which reads
+  // as a successful answer to a question nobody asked. Both bounds reach that
+  // position, so both halves are here.
+  it("keeps an address the caller asked for while the shape bounds the rest", async () => {
+    await withTracker("cyclic-compact-marked", async ({ call }) => {
+      const result = await call("addChildRow", ["--title", "Marked"], {
+        selection: {
+          projection: parseSelectProjection("row@,row.parent"),
+        },
+      }) as any;
+
+      // `row.parent` is the container, which files the row under `children`,
+      // so the caller's own shape still closes a circle and the compact
+      // declaration is what bounds it. `row@` is the address of the row, and
+      // it survives that bound.
+      expect(() => JSON.stringify(result)).not.toThrow();
+      expect(typeof result.row.$link).toBe("string");
+      // The row is a piece of its own, so the deepest link the walk crossed is
+      // that piece's document and there is no path below it.
+      const row = parseLLMFriendlyLink(result.row.$link);
+      expect(row.id?.startsWith("of:")).toBe(true);
+      expect(row.path).toEqual([]);
+      // `parent` is where the circle was, and the declaration does not name
+      // it, so the bound removes it. Nothing the caller did not name comes
+      // back in its place.
+      expect(Object.keys(result.row)).toEqual(["$link"]);
+    });
+  });
+
+  it("keeps an address the caller asked for while the recursion bounds the rest", async () => {
+    await withTracker("cyclic-container-marked", async ({ call }) => {
+      await call("addChildSelf", ["--title", "First"]);
+      const result = await call("addChildSelf", ["--title", "Second"], {
+        selection: {
+          projection: parseSelectProjection("container@,container.children"),
+        },
+      }) as any;
+
+      // `container.children` holds the pieces that point back at the
+      // container, so the caller's shape keeps the circle and the declared
+      // recursion cuts it: each child renders its own address. The
+      // container's own address is the caller's, and stands beside them.
+      expect(() => JSON.stringify(result)).not.toThrow();
+      expect(typeof result.container.$link).toBe("string");
+      expect(parseLLMFriendlyLink(result.container.$link).id?.startsWith("of:"))
+        .toBe(true);
+      expect(
+        result.container.children.map((child: any) =>
+          parseLLMFriendlyLink(child.$link).id?.startsWith("of:")
+        ),
+      ).toEqual([true, true]);
+      // And no position the caller did not name: `title` is declared, was not
+      // selected, and does not come back.
+      expect(Object.keys(result.container).sort()).toEqual([
+        "$link",
+        "children",
+      ]);
+    });
+  });
+
   // The pair below is one contrast, and it is the whole point of both halves:
   // `item.title` narrows PAST the position where the declared type re-enters,
   // so the value it produces holds no circle and nothing derived touches it;

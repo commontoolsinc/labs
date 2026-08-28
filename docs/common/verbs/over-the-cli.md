@@ -320,8 +320,10 @@ its thread, and every sibling it references. The row re-enters nowhere, and the
 circle a readback of the topic closes — through its view, into a profile, into
 that profile's own view — is at no position the row names. There is nothing
 there for a recursion cut to land on, and the bound is the declared shape
-itself: every object position is held to the fields it declares, and what comes
-back is the row its author wrote.
+itself: every object position the declaration closes is held to the fields it
+declares, and what comes back is the row its author wrote. A position the
+declaration leaves open — an index signature beside its named members — still
+reads every key stored at it, because those keys are declared too.
 
 ```bash
 cf call --piece "$BOARD" addTopic -- --title "Session cookie handling" \
@@ -354,8 +356,10 @@ derived added to it. One that keeps the circle — `--select item`, which names
 the re-entering subtree whole — is bounded on the way out, and the bound is a
 cut into what you selected rather than a shape that replaces it: the closing
 position renders its address, and no position you did not name comes back
-beside it. `--select item.parent` names the closing position itself, and answers
-with that one address alone.
+beside it. A position you asked for the address of — `--select
+'item@,item.parent'` — still answers with that address, which was your whole
+answer there rather than a field of what sits behind it. `--select item.parent`
+names the closing position itself, and answers with that one address alone.
 
 Where nothing bounds it — the verb declares no result, the declaration
 describes no less than the value does, or a `--filter` is in play, whose

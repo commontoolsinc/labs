@@ -1224,13 +1224,18 @@ const DERIVED_PROJECTION_SOURCE = "<the verb's declared result>";
  * bound a result which merely closes a circle needs, and applying more of the
  * declaration than that would narrow a value the caller can already read.
  *
- * `"shape"` holds every object position to the fields the declaration gives
- * it as well. A value can reach far past what its declaration describes — a
- * verb declaring a compact row over a piece hands back that piece, and the
- * piece carries its view, and the view reaches every piece it renders — and a
- * circle out there is at no position the declaration names, so cutting the
- * declaration's own recursion does not reach it. Reading the declaration as
- * the shape it states does: what the author declared is what comes back.
+ * `"shape"` holds every object position the declaration CLOSES to the fields
+ * it gives that position as well — none of them, for a declaration that says
+ * the value has no keys. One the declaration leaves open — an index signature
+ * beside its named members, or an empty interface, which names no fields and
+ * accepts whatever is stored — keeps reading every key stored at it, because
+ * those keys are declared too. A value can reach far past what its
+ * declaration describes — a verb declaring a compact row over a piece hands
+ * back that piece, and the piece carries its view, and the view reaches every
+ * piece it renders — and a circle out there is at no position the declaration
+ * names, so cutting the declaration's own recursion does not reach it. Reading
+ * the declaration as the shape it states does: what the author declared is
+ * what comes back.
  */
 export type DeclaredBound = "recursion" | "shape";
 
@@ -1352,20 +1357,42 @@ function derivePosition(
   }
 
   if (schema.type === "object" || schema.properties !== undefined) {
-    const declared = schema.properties;
-    // An object that names no fields describes no less than the value at it
-    // does, under either bound: there is nothing to cut and nothing to hold it
-    // to, so it reads whatever is stored.
-    if (!isObjectNotArray(declared) || Object.keys(declared).length === 0) {
+    const declared = isObjectNotArray(schema.properties)
+      ? schema.properties
+      : {};
+    // A declaration naming fields can still say the value holds keys beside
+    // them: an interface carrying an index signature over its own members
+    // lowers to `properties` AND `additionalProperties`. Written out,
+    // `properties` alone would close the position to what it lists —
+    // `normalizeProjectionSchema` supplies the `additionalProperties: false` a
+    // projection states none of — and the keys the declaration allows would
+    // come back missing, which is a narrower answer than the author declared.
+    // The open answer is written instead, so those keys read what an unbounded
+    // readback reads at them. A declaration that states `false` closed the
+    // position itself and is written closed.
+    const open = schema.additionalProperties !== undefined &&
+      schema.additionalProperties !== false;
+    // Naming no fields and saying the value has none are different
+    // statements, and only the first leaves the position unbounded. An empty
+    // interface names no fields and accepts whatever is stored — as does an
+    // index signature with nothing beside it — so there is nothing to hold
+    // the position to and it reads what an unbounded readback reads.
+    // `Record<string, never>` lowers to that same empty `properties` beside
+    // `additionalProperties: false`, which says the value has no keys at all;
+    // `"shape"` holds the position to it below, and the answer is `{}`.
+    if (
+      Object.keys(declared).length === 0 &&
+      schema.additionalProperties !== false
+    ) {
       return DERIVED_WHOLE;
     }
     const properties: Record<string, unknown> = {};
-    // An object the declaration gives fields to IS the bound under `"shape"`:
-    // a written `properties` closes the position to what it lists
-    // (`normalizeProjectionSchema` supplies the `additionalProperties: false`),
-    // so writing this position out is itself the narrowing, with no marker
-    // anywhere below needed to make it one.
-    let cut = bound === "shape";
+    // An object the declaration CLOSES is the bound under `"shape"`: a written
+    // `properties` holds the position to what it lists, so writing it out is
+    // itself the narrowing, with no marker anywhere below needed to make it
+    // one. An open one narrows nothing on its own — every key stored at it
+    // still reads — so only a cut below makes it a bound.
+    let cut = bound === "shape" && !open;
     for (const [key, child] of Object.entries(declared)) {
       const derived = derivePosition(
         child as JSONSchema,
@@ -1380,7 +1407,12 @@ function derivePosition(
     // that holds no recursion is left whole, so the positions that bound does
     // not need to reach read exactly as an unbounded readback reads them.
     return cut
-      ? { schema: { type: "object", properties }, cut }
+      ? {
+        schema: open
+          ? { type: "object", properties, additionalProperties: true }
+          : { type: "object", properties },
+        cut,
+      }
       : DERIVED_WHOLE;
   }
 
@@ -1411,7 +1443,8 @@ function derivePosition(
  * at no position the declaration names, so there is no re-entry to cut and
  * nothing narrower in reach than the shape the author wrote. `undefined` still
  * where that shape reads no less than the value does — a declaration of bare
- * types, or one whose every object position declares no fields.
+ * types, or one whose every object position declares itself open or names no
+ * fields without closing itself.
  *
  * The derived projection is written in the `--schema` language and reports
  * itself as that flag, which is the flag that replaces it.
@@ -2049,10 +2082,27 @@ function unheldSelectionFieldError(
   );
 }
 
+/**
+ * `value` held to `schema`, in the projection vocabulary.
+ *
+ * `implicitArrayTraversal` states that the schema came from a concise field
+ * list, which names a field wherever the value holds one rather than at a
+ * fixed depth.
+ *
+ * `keepComposedAddresses` states that the value may ALREADY carry addresses a
+ * caller's own projection composed into it — which is the case a derived bound
+ * meets, and only that one. An address is the caller's whole answer at the
+ * position holding it, not a field of what sits behind it, and a schema
+ * describes what sits behind it, so a position closed over declared fields
+ * would drop the one thing named there and answer with contents where an
+ * address was asked for. There is nothing inside an address to hold to a
+ * shape, so it is carried across instead.
+ */
 function projectValue(
   value: unknown,
   schema: JSONSchema,
   implicitArrayTraversal = false,
+  keepComposedAddresses = false,
 ): unknown {
   if (typeof schema === "boolean") return schema ? value : undefined;
   if (value === null) return value;
@@ -2060,12 +2110,22 @@ function projectValue(
     const itemSchema = schema.items ??
       (implicitArrayTraversal ? schema : true);
     return value.map((item) =>
-      projectValue(item, itemSchema, implicitArrayTraversal)
+      projectValue(
+        item,
+        itemSchema,
+        implicitArrayTraversal,
+        keepComposedAddresses,
+      )
     );
   }
   if (!isObjectOrArray(value)) return value;
   if (implicitArrayTraversal && schema.items !== undefined) {
-    return projectValue(value, schema.items, implicitArrayTraversal);
+    return projectValue(
+      value,
+      schema.items,
+      implicitArrayTraversal,
+      keepComposedAddresses,
+    );
   }
 
   const properties = schema.properties ?? {};
@@ -2078,6 +2138,7 @@ function projectValue(
         child,
         childSchema,
         implicitArrayTraversal,
+        keepComposedAddresses,
       );
     }
     return projected;
@@ -2088,8 +2149,16 @@ function projectValue(
         value[key],
         childSchema,
         implicitArrayTraversal,
+        keepComposedAddresses,
       );
     }
+  }
+  // The address a caller already asked for at this position, carried past the
+  // closing. A composed one is a string, which is what tells it apart from a
+  // field of the same spelling in stored data.
+  const address = value[LINK_MARKER_KEY];
+  if (keepComposedAddresses && typeof address === "string") {
+    projected[LINK_MARKER_KEY] = address;
   }
   return projected;
 }
@@ -3433,12 +3502,17 @@ function markersHeldBy(
  * Applied to the value already in hand rather than read afresh, which is what
  * lets it bound a result a caller has ALREADY shaped without widening it: the
  * cut removes positions and never adds one, so whatever `--select`/`--schema`
- * narrowed to stays narrowed. Reading a second time through the derived
- * projection cannot do that — it answers with the declaration's whole shape,
- * which for a caller who named one field is a projection handing back the
- * fields they did not name. Working off the value in hand also runs no pattern
- * graph and commits no transaction; what remains is the address walk itself,
- * which is the same one a hand-written `$link` is composed through.
+ * narrowed to stays narrowed. An address that shape composed is one of the
+ * positions it narrowed to, and stays with the rest: nothing behind an address
+ * was read, so there is nothing there for a bound to hold to a shape, and
+ * closing an object over the declared fields instead would answer with
+ * contents where an address was asked for. Reading a second time through the
+ * derived projection cannot do any of that — it answers with the declaration's
+ * whole shape, which for a caller who named one field is a projection handing
+ * back the fields they did not name. Working off the value in hand also runs
+ * no pattern graph and commits no transaction; what remains is the address
+ * walk itself, which is the same one a hand-written `$link` is composed
+ * through.
  *
  * `contextSpace` is the space the reader is working in, which decides whether
  * a composed address carries a `@did` prefix.
@@ -3455,8 +3529,11 @@ export async function boundReadValue(
   // The derived projection is written at fixed depth, so it is applied at
   // fixed depth: `kind` is `"json"` for everything `declaredResultProjection`
   // returns, and a concise field list's implicit array traversal has no part
-  // in a shape derived from a declaration.
-  const projected = projectValue(value, projection.schema);
+  // in a shape derived from a declaration. The value it is applied to may
+  // already hold addresses a caller's own shape composed, and those are that
+  // caller's answers rather than fields of what sits behind them, so they are
+  // carried across the shape rather than closed out of it.
+  const projected = projectValue(value, projection.schema, false, true);
   const markers = projection.markers === undefined
     ? undefined
     : markersHeldBy(projection.markers, [value]);
