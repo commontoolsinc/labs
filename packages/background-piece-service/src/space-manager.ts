@@ -23,34 +23,40 @@ type Task = {
 export class SpaceManager {
   #did: string;
   #pollingIntervalMs: number;
+
   /**
    * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
    * drives this member directly.
    */
   private enabledPieces = new Map<string, Cell<BGPieceEntry>>();
+
   /**
    * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
    * drives this member directly.
    */
   private activePiece: Cell<BGPieceEntry> | null = null;
   #deactivationTimeoutMs: number;
+
   /**
    * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
    * drives this member directly.
    */
   private workerController!: WorkerController;
   #rerunIntervalMs: number;
+
   /**
    * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
    * drives this member directly.
    */
   private pendingTasks: Task[] = [];
+
   /**
    * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
    * drives this member directly.
    */
   private failureTracking = new Map<string, number>();
   #workerOptions: WorkerOptions;
+
   /**
    * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
    * drives this member directly.

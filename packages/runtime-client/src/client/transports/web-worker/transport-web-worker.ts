@@ -112,11 +112,13 @@ export class WebWorkerRuntimeTransport
     return transport;
   }
 
-  // What a decode returns is deep-frozen, so a consumer of a response or a
-  // notification reads it rather than reshaping it in place.
   /**
-   * TypeScript-private rather than a `#` name, and keeping the `_` the rest
-   * of this sweep drops, because `test/client/transport-web-worker.test.ts`
+   * Handles one message from the worker. What a decode returns is deep-frozen,
+   * so a consumer of a response or a notification reads it rather than
+   * reshaping it in place.
+   *
+   * TypeScript-private rather than a `#` name, and keeping the `_` the rest of
+   * this sweep drops, because `test/client/transport-web-worker.test.ts`
    * reaches it under exactly that name to deliver a message by hand.
    */
   private _handleMessage = (event: MessageEvent): void => {

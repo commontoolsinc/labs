@@ -146,10 +146,11 @@ export class WorkerController extends EventTarget {
   }
 
   /**
+   * Sends a message and returns a promise that resolves with the response.
+   *
    * TypeScript-private rather than a `#` name: `test/service-modules.test.ts`
    * drives this member directly.
    */
-  // send a message and return a promise that resolves with the response
   private exec(type: WorkerIPCMessageType, data?: unknown): Promise<void> {
     const msgId = this.#msgId++;
 
