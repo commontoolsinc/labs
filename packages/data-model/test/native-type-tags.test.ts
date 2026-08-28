@@ -189,6 +189,39 @@ describe("native-type-tags", () => {
       });
     });
 
+    // A prototype can be re-pointed, so "an array's class is `Array`" is only
+    // usually true. `Array.isArray()` is what is actually true of every array,
+    // and it is why the array rule runs before any class is consulted -- in
+    // both dispatches, since either one reporting an array as a convertible
+    // `Date` would be a walk rebuilding it as one.
+    describe("an array is decided by the array rule, whatever its prototype", () => {
+      for (
+        const [label, value] of [
+          ["an ordinary array", [1, 2]],
+          [
+            "an array wearing `Date.prototype`",
+            Object.setPrototypeOf([1, 2], Date.prototype),
+          ],
+          [
+            "an array wearing `Map.prototype`",
+            Object.setPrototypeOf([1, 2], Map.prototype),
+          ],
+          [
+            "an array whose prototype was severed",
+            Object.setPrototypeOf([1, 2], null),
+          ],
+        ] as ReadonlyArray<[string, unknown]>
+      ) {
+        it(`tags ${label} \`Array\``, () => {
+          expect(tagFromNativeValue(value)).toBe(NATIVE_TAGS.Array);
+        });
+
+        it(`reports ${label} as no \`FabricNativeObject\``, () => {
+          expect(isValidFabricNativeObject(value)).toBe(false);
+        });
+      }
+    });
+
     describe("`toJSON()` is intentionally not supported", () => {
       it("returns `Object` tag for a plain object carrying `toJSON()`", () => {
         expect(tagFromNativeValue({ toJSON: () => "converted" })).toBe(

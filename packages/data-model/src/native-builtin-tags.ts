@@ -10,8 +10,9 @@
  * from an ordinary class instance. What it can ask is here; the rest is in
  * `native-type-tags.ts`, which asks this and then its own.
  *
- * Nothing here imports a value from this package. That is the property this
- * file exists to have, and it is worth checking before adding an import.
+ * What this file must not import is any module that knows a fabric class, since
+ * that is the whole of what its callers cannot reach. `native-tags.ts` is
+ * below even this one and is fine; anything else deserves a second look.
  */
 
 import type { FabricNativeObject } from "./interface.ts";
@@ -109,10 +110,15 @@ export function isValidFabricNativeObject(
 ): value is FabricNativeObject {
   if (value === null || typeof value !== "object") return false;
 
-  // No array rule is wanted here, unlike in the full dispatch: an array's
-  // class is `Array`, whose tag is not one of the six below, and an `Array`
-  // subclass has no recognized class at all. Either way the answer is `false`,
-  // which is the right one.
+  // Arrays first, and unconditionally, exactly as the full dispatch does it.
+  // An array's class is USUALLY `Array`, whose tag is not one of the six
+  // below -- but a prototype can be re-pointed, and an array wearing
+  // `Date.prototype` would otherwise be reported as a convertible `Date`.
+  // `Array.isArray()` sees through that, and through a subclass and a severed
+  // prototype besides, which is why the array rule alone decides what an array
+  // may be.
+  if (Array.isArray(value)) return false;
+
   const ctor = constructorFromObject(value);
   const tag = (ctor !== undefined) ? tagFromNativeBuiltinClass(ctor) : null;
 
