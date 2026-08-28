@@ -4,7 +4,7 @@
  *
  * Run: deno task cf test packages/patterns/primitives/sortable-table.test.tsx
  */
-import { action, assert, pattern, TESTS, UI } from "commonfabric";
+import { action, assert, NAME, pattern, TESTS, UI } from "commonfabric";
 import { findElement } from "../test/vnode-helpers.ts";
 import SortableTable from "./sortable-table.tsx";
 
@@ -85,6 +85,8 @@ export default pattern(() => {
           findElement(table[UI], "cf-table") !== undefined
         ),
       },
+      // The name a piece list shows, which reports the row count.
+      { assertion: assert(() => table[NAME] === "Table (4 rows)") },
     ],
   };
 });

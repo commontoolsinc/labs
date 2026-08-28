@@ -3,7 +3,7 @@
  *
  * Run: deno task cf test packages/patterns/primitives/counter.test.tsx
  */
-import { action, assert, pattern, TESTS } from "commonfabric";
+import { action, assert, NAME, pattern, TESTS } from "commonfabric";
 import Counter from "./counter.tsx";
 
 export default pattern(() => {
@@ -47,6 +47,10 @@ export default pattern(() => {
       { assertion: assert(() => bounded.atMin === true) },
       { action: stepDown },
       { assertion: assert(() => bounded.value === 0) },
+
+      // The name a piece list shows, which carries the label and the value.
+      { assertion: assert(() => plain[NAME] === "Count: 0") },
+      { assertion: assert(() => bounded[NAME] === "Count: 0") },
     ],
   };
 });

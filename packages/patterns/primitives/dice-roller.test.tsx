@@ -4,7 +4,8 @@
  *
  * Run: deno task cf test packages/patterns/primitives/dice-roller.test.tsx
  */
-import { action, assert, pattern, TESTS } from "commonfabric";
+import { action, assert, NAME, pattern, TESTS, UI } from "commonfabric";
+import { textContent } from "../test/vnode-helpers.ts";
 import DiceRoller from "./dice-roller.tsx";
 
 export default pattern(() => {
@@ -34,6 +35,10 @@ export default pattern(() => {
       { assertion: assert(() => d6.value >= 1 && d6.value <= 20) },
       // The die keeps the size it was given; the roll's own is for that roll.
       { assertion: assert(() => d6.sides === 6) },
+
+      // The caption states the die it rolls, and the name carries the label.
+      { assertion: assert(() => textContent(coin[UI]).includes("Coin (d2)")) },
+      { assertion: assert(() => coin[NAME].startsWith("Coin: ")) },
     ],
   };
 });

@@ -4,8 +4,24 @@
  *
  * Run: deno task cf test packages/patterns/primitives/amount-ledger.test.tsx
  */
-import { action, assert, pattern, TESTS, UI } from "commonfabric";
-import { textContent } from "../test/vnode-helpers.ts";
+import { action, assert, NAME, pattern, TESTS, UI } from "commonfabric";
+import {
+  findElementByText,
+  propsOf,
+  textContent,
+} from "../test/vnode-helpers.ts";
+
+// Fires the stream bound to a button's onClick, which is how the default UI's
+// own controls are reached: they are inline arrows in JSX rather than exported
+// streams, so a caller-facing test has to go through the rendered tree.
+const clickButton = (root: unknown, text: string) => {
+  const onClick = propsOf(findElementByText(root, "cf-button", text))?.onClick;
+  if (typeof onClick === "function") (onClick as () => void)();
+  else if (onClick && typeof onClick === "object" && "send" in onClick) {
+    (onClick as { send: (e: Record<string, never>) => void }).send({});
+  }
+};
+
 import AmountLedger from "./amount-ledger.tsx";
 
 export default pattern(() => {
@@ -73,6 +89,31 @@ export default pattern(() => {
       { assertion: assert(() => subCent.formattedTotal === "$0.02") },
       { assertion: assert(() => textContent(subCent[UI]).includes("$0.02")) },
       { assertion: assert(() => !textContent(subCent[UI]).includes("$0.01")) },
+
+      // Both budget arms are rendered text, not merely numbers on the output.
+      // Only Groceries remains here, so the ledger is under its 500 budget.
+      { assertion: assert(() => textContent(ledger[UI]).includes("Left")) },
+      { assertion: assert(() => textContent(ledger[UI]).includes("$413.60")) },
+      { assertion: assert(() => ledger[NAME] === "Expenses: $86.40") },
+      // Push it over, and the other arm renders instead.
+      {
+        action: action(() =>
+          ledger.addEntry.send({ label: "Flights", amount: 500 })
+        ),
+      },
+      {
+        assertion: assert(() =>
+          textContent(ledger[UI]).includes("Over budget by")
+        ),
+      },
+      // Removing through the row's own button rather than the exported stream.
+      { action: action(() => clickButton(ledger[UI], "Remove")) },
+      { assertion: assert(() => ledger.entryCount === 1) },
+
+      // The Add button reads the label and amount drafts; with nothing typed
+      // it adds no entry rather than a blank one at zero.
+      { action: action(() => clickButton(ledger[UI], "Add")) },
+      { assertion: assert(() => ledger.entryCount === 1) },
     ],
   };
 });

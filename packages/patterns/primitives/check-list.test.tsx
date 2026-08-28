@@ -4,7 +4,32 @@
  *
  * Run: deno task cf test packages/patterns/primitives/check-list.test.tsx
  */
-import { action, assert, pattern, TESTS, Writable } from "commonfabric";
+import {
+  action,
+  assert,
+  NAME,
+  pattern,
+  TESTS,
+  UI,
+  Writable,
+} from "commonfabric";
+import {
+  findElementByText,
+  propsOf,
+  textContent,
+} from "../test/vnode-helpers.ts";
+
+// Fires the stream bound to a button's onClick, which is how the default UI's
+// own controls are reached: they are inline arrows in JSX rather than exported
+// streams, so a caller-facing test has to go through the rendered tree.
+const clickButton = (root: unknown, text: string) => {
+  const onClick = propsOf(findElementByText(root, "cf-button", text))?.onClick;
+  if (typeof onClick === "function") (onClick as () => void)();
+  else if (onClick && typeof onClick === "object" && "send" in onClick) {
+    (onClick as { send: (e: Record<string, never>) => void }).send({});
+  }
+};
+
 import CheckList from "./check-list.tsx";
 
 export default pattern(() => {
@@ -65,6 +90,22 @@ export default pattern(() => {
 
       { action: stashFirst },
       { action: removeHeld },
+      { assertion: assert(() => list.items.length === 0) },
+
+      // The default UI's own controls, reached through the rendered tree.
+      { action: action(() => list.addItem.send({ title: "Boots" })) },
+      {
+        assertion: assert(() =>
+          textContent(list[UI]).includes("1 left, 0 done")
+        ),
+      },
+      { assertion: assert(() => list[NAME] === "Checklist (1 left)") },
+      { action: action(() => clickButton(list[UI], "Remove")) },
+      { assertion: assert(() => list.items.length === 0) },
+
+      // The Add button reads the draft field; with nothing typed it adds
+      // nothing rather than an untitled row.
+      { action: action(() => clickButton(list[UI], "Add")) },
       { assertion: assert(() => list.items.length === 0) },
     ],
   };
