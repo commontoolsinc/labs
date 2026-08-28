@@ -7646,7 +7646,16 @@ supply; OW29/OW32/OW34 closed):
     takes NO retry: every `pendingCacheWriteBacks` member belongs to a
     compile or load (registry-covered) or to a sibling replication
     (ticket-covered at registration), so an empty-registry retry adds
-    no designed coverage — and it measurably re-rescues the sibling
+    no designed coverage [AMENDED per review-6502 F1: justification (a)
+    is overstated — zero-announce proves "no supplier REGISTERED at
+    snapshot time", a STRICT SUPERSET of "not started": a supplier that
+    completed entirely inside the read window (F1-ii) or a load that
+    resolved leaving its repair persist floating (F1-iii) also snapshots
+    empty while a bare re-consult would rescue. Both slivers share the
+    3b signature and are closed by the ruled 3b close (the RULING block
+    below): F1-ii by the registration-time map check, F1-iii by the
+    repair persist's own record waking the park] — and it measurably
+    re-rescues the sibling
     race nondeterministically, masking the sibling-await pin: the
     build's unconditional-retry draft turned the sibling-await
     mutation kill GREEN (the F1 masking class, recreated); the
@@ -7666,7 +7675,11 @@ supply; OW29/OW32/OW34 closed):
     nor a pre-populated map can rescue (the F1 lesson applied at
     birth); watched RED at pre-fix `bd9b1c10b` with the production
     `closure-replication-failed … source closure unavailable in origin
-    space` line and an empty target; with the fix, 5/5. The once-await
+    space` line and an empty target; with the fix, the suite green
+    [count made count-free per review-6502 F2: the suite was 6 steps at
+    this PR's final head (the F5-1 coverage step landed after this block
+    was written) and has since grown — counts live in the test file, not
+    here]. The once-await
     mutation (both awaits removed, warn + re-read kept) reds step 5
     ALONE, 5/5 stable; the four existing kills re-verified at the new
     head (sibling-await neutralized → step 1 red alone 3/3; fallback
@@ -7698,7 +7711,9 @@ supply; OW29/OW32/OW34 closed):
     TOUCHES THE ONE-SHOT CONTRACT ("a failure is logged and retried on
     the next child creation" would become "…and on the next persist
     event") — an OWNER-LEVEL DESIGN FORK, recorded here for the
-    owner's ruling; deliberately not built by this seat.
+    owner's ruling; deliberately not built by this seat. [RULED AND
+    BUILT 2026-08-28 — the RULING block below carries the ruling, the
+    landed mechanism, and the contract sentence now in effect.]
     The pin suite (`tasks/server-execution-on-skips.test.ts`) was bound,
     post-restore, to the SINGLE-entry registry: the patterns list held
     exactly the restored FILE entry (reason pinned to the
@@ -7769,7 +7784,12 @@ supply; OW29/OW32/OW34 closed):
     failure are the harness process's (Deno-UA, 18:15:18.8–18:16:10.8 —
     probe 4 established that discrimination); the artifact carries no
     serving-side compile/persist lines at all in the window, consistent
-    with a supplier that had not begun. NOT geometry 3 (probe 4's
+    with a supplier that had not begun. [Per review-6502 F3, stated
+    plainly: the pre-declared signature's "closure appearing shortly
+    after" limb was NOT VERIFIABLE FROM THIS ARTIFACT — it carries no
+    persist-level lines at all, so that limb went unchecked; the
+    classification rests on the zero-announce limb plus the
+    no-serving-side-activity window, not on all three limbs.] NOT geometry 3 (probe 4's
     discriminator — compile waves already in flight 5–18 s before the
     failure — is absent here); NOT the close misbehaving (the
     empty-snapshot short-circuit's contract IS the byte-identical
@@ -7791,6 +7811,86 @@ supply; OW29/OW32/OW34 closed):
     space BEFORE serving profile creation, making the supplier
     deterministic rather than boot-order-dependent). Both are
     owner-court; this seat built neither, per the declared stop.
+    **RULING (2026-08-28) — the owner ruled on the 3b fork: "go with
+    (1) plus the (2-D) kick"** — option (1), event-driven re-supply,
+    composed with the (2-D) sidecar serve-time kick, accepting the
+    decision memo's recommendation (fork-3b-analysis) with its two
+    design details as LOAD-BEARING parts: the registry keys by the
+    WANTED (failing) identity, not the entry (a dependency-recursion
+    failure records under the dependency's identity, which is what its
+    supplier's persist will name), and failure registration checks the
+    fallback map ONCE, re-issuing immediately when a usable record
+    already exists (closing review-6502 F1's interleaving (b): a
+    supplier that completed inside the read window records before the
+    failure registers, and its record event may never recur).
+    Supply-side determinism as a PRINCIPLE — option (2-B),
+    activation-time awaited supply — is DEFERRED to its own arc: it
+    re-rules the lazy-activation model (space-server.ts's RULED
+    2026-08-02 block) and is not the 3b close.
+    **LANDED by the ruled-close PR:** (1) in pattern-manager.ts — a
+    supply-class replication failure (the classify-throw's reasons
+    only; store-level throws and persist failures keep today's behavior)
+    PARKS under the wanted identity in `parkedFailedReplications`
+    (FIFO-capped, loud eviction, replacement on re-park) and
+    `recordPersistedClosureSpaces` re-issues matching parks once per
+    persist event (fire-and-forget off the E4-awaited chain; records
+    into a park's own toSpace are skipped — the fallback read cannot use
+    them and the filter keeps a heal from waking itself; records into a
+    park's fromSpace DO wake it, deliberately: the observed lunch
+    supplier persists into the PARENT space, the child replication's
+    origin, and the primary re-read is what heals — pinned by the
+    late-carriage pin). A failed re-issue re-parks WITHOUT the
+    registration-time check (its read just consulted the map — the spin
+    guard) and waits for the next matching record. The one-shot
+    contract sentence is now IN EFFECT as pre-drafted above: "A failure
+    is logged and retried on the next child creation and on the next
+    persist event — never on the caller's commit path." Loudness
+    strictly increased: the failure line is byte-identical, plus
+    `closure-replication-parked` / `-reissued` (with trigger) /
+    `-healed` / `-park-evicted` (all warn). (2-D) in wish.ts — the
+    sidecar cache tracks its compile space and, serving a cached
+    pattern for a space it did not compile into (cached-run arms under
+    the serving posture, and chained demanders inside the memoized
+    fetch), fires the same replicate-into-the-demanding-space the
+    content-cache hit fires, once per (cache epoch, space): the
+    demanding space's supplier is REGISTERED at page-serve time, so the
+    child replication's strictly-older-ticket await covers the lunch
+    class by registration, with (1) as the structural backstop.
+    Red-first pins (all watched red at bare main d569f3722): the
+    record-triggered heal, the module-identity wake, the
+    registration-time check (mutation-isolated pairwise: wake deleted
+    reds the heal pins alone; check neutralized reds its pin alone),
+    the dependency-frame park (wanted=dependency, entry=importer — an
+    entry-keyed-park mutation reds it alone; its phase 1 also pins that
+    a PERSIST failure does not park), the no-storm control (genuine
+    absence: one loud failure, one park, nothing else ever), the
+    late-carriage admission (executor-cross-space: a parked §2b
+    delegation rides the heal into the provisioned space through the
+    accept gate's delegated admission — completeness, not freshness —
+    asserted on the landed commit row), and the serve/chained kick pins.
+    The existing kill matrix re-ran cell-for-cell with no mask; the one
+    mask the build itself would have created — the heal re-rescuing the
+    K1-mutated sibling race's END STATE (the F1 masking class,
+    recreated by design: healing is the product behavior) — was closed
+    by rebinding pin step 1's kill signal to ZERO failure lines
+    (first-try determinism is the ticket await's contract; recovery is
+    the heal's).
+    **WHAT STAYS OPEN under the ruled close, recorded honestly:** the
+    CROSS-REPLICA / never-records supplier (a wire-arrived closure this
+    manager never persists records nothing, so no wake fires) — reduced
+    to "heals at the server's first matching persist of the identity",
+    which the observed lunch class always eventually has; the
+    PRIOR-SESSION third-space closure (durable docs from an earlier
+    session are readable but unrecorded — same reduction); and the
+    recursive-(b) sliver: a record landing inside a RE-ISSUE's own read
+    window with no later record ever stays parked (failed re-issues
+    deliberately skip the registration-time check — the spin guard —
+    and wait for the next record; two independent suppliers of one
+    identity with the second completing inside the re-issue's window
+    and none after is the residue's shape — vanishingly narrow, loud at
+    every step, and strictly smaller than the pre-ruling residue).
+    Where truly nothing ever records, the loud one-shot behavior stands
+    — the correct floor under the wedge-loudly ruling.
 
     **OBSERVATION, not owed by this row and NOT one of the two entries —
     `cfc-group-chat-demo.test.ts` is failing ON at current main, 4/6, and

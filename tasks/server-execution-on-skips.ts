@@ -241,7 +241,8 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
       // profile #AykQuk", :271 at the 300000ms bound; 11 co-residents
       // green. What this PR CLOSED red-first (kept; pinned in
       // packages/runner/test/pattern-replication-sibling-race.test.ts,
-      // 5 steps, every mechanism independently mutation-killed):
+      // every mechanism independently mutation-killed — step counts
+      // live in the test file):
       // geometry 3 — the supplier compile MID-FLIGHT at consult: on a
       // dry origin AND dry map the replication awaits a snapshot of
       // BOTH in-flight compile registries once, re-observes

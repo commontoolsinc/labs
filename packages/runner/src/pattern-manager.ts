@@ -1180,8 +1180,16 @@ export class PatternManager {
       // ticket await — the exact masking that made the F1 pin soft. The
       // absence of a `closure-replication-await-inflight` line before a
       // `closure-replication-failed` line is therefore the pre-declared
-      // geometry-3b signature (a supplier compile that had not STARTED by
-      // consult time — see the register's residue record).
+      // geometry-3b signature. Precisely (review-6502 F1): zero-announce
+      // proves "no supplier REGISTERED at snapshot time" — a strict
+      // superset of "not started" that also admits a supplier completed
+      // inside the read window or a load resolved with its repair
+      // persist floating. All of it — 3b proper and both slivers — now
+      // ends in the same place: the throw below parks the failure for
+      // event-driven re-supply (the ruled 3b close; see
+      // `parkedFailedReplications` and the register's RULING block), so
+      // the short-circuit stays exactly as cheap and mask-free as
+      // designed while no rescueable interleaving is lost.
       const inFlightCompilations = [...this.inProgressCompilations.values()];
       const inFlightLoads = [...this.inProgressByIdentityLoads.values()];
       if (inFlightCompilations.length > 0 || inFlightLoads.length > 0) {
