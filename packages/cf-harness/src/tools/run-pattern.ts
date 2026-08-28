@@ -21,7 +21,10 @@ import {
   type NormalizedFullLink,
   parseLLMFriendlyLink,
 } from "@commonfabric/runner/shared";
-import { PieceController } from "@commonfabric/piece/ops";
+import {
+  PieceController,
+  type PiecesController,
+} from "@commonfabric/piece/ops";
 import { isObjectNotArray } from "@commonfabric/utils/types";
 import type { HarnessToolDescriptor } from "../contracts/tool-descriptor.ts";
 import { keylessInstantiation } from "../fabric-instantiations.ts";
@@ -1511,17 +1514,27 @@ export const runPatternTool: HarnessToolDefinition<
       // short version is that a probe in the live space persists its inputs
       // and its result graph there, `stop()` does not delete them, and the
       // orphan is reachable from the sandbox's Fabric mount.
-      let probe_: Awaited<ReturnType<typeof openProbeRuntime>>;
       const probe = async () => {
-        probe_ = await openProbeRuntime(
+        const opened = await openProbeRuntime(
           session.identity,
           pieces.runtime.apiUrl,
+          context.cfcEnforcementMode,
         );
         // No identity, no isolated runtime, and therefore no probe. Falling
         // back to the live space would re-enter the leak this exists to close
         // through the error path, so the gate abstains instead.
-        if (probe_ === undefined) return recorded("probe-failed");
-        const probePieces = probe_.pieces;
+        if (opened === undefined) return recorded("probe-failed");
+        try {
+          return await runProbe(opened.pieces);
+        } finally {
+          // Owned here rather than by the caller, because cancellation can
+          // return from the race while this is still opening, and a runtime
+          // opened after the caller stopped waiting would never be closed by
+          // anything the caller can still see.
+          await opened.close().catch(() => {});
+        }
+      };
+      const runProbe = async (probePieces: PiecesController) => {
         // A composed source needs its imports in the probe's space too, or
         // the compile below cannot resolve them. Same helper the live path
         // uses, pointed at the isolated runtime — which is why composed
@@ -1588,10 +1601,6 @@ export const runPatternTool: HarnessToolDefinition<
         // than nowhere — a check that fails silently for its own reasons is
         // the failure this gate exists to remove.
         outcome = recorded("probe-failed", errorMessage(error));
-      } finally {
-        // Discarding the runtime discards everything the probe wrote: there
-        // is no store left to clean up rather than a cleanup to get right.
-        await probe_?.close().catch(() => {});
       }
       return signal?.aborted === true ? "cancelled" : outcome;
     };

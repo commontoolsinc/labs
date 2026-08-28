@@ -1,3 +1,4 @@
+import type { CfcEnforcementMode } from "@commonfabric/runner/cfc";
 import type { Identity } from "@commonfabric/identity";
 import { createSession } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
@@ -50,6 +51,7 @@ export interface ProbeRuntime {
 export const openProbeRuntime = async (
   identity: Identity | undefined,
   apiUrl: URL,
+  cfcEnforcementMode: CfcEnforcementMode,
 ): Promise<ProbeRuntime | undefined> => {
   if (identity === undefined) return undefined;
   // Imported here rather than at module scope on purpose. `cache.deno` reaches
@@ -63,8 +65,17 @@ export const openProbeRuntime = async (
     "@commonfabric/runner/storage/cache.deno"
   );
   const storageManager = StorageManager.emulate({ as: identity });
-  const runtime = new Runtime({ apiUrl, storageManager });
+  // Everything after the storage manager is inside the guard, so a throw from
+  // any of it closes what has been allocated so far. Constructing the runtime
+  // outside it leaked the manager whenever the constructor threw.
+  let runtime: Runtime | undefined;
   try {
+    // The probe runs under the run's own CFC mode, and that is not cosmetic:
+    // the content-addressed source cache a `cf:pattern:` import resolves from
+    // is only written under an enforcing mode, so a probe in a default-mode
+    // runtime cannot resolve a composed import at all and every composed
+    // pattern would quietly come back with no verdict.
+    runtime = new Runtime({ apiUrl, storageManager, cfcEnforcementMode });
     const pieces = new PiecesController(
       await createSession({
         identity,
@@ -73,15 +84,22 @@ export const openProbeRuntime = async (
       runtime,
     );
     await pieces.synced();
+    const opened = runtime;
     return {
       pieces,
       async close() {
-        await runtime.dispose();
-        await storageManager.close();
+        // The storage manager closes whether or not disposal does: a rejected
+        // dispose used to skip it and leave the manager live, which is the
+        // one resource this whole module exists to be sure of.
+        try {
+          await opened.dispose();
+        } finally {
+          await storageManager.close();
+        }
       },
     };
   } catch (error) {
-    await runtime.dispose().catch(() => {});
+    await runtime?.dispose().catch(() => {});
     await storageManager.close().catch(() => {});
     throw error;
   }
