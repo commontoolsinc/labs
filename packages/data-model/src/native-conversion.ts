@@ -347,7 +347,7 @@ export function shallowFabricFromNativeObjectElseUndefined(
     case NATIVE_TAGS.Error: {
       // Shallow conversion, so the native `Error` is wrapped without recursing
       // into its internals (`cause`, custom properties): the result is only a
-      // *shallow* `FabricError`, whose `.cause` may still be a raw `Error`. A
+      // _shallow_ `FabricError`, whose `.cause` may still be a raw `Error`. A
       // caller needing a proper (fully-`FabricValue`) one uses the deep
       // `fabricFromNativeValue()`; the cell write paths do so at the points
       // where they treat a `FabricError` as an atomic leaf.
