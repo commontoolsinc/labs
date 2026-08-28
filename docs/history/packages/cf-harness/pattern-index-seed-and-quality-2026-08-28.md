@@ -199,9 +199,17 @@ produced it.
 - A composition proof run in the space that already held its dependencies
   returned `materialized: []`: three ids requested, zero fetched, everything
   rendering, nothing exercised.
-- The rendering gate tested for `$UI` on an unschema'd read, which does not
-  follow the link that reaches it, so twenty of twenty-four patterns recorded
-  as "nothing to check" while the run looked like a pass.
+- The rendering gate tested for `$UI` on an unschema'd read, so twenty of
+  twenty-four patterns recorded as "nothing to check" while the run looked like
+  a pass. The mechanism is worth stating because it selects: a pattern that
+  *declares* its result type — `pattern<Io, Io>` — declares a type that does
+  not name `$UI`, and an unschema'd read returns only the declared fields. A
+  loosely-declared `pattern<In, object>` permits anything and so read back
+  fine. The gate therefore checked exactly the patterns that described
+  themselves least well, and skipped the parameterized, self-describing atoms
+  the index exists to accumulate. The first regression test written for this
+  passed with the fix reverted; seven minimal fixtures failed to reproduce it
+  because all seven declared `object`.
 - A blanket `catch` in that same gate converted a defect in its own code into
   the gate's ordinary "probe failed" outcome.
 - A test asserting only a refusal's header — printed for every refusal — stayed
@@ -229,6 +237,14 @@ The practical rule this leaves: when a check reports an absence, establish that
 the check would have reported a presence. That takes a case whose answer is
 known independently, which is a different and more expensive thing than a test
 that passes.
+
+Its companion, arrived at the hard way: **a regression test that has not been
+seen to fail is not evidence.** The `no-ui` fix above shipped first with a
+mechanism asserted rather than measured, and with a test that still passed when
+the fix was reverted. Neither error was visible on its own — a plausible
+mechanism and a green test agree with each other — and reverting the fix to
+watch the test fail is what separated them. Every real defect in this pass was
+invisible to reading and immediate to running.
 
 ## Conditions worth knowing about the environment of this pass
 
