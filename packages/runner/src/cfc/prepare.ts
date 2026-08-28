@@ -102,9 +102,7 @@ import {
 import { verdictReason } from "./verdict-reason.ts";
 import {
   type ConsumedAtomSource,
-  consumedAtomSourceKey,
-  refusalAttribution,
-  refusalInputsFor,
+  describeRefusalInputs,
   renderCfcAtom,
 } from "./refusal-detail.ts";
 import {
@@ -4889,33 +4887,38 @@ const collectConsumedLabel = (
   modulePolicySpaces: ReadonlyMap<string, ReadonlySet<MemorySpace>>;
 
   /**
-   * Rendered confidentiality atom -> the reads that carried it in, in
-   * first-seen order and deduplicated by (address, label path). This is the
-   * provenance a refusal needs to name an offending INPUT rather than only an
-   * offending atom (`cfc/refusal-detail.ts`); the gates' fits-decisions
-   * themselves stay transaction-global and read only the unioned label above.
+   * Every (clause, read) pair this transaction consumed, in first-seen order.
+   * This is the provenance a refusal needs to name an offending INPUT rather
+   * than only an offending atom (`cfc/refusal-detail.ts`). A gate matches into
+   * it by `deepEqual`, the same structural identity the union above dedups by;
+   * the gates' fits-decisions themselves stay transaction-global and read only
+   * that union.
    */
-  sources: ReadonlyMap<string, readonly ConsumedAtomSource[]>;
+  sources: readonly ConsumedAtomSource[];
 } => {
   const atoms: unknown[] = [];
   const modulePolicySpaces = new Map<string, Set<MemorySpace>>();
-  const sources = new Map<string, ConsumedAtomSource[]>();
+  const sources: ConsumedAtomSource[] = [];
   const noteSource = (
     atom: unknown,
     read: CfcAddress,
     labelPath: readonly string[],
   ): void => {
-    const key = renderCfcAtom(atom);
-    const existing = sources.get(key);
-    const source: ConsumedAtomSource = { read, labelPath };
-    if (existing === undefined) {
-      sources.set(key, [source]);
+    // Deduplicated on the same terms a consumer matches on: one entry per
+    // (clause, address, label path). Two label-map entries of one document
+    // carrying the same clause to the same read are one source.
+    if (
+      sources.some((seen) =>
+        seen.read.id === read.id && seen.read.space === read.space &&
+        seen.read.scope === read.scope &&
+        pathKey(seen.read.path) === pathKey(read.path) &&
+        pathKey(seen.labelPath) === pathKey(labelPath) &&
+        deepEqual(seen.atom, atom)
+      )
+    ) {
       return;
     }
-    const sourceKey = consumedAtomSourceKey(source);
-    if (!existing.some((seen) => consumedAtomSourceKey(seen) === sourceKey)) {
-      existing.push(source);
-    }
+    sources.push({ atom, read, labelPath });
   };
   // Integrity evidence riding the same consumed entries: the guard pool the
   // exchange evaluator matches rule preconditions against (Epic B5). Same
@@ -5257,16 +5260,14 @@ const verifySinkRequestCeilings = (
         offendingAtoms.join(", ");
       reasons.push(verdict ? verdictReason(reason) : reason);
       // The remedy channel (cfc/refusal-detail.ts): which reads carried the
-      // atoms this ceiling refused. Recorded for every mode — an observe-mode
+      // clauses this ceiling refused. Recorded for every mode — an observe-mode
       // rollout wants the same answer a refusal does, and the commit boundary
       // keeps only the details whose reason actually refused.
-      const inputs = refusalInputsFor(offendingAtoms, consumed.sources);
       tx.recordCfcRefusalDetail?.({
         gate: "sink-ceiling",
         sink,
         offendingAtoms,
-        inputs,
-        attribution: refusalAttribution(offendingAtoms, inputs),
+        ...describeRefusalInputs(offending, consumed.sources),
         reason,
       });
     }
@@ -5602,13 +5603,9 @@ export const prepareBoundaryCommit = (
   // prefix the writer-fit decision itself runs on — so a named input is a
   // read that genuinely carried the atom, while `attribution` stays the
   // honest statement of whether the named ones account for all of them.
-  let memoizedRefusalSources:
-    | ReadonlyMap<string, readonly ConsumedAtomSource[]>
-    | undefined;
-  const refusalSources = (): ReadonlyMap<
-    string,
-    readonly ConsumedAtomSource[]
-  > => memoizedRefusalSources ??= collectConsumedLabel(tx).sources;
+  let memoizedRefusalSources: readonly ConsumedAtomSource[] | undefined;
+  const refusalSources = (): readonly ConsumedAtomSource[] =>
+    memoizedRefusalSources ??= collectConsumedLabel(tx).sources;
   const flowIntegrity = flowJoin.integrity;
   const flowLabeledSpaces = flowJoin.labeledSpaces;
   const flowHasLabels = flowConfidentiality.length > 0 ||
@@ -6725,10 +6722,6 @@ export const prepareBoundaryCommit = (
                 path.join("/")
               } (canWrite, §8.12.4): ` +
               offendingAtoms.join(", ");
-            const refusalInputs = refusalInputsFor(
-              offendingAtoms,
-              refusalSources(),
-            );
             tx.recordCfcRefusalDetail?.({
               gate: "writer-fit",
               target: {
@@ -6738,8 +6731,7 @@ export const prepareBoundaryCommit = (
                 path: [...path],
               } as CfcAddress,
               offendingAtoms,
-              inputs: refusalInputs,
-              attribution: refusalAttribution(offendingAtoms, refusalInputs),
+              ...describeRefusalInputs(offending, refusalSources()),
               reason: misfit,
             });
             if (writerFitRejects) {

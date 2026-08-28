@@ -16,40 +16,53 @@
 // not, the detail says so, and the caller learns that taint minimization alone
 // will not clear this one.
 //
+// A clause is matched by `deepEqual`, the structural identity `uniqueCfcAtoms`
+// and the ceiling-membership test already decide by. It has to be that one and
+// not a rendering: `{a:1,b:2}` and `{b:2,a:1}` are ONE clause to CFC and two
+// strings to `JSON.stringify`, so a rendered key would split a clause two
+// reads carried, name only the first, and call the remedy complete — and
+// dropping that read would leave the other read's identical clause behind,
+// refused again. `-0` and `0` fail the other way: two clauses to CFC, one
+// string, so a rendering would attribute an offending atom to an innocent
+// read. Rendering stays what it is, a display form.
+//
 // The detail rides ALONGSIDE the reason string, never inside it. The reason is
 // prose for a person and a matcher; encoding a structure into it would make
 // every consumer a parser and every rewording a breaking change.
+//
+// Every type here is a `type` alias rather than an `interface` on purpose: a
+// detail travels on the `cfc.prepare-reject` telemetry marker, and a marker
+// crosses the runtime-client IPC boundary as a `FabricValue`. An interface
+// carries no implicit index signature, so it does not satisfy
+// `FabricPlainObject`, and the whole marker union stops being serializable.
+
+import { deepEqual } from "@commonfabric/utils/deep-equal";
 
 import type { CfcAddress } from "./types.ts";
 
 /**
- * One read that carried a confidentiality atom into a transaction, paired
+ * One read that carried a confidentiality clause into a transaction, paired
  * with the label-map entry path that carried it. The collector in `prepare.ts`
- * builds these; a gate that refuses turns the ones behind its offending atoms
- * into {@link CfcRefusalInput}s.
+ * builds these; a gate that refuses matches the ones behind its offending
+ * clauses into {@link CfcRefusalInput}s.
+ *
+ * `atom` is the clause itself rather than a rendering of it, because matching
+ * is by `deepEqual` — see the module comment for what a rendered key gets
+ * wrong, in both directions.
  */
-export interface ConsumedAtomSource {
+export type ConsumedAtomSource = {
+  readonly atom: unknown;
   readonly read: CfcAddress;
   readonly labelPath: readonly string[];
-}
+};
 
 /**
- * How an atom is rendered wherever it is named — in a reason string, in a
- * detail, and as the key a source map is built on. One function, so a
- * consumer matching a detail's atoms against a reason's prose compares
- * identical text.
+ * How an atom is rendered wherever it is DISPLAYED — in a reason string and in
+ * a detail. One function, so a consumer reading a detail's atoms against a
+ * reason's prose compares identical text. Never an identity: see the module
+ * comment.
  */
 export const renderCfcAtom = (atom: unknown): string => JSON.stringify(atom);
-
-/** Dedup key for a source: one entry per (address, label path). */
-export const consumedAtomSourceKey = (source: ConsumedAtomSource): string =>
-  JSON.stringify([
-    source.read.space,
-    source.read.id,
-    source.read.scope,
-    source.read.path,
-    source.labelPath,
-  ]);
 
 /** Which gate refused. Named for the rule, so a consumer can branch on it. */
 export type CfcRefusalGate = "sink-ceiling" | "writer-fit";
@@ -63,28 +76,27 @@ export type CfcRefusalGate = "sink-ceiling" | "writer-fit";
  * inside it — which is the common case, and the one where naming only the
  * document would under-specify the remedy.
  */
-export interface CfcRefusalInput {
+export type CfcRefusalInput = {
   readonly read: CfcAddress;
   readonly labelPath: readonly string[];
 
-  /** The offending atoms this read contributed, JSON-rendered as the reason
-   * strings render them, so detail and prose name atoms identically. */
+  /** The offending atoms this read contributed, rendered for display. */
   readonly atoms: readonly string[];
-}
+};
 
 /**
  * How completely {@link CfcRefusalDetail.inputs} accounts for the refusal.
  *
- * - `complete` — every offending atom is attributed to a named read. Dropping
- *   all of them clears this refusal.
- * - `partial` — some offending atom is attributed to no named read. Dropping
- *   the named ones narrows the flow without necessarily clearing it.
+ * - `complete` — every offending clause is attributed to a named read.
+ *   Dropping all of them clears this refusal.
+ * - `partial` — some offending clause is attributed to no named read.
+ *   Dropping the named ones narrows the flow without necessarily clearing it.
  * - `none` — nothing was attributed. The gate still refused; the detail adds
  *   no remedy beyond the reason.
  *
  * An exchange-rule rewrite is the ordinary way to land below `complete`: the
  * gate decides on a REWRITTEN label whose clauses need not be any clause a
- * read contributed, so an atom can be genuinely offending and genuinely
+ * read contributed, so a clause can be genuinely offending and genuinely
  * unattributable. Reporting that honestly is the point — a confident wrong
  * remedy costs more than an admitted gap.
  */
@@ -97,7 +109,7 @@ export type CfcRefusalAttribution = "complete" | "partial" | "none";
  * `inputs` into the argument names an agent passed, and a console renders the
  * boundary and the atoms. Nothing here is meant to be parsed out of prose.
  */
-export interface CfcRefusalDetail {
+export type CfcRefusalDetail = {
   readonly gate: CfcRefusalGate;
 
   /** The sink whose ceiling refused, for `sink-ceiling`. */
@@ -106,10 +118,10 @@ export interface CfcRefusalDetail {
   /** The write the rule refused, for `writer-fit`. */
   readonly target?: CfcAddress;
 
-  /** Atoms outside what the boundary admits, JSON-rendered. */
+  /** Clauses outside what the boundary admits, rendered for display. */
   readonly offendingAtoms: readonly string[];
 
-  /** The reads that carried them, deduplicated by address. */
+  /** The reads that carried them, deduplicated by address and label path. */
   readonly inputs: readonly CfcRefusalInput[];
 
   readonly attribution: CfcRefusalAttribution;
@@ -118,56 +130,69 @@ export interface CfcRefusalDetail {
    * The plain reason text this detail describes, verbatim — the pairing key
    * between the structured detail and the reason list a refusal carries. The
    * commit boundary keeps only the details whose reason survived into the
-   * refusal, so a detail recorded for a reason that did not refuse (an
-   * observe-mode diagnostic, a rule that later resolved) never rides along.
+   * refusal, and each prepare pass describes only its own verdict, so a detail
+   * recorded for a reason that did not refuse never rides along.
    */
   readonly reason: string;
-}
-
-/**
- * Turn the sources behind `offendingAtoms` into the refusal's inputs: one
- * entry per contributing read, carrying every offending atom that read
- * supplied. An atom no source claims is simply absent, which is what drops
- * {@link CfcRefusalDetail.attribution} below `complete`.
- */
-export const refusalInputsFor = (
-  offendingAtoms: readonly string[],
-  sources: ReadonlyMap<string, readonly ConsumedAtomSource[]>,
-): readonly CfcRefusalInput[] => {
-  const byRead = new Map<
-    string,
-    { source: ConsumedAtomSource; atoms: string[] }
-  >();
-  for (const atom of offendingAtoms) {
-    for (const source of sources.get(atom) ?? []) {
-      const key = consumedAtomSourceKey(source);
-      const existing = byRead.get(key);
-      if (existing === undefined) byRead.set(key, { source, atoms: [atom] });
-      else if (!existing.atoms.includes(atom)) existing.atoms.push(atom);
-    }
-  }
-  return [...byRead.values()].map(({ source, atoms }) => ({
-    read: source.read,
-    labelPath: source.labelPath,
-    atoms,
-  }));
 };
 
 /**
- * Classify how completely {@link CfcRefusalDetail.inputs} accounts for
- * `offendingAtoms`.
+ * Match `offending` clauses to the reads that carried them, and say how
+ * completely the result accounts for the refusal.
  *
- * Compares the rendered atom strings rather than the clause values: the
- * renderings are what both the reason and the detail publish, so a consumer
- * matching one against the other sees the same answer this does.
+ * One pass produces both, because they are two readings of the same match:
+ * computing them separately would let a caller act on inputs the attribution
+ * does not describe.
  */
-export const refusalAttribution = (
-  offendingAtoms: readonly string[],
-  inputs: readonly CfcRefusalInput[],
-): CfcRefusalAttribution => {
-  if (inputs.length === 0) return "none";
-  const attributed = new Set(inputs.flatMap((input) => [...input.atoms]));
-  return offendingAtoms.every((atom) => attributed.has(atom))
-    ? "complete"
-    : "partial";
+export const describeRefusalInputs = (
+  offending: readonly unknown[],
+  sources: readonly ConsumedAtomSource[],
+): {
+  inputs: readonly CfcRefusalInput[];
+  attribution: CfcRefusalAttribution;
+} => {
+  const byRead = new Map<
+    string,
+    { read: CfcAddress; labelPath: readonly string[]; atoms: string[] }
+  >();
+  let unattributed = 0;
+  for (const clause of offending) {
+    const rendered = renderCfcAtom(clause);
+    let matched = false;
+    for (const source of sources) {
+      if (!deepEqual(source.atom, clause)) continue;
+      matched = true;
+      const key = JSON.stringify([
+        source.read.space,
+        source.read.id,
+        source.read.scope,
+        source.read.path,
+        source.labelPath,
+      ]);
+      const existing = byRead.get(key);
+      if (existing === undefined) {
+        byRead.set(key, {
+          read: source.read,
+          labelPath: source.labelPath,
+          atoms: [rendered],
+        });
+      } else if (!existing.atoms.includes(rendered)) {
+        existing.atoms.push(rendered);
+      }
+    }
+    if (!matched) unattributed += 1;
+  }
+  const inputs = [...byRead.values()].map(({ read, labelPath, atoms }) => ({
+    read,
+    labelPath,
+    atoms,
+  }));
+  return {
+    inputs,
+    attribution: inputs.length === 0
+      ? "none"
+      : unattributed === 0
+      ? "complete"
+      : "partial",
+  };
 };

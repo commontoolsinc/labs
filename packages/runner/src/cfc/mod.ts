@@ -319,8 +319,6 @@ export {
   type CfcRefusalGate,
   type CfcRefusalInput,
   type ConsumedAtomSource,
-  consumedAtomSourceKey,
-  refusalAttribution,
-  refusalInputsFor,
+  describeRefusalInputs,
   renderCfcAtom,
 } from "./refusal-detail.ts";

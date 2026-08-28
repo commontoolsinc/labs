@@ -39,8 +39,7 @@ import {
   type CfcAddress,
   type CfcRefusalDetail,
   type ConsumedAtomSource,
-  refusalAttribution,
-  refusalInputsFor,
+  describeRefusalInputs,
   renderCfcAtom,
 } from "../src/cfc/mod.ts";
 import { RuntimeTelemetryEvent } from "../src/telemetry.ts";
@@ -69,10 +68,11 @@ const addressOf = (id: string, path: readonly string[]): CfcAddress =>
   ({ space, id, scope: "space", path }) as CfcAddress;
 
 const sourceOf = (
+  atom: unknown,
   id: string,
   readPath: readonly string[],
   labelPath: readonly string[],
-): ConsumedAtomSource => ({ read: addressOf(id, readPath), labelPath });
+): ConsumedAtomSource => ({ atom, read: addressOf(id, readPath), labelPath });
 
 /**
  * Seed a document holding `{ secret: "rosebud" }`. With `confidentiality`, its
@@ -139,16 +139,12 @@ const seedRootLabeledDoc = async (
 };
 
 describe("refusal-detail", () => {
-  describe("refusalInputsFor()", () => {
+  describe("describeRefusalInputs()", () => {
     it("returns one input per contributing read, carrying that read's atoms", () => {
-      const sources = new Map<string, readonly ConsumedAtomSource[]>([
-        [MEDICAL, [sourceOf("of:chart", ["value"], ["secret"])]],
-        [renderCfcAtom("payroll"), [sourceOf("of:ledger", [], ["amount"])]],
+      const { inputs } = describeRefusalInputs(["medical", "payroll"], [
+        sourceOf("medical", "of:chart", ["value"], ["secret"]),
+        sourceOf("payroll", "of:ledger", [], ["amount"]),
       ]);
-      const inputs = refusalInputsFor(
-        [MEDICAL, renderCfcAtom("payroll")],
-        sources,
-      );
       expect(inputs).toEqual([
         {
           read: addressOf("of:chart", ["value"]),
@@ -164,27 +160,19 @@ describe("refusal-detail", () => {
     });
 
     it("groups two offending atoms carried by one read into a single input", () => {
-      const read = sourceOf("of:chart", ["value"], ["secret"]);
-      const sources = new Map<string, readonly ConsumedAtomSource[]>([
-        [MEDICAL, [read]],
-        [renderCfcAtom("payroll"), [read]],
+      const { inputs } = describeRefusalInputs(["medical", "payroll"], [
+        sourceOf("medical", "of:chart", ["value"], ["secret"]),
+        sourceOf("payroll", "of:chart", ["value"], ["secret"]),
       ]);
-      const inputs = refusalInputsFor(
-        [MEDICAL, renderCfcAtom("payroll")],
-        sources,
-      );
       expect(inputs.length).toBe(1);
       expect(inputs[0].atoms).toEqual([MEDICAL, renderCfcAtom("payroll")]);
     });
 
     it("returns separate inputs for two label paths inside one document", () => {
-      const sources = new Map<string, readonly ConsumedAtomSource[]>([
-        [MEDICAL, [
-          sourceOf("of:chart", [], ["secret"]),
-          sourceOf("of:chart", [], ["notes"]),
-        ]],
+      const { inputs } = describeRefusalInputs(["medical"], [
+        sourceOf("medical", "of:chart", [], ["secret"]),
+        sourceOf("medical", "of:chart", [], ["notes"]),
       ]);
-      const inputs = refusalInputsFor([MEDICAL], sources);
       expect(inputs.map((input) => input.labelPath)).toEqual([
         ["secret"],
         ["notes"],
@@ -192,48 +180,60 @@ describe("refusal-detail", () => {
     });
 
     it("returns no input for an offending atom no source claims", () => {
-      const inputs = refusalInputsFor(
-        [MEDICAL],
-        new Map<string, readonly ConsumedAtomSource[]>([[
-          renderCfcAtom("payroll"),
-          [sourceOf("of:ledger", [], ["amount"])],
-        ]]),
-      );
+      const { inputs } = describeRefusalInputs(["medical"], [
+        sourceOf("payroll", "of:ledger", [], ["amount"]),
+      ]);
       expect(inputs).toEqual([]);
     });
-  });
 
-  describe("refusalAttribution()", () => {
-    it("returns `none` for an empty input list", () => {
-      expect(refusalAttribution([MEDICAL], [])).toBe("none");
+    it("names both reads of a clause whose properties two sources ordered differently", () => {
+      // The identity is `deepEqual`, which is what `uniqueCfcAtoms` dedups the
+      // consumed union by — so these are ONE clause, carried by two reads, and
+      // the remedy is to drop both. Keyed on a rendering they would be two
+      // clauses, only the first named, and `complete` would be a lie: dropping
+      // the named read leaves the other read's identical clause behind.
+      const { inputs, attribution } = describeRefusalInputs([{
+        a: 1,
+        b: 2,
+      }], [
+        sourceOf({ a: 1, b: 2 }, "of:chart", [], ["secret"]),
+        sourceOf({ b: 2, a: 1 }, "of:ledger", [], ["amount"]),
+      ]);
+      expect(inputs.map((input) => input.read.id)).toEqual([
+        "of:chart",
+        "of:ledger",
+      ]);
+      expect(attribution).toBe("complete");
     });
 
-    it("returns `complete` when the inputs name every offending atom", () => {
+    it("attributes no read to a signed-zero clause a source carries unsigned", () => {
+      // CFC distinguishes `-0` from `0`; `JSON.stringify` renders both `0`. A
+      // rendered key would name the innocent read as the one to drop.
+      const { inputs, attribution } = describeRefusalInputs([-0], [
+        sourceOf(0, "of:ledger", [], ["amount"]),
+      ]);
+      expect(inputs).toEqual([]);
+      expect(attribution).toBe("none");
+    });
+
+    it("returns `none` when no source claims any offending clause", () => {
+      expect(describeRefusalInputs(["medical"], []).attribution).toBe("none");
+    });
+
+    it("returns `complete` when a source claims every offending clause", () => {
       expect(
-        refusalAttribution([MEDICAL, renderCfcAtom("payroll")], [
-          {
-            read: addressOf("of:chart", []),
-            labelPath: ["secret"],
-            atoms: [MEDICAL],
-          },
-          {
-            read: addressOf("of:ledger", []),
-            labelPath: ["amount"],
-            atoms: [renderCfcAtom("payroll")],
-          },
-        ]),
+        describeRefusalInputs(["medical", "payroll"], [
+          sourceOf("medical", "of:chart", [], ["secret"]),
+          sourceOf("payroll", "of:ledger", [], ["amount"]),
+        ]).attribution,
       ).toBe("complete");
     });
 
-    it("returns `partial` when an offending atom is named by no input", () => {
+    it("returns `partial` when an offending clause is claimed by no source", () => {
       expect(
-        refusalAttribution([MEDICAL, renderCfcAtom("rewritten")], [
-          {
-            read: addressOf("of:chart", []),
-            labelPath: ["secret"],
-            atoms: [MEDICAL],
-          },
-        ]),
+        describeRefusalInputs(["medical", "rewritten"], [
+          sourceOf("medical", "of:chart", [], ["secret"]),
+        ]).attribution,
       ).toBe("partial");
     });
   });
@@ -538,6 +538,42 @@ describe("refusal-detail", () => {
       expect(detail!.sink).toBe("fetchText");
       expect(detail!.offendingAtoms).toContain(MEDICAL);
       expect(detail!.attribution).toBe("complete");
+    });
+
+    it("describes only the pass it ran, when one transaction prepares twice", async () => {
+      // Diagnostics are append-only history on purpose; a detail is paired to
+      // a reason THIS pass recorded. Without the per-pass clear, a second
+      // prepare's refusal would carry the first pass's detail as well as its
+      // own — the same refusal rendered twice, and, once a reason clears, one
+      // the current verdict no longer holds.
+      await seedSecret(runtime, "marker-repeated-secret", ["medical"]);
+      const tx = runtime.edit();
+      const secret = runtime.getCell(
+        space,
+        "marker-repeated-secret",
+        undefined,
+        tx,
+      );
+      expect(secret.key("secret").getRaw() as string).toBe("rosebud");
+      enqueueSinkRequestPostCommitEffect(
+        tx,
+        "fetchText",
+        "fetchText:marker-repeated",
+        createFrozenRequestSnapshot({ url: "https://example.com/exfil" }),
+        "fetchText-start",
+        () => {},
+      );
+      tx.prepareCfc();
+      tx.prepareCfc();
+      tx.abort();
+
+      expect(markers.length).toBe(2);
+      for (const marker of markers) {
+        expect(
+          marker.refusals.filter((entry) => entry.gate === "sink-ceiling")
+            .length,
+        ).toBe(1);
+      }
     });
 
     it("submits a non-terminal marker carrying the same detail when an untagged reason joins the verdict", async () => {
