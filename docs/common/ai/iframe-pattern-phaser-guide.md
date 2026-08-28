@@ -187,27 +187,36 @@ const cancelOutput = output.sink((value) => {
   outputValue = value ?? DEFAULT_OUTPUT;
 });
 
-await Promise.all([
-  input.pull(),
-  state.pull(),
-  output.pull(),
-]);
-if (state.get() === undefined) await stateWrite.initialize(DEFAULT_STATE);
-if (output.get() === undefined) await outputWrite.initialize(DEFAULT_OUTPUT);
-inputValue = input.get() ?? DEFAULT_INPUT;
-stateValue = state.get() ?? DEFAULT_STATE;
-outputValue = output.get() ?? DEFAULT_OUTPUT;
-hydrated = true;
-spawnButton.disabled = false;
-renderAuthoritativeState();
-
-globalThis.addEventListener("pagehide", () => {
+let disposed = false;
+function dispose(): void {
+  if (disposed) return;
+  disposed = true;
   cancelInput();
   cancelState();
   cancelOutput();
   game.destroy(true);
   fabric.disconnect();
-}, { once: true });
+}
+globalThis.addEventListener("pagehide", dispose, { once: true });
+
+try {
+  await Promise.all([
+    input.pull(),
+    state.pull(),
+    output.pull(),
+  ]);
+  if (state.get() === undefined) await stateWrite.initialize(DEFAULT_STATE);
+  if (output.get() === undefined) await outputWrite.initialize(DEFAULT_OUTPUT);
+  inputValue = input.get() ?? DEFAULT_INPUT;
+  stateValue = state.get() ?? DEFAULT_STATE;
+  outputValue = output.get() ?? DEFAULT_OUTPUT;
+  hydrated = true;
+  spawnButton.disabled = false;
+  renderAuthoritativeState();
+} catch (cause) {
+  showError(cause);
+  dispose();
+}
 ```
 
 `sink()` calls synchronously with the guest's current sample and later with
@@ -218,6 +227,8 @@ for every resource an action reads.
 Use the pulls only as a joint readiness barrier. Read values with `get()` after
 every pull and initialization has settled, so a newer sink event that arrives
 during the barrier cannot be replaced by an older individual pull result.
+Install idempotent teardown before starting the barrier, and catch bootstrap
+failures so they remain visible while subscriptions and the game are released.
 
 `initialize()` is the atomic first-use operation. It stores a default only
 while the Cell is undefined and returns the transaction's winner. Never blind-

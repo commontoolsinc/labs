@@ -188,26 +188,35 @@ const cancelOutput = output.sink((value) => {
   render();
 });
 
-await Promise.all([
-  input.pull(),
-  state.pull(),
-  output.pull(),
-]);
-if (state.get() === undefined) await stateWrite.initialize(DEFAULT_STATE);
-if (output.get() === undefined) await outputWrite.initialize(DEFAULT_OUTPUT);
-inputValue = input.get() ?? DEFAULT_INPUT;
-stateValue = state.get() ?? DEFAULT_STATE;
-outputValue = output.get() ?? DEFAULT_OUTPUT;
-hydrated = true;
-addButton.disabled = false;
-render();
-
-globalThis.addEventListener("pagehide", () => {
+let disposed = false;
+function dispose(): void {
+  if (disposed) return;
+  disposed = true;
   cancelInput();
   cancelState();
   cancelOutput();
   fabric.disconnect();
-}, { once: true });
+}
+globalThis.addEventListener("pagehide", dispose, { once: true });
+
+try {
+  await Promise.all([
+    input.pull(),
+    state.pull(),
+    output.pull(),
+  ]);
+  if (state.get() === undefined) await stateWrite.initialize(DEFAULT_STATE);
+  if (output.get() === undefined) await outputWrite.initialize(DEFAULT_OUTPUT);
+  inputValue = input.get() ?? DEFAULT_INPUT;
+  stateValue = state.get() ?? DEFAULT_STATE;
+  outputValue = output.get() ?? DEFAULT_OUTPUT;
+  hydrated = true;
+  addButton.disabled = false;
+  render();
+} catch (cause) {
+  showError(cause);
+  dispose();
+}
 ```
 
 `sink()` calls its listener synchronously with the guest's current sample, then
@@ -218,6 +227,8 @@ the latest value. Keep all actions disabled until one joint `Promise.all` of
 Use the pulls only as a joint readiness barrier. Read values with `get()` after
 every pull and initialization has settled, so a newer sink event that arrives
 during the barrier cannot be replaced by an older individual pull result.
+Install idempotent teardown before starting the barrier, and catch bootstrap
+failures so they remain visible while subscriptions are released.
 
 `initialize()` atomically supplies a default only while the Cell is undefined.
 Use it for first materialization; never issue a whole-state `set()` merely to

@@ -194,24 +194,13 @@ const cancelOutput = output.sink((value) => {
   renderAuthoritativeState();
 });
 
-await Promise.all([
-  input.pull(),
-  state.pull(),
-  output.pull(),
-]);
-if (state.get() === undefined) await stateWrite.initialize(DEFAULT_STATE);
-if (output.get() === undefined) await outputWrite.initialize(DEFAULT_OUTPUT);
-inputValue = input.get() ?? DEFAULT_INPUT;
-stateValue = state.get() ?? DEFAULT_STATE;
-outputValue = output.get() ?? DEFAULT_OUTPUT;
-hydrated = true;
-addButton.disabled = false;
-renderAuthoritativeState();
-
 engine.runRenderLoop(() => scene.render());
 const resize = () => engine.resize();
 globalThis.addEventListener("resize", resize);
-globalThis.addEventListener("pagehide", () => {
+let disposed = false;
+function dispose(): void {
+  if (disposed) return;
+  disposed = true;
   cancelInput();
   cancelState();
   cancelOutput();
@@ -219,7 +208,27 @@ globalThis.addEventListener("pagehide", () => {
   scene.dispose();
   engine.dispose();
   fabric.disconnect();
-}, { once: true });
+}
+globalThis.addEventListener("pagehide", dispose, { once: true });
+
+try {
+  await Promise.all([
+    input.pull(),
+    state.pull(),
+    output.pull(),
+  ]);
+  if (state.get() === undefined) await stateWrite.initialize(DEFAULT_STATE);
+  if (output.get() === undefined) await outputWrite.initialize(DEFAULT_OUTPUT);
+  inputValue = input.get() ?? DEFAULT_INPUT;
+  stateValue = state.get() ?? DEFAULT_STATE;
+  outputValue = output.get() ?? DEFAULT_OUTPUT;
+  hydrated = true;
+  addButton.disabled = false;
+  renderAuthoritativeState();
+} catch (cause) {
+  showError(cause);
+  dispose();
+}
 ```
 
 Use one `Engine` and one `Scene` per guest. Dispose both on teardown. Handle
@@ -235,6 +244,8 @@ undefined writable Cell.
 Use the pulls only as a joint readiness barrier. Read values with `get()` after
 every pull and initialization has settled, so a newer sink event that arrives
 during the barrier cannot be replaced by an older individual pull result.
+Install idempotent teardown before starting the barrier, and catch bootstrap
+failures so they remain visible while subscriptions and the scene are released.
 
 ## Reconcile entities by stable ID
 
