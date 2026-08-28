@@ -145,6 +145,41 @@ A run family is a parent run and the `delegate_task` children the harness named
 alone: a parent commonly delegates the authoring and then names the child's work
 as its own.
 
+## The suite file
+
+A suite is JSON. `label` names the batch, `notes` is rendered into the report
+verbatim, and `tasks` is a list of `{id, text}` — the id files the task in the
+report, the text is given to the session unaltered.
+
+Three optional fields describe the corpus the batch is measured against, and
+they exist because the identifiers alone cannot say what they are:
+
+- `seededPatternIds` — patterns put into the index for this batch to find.
+- `supersededPatternIds` — seeded patterns a later publication of the same atom
+  replaced. Re-formatting a seed's source changes its bytes, and the index
+  identity is a content hash, so re-running a seed after `deno fmt` publishes a
+  second entry for the same program. Both entries are the seeder's work, and
+  only one is reproducible from the committed source.
+
+Every identifier a batch composed is then reported as one of:
+
+| mark                               | meaning                                                                                                  |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| **(seeded)**                       | named in `seededPatternIds`                                                                              |
+| **(seeded, superseded duplicate)** | named in `supersededPatternIds`; the program is the seeder's, and the committed source cannot rebuild it |
+| **(seeded, via alias of …)**       | its own identifier is in neither list, but one dependency hop reaches one that is                        |
+| (pre-existing)                     | neither, one hop deep                                                                                    |
+| (ORIGIN NOT RESOLVED)              | the index would not say what it depends on                                                               |
+
+The three seeded marks are kept apart rather than merged because each answers a
+different question. Composing a seeded atom is the claim seeding was made for.
+Composing a superseded duplicate is the duplicate problem happening _under
+measurement_, which merging into "seeded" would hide. And a bare re-export
+carries its own identifier, so without the hop it would read as pre-existing and
+count a composition of seeded work as evidence against the seeding.
+
+Hops beyond the first are not resolved, and the report says so.
+
 ## What the report holds
 
 Per task: the exact text the session was given, the session and run identifiers,
