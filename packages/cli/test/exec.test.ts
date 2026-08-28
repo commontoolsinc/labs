@@ -3498,6 +3498,9 @@ function createExecHarness(options: {
           tracker.events.push("commit");
           return Promise.resolve();
         },
+        // The real transaction reports one, and the write receipt reads it
+        // rather than treating a resolved `commit()` as proof of a write.
+        status: () => ({ status: "done" }),
       }),
       prepareTxForCommit: () => {},
       getCell: (

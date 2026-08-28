@@ -120,7 +120,10 @@ describe("cf exec read options", () => {
       runtime: {
         [CF_RUNTIME_ERROR_LOG]: [] as Array<{ message: string }>,
         storageManager: { synced: () => Promise.resolve() },
-        edit: () => ({ commit: () => Promise.resolve() }),
+        edit: () => ({
+          commit: () => Promise.resolve(),
+          status: () => ({ status: "done" }),
+        }),
         prepareTxForCommit: () => {},
         getCell: () => resultCell,
         getCellFromLink: () => receiptCell,

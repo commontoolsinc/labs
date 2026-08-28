@@ -1664,6 +1664,9 @@ function createPieceCallableHarness(options: {
       },
       edit: () => ({
         commit: async () => {},
+        // The real transaction reports one, and the write receipt reads it
+        // rather than treating a resolved `commit()` as proof of a write.
+        status: () => ({ status: "done" }),
       }),
       prepareTxForCommit: () => {},
       settled: () => Promise.resolve(),

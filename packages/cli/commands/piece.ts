@@ -3820,11 +3820,19 @@ export async function repairFromCommand(
       }
     }
   }
-  // A repaired row is a written document, so the space is named whenever at
-  // least one was — before the refusal below, which an incomplete run takes.
-  if (report.rows.some((row) => row.verdict === "repaired")) {
-    noteWroteTo(spaceConfig.space);
-  }
+  // A repaired row is a written document. So is a failed one under `--apply`:
+  // a row fails at the write, after it during verification, or before it
+  // reached one, and the row does not say which — its own problem text can
+  // read "the stored document satisfies the fixer, so the row landed". The
+  // ambiguous case is reported rather than withheld, because the operator
+  // needing the space is the one whose run did not finish cleanly.
+  //
+  // Named before the refusal below, which an incomplete run takes.
+  const wrote = report.rows.some((row) =>
+    row.verdict === "repaired" ||
+    (options.apply === true && row.verdict === "failed")
+  );
+  if (wrote) noteWroteTo(spaceConfig.space);
   for (const row of report.rows) {
     if (row.problem !== undefined) {
       printHint(`${row.verdict}: ${row.piece} ${row.problem}`);
@@ -4597,8 +4605,10 @@ export function parsePieceOptions(
  * path's first segment are indistinguishable.
  *
  * A caller naming the target twice — `--piece` beside a positional address —
- * is refused rather than resolved, the same rule `--space` beside `--url`
- * follows. So is a second positional behind a path: only an address earns a
+ * is refused rather than resolved, the same rule an explicitly written
+ * `--space` beside `--url` follows. A space that arrived from `CF_SPACE` is
+ * not a second naming and does not refuse; `--url` supplies the space itself.
+ * So is a second positional behind a path refused: only an address earns a
  * path after it.
  */
 export function readTargetPositionals(
@@ -4685,7 +4695,12 @@ export function spaceWasWritten(
   argv: readonly string[] = Deno.args,
 ): boolean {
   if (explicit !== undefined) return explicit;
-  return argv.some((arg) =>
+  // Only the command's own section counts. `--` hands everything after it to
+  // a callable, where `--space` is that verb's argument and says nothing
+  // about which space the command targets.
+  const end = argv.indexOf("--");
+  const own = end === -1 ? argv : argv.slice(0, end);
+  return own.some((arg) =>
     arg === "--space" || arg === "-s" || arg.startsWith("--space=")
   );
 }

@@ -1801,9 +1801,11 @@ export async function executeResolvedCallable(
     await runtime.idle();
     runtime.prepareTxForCommit(tx);
     await tx.commit();
-    // A tool's result cell is durable, so this commit is a write to the space
-    // like a handler's is.
-    noteWroteTo(resolved.space);
+    // A tool's result cell is durable, so a committed transaction is a write
+    // to the space like a handler's is. `commit()` resolving is not proof of
+    // one — the handler branch above reads `status()` for the same reason —
+    // so the receipt follows the status rather than the call returning.
+    if (tx.status().status !== "error") noteWroteTo(resolved.space);
 
     // Drain the tool to a fully settled state — scheduler idle, storage synced,
     // and every in-flight async builtin finished — so the result is final by the
