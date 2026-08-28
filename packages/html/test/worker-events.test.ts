@@ -2,7 +2,7 @@
  * Tests for VDOM event serialization.
  */
 
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 import {
@@ -203,24 +203,21 @@ Deno.test("events - serializeEvent", async (t) => {
     assertEquals(serialized.target?.value, handle.toJSON());
   });
 
-  await t.step("resolves a `toJSON()` on a target's `value`", () => {
-    // `value` is the one target property no scalar covers, so what is neither a
-    // cell nor a scalar still reaches the general conversion -- which resolves
-    // a `toJSON()`. The other four judge such a value by their own scalar and
-    // leave it out instead.
-    const link = { "/": { "link@1": { id: "of:fid1:abc" } } };
+  await t.step("refuses a value that merely defines a `toJSON()`", () => {
+    // The whole of "no wide-open `toJSON()`": a cell is recognized by its
+    // class, and something that only knows how to render itself as JSON is not
+    // one. `value` is the property with no scalar to fall back on, so nothing
+    // catches this short of the refusal.
     const speaksForItself = new (class {
       toJSON() {
-        return link;
+        return { "/": { "link@1": { id: "of:fid1:abc" } } };
       }
     })();
     const event = new MockEvent("input", {
       target: { value: speaksForItself },
     }) as unknown as Event;
 
-    const serialized = serializeEvent(event);
-
-    assertEquals(serialized.target?.value, link);
+    assertThrows(() => serializeEvent(event), Error, "Cannot yet carry");
   });
 
   await t.step("carries a circular target value through untouched", () => {
@@ -238,19 +235,17 @@ Deno.test("events - serializeEvent", async (t) => {
     assertEquals(serialized.target?.value, circular as FabricValue);
   });
 
-  await t.step("describes a target value that refuses coercion too", () => {
-    // `String()` reaches for `toString` and `valueOf`; a null-prototype object
-    // has neither, and a circular one has no JSON form either, so both routes
-    // out of the conversion throw. The event still has to reach the worker.
+  await t.step("names a value that refuses even to be described", () => {
+    // The refusal has to say what it refused, and `String()` reaches for
+    // `toString` and `valueOf`, which an object made with `Object.create(null)`
+    // has neither of. A fixed token stands in, so the refusal does not fail in
+    // turn from inside its own message.
     const bare = Object.create(null);
-    bare.self = bare;
     const event = new MockEvent("input", {
       target: { value: bare },
     }) as unknown as Event;
 
-    const serialized = serializeEvent(event);
-
-    assertEquals(serialized.target?.value, "/unconvertible");
+    assertThrows(() => serializeEvent(event), Error, "/unconvertible");
   });
 
   await t.step("captures trusted provenance", () => {
@@ -524,18 +519,16 @@ Deno.test("events - serializeEvent", async (t) => {
     assertEquals((serialized.detail as { blob: unknown }).blob, bytes);
   });
 
-  await t.step("renders an `Error` in a detail as a bare record", () => {
-    // An `Error` is not a `FabricValue` and is not a cell, so it reaches the
-    // round trip, whose rendering of one is `{}` -- its state living in
-    // properties JSON does not enumerate. `cf-file-input` dispatches `cf-error`
-    // with one.
+  await t.step("refuses an `Error` handed over in a detail", () => {
+    // The shape most likely to reach the refusal: `cf-error` carries one, and
+    // `cf-code-editor` alone raises six. Nothing binds a handler to that event,
+    // so nothing arrives here -- and an uncaught page exception fails any
+    // browser test, so a case that starts arriving says so at once.
     const event = new MockCustomEvent("cf-error", {
       detail: { error: new Error("boom"), message: "upload failed" },
     }) as unknown as Event;
 
-    const serialized = serializeEvent(event);
-
-    assertEquals(serialized.detail, { error: {}, message: "upload failed" });
+    assertThrows(() => serializeEvent(event), Error, "Cannot yet carry");
   });
 
   await t.step("omits undefined properties", () => {

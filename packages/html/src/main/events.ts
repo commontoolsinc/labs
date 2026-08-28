@@ -344,49 +344,57 @@ function carriedTargetValue(
 
 /**
  * Converts one value a component exposed to the event into the form the VDOM
- * event notification carries.
+ * event notification carries, and refuses what has no such form.
  *
  * A `FabricValue` crosses as itself. The connection carries that whole domain,
  * so there is nothing to convert, and walking one would only be a chance to
- * lose something -- which the round trip below does lose: a `bigint` throws out
- * of `JSON.stringify()`, taking the whole value with it, and a `FabricBytes`
- * renders as `{}`, its state not being enumerable properties. A cycle is a
- * `FabricValue` too, and crosses as one; whether it can be carried further is
- * the encoding's question at the crossing rather than this seam's.
+ * lose something. A cycle is a `FabricValue` too, and crosses as one; whether
+ * it can be carried further is the encoding's question at the crossing rather
+ * than this seam's.
  *
  * A `CellHandle` is the one thing a component exposes that is not fabric and
  * has a representation anyway: the link that reaches its cell. Recognized by
  * its class, so that nothing else defining a `toJSON()` is taken for a cell.
  *
- * Everything else is a native with no fabric form, and the round trip is what
- * renders it -- `{}` for an `Error` or a file, and a description where even
- * that fails. Handing the pattern something is the point: an event whose value
- * cannot cross whole is still an event the handler should see.
+ * Anything else is refused. What reaches the refusal is enumerable, and none of
+ * it is something a handler could act on:
  *
- * TODO(danfuzz): a `FabricInstance` is a `FabricValue`, so one exposed directly
- * crosses here and is then refused by the worker's event ingress
- * (`stripSigilCfcLabelViews()` in `@commonfabric/runner/cfc`), which drops the
- * event. No component exposes one -- what they raise is a native `Error`, which
- * is not fabric and takes the round trip -- so nothing arrives there today. It
- * resolves when that ingress descends an instance rather than refusing one,
- * which is the next step its own refusal records.
+ * * an `Error`, from `cf-error` -- `cf-code-editor` raises six, and
+ *   `cf-file-input`, `cf-file-download` and `cf-copy-button` one apiece.
+ * * a `Blob`, from `cf-voice-input`'s `cf-recording-stop`, as `audioData`.
+ * * a `FileList`, from `cf-input`'s own `cf-input` event, which carries `files`
+ *   when the input's `type` is `file`.
+ * * an `Element`, from `cf-radio`, `cf-tab` and `cf-tab-bar-item`, each of
+ *   which puts itself in its own detail.
+ * * a `Date`, a `Map`, a `Set`, a `RegExp`, or an object that merely defines a
+ *   `toJSON()`. No component exposes one.
+ *
+ * Nothing binds a handler to any of those events, so nothing reaches this
+ * today. Deliberately absent from the list, being already answered above: the
+ * file inputs' `cf-change`, which carries `StoredFile` records -- plain records
+ * of scalars, which cross as themselves.
+ *
+ * The refusal is a tripwire rather than a verdict on any of them. The set this
+ * accepts is expected to grow, and where each refused value should go instead
+ * is undecided: a `Blob` and a `FileList` want records or `FabricBytes` at the
+ * producer, an `Error` wants a `FabricError` once the worker's event ingress
+ * descends an instance rather than refusing one, and an `Element` cannot cross
+ * at all and wants its producer to name what it means instead.
+ *
+ * @throws If the value is neither of the two that cross. It leaves the DOM
+ *   listener that called this, which loses the event and reports as an uncaught
+ *   page error -- and which is what makes a reachable case unmissable, the
+ *   browser suites failing a test on any uncaught page exception.
  */
 function toSerializableValue(value: unknown): FabricValue {
   if (isValidFabricValue(value)) return value;
 
   if (isCellHandle(value)) return value.toJSON();
 
-  try {
-    // Resolves whatever `toJSON()` the value defines, and drops what JSON has
-    // no representation for. `undefined` comes back for a function or an
-    // uninterned symbol, and a throwing `toJSON()` throws out of it.
-    const jsonString = JSON.stringify(value);
-    if (jsonString !== undefined) return JSON.parse(jsonString);
-  } catch {
-    // Described below, as a value with no JSON form at all is.
-  }
-
-  return describeUnconvertible(value);
+  throw new Error(
+    "Cannot yet carry this value on a DOM event, it being neither a " +
+      `\`FabricValue\` nor a \`CellHandle\`: ${describeUnconvertible(value)}`,
+  );
 }
 
 /**
