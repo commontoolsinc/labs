@@ -4,7 +4,11 @@ import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { assertEquals, assertInstanceOf } from "@std/assert";
 
-import type { FabricClient, ResourceSnapshot } from "../src/guest.ts";
+import type {
+  FabricClient,
+  ResourceSnapshot,
+  SqliteQueryInput,
+} from "../src/guest.ts";
 import { createFabricReact } from "../src/react.ts";
 
 type Counter = { count: number };
@@ -139,6 +143,73 @@ Deno.test("React renders bridged cells and SQLite invalidations", async () => {
     await flush();
     assertEquals(host.querySelector("#notes")?.textContent, "First, Second");
     assertEquals(queryCount >= 2, true);
+  } finally {
+    await perform(() => root.unmount());
+    host.remove();
+    environment.IS_REACT_ACT_ENVIRONMENT = previousActEnvironment;
+  }
+});
+
+Deno.test("React keeps supported SQLite parameter identities distinct", async () => {
+  if (typeof document === "undefined") return;
+  const environment = globalThis as typeof globalThis & {
+    IS_REACT_ACT_ENVIRONMENT?: boolean;
+  };
+  const previousActEnvironment = environment.IS_REACT_ACT_ENVIRONMENT;
+  environment.IS_REACT_ACT_ENVIRONMENT = true;
+
+  const calls: Array<SqliteQueryInput["params"]> = [];
+  const database = {
+    query: (_sql: string, params?: SqliteQueryInput["params"]) => {
+      calls.push(params);
+      return Promise.resolve({ rows: [{ call: calls.length }] });
+    },
+    sink: () => () => {},
+  };
+  const client = { sqlite: () => database } as unknown as FabricClient;
+  const { useSqliteQuery } = createFabricReact(React, client);
+
+  function App({ params }: { params: SqliteQueryInput["params"] }) {
+    const query = useSqliteQuery<{ call: number }>(
+      "database",
+      "SELECT :value",
+      params,
+    );
+    return React.createElement(
+      "p",
+      { id: "query-call" },
+      query.status === "ready" ? `Call ${query.rows[0].call}` : "Loading",
+    );
+  }
+
+  const reservedNames = Object.fromEntries([
+    ["constructor", 1],
+    ["__proto__", 2],
+  ]);
+  const cases: Array<NonNullable<SqliteQueryInput["params"]>> = [
+    [null],
+    [NaN],
+    [Infinity],
+    [-Infinity],
+    [-0],
+    [0],
+    reservedNames,
+  ];
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    for (let index = 0; index < cases.length; index++) {
+      await perform(() =>
+        root.render(React.createElement(App, { params: cases[index] }))
+      );
+      await flush();
+      assertEquals(
+        host.querySelector("#query-call")?.textContent,
+        `Call ${index + 1}`,
+      );
+    }
+    assertEquals(calls, cases);
   } finally {
     await perform(() => root.unmount());
     host.remove();
