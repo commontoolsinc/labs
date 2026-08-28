@@ -338,17 +338,17 @@ describe("type-check", () => {
       });
     });
 
-    // What this vet is FOR: standing in for the refusal that
-    // `shallowFabricFromNativeValue()` performs today, so that a caller can
-    // vet without converting. Its verdict and its wording therefore have to be
-    // that function's, value for value -- which is what this pins, over the
-    // whole corpus rather than over a chosen case.
-    //
-    // The exception is a `FabricNativeObject`, and it is the whole of the
-    // exception: conversion has a say over one, and either mints its fabric
-    // form or refuses it there. The vet has no say and does not pretend to,
-    // which its own group below covers.
     describe("says what the shallow conversion says", () => {
+      // What this vet is FOR: standing in for the refusal that
+      // `shallowFabricFromNativeValue()` performs today, so that a caller can
+      // vet without converting. Its verdict and its wording therefore have to be
+      // that function's, value for value -- which is what this pins, over the
+      // whole corpus rather than over a chosen case.
+      //
+      // The exception is a `FabricNativeObject`, and it is the whole of the
+      // exception: conversion has a say over one, and either mints its fabric
+      // form or refuses it there. The vet has no say and does not pretend to,
+      // which its own group below covers.
       for (const [label, value] of LAYER_CORPUS) {
         if (isValidFabricNativeObject(value)) continue;
         it(`gives ${label} the same verdict, in the same words`, () => {

@@ -151,12 +151,12 @@ describe("native-type-tags", () => {
       expect(tagFromNativeValue(() => {})).toBe(NATIVE_TAGS.Primitive);
     });
 
-    // An own `constructor` property is ordinary data that happens to share a
-    // name with the thing that decides a value's class. Reading the class off
-    // the value rather than off its prototype would let a plain record present
-    // itself as an `Error` -- and be rebuilt as one, by a conversion doing
-    // exactly what it was told.
     describe("an own `constructor` property does not decide the class", () => {
+      // An own `constructor` property is ordinary data that happens to share a
+      // name with the thing that decides a value's class. Reading the class off
+      // the value rather than off its prototype would let a plain record present
+      // itself as an `Error` -- and be rebuilt as one, by a conversion doing
+      // exactly what it was told.
       for (
         const [label, forged] of [
           ["`Error`", Error],
@@ -184,12 +184,12 @@ describe("native-type-tags", () => {
       });
     });
 
-    // A prototype can be re-pointed, so "an array's class is `Array`" is only
-    // usually true. `Array.isArray()` is what is actually true of every array,
-    // and it is why the array rule runs before any class is consulted -- in
-    // both dispatches, since either one reporting an array as a convertible
-    // `Date` would be a walk rebuilding it as one.
     describe("an array is decided by the array rule, whatever its prototype", () => {
+      // A prototype can be re-pointed, so "an array's class is `Array`" is only
+      // usually true. `Array.isArray()` is what is actually true of every array,
+      // and it is why the array rule runs before any class is consulted -- in
+      // both dispatches, since either one reporting an array as a convertible
+      // `Date` would be a walk rebuilding it as one.
       for (
         const [label, value] of [
           ["an ordinary array", [1, 2]],
@@ -217,12 +217,12 @@ describe("native-type-tags", () => {
       }
     });
 
-    // `toJSON` is an ordinary property name here, with no say in what a value
-    // is. These pin that at each of the shapes it can be carried on, because a
-    // classifier that consulted it would let one assignment --
-    // `Array.prototype.toJSON`, an own key on a record -- redirect values
-    // wholesale.
     describe("`toJSON()` is intentionally not supported", () => {
+      // `toJSON` is an ordinary property name here, with no say in what a value
+      // is. These pin that at each of the shapes it can be carried on, because a
+      // classifier that consulted it would let one assignment --
+      // `Array.prototype.toJSON`, an own key on a record -- redirect values
+      // wholesale.
       it("returns `Object` tag for a plain object carrying `toJSON()`", () => {
         expect(tagFromNativeValue({ toJSON: () => "converted" })).toBe(
           NATIVE_TAGS.Object,
