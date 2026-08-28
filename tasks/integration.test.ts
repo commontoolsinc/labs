@@ -370,12 +370,15 @@ function generatedPortOffsets(): number[] {
   return [...offsets].sort((a, b) => a - b);
 }
 
+//
 // A port offset shifts every dev server together, and the servers bind whatever
 // port arithmetic lands on. Browsers and Deno's `fetch` both refuse to open a
 // connection to a port on the WHATWG bad-port list, so an offset that lands a
 // server on one produces a server that starts, passes a curl health check, and
 // that nothing in a test can reach: every browser navigation gets an error page
 // and every server-to-server proxy hop fails.
+//
+
 Deno.test("no generated port offset lands a server on a blocked port", () => {
   const blocked = new Set(ports.blockedPorts);
   const offenders: string[] = [];
@@ -395,11 +398,12 @@ Deno.test("generated port offsets span the documented range", () => {
   assertEquals(offsets[offsets.length - 1], GENERATED_PORT_OFFSET_RANGE.last);
 });
 
-// Keeps the recorded list honest against the runtime that enforces it. A
-// blocked port is rejected before any connection is opened, so pointing these
-// probes at a host that cannot resolve reaches no network service: the blocked
-// answer arrives first, and any other port would fail on the name instead.
 Deno.test("every recorded blocked port is one fetch refuses", async () => {
+  // Keeps the recorded list honest against the runtime that enforces it. A
+  // blocked port is rejected before any connection is opened, so pointing these
+  // probes at a host that cannot resolve reaches no network service: the
+  // blocked answer arrives first, and any other port would fail on the name
+  // instead.
   const stillBlocked: number[] = [];
   for (const port of ports.blockedPorts) {
     try {

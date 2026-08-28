@@ -330,8 +330,10 @@ Deno.test("collectDrift reports a package that declares no exports", () => {
   assert(drift[0].message.includes("has no root export"));
 });
 
+//
 // The tests below drive the command entry point over temp git fixtures, so they
 // cover the clean and drift paths without depending on the real tree.
+//
 
 Deno.test("main reports success and returns 0 on a clean repo", async () => {
   const root = await fixtureRepo(fixtureFiles(
@@ -503,9 +505,9 @@ Deno.test("the script runs as a command over the real repo", async () => {
   );
 });
 
-// Runs against the real repository: every fact every covered document cites
-// must resolve.
 Deno.test("every cited path and specifier resolves", async () => {
+  // Runs against the real repository: every fact every covered document cites
+  // must resolve.
   const root = fromFileUrl(new URL("..", import.meta.url));
   const tree = await readTree(root);
   const docs = await readSkillDocs(root, tree);
@@ -520,9 +522,12 @@ Deno.test("every cited path and specifier resolves", async () => {
   );
 });
 
+//
 // The three kinds of document this covers are named by different conventions,
 // so each is pinned: a rename that drops one from the scan would otherwise be
 // invisible.
+//
+
 Deno.test("the scan covers skills, AGENTS.md guides, and rules", async () => {
   const root = fromFileUrl(new URL("..", import.meta.url));
   const tree = await readTree(root);

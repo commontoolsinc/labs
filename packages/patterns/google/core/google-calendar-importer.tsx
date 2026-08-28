@@ -403,8 +403,7 @@ const toggleDebugMode = handler<
   { settings: Writable<Settings> }
 >(
   ({ target }, { settings }) => {
-    const current = settings.get();
-    settings.set({ ...current, debugMode: target.checked });
+    settings.update({ debugMode: target.checked });
   },
 );
 

@@ -3166,6 +3166,11 @@ describe("runtime-processor", () => {
       commitResult: { ok?: object; error?: { message: string } } = { ok: {} },
       commitFailure?: Error,
     ) => {
+      const calls: Array<{
+        cell: unknown;
+        value: unknown;
+        options: { blind: boolean; supersedeKey?: string };
+      }> = [];
       let prepared = false;
       const tx = {
         commit: () => {
@@ -3175,27 +3180,23 @@ describe("runtime-processor", () => {
         },
       };
       const cellWithTx = {
-        set: (value: unknown) => {
-          expect(value).toBe("new value");
-        },
         push: (...values: unknown[]) => {
           expect(values).toEqual(["new value"]);
         },
         send: (value: unknown) => {
           expect(value).toBe("new value");
         },
-        // A blind `set` resolves the write target to thread its parent as the
-        // structural precondition (see applyCellWrite).
-        resolveAsCell: () => ({
-          getAsNormalizedFullLink: () => ({
-            id: ref.id,
-            space: ref.space,
-            scope: ref.scope,
-            path: ref.path,
-          }),
-        }),
+      };
+      const resolvedCell = {
+        marker: "resolved-cell",
+        withTx: (candidateTx: unknown) => {
+          expect(candidateTx).toBe(tx);
+          return cellWithTx;
+        },
       };
       return {
+        calls,
+        resolvedCell,
         processor: Object.assign(Object.create(RuntimeProcessor.prototype), {
           runtime: {
             edit: () => tx,
@@ -3205,26 +3206,44 @@ describe("runtime-processor", () => {
             },
             getCellFromLink: (candidate: unknown) => {
               expect(candidate).toBe(ref);
-              return {
-                withTx: (candidateTx: unknown) => {
-                  expect(candidateTx).toBe(tx);
-                  return cellWithTx;
-                },
-              };
+              return resolvedCell;
+            },
+            commitUiCellWrite: (
+              cell: unknown,
+              value: unknown,
+              options: { blind: boolean; supersedeKey?: string },
+            ) => {
+              calls.push({ cell, value, options });
+              if (commitFailure) return Promise.reject(commitFailure);
+              return Promise.resolve(commitResult);
             },
           },
         }) as RuntimeProcessor,
       };
     };
 
-    it("prepares cell set transactions before committing", async () => {
-      const { processor } = createProcessor();
+    it("routes a cell set through the blind supersede lane", () => {
+      const { processor, calls, resolvedCell } = createProcessor();
 
-      await RuntimeProcessor.prototype.handleCellSet.call(processor, {
+      RuntimeProcessor.prototype.handleCellSet.call(processor, {
         type: RequestType.CellSet,
         cell: ref,
         value: "new value",
       });
+
+      expect(calls).toEqual([{
+        cell: resolvedCell,
+        value: "new value",
+        options: {
+          blind: true,
+          supersedeKey: JSON.stringify([
+            ref.space,
+            ref.id,
+            ref.scope,
+            ref.path,
+          ]),
+        },
+      }]);
     });
 
     it("prepares mergeable cell append transactions before committing", async () => {
@@ -3319,7 +3338,6 @@ describe("runtime-processor", () => {
         await Promise.resolve();
 
         expect(calls.map(([message]) => message)).toEqual([
-          "[RuntimeProcessor] Cell set commit failed:",
           "[RuntimeProcessor] Cell push commit failed:",
           "[RuntimeProcessor] Cell send commit failed:",
         ]);

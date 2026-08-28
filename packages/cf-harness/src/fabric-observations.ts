@@ -20,6 +20,7 @@
 
 import type { Runtime } from "@commonfabric/runner";
 import { RuntimeTelemetryEvent } from "@commonfabric/runner";
+import type { CfcRefusalDetail } from "@commonfabric/runner/cfc";
 import { hashStringForEntityAddress } from "@commonfabric/runner/entity-kind";
 
 export interface FabricActionErrorRecord {
@@ -31,6 +32,14 @@ export interface FabricActionErrorRecord {
    * (`CfcCommitRefusalError`) from a thrown computation (`Error`). */
   name: string;
   message: string;
+
+  /**
+   * The structured refusals behind a `CfcCommitRefusalError`, as the commit
+   * boundary minted them: which gate refused, the atoms outside it, and the
+   * reads that carried them. Absent for every other error, and for a refusal
+   * the boundary described only in prose.
+   */
+  refusals?: readonly CfcRefusalDetail[];
 }
 
 export interface FabricDeferredActionRecord {
@@ -114,12 +123,15 @@ export const fabricRuntimeObservations = (
     if (pieceHash === undefined) {
       return;
     }
+    const refusals =
+      (error as { refusals?: readonly CfcRefusalDetail[] }).refusals;
     push(errors, {
       sequence: ++sequence,
       pieceId: pieceHash,
       patternId: typeof error.patternId === "string" ? error.patternId : "",
       name: error.name,
       message: error.message,
+      ...(Array.isArray(refusals) ? { refusals } : {}),
     });
   });
   runtime.telemetry.addEventListener("telemetry", (event) => {

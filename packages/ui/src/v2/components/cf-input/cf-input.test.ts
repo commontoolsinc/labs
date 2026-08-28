@@ -3,12 +3,14 @@ import { expect } from "@std/expect";
 import { createMockCellHandle } from "../../test-utils/mock-cell-handle.ts";
 import { CFInput, INPUT_PATTERNS } from "./index.ts";
 
+//
 // NOTE: Full DOM interaction tests (input events, Cell two-way binding,
 // timing strategy integration, validation UI) require Lit's rendering
 // pipeline and shadow DOM, which aren't available in Deno's headless
 // test runner. The tests below cover property defaults, validation
 // patterns, Cell property acceptance, and basic configuration.
 // For full integration tests, use a browser-based test harness.
+//
 
 describe("CFInput", () => {
   it("should be defined", () => {

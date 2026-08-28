@@ -217,11 +217,11 @@ Deno.test("diff semantics: no in-workspace root file means no service (not a fai
   assertEquals(sem, undefined);
 });
 
-// lazyProgram is the shared build/cache/latch both factories use. The
-// configured host never makes it fail, so its failure isolation is exercised
-// directly: a build is cached after the first success, and a throwing or
-// program-less build latches so it is not retried.
 Deno.test("lazyProgram: caches a success and latches a failed build", () => {
+  // lazyProgram is the shared build/cache/latch both factories use. The
+  // configured host never makes it fail, so its failure isolation is exercised
+  // directly: a build is cached after the first success, and a throwing or
+  // program-less build latches so it is not retried.
   const fake = {} as unknown as ts.Program;
 
   let okCalls = 0;
@@ -252,9 +252,12 @@ Deno.test("lazyProgram: caches a success and latches a failed build", () => {
   assertEquals(nullCalls, 1, "a program-less build latches and is not retried");
 });
 
+//
 // makeHost's readReal memoizes real-file reads. Under the pager's module
 // resolution TypeScript reads each file once, so the cache hit never fires
 // there; reading the same path twice through the host exercises it directly.
+//
+
 Deno.test("makeHost: a repeated read of the same file is served from the cache", () => {
   const dir = Deno.makeTempDirSync();
   try {

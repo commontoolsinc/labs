@@ -127,10 +127,9 @@ describe("a list projection survives its input emptying", () => {
   });
 });
 
-// Two managers over one in-process server, so a commit on one can conflict with
-// a commit on the other.
-
 describe("a cross-replica conflict settles", () => {
+  // Two managers over one in-process server, so a commit on one can conflict
+  // with a commit on the other.
   let server: MemoryV2Server.Server;
   let storageA: EmulatedStorageManager;
   let storageB: EmulatedStorageManager;

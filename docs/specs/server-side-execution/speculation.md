@@ -53,7 +53,14 @@ half of Phase 3. Assumes [README.md](README.md) §3.2 and
   identity — a session-blind recomputation would misread "inputs
   changed" for every such node.
 - `navigate-to`: may enact optimistically (protocol.md §5) — navigation
-  is reversible. The overlay records the nonce it acted on.
+  is reversible. The overlay records the nonce it acted on. When the
+  AUTHORITATIVE run's branch computes NO navigation (a speculative read
+  diverged — the 2026-08-27 r06/r09 root cause, register OW45), the
+  optimistic enactment STANDS: ruled PUNT (owner, 2026-08-27) — the
+  client navigates, so be it. Nonce reconciliation covers only the
+  intent-arrives case; no withdrawal mechanism exists, and consumers
+  (tests included) must be robust to the view resting where the
+  speculative branch left it.
 - Child-piece instantiation (builtins.md §3): result-as-pattern
   children MAY instantiate speculatively, overlay-local (owner,
   2026-08-02 — reversing the earlier no-children rule). Child ids

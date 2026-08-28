@@ -20,12 +20,13 @@ type StoredEntry = {
   origin?: string;
 };
 
-// The Vouched Ingest Channel split-mint: a builtin-authored ExternalIngest
-// provenance mark, derived only from the verified channel metadata stamped on
-// the tx, that survives the runtime-minted gate while a copy smuggled into the
-// payload is stripped. The toolshed/operator runtime runs CFC *disabled*, so
-// the headline case proves the mark is still minted there.
 describe("CFC external-ingest provenance mint (split-mint)", () => {
+  // The Vouched Ingest Channel split-mint: a builtin-authored ExternalIngest
+  // provenance mark, derived only from the verified channel metadata stamped on
+  // the tx, that survives the runtime-minted gate while a copy smuggled into
+  // the payload is stripped. The toolshed/operator runtime runs CFC *disabled*,
+  // so the headline case proves the mark is still minted there.
+
   const makeRuntime = (
     overrides: {
       cfcEnforcementMode?: string;

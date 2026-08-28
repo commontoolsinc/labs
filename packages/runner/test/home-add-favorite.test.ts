@@ -20,11 +20,12 @@ type FavoriteEntry = {
   id?: string;
 };
 
-// Compiles and runs the real home pattern, then drives its addFavorite /
-// removeFavorite handlers the way the runtime client does: it derives the
-// piece's stable key and the discovery tags as data, and the handlers key the
-// favorite entity by that id.
 describe("home favorites handlers", () => {
+  // Compiles and runs the real home pattern, then drives its addFavorite /
+  // removeFavorite handlers the way the runtime client does: it derives the
+  // piece's stable key and the discovery tags as data, and the handlers key the
+  // favorite entity by that id.
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;

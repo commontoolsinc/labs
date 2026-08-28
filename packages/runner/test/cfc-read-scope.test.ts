@@ -78,12 +78,13 @@ const seedRecord = async (runtime: Runtime, name: string) => {
   expect((await seed.commit()).ok).toBeDefined();
 };
 
-// The flow join quantifies over what a transaction actually read. A labelled
-// leaf taints a read of itself or of any ancestor, and must not taint a read
-// of a sibling leaf — otherwise a computation that deliberately avoids a
-// confidential field could not prove so by its read set, and strict mode
-// would refuse the untainted aggregate along with the leak.
 describe("CFC flow-join read scope", () => {
+  // The flow join quantifies over what a transaction actually read. A labelled
+  // leaf taints a read of itself or of any ancestor, and must not taint a read
+  // of a sibling leaf — otherwise a computation that deliberately avoids a
+  // confidential field could not prove so by its read set, and strict mode
+  // would refuse the untainted aggregate along with the leak.
+
   it("does not taint a sibling-leaf read with a labelled descendant elsewhere", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = newRuntime(storageManager);

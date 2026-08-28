@@ -27,8 +27,8 @@ import { newSharedServer } from "./memory-v2-test-utils.ts";
 const signer = await Identity.fromPassphrase("linked-stale-read-strand");
 const space = signer.did();
 
-// Two StorageManagers sharing ONE real server, each with its own replicas.
 describe("stale linked read across two clients", () => {
+  // Two StorageManagers sharing ONE real server, each with its own replicas.
   let server: MemoryV2Server.Server;
   let storageA: EmulatedStorageManager;
   let storageB: EmulatedStorageManager;

@@ -458,9 +458,12 @@ Deno.test("runTests reports a failure when every member is disabled", async () =
   }
 });
 
+//
 // The runner reads each member's manifest to decide whether an appended
 // --junit-path reaches its `deno test` whole, so an ordinary new package is
 // covered without being named anywhere.
+//
+
 Deno.test("acceptsJUnitPath reads an ordinary test task", () => {
   assertEquals(acceptsJUnitPath("./packages/x", "deno test"), true);
   assertEquals(

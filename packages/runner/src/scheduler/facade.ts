@@ -1004,8 +1004,12 @@ export class Scheduler {
    * node-level preflight (`collectInvalidUpstreamForLog`) asks only
    * whether the NODE is invalid, so the actor's own per-user derivation
    * was never materialized and her handler read an empty instance —
-   * refused as a schema mismatch and marked consequenced with no error
-   * (silent event loss). This is the arrival re-arm applied to the
+   * refused as a schema mismatch and, until the mark/effects-atomicity
+   * fix (events.ts's finalize withdrawal, RULED 2026-08-27), sealed
+   * consequenced with no error: silent event loss. A skipped served
+   * dispatch now withdraws and re-drains, so a miss here costs a
+   * deferral cycle rather than the event — this preflight remains what
+   * makes the FIRST delivery succeed. This is the arrival re-arm applied to the
    * event's transient demander (already folded into the demanders by
    * `transientEventDemandersFor`, pinned by (j)): mark the node invalid
    * KEEPING the sibling instances clean, so its next run derives the

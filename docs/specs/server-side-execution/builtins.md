@@ -37,6 +37,27 @@ hit ⇒ stored result is the value; miss ⇒ outbox; result + key in one
 derived commit; error results advance the same way; in-flight dedupe by
 key; client speculation reads through (speculation.md §2).
 
+A request reaches the outbox only if the commit that staged it succeeds. A
+rejected commit clears the outbox, so nothing is sent and no receipt stands for
+a request that never ran, and the action is attempted again. When the scheduler
+stops attempting it, the transaction is abandoned and the builtin settles its
+result with the refusal as its error, recording the request hash so the same
+request is not staged afresh. `enqueueSinkRequestPostCommitEffect` carries that
+as its `onRejected` hook, and every builtin on this table settles through it:
+`llm` and its two siblings, `fetch`, `fetch-program`, `llm-dialog` and
+`stream-data`. `sqlite*` reaches the same ending without the seam, giving its
+effect an `abandon` directly, because it enqueues that effect by hand rather
+than as a sink request.
+
+The settled shape differs by builtin, and each writes what its own result
+surface reads: an error beside a pending flag for `fetch` and `stream-data`, an
+`error` cache entry for `fetch-program`, a settled `QueryState` for `sqlite*`.
+`llm-dialog` is the one that settles by leaving the conversation alone: the
+turn's user message, pending flag and request id all rode the abandoned
+transaction, so an assistant error message would answer a turn no reader can
+see. It takes the pending flag down and re-announces, and the refusal is
+reported rather than written into the conversation.
+
 | built-in | request inputs (memo key basis) | result cell | authority | notes |
 | --- | --- | --- | --- | --- |
 | `fetch` (`fetchData`) | url, method, headers (allowlisted), body, response schema | `{ result?, error?, pending, requestHash }` — today the hash lives in an internal cell `{requestId, lastActivity, inputHash}` (`fetch.ts:427-472`); the "migrate it onto the result doc" move was DEFERRED at stage G (deliberate): the internal-cell hash is functionally equivalent committed state (T10.Q1 — §4's memo rule reads it the same), and the migration is an OFF-arm cell-shape change, so it waits for an OFF-arm ruling batch that wants it (plausibly never) | capability handle bound at wiring (README §3.8) | redirects/deadlines per existing `fetch-request-deadlines` doc; today's outbox id `` `${kind.name}:${inputHash}` `` is the memo+outbox-dedupe precedent |

@@ -5,11 +5,12 @@ import { PageHandle } from "@/page-handle.ts";
 import { $conn, type RuntimeClient } from "@/runtime-client.ts";
 import { type CellRef, RequestType } from "@/protocol/mod.ts";
 
-// Federation PR2: PageHandle.start/stop carry their cell's space so a
-// handle for a foreign-space page routes to that space's piece context
-// (a home-space handle carries the home space, which resolves to the
-// same context as the no-space form).
 describe("PageHandle start/stop space threading", () => {
+  // Federation PR2: PageHandle.start/stop carry their cell's space so a handle
+  // for a foreign-space page routes to that space's piece context (a home-space
+  // handle carries the home space, which resolves to the same context as the
+  // no-space form).
+
   const space = "did:key:z6Mk-page-handle-space" as DID;
 
   function makeHandle() {

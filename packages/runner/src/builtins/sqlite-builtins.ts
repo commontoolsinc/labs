@@ -21,6 +21,7 @@
 
 import type { CfcAtom } from "@commonfabric/api/cfc";
 import { parseLink } from "../link-utils.ts";
+import { settleAbandonedRequest } from "./abandoned-request.ts";
 import {
   computeRowLabelRead,
   resolveCeilingPlaceholders,
@@ -949,6 +950,42 @@ export function sqliteQuery(
       id: `sqliteQuery:${hash}`,
       idempotencyKey: effectKey,
       kind: "sqlite-query",
+      // The claim above rides this transaction, and so does this effect. When
+      // the scheduler stops attempting the commit neither landed and no read
+      // is coming, so a reader of the claim would wait on a query nobody is
+      // running.
+      abandon: (rejection) => {
+        runtime.trackAsyncWork(
+          settleAbandonedRequest(
+            runtime,
+            "sqliteQuery",
+            effectKey,
+            (settleTx) => {
+              sendResult(settleTx, result);
+              // Read the stored claim at write time: a newer request commits
+              // its own hash, and from then on the result is that request's
+              // to write, exactly as `failQuery` decides it.
+              const stored = result.withTx(settleTx).get();
+              if (
+                stored?.requestHash !== undefined && stored.requestHash !== hash
+              ) {
+                return;
+              }
+              result.withTx(settleTx).set({
+                pending: false,
+                error: (rejection as { message?: string })?.message,
+                requestHash: hash,
+              });
+            },
+          ),
+          parentCell,
+        );
+      },
+      // The flush awaits the query and its writeback, so the transaction's own
+      // commit promise spans them and the scheduler registers that promise for
+      // every commit carrying post-commit effects. Nothing here is handed to
+      // `trackAsyncWork` for that reason; the abandonment settle above is
+      // separate work with its own completion, and is registered.
       async flush() {
         inFlightIssues.add(hash);
         // The requesting RUN's identity, applied to every writeback

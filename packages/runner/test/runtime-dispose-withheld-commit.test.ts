@@ -51,13 +51,14 @@ function makeServer(): MemoryV2Server.Server {
   });
 }
 
-// runtime.dispose() tears down storage as part of shutdown. Storage teardown
-// used to flush in-flight commits — awaiting their confirmation — BEFORE closing
-// the client that would settle them. A commit whose response is withheld past
-// dispose never confirms on its own, so that pre-teardown flush deadlocked, and
-// dispose() hung. Teardown must reject in-flight commits (the way it already
-// rejects in-flight reads) rather than wait on a response that may never come.
 Deno.test("runtime.dispose() resolves while a commit is withheld in flight", async () => {
+  // runtime.dispose() tears down storage as part of shutdown. Storage teardown
+  // used to flush in-flight commits — awaiting their confirmation — BEFORE
+  // closing the client that would settle them. A commit whose response is
+  // withheld past dispose never confirms on its own, so that pre-teardown flush
+  // deadlocked, and dispose() hung. Teardown must reject in-flight commits (the
+  // way it already rejects in-flight reads) rather than wait on a response that
+  // may never come.
   const signer = await Identity.fromPassphrase(
     "runtime-dispose-withheld-commit",
   );

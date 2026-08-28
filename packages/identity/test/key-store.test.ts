@@ -16,10 +16,13 @@ Deno.test("KeyStore can store and recover keys", async () => {
   assert(recovered && did === recovered.verifier.did());
 });
 
+//
 // The two arms are stored differently -- bytes for one, `CryptoKey` handles
 // for the other -- and each names its own implementation, so a recovered key
 // that arrived through the wrong arm would sign as a different implementation
 // than it was stored as.
+//
+
 Deno.test("KeyStore recovers a key pair holding material as one", async () => {
   const store = await KeyStore.open("test-key-store-material");
   await store.clear();

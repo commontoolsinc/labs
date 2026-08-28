@@ -21,13 +21,14 @@ const schema = {
   },
 } as const;
 
-// Runner-level coverage for the blind UI-input write path (the runtime-client's
-// handleCellSet / the multi-runtime worker mirror it, but runner's own suite
-// otherwise never marks a tx blind). Drives a blind nested write: mark the tx
-// blind, thread the cell's PARENT as the structural precondition
-// (setBlindStructuralTarget), write, and commit — so buildReads drops the
-// value-equality read and emits the nonRecursive structural read at the parent.
 Deno.test("a blind UI-input write threads a structural precondition at the cell's parent", async () => {
+  // Runner-level coverage for the blind UI-input write path (the
+  // runtime-client's handleCellSet / the multi-runtime worker mirror it, but
+  // runner's own suite otherwise never marks a tx blind). Drives a blind nested
+  // write: mark the tx blind, thread the cell's PARENT as the structural
+  // precondition (setBlindStructuralTarget), write, and commit — so buildReads
+  // drops the value-equality read and emits the nonRecursive structural read at
+  // the parent.
   const storageManager = StorageManager.emulate({ as: signer });
   const runtime = new Runtime({
     apiUrl: new URL(import.meta.url),

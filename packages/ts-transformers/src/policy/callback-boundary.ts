@@ -9,6 +9,7 @@ import {
   isCollectingPlainArrayMethodCallback,
 } from "../ast/call-kind.ts";
 import { isEventHandlerJsxAttribute } from "../ast/event-handlers.ts";
+import { outermostTransparentWrapper } from "../utils/expression.ts";
 
 export interface CallbackBoundaryLookup {
   isArrayMethodCallback(node: ts.Node): boolean;
@@ -140,7 +141,9 @@ export function classifyCallbackBoundary(
   checker: ts.TypeChecker,
   lookup?: CallbackBoundaryLookup,
 ): CallbackBoundaryDecision {
-  const jsxParent = callback.parent;
+  // The attribute holds the outermost wrapper around the callback, so the
+  // JSX lookup starts from the usage site rather than the callback itself.
+  const jsxParent = outermostTransparentWrapper(callback).parent;
   if (
     ts.isJsxExpression(jsxParent) &&
     ts.isJsxAttribute(jsxParent.parent) &&

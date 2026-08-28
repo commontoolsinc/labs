@@ -62,8 +62,6 @@ import {
   isCell,
   isCellResult,
   markDurableReadTx,
-  markRendererInputTx,
-  markUiInputBlindWriteTx,
   normalizeSpaceHost,
   PatternCoverageCollector,
   popFrame,
@@ -73,11 +71,9 @@ import {
   runtimePresets,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
-  setBlindStructuralTarget,
   setPatternEnvironment,
   type SigilLink,
   SpaceHostValidationError,
-  unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
 import type { RuntimeOptions } from "@commonfabric/runner";
 import {
@@ -1130,7 +1126,12 @@ export class RuntimeProcessor {
   handleCellSet(request: CellSetRequest): void | Promise<void> {
     const commit = this.applyCellSet(request);
     if (request.awaitCommit) return this.requireCellCommit(commit);
-    this.observeCellCommit(commit, "set");
+    void commit.catch((error) => {
+      console.error(
+        "[RuntimeProcessor] Cell set commit failed:",
+        error,
+      );
+    });
   }
 
   handleCellPush(request: CellPushRequest): void | Promise<void> {
@@ -1375,34 +1376,17 @@ export class RuntimeProcessor {
     };
   }
 
-  // A CellSet's reads carry no value-equality precondition, so a UI overwrite
-  // is last-write-wins. In their place we thread ONE structural precondition —
-  // the cell's PARENT address — which catches a concurrent whole-doc delete or
-  // ancestor reshape without conflicting on the cell's own value.
+  // A CellSet is the blind, last-write-wins arm. Runtime.commitUiCellWrite owns
+  // its structural precondition, retry policy, and per-address supersede lane.
+  // Ordinary UI writes remain fire-and-forget, while strict capability writes
+  // can await the same outcome through handleCellSet.
   applyCellSet(request: CellSetRequest) {
-    const tx = this.runtime.edit();
     const cell = getCell(this.runtime, request.cell);
     const value = mapCellRefsToSigilLinks(request.value);
-    markUiInputBlindWriteTx(tx);
-    // Renderer-input provenance that survives to commit, so the scheduler can
-    // shape the resulting subscriber wake (timing side-channel mitigation,
-    // channels 4/5). A blind write is exactly a renderer `$value` input write.
-    markRendererInputTx(tx);
-    // The resolved storage address of the write target; its parent is the
-    // structural existence/shape precondition for the blind write.
-    const link = cell.withTx(tx).resolveAsCell().getAsNormalizedFullLink();
-    setBlindStructuralTarget(tx, {
-      id: link.id,
-      space: link.space,
-      scope: link.scope,
-      path: link.path.slice(0, -1),
+    return this.runtime.commitUiCellWrite(cell, value, {
+      blind: true,
+      supersedeKey: this.operationSessionKey(request.cell),
     });
-    cell.withTx(tx).set(value);
-    unmarkUiInputBlindWriteTx(tx);
-    this.runtime.prepareTxForCommit(tx);
-    // Local visibility is established by commit(). Ordinary UI writes retain
-    // fire-and-forget latency; capability writes can await this same promise.
-    return tx.commit();
   }
 
   handleCellSend(request: CellSendRequest): void | Promise<void> {

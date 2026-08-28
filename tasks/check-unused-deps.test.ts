@@ -36,9 +36,11 @@ Deno.test("importsAlias matches a dynamic import", () => {
   assert(importsAlias('await import("dagre");', "dagre"));
 });
 
+//
 // These next few pin the specifier shapes that the matcher must keep handling:
 // dropping the `\s*` or an alternative from the lead would reintroduce a false
 // positive on ordinary code, yet leave the happy-path tests above green.
+//
 
 Deno.test("importsAlias matches an import broken across lines", () => {
   const source = [
@@ -89,9 +91,11 @@ Deno.test("importsAlias matches a @deno-types companion comment", () => {
   assert(importsAlias(source, "@types/d3-scale"));
 });
 
+//
 // `@ts-types` is Deno's current spelling of the companion-type comment; the
 // older `@deno-types` above still works and both must be recognized, or an
 // `@types/*` alias reached through the current form would be reported unused.
+//
 
 Deno.test("importsAlias matches a @ts-types companion comment", () => {
   const source = [
@@ -145,10 +149,10 @@ Deno.test("importsAlias ignores a substring of a different specifier", () => {
   );
 });
 
-// The loose matching is deliberate: an occurrence inside a comment or string
-// counts as used. That can only ever hide a dead alias, never flag a live one,
-// so the check does not misfire on a real dependency.
 Deno.test("importsAlias counts a commented-out import as used", () => {
+  // The loose matching is deliberate: an occurrence inside a comment or string
+  // counts as used. That can only ever hide a dead alias, never flag a live
+  // one, so the check does not misfire on a real dependency.
   assert(importsAlias('// import { x } from "zod";', "zod"));
 });
 

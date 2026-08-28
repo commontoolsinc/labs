@@ -34,6 +34,30 @@ describe("data flow analyzer", () => {
     );
   });
 
+  // A transparent wrapper is analyzed as the expression it wraps, so the hint
+  // the inner analysis produced reaches the caller. A spelling not named there
+  // falls to the generic child walk, which merges through `mergeAnalyses` and
+  // hardcodes `rewriteHint: undefined` — the hint is lost silently.
+  for (
+    const [name, wrap] of Object.entries({
+      parenthesized: (inner: string) => `(${inner})`,
+      "as-cast": (inner: string) => `(${inner}) as never`,
+      satisfies: (inner: string) => `(${inner}) satisfies unknown`,
+      "non-null": (inner: string) => `(${inner})!`,
+    })
+  ) {
+    it(`keeps the ifElse hint through a ${name} wrapper`, () => {
+      const { analysis } = analyzeExpression(
+        wrap("ifElse(state.count > 3, 'hi', 'bye')"),
+      );
+
+      assert(
+        analysis.rewriteHint && analysis.rewriteHint.kind === "call-if-else",
+      );
+      assertEquals(analysis.rewriteHint.predicate.getText(), "state.count > 3");
+    });
+  }
+
   it("identifies array map calls that should skip wrapping", () => {
     const { analysis } = analyzeExpression(
       "state.items.map(item => item + state.count)",

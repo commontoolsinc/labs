@@ -9,11 +9,11 @@ import type { RuntimeProgram } from "../src/harness/types.ts";
 const signer = await Identity.fromPassphrase("resume-by-identity");
 const space = signer.did();
 
-// End-to-end step 3: a result cell records the content-addressed
-// {identity, symbol} pattern reference at setup; a fresh runtime resuming that
-// result cell from storage loads the pattern straight from the compiled cache
-// BY IDENTITY (no TS source pulled, no meta-cell roundtrip), and re-runs it.
 describe("resume a result cell by {identity, symbol}", () => {
+  // End-to-end step 3: a result cell records the content-addressed {identity,
+  // symbol} pattern reference at setup; a fresh runtime resuming that result
+  // cell from storage loads the pattern straight from the compiled cache BY
+  // IDENTITY (no TS source pulled, no meta-cell roundtrip), and re-runs it.
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
   const RESULT_CAUSE = "resume-by-identity result cell";

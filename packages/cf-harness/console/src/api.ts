@@ -15,10 +15,22 @@ import type {
   PatternIndexSearchResponse,
 } from "../../src/pattern-index/client.ts";
 import type { ConsoleRunDetail } from "../run-store.ts";
+import type {
+  ConsoleGraph,
+  ConsoleGraphEdge,
+  ConsoleGraphNode,
+} from "../graph.ts";
+import type { ConsoleFlow, ConsoleFlowCell, ConsoleFlowNode } from "../flow.ts";
 import type { ConsoleRunSummary } from "../runs.ts";
 import type { ConsoleSessionSummary } from "../sessions.ts";
 
 export type {
+  ConsoleFlow,
+  ConsoleFlowCell,
+  ConsoleFlowNode,
+  ConsoleGraph,
+  ConsoleGraphEdge,
+  ConsoleGraphNode,
   ConsoleRunDetail,
   ConsoleRunSummary,
   ConsoleSessionSummary,
@@ -108,6 +120,22 @@ export const listRuns = async (): Promise<readonly ConsoleRunSummary[]> =>
 export const readRun = async (runId: string): Promise<ConsoleRunDetail> =>
   await json<ConsoleRunDetail>(
     await fetch(`/api/runs/${encodeURIComponent(runId)}`),
+  );
+
+/**
+ * The data-flow graph of a run and the children beneath it. Its own request
+ * rather than a field of the run, because it reads every descendant's
+ * artifacts and the timeline re-reads the run on every completed tool call.
+ */
+export const readRunGraph = async (runId: string): Promise<ConsoleGraph> =>
+  await json<ConsoleGraph>(
+    await fetch(`/api/runs/${encodeURIComponent(runId)}/graph`),
+  );
+
+/** The conversation map of a run and the children beneath it. */
+export const readRunFlow = async (runId: string): Promise<ConsoleFlow> =>
+  await json<ConsoleFlow>(
+    await fetch(`/api/runs/${encodeURIComponent(runId)}/flow`),
   );
 
 /**

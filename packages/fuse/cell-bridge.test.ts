@@ -3597,12 +3597,15 @@ Deno.test("CellBridge.addPieceToSpace assigns -2 suffix on name collision", asyn
   assertEquals(tree.lookup(state.piecesIno, "My-Note-2") !== undefined, true);
 });
 
+//
 // Regression: on a cold runtime the piece list doesn't load the linked piece
 // docs, so a synchronous piece.name() read returns undefined until the NAME
 // doc is synced. addPieceToSpace must await that sync before choosing the
 // directory name — otherwise the piece mounts under the opaque id-derived
 // fallback name, permanently if no later change event fires (CI fuse-exec
 // "Timed out waiting for path: pieces/Fuse-Exec-Fixture").
+//
+
 Deno.test("CellBridge.addPieceToSpace syncs a late-loading name before naming the directory", async () => {
   const tree = new FsTree();
   const bridge = new CellBridge(tree, "/tmp/cf-exec");
