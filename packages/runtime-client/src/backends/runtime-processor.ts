@@ -1291,10 +1291,14 @@ export class RuntimeProcessor {
     //
     // Local visibility is established by the first commit attempt; the
     // returned promise tracks remote confirmation, retries, and the loss
-    // report, and must not block cell IPC.
+    // report, and must not block cell IPC. Only BLIND writes join a
+    // supersede lane: a CAS push carries a read-modify-write premise its
+    // lane-mates must never overwrite (cubic P2 on #6477).
     void this.runtime.commitUiCellWrite(cell, value, {
       blind,
-      supersedeKey: this.operationSessionKey(request.cell),
+      ...(blind
+        ? { supersedeKey: this.operationSessionKey(request.cell) }
+        : {}),
     });
   }
 

@@ -2575,8 +2575,14 @@ export class Runtime {
    *   caught-up state ("the retry's write carries its true version" —
    *   {@link awaitCommitRetryReadiness}).
    * - `blind: false` is the CAS class (`CellHandle.push`): the value was
-   *   resolved by the caller and the value-equality reads stay in place, so
-   *   re-running against fresh state is ordinary compare-and-set retry.
+   *   resolved by the caller (read-modify-write on the main thread) and
+   *   the value-equality reads stay in place. A conflicted CAS write takes
+   *   ONE attempt and surfaces the loss loudly — re-running `set` with the
+   *   same already-resolved value against fresh state could erase an
+   *   intervening writer's append (cubic/codex P1 on #6477); the modify
+   *   step is not re-runnable here, so retrying is the caller's decision.
+   *   CAS writes also never join a supersede lane: a blind set's retry
+   *   must never write a push's resolved value or vice versa.
    * - `supersedeKey` makes writes to one UI control one LANE, and each
    *   attempt writes the lane's NEWEST requested value rather than the
    *   value this call was issued with. That closes both failure shapes at
@@ -2606,7 +2612,7 @@ export class Runtime {
   > {
     const { blind, supersedeKey } = options;
     let lane: { value: unknown; inFlight: number } | undefined;
-    if (supersedeKey !== undefined) {
+    if (blind && supersedeKey !== undefined) {
       lane = this.#uiWriteLanes.get(supersedeKey);
       if (lane === undefined) {
         lane = { value, inFlight: 0 };
@@ -2621,6 +2627,7 @@ export class Runtime {
     try {
       const result = await this.editWithRetry<"committed">(
         (tx) => {
+          // (retry budget: blind writes only — see the CAS bullet above.)
           // Per attempt: write the lane's NEWEST requested value (see the
           // supersedeKey semantics above). Without a lane, this call's own
           // value.
@@ -2648,6 +2655,7 @@ export class Runtime {
           if (blind) unmarkUiInputBlindWriteTx(tx);
           return "committed";
         },
+        blind ? DEFAULT_MAX_RETRIES : 0,
       );
       if (result.error !== undefined) {
         uiCellWriteLogger.error("lost", () => [
@@ -2666,7 +2674,7 @@ export class Runtime {
       }
       return { ok: "committed" };
     } finally {
-      if (supersedeKey !== undefined && lane !== undefined) {
+      if (blind && supersedeKey !== undefined && lane !== undefined) {
         lane.inFlight--;
         if (
           lane.inFlight <= 0 &&

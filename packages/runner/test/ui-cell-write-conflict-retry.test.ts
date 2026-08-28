@@ -289,6 +289,41 @@ describe("UI cell write conflict retry (the :133 stall's consumer seam)", () => 
     expect(leaf.get()).toBe("new");
   });
 
+  it("a conflicted CAS push is NOT retried — the stale read-modify-write premise must not re-commit (cubic/codex P1 on #6477)", async () => {
+    const seed = runtime.edit();
+    const cell = runtime.getCell<Doc>(space, "ui-write-cas", schema, seed);
+    cell.withTx(seed).set({ drafts: { message: "seed" } });
+    const seeded = await seed.commit();
+    expect(seeded.error).toBeUndefined();
+
+    const leaf = cell.key("drafts").key("message");
+    const lostBefore = uiWriteLostCount();
+    const injection = injectConflictOnNextCommits(
+      runtime,
+      1,
+      () => staleReadConflict(),
+    );
+    try {
+      // A push's value embeds a read-modify-write premise resolved on the
+      // main thread; a conflict means that premise is stale, and re-running
+      // `set` with the same resolved value against fresh state could erase
+      // an intervening writer's append. So the CAS class takes ONE attempt:
+      // the conflict surfaces loudly instead of retrying.
+      const outcome = await runtime.commitUiCellWrite(leaf, "stale-cas", {
+        blind: false,
+      });
+      expect(outcome.error?.name).toBe("ConflictError");
+      expect(injection.intercepted()).toBe(1);
+    } finally {
+      injection.restore();
+    }
+    expect(uiWriteLostCount()).toBeGreaterThan(lostBefore);
+    // The stale value never lands — not on the first attempt (rejected) and
+    // not through any retry.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(leaf.get()).toBe("seed");
+  });
+
   it("an exhausted retry budget surfaces the loss loudly instead of silently", async () => {
     const seed = runtime.edit();
     const cell = runtime.getCell<Doc>(space, "ui-write-loss", schema, seed);
