@@ -706,12 +706,42 @@ describe("seed-pattern-index", () => {
       expect(await denoFmtCheck(paths)).toEqual([]);
     });
 
-    it("names an unformatted file the repository would rewrite", async () => {
-      const unformatted = join(
-        REPO_ROOT,
-        "packages/cf-harness/test/support/seed-pattern-index/unformatted.ts",
-      );
-      expect(await denoFmtCheck([unformatted])).toEqual([unformatted]);
+    // Deliberately mixes a formatted file in with the unformatted one, and
+    // asserts BOTH that the offender is named and that the innocent file is
+    // not. Given a single path those two claims coincide with "blame
+    // everything I was given", which is what `denoFmtCheck` falls back to when
+    // it cannot read deno's answer — so a one-file version of this test passes
+    // against a parse that never worked, and passed against a fixture that did
+    // not exist at all.
+    it("names only the unformatted file among several", async () => {
+      // Written outside the repository so the repo's own formatting gates
+      // cannot rewrite the thing under test.
+      const directory = await Deno.makeTempDir();
+      try {
+        const unformatted = join(directory, "unformatted.ts");
+        const formatted = join(directory, "formatted.ts");
+        await Deno.writeTextFile(
+          unformatted,
+          "export const   x   =    {a:1,   b:2}\n",
+        );
+        await Deno.writeTextFile(formatted, "export const y = 1;\n");
+        const named = await denoFmtCheck([formatted, unformatted]);
+        expect(named.length).toBe(1);
+        // deno reports the path it resolved, so compare by what it names.
+        expect(named[0].endsWith("unformatted.ts")).toBe(true);
+      } finally {
+        await Deno.remove(directory, { recursive: true });
+      }
+    });
+
+    // The fallback itself: a non-zero exit deno named no file for is still a
+    // refusal to publish, because seeding on an unreadable answer is the
+    // silence this guard exists to prevent.
+    it("refuses everything it was given when deno names no file", async () => {
+      const directory = await Deno.makeTempDir();
+      await Deno.remove(directory, { recursive: true });
+      const absent = join(directory, "gone.ts");
+      expect(await denoFmtCheck([absent])).toEqual([absent]);
     });
   });
 
