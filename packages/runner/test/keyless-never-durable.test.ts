@@ -1016,6 +1016,71 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
     expect((value as { out?: number })?.out).toBe(1);
   });
 
+  it("a first-ever staging evicted mid-window leaves no tombstone when it fails", async () => {
+    // The delete arm of the same repair: the doc had NO committed pointer
+    // before the failed staging, so there is nothing for the tombstone to
+    // fall back to — it is removed, restoring the doc's designed
+    // zero-evidence verdict. A later different-pattern setup then takes the
+    // fresh-session exemption (no restage), exactly as if the aborted
+    // staging had never happened.
+    storageManager = EmulatedStorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const cell = runtime.getCell<Record<string, unknown>>(
+      space,
+      "tombstone-first-staging-clears",
+    );
+    // Seed the doc with an argument link shape the exemption path expects
+    // (a stored argument written by a plain committed value write).
+    {
+      const seed = runtime.edit();
+      cell.withTx(seed).set({ seeded: true });
+      await seed.commit();
+    }
+
+    // First-EVER keyless staging for this doc (no prior pointer), evicted
+    // inside its own staging window, then failed.
+    const tx = runtime.edit();
+    // deno-lint-ignore no-explicit-any
+    runtime.run(tx, handBuiltPattern() as any, {}, cell);
+    expect(runtime.runner.sessionPatternPointerFor(cell)).toBeDefined();
+    const pointers = (runtime.runner as unknown as {
+      sessionPatternPointers: {
+        set(key: string, value: { identity: string; symbol: string }): void;
+      };
+    }).sessionPatternPointers;
+    for (
+      let i = 0;
+      runtime.runner.sessionPatternPointerFor(cell) !== undefined;
+      i++
+    ) {
+      if (i > 100_000) throw new Error("the pointer never evicted");
+      pointers.set(`first-staging-synthetic/${i}`, {
+        identity: `keyless:churn-${i}`,
+        symbol: "default",
+      });
+    }
+    tx.abort();
+
+    // No tombstone survives: a different keyless pattern's setup reads the
+    // designed zero-evidence state and commits without a restage.
+    const tx2 = runtime.edit();
+    const rerun = runtime.run(
+      tx2,
+      // deno-lint-ignore no-explicit-any
+      { ...handBuiltPattern(), result: { marker: "fresh-after-abort" } } as any,
+      {},
+      cell,
+    );
+    const committed = await tx2.commit();
+    expect(committed.error).toBeUndefined();
+    await rerun.pull();
+    expect(runtime.runner.sessionPatternPointerFor(cell)).toBeDefined();
+    runtime.runner.stop(cell);
+  });
+
   it("the legacy-tolerance diagnostics render under debug logging", async () => {
     // The tolerance arms log LAZILY: their message closures execute only at
     // debug level, so a closure that throws — a renamed field, a bad
