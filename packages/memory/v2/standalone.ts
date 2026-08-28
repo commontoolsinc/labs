@@ -86,6 +86,7 @@ export class StandaloneMemoryServer {
       socket.binaryType = "arraybuffer";
       const connectionTag = nextConnectionTag++;
       let compressionNegotiated = false;
+      let helloReceived = false;
       let sawFirstMessage = false;
       let closed = false;
       const channel = new MemoryMessageCompressionChannel(
@@ -137,9 +138,11 @@ export class StandaloneMemoryServer {
           }
           sawFirstMessage = true;
           const first = MemoryServer.parseClientMessage(frame);
-          compressionNegotiated = first?.type === "hello" &&
-            first.flags.messageCompressionV1 === true &&
-            getMemoryProtocolFlags().messageCompressionV1;
+          if (first?.type === "hello") {
+            helloReceived = true;
+            compressionNegotiated = first.flags.messageCompressionV1 === true &&
+              getMemoryProtocolFlags().messageCompressionV1;
+          }
         } else if (!compressionNegotiated && typeof frame !== "string") {
           socket.close(
             1003,
@@ -151,7 +154,7 @@ export class StandaloneMemoryServer {
         if (closed) return;
         channel.receive(frame, async (payload) => {
           const control = parseMemoryCompressionControlMessage(payload);
-          if (control) {
+          if (control && helloReceived) {
             const enabled = compressionNegotiated && control.enabled;
             channel.setSendCompressionEnabled(enabled);
             channel.send(encodeMemoryCompressionControlMessage({

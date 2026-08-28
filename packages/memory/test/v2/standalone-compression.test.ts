@@ -19,6 +19,38 @@ import {
 import { StandaloneMemoryServer } from "../../v2/standalone.ts";
 
 describe("standalone memory compression", () => {
+  it("requires hello before accepting a compression control", async () => {
+    const server = StandaloneMemoryServer.start();
+    const address = new URL(server.url);
+    address.protocol = "ws:";
+    const socket = new WebSocket(address);
+    socket.binaryType = "arraybuffer";
+    try {
+      await opened(socket);
+      const reply = nextMessage(socket);
+      socket.send(encodeMemoryCompressionControlMessage({
+        requestId: "control-before-hello",
+        enabled: false,
+      }));
+      const frame = await reply;
+      expect(typeof frame).toBe("string");
+      if (typeof frame !== "string") {
+        throw new Error("Expected text protocol error");
+      }
+      expect(parseMemoryCompressionControlMessage(frame)).toBeNull();
+      expect(decodeMemoryBoundary<{
+        type: string;
+        error?: { name: string };
+      }>(frame)).toMatchObject({
+        type: "response",
+        error: { name: "InvalidMessageError" },
+      });
+    } finally {
+      await closeSocket(socket);
+      await server.close();
+    }
+  });
+
   it("exchanges compressed messages after an ordinary hello", async () => {
     const server = StandaloneMemoryServer.start();
     const address = new URL(server.url);

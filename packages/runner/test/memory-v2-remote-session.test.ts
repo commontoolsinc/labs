@@ -654,6 +654,19 @@ describe("WebSocketTransport failure signaling", () => {
     });
   });
 
+  it("rejects a compression control when the socket closes before opening", async () => {
+    await withTransport(async (transport, socket) => {
+      transport.setMessageCompressionEnabled(true);
+      const control = transport.requestMessageCompression(false);
+      socket().readyState = DrivableWebSocket.CLOSED;
+      socket().dispatchEvent(new Event("close"));
+
+      await expect(control).rejects.toThrow(
+        "memory websocket transport closed before opening",
+      );
+    });
+  });
+
   it("dials once for two sends issued while the socket is opening", async () => {
     await withTransport(async (transport, socket) => {
       const first = transport.send("first");

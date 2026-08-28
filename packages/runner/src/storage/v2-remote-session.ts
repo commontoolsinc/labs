@@ -367,6 +367,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
   async #sendCompressionControl(enabled: boolean): Promise<boolean> {
     const requestId = crypto.randomUUID();
     const response = Promise.withResolvers<boolean>();
+    void response.promise.catch(() => {});
     this.#compressionRequests.set(requestId, response);
     const opening = this.open();
     const send = this.#sending.then(async () => {
