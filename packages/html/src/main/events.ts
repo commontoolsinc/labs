@@ -10,7 +10,7 @@ import {
   type EventProvenance,
   getEventProvenance,
   getEventTargetDataset,
-} from "../event-provenance.ts";
+} from "./event-provenance.ts";
 
 /**
  * Serialized DOM event data.
