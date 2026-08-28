@@ -25,38 +25,21 @@ import { describe, it } from "@std/testing/bdd";
 import { Identity } from "@commonfabric/identity";
 import { assert, assertEquals } from "@std/assert";
 import { resolveSpaceDid } from "@commonfabric/lib-shell";
-import { experimentalOptionsFromEnv } from "@commonfabric/runner";
-import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-skips.ts";
 
-// The server-execution v2 posture this test process runs (testing.md §2):
-// the CI ON lane sets EXPERIMENTAL_SERVER_EXECUTION=true; unset = OFF.
-const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)
-  .serverExecution;
-
-// The ON arm's STEP-level skip guard (tasks/server-execution-on-skips.ts):
-// a step listed there for this file is skipped ONLY under the ON posture,
-// loudly (its reason is printed), and only while the entry exists — the OFF
-// arm and an unlisted step always run. The rapid notebook step remains listed:
-// a direct CI ON unskip probe at 66a969ca0 ran the exact step and reached all
-// seven invocation traces, but finished with no notebook-bound action state or
-// rendered notes before its unchanged condition bound. That run did not carry
-// the off-repository launcher's recursive-schema signature. The skip protects
-// CI from the currently observed ON failure, while the OFF arm still runs.
-function onArmStepSkip(step: string): { ignore: boolean } {
-  if (SERVER_EXECUTION_FROM_ENV !== true) return { ignore: false };
-  const entry = serverExecutionOnStepSkip(
-    "patterns",
-    "integration/default-app.test.ts",
-    step,
-  );
-  if (entry === undefined) return { ignore: false };
-  console.warn(
-    `[server-execution ON arm] patterns: SKIPPING STEP ${
-      JSON.stringify(step)
-    } (until ${entry.phase}) — ${entry.reason}`,
-  );
-  return { ignore: true };
-}
+// This file carried the ON arm's STEP-level skip guard
+// (tasks/server-execution-on-skips.ts) for "should persist and reload every
+// rapidly created notebook note". The entry LIFTED 2026-08-28 under the owner's
+// surface reading of the ruled local-plus-CI-probe bar: 10/10 quiet-and-loaded
+// locally at main 1fc841b6e with every fixed-mechanism counter zero, and the
+// DIRECT CI UNSKIP PROBE (run 33138358110, ON shard 5, job 98743591519, head
+// 95f313835) ran this exact step with no listed skip and it PASSED — ok (18s),
+// the whole default-app file green, the shard's toolshed log clean across the
+// file's window. Shard 5's red was a CO-RESIDENT file
+// (cfc-group-chat-demo.test.ts:133), a separate unlisted defect carrying its
+// own accountability, not this step's charge. Evidence chain and the ruling:
+// verification-coverage.md OW45. If a future seat ever needs a step skip here,
+// re-add the guard WITH the entry: the registry's validator fails a step entry
+// whose file never calls `serverExecutionOnStepSkip`, so it cannot go silent.
 
 type BrowserWriteTraceEntry = {
   recordedAt: number;
@@ -669,9 +652,6 @@ describe("default-app flow test", () => {
 
   it(
     "should persist and reload every rapidly created notebook note",
-    onArmStepSkip(
-      "should persist and reload every rapidly created notebook note",
-    ),
     async () => {
       identity = await Identity.generate({ implementation: "noble" });
       const notebookSpaceName = globalThis.crypto.randomUUID();

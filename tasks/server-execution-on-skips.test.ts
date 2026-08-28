@@ -128,86 +128,74 @@ Deno.test("main: no arguments behaves like an unknown suite", async () => {
 });
 
 Deno.test("main: empty lists print the report on stderr and nothing on stdout", async () => {
-  // The shell suite's list is empty (patterns carries one FILE entry and two
-  // STEP entries; runner and runtime-client are empty since their lifts).
+  // The shell suite's list is empty (patterns carries the one lunch-poll-vote
+  // FILE entry; runner and runtime-client are empty since their lifts, and
+  // patterns' last STEP entry lifted 2026-08-28).
   const { out, err, io } = captureIo();
   assertEquals(await main(["shell"], io), 0);
   assertEquals(out, []);
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-Deno.test("main: the patterns list carries the two current phase-7 entries and keeps the flip bar explicit", async () => {
+Deno.test("main: the patterns list carries the ONE remaining phase-7 entry — the default-app reload STEP LIFTED 2026-08-28 under the owner's surface reading of the ruled local-plus-CI-probe bar (10/10 local at 1fc841b6e AND the direct-CI probe of that exact step green, run 33138358110 shard 5 `ok (18s)`; the shard's red was the co-resident, unlisted cfc-group-chat-demo file) — and keeps the flip bar explicit", async () => {
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
-  // The default-app step entry never drops its file; the lunch-poll-vote
-  // FILE entry is the one --ignore flag on stdout.
+  // The lunch-poll-vote FILE entry is the one --ignore flag on stdout.
   assertEquals(out, ["--ignore=integration/lunch-poll-vote.test.ts"]);
-  // …the report carries both remaining skips loudly…
-  assertMatch(
-    err[0],
-    /patterns: SKIP-STEP integration\/default-app\.test\.ts :: should persist and reload every rapidly created notebook note \(until phase-7; the rest of the file runs\)/,
-  );
+  // …the report carries the one remaining skip loudly…
   assertMatch(
     err[0],
     /patterns: SKIP integration\/lunch-poll-vote\.test\.ts \(until phase-7\)/,
   );
-  // …and the list holds EXACTLY these two entries — an addition or a silent
-  // lift both redden this pin.
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 2);
-  assertEquals(
-    SERVER_EXECUTION_ON_SKIPS.patterns[0].file,
-    "integration/default-app.test.ts",
-  );
-  assertEquals(
-    SERVER_EXECUTION_ON_SKIPS.patterns[0].step,
-    "should persist and reload every rapidly created notebook note",
-  );
+  // …and the list holds EXACTLY that entry — an addition or a silent lift
+  // both redden this pin.
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns.length, 1);
   // The lunch-poll-vote entry is FILE-level (no step guard: every step
   // depends on the profile-first join the class kills), same class and
-  // fork memo as the closed default-app residue.
+  // fork memo as the lifted default-app residue.
   assertEquals(
-    SERVER_EXECUTION_ON_SKIPS.patterns[1].file,
+    SERVER_EXECUTION_ON_SKIPS.patterns[0].file,
     "integration/lunch-poll-vote.test.ts",
   );
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[1].step, undefined);
-  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[1].phase, "phase-7");
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[0].step, undefined);
+  assertEquals(SERVER_EXECUTION_ON_SKIPS.patterns[0].phase, "phase-7");
   // Its reason carries the 2026-08-27 phase-3 charge: the local ~8-run
   // re-baseline PASSED (8/8) and the direct-CI unskip probe went RED at
   // the HOST's join — the SECOND campaign in a row to split that way.
   // Pinned by the CI coordinates, the failing line, and the newly
   // OBSERVED server-side mechanism, so a future seat neither reads the
   // 8/8 as a clean bar nor re-derives the classification from scratch.
-  assertMatch(SERVER_EXECUTION_ON_SKIPS.patterns[1].reason, /8\/8 GREEN/);
+  assertMatch(SERVER_EXECUTION_ON_SKIPS.patterns[0].reason, /8\/8 GREEN/);
   assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
+    SERVER_EXECUTION_ON_SKIPS.patterns[0].reason,
     /DIRECT CI UNSKIP PROBE .*went\s+RED/s,
   );
-  assertMatch(SERVER_EXECUTION_ON_SKIPS.patterns[1].reason, /33138358110/);
+  assertMatch(SERVER_EXECUTION_ON_SKIPS.patterns[0].reason, /33138358110/);
   assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
+    SERVER_EXECUTION_ON_SKIPS.patterns[0].reason,
     /lunch-poll-vote\.test\.ts:271/,
   );
   assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
+    SERVER_EXECUTION_ON_SKIPS.patterns[0].reason,
     /HOST's clickCfButton/,
   );
   // The mechanism half: the forever-park, its root, and the negative that
   // stops the next seat chasing the foreign-write refusal (which every
   // local GREEN also carries).
   assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
+    SERVER_EXECUTION_ON_SKIPS.patterns[0].reason,
     /structure-load-stuck/,
   );
   assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
+    SERVER_EXECUTION_ON_SKIPS.patterns[0].reason,
     /foreign-write-refused/,
   );
   assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
+    SERVER_EXECUTION_ON_SKIPS.patterns[0].reason,
     /the refusal is NOT it/i,
   );
   assertMatch(
-    SERVER_EXECUTION_ON_SKIPS.patterns[1].reason,
+    SERVER_EXECUTION_ON_SKIPS.patterns[0].reason,
     /PARK is the discriminator/,
   );
   // The topic-board pivot-baseline entry is GONE (#6304 fixed): the
@@ -221,36 +209,26 @@ Deno.test("main: the patterns list carries the two current phase-7 entries and k
     ),
     undefined,
   );
-  // The guard resolves the current direct-CI charge and pins its decisive
-  // discriminators so a stale launcher-era reason cannot return silently.
-  const entry = serverExecutionOnStepSkip(
-    "patterns",
-    "integration/default-app.test.ts",
-    "should persist and reload every rapidly created notebook note",
+  // The default-app reload STEP entry is GONE (LIFTED 2026-08-28 under the
+  // owner's surface reading of the ruled bar): its guard lookup resolves
+  // NOTHING, so the ON arm RUNS that step — the lift's standing proof, and the
+  // pin that makes a silent re-skip impossible. The bound in-file guard was
+  // removed with the entry, so the validator's step-entry binding check would
+  // fail any re-listing that did not restore the guard too.
+  assertEquals(
+    serverExecutionOnStepSkip(
+      "patterns",
+      "integration/default-app.test.ts",
+      "should persist and reload every rapidly created notebook note",
+    ),
+    undefined,
   );
-  assert(entry !== undefined, "the rapid-note step's guard entry must resolve");
-  assertEquals(entry.phase, "phase-7");
-  // The 2026-08-27 phase-3 campaign INVERTED this entry's evidence: the
-  // step is 10/10 locally AND passed its direct-CI unskip probe, and the
-  // lane red was a co-resident file. Pin all three so the next seat
-  // re-probes instead of re-running a local campaign, and so a stale
-  // charge (the 66a969ca0 fingerprint, or the a04 residue #6459 closed)
-  // cannot quietly return as this entry's reason.
-  assertMatch(entry.reason, /10\/10 quiet-and-loaded/);
-  assertMatch(entry.reason, /33138358110/);
-  assertMatch(entry.reason, /it PASSED/);
-  assertMatch(entry.reason, /cfc-group-chat-demo\.test\.ts:133/);
-  assertMatch(entry.reason, /4\/6 RED locally/);
-  assertMatch(entry.reason, /RE-PROBE/);
+  // The report no longer carries a SKIP-STEP line at all: the one remaining
+  // entry is FILE-level, so a step line reappearing means a new step entry.
   assert(
-    !/Lifts on 10\/10/.test(entry.reason),
-    "the reason must not still state a bare local-count lift bar — the " +
-      "ruled bar (2026-08-27) also requires a green direct-CI unskip probe",
-  );
-  assert(
-    !/cause is not yet assigned/.test(entry.reason),
-    "the reason must not claim the cause is unassigned — it was root-caused " +
-      "2026-08-27 (register OW45; keyless-diagnosis-2026-08-27.md)",
+    !/SKIP-STEP/.test(err[0]),
+    "the patterns report must carry no SKIP-STEP line — the default-app " +
+      "reload step lifted 2026-08-28 and no other step entry exists",
   );
   // The shard filter drops exactly the FILE entry's file (the shard
   // lanes feed explicit file lists) and passes every other candidate
@@ -269,7 +247,7 @@ Deno.test("main: the patterns list carries the two current phase-7 entries and k
     "./integration/convergence-storm.test.ts",
     "./integration/topics-navigation.test.ts",
   ]);
-  assertEquals(skipped, [SERVER_EXECUTION_ON_SKIPS.patterns[1]]);
+  assertEquals(skipped, [SERVER_EXECUTION_ON_SKIPS.patterns[0]]);
   assertEquals(SERVER_EXECUTION_ON_SKIPS.shell.length, 0);
 });
 

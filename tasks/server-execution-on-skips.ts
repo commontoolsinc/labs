@@ -192,62 +192,43 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
   // The product smell the flake used to witness stays tracked as
   // verification-coverage.md OW60, not as a flaky test.
   patterns: [
-    {
-      // READ THIS BEFORE RE-CAMPAIGNING: the entry's own CHARGE no longer
-      // reproduces, in either arm. Both halves of it are fixed on main —
-      // the NAVIGATION half by the L2 ruled PUNT plus the step's id-bound
-      // reads (#6448), the a04 WRITE-side mark-without-effects residue by
-      // #6459's mark/effects atomicity — and the 2026-08-27 phase-3
-      // campaign found 10/10 quiet-and-loaded locally AND a GREEN direct-CI
-      // run of this exact step (33138358110, ON shard 5: `ok (18s)`, server
-      // window clean). What holds the entry is the ruled bar's second half
-      // read literally: the probed LANE was red, on a CO-RESIDENT file this
-      // entry has nothing to do with (cfc-group-chat-demo.test.ts:133).
-      // Whether "lane green" means the probed surface or the whole shard is
-      // an OPEN question for the coordinator/owner — flagged, not filled.
-      // So the next seat should RE-PROBE, not re-campaign.
-      file: "integration/default-app.test.ts",
-      step: "should persist and reload every rapidly created notebook note",
-      phase: "phase-7",
-      reason: "NOT this entry's charge any more — held by the LANE, not " +
-        "the step. Phase-3 lift campaign 2026-08-27 at main 1fc841b6e, " +
-        "ON binary sha256 a93047a461c0c4d8 re-verified per run, fresh " +
-        "store + own 97xx port + ON posture probe per run, ensure " +
-        "defaulting ON, toolshed self-sourced, LLM masked, gtimeout 600 " +
-        "never approached: 10/10 quiet-and-loaded, every run 13-14s wall " +
-        "against 313-315s for every red the 2026-08-27 campaign recorded, " +
-        "with pattern-load-error, pattern-swap-setup-error, " +
-        "deferred-start-catchup, session-remount, load-park and " +
-        "handlerNotRunDeferrals all ZERO. The DIRECT CI UNSKIP PROBE " +
-        "(run 33138358110, ON shard 5, job 98743591519, head 95f313835) " +
-        "then ran this exact step with no listed skip and it PASSED: " +
-        "ok (18s), the whole default-app file green, and the shard's " +
-        "toolshed log clean across the file's window (4 event-view-lag, " +
-        "nothing else). The prior charge is therefore NOT reproduced: the " +
-        "66a969ca0/33008274232 fingerprint (eventInvocationCount=7 with " +
-        "notebookActionCount=0) did not recur, and neither did the a04 " +
-        "1-op mark-without-effects shape #6459 fixed. The lane went red " +
-        "on a DIFFERENT, co-resident file: cfc-group-chat-demo.test.ts:133, " +
-        "clickCfButton(#host-send-button) retargeting to the cf-button host " +
-        "(cf-button#host-send-button < slot < div < cf-hstack) — the " +
-        "rootcause 2b disabled-inner-button shape, whose S-G test-aim seat " +
-        "is named-but-unbuilt. That file is NOT skip-listed, is untouched " +
-        "by the probe diff, and reproduces 4/6 RED locally at the same " +
-        "head running alone on a fresh store, so it is neither this " +
-        "entry's charge nor a probe artifact. This entry therefore stands " +
-        "ONLY on the literal reading of the ruled bar (RULED 2026-08-27: " +
-        "local campaign AND a green direct-CI unskip probe). Whether " +
-        "'lane green' means the probed SURFACE or the whole SHARD is an " +
-        "OPEN coordinator/owner question, flagged not filled. The next " +
-        "seat should RE-PROBE this step once the group-chat surface is " +
-        "green, not re-run a local campaign.",
-    },
+    // default-app's reload STEP ("should persist and reload every rapidly
+    // created notebook note") LIFTED 2026-08-28, and its in-file guard removed
+    // with it. The entry's own CHARGE stopped reproducing in either arm: the
+    // NAVIGATION half fixed by the L2 ruled PUNT plus the step's id-bound reads
+    // (#6448), the a04 WRITE-side mark-without-effects residue by #6459's
+    // mark/effects atomicity. Lift evidence, both halves of the ruled
+    // local-plus-CI-probe bar (RULED 2026-08-27):
+    // (1) LOCAL 10/10 quiet-and-loaded at main 1fc841b6e on one ON-built binary
+    //     (sha256 a93047a461c0c4d8…, re-verified per run), fresh store + own
+    //     97xx port + ON posture probe per run, ensure defaulting ON, toolshed
+    //     self-sourced, LLM masked, gtimeout 600 never approached — 13-14s wall
+    //     per run against 313-315s for every red the earlier 2026-08-27
+    //     campaign recorded, with pattern-load-error, pattern-swap-setup-error,
+    //     deferred-start-catchup, session-remount, load-park,
+    //     piece-start-commit-failed, structure-load-stuck and
+    //     handlerNotRunDeferrals ALL ZERO (events.appended 14 =
+    //     events.processed 14 in all ten).
+    // (2) The DIRECT CI UNSKIP PROBE (run 33138358110, ON shard 5, job
+    //     98743591519, head 95f313835) ran this exact step with no listed skip
+    //     and it PASSED — ok (18s), the whole default-app file green, the
+    //     shard's published toolshed log clean across the file's window (4
+    //     event-view-lag, nothing else).
+    // Shard 5's red was a CO-RESIDENT file, cfc-group-chat-demo.test.ts:133 —
+    // not skip-listed, untouched by the probe diff, and 4/6 RED locally at the
+    // same head running ALONE. The owner RULED 2026-08-28, over the
+    // coordinator's recommendation that the probe proves the UNSKIPPED SURFACE
+    // and co-resident debt carries its own accountability: "agreed with your
+    // recommendations, proceed". Under that surface reading this entry's bar
+    // was fully met by the evidence above. Full chain: verification-coverage.md
+    // OW45 (the PHASE 3 block and the LIFT block that follows it).
     {
       // Re-listed by the lunch-poll identity PR (#5744). This file was
       // LIFTED 2026-08-19 for the swatch-stall class (stage-C W3.1 —
       // history in the header comment above); the profile-first join
       // that PR introduces newly exposes the arm-B family's REMAINING
-      // member (the entry above): the test now creates the viewer's
+      // member (then the default-app reload STEP entry, LIFTED
+      // 2026-08-28 — the comment above): the test now creates the viewer's
       // profile piece mid-test, and the flag-ON client's deferred start
       // of that fresh piece dies terminally on the first-hydration
       // stale-confirmed-read ConflictError, killing the client's piece
@@ -259,11 +240,11 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
       // deferred-start tx-commit-error signature; the OFF lane runs
       // this file green. Every later step depends on that join, hence
       // a FILE entry rather than a step guard. Same class, same fork
-      // memo as the entry above. MERGE NOTE (the catch-up-and-start
-      // PR): both recorded reds PREDATE the recovery landing — the
-      // "dies terminally" mechanism is exactly the b04 death that
-      // recovery closes (verification-coverage.md OW45's
-      // CATCH-UP-AND-START block), so this entry's lift condition is
+      // memo as the lifted default-app STEP entry. MERGE NOTE (the
+      // catch-up-and-start PR): both recorded reds PREDATE the
+      // recovery landing — the "dies terminally" mechanism is exactly
+      // the b04 death that recovery closes (verification-coverage.md
+      // OW45's CATCH-UP-AND-START block), so this entry's lift condition is
       // now concretely testable; it lifts on its own gate evidence at
       // the merged head, never by inference from the default-app gate.
       // THAT GATE RAN 2026-08-24 — 10 runs at merged head f14e44830
