@@ -661,17 +661,9 @@ describe("the two classifiers a recorded origin meets", () => {
     ];
 
     // Rooted paths on this host that name nothing under the patterns route.
-    // Reconciliation reports them unusable; this side still reads them as
-    // ordinary web origins. `docs/specs/piece-source-lifecycle.md` says such
-    // a string is not an origin at all, so the two are not yet saying the
-    // same thing about them — listed here rather than left out of the strings
-    // above, because a case a test omits is a case it does not check.
-    const knownAsymmetric = new Set([
-      "/",
-      "/nope.tsx",
-      "/api/patterns/../../etc/passwd",
-    ]);
-    for (const recorded of knownAsymmetric) strings.push(recorded);
+    // Both sides refuse them: the path names no file this deployment serves,
+    // so nothing resolves it.
+    strings.push("/", "/nope.tsx", "/api/patterns/../../etc/passwd");
 
     for (const recorded of strings) {
       const kind = classifyPieceOriginString(recorded, host);
@@ -687,8 +679,7 @@ describe("the two classifiers a recorded origin meets", () => {
       } catch {
         usable = false;
       }
-      const expected = knownAsymmetric.has(recorded) ? true : followable;
-      expect({ recorded, usable }).toEqual({ recorded, usable: expected });
+      expect({ recorded, usable }).toEqual({ recorded, usable: followable });
     }
   });
 

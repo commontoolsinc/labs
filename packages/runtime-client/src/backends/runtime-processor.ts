@@ -1895,13 +1895,16 @@ export class RuntimeProcessor {
   ): Promise<PageResponse> {
     const cc = this.getSpaceCtx(request.space);
     let program: Program | undefined;
-    let origin: string | undefined;
     if ("url" in request.source && request.source.url) {
       const sourceUrl = new URL(request.source.url);
       if (sourceUrl.protocol !== "http:" && sourceUrl.protocol !== "https:") {
         throw new Error("Piece source URL must use HTTP or HTTPS.");
       }
-      origin = sourceUrl.href;
+      // The URL is a place to read a program from once, not an origin. A piece
+      // follows what this deployment serves and what the fabric holds, so an
+      // arbitrary endpoint names nothing the lifecycle can resolve later, and
+      // recording one would leave the piece carrying an origin nothing follows.
+      // The piece is created detached, and its owner can name an origin after.
       program = await cc.runtime.harness.resolve(
         new HttpProgramResolver(sourceUrl),
       );
@@ -1928,7 +1931,6 @@ export class RuntimeProcessor {
 
     const piece = await cc.create<NameSchema>(program, {
       input: argument,
-      origin,
       start: request.run ?? true,
     }, request.cause);
     return {

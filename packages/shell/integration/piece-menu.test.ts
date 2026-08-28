@@ -596,8 +596,9 @@ describe("piece context menu", () => {
 
     await rightClickRenderedPiece(page);
     await clickPierce(page, '[test-id="piece-menu-origin"]');
-    // A root created from the default-app URL records it as a web origin.
-    await waitForPanelText(page, "piece-panel-origin", "External web URL");
+    // The root's origin is the `system:` ref naming the default app, which is
+    // a pattern this deployment serves rather than an endpoint outside it.
+    await waitForPanelText(page, "piece-panel-origin", "Deployment pattern");
     await waitForPanelText(
       page,
       "piece-panel-origin",

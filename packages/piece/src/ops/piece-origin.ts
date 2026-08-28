@@ -387,6 +387,17 @@ export function classifyOrigin(
           `this space; write the URL out if that is what you meant`,
       );
     }
+    // Resolving to this host is not enough. The path also has to name a file
+    // under the patterns route, because that route is the only thing this
+    // deployment serves as a program; any other path answers with whatever the
+    // site returns for it. `normalizePatternSource` yields the `system:` ref
+    // when the path names such a file and the input unchanged when it does
+    // not, which is the same test reconciliation applies before rewriting it.
+    if (normalizePatternSource(source, host) === source) {
+      throw new PieceOriginError(
+        `${source} addresses nothing under the patterns route`,
+      );
+    }
     return systemOrigin(resolved, source);
   }
 
