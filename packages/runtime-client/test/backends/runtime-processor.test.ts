@@ -3465,6 +3465,35 @@ describe("runtime-processor", () => {
   });
 
   describe("direct cell initialization", () => {
+    it("rejects malformed initializers and surfaces transaction failures", async () => {
+      const failed = Object.assign(
+        Object.create(RuntimeProcessor.prototype),
+        {
+          runtime: {
+            editWithRetry: () =>
+              Promise.resolve({ error: new Error("initialize failed") }),
+          },
+        },
+      ) as RuntimeProcessor;
+      const ref = {
+        space: "did:key:test" as CellRef["space"],
+        id: "of:initialize-failure" as CellRef["id"],
+        scope: "space",
+        path: [],
+      } satisfies CellRef;
+
+      await expect(failed.handleCellInitialize({
+        type: RequestType.CellInitialize,
+        cell: ref,
+        value: undefined as never,
+      })).rejects.toThrow("Cell initialize requires a defined value");
+      await expect(failed.handleCellInitialize({
+        type: RequestType.CellInitialize,
+        cell: ref,
+        value: 1,
+      })).rejects.toThrow("initialize failed");
+    });
+
     it("loads an existing scoped value before choosing an initializer", async () => {
       const signer = await Identity.fromPassphrase(
         `direct-scoped-cell-initialize-${crypto.randomUUID()}`,
@@ -3619,11 +3648,11 @@ describe("runtime-processor", () => {
         ) as RuntimeProcessor;
         const linkedRef = createCellRef(linked);
 
-        const selected = await processor.handleCellInitialize({
+        const selected = await processor.handleRequest({
           type: RequestType.CellInitialize,
           cell: createCellRef(target),
           value: { linked: linkedRef },
-        });
+        }) as { value: unknown };
 
         expect(selected.value).toEqual({
           linked: cellRefToSigilLink(linkedRef),

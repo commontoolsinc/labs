@@ -189,6 +189,27 @@ describe("guest", () => {
       });
     });
 
+    it("rejects initialize after disconnect without negotiating a manifest", async () => {
+      const fabric = connectFabric();
+      const cell = fabric.cell<number>("count");
+      fabric.disconnect();
+
+      await expect(cell.initialize(0)).rejects.toMatchObject({
+        code: "disconnected",
+      });
+    });
+
+    it("rejects initialize without a cell capability target", async () => {
+      const fabric = connectFabric();
+      try {
+        await expect(fabric.request("initialize", {})).rejects.toMatchObject({
+          code: "method-not-supported",
+        });
+      } finally {
+        fabric.disconnect();
+      }
+    });
+
     it("negotiates initialize through resolved cell capabilities", async () => {
       const fabric = connectFabric();
       try {
@@ -601,6 +622,27 @@ describe("guest", () => {
         status: "ready",
         value: { count: 7 },
       });
+    });
+
+    it("rejects invalid initializers before contacting the host", async () => {
+      let requests = 0;
+      const client = {
+        request: () => {
+          requests++;
+          return Promise.resolve(undefined);
+        },
+      } as unknown as FabricClient;
+      const cell = new RemoteCell<FabricValue | undefined>(client, "state");
+      const cyclic = {} as Record<string, FabricValue>;
+      cyclic.self = cyclic;
+
+      await expect(cell.initialize(undefined)).rejects.toThrow(
+        "Cell initialize requires a defined value",
+      );
+      await expect(cell.initialize(cyclic)).rejects.toThrow(
+        "Cannot deep-clone circular reference",
+      );
+      expect(requests).toBe(0);
     });
 
     it("orders a pull after every previously queued set", async () => {

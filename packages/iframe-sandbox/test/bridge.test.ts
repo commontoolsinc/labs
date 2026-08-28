@@ -341,6 +341,39 @@ describe("Fabric iframe bridge", () => {
     }
   });
 
+  it("rejects an operation removed after its resolved authority is minted", async () => {
+    const leaf: BridgeCell = {
+      get: () => 1,
+      initialize: () => 1,
+      pull: () => 1,
+    };
+    const root: BridgeCell = {
+      get: () => 1,
+      pull: () => 1,
+      resolve: () => leaf,
+    };
+    const channel = new MessageChannel();
+    const host = new FabricBridgeHost(
+      createFabricBridge({ reader: { kind: "cell", cell: root } }),
+      channel.port1,
+    );
+    const client = connectFabric();
+    handOff(channel.port2);
+
+    try {
+      const resolved = await client.cell<number>("reader").resolve();
+      delete leaf.initialize;
+
+      await expect(resolved.initialize(0)).rejects.toMatchObject({
+        code: "method-not-supported",
+        resource: "reader",
+      });
+    } finally {
+      client.disconnect();
+      host.disconnect();
+    }
+  });
+
   it("carries push as append intent instead of replacing the array", async () => {
     const value = [0];
     const pushes: FabricValue[][] = [];
