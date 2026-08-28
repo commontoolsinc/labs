@@ -1,0 +1,475 @@
+# React iframe-first pattern guide
+
+Use this guide to build a Common Fabric pattern whose application is a React
+tree inside one sandboxed `cf-iframe`. The wrapper remains mechanical: it
+exposes named Cell and SQLite resources, bundles the React guest and all of its
+dependencies into one HTML string, and returns durable state and output through
+the normal pattern result.
+
+This guide is self-contained. Do not also load the plain-DOM iframe guide unless
+you are migrating an existing guest and need to compare the two source styles.
+
+## Source layout
+
+Keep these authored files beside the generated wrapper:
+
+```text
+packages/patterns/react-quick-notes/
+├── contract.ts  # input, durable state, output, scopes, optional databases
+├── guest.tsx    # React application and Fabric bridge client
+├── guest.html   # optional document shell
+└── main.tsx     # generated wrapper; do not hand-edit
+```
+
+The generated `main.tsx` contains React, React DOM, the guest bridge, and the
+application. It does not need a module server at runtime. Keep `contract.ts` and
+`guest.tsx` so an agent can regenerate the wrapper.
+
+React is owned by the guest bundle. The iframe sandbox adapter accepts the
+exact React instance the guest imports; `@commonfabric/iframe-sandbox` does not
+select a React version for applications.
+
+## Describe input, state, and output
+
+Create `contract.ts` as a declarative module with no side effects:
+
+```typescript
+interface Note {
+  id: string;
+  text: string;
+}
+
+export interface IframeInputData {
+  heading: string;
+}
+
+export interface IframeStateData {
+  notes: Note[];
+  selectedId: string | null;
+}
+
+export interface IframeOutputData {
+  noteCount: number;
+  selectedId: string | null;
+}
+
+export const DEFAULT_INPUT: IframeInputData = {
+  heading: "Quick notes",
+};
+
+export const DEFAULT_STATE: IframeStateData = {
+  notes: [],
+  selectedId: null,
+};
+
+export const DEFAULT_OUTPUT: IframeOutputData = {
+  noteCount: 0,
+  selectedId: null,
+};
+
+export const IFRAME_PATTERN = {
+  name: "ReactQuickNotes",
+  displayName: "React quick notes",
+  stateScope: "user",
+  outputScope: "session",
+  frameHeight: "100vh",
+  databases: {},
+} as const;
+```
+
+The wrapper exposes three resources with these roles:
+
+- `input` is read-only data supplied by the caller.
+- `state` is durable application state the guest may change.
+- `output` is the public result the guest may change and the wrapper returns.
+
+The scopes are independent:
+
+| Scope | Meaning |
+| --- | --- |
+| `space` | Shared by every user and session in the piece |
+| `user` | Separate for each user and shared by that user's sessions |
+| `session` | Separate for each browser session |
+
+Keep React-only UI state such as hover, an open menu, an unfinished text field,
+or animation state in React. Put data in a Fabric Cell only when it should be
+durable or visible outside this component tree.
+
+## Import React and create the adapter
+
+Pin the React and type packages in the guest source. The file-level JSX pragmas
+make the guest compile independently of the Common Fabric JSX configuration
+used by generated `main.tsx`:
+
+```tsx
+// Shown at module scope.
+/** @jsxRuntime classic */
+/** @jsx React.createElement */
+// @deno-types="npm:@types/react@19.2.18"
+import React from "npm:react@19.2.8";
+// @deno-types="npm:@types/react-dom@19.2.5/client.d.ts"
+import { createRoot } from "npm:react-dom@19.2.8/client";
+import { connectFabric } from "@commonfabric/iframe-sandbox/guest";
+import { createFabricReact } from "@commonfabric/iframe-sandbox/react";
+
+const fabric = connectFabric();
+const { useCell, useSqliteQuery } = createFabricReact(React, fabric);
+
+function App() {
+  const heading = useCell<{ heading: string } | undefined>("input");
+  if (heading.status === "error") return <p role="alert">{heading.error.message}</p>;
+  if (heading.status !== "ready") return <p>Loading</p>;
+  return <h1>{(heading.value ?? { heading: "Notes" }).heading}</h1>;
+}
+
+const root = createRoot(document.querySelector<HTMLDivElement>("#root")!);
+root.render(<App />);
+
+globalThis.addEventListener("pagehide", () => {
+  root.unmount();
+  fabric.disconnect();
+}, { once: true });
+```
+
+Pass the same imported `React` object to `createFabricReact` that creates the
+tree. Do not import a second React copy for the bridge adapter. Use
+`createRoot`; do not use the removed legacy `render` entry point.
+
+The default generated document contains `<div id="root"></div>`. Supply a
+custom `guest.html` only when the guest needs document-level metadata, fonts,
+or sibling elements outside the React root.
+
+## Read and write Cells with hooks
+
+`useCell<T>(name)` returns one of three snapshots:
+
+- `{ status: "loading" }` while the initial pull is active;
+- `{ status: "ready", value }` after the host pull barrier resolves;
+- `{ status: "error", error }` when the resource cannot be read.
+
+It also returns `set(valueOrUpdater)` and `refresh()`. `refresh()` is the
+explicit host `Cell.pull()` boundary. The hook subscribes through
+`useSyncExternalStore`, so host updates rerender the component.
+
+`ready` means the pull completed; a newly scoped or optional Cell can therefore
+be ready with the value `undefined`. Include `undefined` in the hook type. Use
+the declared input default for an absent read-only input. For writable state or
+output, initialize only after that Cell's authoritative pull reports
+`undefined`; do not replace a value that another session may already have
+materialized.
+
+Treat readiness as one aggregate phase. Every resource an action reads must be
+ready before that action becomes available:
+
+```tsx
+// Shown at module scope.
+/** @jsxRuntime classic */
+/** @jsx React.createElement */
+// @deno-types="npm:@types/react@19.2.18"
+import React from "npm:react@19.2.8";
+import { connectFabric } from "@commonfabric/iframe-sandbox/guest";
+import { createFabricReact } from "@commonfabric/iframe-sandbox/react";
+import {
+  DEFAULT_INPUT,
+  DEFAULT_OUTPUT,
+  DEFAULT_STATE,
+} from "./contract.ts";
+
+const fabric = connectFabric();
+const { useCell } = createFabricReact(React, fabric);
+
+function Editor() {
+  const input = useCell<typeof DEFAULT_INPUT | undefined>("input");
+  const state = useCell<typeof DEFAULT_STATE | undefined>("state");
+  const output = useCell<typeof DEFAULT_OUTPUT | undefined>("output");
+  const stateValue = state.status === "ready" ? state.value : undefined;
+  const outputValue = output.status === "ready" ? output.value : undefined;
+  React.useEffect(() => {
+    if (state.status === "ready" && stateValue === undefined) {
+      void state.set(DEFAULT_STATE);
+    }
+  }, [state.status, stateValue, state.set]);
+  React.useEffect(() => {
+    if (output.status === "ready" && outputValue === undefined) {
+      void output.set(DEFAULT_OUTPUT);
+    }
+  }, [output.status, outputValue, output.set]);
+  const resources = [input, state, output];
+  const failure = resources.find((resource) => resource.status === "error");
+
+  if (failure?.status === "error") {
+    return <p role="alert">{failure.error.message}</p>;
+  }
+  if (
+    input.status !== "ready" || state.status !== "ready" ||
+    stateValue === undefined || output.status !== "ready" ||
+    outputValue === undefined
+  ) {
+    return <button type="button" disabled>Loading</button>;
+  }
+
+  const addNote = async () => {
+    const note = { id: crypto.randomUUID(), text: "New note" };
+    await state.set((current: typeof DEFAULT_STATE | undefined) => ({
+      ...(current ?? DEFAULT_STATE),
+      notes: [...(current ?? DEFAULT_STATE).notes, note],
+      selectedId: note.id,
+    }));
+    const current = (await state.refresh()) ?? DEFAULT_STATE;
+    await output.set({
+      noteCount: current.notes.length,
+      selectedId: current.selectedId,
+    });
+  };
+
+  return (
+    <section>
+      <h1>{(input.value ?? DEFAULT_INPUT).heading}</h1>
+      <p>{stateValue.notes.length} notes</p>
+      <button type="button" onClick={() => void addNote()}>Add note</button>
+    </section>
+  );
+}
+```
+
+The hooks load Cells independently, but the component owns one joint readiness
+predicate. An individual resource becoming ready must not enable an action that
+still reads fallback input, state, or output.
+
+Functional setters are serialized for the same remote Cell inside one guest.
+They are not a transaction across users or across resources. Prefer a narrow
+operation when the intent permits it. The direct client remains available next
+to the hooks:
+
+```typescript
+// Shown at module scope.
+import { connectFabric } from "@commonfabric/iframe-sandbox/guest";
+
+const fabric = connectFabric();
+const state = fabric.cell<{ notes: Array<{ id: string; text: string }> }>(
+  "state",
+);
+await state.key("notes").push({ id: crypto.randomUUID(), text: "New note" });
+```
+
+`push()` is a mergeable append. Replacing the whole array from a React setter
+has a wider conflict domain.
+
+## Fine-grained paths and stable array items
+
+The React adapter intentionally covers named root resources. Use the direct
+Cell API in a custom hook when a component should observe one path rather than
+rerender for the entire root. `sink()` calls its listener synchronously with the
+current cached sample, then again for later values; call `pull()` when the
+component requires current data before mutation.
+
+An array index is a position rather than an identity. Resolve the item first,
+then keep the resolved handle in the effect:
+
+```tsx
+/** @jsxRuntime classic */
+/** @jsx React.createElement */
+// @deno-types="npm:@types/react@19.2.18"
+import React from "npm:react@19.2.8";
+import { connectFabric } from "@commonfabric/iframe-sandbox/guest";
+
+const fabric = connectFabric();
+
+function FirstNoteTitle() {
+  const [title, setTitle] = React.useState<string>();
+  const [error, setError] = React.useState<Error>();
+
+  React.useEffect(() => {
+    let stop: (() => void) | undefined;
+    let active = true;
+    void fabric.cell<Array<{ title: string }>>("notes").key(0).resolve()
+      .then(async (note) => {
+        if (!active) return;
+        const titleCell = note.key("title");
+        await titleCell.pull();
+        if (!active) return;
+        stop = titleCell.sink((value) => setTitle(value));
+      })
+      .catch((cause) => {
+        if (active) setError(cause instanceof Error ? cause : new Error(String(cause)));
+      });
+    return () => {
+      active = false;
+      stop?.();
+    };
+  }, []);
+
+  if (error) return <p role="alert">{error.message}</p>;
+  return <p>{title ?? "Loading"}</p>;
+}
+```
+
+The resolved capability stays anchored to the stored entity if array positions
+move. Its `.identity.id` names the entity document. Its
+`.identity.instanceId` names the concrete scoped instance and is stable across
+sessions for one PerUser Cell, different across users, and different for every
+PerSession Cell. The guest cannot turn an arbitrary ID into authority; writes
+go through the resolved handle.
+
+## Add SQLite without querying before hydration
+
+Declare databases in `IFRAME_PATTERN`:
+
+```typescript
+export const IFRAME_PATTERN = {
+  name: "ReactQuickNotes",
+  displayName: "React quick notes",
+  stateScope: "user",
+  outputScope: "session",
+  databases: {
+    appDatabase: {
+      scope: "user",
+      tables: {
+        notes: {
+          id: "integer primary key",
+          text: "text not null",
+        },
+      },
+    },
+  },
+} as const;
+```
+
+Mount the query component only after every Cell used to construct or authorize
+the query is ready. This preserves the Rules of Hooks while preventing an early
+query from using fallback configuration:
+
+```tsx
+/** @jsxRuntime classic */
+/** @jsx React.createElement */
+// @deno-types="npm:@types/react@19.2.18"
+import React from "npm:react@19.2.8";
+import { connectFabric } from "@commonfabric/iframe-sandbox/guest";
+import { createFabricReact } from "@commonfabric/iframe-sandbox/react";
+
+const fabric = connectFabric();
+const database = fabric.sqlite("appDatabase");
+const { useCell, useSqliteQuery } = createFabricReact(React, fabric);
+
+function Notes({ heading }: { heading: string }) {
+  const query = useSqliteQuery<{ id: number; text: string }>(
+    "appDatabase",
+    "SELECT id, text FROM notes ORDER BY id",
+  );
+  if (query.status === "error") return <p role="alert">{query.error.message}</p>;
+  if (query.status !== "ready") return <p>Loading notes</p>;
+
+  const add = async () => {
+    await database.exec(
+      "INSERT INTO notes (text) VALUES (?)",
+      [`${heading} ${query.rows.length + 1}`],
+    );
+  };
+
+  return (
+    <section>
+      <button type="button" onClick={() => void add()}>Add stored note</button>
+      <ul>{query.rows.map((note) => <li key={note.id}>{note.text}</li>)}</ul>
+    </section>
+  );
+}
+
+function App() {
+  const input = useCell<{ heading: string }>("input");
+  const state = useCell<{ selectedId: string | null }>("state");
+  if (input.status !== "ready" || state.status !== "ready") {
+    return <p>Loading application</p>;
+  }
+  return <Notes heading={input.value.heading} />;
+}
+```
+
+`useSqliteQuery()` begins in `loading`, returns typed rows in `ready`, reports
+query failures in `error`, and exposes `refresh()`. It subscribes to database
+invalidations, so committed `exec()` calls refresh active queries. Do not put a
+query hook behind a conditional inside one component; put it in a child that is
+mounted after the readiness boundary.
+
+SQLite scopes have the same meanings as Cell scopes. Database, table, and
+column names are data. For the exact name `__proto__` in `contract.ts`, use a
+computed property (`["__proto__"]`) so JavaScript creates an own property.
+
+## Preserve user drafts and report failures
+
+An authoritative sink or hook rerender can arrive while the user edits a text
+field. Keep the draft in `useState`; copy authoritative data into it only when
+there is no pending local edit. Disable the action while its write is pending,
+and surface rejected writes. Do not clear the draft before a successful write.
+
+Use `button type="button"` for every bridge action. The sandbox does not grant
+native form submission or navigation, so do not wrap bridge controls in a
+`form`, use a submit button, or call `requestSubmit()`.
+
+If one fact must agree across shared state and scoped output, store the fact in
+one authoritative resource and store only its stable key in the other. Separate
+Cell writes are not atomic. Mint a new ID for a genuinely edited retry; reuse an
+idempotency ID only for the same payload.
+
+## Generate the wrapper
+
+Run the helper from the repository root with `--react`. That flag compiles TSX
+through the `React` instance imported by `guest.tsx`; without it, repository JSX
+settings target the Common Fabric host runtime instead.
+
+```bash
+deno run -A tools/write-iframe-wrapper.ts \
+  --contract packages/patterns/react-quick-notes/contract.ts \
+  --guest packages/patterns/react-quick-notes/guest.tsx \
+  --out packages/patterns/react-quick-notes/main.tsx \
+  --react
+```
+
+The helper refuses to overwrite a file. Add `--force` only when regenerating
+that named output. For a custom document, add `--html .../guest.html`; the HTML
+must contain `<!-- PATTERN_IFRAME_SCRIPT -->` exactly once.
+
+## Verify in the browser
+
+Format and compile both realms:
+
+```bash
+deno fmt packages/patterns/react-quick-notes
+deno check packages/patterns/react-quick-notes/guest.tsx
+deno task cf check packages/patterns/react-quick-notes/main.tsx --no-run
+```
+
+Launch against local servers:
+
+```bash
+./scripts/start-local-dev.sh
+mkdir -p .cf
+test -e .cf/iframe-pattern.key || \
+  deno task cf id new > .cf/iframe-pattern.key
+CF_API_URL=http://localhost:8000 \
+CF_IDENTITY=.cf/iframe-pattern.key \
+deno task cf piece new packages/patterns/react-quick-notes/main.tsx \
+  --root . --space iframe-react-notes --slug react-notes
+```
+
+Never overwrite an existing key file because it selects the PerUser identity.
+Open `http://localhost:8000/iframe-react-notes/react-notes`. If the shell shows
+first-use login, choose **Register New Key**, enter and confirm a passphrase, and
+continue. Exercise every meaningful action and inspect the browser console. A
+successful bundle does not prove React mounted, a hook completed its pull, or a
+bridge write reached the worker.
+
+Verify at least these behaviors:
+
+- the initial loading view becomes the authoritative input/state view;
+- hook-driven Cell writes rerender and survive reload at their declared scope;
+- a SQLite mutation causes the active query to rerender;
+- a rejected write or query renders an error rather than silently clearing a
+  draft;
+- cleanup disconnects the bridge when the iframe document is replaced.
+
+For multi-user state, cover two sessions of one identity, a second identity,
+and a reload. PerSpace data agrees everywhere, PerUser data agrees only between
+the same identity's sessions, and PerSession data remains distinct. Exercise
+first use rather than only a warmed-up piece. When both runtime modes matter,
+run the same unskipped browser test with default execution and with
+`EXPERIMENTAL_SERVER_EXECUTION=true`.

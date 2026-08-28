@@ -265,14 +265,12 @@ needs a new ID. Represent UI sentinels outside the user-data domain, such as
 
 ### React guests
 
-React belongs to the guest bundle, not the wrapper. Import the React instance
-chosen by the guest and pass that exact instance to
-`createFabricReact(React, fabric)` from
-`@commonfabric/iframe-sandbox/react`. Its `useCell(name)` hook uses
-`useSyncExternalStore`, returns `loading`, `ready`, or `error`, accepts a value or
-functional setter, and exposes `refresh()` as the explicit pull. The direct Cell
-API remains useful for fine-grained `key(...).sink(...)` subscriptions and
-stable resolved items.
+When the application should be a React component tree, use the parallel
+[`iframe-pattern-react-guide.md`](./iframe-pattern-react-guide.md) as the one
+self-contained authoring contract. It covers guest-owned React dependencies,
+TSX compilation, hook readiness, fine-grained direct Cell subscriptions,
+stable resolved items, SQLite query hooks, cleanup, and browser verification.
+Do not combine the two guest bootstraps.
 
 ## Optional SQLite
 

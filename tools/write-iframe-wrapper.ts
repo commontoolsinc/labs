@@ -28,6 +28,7 @@ type Options = {
   html?: string;
   force: boolean;
   help: boolean;
+  react: boolean;
 };
 
 function usage(): string {
@@ -42,17 +43,20 @@ Options:
   --guest <path>     Browser entry bundled into the iframe document
   --out <path>       Generated pattern wrapper
   --html <path>      Optional document shell containing ${SCRIPT_MARKER}
+  --react           Compile TSX with the React instance imported by the guest
   --force            Replace an existing output file
   --help             Show this help
 `;
 }
 
 function parseArgs(args: string[]): Options {
-  const options: Options = { force: false, help: false };
+  const options: Options = { force: false, help: false, react: false };
   for (let index = 0; index < args.length; index++) {
     const argument = args[index];
     if (argument === "--force") {
       options.force = true;
+    } else if (argument === "--react") {
+      options.react = true;
     } else if (argument === "--help" || argument === "-h") {
       options.help = true;
     } else if (
@@ -455,6 +459,13 @@ async function main(): Promise<void> {
 
   const result = await build({
     entryPoints: [guestPath],
+    ...(options.react
+      ? {
+        jsx: "transform" as const,
+        jsxFactory: "React.createElement",
+        jsxFragment: "React.Fragment",
+      }
+      : {}),
     minify: true,
     sourcemap: false,
     target: ["es2022"],

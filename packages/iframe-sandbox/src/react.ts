@@ -4,7 +4,7 @@
  */
 
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
-import { hashStringOf } from "@commonfabric/data-model/value-hash";
+import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
 
 import {
   type FabricClient,
@@ -95,8 +95,8 @@ export function createFabricReact(react: ReactHooks, client: FabricClient) {
     params?: SqliteQueryInput["params"],
   ): QuerySnapshot<Row> & { refresh(): Promise<void> } {
     const database = react.useMemo(() => client.sqlite(name), [name]);
-    const paramsKey = hashStringOf(params ?? null);
-    const queryKey = hashStringOf({ name, sql, params: params ?? null });
+    const paramsKey = JSON.stringify(realmFromFabricValue(params ?? null));
+    const queryKey = JSON.stringify([name, sql, paramsKey]);
     const activeQuery = react.useRef<string | undefined>(undefined);
     const generation = react.useRef(0);
     const [state, setState] = react.useState<KeyedQuerySnapshot<Row>>(() => ({
