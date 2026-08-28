@@ -1102,7 +1102,7 @@ run_completion_walkthrough() {
 
 # The Topics content-safety drill: export a space's authored content, clobber a
 # topic the way a bad migration would, restore it, and prove the restore
-# byte-exact. docs/plans/topics-migration-rehearsal.md makes it part of every
+# byte-exact. docs/history/plans/topics-migration-rehearsal.md makes it part of every
 # clean rehearsal pass, and a restore mechanism nobody exercises is not a
 # mechanism — so it runs here rather than only by hand.
 #

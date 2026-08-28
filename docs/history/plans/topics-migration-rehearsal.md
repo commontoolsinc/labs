@@ -1,3 +1,11 @@
+---
+status: historical
+created: 2026-07-29
+archived: 2026-08-28
+reason: "The rehearsal script for the Estuary Topics board migration, executed on 2026-08-27/28. What the run found, including where this script was wrong, is recorded in ../topics-board-migration-2026-08-28.md."
+superseded-by: ../topics-board-migration-2026-08-28.md
+---
+
 # Topics board migration — the rehearsal script
 
 **Status:** proposed, unexecuted. The concrete plan for rehearsing a `setsrc`
@@ -5,12 +13,12 @@ of the Estuary Topics board against a clone, and then doing it live.
 
 Three documents already exist and none of them is this one:
 
-- [`../development/space-clone-rehearsal.md`](../development/space-clone-rehearsal.md)
+- [`../development/space-clone-rehearsal.md`](../../development/space-clone-rehearsal.md)
   is the **generic loop** — clone, serve, verify, reset. It cannot say which
   pieces to migrate or what to assert.
-- [`space-clone-rehearsal.md`](space-clone-rehearsal.md) is the **design** of
+- [`space-clone-rehearsal.md`](../../plans/space-clone-rehearsal.md) is the **design** of
   that tooling.
-- [`pattern-verb-contract-implementation.md`](../history/plans/pattern-verb-contract-implementation.md)
+- [`pattern-verb-contract-implementation.md`](pattern-verb-contract-implementation.md)
   holds the **live-acceptance checklist** and the **write-storm gate**, spread
   across its Testing and Risks sections.
 
@@ -445,7 +453,7 @@ checked out at the rev that produced the identity, which is why that rev is
 captured beside the manifest and not reconstructed afterwards. The runtime
 also retains, on the piece, a revision for the source it was on before the
 migration — when that source is still present in the space — which is what
-[bulk piece operations](piece-bulk-operations.md) builds rollback on; no
+[bulk piece operations](../../plans/piece-bulk-operations.md) builds rollback on; no
 command fronts that restore yet, so until one does, the recorded-rev `setsrc`
 is the rollback.
 Above it sit two content tiers: `topics-restore.ts` repairs an individual

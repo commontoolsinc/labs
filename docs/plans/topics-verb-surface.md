@@ -75,7 +75,7 @@ a default is the only one of them a board can grant itself.
 | stage | carries | state |
 | --- | --- | --- |
 | A | compatible updates: verb and event prose, the describe layer, `setTitle`, a compact `addTopic` result | landed in source |
-| B | one rehearsed break, four items batched | batched in PR #6143, in review |
+| B | one rehearsed break, four items batched | landed and deployed |
 | C | items gated on platform work | designed for, not started |
 
 ### Stage A
@@ -92,9 +92,17 @@ Stage A is not yet deployed to the team board: no deployed topic carries a
 Four items, batched into a single rehearsed migration rather than paying the
 rehearsal four times:
 
-All four are written and batched into PR #6143, which is in review. None of
-them has landed until that merges, and they merge together or not at all —
-that is what batching a single rehearsed migration means.
+All four landed together in #6143 and are deployed: the Estuary board and
+every one of its 125 topics run these patterns. They merged together or not at
+all, which is what batching a single rehearsed migration means.
+
+The migration itself is recorded in
+[`../history/topics-board-migration-2026-08-28.md`](../history/topics-board-migration-2026-08-28.md).
+The ordering it establishes is the reusable part: the board moves FIRST,
+because the narrowed board reads both the old and the new topic shape while
+the old board reads only the old one. That inverts the children-first rule the
+generic clone-rehearsal runbook gives, and the inversion is a property of which
+side's demand moved rather than of this board.
 
 1. **Narrow the board's `topics` demand and the topic's `mentionable`
    demand** to the fields above.
@@ -173,7 +181,7 @@ before writing a case:
 ## Deploying to the team board
 
 Stage B rewrites the shape of live team data, so it goes through the rehearsal
-in [Topics migration rehearsal](topics-migration-rehearsal.md): a snapshot
+in [Topics migration rehearsal](../history/plans/topics-migration-rehearsal.md): a snapshot
 first, two consecutive clean passes against a clone, the board before its
 children,
 and a content export that the restore drill exercises rather than assumes.
