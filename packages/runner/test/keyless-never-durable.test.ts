@@ -607,6 +607,107 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
     }
   });
 
+  it("an evicted session pointer does not masquerade as the zero-evidence state", async () => {
+    // The session pointer map is BOUNDED: past its capacity a long-lived
+    // session (a server streaming keyless `cf get` transforms) evicts its
+    // oldest entries. An evicted piece then reads pointer-absent AND
+    // marker-absent — byte-identical to the DESIGNED zero-evidence state (a
+    // fresh session replaying a keyless piece) — so a DIFFERENT keyless
+    // pattern staged over it with no supplied argument would skip exactly
+    // the restage validation the un-evicted state performed, reading stale
+    // argument bytes through the new schema unvalidated. Eviction is
+    // "evidence unknown", not "no evidence": the eviction tombstone forces
+    // the conservative restage, whose validation rejects the stored
+    // argument the new pattern cannot read — loudly.
+    storageManager = EmulatedStorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    // Accepts extras…
+    const loosePattern = () => ({
+      argumentSchema: { type: "object" },
+      resultSchema: {
+        type: "object",
+        properties: { out: { type: "number" } },
+      },
+      result: { out: { $alias: { cell: "argument", path: ["v"] } } },
+      nodes: [],
+    });
+    // …the re-setup pattern does not.
+    const strictPattern = () => ({
+      argumentSchema: {
+        type: "object",
+        properties: { v: { type: "number" } },
+        additionalProperties: false,
+      },
+      resultSchema: {
+        type: "object",
+        properties: { out: { type: "number" } },
+      },
+      result: { out: { $alias: { cell: "argument", path: ["v"] } } },
+      nodes: [],
+    });
+
+    const tx = runtime.edit();
+    const cell = runtime.getCell<Record<string, unknown>>(
+      space,
+      "evicted-pointer-not-zero-evidence",
+      undefined,
+      tx,
+    );
+    const running = runtime.run(
+      tx,
+      // deno-lint-ignore no-explicit-any
+      loosePattern() as any,
+      { v: 1, extra: 2 },
+      cell,
+    );
+    await tx.commit();
+    await running.pull();
+    expect(runtime.runner.sessionPatternPointerFor(cell)).toBeDefined();
+    runtime.runner.stop(cell);
+
+    // Capacity-evict the piece's pointer with synthetic churn — the map's
+    // REAL eviction path, just fed faster than a server would.
+    const pointers = (runtime.runner as unknown as {
+      sessionPatternPointers: {
+        set(key: string, value: { identity: string; symbol: string }): void;
+      };
+    }).sessionPatternPointers;
+    for (
+      let i = 0;
+      runtime.runner.sessionPatternPointerFor(cell) !== undefined;
+      i++
+    ) {
+      if (i > 100_000) throw new Error("the pointer never evicted");
+      pointers.set(`synthetic/${i}`, {
+        identity: `keyless:churn-${i}`,
+        symbol: "default",
+      });
+    }
+
+    // The different-pattern re-setup with NO supplied argument: the restage
+    // decision is the only validation gate left, and it must fire.
+    const tx2 = runtime.edit();
+    let loud = false;
+    try {
+      const rerun = runtime.run(
+        tx2,
+        // deno-lint-ignore no-explicit-any
+        strictPattern() as any,
+        undefined,
+        cell,
+      );
+      const committed = await tx2.commit();
+      if (committed.error !== undefined) loud = true;
+      else await rerun.pull();
+    } catch {
+      loud = true;
+    }
+    expect(loud).toBe(true);
+  });
+
   it("counts a keyless mint against a module-indexed pattern (missing-association tripwire)", async () => {
     // The sanctioned keyless population is runtime-BUILT values. A pattern
     // carrying a module-index source path reaching the mint means its

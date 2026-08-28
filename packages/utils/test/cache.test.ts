@@ -294,6 +294,28 @@ describe("BoundedKeyMap", () => {
     expect(map.has("b")).toBe(false);
   });
 
+  it("reports capacity evictions — and only those — through onEvict", () => {
+    // Eviction and the caller's own removals must stay distinguishable: a
+    // consumer whose absence-check feeds a decision records tombstones here,
+    // and a delete/clear/refresh must NOT look like an eviction.
+    const evicted: Array<[string, number]> = [];
+    const map = new BoundedKeyMap<string, number>(3, {
+      onEvict: (key, value) => evicted.push([key, value]),
+    });
+    map.set("a", 1);
+    map.set("b", 2);
+    map.set("a", 10); // refresh: not an eviction
+    map.delete("b"); // caller removal: not an eviction
+    map.set("c", 3);
+    map.set("d", 4);
+    expect(evicted).toEqual([]);
+    map.set("e", 5); // capacity: "a" (oldest) evicts, with its CURRENT value
+    expect(evicted).toEqual([["a", 10]]);
+    expect(map.has("a")).toBe(false);
+    map.clear(); // caller removal: not an eviction
+    expect(evicted).toEqual([["a", 10]]);
+  });
+
   it("reads like a `ReadonlyMap`, oldest entry first", () => {
     const map = new BoundedKeyMap<string, number>(10);
     map.set("a", 1);

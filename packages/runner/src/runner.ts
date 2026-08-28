@@ -1517,6 +1517,22 @@ export class Runner {
   private independentlyStartedResults = new Set<
     `${MemorySpace}/${ScopeKey}/${URI}`
   >();
+  // Tombstones for `sessionPatternPointers` entries dropped by CAPACITY
+  // EVICTION — never by the sanctioned removals (a real pattern's durable
+  // stamps superseding the pointer; a failed staging's cleanup). The
+  // zero-evidence restage exemption in `setupInternal` consults this:
+  // an EVICTED pointer is "evidence unknown", not "no evidence", and must
+  // take the conservative restage rather than the fresh-session exemption
+  // — without the tombstone, eviction would silently skip the argument
+  // revalidation the un-evicted state performed. Entries are never
+  // individually removed (the doubt they record stays true for every
+  // state that consults them); bounded like the pointer map itself, so a
+  // doubly-blown bound degrades honestly to the designed zero-evidence
+  // verdict.
+  private evictedSessionPatternPointers = new BoundedKeyMap<
+    `${MemorySpace}/${ScopeKey}/${URI}`,
+    true
+  >(RESULT_SHORTCUT_LIMIT);
   // SESSION-side pattern pointers for KEYLESS pieces. A hand-built pattern's
   // setup no longer stamps its session-synthetic `keyless:` ref durably
   // (never-durable contract; L3(a), RULED 2026-08-27), but the in-session
@@ -1529,13 +1545,18 @@ export class Runner {
   // have been (end of `applySetupState`), erased when a real pattern's
   // stamps supersede it or the staging transaction fails, and it dies with
   // the session — which is the contract's whole point. Bounded like the
-  // shortcut maps beside it, and safe to evict for the same reason: a
-  // missing entry costs the designed no-pattern-meta verdict (the piece's
-  // producer re-derives it) or a restage, never a wrong answer.
+  // shortcut maps beside it. Eviction costs the designed no-pattern-meta
+  // verdict (the piece's producer re-derives it), a restage, or a loud
+  // moved/not-current abort — with one guarded corner: absence alone would
+  // read as the fresh-session ZERO-EVIDENCE state and skip the restage
+  // validation, so evictions leave a tombstone (above) and the exemption
+  // treats "evicted" as evidence-unknown → restage.
   private sessionPatternPointers = new BoundedKeyMap<
     `${MemorySpace}/${ScopeKey}/${URI}`,
     { identity: string; symbol: string }
-  >(RESULT_SHORTCUT_LIMIT);
+  >(RESULT_SHORTCUT_LIMIT, {
+    onEvict: (key) => this.evictedSessionPatternPointers.set(key, true),
+  });
 
   /**
    * The SESSION-side pattern pointer for a keyless piece this runner set up,
@@ -2526,10 +2547,16 @@ export class Runner {
       // re-staging would validate — and rewrite defaults over — a stored
       // argument no update touched (the cross-session `cf get` transform
       // replay failed exactly there). A marker naming ANOTHER identity still
-      // restages, and any surviving pointer keeps the ordinary rule.
+      // restages, and any surviving pointer keeps the ordinary rule. An
+      // EVICTED session pointer is NOT zero evidence — this session had the
+      // evidence and lost it to capacity, so the tombstone routes the piece
+      // to the conservative restage instead of the exemption.
       restageStoredArgument: (!sameStoredSetup || marker === "other") &&
         !(previousIdentityRef === undefined && marker === "absent" &&
-          !validationOptions.reapplyStoredSetup),
+          !validationOptions.reapplyStoredSetup &&
+          !this.evictedSessionPatternPointers.has(
+            this.getDocKey(resultCell),
+          )),
       // "matches" only. An ABSENT marker is not evidence that the running graph
       // is this pattern — it is the absence of evidence either way, and the two
       // must not collapse into one boolean.
