@@ -16,7 +16,7 @@ import {
  * Serialized DOM event data.
  * Contains a subset of event properties that are safe to serialize.
  */
-export interface SerializedEvent {
+export type SerializedEvent = {
   /** Event type (e.g., "click", "input", "change") */
   type: string;
 
@@ -47,7 +47,7 @@ export interface SerializedEvent {
 
   // Custom event detail
   detail?: FabricValue;
-}
+};
 
 export type { EventProvenance };
 
@@ -55,7 +55,7 @@ export type { EventProvenance };
  * Serialized event target data.
  * Contains common input element properties.
  */
-export interface SerializedEventTarget {
+export type SerializedEventTarget = {
   name?: string;
 
   /**
@@ -76,7 +76,7 @@ export interface SerializedEventTarget {
   selectedIndex?: number;
   selectedOptions?: { value: string }[];
   dataset?: Record<string, string>;
-}
+};
 
 /**
  * Message sent from main thread to worker when a DOM event fires.
