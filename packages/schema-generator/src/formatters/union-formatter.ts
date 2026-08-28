@@ -15,6 +15,7 @@ import {
   getNativeTypeSchema,
   getPropertyNameText,
   isDefaultBrandedMember,
+  resolveAliasedSymbol,
   resolveWrapperNode,
   TypeWithInternals,
 } from "../type-utils.ts";
@@ -424,9 +425,7 @@ export class UnionFormatter implements TypeFormatter {
     }
 
     const symbol = checker.getSymbolAtLocation(unwrapped.typeName);
-    const resolvedSymbol = symbol && (symbol.flags & ts.SymbolFlags.Alias)
-      ? checker.getAliasedSymbol(symbol)
-      : symbol;
+    const resolvedSymbol = symbol && resolveAliasedSymbol(symbol, checker);
     const aliasDeclaration = resolvedSymbol?.declarations?.find((
       declaration,
     ): declaration is ts.TypeAliasDeclaration =>
@@ -915,7 +914,10 @@ export class UnionFormatter implements TypeFormatter {
     symbol: ts.Symbol,
     context: GenerationContext,
   ): unknown {
-    const valueDeclaration = symbol.valueDeclaration;
+    const valueDeclaration = resolveAliasedSymbol(
+      symbol,
+      context.typeChecker,
+    ).valueDeclaration;
     if (
       valueDeclaration &&
       ts.isVariableDeclaration(valueDeclaration) &&

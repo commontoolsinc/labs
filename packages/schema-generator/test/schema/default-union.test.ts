@@ -234,6 +234,75 @@ describe("Schema: Default in unions", () => {
     expect(result.default).toEqual({ theme: "dark", retries: 3 });
   });
 
+  // A `typeof CONST` payload reads the const's initializer off the AST, so the
+  // const must be found through its import when it lives in another module —
+  // the shape every pattern that keeps its defaults in a `contract.ts` has.
+  // `getSymbolAtLocation` on the import returns the alias symbol, whose
+  // valueDeclaration is the ImportSpecifier, not the const; without the alias
+  // hop the default silently disappears from the schema (2026-08-28, found
+  // through the pattern-iframe wrapper: every deployed guest hydrated to
+  // `undefined`).
+  describe("typeof values imported from another module", () => {
+    const contract = `
+      export interface Config {
+        theme: string;
+        retries: number;
+      }
+      export const DEFAULT_CONFIG: Config = { theme: "dark", retries: 3 };
+      export const DEFAULT_THEME = "light";
+    `;
+
+    async function schemaFor(mainSource: string) {
+      const { type, checker, typeNode } = await getTypeFromFiles(
+        { "/contract.ts": contract, "/main.ts": mainSource },
+        "/main.ts",
+        "T",
+      );
+      return asObjectSchema(
+        new SchemaGenerator().generateSchema(type, checker, typeNode),
+      );
+    }
+
+    it("applies them in Config | Default<typeof IMPORTED>", async () => {
+      const result = await schemaFor(`
+        import { type Config, DEFAULT_CONFIG } from "./contract.ts";
+        interface Default<T, V extends T = T> {}
+        export type T = Config | Default<typeof DEFAULT_CONFIG>;
+      `);
+      expect(result.$ref).toBe("#/$defs/Config");
+      expect(result.default).toEqual({ theme: "dark", retries: 3 });
+    });
+
+    it("applies them in Config | Default<Config, typeof IMPORTED>", async () => {
+      const result = await schemaFor(`
+        import { type Config, DEFAULT_CONFIG } from "./contract.ts";
+        interface Default<T, V extends T = T> {}
+        export type T = Config | Default<Config, typeof DEFAULT_CONFIG>;
+      `);
+      expect(result.$ref).toBe("#/$defs/Config");
+      expect(result.default).toEqual({ theme: "dark", retries: 3 });
+    });
+
+    it("applies an imported const used as a shorthand property", async () => {
+      const result = await schemaFor(`
+        import { type Config, DEFAULT_THEME as theme } from "./contract.ts";
+        interface Default<T, V extends T = T> {}
+        const LOCAL = { theme, retries: 3 } as const;
+        export type T = Config | Default<typeof LOCAL>;
+      `);
+      expect(result.default).toEqual({ theme: "light", retries: 3 });
+    });
+
+    it("applies an imported primitive const", async () => {
+      const result = await schemaFor(`
+        import { DEFAULT_THEME } from "./contract.ts";
+        interface Default<T, V extends T = T> {}
+        export type T = string | Default<typeof DEFAULT_THEME>;
+      `);
+      expect(result.default).toBe("light");
+    });
+  });
+
   it("applies object defaults from typeof values with shorthand properties", async () => {
     const code = `
       interface Default<T, V extends T = T> {}

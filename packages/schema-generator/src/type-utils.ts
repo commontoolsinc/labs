@@ -337,6 +337,30 @@ export interface TypeWithInternals extends ts.Type {
  * Resolve the most relevant symbol for a type, accounting for references,
  * aliases, and internal helper accessors exposed on some compiler objects.
  */
+/**
+ * Follow an import alias to the symbol it names. `getSymbolAtLocation` on an
+ * imported identifier returns the alias symbol, whose `valueDeclaration` is
+ * the ImportSpecifier — so anything that reads a declaration off a symbol
+ * (a `typeof CONST` default's initializer, a type alias's declaration) sees
+ * nothing unless it hops first. Every such reader goes through here, so the
+ * hop cannot be present on one path and missing on another.
+ *
+ * The try/catch is for synthetic symbols in test programs, which do not
+ * always round-trip through `getAliasedSymbol`; a non-alias symbol is
+ * returned as is.
+ */
+export function resolveAliasedSymbol(
+  symbol: ts.Symbol,
+  checker: ts.TypeChecker,
+): ts.Symbol {
+  if ((symbol.flags & ts.SymbolFlags.Alias) === 0) return symbol;
+  try {
+    return checker.getAliasedSymbol(symbol);
+  } catch {
+    return symbol;
+  }
+}
+
 export function getPrimarySymbol(type: ts.Type): ts.Symbol | undefined {
   if (type.symbol) return type.symbol;
   const ref = type as ts.TypeReference;

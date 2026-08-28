@@ -18,6 +18,7 @@ import {
   extractDefaultBrandPayloadValue,
   getArrayElementInfo,
   getPropertyNameText,
+  resolveAliasedSymbol,
   resolveWrapperNode,
   type TypeWithInternals,
 } from "../type-utils.ts";
@@ -1214,15 +1215,8 @@ export class CommonFabricFormatter implements TypeFormatter {
     symbol: ts.Symbol | undefined,
     context: GenerationContext,
   ): ts.TypeAliasDeclaration | undefined {
-    let resolved = symbol;
-    if (resolved && (resolved.flags & ts.SymbolFlags.Alias) !== 0) {
-      try {
-        resolved = context.typeChecker.getAliasedSymbol(resolved);
-      } catch {
-        // Fall back to the original symbol; some synthetic test symbols do not
-        // round-trip cleanly through getAliasedSymbol.
-      }
-    }
+    const resolved = symbol &&
+      resolveAliasedSymbol(symbol, context.typeChecker);
     return resolved?.declarations?.find(
       (decl): decl is ts.TypeAliasDeclaration =>
         ts.isTypeAliasDeclaration(decl),
@@ -1932,17 +1926,9 @@ export class CommonFabricFormatter implements TypeFormatter {
     const exprName = typeQueryNode.exprName;
 
     // Get the symbol for the referenced entity
-    let symbol = context.typeChecker.getSymbolAtLocation(exprName);
+    const symbol = context.typeChecker.getSymbolAtLocation(exprName);
     if (!symbol) {
       return undefined;
-    }
-    if ((symbol.flags & ts.SymbolFlags.Alias) !== 0) {
-      try {
-        symbol = context.typeChecker.getAliasedSymbol(symbol);
-      } catch {
-        // Fall back to the import alias; local test programs can produce
-        // synthetic symbols that do not round-trip through getAliasedSymbol.
-      }
     }
 
     return this.extractValueFromSymbol(symbol, context);
@@ -1956,7 +1942,10 @@ export class CommonFabricFormatter implements TypeFormatter {
     symbol: ts.Symbol,
     context: GenerationContext,
   ): unknown {
-    const valueDeclaration = symbol.valueDeclaration;
+    const valueDeclaration = resolveAliasedSymbol(
+      symbol,
+      context.typeChecker,
+    ).valueDeclaration;
     if (!valueDeclaration) {
       return undefined;
     }
