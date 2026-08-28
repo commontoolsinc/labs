@@ -173,12 +173,21 @@ describe("publish-render-gate", () => {
       );
     });
 
-    it("names an output whose elements carry no text", () => {
-      expect(classifyRenderedHtml("   \n  ")).toBe("ui-rendered-no-text");
+    it("names an output whose tree carries nothing at all", () => {
+      expect(classifyRenderedHtml("   \n  ")).toBe("ui-rendered-empty");
       // What an empty fragment renders as, which is not literally empty.
       expect(classifyRenderedHtml("<cf-fragment></cf-fragment>")).toBe(
-        "ui-rendered-no-text",
+        "ui-rendered-empty",
       );
+    });
+
+    it("reads a form of labelled fields as rendered, though it carries no text", () => {
+      // `email.tsx` in the seed corpus, verbatim. Weighing text alone hid it.
+      expect(
+        classifyRenderedHtml(
+          '<cf-vstack gap="3"><cf-field label="Email"><cf-input value="[binding]" placeholder="email@example.com" type="email"></cf-input></cf-field></cf-vstack>',
+        ),
+      ).toBe("ui-rendered");
     });
 
     it("passes output that rendered content", () => {
@@ -204,7 +213,7 @@ describe("publish-render-gate", () => {
       for (
         const reason of [
           "ui-default-tostring",
-          "ui-rendered-no-text",
+          "ui-rendered-empty",
           "probe-failed",
           "superseded",
         ] as const

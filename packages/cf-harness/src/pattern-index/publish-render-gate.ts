@@ -37,12 +37,23 @@
  * `wish()` is the plain case, and a link the body constructs is another — and
  * the probe runs in the run's own space. A pattern that does so reads labeled
  * data whatever its arguments were, and the bounded HTML this gate keeps can
- * hold it. That HTML is artifact-only, and the artifact is the boundary that
- * already holds this run's `rawValue` — the real piece's entire unsanitized
- * result. So the probe adds no sink class the publish path did not already
- * have, and strictly less data than the artifact beside it. It is not "CFC-
- * neutral by construction"; it is neutral on the argument path and equal to
- * the existing artifact boundary on the space-read path.
+ * hold it. That HTML goes to the run artifact rather than to the tool result,
+ * and the artifact is the boundary that already holds this run's `rawValue` —
+ * the real piece's entire unsanitized result. So the probe adds no sink class
+ * the publish path did not already have, and strictly less data than the
+ * artifact beside it. It is not "CFC-neutral by construction"; it is neutral
+ * on the argument path and equal to the existing artifact boundary on the
+ * space-read path.
+ *
+ * And "the artifact" is not a boundary the model cannot cross. `read_file`,
+ * `write_file`, `edit_file` and `view_image` reserve the artifact root
+ * (`tools/reserved-artifacts.ts`); `bash` does not, and its stdout is
+ * model-facing, so a run that lists and cats its own tool-output JSON reads
+ * this HTML back. That route predates this gate and carries strictly more
+ * through it — `rawValue` and every withheld thrown message travel the same
+ * way — so it is a property of the artifact root, not of the probe. What is
+ * true, and all that is claimed, is that nothing derived from the DOM is put
+ * into the tool result the prompt loop hands the model.
  *
  * ## Why the verdict is a closed enumeration
  *
@@ -71,6 +82,7 @@
 import type { JSONSchema } from "@commonfabric/api";
 import type { Cell } from "@commonfabric/runner";
 import { UI } from "@commonfabric/runner/shared";
+import { uiSchema } from "@commonfabric/runner/schemas";
 import { MockDoc } from "@commonfabric/html/mock-doc";
 import { renderInProcess } from "@commonfabric/html/in-process";
 import { isObjectNotArray } from "@commonfabric/utils/types";
@@ -103,15 +115,27 @@ export type PatternPublicationStatus = "discoverable" | "recorded";
 export type PatternPublicationReason =
   /** The probe rendered element content carrying no default-`toString` text. */
   | "ui-rendered"
-  /** The pattern's result declares no `$UI`, so there was nothing to render. */
+  /**
+   * The pattern's result declares no `$UI`, so there was nothing to render.
+   *
+   * This code exists to be QUERIED, not only to explain one decision. A
+   * doubler with no UI and an entry promising "a reading list with toggles
+   * and live counts" that has no UI at all are the same fact to this gate,
+   * and telling them apart needs the description read against the program —
+   * judgement rather than structure, and outside what a render can settle.
+   * Recording it distinctly means whoever builds that check can enumerate
+   * exactly these entries from the index against real data, rather than
+   * re-deriving the set.
+   */
   | "no-ui"
   /** The probe's rendered output carried `[object Object]` or a sibling. */
   | "ui-default-tostring"
   /**
-   * The pattern declares a `$UI` that rendered elements carrying no text at
-   * all. Reported, not refused on — see `classifyRenderedHtml`.
+   * The pattern declares a `$UI` that rendered a tree carrying nothing — no
+   * text and no attributes. See `classifyRenderedHtml` for why that is the
+   * test rather than text alone.
    */
-  | "ui-rendered-no-text"
+  | "ui-rendered-empty"
   /**
    * The probe could not be started, did not settle, or the reconciler
    * reported an error, so no complete tree was read.
@@ -125,7 +149,8 @@ export type PatternPublicationReason =
 
 /**
  * What the gate learned, in full. Only `status`, `reason` and
- * `syntheticInputsComplete` cross to the model; `html` is artifact-only.
+ * `syntheticInputsComplete` reach the tool result; `html` goes only to the
+ * run artifact — see the module comment on what that does and does not mean.
  */
 
 export interface PatternRenderVerdict {
@@ -140,7 +165,11 @@ export interface PatternRenderVerdict {
    */
   readonly syntheticInputsComplete: boolean;
 
-  /** The probe's rendered HTML, bounded. Artifact-only; never model-facing. */
+  /**
+   * The probe's rendered HTML, bounded. Kept for the run artifact and never
+   * put in the tool result. The artifact root itself is reachable through
+   * `bash`, which does not reserve it the way the file tools do.
+   */
   readonly html?: string;
 
   /** Whether `html` stops at `PROBE_HTML_MAX_CHARS` rather than at its end. */
@@ -164,8 +193,8 @@ export const PATTERN_PUBLICATION_MESSAGES: Readonly<
     "published to the pattern index and offered to search. It declares no $UI, so the render check does not apply to it.",
   "ui-default-tostring":
     "recorded in the pattern index but NOT offered to search. Rendering its $UI host-side produced text of the form [object Object] — a value reaching the DOM through Object.prototype.toString rather than through a read. Indexing a reactive row by a reactive key is the usual cause: the index expression yields a proxy, and stringifying a proxy gives exactly this. Read the value out (a derive or a lift over the row and the key) and run it again to have the fixed version offered. The rendered output is retained in the run artifact and withheld here.",
-  "ui-rendered-no-text":
-    "recorded in the pattern index but NOT offered to search: its $UI rendered elements carrying no text at all, against a synthetic instance of its own argument schema. That is what an empty-state list looks like and also what a UI built only from images or canvases looks like, so this is an absence of evidence rather than a defect found. The entry is uncertified rather than condemned.",
+  "ui-rendered-empty":
+    "recorded in the pattern index but NOT offered to search: its $UI rendered a tree carrying no text and no attributes at all, against a synthetic instance of its own argument schema. That is an absence of evidence rather than a defect found — an empty-state list renders this way too — so the entry is uncertified rather than condemned.",
   "probe-failed":
     "recorded in the pattern index but NOT offered to search: a second instance of the pattern, built from synthetic inputs, could not be started, did not settle, or errored while rendering, so nothing was rendered and nothing was checked. The entry is uncertified rather than condemned.",
   "superseded":
@@ -190,8 +219,8 @@ export const PATTERN_DISCOVERABILITY_REASONS: Readonly<
   "no-ui": "render gate: not applicable, the pattern declares no $UI",
   "ui-default-tostring":
     "render gate: the $UI rendered [object Object] against a synthetic instance of the pattern's own argument schema — a value reaching the DOM through Object.prototype.toString rather than through a read",
-  "ui-rendered-no-text":
-    "render gate: no verdict — the $UI rendered elements carrying no text against a synthetic instance of the pattern's own argument schema, which an empty-state list and an image-only UI both do",
+  "ui-rendered-empty":
+    "render gate: no verdict — the $UI rendered a tree carrying no text and no attributes against a synthetic instance of the pattern's own argument schema, which an empty-state list also does",
   "probe-failed":
     "render gate: no verdict — a synthetic-input probe could not be started, did not settle, or errored while rendering",
   "superseded":
@@ -454,17 +483,22 @@ export const syntheticArgument = (
  * Handlers the reconciler registers are never invoked: nothing dispatches
  * events at a document nobody is looking at.
  *
- * Returns `undefined` when the result carries no `$UI` at all.
+ * Returns `undefined` when the result carries no `$UI` at all. The test for
+ * that goes through `uiSchema` rather than reading the raw result: a `$UI` a
+ * pattern produced is reached by a link, and an unschema'd read does not
+ * follow it — so a raw read answers "no UI" for a pattern that has one, and
+ * the gate would skip the check while appearing to pass it.
  */
 export const renderPatternUiToHtml = async (
   resultCell: Cell<unknown>,
   idle: () => Promise<void>,
 ): Promise<{ html: string; errors: readonly string[] } | undefined> => {
-  const result = resultCell.get();
-  if (
-    !isObjectNotArray(result) ||
-    (result as Record<string, unknown>)[UI] === undefined
-  ) {
+  const uiCell = resultCell.asSchema(uiSchema) as Cell<
+    Record<string, unknown> | undefined
+  >;
+  await uiCell.sync();
+  const result = uiCell.get();
+  if (!isObjectNotArray(result) || result[UI] === undefined) {
     return undefined;
   }
   const mock = new MockDoc(
@@ -476,7 +510,7 @@ export const renderPatternUiToHtml = async (
     throw new Error("the mock document has no render container");
   }
   const errors: string[] = [];
-  const render = renderInProcess(container, resultCell.key(UI), {
+  const render = renderInProcess(container, uiCell.key(UI), {
     document,
     setProp: renderOptions.setProp,
     onError: (error) => {
@@ -516,9 +550,19 @@ export const renderPatternUiToHtml = async (
  */
 export const classifyRenderedHtml = (
   html: string,
-): "ui-rendered" | "ui-default-tostring" | "ui-rendered-no-text" => {
+): "ui-rendered" | "ui-default-tostring" | "ui-rendered-empty" => {
   if (DEFAULT_TO_STRING.test(html)) return "ui-default-tostring";
-  return html.replaceAll(/<[^>]*>/g, "").trim() === ""
-    ? "ui-rendered-no-text"
+  // Text alone is the wrong test, and measurably so: a form of labelled
+  // fields with placeholders — `<cf-field label="Email"><cf-input
+  // placeholder="email@example.com">` — renders correctly and carries no
+  // text node anywhere, and reading that as empty hid a working component.
+  // What a rendered tree carries is its text AND its attribute values, so
+  // both are weighed. A tree with neither carries nothing; a UI built only
+  // from bare tags with no attributes reads as empty here too, which errs
+  // toward not certifying rather than toward certifying wrongly.
+  const text = html.replaceAll(/<[^>]*>/g, "").trim();
+  const attributes = html.match(/=\s*"([^"]*)"/g) ?? [];
+  return text === "" && attributes.every((pair) => /="\s*"$/.test(pair))
+    ? "ui-rendered-empty"
     : "ui-rendered";
 };

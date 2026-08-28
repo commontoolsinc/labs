@@ -320,7 +320,7 @@ describe("run_pattern publish render gate", () => {
     });
 
     expect(output.patternPublication?.status).toBe("recorded");
-    expect(output.patternPublication?.reason).toBe("ui-rendered-no-text");
+    expect(output.patternPublication?.reason).toBe("ui-rendered-empty");
     expect(published(index)).toHaveLength(1);
     expect(published(index)[0].body.discoverable).toBe(false);
   });

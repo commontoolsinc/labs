@@ -141,6 +141,11 @@ export interface RunPatternToolSuccessOutput {
    * stripped from the model-facing rendering, on the same terms as thrown
    * text: rendered DOM can carry both labeled data a pattern reached for
    * itself and text from `cf:pattern:` source the model has never seen.
+   *
+   * Stripped from the tool result is the whole of the claim. The artifact it
+   * lands in is reachable by `bash`, which does not reserve the artifact root
+   * the way the file tools do — a property of that root, which already holds
+   * `rawValue` and every withheld thrown message, rather than of this field.
    */
   rawCauseMessage?: string;
 }
@@ -328,6 +333,36 @@ export const runPatternToolDescriptor: HarnessToolDescriptor = {
         linkedStringCount: { type: "integer", minimum: 0 },
         valueError: { type: "string" },
         rawValue: {},
+        patternPublication: {
+          type: "object",
+          properties: {
+            status: {
+              type: "string",
+              enum: ["discoverable", "recorded"],
+            },
+            reason: {
+              type: "string",
+              enum: [
+                "ui-rendered",
+                "no-ui",
+                "ui-default-tostring",
+                "ui-rendered-empty",
+                "probe-failed",
+                "superseded",
+              ],
+            },
+            message: { type: "string" },
+            syntheticInputsComplete: { type: "boolean" },
+          },
+          required: [
+            "status",
+            "reason",
+            "message",
+            "syntheticInputsComplete",
+          ],
+          additionalProperties: false,
+        },
+        rawCauseMessage: { type: "string" },
       },
       required: [
         "outputId",
@@ -1537,7 +1572,7 @@ export const runPatternTool: HarnessToolDefinition<
         // and is recorded as such rather than read as a pass.
         if (reason === "ui-default-tostring") return recorded(reason, html);
         if (rendered.errors.length > 0) return recorded("probe-failed", html);
-        if (reason === "ui-rendered-no-text") return recorded(reason, html);
+        if (reason === "ui-rendered-empty") return recorded(reason, html);
         return discoverable(reason, html);
       } catch {
         // What a probe throws is the pattern's own text, which the artifact
