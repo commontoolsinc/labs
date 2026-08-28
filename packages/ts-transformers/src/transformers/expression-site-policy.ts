@@ -8,6 +8,7 @@ import {
   getOwnReturnExpressions,
   getTypeAtLocationWithFallback,
   hasAuthoredSourceSite,
+  hasReactiveCollectionProvenance,
   isCollectionType,
   isEventHandlerJsxAttribute,
   isFunctionLikeExpression,
@@ -1661,7 +1662,7 @@ function localBindingCanCarryReactiveValue(
       ts.isBinaryExpression(node) &&
       node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
       node.operatorToken.kind <= ts.SyntaxKind.LastAssignment &&
-      expressionReferencesSymbol(node.left, symbol, context.checker) &&
+      assignmentTargetsSymbol(node.left, symbol, context.checker) &&
       collectedValueEscapes(
         node.right,
         callback,
@@ -1677,6 +1678,31 @@ function localBindingCanCarryReactiveValue(
   };
   ts.forEachChild(callback.body, visit);
   return reactiveAssignment;
+}
+
+/**
+ * Whether an assignment writes to the binding itself rather than through it.
+ * `flag = value` targets `flag`; `bag[flag] = value` targets `bag` and only
+ * reads `flag` as a key, so a reference scan over the whole left-hand side
+ * would misread the second as rebinding the first. A destructuring pattern
+ * has no single target identifier, so it keeps the reference scan.
+ */
+function assignmentTargetsSymbol(
+  target: ts.Expression,
+  symbol: ts.Symbol,
+  checker: ts.TypeChecker,
+): boolean {
+  const current = unwrapExpression(target);
+  if (ts.isIdentifier(current)) {
+    return checker.getSymbolAtLocation(current) === symbol;
+  }
+  if (
+    ts.isPropertyAccessExpression(current) ||
+    ts.isElementAccessExpression(current)
+  ) {
+    return false;
+  }
+  return expressionReferencesSymbol(current, symbol, checker);
 }
 
 function expressionReferencesSymbol(
@@ -1788,6 +1814,10 @@ export function classifyUnsupportedPlainArrayMapCall(
     return undefined;
   }
 
+  if (mapReceiverHasReactiveCollectionProvenance(call, context)) {
+    return undefined;
+  }
+
   if (
     !plainArrayMapDecisionNeedsDiagnostic(
       decision,
@@ -1799,6 +1829,128 @@ export function classifyUnsupportedPlainArrayMapCall(
     return undefined;
   }
   return { kind: "unsupported-plain-array-map", reason: decision, call };
+}
+
+/**
+ * Whether the receiver is a reactive collection by provenance, whatever its
+ * static type says.
+ *
+ * This validation runs at stage 4, and the closure stage that rewrites a
+ * reactive `.map()` into `mapWithPattern` runs at stage 13, so the
+ * `lowered` flag `classifyPlainArrayMapWrapperSite` consults is necessarily
+ * still false here and cannot distinguish the two. Deciding from the static
+ * type alone claims receivers that are declared as plain arrays but carry a
+ * reactive collection — `gmailImporter.emails` is declared `Email[]` — and
+ * for those the diagnostic's premise is wrong: the lowering collects through
+ * a sub-pattern, so no cell is ever stored in a native array.
+ *
+ * Asking the same provenance question the lowering asks keeps the diagnostic
+ * to the receivers that really do stay native. The stage-13 registries are
+ * empty this early, so provenance an earlier stage has not recorded yet is
+ * not visible; that direction only withholds the diagnostic, never invents
+ * one.
+ */
+function mapReceiverHasReactiveCollectionProvenance(
+  call: ts.CallExpression,
+  context: TransformationContext,
+): boolean {
+  const target = unwrapExpression(call.expression);
+  if (!ts.isPropertyAccessExpression(target)) {
+    return false;
+  }
+  const receiver = unwrapExpression(target.expression);
+  if (
+    hasReactiveCollectionProvenance(receiver, context.checker, {
+      typeRegistry: context.state.typeRegistry,
+      syntheticReactiveCollectionRegistry:
+        context.state.syntheticReactiveCollectionRegistry,
+    })
+  ) {
+    return true;
+  }
+  // A binding whose initializer is site-lifted holds a Reactive at runtime,
+  // which is the other half of what the closure stage admits.
+  return getSiteLiftedCollectionLocalSymbol(receiver, context) !== undefined;
+}
+
+/**
+ * Whether the receiver is a pattern-scope variable whose initializer the
+ * expression-site machinery lifts — `const view = rows.get().filter(...)`,
+ * `const linksView = asArray(links.get()).filter((l) => l)`. The lift is
+ * created by PatternOwnedExpressionSiteLowering, which runs AFTER the closure
+ * stage (C-002), so at decision time the binding still reads as its authored
+ * initializer and no registry entry can exist yet — the same decision-time
+ * race CT-1778 records for helper-call results. The cure is the same: decide
+ * from the shape that will exist, by asking the site machinery itself whether
+ * the initializer classifies as a lowerable site. A binding whose initializer
+ * is site-lifted holds a Reactive at runtime, so an array method over it must
+ * take the WithPattern form or the runtime rejects it.
+ */
+export function getSiteLiftedCollectionLocalSymbol(
+  mapTarget: ts.Expression,
+  context: TransformationContext,
+): ts.Symbol | undefined {
+  const target = unwrapExpression(mapTarget);
+  if (!ts.isIdentifier(target)) {
+    return undefined;
+  }
+
+  const originalTarget = ts.getOriginalNode(target);
+  const symbol = context.checker.getSymbolAtLocation(target) ??
+    (
+      originalTarget !== target && ts.isIdentifier(originalTarget)
+        ? context.checker.getSymbolAtLocation(originalTarget)
+        : undefined
+    );
+  const declaration = symbol?.valueDeclaration;
+  if (
+    !declaration || !ts.isVariableDeclaration(declaration) ||
+    !declaration.initializer
+  ) {
+    return undefined;
+  }
+
+  const initializer = declaration.initializer;
+  if (context.getReactiveContext(initializer).kind !== "pattern") {
+    return undefined;
+  }
+
+  // Only bindings in the pattern-builder callback body itself are
+  // site-lifted. A local inside a JSX IIFE is owned by the IIFE
+  // decomposition, and a local inside any other callback by that callback's
+  // own lowering — treating either as already-reactive here would misroute
+  // it.
+  let enclosing: ts.Node | undefined = declaration.parent;
+  while (enclosing && !ts.isFunctionLike(enclosing)) {
+    enclosing = enclosing.parent;
+  }
+  if (
+    !enclosing ||
+    !(ts.isArrowFunction(enclosing) || ts.isFunctionExpression(enclosing))
+  ) {
+    return undefined;
+  }
+  const builderPosition = getCallArgumentPosition(enclosing);
+  if (!builderPosition) {
+    return undefined;
+  }
+  const builderKind = detectCallKind(builderPosition.call, context.checker);
+  if (
+    builderKind?.kind !== "builder" ||
+    (builderKind.builderName !== "pattern" &&
+      builderKind.builderName !== "render")
+  ) {
+    return undefined;
+  }
+
+  const analyze = context.getDataFlowAnalyzer();
+  const decision = classifyExpressionSiteHandling(
+    initializer,
+    "variable-initializer",
+    context,
+    analyze,
+  );
+  return decision.kind !== "skip" && decision.lowerable ? symbol : undefined;
 }
 
 export function classifyRestrictedReactiveComputation(

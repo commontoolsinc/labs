@@ -767,7 +767,20 @@ What the callback returns then decides how far its result may travel:
   included because record creation evaluates them as ordinary JavaScript.
   Resource- or handler-producing collections use an explicitly reactive
   receiver so the collection lowers to reactive `mapWithPattern`, or attach a
-  handler directly to the JSX node that owns it. A rejected-flow map whose
+  handler directly to the JSX node that owns it.
+
+  The diagnostic asks whether the receiver is a reactive collection by
+  **provenance**, not by declared type. Validation is stage 4 and the closure
+  stage that rewrites a reactive `.map()` into `mapWithPattern` is stage 13, so
+  the `lowered` flag is still false here and cannot separate the two. A
+  receiver declared as a plain array can still carry a reactive collection —
+  `gmailImporter.emails` is declared `Email[]` — and for those the lowering
+  collects through a sub-pattern, so no cell is ever stored in a native array
+  and the diagnostic does not apply. The check therefore consults
+  `hasReactiveCollectionProvenance` and `getSiteLiftedCollectionLocalSymbol`,
+  the same two questions the closure stage asks. Provenance an earlier stage
+  has not recorded yet is invisible this early, which can only withhold the
+  diagnostic, never invent one. A rejected-flow map whose
   returns are all plain stays ordinary JavaScript and keeps the standard
   non-escaping diagnostics for anything reactive inside it. Async and
   generator callbacks containing reactive work are rejected independently of

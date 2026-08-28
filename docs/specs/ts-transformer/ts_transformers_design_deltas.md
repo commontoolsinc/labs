@@ -138,6 +138,18 @@ maps instead make their collection ownership explicit with a reactive receiver
 (and therefore `mapWithPattern`), while handler-producing render loops attach
 the handler directly to the JSX node that owns it.
 
+Which maps the test claims is decided by the receiver's provenance rather than
+its declared type. Validation runs at stage 4 and the closure stage that
+rewrites a reactive `.map()` into `mapWithPattern` runs at stage 13, so the
+`lowered` flag is necessarily still false at decision time. A receiver
+declared as a plain array can nonetheless carry a reactive collection, and
+there the lowering collects through a sub-pattern, so nothing reactive is ever
+stored in a native array and the diagnostic would be describing a shape that
+does not exist. The check asks the same two questions the closure stage asks —
+`hasReactiveCollectionProvenance`, and whether the receiver is a site-lifted
+collection local — which is also why `getSiteLiftedCollectionLocalSymbol`
+lives beside the expression-site policy that answers the second one.
+
 An object or array literal is not exempt as a whole either. Its own
 truthiness is never in question, but an ordinary consumer reads through it —
 `map((v) => ({ v, flag })).filter(({ flag }) => flag)` interprets the member,

@@ -3497,6 +3497,41 @@ Deno.test("Reactive .get() Validation", async (t) => {
   );
 
   await t.step(
+    "does not claim a map whose receiver is reactive by provenance",
+    async () => {
+      // The receiver's declared type is a plain array, but its provenance is
+      // a reactive collection, so the closure stage lowers this map to
+      // `mapWithPattern` and no cell is ever stored in a native array. This
+      // validation runs before that lowering, so it has to ask the same
+      // provenance question rather than read the declared type.
+      const source = `      import { pattern, Writable } from "commonfabric";
+
+      interface Row { label: Writable<string> }
+
+      export default pattern<{ rows: Writable<Row[]> }, { titles: unknown }>(
+        ({ rows }) => {
+          const items: Row[] = rows.get();
+          const titles = items.map((row) => row.label);
+          return { titles };
+        },
+      );
+    `;
+      const { diagnostics } = await validateSource(source, {
+        types: COMMONFABRIC_TYPES,
+      });
+      const errors = getErrors(diagnostics).filter(
+        (error) => error.type === "pattern-context:computation",
+      );
+      assertEquals(
+        errors.length,
+        0,
+        "a reactive-provenance receiver is lowered to mapWithPattern, so the " +
+          "escaping-map diagnostic must not claim it",
+      );
+    },
+  );
+
+  await t.step(
     "errors when a lifted plain map result flows through a local",
     async () => {
       const source = `      import { pattern, Writable } from "commonfabric";
