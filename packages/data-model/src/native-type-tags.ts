@@ -13,6 +13,9 @@
  * alone.
  */
 
+import { constructorFromObject } from "@commonfabric/utils/objects";
+
+import { NATIVE_TAGS, type NativeTag } from "./NATIVE_TAGS.ts";
 import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
@@ -21,40 +24,7 @@ import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricInstance } from "./interface.ts";
 
-/**
- * Tags identifying classes that the fabric system recognizes for dispatch.
- * These are distinct from wire-format `TAGS` -- they identify *what the value
- * is*, not what fabric type it becomes after conversion.
- *
- * Covers two categories:
- * - **Native JS builtins**: standard JS types that the fabric system converts.
- * - **System-defined value types**: classes defined by this system that
- *   behave like primitives (always frozen, pass through conversion
- *   unchanged) but aren't under the open-ended `FabricInstance` umbrella.
- */
-export const NATIVE_TAGS = Object.freeze(
-  {
-    Array: "Array",
-    Object: "Object",
-    Error: "Error",
-    Map: "Map",
-    Set: "Set",
-    Date: "Date",
-    Uint8Array: "Uint8Array",
-    RegExp: "RegExp",
-    EpochNsec: "EpochNsec",
-    EpochDay: "EpochDay",
-    Hash: "Hash",
-    FabricBytes: "FabricBytes",
-    FabricKeyPair: "FabricKeyPair",
-    FabricRegExp: "FabricRegExp",
-    FabricInstance: "FabricInstance",
-    Primitive: "Primitive",
-  } as const,
-);
-
-/** One of the native-instance tag strings. */
-export type NativeTag = typeof NATIVE_TAGS[keyof typeof NATIVE_TAGS];
+export { NATIVE_TAGS, type NativeTag } from "./NATIVE_TAGS.ts";
 
 /**
  * Checks whether a value is a native `Error`.
@@ -162,19 +132,12 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
     return NATIVE_TAGS.Array;
   }
 
-  // The constructor is read from the _prototype_, not from the value. What is
-  // being asked is which class the value is an instance of, and that is a fact
-  // about its prototype; an own `constructor` property is ordinary data that
-  // happens to share the name, and must not decide the value's type. Reading
-  // it off the value would let `{constructor: Error}` -- a plain record -- be
-  // tagged `Error` and silently rebuilt as one.
-  //
-  // Guard: a null-prototype object has no constructor to find, and an exotic
-  // one may not have a callable one.
-  const proto = Object.getPrototypeOf(value);
-  const ctor = proto === null ? undefined : proto.constructor;
+  // `constructorFromObject()` reads the class off the value's PROTOTYPE, which
+  // is what keeps an own `constructor` property -- ordinary data that happens
+  // to share the name -- from deciding the value's type.
+  const ctor = constructorFromObject(value);
 
-  if (typeof ctor === "function") {
+  if (ctor !== undefined) {
     const tag = tagFromNativeClass(ctor);
     if (tag !== null) return tag;
   }
@@ -193,7 +156,7 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
   // Null-prototype objects (`Object.create(null)`), which have no constructor
   // to have been recognized. Tagged `Object` so the object rule decides them
   // by name, the same way an indirect array is tagged `Array`.
-  if (proto === null) return NATIVE_TAGS.Object;
+  if (Object.getPrototypeOf(value) === null) return NATIVE_TAGS.Object;
 
   return null;
 }

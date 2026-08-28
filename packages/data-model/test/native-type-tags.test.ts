@@ -9,7 +9,9 @@
  * including a run with `Error.isError` removed, to reach the fallback beneath
  * it.
  *
- * A separate group pins something the classifier deliberately does not do:
+ * One group pins where the class is read FROM: a value's own `constructor`
+ * property is data, and must not be able to present a plain record as an
+ * `Error`. Another pins something the classifier deliberately does not do:
  * `toJSON()` has no bearing on what a value is. An object carrying one is
  * still an object and a class instance carrying one is still unrecognized,
  * whether the member is own or inherited.
@@ -18,12 +20,13 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+import { NATIVE_TAGS } from "@/NATIVE_TAGS.ts";
 import {
   isNativeError,
-  NATIVE_TAGS,
   tagFromNativeClass,
   tagFromNativeValue,
 } from "@/native-type-tags.ts";
+import { isValidFabricNativeObject } from "@/native-conversion.ts";
 
 describe("native-type-tags", () => {
   describe("tagFromNativeValue()", () => {
@@ -153,6 +156,39 @@ describe("native-type-tags", () => {
     // classifier that consulted it would let one assignment --
     // `Array.prototype.toJSON`, an own key on a record -- redirect values
     // wholesale.
+    // An own `constructor` property is ordinary data that happens to share a
+    // name with the thing that decides a value's class. Reading the class off
+    // the value rather than off its prototype would let a plain record present
+    // itself as an `Error` -- and be rebuilt as one, by a conversion doing
+    // exactly what it was told.
+    describe("an own `constructor` property does not decide the class", () => {
+      for (
+        const [label, forged] of [
+          ["`Error`", Error],
+          ["`Map`", Map],
+          ["`Date`", Date],
+          ["`Uint8Array`", Uint8Array],
+        ] as ReadonlyArray<[string, unknown]>
+      ) {
+        it(`returns \`Object\` for a record claiming ${label}`, () => {
+          expect(tagFromNativeValue({ constructor: forged, a: 1 }))
+            .toBe(NATIVE_TAGS.Object);
+        });
+
+        it(`returns \`false\` from the membership check for one claiming ${label}`, () => {
+          expect(isValidFabricNativeObject({ constructor: forged, a: 1 }))
+            .toBe(false);
+        });
+      }
+
+      it("reads an inherited `constructor`, which is the real one", () => {
+        // The counterpart: what the prototype says IS the answer, so a value
+        // whose class is reachable only through its prototype is tagged by it.
+        expect(tagFromNativeValue(new Map())).toBe(NATIVE_TAGS.Map);
+        expect(isValidFabricNativeObject(new Map())).toBe(true);
+      });
+    });
+
     describe("`toJSON()` is intentionally not supported", () => {
       it("returns `Object` tag for a plain object carrying `toJSON()`", () => {
         expect(tagFromNativeValue({ toJSON: () => "converted" })).toBe(

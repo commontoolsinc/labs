@@ -1,6 +1,13 @@
 /**
- * What `isInertPlainObject()` accepts, and the accepting cases are the
- * surprising ones. A frozen object qualifies, and so does a key whose value is
+ * Asking what an object is: the shape of its property keys, and the class it
+ * is an instance of.
+ *
+ * The second question has one case that carries the whole point -- an own
+ * `constructor` property must not answer it -- and the rest are the shapes
+ * where there is no answer to give.
+ *
+ * For the first: what `isInertPlainObject()` accepts, and the accepting cases
+ * are the surprising ones. A frozen object qualifies, and so does a key whose value is
  * `undefined` and one whose name is index-shaped -- none of those disturbs the
  * property that the predicate is actually about.
  *
@@ -11,7 +18,10 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { isInertPlainObject } from "@commonfabric/utils/objects";
+import {
+  constructorFromObject,
+  isInertPlainObject,
+} from "@commonfabric/utils/objects";
 
 describe("objects", () => {
   describe("isInertPlainObject()", () => {
@@ -228,6 +238,69 @@ describe("objects", () => {
             : Object.getOwnPropertyDescriptor(target, key),
       });
       expect(isInertPlainObject(ghosted)).toBe(false);
+    });
+  });
+
+  describe("constructorFromObject()", () => {
+    it("returns the class an ordinary instance was built from", () => {
+      expect(constructorFromObject({})).toBe(Object);
+      expect(constructorFromObject([])).toBe(Array);
+      expect(constructorFromObject(new Map())).toBe(Map);
+      expect(constructorFromObject(new Date())).toBe(Date);
+      expect(constructorFromObject(/x/)).toBe(RegExp);
+    });
+
+    it("returns the subclass, not the base", () => {
+      class Sub extends Map {}
+      expect(constructorFromObject(new Sub())).toBe(Sub);
+    });
+
+    it("returns the class of an instance whose prototype was replaced", () => {
+      // The prototype is the whole of the answer, so re-pointing it re-points
+      // the answer -- which is the property, not a wrinkle in it.
+      const value = Object.setPrototypeOf({}, Map.prototype);
+      expect(constructorFromObject(value)).toBe(Map);
+    });
+
+    // The case the function exists for. An own `constructor` is ordinary data
+    // that happens to share a name with the thing that decides a class, and a
+    // caller dispatching on the answer would otherwise let a plain record pass
+    // for whatever it named.
+    describe("an own `constructor` property does not answer", () => {
+      for (
+        const [label, forged] of [
+          ["`Error`", Error],
+          ["`Map`", Map],
+          ["`Date`", Date],
+        ] as ReadonlyArray<[string, unknown]>
+      ) {
+        it(`returns \`Object\` for a record claiming ${label}`, () => {
+          expect(constructorFromObject({ constructor: forged, a: 1 }))
+            .toBe(Object);
+        });
+      }
+
+      it("is not fooled by one that shadows the real class either", () => {
+        const value = Object.assign(new Map(), { constructor: Error });
+        expect(constructorFromObject(value)).toBe(Map);
+      });
+    });
+
+    describe("returns `undefined` where there is no class to read", () => {
+      it("returns `undefined` for a null-prototype object", () => {
+        expect(constructorFromObject(Object.create(null))).toBe(undefined);
+      });
+
+      it("returns `undefined` for an object whose prototype was severed", () => {
+        const value = Object.setPrototypeOf({ a: 1 }, null);
+        expect(constructorFromObject(value)).toBe(undefined);
+      });
+
+      it("returns `undefined` when the constructor is not callable", () => {
+        const proto = Object.create(null) as { constructor?: unknown };
+        proto.constructor = "not a function";
+        expect(constructorFromObject(Object.create(proto))).toBe(undefined);
+      });
     });
   });
 });
