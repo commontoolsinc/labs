@@ -1474,6 +1474,144 @@ describe("Phase 3 events-down (serving side)", () => {
     cancelDemand();
   });
 
+  it('the handler-not-run barrier reaches entries the drain has NOT queued yet: a withdrawal landing MID-PASS stops the pass (events.md §2, the mid-pass half — the in-queue sweep can only hold what is already in the event queue, and each new sidecar\'s sync() is an await, so the gap is real; held open here with the drain\'s sync gate on B\'s sidecar, the load-park mid-pass pin\'s construction. Mutation: drop the handler-not-run #loadParkDeferredInPass set → B1 queues behind the barrier\'s back into the healed gate and the log reads ["A","B","A"])', async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+
+    const compiled = await clientRuntime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: GATED_ORDERED_LOG_PATTERN }],
+    }, { space });
+    const gateCell = clientRuntime.getCell<unknown>(
+      space,
+      "hnr-midpass-gate",
+      undefined,
+    );
+    const argument = clientRuntime.getCell<{ log: string[]; gate?: unknown }>(
+      space,
+      "hnr-midpass-arg",
+      undefined,
+    );
+    const result = clientRuntime.getCell<Record<string, unknown>>(
+      space,
+      "hnr-midpass-result",
+      compiled.resultSchema,
+    );
+    await gateCell.sync();
+    await argument.sync();
+    await result.sync();
+    {
+      // Seed the gate VALID so the warm-up consequence seals.
+      const seed = clientRuntime.edit();
+      gateCell.withTx(seed).set(7);
+      argument.withTx(seed).set({ log: [], gate: gateCell });
+      expect((await seed.commit()).error).toBeUndefined();
+    }
+    {
+      const tx = clientRuntime.edit();
+      clientRuntime.run(tx, compiled, argument, result);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    const argumentId = argument.getAsNormalizedFullLink().id;
+    const storedLog =
+      (): string[] => ((Engine.read(engine, { id: argumentId })?.value as
+        | { log?: string[] }
+        | undefined)?.log ?? []);
+    const send = (stream: "a" | "b") =>
+      (result.key(stream) as unknown as { send(value: unknown): unknown })
+        .send({});
+    const deferrals = () =>
+      (host!.stats().events as { handlerNotRunDeferrals?: number })
+        .handlerNotRunDeferrals ?? 0;
+
+    const gate = Promise.withResolvers<void>();
+    try {
+      // Warm the piece and stream `a`'s sidecar, gate valid.
+      send("a");
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () => storedLog().length === 1,
+        "the warm-up consequence to land",
+      );
+      const aSidecarId = sidecarIdsIn(engine)[0];
+      expect(aSidecarId).toBeDefined();
+      expect(servingManager).toBeDefined();
+
+      // INVALIDATE the gate (a present non-number): A2's dispatch now
+      // withdraws (handler-not-run) deterministically.
+      {
+        const tx = clientRuntime.edit();
+        gateCell.withTx(tx).set({ pending: true });
+        expect((await tx.commit()).error).toBeUndefined();
+      }
+      await clientRuntime.storageManager.synced();
+
+      // Hold the drain at B's sidecar sync — the exact point at which A2
+      // has been queued (a's sidecar passes through) and B1 has not.
+      servingManager!.syncGateWhen = (id) =>
+        id.startsWith("of:stream-events:") && id !== aSidecarId;
+      servingManager!.syncGate = gate.promise;
+
+      send("a"); // A2 arrives first — and will withdraw
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      send("b"); // B1 second — healthy closure
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () => sidecarIdsIn(engine).length === 2,
+        "B1's append to land on its own sidecar",
+      );
+
+      // The window: a pass held at B's sidecar sync, with A2's
+      // withdrawal counted. The scheduler runs free while the drain
+      // waits on the gate, so a queued A2 dispatches — and withdraws —
+      // inside the hold.
+      await waitUntil(
+        () => (servingManager?.syncGateHits ?? 0) > 0,
+        "a drain pass held at B's sidecar",
+      );
+      await waitUntil(
+        () => deferrals() >= 1,
+        "A2's withdrawal inside the held pass",
+      );
+      expect(storedLog()).toEqual(["A"]);
+
+      // HEAL FIRST, then release: with the gate healthy, an unbarriered
+      // pass would queue B1 and dispatch it immediately — the overtake —
+      // while A2 waits for the next re-drain.
+      {
+        const tx = clientRuntime.edit();
+        gateCell.withTx(tx).set(7);
+        expect((await tx.commit()).error).toBeUndefined();
+      }
+      servingManager!.syncGateWhen = undefined;
+      servingManager!.syncGate = undefined;
+      gate.resolve();
+
+      await waitUntil(
+        () => storedLog().length === 3,
+        "all three consequences to land after the pass resumes",
+        30_000,
+      );
+      // THE PIN: arrival order held across the mid-pass gap.
+      expect(storedLog()).toEqual(["A", "A", "B"]);
+    } finally {
+      if (servingManager !== undefined) {
+        servingManager.syncGateWhen = undefined;
+        servingManager.syncGate = undefined;
+      }
+      gate.resolve();
+      cancelDemand();
+    }
+  });
+
   it("a permanently unresolvable argument hardens into a §5 DROP whose notice names the REAL class (review-6459 F2): the handler was runnable and dispatched — the deferrals were withdrawn dispatches, not load attempts, and the durable drop record must not say otherwise", async () => {
     ({ manager: clientManager, runtime: clientRuntime } = openClient());
     const engine = await server.engineForSpace(space);

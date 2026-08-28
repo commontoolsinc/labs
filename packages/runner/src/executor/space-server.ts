@@ -804,16 +804,17 @@ export class SpaceServer implements TransactionSealDestination {
    * EVENT_PREQUEUE_STUCK_AFTER. */
   #preQueueDeferralStreaks = new Map<string, number>();
 
-  /** Set when a LOAD-PARK deferral fires while a drain pass is running
-   * (verification-coverage.md's OW45 residue member). The scheduler's
-   * own arrival-order barrier holds every later-arrived durable entry
-   * that is already QUEUED behind the deferred one, but an entry this
-   * pass has not reached yet is out of its reach — and the pass awaits
-   * TWICE per entry (a new sidecar's `sync()`, then the stream doc's),
-   * so a park failure genuinely can land in either gap. The drain reads
-   * this immediately before queueing each entry — past both awaits —
-   * and stops the pass, the same barrier `break` the sidecar-sync-
-   * failure arm makes. Cleared at the top of every pass. */
+  /** Set when a LOAD-PARK deferral — or a handler-not-run withdrawal
+   * (review-6459 F1, the same §2 obligation) — fires while a drain pass
+   * is running (verification-coverage.md's OW45 residue member). The
+   * scheduler's own arrival-order barrier holds every later-arrived
+   * durable entry that is already QUEUED behind the deferred one, but
+   * an entry this pass has not reached yet is out of its reach — and
+   * the pass awaits TWICE per entry (a new sidecar's `sync()`, then the
+   * stream doc's), so a deferral genuinely can land in either gap. The
+   * drain reads this immediately before queueing each entry — past both
+   * awaits — and stops the pass, the same barrier `break` the
+   * sidecar-sync-failure arm makes. Cleared at the top of every pass. */
   #loadParkDeferredInPass = false;
 
   /** Post-commit effects of sealed transactions, deferred per wave
@@ -3371,6 +3372,22 @@ export class SpaceServer implements TransactionSealDestination {
                       (this.#eventDeferrals.get(entry.eventId) ?? 0) + 1;
                     this.#eventDeferrals.set(entry.eventId, deferrals);
                     if (deferrals < EVENT_DEFERRAL_DROP_THRESHOLD) {
+                      if (
+                        "cause" in outcome &&
+                        outcome.cause === "handler-not-run"
+                      ) {
+                        // The withdrawal's arrival-order barrier,
+                        // MID-PASS half (events.md §2; review-6459 F1
+                        // completed): the scheduler-side sweep can only
+                        // hold entries already IN the event queue. A
+                        // withdrawal landing while a drain pass awaits
+                        // a later sidecar's sync would let that pass
+                        // queue the next arrival behind the barrier's
+                        // back — the same gap the load-park causes
+                        // close through this flag (see the
+                        // #drainStreamEvents check past every await).
+                        this.#loadParkDeferredInPass = true;
+                      }
                       // No consequence: the entry stays pending; the
                       // re-drain waits for input or the backstop tick
                       // (the cold-view creation race — OW19's

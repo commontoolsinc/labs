@@ -474,14 +474,17 @@ loop's duty).
   PERMANENTLY unresolvable argument hardens through the bounded
   deferral budget into the visible T3 drop notice instead of wedging
   the stream. The withdrawal carries §2's per-space arrival-order
-  BARRIER with it, exactly as the load-park failure arm does: every
-  later-arrived durable served entry queued behind the withdrawn
-  dispatch in the same space defers too (`cause: "arrival-barrier"`,
-  counted with the other barrier followers), or a later arrival's
-  consequence lands ahead of the withdrawn entry's re-drain — the b01
-  inversion. The piece-start deferral (a served entry whose piece
-  could not be started) carries the same barrier; cross-space
-  neighbours and LT1 in-process copies are excluded from the sweep,
+  BARRIER with it, exactly as the load-park failure arm does — both
+  halves: every later-arrived durable served entry already QUEUED
+  behind the withdrawn dispatch in the same space defers too
+  (`cause: "arrival-barrier"`, counted with the other barrier
+  followers), and a withdrawal landing while a drain pass is mid-
+  iteration stops the pass before it queues later arrivals behind the
+  barrier's back — else a later arrival's consequence lands ahead of
+  the withdrawn entry's re-drain, the b01 inversion. The piece-start
+  deferral (a served entry whose piece could not be started) carries
+  the same in-queue sweep; cross-space neighbours and LT1 in-process
+  copies are excluded from the sweep,
   as everywhere. (α) preserved: the mark still commits exactly once, only
   never without its effects. An LT1 in-process copy takes the same
   withdrawal through its abort alone — the batch marks only a
