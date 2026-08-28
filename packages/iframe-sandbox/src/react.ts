@@ -38,6 +38,7 @@ export type ReactHooks = {
 
 /** Reactive state and mutations returned for a bridged cell. */
 export type CellHookResult<T> = ResourceSnapshot<T> & {
+  initialize(value: T): Promise<T>;
   set(value: T | ((current: T) => T)): Promise<void>;
   refresh(): Promise<T>;
 };
@@ -81,11 +82,17 @@ export function createFabricReact(react: ReactHooks, client: FabricClient) {
           : cell.set(next),
       [cell],
     );
+    const initialize = react.useCallback(
+      (value: T) => cell.initialize(value),
+      [cell],
+    );
+    const refresh = react.useCallback(() => cell.pull(), [cell]);
 
     return {
       ...snapshot,
+      initialize,
       set,
-      refresh: () => cell.pull(),
+      refresh,
     };
   }
 

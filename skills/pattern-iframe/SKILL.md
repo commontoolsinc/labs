@@ -5,9 +5,16 @@ description: Build or generate a Common Fabric pattern whose primary UI is a sel
 
 # Iframe-first patterns
 
-Read `docs/common/ai/iframe-pattern-guide.md` in full. It is the self-contained
-authoring contract for this task; do not load the general pattern-development
-guides unless the requested behavior extends beyond its wrapper.
+Choose one self-contained authoring contract before writing code:
+
+- For a React component tree, hooks, or an explicitly requested React guest,
+  read `docs/common/ai/iframe-pattern-react-guide.md` in full.
+- Otherwise read `docs/common/ai/iframe-pattern-guide.md` in full for a plain
+  DOM guest.
+
+Do not load both guides unless the task is a migration between those styles. Do
+not load the general pattern-development guides unless the requested behavior
+extends beyond the generated wrapper.
 
 Keep the authored surface small:
 
@@ -28,6 +35,9 @@ deno run -A tools/write-iframe-wrapper.ts \
   --guest packages/patterns/<name>/guest.ts \
   --out packages/patterns/<name>/main.tsx
 ```
+
+Add `--react` when the authored guest is React TSX, as required by the React
+guide.
 
 Add `--html packages/patterns/<name>/guest.html` when the guest needs a custom
 document shell, and `--force` only when regenerating the named output. The HTML

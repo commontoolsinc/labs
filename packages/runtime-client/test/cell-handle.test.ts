@@ -1051,6 +1051,78 @@ describe("cell-handle", () => {
       unsubscribe();
     });
 
+    it("publishes the value selected by atomic initialization", async () => {
+      const requests: unknown[] = [];
+      const runtime = {
+        [$conn]: () => ({
+          request: (request: unknown) => {
+            requests.push(request);
+            return Promise.resolve({ value: { n: 7 } });
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle(runtime, ref);
+
+      await expect(cell.initialize({ n: 0 })).resolves.toEqual({ n: 7 });
+      expect(cell.get()).toEqual({ n: 7 });
+      expect(requests).toEqual([{
+        type: RequestType.CellInitialize,
+        cell: ref,
+        value: { n: 0 },
+      }]);
+    });
+
+    it("hydrates nested cell handles in the selected initializer", async () => {
+      const linkedRef: CellRef = {
+        ...ref,
+        id: "of:initialized-link" as CellRef["id"],
+      };
+      const runtime = {
+        [$conn]: () => ({
+          request: () =>
+            Promise.resolve({ value: { linked: linkRefFrom(linkedRef) } }),
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<{ linked: CellHandle<unknown> }>(
+        runtime,
+        ref,
+      );
+      const linked = new CellHandle(runtime, linkedRef);
+
+      const selected = await cell.initialize({ linked });
+
+      expect(isCellHandle(selected.linked)).toBe(true);
+      expect(selected.linked.ref()).toEqual(linkedRef);
+      expect(cell.get()?.linked).toBe(selected.linked);
+    });
+
+    it("refuses an undefined initializer before contacting the runtime", async () => {
+      let requests = 0;
+      const runtime = {
+        [$conn]: () => ({
+          request: () => {
+            requests++;
+            return Promise.resolve({ value: undefined });
+          },
+          subscribe: () => Promise.resolve(),
+          unsubscribe: () => Promise.resolve(),
+          signal: { aborted: false },
+        }),
+      } as unknown as RuntimeClient;
+      const cell = new CellHandle<undefined>(runtime, ref);
+
+      await expect(cell.initialize(undefined)).rejects.toThrow(
+        "Cell initialize requires a defined value",
+      );
+      expect(requests).toBe(0);
+    });
+
     it("keeps an earlier strict commit when a queued strict set fails", async () => {
       let writes = 0;
       const runtime = {

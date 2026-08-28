@@ -190,6 +190,24 @@ export class RemoteCell<T = FabricValue> {
     return this.#enqueueOperation(() => this.#set(snapshot));
   }
 
+  /** Atomically stores a default while the cell is undefined. */
+  initialize(value: T): Promise<T> {
+    if (value === undefined) {
+      return Promise.reject(
+        new TypeError("Cell initialize requires a defined value."),
+      );
+    }
+    let snapshot: T;
+    try {
+      snapshot = cloneIfNecessary(value as FabricValue, {
+        frozen: false,
+      }) as T;
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    return this.#enqueueOperation(() => this.#initialize(snapshot));
+  }
+
   update(updater: (current: T) => T): Promise<void> {
     return this.#enqueueOperation(async () => {
       const snapshot = this.#snapshot;
@@ -291,6 +309,32 @@ export class RemoteCell<T = FabricValue> {
       ) {
         this.#setReady(snapshot);
       }
+    } catch (error) {
+      if (
+        eventGeneration === this.#eventGeneration &&
+        this.#snapshot === before
+      ) {
+        this.#setError(error);
+      }
+      throw error;
+    }
+  }
+
+  async #initialize(value: T): Promise<T> {
+    const before = this.#snapshot;
+    const eventGeneration = this.#eventGeneration;
+    try {
+      const current = await this.#client.request("initialize", {
+        ...targetFields(this.#target),
+        value: value as FabricValue,
+      }) as T;
+      if (
+        eventGeneration === this.#eventGeneration &&
+        this.#snapshot === before
+      ) {
+        this.#setReady(current);
+      }
+      return current;
     } catch (error) {
       if (
         eventGeneration === this.#eventGeneration &&
@@ -448,6 +492,8 @@ export class FabricClient {
   #subscriptions = new Map<string, Subscription>();
   #cells = new Map<string, RemoteCell<unknown>>();
   #cellOperationQueues = new Map<string, CellOperationQueue>();
+  #resolvedOperations = new Map<string, ReadonlySet<string>>();
+  #manifest: Promise<BridgeManifest> | undefined;
   #disconnected = false;
 
   constructor() {
@@ -455,7 +501,9 @@ export class FabricClient {
   }
 
   describe(): Promise<BridgeManifest> {
-    return this.request("describe") as Promise<BridgeManifest>;
+    return this.#manifest ??= this.#request("describe") as Promise<
+      BridgeManifest
+    >;
   }
 
   cell<T = FabricValue>(name: string): RemoteCell<T> {
@@ -490,7 +538,13 @@ export class FabricClient {
   }
 
   /** Rehydrates a host-minted stable cell capability. */
-  resolvedCell<T = FabricValue>(descriptor: BridgeResolvedCell): RemoteCell<T> {
+  resolvedCell<T = FabricValue>(
+    descriptor: BridgeResolvedCell,
+  ): RemoteCell<T> {
+    this.#resolvedOperations.set(
+      descriptor.handle,
+      new Set(descriptor.operations ?? []),
+    );
     return this.cellTarget<T>(
       { handle: descriptor.handle, path: [] },
       {
@@ -515,6 +569,61 @@ export class FabricClient {
   }
 
   request(
+    operation: BridgeOperation,
+    fields: Partial<
+      Omit<
+        BridgeRequest,
+        "protocol" | "version" | "type" | "id" | "operation"
+      >
+    > = {},
+  ): Promise<FabricValue | undefined> {
+    if (operation === "initialize") {
+      return this.#initialize(fields);
+    }
+    return this.#request(operation, fields);
+  }
+
+  async #initialize(
+    fields: Partial<
+      Omit<
+        BridgeRequest,
+        "protocol" | "version" | "type" | "id" | "operation"
+      >
+    >,
+  ): Promise<FabricValue | undefined> {
+    if (this.#disconnected) {
+      return await this.#request("initialize", fields);
+    }
+    if (typeof fields.handle === "string") {
+      if (!this.#resolvedOperations.get(fields.handle)?.has("initialize")) {
+        throw new FabricBridgeError({
+          code: "method-not-supported",
+          message: "The resolved cell does not support initialize().",
+        });
+      }
+      return await this.#request("initialize", fields);
+    }
+    if (typeof fields.resource !== "string") {
+      throw new FabricBridgeError({
+        code: "method-not-supported",
+        message: "The cell capability cannot negotiate initialize().",
+      });
+    }
+    const manifest = await this.describe();
+    const descriptor = manifest.resources.find((entry) =>
+      entry.name === fields.resource
+    );
+    if (!descriptor?.operations.includes("initialize")) {
+      throw new FabricBridgeError({
+        code: "method-not-supported",
+        message: `Cell \`${fields.resource}\` does not support initialize().`,
+        resource: fields.resource,
+      });
+    }
+    return await this.#request("initialize", fields);
+  }
+
+  #request(
     operation: BridgeOperation,
     fields: Partial<
       Omit<
@@ -625,6 +734,8 @@ export class FabricClient {
     for (const pending of this.#pending.values()) pending.reject(error);
     this.#pending.clear();
     this.#subscriptions.clear();
+    this.#resolvedOperations.clear();
+    this.#manifest = undefined;
     this.#cellOperationQueues.clear();
     this.#queued = [];
   }

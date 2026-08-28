@@ -136,6 +136,8 @@ function bridgeCell(
     get: () => bridgeValue(cell.get()),
     pull: async () => bridgeValue(await cell.pull()),
     ...(writable && {
+      initialize: async (value: FabricValue) =>
+        bridgeValue(await cell.initialize(value)),
       set: async (value: FabricValue) => await cell.setStrict(value),
       push: async (...values: FabricValue[]) =>
         await (cell as CellHandle<FabricValue[]>).pushStrict(...values),

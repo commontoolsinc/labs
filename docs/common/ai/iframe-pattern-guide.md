@@ -167,6 +167,8 @@ The Cell contract matches the rest of Common Fabric:
   for later values. Call `pull()` when the first render needs fresh data.
 - `key(nameOrIndex)` derives a path-specific handle. Its sink observes that path
   rather than the whole root value.
+- `initialize(defaultValue)` atomically stores a first-use default only while
+  the Cell is undefined, then returns the value that won.
 - `set(value)` replaces a value. `update(fn)` queues a read-modify-write against
   other operations on the same remote Cell in this guest; it is not a
   transaction across users, sessions, or resources.
@@ -205,16 +207,18 @@ const state = fabric.cell<typeof DEFAULT_STATE>("state");
 
 async function addNote(text: string): Promise<void> {
   const current = await state.pull();
-  if (current === undefined) await state.set(DEFAULT_STATE);
+  if (current === undefined) await state.initialize(DEFAULT_STATE);
   await state.key("notes").push({ id: crypto.randomUUID(), text });
 }
 ```
 
 Do not initialize with `update((current) => current ?? DEFAULT_STATE)`: the
 updater starts from this guest's cache, which another session may have made
-stale. A strict default `set()` after `pull()` either materializes the missing
-parent or fails closed if another writer won. Use `update()` only when a local
-queue over an already materialized complete object is the intended boundary.
+stale. `initialize()` reads and conditionally writes in one runtime transaction,
+so concurrent guests return the same winning value without replacing it. Use
+`set()` for intentional last-writer-wins replacement, and use `update()` only
+when a local queue over an already materialized complete object is the intended
+boundary.
 
 Keep editable DOM drafts separate from authoritative Cell samples. While a
 local write is pending, a sink rerender should preserve that draft. Once it
@@ -265,14 +269,12 @@ needs a new ID. Represent UI sentinels outside the user-data domain, such as
 
 ### React guests
 
-React belongs to the guest bundle, not the wrapper. Import the React instance
-chosen by the guest and pass that exact instance to
-`createFabricReact(React, fabric)` from
-`@commonfabric/iframe-sandbox/react`. Its `useCell(name)` hook uses
-`useSyncExternalStore`, returns `loading`, `ready`, or `error`, accepts a value or
-functional setter, and exposes `refresh()` as the explicit pull. The direct Cell
-API remains useful for fine-grained `key(...).sink(...)` subscriptions and
-stable resolved items.
+When the application should be a React component tree, use the parallel
+[`iframe-pattern-react-guide.md`](./iframe-pattern-react-guide.md) as the one
+self-contained authoring contract. It covers guest-owned React dependencies,
+TSX compilation, hook readiness, fine-grained direct Cell subscriptions,
+stable resolved items, SQLite query hooks, cleanup, and browser verification.
+Do not combine the two guest bootstraps.
 
 ## Optional SQLite
 

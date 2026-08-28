@@ -55,6 +55,41 @@ export const DEFAULT_OUTPUT: IframeOutputData = { count: 0 };
 `;
 
 describe("iframe pattern wrapper generator", () => {
+  it("bundles React TSX with the guest-owned React instance", async () => {
+    const directory = await Deno.makeTempDir({
+      prefix: "pattern-iframe-react-",
+    });
+    try {
+      const contract = resolve(directory, "contract.ts");
+      const guest = resolve(directory, "guest.tsx");
+      const out = resolve(directory, "main.tsx");
+      await Deno.writeTextFile(
+        contract,
+        `${contractPrefix}
+export const IFRAME_PATTERN = { name: "ReactGuest" } as const;
+`,
+      );
+      await Deno.writeTextFile(
+        guest,
+        `import React from "npm:react@19.2.8";
+import { createRoot } from "npm:react-dom@19.2.8/client";
+createRoot(document.querySelector("#root")!).render(
+  <button type="button">React {React.version}</button>,
+);
+`,
+      );
+
+      const result = await generate(contract, guest, out, "--react");
+
+      expect(result.code, decoder.decode(result.stderr)).toBe(0);
+      const generated = await Deno.readTextFile(out);
+      expect(generated).toContain("react.production.js");
+      expect(generated).not.toContain("@commonfabric/runner/jsx-runtime");
+    } finally {
+      await removeDirectory(directory);
+    }
+  });
+
   it("keeps state and output scoped to the active viewer", async () => {
     const directory = await Deno.makeTempDir({
       prefix: "pattern-iframe-scopes-",
