@@ -43,6 +43,16 @@ import type {
 } from "../pattern-index/client.ts";
 import { PatternIndexError } from "../pattern-index/client.ts";
 import {
+  classifyRenderedHtml,
+  PATTERN_DISCOVERABILITY_REASONS,
+  PATTERN_PUBLICATION_MESSAGES,
+  type PatternPublicationReason,
+  type PatternPublicationStatus,
+  PROBE_HTML_MAX_CHARS,
+  renderPatternUiToHtml,
+  syntheticArgument,
+} from "../pattern-index/publish-render-gate.ts";
+import {
   composedPatternIds,
   materializeComposedPatterns,
   PatternCompositionError,
@@ -118,6 +128,42 @@ export interface RunPatternToolSuccessOutput {
    * `value` reaches model context.
    */
   rawValue?: unknown;
+
+  /**
+   * What became of this run's contribution to the pattern index, when the
+   * run had one to make. Absent when the run published nothing at all — it
+   * named a `patternId`, it gave no description, or the run has no index.
+   */
+  patternPublication?: RunPatternPublicationReport;
+
+  /**
+   * The probe render's own output, retained for the persisted artifact and
+   * stripped from the model-facing rendering, on the same terms as thrown
+   * text: rendered DOM can carry both labeled data a pattern reached for
+   * itself and text from `cf:pattern:` source the model has never seen.
+   */
+  rawCauseMessage?: string;
+}
+
+/**
+ * What the render gate decided about this run's contribution to the index.
+ *
+ * Every field is pinned to a fixed set — the two unions and a boolean, with
+ * `message` drawn from `PATTERN_PUBLICATION_MESSAGES` and never composed. See
+ * `pattern-index/publish-render-gate.ts` for why nothing derived from the
+ * rendered DOM may join them.
+ */
+export interface RunPatternPublicationReport {
+  status: PatternPublicationStatus;
+  reason: PatternPublicationReason;
+  message: string;
+
+  /**
+   * Whether the synthetic instance the probe was driven with covers the
+   * pattern's whole argument schema. `false` where the schema declares no
+   * shape, or where generating it hit a depth or node bound.
+   */
+  syntheticInputsComplete: boolean;
 }
 
 /**
@@ -1407,11 +1453,114 @@ export const runPatternTool: HarnessToolDefinition<
     if (valueError === undefined) {
       recordOutcome("run_succeeded");
     }
+    /**
+     * The render gate: what the pattern's own `$UI` does before the pattern
+     * is contributed to the index.
+     *
+     * The render runs against a PROBE — a second, detached instance of the
+     * same compiled pattern, built from a synthetic instance of the pattern's
+     * own argument schema rather than from this run's inputs. The run's own
+     * piece is never rendered, so no labeled data reaches the render through
+     * the argument path. A pattern that reaches the space for itself is the
+     * case that argument does not cover; `pattern-index/publish-render-gate.ts`
+     * carries the whole of the reasoning, including what the verdict may say.
+     *
+     * The probe is unregistered like the run's own piece, and its `cause` is
+     * left to default, so each check gets a piece with no state carried over
+     * from an earlier one.
+     *
+     * A verdict never bears on the run: every path returns a verdict, and the
+     * caller's only use for it is whether to publish.
+     */
+    const renderGateVerdict = async (): Promise<{
+      status: PatternPublicationStatus;
+      reason: PatternPublicationReason;
+      syntheticInputsComplete: boolean;
+      html?: string;
+    }> => {
+      const synthetic = syntheticArgument(pattern.argumentSchema);
+      const recorded = (reason: PatternPublicationReason, html?: string) => ({
+        status: "recorded" as const,
+        reason,
+        syntheticInputsComplete: synthetic.complete,
+        ...(html !== undefined ? { html } : {}),
+      });
+      const discoverable = (
+        reason: PatternPublicationReason,
+        html?: string,
+      ) => ({
+        status: "discoverable" as const,
+        reason,
+        syntheticInputsComplete: synthetic.complete,
+        ...(html !== undefined ? { html } : {}),
+      });
+      let probeCell: Cell<unknown> | undefined;
+      try {
+        probeCell = await pieces.runPersistent(
+          pattern,
+          synthetic.value,
+          undefined,
+          { start: true },
+        );
+        const settle = (async () => {
+          await pieces.runtime.settled();
+          await pieces.synced();
+        })();
+        if (await raceWithAbort(settle, signal) === "aborted") {
+          return recorded("probe-failed");
+        }
+        const probeResult = await new PieceController(pieces, probeCell)
+          .result.getCell();
+        let rendered: Awaited<ReturnType<typeof renderPatternUiToHtml>>;
+        const render = (async () => {
+          rendered = await renderPatternUiToHtml(
+            probeResult,
+            () => pieces.runtime.idle(),
+          );
+        })();
+        if (await raceWithAbort(render, signal) === "aborted") {
+          return recorded("probe-failed");
+        }
+        if (rendered === undefined) {
+          return discoverable("no-ui");
+        }
+        const html = rendered.html.length > PROBE_HTML_MAX_CHARS
+          ? `${
+            rendered.html.slice(0, PROBE_HTML_MAX_CHARS)
+          }\n[truncated at ${PROBE_HTML_MAX_CHARS} characters]`
+          : rendered.html;
+        const reason = classifyRenderedHtml(rendered.html);
+        // A default-`toString` in the output is positive evidence of a
+        // defect, and keeps the entry out of search however thin the
+        // synthetic instance was or whatever else the render reported. A
+        // render the reconciler complained about is no evidence either way,
+        // and is recorded as such rather than read as a pass.
+        if (reason === "ui-default-tostring") return recorded(reason, html);
+        if (rendered.errors.length > 0) return recorded("probe-failed", html);
+        if (reason === "ui-rendered-no-text") return recorded(reason, html);
+        return discoverable(reason, html);
+      } catch {
+        // What a probe throws is the pattern's own text, which the artifact
+        // keeps for the run's own failure paths and which has no reading here
+        // beyond "no verdict".
+        return recorded("probe-failed");
+      } finally {
+        if (probeCell !== undefined) {
+          try {
+            pieces.runtime.runner.stop(probeCell);
+          } catch {
+            // Best-effort: the verdict stands either way.
+          }
+        }
+      }
+    };
     // Source the model wrote and successfully ran is contributed back to the
     // index, so the next run that needs this capability finds it instead of
     // writing it again. A run naming a `patternId` publishes nothing: it ran
     // what the index already holds.
     const description = input.description?.trim();
+    let publication: RunPatternPublicationReport | undefined;
+    let probeHtml: string | undefined;
     if (
       patternId === undefined &&
       getPatternIndexClient !== undefined &&
@@ -1436,26 +1585,53 @@ export const runPatternTool: HarnessToolDefinition<
           "run_pattern could not publish the pattern it ran: the compiled pattern carries no durable content-addressed entry identity",
         );
       } else {
-        publishPatternToIndex(getPatternIndexClient, {
-          patternId: entryIdentity,
-          program: {
-            main: program.main,
-            files: program.files.map((file) => ({
-              name: file.name,
-              contents: file.contents,
-            })),
-          },
-          description,
-          hashtags: input.hashtags ?? [],
-          // What the pattern was written to answer. The run's own task is
-          // that request; a run carrying no task text has only the model's
-          // description of what it wrote, which is the same claim in the
-          // model's words.
-          directQuery: context.taskText ?? description,
-          argumentSchema: pattern.argumentSchema,
-          resultSchema: pattern.resultSchema,
-          dependencies: patternIndexDependencies(program.files),
-        });
+        const verdict = await renderGateVerdict();
+        publication = {
+          status: verdict.status,
+          reason: verdict.reason,
+          message: PATTERN_PUBLICATION_MESSAGES[verdict.reason],
+          syntheticInputsComplete: verdict.syntheticInputsComplete,
+        };
+        probeHtml = verdict.html;
+        {
+          const request: PatternIndexPublishRequest = {
+            patternId: entryIdentity,
+            program: {
+              main: program.main,
+              files: program.files.map((file) => ({
+                name: file.name,
+                contents: file.contents,
+              })),
+            },
+            description,
+            hashtags: input.hashtags ?? [],
+            // What the pattern was written to answer. The run's own task is
+            // that request; a run carrying no task text has only the model's
+            // description of what it wrote, which is the same claim in the
+            // model's words.
+            directQuery: context.taskText ?? description,
+            argumentSchema: pattern.argumentSchema,
+            resultSchema: pattern.resultSchema,
+            dependencies: patternIndexDependencies(program.files),
+            // Recording and surfacing are separate. Everything that ran is
+            // recorded; the gate decides only whether search offers it.
+            ...(verdict.status === "recorded"
+              ? {
+                nonDiscoverable: {
+                  reason: PATTERN_DISCOVERABILITY_REASONS[verdict.reason],
+                },
+              }
+              : {}),
+          };
+          // The session's ledger publishes once per capability, at the end of
+          // the session. A run invoked without one — a direct call rather
+          // than one through the engine — publishes as it goes.
+          if (context.patternIndexPublications !== undefined) {
+            context.patternIndexPublications.stage(request);
+          } else {
+            publishPatternToIndex(getPatternIndexClient, request);
+          }
+        }
       }
     }
     return {
@@ -1468,6 +1644,8 @@ export const runPatternTool: HarnessToolDefinition<
       ...(linkedStringCount !== undefined ? { linkedStringCount } : {}),
       ...(valueError !== undefined ? { valueError } : {}),
       ...(rawValue !== undefined ? { rawValue } : {}),
+      ...(publication !== undefined ? { patternPublication: publication } : {}),
+      ...(probeHtml !== undefined ? { rawCauseMessage: probeHtml } : {}),
     };
   },
 };
