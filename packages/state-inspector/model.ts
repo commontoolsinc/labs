@@ -55,7 +55,8 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 
 import type { SpaceDb } from "./db.ts";
-import { countLinks, parseSigilLink, summarize } from "./decode.ts";
+import { linksWithPaths, parseSigilLink, summarize } from "./decode.ts";
+import type { LinkWalkBounds } from "./decode.ts";
 import {
   branchReadChain,
   type BranchReadLink,
@@ -721,6 +722,22 @@ export interface EntityListing {
 }
 
 /**
+ * How far a listing's link count reaches. The count is a fan-out proxy in one
+ * column of a table over every entity in a space, read beside the others to
+ * tell a hub from a leaf, so it is bounded shallow: eight levels is deeper
+ * than the nesting that distinguishes them, and the walk runs once per entity.
+ *
+ * `maxNodes` is unbounded because `EntityModel` carries a link count and no
+ * field saying the count is a floor, and a number silently short is worse than
+ * a walk that does not stop early. Giving it a finite value belongs with
+ * giving the model that field.
+ */
+const LISTING_LINK_WALK: LinkWalkBounds = {
+  maxDepth: 8,
+  maxNodes: Number.POSITIVE_INFINITY,
+};
+
+/**
  * Model the entities in a space — the fluent "what is in here?" view. One
  * reconstruction pass: collect documents, build the module index from them,
  * then classify each. Sorted pieces → modules → streams → schemas → cells.
@@ -882,7 +899,8 @@ export function listEntityModels(
       moduleIndex,
     });
     m.revisions = r.revisions;
-    m.links = countLinks(outcome.document.value);
+    m.links = linksWithPaths(outcome.document.value, LISTING_LINK_WALK)
+      .links.length;
     return m;
   });
 

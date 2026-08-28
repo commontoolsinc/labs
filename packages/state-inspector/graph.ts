@@ -15,7 +15,8 @@
 // (present:false) so the home→profile structure shows up here too, bounded.
 
 import type { SpaceDb } from "./db.ts";
-import { collectLinks } from "./decode.ts";
+import { linksWithPaths } from "./decode.ts";
+import type { LinkWalkBounds } from "./decode.ts";
 import { reconstructOutcome } from "./reconstruct.ts";
 import type { EntityDocument, ReconstructOutcome } from "./reconstruct.ts";
 import {
@@ -74,6 +75,21 @@ export interface SpaceGraph {
   /** How far the entity scan this graph was built from reached. */
   extent: ScanExtent;
 }
+
+/**
+ * How far the graph's data-link walk reaches. A graph is a rendering, and the
+ * value it walks is one an entity's document already decoded into memory, so
+ * twelve levels of nesting reaches past any value this tool has met.
+ *
+ * `maxNodes` is unbounded because `SpaceGraph` carries no field saying an
+ * entity's edges are only some of its edges, and a truncation nothing renders
+ * is the silence a bound is supposed to prevent. Giving it a finite value
+ * belongs with giving the graph that field.
+ */
+const GRAPH_LINK_WALK: LinkWalkBounds = {
+  maxDepth: 12,
+  maxNodes: Number.POSITIVE_INFINITY,
+};
 
 function shortPath(p?: readonly string[]): string | undefined {
   return p && p.length ? p.join("/") : undefined;
@@ -208,7 +224,9 @@ export function buildSpaceGraph(
     }
     // link: data links inside the value
     if (includeLinks) {
-      for (const l of collectLinks(doc.value)) {
+      for (
+        const { link: l } of linksWithPaths(doc.value, GRAPH_LINK_WALK).links
+      ) {
         if (!l.id) continue;
         const external = !!l.space && l.space !== own &&
           l.space !== `did:key:${own}`;
