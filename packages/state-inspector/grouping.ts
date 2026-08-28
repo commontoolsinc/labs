@@ -24,8 +24,7 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 // DB).
 
 import { openSpace, type SpaceDb } from "./db.ts";
-import { linksWithPaths } from "./decode.ts";
-import type { LinkWalkBounds } from "./decode.ts";
+import { linksWithPaths, type LinkWalkBounds } from "./decode.ts";
 import { candidatesMatching, reconstructDocument } from "./reconstruct.ts";
 import type { DiscoveredSpace } from "./discover.ts";
 

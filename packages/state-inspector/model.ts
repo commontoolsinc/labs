@@ -55,8 +55,12 @@ import { isObjectNotArray } from "@commonfabric/utils/types";
 import { utf8Compare } from "@commonfabric/utils/utf8";
 
 import type { SpaceDb } from "./db.ts";
-import { linksWithPaths, parseSigilLink, summarize } from "./decode.ts";
-import type { LinkWalkBounds } from "./decode.ts";
+import {
+  linksWithPaths,
+  type LinkWalkBounds,
+  parseSigilLink,
+  summarize,
+} from "./decode.ts";
 import {
   branchReadChain,
   type BranchReadLink,

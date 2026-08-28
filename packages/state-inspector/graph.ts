@@ -15,8 +15,7 @@
 // (present:false) so the home→profile structure shows up here too, bounded.
 
 import type { SpaceDb } from "./db.ts";
-import { linksWithPaths } from "./decode.ts";
-import type { LinkWalkBounds } from "./decode.ts";
+import { linksWithPaths, type LinkWalkBounds } from "./decode.ts";
 import { reconstructOutcome } from "./reconstruct.ts";
 import type { EntityDocument, ReconstructOutcome } from "./reconstruct.ts";
 import {

@@ -29,8 +29,7 @@
 import { hashStringOf } from "@commonfabric/data-model/value-hash";
 
 import { openSpace, type SpaceDb } from "./db.ts";
-import { annotate, linksWithPaths } from "./decode.ts";
-import type { LinkWalkBounds } from "./decode.ts";
+import { annotate, linksWithPaths, type LinkWalkBounds } from "./decode.ts";
 import {
   candidatesMatching,
   getValueAt,
