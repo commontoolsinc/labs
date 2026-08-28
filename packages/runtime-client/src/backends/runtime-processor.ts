@@ -1138,7 +1138,7 @@ export class RuntimeProcessor {
     });
   }
 
-  /** Atomically stores a default only while the target remains undefined. */
+  /** Atomically stores a default only while the target has no backing value. */
   async handleCellInitialize(
     request: CellInitializeRequest,
   ): Promise<{ value: FabricValue }> {
@@ -1148,9 +1148,15 @@ export class RuntimeProcessor {
     const initial = mapCellRefsToSigilLinks(request.value);
     const result = await this.runtime.editWithRetry((tx) => {
       const cell = getCell(this.runtime, request.cell).withTx(tx);
-      const current = cell.get();
-      if (current !== undefined) {
-        return cellValueForClient(current);
+      // Initialization materializes a backing value. A schema default is a
+      // readable fallback, not proof that the cell has been stored: treating
+      // it as an existing value leaves a later child write with no durable
+      // parent and can replace the visible default. Drop the view schema only
+      // for this existence check, then return the normal projected value when
+      // storage already won.
+      const stored = cell.asSchema(undefined).getRaw();
+      if (stored !== undefined) {
+        return cellValueForClient(cell.get());
       }
       cell.set(initial);
       return cellValueForClient(initial);

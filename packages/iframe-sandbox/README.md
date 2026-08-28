@@ -51,7 +51,9 @@ A resource has a `kind`, optional schema and description, and only the
 operations the host supplies. A cell capability follows the runtime's Cell
 shape: `get()`, `pull()`, optional `initialize()`, `set()`, and `push()`,
 `sink()`, `key()`, and `resolve()`. `initialize(defaultValue)` atomically stores
-the default only while the cell is undefined and returns the value that won. The
+the default only while the cell has no backing value and returns the value that
+won. A readable schema fallback does not count as stored, so calling
+`initialize()` after `pull()` safely materializes it before a child write. The
 resource kinds are `cell`, `stream`, `sqlite`, and `service`. Named methods let
 an application expose a narrow service without expanding the cell protocol.
 

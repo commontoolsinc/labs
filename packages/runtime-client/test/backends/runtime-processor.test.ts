@@ -3622,6 +3622,77 @@ describe("runtime-processor", () => {
       }
     });
 
+    it("materializes a schema default before a nested append", async () => {
+      const signer = await Identity.fromPassphrase(
+        `direct-default-cell-initialize-${crypto.randomUUID()}`,
+      );
+      const space = signer.did();
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("http://localhost/"),
+        storageManager,
+      });
+      try {
+        const initial = {
+          bars: [
+            { id: "alpha", value: 3 },
+            { id: "beta", value: 5 },
+          ],
+        };
+        const schema = {
+          type: "object",
+          properties: {
+            bars: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  value: { type: "number" },
+                },
+                required: ["id", "value"],
+              },
+            },
+          },
+          required: ["bars"],
+          default: initial,
+        } as const;
+        const processor = Object.assign(
+          Object.create(RuntimeProcessor.prototype),
+          { runtime },
+        ) as RuntimeProcessor;
+        for (const scope of ["user", "session"] as const) {
+          const cell = runtime.getCell<typeof initial>(
+            space,
+            `direct-default-cell-initialize-${scope}-${crypto.randomUUID()}`,
+            schema,
+            undefined,
+            scope,
+          );
+          await cell.sync();
+          expect(cell.get()).toEqual(initial);
+          expect(cell.asSchema(undefined).getRaw()).toBeUndefined();
+
+          await expect(processor.handleCellInitialize({
+            type: RequestType.CellInitialize,
+            cell: createCellRef(cell),
+            value: initial,
+          })).resolves.toEqual({ value: initial });
+          expect(cell.asSchema(undefined).getRaw()).not.toBeUndefined();
+
+          const append = runtime.edit();
+          cell.withTx(append).key("bars").push({ id: "gamma", value: 7 });
+          expect((await append.commit()).error).toBeUndefined();
+          expect(cell.get()).toEqual({
+            bars: [...initial.bars, { id: "gamma", value: 7 }],
+          });
+        }
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
     it("returns nested initialized cells in the client-hydratable link form", async () => {
       const signer = await Identity.fromPassphrase(
         `direct-linked-cell-initialize-${crypto.randomUUID()}`,

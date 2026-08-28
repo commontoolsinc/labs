@@ -205,8 +205,8 @@ try {
     state.pull(),
     output.pull(),
   ]);
-  if (state.get() === undefined) await stateWrite.initialize(DEFAULT_STATE);
-  if (output.get() === undefined) await outputWrite.initialize(DEFAULT_OUTPUT);
+  await stateWrite.initialize(DEFAULT_STATE);
+  await outputWrite.initialize(DEFAULT_OUTPUT);
   inputValue = input.get() ?? DEFAULT_INPUT;
   stateValue = state.get() ?? DEFAULT_STATE;
   outputValue = output.get() ?? DEFAULT_OUTPUT;
@@ -231,8 +231,10 @@ Install idempotent teardown before starting the barrier, and catch bootstrap
 failures so they remain visible while subscriptions and the game are released.
 
 `initialize()` is the atomic first-use operation. It stores a default only
-while the Cell is undefined and returns the transaction's winner. Never blind-
-set the whole world merely to ensure it exists.
+while the Cell has no backing value and returns the transaction's winner. Call
+it even when `get()` exposes a compiled schema fallback, so the fallback is
+materialized before a path write. Never blind-set the whole world merely to
+ensure it exists.
 
 ## Separate the simulation from durable state
 

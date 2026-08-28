@@ -217,8 +217,8 @@ try {
     state.pull(),
     output.pull(),
   ]);
-  if (state.get() === undefined) await stateWrite.initialize(DEFAULT_STATE);
-  if (output.get() === undefined) await outputWrite.initialize(DEFAULT_OUTPUT);
+  await stateWrite.initialize(DEFAULT_STATE);
+  await outputWrite.initialize(DEFAULT_OUTPUT);
   inputValue = input.get() ?? DEFAULT_INPUT;
   stateValue = state.get() ?? DEFAULT_STATE;
   outputValue = output.get() ?? DEFAULT_OUTPUT;
@@ -238,8 +238,9 @@ long-lived tabs.
 `sink()` invokes its listener synchronously with the guest's current sample;
 that callback does not prove the worker has delivered current state. Keep scene
 actions disabled until a joint `Promise.all` of `pull()` calls resolves for all
-resources they read. Use `initialize()` for atomic first materialization of an
-undefined writable Cell.
+resources they read. Use `initialize()` for atomic first materialization of a
+writable Cell with no backing value. Call it even when `get()` exposes a
+compiled schema fallback, so a later path write starts from durable state.
 
 Use the pulls only as a joint readiness barrier. Read values with `get()` after
 every pull and initialization has settled, so a newer sink event that arrives

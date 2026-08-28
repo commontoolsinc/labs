@@ -106,8 +106,9 @@ export enum RequestType {
   CellPull = "cell:pull",
 
   /**
-   * Stores a value only when the cell is currently undefined, using the read
-   * as an optimistic-concurrency precondition. Returns the value that won.
+   * Stores a value only when the cell has no backing value, using the raw read
+   * as an optimistic-concurrency precondition. A schema fallback does not
+   * count as stored. Returns the value that won.
    */
   CellInitialize = "cell:initialize",
 
@@ -823,7 +824,7 @@ export type CellPullRequest = BaseRequest & {
 export type CellInitializeRequest = BaseRequest & {
   type: RequestType.CellInitialize;
 
-  /** The cell to initialize when it is currently undefined. */
+  /** The cell to initialize when it has no backing value. */
   cell: CellRef;
 
   /** The non-undefined default to store. */

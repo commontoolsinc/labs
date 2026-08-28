@@ -205,8 +205,8 @@ try {
     state.pull(),
     output.pull(),
   ]);
-  if (state.get() === undefined) await stateWrite.initialize(DEFAULT_STATE);
-  if (output.get() === undefined) await outputWrite.initialize(DEFAULT_OUTPUT);
+  await stateWrite.initialize(DEFAULT_STATE);
+  await outputWrite.initialize(DEFAULT_OUTPUT);
   inputValue = input.get() ?? DEFAULT_INPUT;
   stateValue = state.get() ?? DEFAULT_STATE;
   outputValue = output.get() ?? DEFAULT_OUTPUT;
@@ -230,9 +230,10 @@ during the barrier cannot be replaced by an older individual pull result.
 Install idempotent teardown before starting the barrier, and catch bootstrap
 failures so they remain visible while subscriptions are released.
 
-`initialize()` atomically supplies a default only while the Cell is undefined.
-Use it for first materialization; never issue a whole-state `set()` merely to
-ensure a value exists.
+`initialize()` atomically supplies a default only while the Cell has no backing
+value. Call it even when `get()` exposes a compiled schema fallback: the
+idempotent operation materializes that fallback before a path write. Never
+issue a whole-state `set()` merely to ensure a value exists.
 
 ## Render D3 from authoritative state
 

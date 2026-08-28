@@ -104,7 +104,8 @@ such as hover or an open tooltip in a Fabric Cell; keep that inside the guest.
 The generated wrapper owns `space`-scoped state and output inside the piece. It
 declares `user`- and `session`-scoped state or output as optional scoped pattern
 inputs, so the runtime resolves them for the active user or browser session.
-Callers normally omit those inputs and let their `Default` value materialize.
+Callers normally omit those inputs. Their `Default` supplies the readable
+schema fallback; the guest materializes each writable value after pulling it.
 This distinction stays in the wrapper; the guest always addresses the same
 `state` and `output` resources by name.
 
@@ -126,21 +127,33 @@ const output = fabric.cell<typeof DEFAULT_OUTPUT>("output");
 const root = document.querySelector<HTMLDivElement>("#root")!;
 const heading = document.createElement("h1");
 const add = document.createElement("button");
+const error = document.createElement("p");
 add.type = "button";
 add.textContent = "Add note";
-root.append(heading, add);
+error.role = "alert";
+root.append(heading, add, error);
 
 let hydrated = false;
 const render = () => {
   heading.textContent = input.get()?.heading ?? "Loading";
   add.disabled = !hydrated;
 };
+const showError = (cause: unknown) => {
+  error.textContent = cause instanceof Error ? cause.message : String(cause);
+};
 
 const stops = [input.sink(render), state.sink(render), output.sink(render)];
-void Promise.all([input.pull(), state.pull(), output.pull()]).then(() => {
-  hydrated = true;
-  render();
-});
+void (async () => {
+  try {
+    await Promise.all([input.pull(), state.pull(), output.pull()]);
+    await state.initialize(DEFAULT_STATE);
+    await output.initialize(DEFAULT_OUTPUT);
+    hydrated = true;
+    render();
+  } catch (cause) {
+    showError(cause);
+  }
+})();
 
 add.addEventListener("click", () => {
   const note = { id: crypto.randomUUID(), text: "New note" };
@@ -150,7 +163,7 @@ add.addEventListener("click", () => {
       noteCount: current.notes.length,
       selectedId: current.selectedId,
     });
-  });
+  }).catch(showError);
 });
 
 globalThis.addEventListener("pagehide", () => {
@@ -174,7 +187,8 @@ The Cell contract matches the rest of Common Fabric:
 - `key(nameOrIndex)` derives a path-specific handle. Its sink observes that path
   rather than the whole root value.
 - `initialize(defaultValue)` atomically stores a first-use default only while
-  the Cell is undefined, then returns the value that won.
+  the Cell has no backing value, then returns the value that won. A schema
+  fallback visible through `get()` does not count as stored.
 - `set(value)` replaces a value. `update(fn)` queues a read-modify-write against
   other operations on the same remote Cell in this guest; it is not a
   transaction across users, sessions, or resources.
@@ -199,9 +213,10 @@ after the joint `Promise.all(...)` resolves, then render from the complete set.
 
 A newly resolved `user`- or `session`-scoped input can also be `undefined` while
 its default is materializing. Pull before the first mutation. If a child write
-needs its parent object to exist, initialize only when the authoritative pull
-still reports absence, await that write, and then use the narrow child
-operation:
+needs its parent object to exist, call `initialize()` after the authoritative
+pull, await it, and then use the narrow child operation. Call it even when
+`get()` exposes the compiled schema fallback: initialization is idempotent and
+materializes that fallback before the child write.
 
 ```typescript
 // Shown at module scope.
@@ -212,19 +227,19 @@ const fabric = connectFabric();
 const state = fabric.cell<typeof DEFAULT_STATE>("state");
 
 async function addNote(text: string): Promise<void> {
-  const current = await state.pull();
-  if (current === undefined) await state.initialize(DEFAULT_STATE);
+  await state.pull();
+  await state.initialize(DEFAULT_STATE);
   await state.key("notes").push({ id: crypto.randomUUID(), text });
 }
 ```
 
 Do not initialize with `update((current) => current ?? DEFAULT_STATE)`: the
 updater starts from this guest's cache, which another session may have made
-stale. `initialize()` reads and conditionally writes in one runtime transaction,
-so concurrent guests return the same winning value without replacing it. Use
-`set()` for intentional last-writer-wins replacement, and use `update()` only
-when a local queue over an already materialized complete object is the intended
-boundary.
+stale. `initialize()` reads raw backing state and conditionally writes in one
+runtime transaction, so concurrent guests return the same winning value
+without replacing it. Use `set()` for intentional last-writer-wins replacement,
+and use `update()` only when a local queue over an already materialized complete
+object is the intended boundary.
 
 Keep editable DOM drafts separate from authoritative Cell samples. While a
 local write is pending, a sink rerender should preserve that draft. Once it
