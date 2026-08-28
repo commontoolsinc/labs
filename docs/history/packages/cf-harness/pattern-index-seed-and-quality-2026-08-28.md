@@ -237,7 +237,12 @@ produced it.
   against that API inverted its `until` condition and reported a run "settled"
   with fifty checks outstanding — an instrument that named its subject
   correctly and still reported a state it had never checked. Naming the subject
-  is necessary and not sufficient.
+  is necessary and not sufficient. Nor does it settle *how much* of the subject
+  was read: that endpoint pages at thirty by default, the pull requests in
+  question carried sixty-three checks, and the unqualified request returned
+  half — with every conclusion in the missing half reading as absent rather
+  than as unread. Comparing the returned count against `total_count` is what
+  makes the truncation say so.
 - The sandbox transport guard checked that two directories were *named* in a
   runtime's configuration, never that the runtime read them, and then reported
   `invocationContextTransport: "sidecar"` into the run's policy snapshot on the
