@@ -102,6 +102,11 @@ bytes 5..8   uncompressed UTF-8 byte length, unsigned 32-bit big-endian
 bytes 9..    raw gzip bytes
 ```
 
+A binary first frame violates the protocol because the connection has not yet
+exchanged `hello`. Any binary frame on a connection that did not negotiate
+`messageCompressionV1` is likewise a protocol violation. Memory WebSocket
+hosts close the connection with WebSocket code 1003 in both cases.
+
 A peer expands the binary frame before decoding the memory message inside it.
 Messages below 1,024 UTF-8 bytes stay in their ordinary text form, as do
 messages whose binary envelope would not be smaller. Receivers therefore accept

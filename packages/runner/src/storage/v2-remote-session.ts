@@ -192,6 +192,10 @@ export class WebSocketTransport implements MemoryClient.Transport {
     return await this.#sendCompressionControl(enabled);
   }
 
+  /**
+   * Sends in submission order. Every payload stays on the queue because a
+   * later text frame must not overtake earlier asynchronous compression.
+   */
   async send(payload: string): Promise<void> {
     const opening = this.open();
     const send = this.#sending.then(async () => {
