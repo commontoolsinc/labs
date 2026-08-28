@@ -1148,15 +1148,25 @@ export class RuntimeProcessor {
     const initial = mapCellRefsToSigilLinks(request.value);
     const result = await this.runtime.editWithRetry((tx) => {
       const cell = getCell(this.runtime, request.cell).withTx(tx);
-      // Initialization materializes a backing value. A schema default is a
-      // readable fallback, not proof that the cell has been stored: treating
-      // it as an existing value leaves a later child write with no durable
-      // parent and can replace the visible default. Drop the view schema only
-      // for this existence check, then return the normal projected value when
-      // storage already won.
-      const stored = cell.asSchema(undefined).getRaw();
+      // Initialization materializes the same backing value a whole-cell write
+      // targets. A schema default is a readable fallback, not proof that the
+      // cell has been stored, and a write redirect is an address rather than
+      // backing data. Treating either as an existing value leaves a later
+      // child write with no durable parent and can replace the visible default.
+      // Drop the view schema and follow a final write redirect only for this
+      // existence check, then return the normal projected value when storage
+      // already won.
+      const stored = cell.asSchema(undefined).getRaw({
+        lastNode: "writeRedirect",
+      });
       if (stored !== undefined) {
-        return cellValueForClient(cell.get());
+        const projected = cell.get();
+        if (projected === undefined) {
+          throw new TypeError(
+            "Cell backing value is incompatible with its schema.",
+          );
+        }
+        return cellValueForClient(projected);
       }
       cell.set(initial);
       return cellValueForClient(initial);

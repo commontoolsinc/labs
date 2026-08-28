@@ -3693,6 +3693,124 @@ describe("runtime-processor", () => {
       }
     });
 
+    it("materializes a write-redirect target before a nested append", async () => {
+      const signer = await Identity.fromPassphrase(
+        `direct-linked-default-initialize-${crypto.randomUUID()}`,
+      );
+      const space = signer.did();
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("http://localhost/"),
+        storageManager,
+      });
+      try {
+        const initial = {
+          bars: [
+            { id: "alpha", value: 3 },
+            { id: "beta", value: 5 },
+          ],
+        };
+        const schema = {
+          type: "object",
+          properties: {
+            bars: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  value: { type: "number" },
+                },
+                required: ["id", "value"],
+              },
+            },
+          },
+          required: ["bars"],
+          default: initial,
+        } as const;
+        const target = runtime.getCell<typeof initial>(
+          space,
+          `direct-linked-default-target-${crypto.randomUUID()}`,
+          schema,
+        );
+        const alias = runtime.getCell<typeof initial>(
+          space,
+          `direct-linked-default-alias-${crypto.randomUUID()}`,
+          schema,
+        );
+        await Promise.all([target.sync(), alias.sync()]);
+        const link = runtime.edit();
+        alias.withTx(link).setRawUntyped(
+          target.getAsWriteRedirectLink({ includeSchema: false }),
+        );
+        expect((await link.commit()).error).toBeUndefined();
+        expect(alias.get()).toEqual(initial);
+        expect(target.asSchema(undefined).getRaw()).toBeUndefined();
+
+        const processor = Object.assign(
+          Object.create(RuntimeProcessor.prototype),
+          { runtime },
+        ) as RuntimeProcessor;
+        await expect(processor.handleCellInitialize({
+          type: RequestType.CellInitialize,
+          cell: createCellRef(alias),
+          value: initial,
+        })).resolves.toEqual({ value: initial });
+        expect(target.asSchema(undefined).getRaw()).not.toBeUndefined();
+
+        const append = runtime.edit();
+        alias.withTx(append).key("bars").push({ id: "gamma", value: 7 });
+        expect((await append.commit()).error).toBeUndefined();
+        expect(alias.get()).toEqual({
+          bars: [...initial.bars, { id: "gamma", value: 7 }],
+        });
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("rejects backing values incompatible with the requested schema", async () => {
+      const signer = await Identity.fromPassphrase(
+        `direct-incompatible-initialize-${crypto.randomUUID()}`,
+      );
+      const space = signer.did();
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("http://localhost/"),
+        storageManager,
+      });
+      try {
+        const cause = `direct-incompatible-initialize-${crypto.randomUUID()}`;
+        const raw = runtime.getCell<number>(space, cause);
+        await raw.sync();
+        const seed = runtime.edit();
+        raw.withTx(seed).set(42);
+        expect((await seed.commit()).error).toBeUndefined();
+
+        const projected = raw.asSchema<{ n: number }>({
+          type: "object",
+          properties: { n: { type: "number" } },
+          required: ["n"],
+          default: { n: 1 },
+        });
+        const processor = Object.assign(
+          Object.create(RuntimeProcessor.prototype),
+          { runtime },
+        ) as RuntimeProcessor;
+
+        await expect(processor.handleCellInitialize({
+          type: RequestType.CellInitialize,
+          cell: createCellRef(projected),
+          value: { n: 1 },
+        })).rejects.toThrow("incompatible with its schema");
+        expect(raw.get()).toBe(42);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
     it("returns nested initialized cells in the client-hydratable link form", async () => {
       const signer = await Identity.fromPassphrase(
         `direct-linked-cell-initialize-${crypto.randomUUID()}`,

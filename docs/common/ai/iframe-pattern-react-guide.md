@@ -194,6 +194,7 @@ function Editor() {
   const actionTail = React.useRef(Promise.resolve());
   const [pending, setPending] = React.useState(false);
   const [materialized, setMaterialized] = React.useState(false);
+  const [initializationError, setInitializationError] = React.useState<Error>();
   const [actionError, setActionError] = React.useState<Error>();
   React.useEffect(() => {
     if (
@@ -210,7 +211,7 @@ function Editor() {
       if (active) setMaterialized(true);
     }).catch((cause) => {
       if (active) {
-        setActionError(
+        setInitializationError(
           cause instanceof Error ? cause : new Error(String(cause)),
         );
       }
@@ -230,6 +231,9 @@ function Editor() {
 
   if (failure?.status === "error") {
     return <p role="alert">{failure.error.message}</p>;
+  }
+  if (initializationError) {
+    return <p role="alert">{initializationError.message}</p>;
   }
   if (
     input.status !== "ready" || state.status !== "ready" ||
