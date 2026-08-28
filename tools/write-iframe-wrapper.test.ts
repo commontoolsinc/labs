@@ -3,8 +3,8 @@ import { resolve } from "@std/path";
 import { describe, it } from "@std/testing/bdd";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
 
-const ROOT = resolve(import.meta.dirname!, "../../..");
-const SCRIPT = resolve(import.meta.dirname!, "write-wrapper.ts");
+const ROOT = resolve(import.meta.dirname!, "..");
+const SCRIPT = resolve(import.meta.dirname!, "write-iframe-wrapper.ts");
 const decoder = new TextDecoder();
 
 async function removeDirectory(path: string): Promise<void> {

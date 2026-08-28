@@ -23,7 +23,7 @@ Keep the authored surface small:
 Generate the wrapper with:
 
 ```bash
-deno run -A skills/pattern-iframe/scripts/write-wrapper.ts \
+deno run -A tools/write-iframe-wrapper.ts \
   --contract packages/patterns/<name>/contract.ts \
   --guest packages/patterns/<name>/guest.ts \
   --out packages/patterns/<name>/main.tsx
