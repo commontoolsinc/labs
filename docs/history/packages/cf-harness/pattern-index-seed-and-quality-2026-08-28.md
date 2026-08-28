@@ -230,9 +230,14 @@ produced it.
   during this pass for a commit that was not the head — once when the head
   carried a single queued check. The pull-request-level rollup has the same
   property. Neither was lying; both were answering a question that had not been
-  asked. Naming the commit in the request (`commits/<sha>/check-runs`) removes
-  the ambiguity, because a request that names a subject cannot answer about a
-  different one.
+  asked. Naming the commit in the request (`commits/<sha>/check-runs`) settles
+  *which* subject the answer is about, because a request that names a subject
+  cannot answer about a different one. It does not settle whether the caller's
+  own condition means what the caller thinks: the first replacement written
+  against that API inverted its `until` condition and reported a run "settled"
+  with fifty checks outstanding — an instrument that named its subject
+  correctly and still reported a state it had never checked. Naming the subject
+  is necessary and not sufficient.
 - The sandbox transport guard checked that two directories were *named* in a
   runtime's configuration, never that the runtime read them, and then reported
   `invocationContextTransport: "sidecar"` into the run's policy snapshot on the
