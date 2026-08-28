@@ -1038,17 +1038,17 @@ describe("data-updating", () => {
     expect(destinationCell.get()).toEqual({ value: 42 });
   });
 
-  // The two container re-assert branches, which are the ONLY places this
-  // walk writes a container whole rather than by its members: a subtree that
-  // emits nothing has to assert the container itself, or a completion
-  // writeback of an equal `[]` against a doomed optimistic overlay commits
-  // only its siblings and leaves the durable result torn.
-  //
-  // Writing a container whole is also what makes its frozenness the store's
-  // business rather than the walk's, so these pin both at once: the write
-  // happens, and what it carries is not something the caller can go on
-  // mutating.
   describe("authoritative container re-assert in normalizeAndDiff", () => {
+    // The two container re-assert branches, which are the ONLY places this
+    // walk writes a container whole rather than by its members: a subtree that
+    // emits nothing has to assert the container itself, or a completion
+    // writeback of an equal `[]` against a doomed optimistic overlay commits
+    // only its siblings and leaves the durable result torn.
+    //
+    // Writing a container whole is also what makes its frozenness the store's
+    // business rather than the walk's, so these pin both at once: the write
+    // happens, and what it carries is not something the caller can go on
+    // mutating.
     /**
      * The transaction with the authoritative posture reported. The real setter
      * is gated on a configured seal destination, which is serving-posture
