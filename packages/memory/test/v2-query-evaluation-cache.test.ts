@@ -4,6 +4,7 @@ import { applyCommit, open as openEngine } from "../v2/engine.ts";
 import {
   classifyStateScope,
   createQueryEvaluationCache,
+  queryEvaluationCacheDiagnostics,
   type TrackedGraphState,
   trackGraph,
 } from "../v2/query.ts";
@@ -342,6 +343,8 @@ describe("v2 query evaluation cache", () => {
       // space-scoped corpus. One evaluation serves both.
       expect(after.misses - before.misses).toBe(1);
       expect(after.hits - before.hits).toBe(1);
+      expect(after.hitsPure - before.hitsPure).toBe(1);
+      expect(after.entriesPure - before.entriesPure).toBe(1);
       expect(upsertIds(syncB)).toEqual(upsertIds(syncA));
     } finally {
       connectionA.close();
@@ -374,6 +377,7 @@ describe("v2 query evaluation cache", () => {
       // Two identities, each a miss: the tainted entry never crosses.
       expect(after.misses - before.misses).toBe(2);
       expect(after.hits - before.hits).toBe(0);
+      expect(after.entriesTainted - before.entriesTainted).toBe(2);
     } finally {
       connectionA.close();
       connectionB.close();
@@ -459,6 +463,8 @@ describe("v2 query evaluation cache", () => {
       const after = server.evaluationCacheDiagnostics(space);
       expect(after.misses - before.misses).toBe(1);
       expect(after.hits - before.hits).toBe(1);
+      expect(after.hitsAbsentResidue - before.hitsAbsentResidue).toBe(1);
+      expect(after.entriesAbsentResidue - before.entriesAbsentResidue).toBe(1);
       expect(upsertIds(syncB)).toEqual(upsertIds(syncA));
 
       // The recording identity re-asking (as a one-shot graph query, which
@@ -480,6 +486,8 @@ describe("v2 query evaluation cache", () => {
       );
       const afterSame = server.evaluationCacheDiagnostics(space);
       expect(afterSame.hits - beforeSame.hits).toBe(1);
+      expect(afterSame.hitsAbsentResidue - beforeSame.hitsAbsentResidue)
+        .toBe(1);
       expect(same.entities.map((entity) => entity.id)).toContain(
         "of:doc:linked",
       );
@@ -633,6 +641,7 @@ describe("v2 query evaluation cache", () => {
       // evaluation delivers its instance.
       expect(after.misses - before.misses).toBe(2);
       expect(after.hits - before.hits).toBe(0);
+      expect(after.residueRefusals - before.residueRefusals).toBe(1);
       expect(upsertIds(syncC)).toContain("of:doc:draft");
 
       // C's refused evaluation was cached under its identity, and the
@@ -653,6 +662,7 @@ describe("v2 query evaluation cache", () => {
       );
       const retried = server.evaluationCacheDiagnostics(space);
       expect(retried.hits - after.hits).toBe(1);
+      expect(retried.hitsIdentity - after.hitsIdentity).toBe(1);
       expect(again.entities.map((entity) => entity.id)).toContain(
         "of:doc:draft",
       );
@@ -684,6 +694,28 @@ describe("v2 query evaluation cache", () => {
       },
     } as unknown as TrackedGraphState;
     expect(classifyStateScope(state)).toEqual({ kind: "tainted" });
+  });
+
+  it("reads a never-evaluated space's diagnostics as empty", () => {
+    const server = createServer("memory://eval-cache-absent-diagnostics");
+    const diagnostics = server.evaluationCacheDiagnostics(
+      "did:key:z6Mk-eval-cache-never-evaluated",
+    );
+    expect(diagnostics).toEqual({
+      seq: -1,
+      entries: 0,
+      weight: 0,
+      hits: 0,
+      misses: 0,
+      rotations: 0,
+      hitsPure: 0,
+      hitsAbsentResidue: 0,
+      hitsIdentity: 0,
+      residueRefusals: 0,
+      entriesPure: 0,
+      entriesAbsentResidue: 0,
+      entriesTainted: 0,
+    });
   });
 
   it("rotates when a different engine presents the same sequence", async () => {
@@ -740,7 +772,7 @@ describe("v2 query evaluation cache", () => {
     };
     expect(valueOf(fromA.state)).toBe(1);
     expect(valueOf(fromB.state)).toBe(2);
-    expect(cache.hits).toBe(0);
+    expect(queryEvaluationCacheDiagnostics(cache).hits).toBe(0);
     expect(cache.rotations).toBe(2);
   });
 
@@ -796,7 +828,7 @@ describe("v2 query evaluation cache", () => {
       sessionId: "probe-s2",
       evaluationCache: cache,
     });
-    expect(cache.hits).toBe(1);
+    expect(cache.hitsAbsentResidue).toBe(1);
     // One residue doc was probed for absence: a hit is not free of engine
     // reads, and its stats say exactly what it read.
     expect(hit.stats.managerReads).toBe(1);
@@ -1008,8 +1040,11 @@ describe("v2 query evaluation cache", () => {
       evaluationCache: cache,
     });
     // Identity-fallback hit: exactly ONE probe was performed before the
-    // refusal — not the residue's full length.
-    expect(cache.hits).toBe(1);
+    // refusal — not the residue's full length. The shared entry is
+    // consulted (and refused) on EVERY ask, so both of C's asks count a
+    // refusal.
+    expect(cache.hitsIdentity).toBe(1);
+    expect(cache.residueRefusals).toBe(2);
     expect(fallback.stats.managerReads).toBe(1);
   });
 

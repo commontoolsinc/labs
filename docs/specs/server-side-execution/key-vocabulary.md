@@ -340,6 +340,25 @@ per-run identities where run contexts carry them):
   where a shared memo meets a traversal (the SchemaObjectTraverser
   constructor) and throws on any other identity — a future sharing
   change becomes a loud error, never silent value-bleed.
+- the query evaluation cache — `QueryEvaluationCache`
+  (`packages/memory/v2/query.ts`) serves whole tracked-graph
+  evaluations ACROSS identities, and its sharing rests on an
+  assumption wider than key construction: evaluation is
+  recipient-blind. The walk consults the requesting identity only
+  to resolve scope instances, so `classifyStateScope` decides
+  shareability from scope keys alone — a scope-pure entry serves
+  every identity, an absent-residue entry serves after per-requester
+  absence probes, and anything else keys to the evaluating identity.
+  ACL changes hold the invariant from outside: they are commits, and
+  any commit rotates the cache. A per-recipient filter INSIDE
+  evaluation (CFC label enforcement, say — the runtime's flow-label
+  and sink-ceiling dials own it today, and the server's sqlite read
+  labeling annotates rather than filters) would break the sharing
+  invisibly: clearance differs between identities at one seq, so
+  rotation cannot fence it and scope classification cannot see it.
+  Such a filter must key the cache by its filtering context or
+  bypass it — a separate, deliberate change, never a side effect of
+  landing the filter.
 
 **Instance-safe transients** (why each is fine as-is):
 

@@ -4514,9 +4514,9 @@ export class Server {
     space: string,
   ): QueryEvaluationCacheDiagnostics {
     const cache = this.#queryEvaluationCaches.get(space);
-    return cache === undefined
-      ? { seq: -1, entries: 0, weight: 0, hits: 0, misses: 0, rotations: 0 }
-      : queryEvaluationCacheDiagnostics(cache);
+    return queryEvaluationCacheDiagnostics(
+      cache ?? createQueryEvaluationCache(),
+    );
   }
 
   async evaluateGraphQuery(
