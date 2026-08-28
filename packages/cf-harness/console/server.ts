@@ -318,7 +318,46 @@ interface ConsoleConfig {
   spaceDbPath?: string;
   maxModelTurns?: number;
   skillsRoot?: string;
+
+  /**
+   * System prompt seeded into every console session, read from the file named
+   * by `--system-prompt-file`. Absent, a session runs with no system message,
+   * which is this surface's default: the parent's only standing guidance is
+   * its tool descriptors.
+   */
+  systemPrompt?: string;
+
+  /**
+   * Whether a `pattern-author` child keeps the guidance telling it to compose
+   * what the index holds rather than rewrite it. True unless
+   * `--no-child-composition-guidance` is passed.
+   */
+  childCompositionGuidance: boolean;
 }
+
+/**
+ * Reads the seeded system prompt off disk. A named file that is empty or
+ * unreadable is a startup failure rather than a session that quietly runs
+ * without the prompt the operator asked for — a variant measured against a
+ * prompt that never loaded is a variant that measured nothing.
+ */
+const readSystemPromptFile = (path: string, cwd: string): string => {
+  const resolved = resolve(cwd, path);
+  let contents: string;
+  try {
+    contents = Deno.readTextFileSync(resolved);
+  } catch (error) {
+    throw new Error(
+      `--system-prompt-file could not be read: ${resolved}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  if (contents.trim() === "") {
+    throw new Error(`--system-prompt-file is empty: ${resolved}`);
+  }
+  return contents;
+};
 
 const nonEmpty = (value: string | undefined): string | undefined =>
   value === undefined || value.trim() === "" ? undefined : value.trim();
@@ -367,10 +406,15 @@ export const resolveConsoleConfig = (
       "fabric-cfc-enforcement-mode",
       "fabric-cfc-flow-labels",
       "fabric-cfc-posture",
+      "system-prompt-file",
     ],
+    boolean: ["no-child-composition-guidance"],
   });
   const flag = (name: string): string | undefined =>
     typeof parsed[name] === "string" ? nonEmpty(parsed[name]) : undefined;
+
+  const systemPromptFile = flag("system-prompt-file") ??
+    nonEmpty(env.CF_HARNESS_CONSOLE_SYSTEM_PROMPT_FILE);
 
   const port = flag("port") !== undefined
     ? positiveInteger(flag("port")!, "--port")
@@ -521,6 +565,10 @@ export const resolveConsoleConfig = (
       }
       : {}),
     skillsRoot: skillsRootFlag,
+    ...(systemPromptFile !== undefined
+      ? { systemPrompt: readSystemPromptFile(systemPromptFile, cwd) }
+      : {}),
+    childCompositionGuidance: parsed["no-child-composition-guidance"] !== true,
   };
 };
 
@@ -1328,7 +1376,11 @@ export const startConsoleServer = async (
           ...(config.skillsRoot !== undefined
             ? { skillsRoot: config.skillsRoot }
             : {}),
+          subagentCompositionGuidance: config.childCompositionGuidance,
         },
+        ...(config.systemPrompt !== undefined
+          ? { systemPrompt: config.systemPrompt }
+          : {}),
         ...(modelOptions.credentialOwner !== undefined
           ? { credentialOwner: modelOptions.credentialOwner }
           : {}),

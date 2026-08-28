@@ -74,6 +74,17 @@ export interface CreateHarnessInteractiveChatServiceOptions {
   basePromptLoopOptions?: CreateHarnessPromptLoopOptions;
 
   /**
+   * System prompt seeded as the first message of a session's transcript.
+   *
+   * A session without one runs with no system message at all, which is what
+   * the console does by default: the parent's guidance is the tool
+   * descriptors and nothing else. Seeding happens once per session, on the
+   * first turn that finds no system message in the durable transcript, so a
+   * following turn inherits it from history rather than prepending a second.
+   */
+  systemPrompt?: string;
+
+  /**
    * The single authenticated owner bound to this service process. Required
    * for openai-codex; interactive requests cannot select or replace it.
    */
@@ -652,6 +663,7 @@ export class HarnessInteractiveChatService {
   readonly #onEvent?: HarnessInteractiveChatEventListener;
   readonly #sessionStore?: HarnessChatSessionStore;
   readonly #maxInMemoryEvents?: number;
+  readonly #systemPrompt?: string;
   readonly #sessions = new Map<string, HarnessInteractiveChatSessionRecord>();
   readonly #events: HarnessChatEventEnvelope[] = [];
   #emitQueue: Promise<void> = Promise.resolve();
@@ -659,6 +671,9 @@ export class HarnessInteractiveChatService {
 
   constructor(options: CreateHarnessInteractiveChatServiceOptions = {}) {
     this.#basePromptLoopOptions = options.basePromptLoopOptions ?? {};
+    if (options.systemPrompt !== undefined) {
+      this.#systemPrompt = options.systemPrompt;
+    }
     this.#loomLocalHostBinding = loomLocalHostBindingFromPromptLoopOptions(
       this.#basePromptLoopOptions,
     );
@@ -1399,7 +1414,16 @@ export class HarnessInteractiveChatService {
     browserAccess: HarnessChatBrowserAccessLease | undefined,
   ): Promise<void> {
     const session = record.status;
+    // Seeded only when the durable history carries no system message. A turn
+    // persists the transcript it ran, so the second turn of a seeded session
+    // finds the message already there and prepends nothing.
+    const seededSystemPrompt: readonly HarnessTranscriptMessage[] =
+      this.#systemPrompt !== undefined &&
+        !record.transcript.some((message) => message.role === "system")
+        ? [{ role: "system", content: this.#systemPrompt }]
+        : [];
     const transcript: HarnessTranscriptMessage[] = [
+      ...seededSystemPrompt,
       ...record.transcript,
       {
         role: "user",
