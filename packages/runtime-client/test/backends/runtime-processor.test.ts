@@ -4576,17 +4576,16 @@ describe("runtime-processor", () => {
               },
             },
           },
+          setMemoryMessageCompression:
+            RuntimeProcessor.prototype.setMemoryMessageCompression,
         } as unknown as RuntimeProcessor;
-        const setCompression = (RuntimeProcessor.prototype as unknown as {
-          setMemoryMessageCompression(
-            request: { type: RequestType; enabled: boolean },
-          ): Promise<void>;
-        }).setMemoryMessageCompression;
-
-        await setCompression.call(processor, {
-          type: RequestType.SetMemoryMessageCompression,
-          enabled: false,
-        });
+        await RuntimeProcessor.prototype.handleRequest.call(
+          processor,
+          {
+            type: RequestType.SetMemoryMessageCompression,
+            enabled: false,
+          },
+        );
 
         expect(modes).toEqual([false]);
       });

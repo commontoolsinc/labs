@@ -278,6 +278,54 @@ describe("standalone memory compression", () => {
       await server.close();
     }
   });
+
+  it("closes with 1003 for binary data before hello", async () => {
+    const server = StandaloneMemoryServer.start();
+    const address = new URL(server.url);
+    address.protocol = "ws:";
+    const socket = new WebSocket(address);
+    try {
+      await opened(socket);
+      const closed = new Promise<CloseEvent>((resolve) => {
+        socket.addEventListener("close", resolve, { once: true });
+      });
+      socket.send(new Uint8Array([1, 2, 3]));
+
+      expect((await closed).code).toBe(1003);
+    } finally {
+      await closeSocket(socket);
+      await server.close();
+    }
+  });
+
+  it("closes with 1011 for an invalid negotiated envelope", async () => {
+    const server = StandaloneMemoryServer.start();
+    const address = new URL(server.url);
+    address.protocol = "ws:";
+    const socket = new WebSocket(address);
+    socket.binaryType = "arraybuffer";
+    try {
+      await opened(socket);
+      const helloReply = nextMessage(socket);
+      socket.send(encodeMemoryBoundary({
+        type: "hello",
+        protocol: MEMORY_PROTOCOL,
+        flags: getMemoryProtocolFlags(),
+      }));
+      await helloReply;
+      await server.idle();
+
+      const closed = new Promise<CloseEvent>((resolve) => {
+        socket.addEventListener("close", resolve, { once: true });
+      });
+      socket.send(new Uint8Array([1, 2, 3]));
+
+      expect((await closed).code).toBe(1011);
+    } finally {
+      await closeSocket(socket);
+      await server.close();
+    }
+  });
 });
 
 /** Resolves when `socket` opens and rejects if opening fails. */

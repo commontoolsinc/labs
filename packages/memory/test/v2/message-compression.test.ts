@@ -7,8 +7,10 @@ import {
   decodeCompressedMemoryMessage,
   encodeCompressedMemoryMessage,
   encodeMemoryCompressionControlMessage,
+  isMemoryMessageFrame,
   MAX_DECOMPRESSED_MEMORY_MESSAGE_BYTES,
   MemoryMessageCompressionChannel,
+  memoryMessageFrameBytes,
   parseMemoryCompressionControlMessage,
 } from "../../v2/message-compression.ts";
 
@@ -173,5 +175,122 @@ describe("message-compression", () => {
       enabled: false,
     });
     expect(parseMemoryCompressionControlMessage("memory data")).toBeNull();
+  });
+
+  it("parses controls strictly and measures every supported frame", () => {
+    expect(parseMemoryCompressionControlMessage("{}")).toBeNull();
+    expect(parseMemoryCompressionControlMessage("{")).toBeNull();
+
+    const text = "memory frame 🌲";
+    const bytes = new Uint8Array([1, 2, 3]);
+    const buffer = bytes.buffer.slice(0);
+    const blob = new Blob([bytes]);
+    expect(memoryMessageFrameBytes(text)).toBe(
+      new TextEncoder().encode(text).byteLength,
+    );
+    expect(memoryMessageFrameBytes(bytes)).toBe(3);
+    expect(memoryMessageFrameBytes(buffer)).toBe(3);
+    expect(memoryMessageFrameBytes(blob)).toBe(3);
+    expect([text, bytes, buffer, blob].every(isMemoryMessageFrame)).toBe(true);
+    expect(isMemoryMessageFrame({ byteLength: 3 })).toBe(false);
+  });
+
+  it("decodes envelopes delivered as blobs and array buffers", async () => {
+    const payload = "binary websocket frame ".repeat(1_000);
+    const encoded = await encodeCompressedMemoryMessage(payload);
+    if (!(encoded instanceof Uint8Array)) throw new Error("Expected binary");
+
+    expect(await decodeCompressedMemoryMessage(new Blob([encoded]))).toBe(
+      payload,
+    );
+    expect(await decodeCompressedMemoryMessage(encoded.buffer.slice(0))).toBe(
+      payload,
+    );
+  });
+
+  it("reports the first receive failure and ignores later work", async () => {
+    const sent: Array<string | Uint8Array<ArrayBuffer>> = [];
+    const received: string[] = [];
+    const errors: Error[] = [];
+    const channel = new MemoryMessageCompressionChannel(
+      (frame) => sent.push(frame),
+      (error) => errors.push(error),
+    );
+
+    channel.receive(new Uint8Array([1]), (payload) => {
+      received.push(payload);
+    });
+    await channel.idle();
+    channel.send("ignored send");
+    channel.receive("ignored receive", (payload) => {
+      received.push(payload);
+    });
+    await channel.idle();
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toBe(
+      "Memory websocket expects text before negotiation",
+    );
+    expect(sent).toEqual([]);
+    expect(received).toEqual([]);
+  });
+
+  it("wraps non-error receiver failures", async () => {
+    const errors: Error[] = [];
+    const channel = new MemoryMessageCompressionChannel(
+      () => {},
+      (error) => errors.push(error),
+    );
+    channel.receive("payload", () => {
+      throw "receiver failure";
+    });
+
+    await channel.idle();
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toBe("Memory message compression failure");
+    expect(errors[0].cause).toBe("receiver failure");
+  });
+
+  it("cancels queued sends and receives when closed", async () => {
+    const sent: Array<string | Uint8Array<ArrayBuffer>> = [];
+    const received: string[] = [];
+    const channel = new MemoryMessageCompressionChannel(
+      (frame) => sent.push(frame),
+      (error) => {
+        throw error;
+      },
+    );
+    channel.send("queued send");
+    channel.receive("queued receive", (payload) => {
+      received.push(payload);
+    });
+    channel.close();
+
+    await channel.idle();
+
+    expect(sent).toEqual([]);
+    expect(received).toEqual([]);
+  });
+
+  it("does not report an in-flight failure after closing", async () => {
+    const started = Promise.withResolvers<void>();
+    const failed = Promise.withResolvers<void>();
+    const errors: Error[] = [];
+    const channel = new MemoryMessageCompressionChannel(
+      () => {},
+      (error) => errors.push(error),
+    );
+    channel.receive("payload", async () => {
+      started.resolve();
+      await failed.promise;
+    });
+    await started.promise;
+
+    channel.close();
+    failed.reject(new Error("closed receiver failed"));
+    await channel.idle();
+
+    expect(errors).toEqual([]);
   });
 });
