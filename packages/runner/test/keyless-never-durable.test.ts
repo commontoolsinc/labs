@@ -607,6 +607,120 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
     }
   });
 
+  it("a failed keyless re-setup restores the prior session pointer", async () => {
+    // The durable stamp was transactional: keyless P1's stamp survived a
+    // LATER setup's failed transaction untouched. The session pointer that
+    // replaced it is set eagerly at staging (mirroring
+    // `locallyPreparedResults`), so the failure cleanup must RESTORE the
+    // prior committed pointer — deleting it would leave the still-running
+    // P1 piece pointer-less: start-by-pointer dead, marker absent (the
+    // evicted/zero-evidence shape) — a piece this session owns turning
+    // unresolvable because someone ELSE's setup failed.
+    storageManager = EmulatedStorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const tx = runtime.edit();
+    const cell = runtime.getCell<Record<string, unknown>>(
+      space,
+      "failed-resetup-restores-pointer",
+      undefined,
+      tx,
+    );
+    // deno-lint-ignore no-explicit-any
+    const running = runtime.run(tx, handBuiltPattern() as any, {}, cell);
+    await tx.commit();
+    await running.pull();
+    const first = runtime.runner.sessionPatternPointerFor(cell);
+    expect(first).toBeDefined();
+    runtime.runner.stop(cell);
+
+    // A structurally DIFFERENT keyless pattern staged over it; the staging
+    // transaction dies before commit.
+    const differentPattern = {
+      ...handBuiltPattern(),
+      result: { marker: "hand-built-v2" },
+    };
+    const tx2 = runtime.edit();
+    // deno-lint-ignore no-explicit-any
+    runtime.run(tx2, differentPattern as any, {}, cell);
+    expect(runtime.runner.sessionPatternPointerFor(cell)?.identity)
+      .not.toBe(first!.identity);
+    tx2.abort();
+
+    expect(runtime.runner.sessionPatternPointerFor(cell)?.identity).toBe(
+      first!.identity,
+    );
+  });
+
+  it("a failed REAL re-setup keeps the keyless session pointer; a committed one sheds it", async () => {
+    // The other half of the same transactional semantics: a real pattern's
+    // setup deletes the session pointer because its durable stamps
+    // supersede it — but the stamps are staged IN the transaction, so the
+    // delete must land with the commit, not at staging. A failed real
+    // re-setup used to drop the pointer while its stamps rolled back,
+    // leaving the keyless piece with neither.
+    storageManager = EmulatedStorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const setupTx = runtime.edit();
+    const compiled = await runtime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{
+        name: "/main.tsx",
+        contents: [
+          "import { pattern } from 'commonfabric';",
+          "export default pattern<Record<string, never>, { marker: string }>(",
+          "  () => ({ marker: 'real-resetup' }),",
+          ");",
+          "",
+        ].join("\n"),
+      }],
+    }, {
+      space,
+      tx: setupTx,
+    });
+    const cell = runtime.getCell<Record<string, unknown>>(
+      space,
+      "failed-real-resetup-keeps-pointer",
+      undefined,
+      setupTx,
+    );
+    // deno-lint-ignore no-explicit-any
+    const running = runtime.run(setupTx, handBuiltPattern() as any, {}, cell);
+    await setupTx.commit();
+    await running.pull();
+    const first = runtime.runner.sessionPatternPointerFor(cell);
+    expect(first).toBeDefined();
+    runtime.runner.stop(cell);
+
+    // Real re-setup whose transaction dies: stamps roll back, pointer stays.
+    const tx2 = runtime.edit();
+    runtime.run(tx2, compiled as Parameters<Runtime["run"]>[1], {}, cell);
+    tx2.abort();
+    expect(getPatternIdentityRef(cell)).toBeUndefined();
+    expect(runtime.runner.sessionPatternPointerFor(cell)?.identity).toBe(
+      first!.identity,
+    );
+
+    // The same re-setup COMMITTED: durable stamps land, pointer sheds.
+    const tx3 = runtime.edit();
+    const rerun = runtime.run(
+      tx3,
+      compiled as Parameters<Runtime["run"]>[1],
+      {},
+      cell,
+    );
+    await tx3.commit();
+    await rerun.pull();
+    expect(getPatternIdentityRef(cell)).toBeDefined();
+    expect(runtime.runner.sessionPatternPointerFor(cell)).toBeUndefined();
+    runtime.runner.stop(cell);
+  });
+
   it("an evicted session pointer does not masquerade as the zero-evidence state", async () => {
     // The session pointer map is BOUNDED: past its capacity a long-lived
     // session (a server streaming keyless `cf get` transforms) evicts its

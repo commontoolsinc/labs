@@ -2441,7 +2441,25 @@ export class Runner {
         identity: durableEntryRef.identity,
         symbol: durableEntryRef.symbol,
       });
-      this.sessionPatternPointers.delete(this.getDocKey(resultCell));
+      // The durable stamps staged above supersede a keyless session pointer
+      // — WHEN they commit. They are transaction state, so the pointer
+      // removal rides the same commit: dropping it at staging would leave a
+      // still-committed keyless piece pointer-less if this transaction
+      // fails (its stamps roll back; the delete would not). The
+      // unchanged-value guard keeps a re-setup staged after this one
+      // authoritative — its own bookkeeping then owns the entry.
+      const key = this.getDocKey(resultCell);
+      const priorPointer = this.sessionPatternPointers.get(key);
+      if (priorPointer !== undefined) {
+        tx.addCommitCallback((_tx, result) => {
+          if (
+            !result.error &&
+            this.sessionPatternPointers.get(key) === priorPointer
+          ) {
+            this.sessionPatternPointers.delete(key);
+          }
+        });
+      }
     } else if (entryRef) {
       // A piece previously stamped with a DIFFERENT durable pointer (a real
       // identity from an earlier keyed setup, or a pre-guard legacy keyless
@@ -2464,16 +2482,31 @@ export class Runner {
       // the pattern pointer (start/resume flows) and the setup-completion
       // marker (`storedSetupMarker`'s reuse decision — without it a
       // re-derived sub-piece would restage its running setup every pass).
-      // Erased if the staging transaction fails, mirroring
-      // `locallyPreparedResults`' cleanup.
+      //
+      // Set EAGERLY at staging — visible before this transaction commits,
+      // mirroring `locallyPreparedResults` (the pre-existing idiom for
+      // setup bookkeeping; a concurrent start in the staging window is the
+      // same race that map has always carried). The failure cleanup
+      // RESTORES the prior committed pointer rather than deleting: the
+      // durable stamp this map replaces was transactional, so an earlier
+      // keyless setup's pointer survived a later setup's failed commit.
+      // (If the prior pointer itself was never committed — two failing
+      // stagings interleaved on one doc — the restore resurrects a staged
+      // value; recording per-key committed state would close that residue
+      // and is not worth its weight here.)
       const key = this.getDocKey(resultCell);
+      const priorPointer = this.sessionPatternPointers.get(key);
       this.sessionPatternPointers.set(key, entryRef);
       tx.addCommitCallback((_tx, result) => {
         if (
           result.error &&
           this.sessionPatternPointers.get(key) === entryRef
         ) {
-          this.sessionPatternPointers.delete(key);
+          if (priorPointer !== undefined) {
+            this.sessionPatternPointers.set(key, priorPointer);
+          } else {
+            this.sessionPatternPointers.delete(key);
+          }
         }
       });
     }
