@@ -8,6 +8,7 @@ import { newLoopbackServer } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { Engine } from "../src/harness/engine.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { getLogger } from "@commonfabric/utils/logger";
 import {
   getPatternIdentityRef,
   getPatternSetupIdentityRef,
@@ -16,6 +17,8 @@ import {
 import {
   brandTrustedPattern,
   noteDerivedCopy,
+  resolveProducerEntryRef,
+  setArtifactEntryRef,
   setPatternSourcePath,
 } from "../src/builder/pattern-metadata.ts";
 
@@ -905,6 +908,254 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
     expect(committed.error).toBeUndefined();
     const value = await rerun.pull();
     expect((value as { out?: number })?.out).toBe(1);
+  });
+
+  it("the legacy-tolerance diagnostics render under debug logging", async () => {
+    // The tolerance arms log LAZILY: their message closures execute only at
+    // debug level, so a closure that throws — a renamed field, a bad
+    // interpolation — would break the tolerance path exactly when an
+    // operator turns diagnostics on to investigate the legacy state. Drive
+    // every arm with debug enabled and assert the tolerated outcomes hold
+    // (a crashing closure would fail these loudly).
+    const loggers = [getLogger("runner"), getLogger("pattern-manager")];
+    const prior = loggers.map((l) => ({
+      disabled: l.disabled,
+      level: l.level,
+    }));
+    for (const l of loggers) {
+      l.disabled = false;
+      l.level = "debug";
+    }
+    try {
+      storageManager = EmulatedStorageManager.emulate({ as: signer });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      const orphan = "keyless:fid1:legacy-orphan-from-a-pre-guard-session";
+
+      // Load-skip arm: a keyless identity never probes storage.
+      expect(
+        await runtime.patternManager.loadPatternByIdentity(
+          orphan,
+          "default",
+          space,
+        ),
+      ).toBeUndefined();
+
+      // Start-walk tolerance arm: not started, not rejected.
+      {
+        const tx = runtime.edit();
+        const cell = runtime.getCell<Record<string, unknown>>(
+          space,
+          "debug-diagnostics-start-walk",
+          undefined,
+          tx,
+        );
+        cell.withTx(tx).set({ marker: "orphan" });
+        cell.withTx(tx).setMetaRaw("patternIdentity", {
+          identity: orphan,
+          symbol: "default",
+        });
+        await tx.commit();
+        await runtime.idle();
+        expect(await runtime.runner.start(cell)).toBe(false);
+      }
+
+      // Watcher legacy arm + heal convergence message: a running REAL
+      // pattern whose durable pointer is repointed to the orphan converges
+      // back to the running identity.
+      {
+        const tx = runtime.edit();
+        const compiled = await runtime.patternManager.compilePattern(
+          mapProgram,
+          { space, tx },
+        );
+        const realRef = runtime.patternManager.getArtifactEntryRef(
+          compiled as object,
+        )!;
+        const cell = runtime.getCell<Record<string, unknown>>(
+          space,
+          "debug-diagnostics-watcher-heal",
+          undefined,
+          tx,
+        );
+        const running = runtime.run(
+          tx,
+          compiled as Parameters<Runtime["run"]>[1],
+          {},
+          cell,
+        );
+        runtime.prepareTxForCommit(tx);
+        await tx.commit();
+        const cancel = running.sink(() => {});
+        await runtime.idle();
+        {
+          const repointTx = runtime.edit();
+          cell.withTx(repointTx).setMetaRaw("patternIdentity", {
+            identity: orphan,
+            symbol: "default",
+          });
+          await repointTx.commit();
+        }
+        await runtime.idle();
+        await runtime.runner.idlePointerMaintenance();
+        await runtime.idle();
+        await runtime.runner.idlePointerMaintenance();
+        expect(getPatternIdentityRef(cell)?.identity).toBe(realRef.identity);
+        cancel();
+        await runtime.idle();
+      }
+
+      // No-producer refusal arm: an unloadable durable pointer over a
+      // running hand-built (keyless, producer-less) pattern is left as
+      // written — nothing durable-legal to converge to.
+      {
+        const tx = runtime.edit();
+        const cell = runtime.getCell<Record<string, unknown>>(
+          space,
+          "debug-diagnostics-no-producer",
+          undefined,
+          tx,
+        );
+        // deno-lint-ignore no-explicit-any
+        const running = runtime.run(tx, handBuiltPattern() as any, {}, cell);
+        await tx.commit();
+        await running.pull();
+        const unloadableIdentity = await unloadableIdentityPromise;
+        {
+          const repointTx = runtime.edit();
+          cell.withTx(repointTx).setMetaRaw("patternIdentity", {
+            identity: unloadableIdentity,
+            symbol: "default",
+          });
+          await repointTx.commit();
+        }
+        await runtime.idle();
+        await runtime.runner.idlePointerMaintenance();
+        await runtime.idle();
+        await runtime.runner.idlePointerMaintenance();
+        expect(getPatternIdentityRef(cell)?.identity).toBe(
+          unloadableIdentity,
+        );
+        runtime.runner.stop(cell);
+      }
+    } finally {
+      loggers.forEach((l, i) => {
+        l.disabled = prior[i].disabled;
+        l.level = prior[i].level;
+      });
+    }
+  });
+
+  it("the producer walk serves copies and refuses non-artifacts", () => {
+    // Non-object values carry no identity facts: the guards return without
+    // touching the maps.
+    setArtifactEntryRef(42, { identity: "real-guard", symbol: "default" });
+    expect(resolveProducerEntryRef(42)).toBeUndefined();
+    expect(resolveProducerEntryRef(undefined)).toBeUndefined();
+
+    // The walk STEPS: a copy made while the root was keyless has no own
+    // real ref, so the walk follows `derivedFrom` to the root and returns
+    // the root's later-promoted real identity.
+    storageManager = EmulatedStorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const root = handBuiltPattern();
+    const minted = runtime.patternManager.ensureKeylessPatternIdentity(
+      root as never,
+    );
+    expect(minted.identity).toMatch(/^keyless:/);
+    const copy = { producerWalkCopyOf: "root" };
+    noteDerivedCopy(copy, root);
+    const realRef = { identity: "producer-walk-real", symbol: "default" };
+    setArtifactEntryRef(root, realRef);
+    expect(resolveProducerEntryRef(copy)).toEqual(realRef);
+  });
+
+  it("the session swap channel tolerates a failed commit and a stopped piece", async () => {
+    // The swap request rides the setup transaction's commit callback. Its
+    // two refusal arms: a FAILED staging must not swap (the setup never
+    // landed), and a swap arriving after the piece was STOPPED must not
+    // touch the dead registration (the watcher's cancel already ran).
+    storageManager = EmulatedStorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const first = handBuiltPattern();
+    const second = {
+      ...handBuiltPattern(),
+      result: { marker: "hand-built-swap-v2" },
+    };
+    const third = {
+      ...handBuiltPattern(),
+      result: { marker: "hand-built-swap-v3" },
+    };
+
+    const tx = runtime.edit();
+    const cell = runtime.getCell<Record<string, unknown>>(
+      space,
+      "session-swap-corners",
+      undefined,
+      tx,
+    );
+    // deno-lint-ignore no-explicit-any
+    const running = runtime.run(tx, first as any, {}, cell);
+    await tx.commit();
+    await running.pull();
+    const firstPointer = runtime.runner.sessionPatternPointerFor(cell);
+    expect(firstPointer).toBeDefined();
+
+    // Failed staging: the swap callback sees the commit error and returns.
+    const tx2 = runtime.edit();
+    // deno-lint-ignore no-explicit-any
+    runtime.run(tx2, second as any, {}, cell);
+    tx2.abort();
+    expect(runtime.runner.sessionPatternPointerFor(cell)?.identity).toBe(
+      firstPointer!.identity,
+    );
+
+    // Stopped between staging and commit: the captured swap handler runs
+    // against a deactivated watcher and returns without swapping.
+    const tx3 = runtime.edit();
+    // deno-lint-ignore no-explicit-any
+    runtime.run(tx3, third as any, {}, cell);
+    runtime.runner.stop(cell);
+    const committed = await tx3.commit();
+    expect(committed.error).toBeUndefined();
+    await runtime.idle();
+  });
+
+  it("a stopped keyless piece restarts through the sync in-session lookup", async () => {
+    // Restart-after-stop is one of the sanctioned session-pointer flows:
+    // start(resultCell) resolves the pointer, and the minted artifact is
+    // LIVE in this session's index, so the start takes the synchronous
+    // instantiate path — no storage load for a keyless identity.
+    storageManager = EmulatedStorageManager.emulate({ as: signer });
+    runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager,
+    });
+    const tx = runtime.edit();
+    const cell = runtime.getCell<Record<string, unknown>>(
+      space,
+      "keyless-restart-sync-path",
+      undefined,
+      tx,
+    );
+    // deno-lint-ignore no-explicit-any
+    const running = runtime.run(tx, handBuiltPattern() as any, {}, cell);
+    await tx.commit();
+    await running.pull();
+    runtime.runner.stop(cell);
+
+    expect(await runtime.runner.start(cell)).toBe(true);
+    const value = await cell.pull();
+    expect((value as { marker?: string })?.marker).toBe("hand-built");
+    runtime.runner.stop(cell);
   });
 
   it("counts a keyless mint against a module-indexed pattern (missing-association tripwire)", async () => {
