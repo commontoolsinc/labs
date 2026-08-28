@@ -255,8 +255,6 @@ export const PATTERN_AUTHOR_RETURN_SCHEMA: JSONSchema = {
         hashtags: {
           type: "array",
           items: { type: "string" },
-          minItems: 1,
-          maxItems: 8,
           description:
             "The hashtags the pattern was published to the index under, so a later search finds it by the same words. Omitted by a run with no pattern index, which publishes nothing.",
         },

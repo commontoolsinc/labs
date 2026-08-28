@@ -1449,9 +1449,7 @@ it hands back is the point of the profile.
         "describes": { "type": "string" },
         "hashtags": {
           "type": "array",
-          "items": { "type": "string" },
-          "minItems": 1,
-          "maxItems": 8
+          "items": { "type": "string" }
         }
       },
       "required": ["ok", "resultRef", "describes"],
