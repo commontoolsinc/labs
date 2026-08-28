@@ -5,6 +5,10 @@ import type { Cell } from "../src/cell.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 import { Runtime } from "../src/runtime.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
+import {
+  resetReaderSchemaPrecedenceConfig,
+  setReaderSchemaPrecedenceConfig,
+} from "../src/reader-schema-precedence-config.ts";
 
 // The argument link-target pre-sync follows each root's declared schema:
 // targets on schema-named paths are synced (reading through links, two link
@@ -442,6 +446,62 @@ describe("syncArgumentLinkTargets", () => {
     // collapse them and drop the second.
     expect(syncedIds).toContain(id(nestedLeaf));
     expect(syncedIds).toContain(id(slashLeaf));
+  });
+
+  it("holds an `unknown`-typed link as a reference instead of reading through it", async () => {
+    const { make, commit } = docBuilder("unknown ref");
+    const behind = make("behind", { n: 1 });
+    const referenced = make("referenced", { child: behind });
+    const root = make("root", { mention: referenced });
+    await commit();
+    await run(root, {
+      type: "object",
+      properties: { mention: { type: "unknown" } },
+    } as JSONSchema);
+    // `unknown` asks for reference semantics: the value is compared by
+    // identity, never read through, and stays opaque at every deeper hop.
+    expect(syncedIds).toContain(id(referenced));
+    expect(syncedIds).not.toContain(id(behind));
+  });
+
+  it("adopts a link's own schema when the reader brought no shape", async () => {
+    const { make, commit } = docBuilder("schema lineage");
+    const wanted = make("wanted", { n: 1 });
+    const unwanted = make("unwanted", { n: 2 });
+    const target = make("target", { a: wanted, b: unwanted });
+    const typed = target.asSchema({
+      type: "object",
+      properties: { a: { type: "object" } },
+    } as JSONSchema);
+    const root = make("root", { child: typed });
+    await commit();
+    await run(root, true);
+    // A permissive reader is typed by the link it crosses, so the walk
+    // follows that declaration rather than scanning everything behind it:
+    // `a` is selected, `b` is not.
+    expect(syncedIds).toContain(id(target));
+    expect(syncedIds).toContain(id(wanted));
+    expect(syncedIds).not.toContain(id(unwanted));
+  });
+
+  it("still covers the declared read surface under the rollback posture", async () => {
+    setReaderSchemaPrecedenceConfig(false);
+    try {
+      const { root, ids } = await linkedFixture("rollback posture");
+      await run(root, {
+        type: "object",
+        properties: {
+          a: { type: "object", properties: { inner: { type: "number" } } },
+        },
+      });
+      // With reader precedence off, crossings go back to the strict
+      // pseudo-intersection, which can only widen what the walk carries —
+      // so the declared surface stays covered.
+      expect(syncedIds).toContain(ids.a);
+      expect(syncedIds).toContain(ids.deep);
+    } finally {
+      resetReaderSchemaPrecedenceConfig();
+    }
   });
 
   it("gives an undeclared subtree below a declared root the two-hop budget", async () => {
