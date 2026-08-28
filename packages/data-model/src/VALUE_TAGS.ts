@@ -9,9 +9,9 @@
  */
 
 /**
- * Tags identifying classes that the fabric system recognizes for dispatch.
- * These are distinct from wire-format `TAGS` -- they identify *what the value
- * is*, not what fabric type it becomes after conversion.
+ * Tags identifying the classes this system recognizes for dispatch. These are
+ * distinct from wire-format `TAGS` -- they identify *what the value is*, not
+ * what fabric type it becomes after conversion.
  *
  * Covers two categories:
  * - **Native JS builtins**: standard JS types that the fabric system converts.
@@ -19,7 +19,7 @@
  *   behave like primitives (always frozen, pass through conversion
  *   unchanged) but aren't under the open-ended `FabricInstance` umbrella.
  */
-export const NATIVE_TAGS = Object.freeze(
+export const VALUE_TAGS = Object.freeze(
   {
     Array: "Array",
     Object: "Object",
@@ -40,5 +40,5 @@ export const NATIVE_TAGS = Object.freeze(
   } as const,
 );
 
-/** One of the native-instance tag strings. */
-export type NativeTag = typeof NATIVE_TAGS[keyof typeof NATIVE_TAGS];
+/** One of the tag strings. */
+export type ValueTag = typeof VALUE_TAGS[keyof typeof VALUE_TAGS];

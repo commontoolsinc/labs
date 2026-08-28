@@ -41,7 +41,7 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { NATIVE_TAGS } from "./NATIVE_TAGS.ts";
+import { VALUE_TAGS } from "./VALUE_TAGS.ts";
 import { tagFromNativeValue } from "./native-type-tags.ts";
 import { cloneHelper } from "./value-clone.ts";
 import { isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
@@ -178,12 +178,12 @@ export function isValidFabricNativeObject(
   value: unknown,
 ): value is FabricNativeObject {
   switch (tagFromNativeValue(value)) {
-    case NATIVE_TAGS.Error:
-    case NATIVE_TAGS.Map:
-    case NATIVE_TAGS.Set:
-    case NATIVE_TAGS.Date:
-    case NATIVE_TAGS.Uint8Array:
-    case NATIVE_TAGS.RegExp:
+    case VALUE_TAGS.Error:
+    case VALUE_TAGS.Map:
+    case VALUE_TAGS.Set:
+    case VALUE_TAGS.Date:
+    case VALUE_TAGS.Uint8Array:
+    case VALUE_TAGS.RegExp:
       return true;
     default:
       return false;
@@ -230,15 +230,15 @@ export function shallowFabricFromNativeValue(
   switch (tag) {
     // `FabricPrimitive`s are direct `FabricValue` members -- always frozen,
     // pass through as-is regardless of the `freeze` argument.
-    case NATIVE_TAGS.EpochNsec:
-    case NATIVE_TAGS.EpochDay:
-    case NATIVE_TAGS.FabricBytes:
-    case NATIVE_TAGS.FabricKeyPair:
-    case NATIVE_TAGS.FabricRegExp:
-    case NATIVE_TAGS.Hash:
+    case VALUE_TAGS.EpochNsec:
+    case VALUE_TAGS.EpochDay:
+    case VALUE_TAGS.FabricBytes:
+    case VALUE_TAGS.FabricKeyPair:
+    case VALUE_TAGS.FabricRegExp:
+    case VALUE_TAGS.Hash:
       return value as FabricValueLayer;
 
-    case NATIVE_TAGS.Error: {
+    case VALUE_TAGS.Error: {
       // Shallow conversion: wrap the native `Error` without recursing into its
       // internals (`cause`, custom properties). The result is therefore only a
       // *shallow* `FabricError` -- its `.cause` may still be a raw `Error`.
@@ -250,7 +250,7 @@ export function shallowFabricFromNativeValue(
       return wrapped;
     }
 
-    case NATIVE_TAGS.Date: {
+    case VALUE_TAGS.Date: {
       // `Date` instances are converted to `FabricEpochNsec` (nanoseconds from
       // epoch). Extra enumerable properties cause rejection ("death before
       // confusion").
@@ -261,19 +261,19 @@ export function shallowFabricFromNativeValue(
       return wrapped;
     }
 
-    case NATIVE_TAGS.RegExp: {
+    case VALUE_TAGS.RegExp: {
       // `RegExp` instances are converted to `FabricRegExp`, which rejects extra
       // enumerable properties and is frozen at construction.
       return new FabricRegExp(value as RegExp);
     }
 
-    case NATIVE_TAGS.Uint8Array: {
+    case VALUE_TAGS.Uint8Array: {
       // Native `Uint8Array` instances are wrapped in `FabricBytes`.
       // `FabricBytes` is frozen at construction (`FabricPrimitive` contract).
       return new FabricBytes(value as Uint8Array);
     }
 
-    case NATIVE_TAGS.Array: {
+    case VALUE_TAGS.Array: {
       // An array in this system is _inert_: a direct `Array` instance, which
       // may only carry numeric index properties, each a data property. A named
       // or symbol-keyed property has no fabric representation, and an
@@ -298,7 +298,7 @@ export function shallowFabricFromNativeValue(
       );
     }
 
-    case NATIVE_TAGS.Object: {
+    case VALUE_TAGS.Object: {
       // A plain object in this system is _inert_: `FabricPlainObject` is keyed
       // by `string`, so a symbol key has no fabric representation, and neither
       // does a non-enumerable string key; an accessor-backed property is live
@@ -332,7 +332,7 @@ export function shallowFabricFromNativeValue(
       );
     }
 
-    case NATIVE_TAGS.FabricInstance: {
+    case VALUE_TAGS.FabricInstance: {
       // `FabricInstance` values (`FabricError`, `UnknownValue`, etc.) are
       // already valid `FabricValue` members. Delegate frozenness handling to
       // `cloneHelper()`.
@@ -346,7 +346,7 @@ export function shallowFabricFromNativeValue(
     }
 
     // deno-lint-ignore no-fallthrough
-    case NATIVE_TAGS.Primitive: {
+    case VALUE_TAGS.Primitive: {
       // Primitives: `null`, `undefined`, `boolean`, `string`, `number`,
       // `bigint`, `symbol`, `function`. `null` is the only value here with
       // `typeof "object"` (actual objects are routed to other tags by

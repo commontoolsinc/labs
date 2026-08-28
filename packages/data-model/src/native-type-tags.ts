@@ -13,9 +13,7 @@
  * alone.
  */
 
-import { constructorFromObject } from "@commonfabric/utils/objects";
-
-import { NATIVE_TAGS, type NativeTag } from "./NATIVE_TAGS.ts";
+import { VALUE_TAGS, type ValueTag } from "./VALUE_TAGS.ts";
 import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
 import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
@@ -24,7 +22,7 @@ import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricInstance } from "./interface.ts";
 
-export { NATIVE_TAGS, type NativeTag } from "./NATIVE_TAGS.ts";
+export { VALUE_TAGS, type ValueTag } from "./VALUE_TAGS.ts";
 
 /**
  * Checks whether a value is a native `Error`.
@@ -53,7 +51,7 @@ export function isNativeError(value: unknown): value is Error {
  */
 export function tagFromNativeClass(
   constructorFn: { prototype: unknown },
-): NativeTag | null {
+): ValueTag | null {
   switch (constructorFn) {
     // `Error` and standard subclasses all map to the `Error` tag.
     case Error:
@@ -63,34 +61,34 @@ export function tagFromNativeClass(
     case ReferenceError:
     case URIError:
     case EvalError:
-      return NATIVE_TAGS.Error;
+      return VALUE_TAGS.Error;
 
     case Array:
-      return NATIVE_TAGS.Array;
+      return VALUE_TAGS.Array;
     case Object:
-      return NATIVE_TAGS.Object;
+      return VALUE_TAGS.Object;
     case Map:
-      return NATIVE_TAGS.Map;
+      return VALUE_TAGS.Map;
     case Set:
-      return NATIVE_TAGS.Set;
+      return VALUE_TAGS.Set;
     case Date:
-      return NATIVE_TAGS.Date;
+      return VALUE_TAGS.Date;
     case Uint8Array:
-      return NATIVE_TAGS.Uint8Array;
+      return VALUE_TAGS.Uint8Array;
     case RegExp:
-      return NATIVE_TAGS.RegExp;
+      return VALUE_TAGS.RegExp;
     case FabricBytes:
-      return NATIVE_TAGS.FabricBytes;
+      return VALUE_TAGS.FabricBytes;
     case FabricEpochNsec:
-      return NATIVE_TAGS.EpochNsec;
+      return VALUE_TAGS.EpochNsec;
     case FabricEpochDay:
-      return NATIVE_TAGS.EpochDay;
+      return VALUE_TAGS.EpochDay;
     case FabricHash:
-      return NATIVE_TAGS.Hash;
+      return VALUE_TAGS.Hash;
     case FabricKeyPair:
-      return NATIVE_TAGS.FabricKeyPair;
+      return VALUE_TAGS.FabricKeyPair;
     case FabricRegExp:
-      return NATIVE_TAGS.FabricRegExp;
+      return VALUE_TAGS.FabricRegExp;
 
     default:
       // Catch exotic `Error` subclasses (e.g. custom subclasses with
@@ -100,7 +98,7 @@ export function tagFromNativeClass(
         typeof constructorFn === "function" &&
         constructorFn.prototype instanceof Error
       ) {
-        return NATIVE_TAGS.Error;
+        return VALUE_TAGS.Error;
       }
       return null;
   }
@@ -122,22 +120,34 @@ export function tagFromNativeClass(
  * constructor is unreachable -- a severed prototype, or another realm -- and to
  * a prototype check for null-prototype objects.
  */
-export function tagFromNativeValue(value: unknown): NativeTag | null {
+export function tagFromNativeValue(value: unknown): ValueTag | null {
   if (value === null || typeof value !== "object") {
-    return NATIVE_TAGS.Primitive;
+    return VALUE_TAGS.Primitive;
   }
 
   // Arrays first, and unconditionally: see above.
   if (Array.isArray(value)) {
-    return NATIVE_TAGS.Array;
+    return VALUE_TAGS.Array;
   }
 
-  // `constructorFromObject()` reads the class off the value's PROTOTYPE, which
-  // is what keeps an own `constructor` property -- ordinary data that happens
-  // to share the name -- from deciding the value's type.
-  const ctor = constructorFromObject(value);
+  // The constructor is read from the _prototype_, not from the value. What is
+  // being asked is which class the value is an instance of, and that is a fact
+  // about its prototype; an own `constructor` property is ordinary data that
+  // happens to share the name, and must not decide the value's type. Reading
+  // it off the value would let `{constructor: Error}` -- a plain record -- be
+  // tagged `Error` and silently rebuilt as one.
+  //
+  // Guard: a null-prototype object has no constructor to find, and an exotic
+  // one may not have a callable one.
+  //
+  // Read ONCE, and used twice: the null-prototype fallback below tests this
+  // same result rather than asking again, so that a value whose prototype is
+  // answered by a trap cannot be one thing to the class lookup and another to
+  // the fallback.
+  const proto = Object.getPrototypeOf(value);
+  const ctor = proto === null ? undefined : proto.constructor;
 
-  if (ctor !== undefined) {
+  if (typeof ctor === "function") {
     const tag = tagFromNativeClass(ctor);
     if (tag !== null) return tag;
   }
@@ -148,15 +158,15 @@ export function tagFromNativeValue(value: unknown): NativeTag | null {
   // been severed, or one from another realm. An ordinary subclass (including
   // `DOMException`) never gets here: `tagFromNativeClass()` matches it via
   // `prototype instanceof Error`.
-  if (isNativeError(value)) return NATIVE_TAGS.Error;
+  if (isNativeError(value)) return VALUE_TAGS.Error;
 
   // `FabricInstance` values (object-like protocol types).
-  if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;
+  if (value instanceof FabricInstance) return VALUE_TAGS.FabricInstance;
 
   // Null-prototype objects (`Object.create(null)`), which have no constructor
   // to have been recognized. Tagged `Object` so the object rule decides them
   // by name, the same way an indirect array is tagged `Array`.
-  if (Object.getPrototypeOf(value) === null) return NATIVE_TAGS.Object;
+  if (proto === null) return VALUE_TAGS.Object;
 
   return null;
 }
