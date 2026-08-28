@@ -6225,6 +6225,145 @@ supply; OW29/OW32/OW34 closed):
     running`) did not and could not fire in any of the three reds —
     `deferred-start-catchup` was 0 campaign-wide — so these reds are
     decisively NOT the catchup-resolved-without-running variant.
+    **THE a04 FAMILY ROOT-CAUSED AND FIXED — mark/effects atomicity,
+    RULED 2026-08-27 (owner) and built the same day (branch
+    `claude/server-exec-v2-mark-atomicity`). The ruling:** atomic with
+    all its effects — contribution-level all-or-nothing. If ANY effect
+    op of a consequence contribution is withdrawn or requeued by the
+    wave, the MARK op goes with it — the entry stays
+    pending-unconsequenced, the standard re-drain re-delivers, and the
+    retried handler's cause-derived (idempotent) writes converge. (α)
+    preserved: the mark still commits exactly once, only never without
+    its effects. Handler-launched patterns: launch writes are
+    cause-derived/idempotent; ON's run-until-first-idle analog is the
+    serving cycle's settle — no kickoff logic needed or wanted.
+    **The split point, store-proven (evidence before code): NOT the
+    wave.** commitWave already treats an event-handler contribution
+    atomically (whole-contribution requeue, wave.ts; per-doc drops
+    apply only to derivation kind; the batch build never strips a
+    handler contribution's ops; the mark rides the handler's own tx,
+    runtime.ts `streamEntry` doc + space-server.ts's stamper, written
+    BEFORE the body runs). The wave was HANDED a 1-op contribution:
+    the split is the DISPATCH-side skip at runner.ts's stream path —
+    `readJavaScriptArgument` → `isValidArgument === false` → "action
+    argument is undefined (potential schema mismatch) -- not running"
+    logged, handler body skipped, and the tx — holding the
+    pre-stamped mark and nothing else — sealed and committed cleanly.
+    a04's toolshed.log carries exactly TWO of those ERROR lines
+    (14:34:01.511 and .725, the two notebook create handlers'
+    `$ctx`), one per lost event; `events.processed 15` vs
+    `appended 14` shows clientSeq 10's FIRST run silently requeued
+    (its cause-derived note materialization surviving as the seq-52
+    orphan sets, no consequence_of) before the REDISPATCH hit the
+    skip mid-churn; clientSeq 11 skipped on its first dispatch. The
+    class was already NAMED in prose (scheduler/events.ts's B7
+    comment, scheduler/facade.ts's preflight doc: "its argument fails
+    the schema, the run is silently skipped, the entry marked
+    consequenced with no error — silent event loss"); B7 guarded one
+    trigger (the per-actor fan-out instance), a04 is a second trigger
+    (serving-replica view churn on the handler's `$ctx` docs) through
+    the same unguarded skip. **The fix (the ruled substance adapted to
+    the verified point — mark durability ⇒ effects durability):** the
+    runner records the skip on the tx
+    (`dispatchedHandlerNotRun`), and the scheduler's event finalize
+    WITHDRAWS a served dispatch's tx instead of sealing it — aborted,
+    reported `{kind: "deferred", cause: "handler-not-run"}`, counted
+    `events.handlerNotRunDeferrals` (serving-loop.md §7) — so the
+    entry stays pending and re-drains (the 8-deferral threshold
+    hardens a permanently unresolvable argument into the visible §5
+    DROP notice; no stream wedge). An LT1 copy withdraws through the
+    abort alone (no onFailure): the batch marks only a surviving lt1
+    run, the entry lands unmarked, the drain re-delivers with a
+    `streamEntry`. Client/OFF dispatches carry no mark and keep the
+    silent skip. Spec: events.md §5's new handler-body-did-not-run
+    bullet (RULED 2026-08-27). **Pin (red-first, watched):**
+    `executor-events-down.test.ts` "mark/effects atomicity at the
+    DISPATCH layer" — a served event whose handler `$ctx` requires a
+    number the argument doc does not yet hold: at the pre-fix base
+    the entry consequenced with ZERO effects (the a04 1-op shape —
+    watched red at the `consequenced not.toBe(true)` assert); with
+    the fix the entry stays pending through counted deferrals, the
+    healing write re-drains it, and mark + effects land in ONE
+    derived commit exactly once (α run-count witness: the
+    non-idempotent bump reads exactly 1; exactly one consequence-
+    carrying commit; the committing batch holds the sidecar mark op
+    AND the argument write together). Mutation kill: reverting the
+    finalize withdrawal (= the pre-fix base) reds the pin at the same
+    assert. Full events-down suite green with the fix (29 steps).
+    **NAMED FOLLOW-UP, not built (owner, verbatim, 2026-08-27): the
+    mark may duplicate the result-cell write-once guarantee** — "the
+    idea was that all handlers write result cells (even if the value
+    is undefined), and that CAS for that is the write-once guarantee.
+    but if that means we don't need the mark after all, consider
+    marking that for follow-up improvements rather than expanding
+    scope." If mark retirement is taken up, the drain's
+    delivered-scan would key on the handling receipt/result cell
+    (spec §7.6's cause-derived receipt address) instead of the
+    entry's `consequenced` field — recorded here as the candidate
+    key, not a design. Also recorded, not owed by this fix: WHY the
+    redispatch's argument read failed mid-churn (the transient
+    resolution failure on ctx docs the first run's withdrawal left
+    behind) is its own diagnosis — the atomicity fix makes every such
+    transient recoverable by re-drain instead of a permanent loss.
+    **FIX ROUND (independent review of PR #6459, 2026-08-27): F1
+    landed — the withdrawal carries §2's arrival-order barrier.** The
+    review DEMONSTRATED (213 ms probe) that the new deferral arm let
+    a later-arrived same-space served entry overtake the withdrawn
+    head — the b01 class re-opened at a new arm: durable log
+    ["B","A"] against arrival [a1, b1], b1 sealing while a1 was
+    pending. The withdrawal now sweeps later-arrived durable served
+    followers out of the scheduler queue with
+    `{cause: "arrival-barrier", blockedBy}` exactly as
+    `failHeadEventLoadPark` does (a shared events.ts helper,
+    enqueueSeq-guarded because these arms do not fail at the
+    un-dispatched queue head; the piece-start deferral arms — the
+    review's named sibling gap, same no-sweep shape, same disposition
+    — carry the same sweep). Pins red-first, watched: the ordering
+    pin inverts the review's probe (executor-events-down "the
+    handler-not-run withdrawal carries the arrival-order BARRIER" —
+    pre-fix/mutation red at stored log ["B"] while a1 pends; fixed:
+    b1 barrier-deferred and the healed re-drain lands ["A","B"]); a
+    unit pin (scheduler-event-identity) drives both piece-start
+    failure modes and the exclusions (cross-space neighbours and LT1
+    copies stay queued). Mutations killed arm by arm: finalize sweep
+    disabled → ordering pin red at the ["B"] overtake with the piece
+    sweeps still active; piece sweeps disabled → unit pin red with
+    the finalize sweep still active. The barrier's MID-PASS half
+    landed with it: the sweep can only hold entries already queued,
+    and a withdrawal landing while the drain pass awaits a later
+    sidecar's sync let the pass queue the next arrival behind the
+    barrier's back (the load-park fix's P1 gap, reopened for this
+    cause) — the plain-deferral arm now sets
+    `#loadParkDeferredInPass` for handler-not-run, and the drain's
+    existing past-every-await check stops the pass. RESIDUAL,
+    recorded (scoped-verify SV1): the piece-start (cold-view)
+    deferral arms carry NO cause, so they never set the pass flag —
+    their in-queue half is swept by the shared helper, but a
+    piece-start deferral landing mid-pass keeps the pre-existing
+    mid-pass window (their deferrals usually land outside a pass;
+    same one-flag shape if ever taken up). Deterministic
+    pin, red-first (watched): the load-park mid-pass construction —
+    pass held at B's sidecar sync, A2's withdrawal counted inside the
+    hold, gate healed before release — pre-fix durable log
+    ["A","B","A"], fixed ["A","A","B"]; the watched red is the
+    mutation evidence (that tree was the final code minus exactly the
+    flag-set). **F2 landed** — the terminal §5
+    notice branches on the final deferral's cause ("handler did not
+    run after N withdrawn dispatches"; the old
+    no-runnable-handler/load-attempt boilerplate was false in both
+    clauses for this class), red-first through the full 8-deferral
+    budget with THIS cause — which also closes the review's stated
+    gap that the threshold path was code-traced, not test-run. **F3,
+    recorded shape, not built:** a deferral that heals below the
+    threshold leaves its `#eventDeferrals` entry for the tenure, and
+    `#eventDeferrals.size > 0` arms `#eventScanOwed` on every
+    admitted commit — a per-commit drain rescan over an (empty)
+    pending set. Pre-existing for every plain-deferral cause;
+    handler-not-run makes heal-after-defer the COMMON case, so the
+    residue now arms routinely. Cheap close if taken up: delete the
+    eventId on successful seal. **F4: no change owed** — the
+    atomicity pin's final batch assert is corroborative; the teeth
+    are the α run-count and the single consequence-carrying commit.
     Sibling entry, landed mid-review: #5744 (lunch-poll profile-first
     join) re-skipped `integration/lunch-poll-vote.test.ts` as a FILE
     entry on this row's b04 signature — its recorded reds PREDATE the
@@ -6556,7 +6695,17 @@ supply; OW29/OW32/OW34 closed):
     reading: a DROPPED contribution leaves NO basis rows
     (`#basisRowsFor` covers survivors only), so "its own reads re-run
     it when fresh state lands" is structurally false for a first-ever
-    run that gets dropped. (ii) The client and server auto-updaters
+    run that gets dropped — the D3 basis-row gap.
+    **D3 DECOUPLED from the a04 event family (2026-08-27, the
+    mark/effects-atomicity pass):** for HANDLER EVENTS the re-arm is
+    the RE-DRAIN, not basis rows — the durable pending-unconsequenced
+    entry is itself the retry record, so a withdrawn or never-run
+    handler dispatch needs no basis row to run again (the atomicity
+    fix keeps the entry pending exactly so that mechanism carries the
+    recovery). D3 therefore stays scoped to REACTIVE first-runs with
+    no durable retry record behind them — the wish case above, where
+    a dropped first-ever derivation leaves neither basis rows nor any
+    entry to re-drain. (ii) The client and server auto-updaters
     ping-pong the ensure-created root's summary-index child between
     its closure-embedded pattern identity and the standalone compile
     of the same source (alternating authored/derived

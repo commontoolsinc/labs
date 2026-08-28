@@ -302,6 +302,24 @@ const THROW_PATTERN = [
   ">(({ value }) => ({ value, explode: explode({ value }) }));",
 ].join("\n");
 
+/** A handler whose `$ctx` requires a plain-number `gate` the argument doc
+ * does not hold at fire time: the served dispatch's argument read fails the
+ * schema (`isValidArgument === false`, runner.ts's "-- not running" skip)
+ * until a later authored write supplies it — the mark/effects-atomicity
+ * pin's reproduction of the a04 write-side member. */
+const GATED_BUMP_PATTERN = [
+  "import { handler, pattern, Stream, Writable } from 'commonfabric';",
+  "const bump = handler<unknown, { value: Writable<number>; gate: number }>(",
+  "  (_ev, { value, gate }) => {",
+  "    value.set((value.get() ?? 0) + 1 + gate * 0);",
+  "  },",
+  ");",
+  "export default pattern<",
+  "  { value: Writable<number>; gate: Writable<number> },",
+  "  { value: number; bump: Stream<unknown> }",
+  ">(({ value, gate }) => ({ value, bump: bump({ value, gate }) }));",
+].join("\n");
+
 /** Two independent streams whose handlers append their letter to ONE
  * shared log — the arrival-order pin reads the log as the record of
  * consequence order. */
@@ -337,6 +355,30 @@ const DISJOINT_CLOSURE_LOG_PATTERN = [
   "  gate.get();",
   "  log.set([...(log.get() ?? []), 'A']);",
   "});",
+  "const pushB = handler<unknown, { log: Writable<string[]> }>(",
+  "  (_ev, { log }) => { log.set([...(log.get() ?? []), 'B']); },",
+  ");",
+  "export default pattern<",
+  "  { log: Writable<string[]>; gate: Writable<number> },",
+  "  { log: string[]; a: Stream<unknown>; b: Stream<unknown> }",
+  ">(({ log, gate }) => ({ log, a: pushA({ log, gate }), b: pushB({ log }) }));",
+].join("\n");
+
+/** DISJOINT_CLOSURE_LOG_PATTERN's shape with GATED_BUMP's plain-number
+ * gate: `pushA`'s `$ctx` requires `gate: number`, which the argument doc
+ * does not hold at fire time — its served dispatch hits the runner's
+ * argument-did-not-resolve skip and is WITHDRAWN (handler-not-run) —
+ * while `pushB`'s closure reads only the shared log and is perfectly
+ * runnable. The construction the handler-not-run arrival-order barrier
+ * pin needs (review-6459 F1): a healthy later arrival queued behind a
+ * withdrawn head. */
+const GATED_ORDERED_LOG_PATTERN = [
+  "import { handler, pattern, Stream, Writable } from 'commonfabric';",
+  "const pushA = handler<unknown, { log: Writable<string[]>; gate: number }>(",
+  "  (_ev, { log, gate }) => {",
+  "    log.set([...(log.get() ?? []), gate * 0 === 0 ? 'A' : 'never']);",
+  "  },",
+  ");",
   "const pushB = handler<unknown, { log: Writable<string[]> }>(",
   "  (_ev, { log }) => { log.set([...(log.get() ?? []), 'B']); },",
   ");",
@@ -1211,6 +1253,421 @@ describe("Phase 3 events-down (serving side)", () => {
       });
       expect((doc?.value as { value?: number })?.value).toBe(K);
     }
+    cancelDemand();
+  });
+
+  it("mark/effects atomicity at the DISPATCH layer (events.md §4, RULED 2026-08-27 — the a04 write-side member): a served dispatch whose handler argument cannot resolve is WITHDRAWN, never sealed — the pre-stamped mark must not commit alone; the entry stays pending, re-drains once the argument resolves, and mark + effects land in ONE commit exactly once (mutation: the finalize withdrawal removed → the a04 1-op mark-only consequence, the event permanently consumed with zero effects)", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const { argument, result } = await standUp(
+      clientRuntime,
+      GATED_BUMP_PATTERN,
+      { arg: "atomicity-arg", result: "atomicity-result" },
+    );
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    const before = Engine.serverSeq(engine);
+    (result.key("bump") as unknown as { send(value: unknown): unknown })
+      .send({});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    await waitUntil(
+      () => sidecarIdsIn(engine).length === 1,
+      "the event append to land",
+    );
+    const sidecarId = sidecarIdsIn(engine)[0];
+    const readEntry = () =>
+      (Engine.read(engine, { id: sidecarId })?.value as
+        | StreamEventsDocValue
+        | undefined)?.entries?.[0];
+    const argumentDocId = argument.getAsNormalizedFullLink().id;
+    const argumentValue = () => {
+      const doc = Engine.read(engine, { id: argumentDocId });
+      return (doc?.value as { value?: number } | undefined)?.value ?? 0;
+    };
+    const deferrals = () =>
+      (host!.stats().events as { handlerNotRunDeferrals?: number })
+        .handlerNotRunDeferrals ?? 0;
+
+    // The unresolvable dispatch resolves: post-fix as a counted
+    // handler-not-run deferral with the entry still pending; PRE-FIX
+    // (watched red) as the a04 shape — the entry consequenced with zero
+    // effects before any deferral exists (seqs 53/56: a 1-op 802-byte
+    // derived commit carrying ONLY the mark).
+    await waitUntil(
+      () => deferrals() >= 1 || readEntry()?.consequenced === true,
+      "the unresolvable dispatch to resolve (deferral post-fix / mark pre-fix)",
+    );
+    expect(readEntry()?.consequenced).not.toBe(true);
+    expect(readEntry()?.status).toBeUndefined();
+    expect(readEntry()?.error).toBeUndefined();
+    expect(argumentValue()).toBe(0);
+    expect(deferrals()).toBeGreaterThanOrEqual(1);
+
+    // Heal within the deferral budget: supply the gate. The standard
+    // re-drain re-delivers and the retried handler's writes land.
+    {
+      const gateCell = clientRuntime.getCell<{ value: number; gate?: number }>(
+        space,
+        "atomicity-arg",
+        undefined,
+      );
+      await gateCell.sync();
+      const tx = clientRuntime.edit();
+      gateCell.key("gate").withTx(tx).set(7);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+
+    await waitUntil(
+      () => readEntry()?.consequenced === true && argumentValue() === 1,
+      "the re-delivered handler's mark + effects to land",
+    );
+    // (α) exactly once: the non-idempotent effect applied exactly once…
+    expect(argumentValue()).toBe(1);
+    const entry = readEntry()!;
+    expect(entry.error).toBeUndefined();
+    expect(entry.status).toBeUndefined();
+    // …and exactly ONE durable derived commit names the event.
+    const consequenceRows = engine.database.prepare(
+      `SELECT seq, consequence_of FROM "commit"
+       WHERE seq > :from_seq AND class = 'derived'
+         AND consequence_of IS NOT NULL`,
+    ).all({ from_seq: before }) as Array<
+      { seq: number; consequence_of: string }
+    >;
+    const carrying = consequenceRows.filter((row) =>
+      row.consequence_of.includes(entry.eventId)
+    );
+    expect(carrying.length).toBe(1);
+    // The committing wave batch carries the mark AND the effect together
+    // (the atomicity, stated positively): the sidecar's mark op and the
+    // argument doc's bump ride ONE home commit.
+    const carryingBatches = observedWaveCommits.filter((batch) =>
+      batch.consequenceOf.includes(entry.eventId)
+    );
+    expect(carryingBatches.length).toBeGreaterThanOrEqual(1);
+    const committedOps = carryingBatches[carryingBatches.length - 1].operations;
+    expect(
+      committedOps.some((op) => op.op !== "sqlite" && op.id === sidecarId),
+    ).toBe(true);
+    expect(
+      committedOps.some((op) => op.op !== "sqlite" && op.id === argumentDocId),
+    ).toBe(true);
+    cancelDemand();
+  });
+
+  it('the handler-not-run withdrawal carries the arrival-order BARRIER (events.md §2 + §5, review-6459 F1): a later-arrived same-space served event queued behind the withdrawn head defers with it instead of overtaking, and the healed re-drain lands both consequences in arrival order (mutation: empty the finalize sweep → B seals while A is still pending and the durable log reads ["B","A"] against arrival [a1,b1] — the b01 inversion)', async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+
+    const compiled = await clientRuntime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: GATED_ORDERED_LOG_PATTERN }],
+    }, { space });
+    // The gate is its OWN doc linked into the argument, seeded with a
+    // present NON-NUMBER: pushA's `$ctx` schema read fails
+    // deterministically (handler-not-run — never a load park, the doc
+    // exists) until the heal writes a number, while pushB never reads
+    // it. Its own doc also keeps the HEAL commit clean: pushB's
+    // client-side speculative run leaves an unresolved overlay on the
+    // argument doc while b1 is barrier-deferred server-side, and a heal
+    // tx reading that doc would be refused (SpeculativeBasisError).
+    const gateCell = clientRuntime.getCell<unknown>(
+      space,
+      "hnr-barrier-gate",
+      undefined,
+    );
+    const argument = clientRuntime.getCell<{ log: string[]; gate?: unknown }>(
+      space,
+      "hnr-barrier-arg",
+      undefined,
+    );
+    const result = clientRuntime.getCell<Record<string, unknown>>(
+      space,
+      "hnr-barrier-result",
+      compiled.resultSchema,
+    );
+    await gateCell.sync();
+    await argument.sync();
+    await result.sync();
+    {
+      const seed = clientRuntime.edit();
+      gateCell.withTx(seed).set({ pending: true });
+      argument.withTx(seed).set({ log: [], gate: gateCell });
+      expect((await seed.commit()).error).toBeUndefined();
+    }
+    {
+      const tx = clientRuntime.edit();
+      clientRuntime.run(tx, compiled, argument, result);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    const argumentId = argument.getAsNormalizedFullLink().id;
+    const storedLog =
+      (): string[] => ((Engine.read(engine, { id: argumentId })?.value as
+        | { log?: string[] }
+        | undefined)?.log ?? []);
+    const send = (stream: "a" | "b") =>
+      (result.key(stream) as unknown as { send(value: unknown): unknown })
+        .send({});
+    const stats = () =>
+      host!.stats().events as {
+        handlerNotRunDeferrals?: number;
+        loadParkDeferrals?: number;
+      };
+
+    // a1 first (its handler requires the absent gate), b1 second
+    // (healthy closure), each append awaited so the durable arrival
+    // order is [a1, b1] by construction.
+    send("a");
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+    await waitUntil(
+      () => sidecarIdsIn(engine).length >= 1,
+      "a1's append to land",
+    );
+    send("b");
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+    await waitUntil(
+      () => sidecarIdsIn(engine).length === 2,
+      "b1's append to land on its own sidecar",
+    );
+
+    // b1's dispatch resolves one way or the other: post-fix it is swept
+    // behind the withdrawn a1 (an arrival-barrier deferral, counted in
+    // loadParkDeferrals — "every head and barrier deferral"); PRE-FIX
+    // (watched red) it dispatches next out of the same pass and SEALS
+    // while a1 is still pending — the review's 213ms overtake probe,
+    // stored log ["B"].
+    await waitUntil(
+      () =>
+        (stats().handlerNotRunDeferrals ?? 0) >= 1 &&
+        ((stats().loadParkDeferrals ?? 0) >= 1 || storedLog().length >= 1),
+      "b1's dispatch to resolve (barrier post-fix / overtake pre-fix)",
+    );
+    expect(storedLog()).toEqual([]);
+
+    // Heal the gate within the deferral budget — a write touching ONLY
+    // the gate doc: the standard re-drain re-delivers BOTH entries, in
+    // arrival order.
+    {
+      const tx = clientRuntime.edit();
+      gateCell.withTx(tx).set(7);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    await waitUntil(
+      () => storedLog().length === 2,
+      "both consequences to land after the heal",
+      30_000,
+    );
+    // THE PIN: durable consequence order equals arrival order.
+    expect(storedLog()).toEqual(["A", "B"]);
+    cancelDemand();
+  });
+
+  it('the handler-not-run barrier reaches entries the drain has NOT queued yet: a withdrawal landing MID-PASS stops the pass (events.md §2, the mid-pass half — the in-queue sweep can only hold what is already in the event queue, and each new sidecar\'s sync() is an await, so the gap is real; held open here with the drain\'s sync gate on B\'s sidecar, the load-park mid-pass pin\'s construction. Mutation: drop the handler-not-run #loadParkDeferredInPass set → B1 queues behind the barrier\'s back into the healed gate and the log reads ["A","B","A"])', async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+
+    const compiled = await clientRuntime.patternManager.compilePattern({
+      main: "/main.tsx",
+      files: [{ name: "/main.tsx", contents: GATED_ORDERED_LOG_PATTERN }],
+    }, { space });
+    const gateCell = clientRuntime.getCell<unknown>(
+      space,
+      "hnr-midpass-gate",
+      undefined,
+    );
+    const argument = clientRuntime.getCell<{ log: string[]; gate?: unknown }>(
+      space,
+      "hnr-midpass-arg",
+      undefined,
+    );
+    const result = clientRuntime.getCell<Record<string, unknown>>(
+      space,
+      "hnr-midpass-result",
+      compiled.resultSchema,
+    );
+    await gateCell.sync();
+    await argument.sync();
+    await result.sync();
+    {
+      // Seed the gate VALID so the warm-up consequence seals.
+      const seed = clientRuntime.edit();
+      gateCell.withTx(seed).set(7);
+      argument.withTx(seed).set({ log: [], gate: gateCell });
+      expect((await seed.commit()).error).toBeUndefined();
+    }
+    {
+      const tx = clientRuntime.edit();
+      clientRuntime.run(tx, compiled, argument, result);
+      expect((await tx.commit()).error).toBeUndefined();
+    }
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    const argumentId = argument.getAsNormalizedFullLink().id;
+    const storedLog =
+      (): string[] => ((Engine.read(engine, { id: argumentId })?.value as
+        | { log?: string[] }
+        | undefined)?.log ?? []);
+    const send = (stream: "a" | "b") =>
+      (result.key(stream) as unknown as { send(value: unknown): unknown })
+        .send({});
+    const deferrals = () =>
+      (host!.stats().events as { handlerNotRunDeferrals?: number })
+        .handlerNotRunDeferrals ?? 0;
+
+    const gate = Promise.withResolvers<void>();
+    try {
+      // Warm the piece and stream `a`'s sidecar, gate valid.
+      send("a");
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () => storedLog().length === 1,
+        "the warm-up consequence to land",
+      );
+      const aSidecarId = sidecarIdsIn(engine)[0];
+      expect(aSidecarId).toBeDefined();
+      expect(servingManager).toBeDefined();
+
+      // INVALIDATE the gate (a present non-number): A2's dispatch now
+      // withdraws (handler-not-run) deterministically.
+      {
+        const tx = clientRuntime.edit();
+        gateCell.withTx(tx).set({ pending: true });
+        expect((await tx.commit()).error).toBeUndefined();
+      }
+      await clientRuntime.storageManager.synced();
+
+      // Hold the drain at B's sidecar sync — the exact point at which A2
+      // has been queued (a's sidecar passes through) and B1 has not.
+      servingManager!.syncGateWhen = (id) =>
+        id.startsWith("of:stream-events:") && id !== aSidecarId;
+      servingManager!.syncGate = gate.promise;
+
+      send("a"); // A2 arrives first — and will withdraw
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      send("b"); // B1 second — healthy closure
+      await clientRuntime.idle();
+      await clientRuntime.storageManager.synced();
+      await waitUntil(
+        () => sidecarIdsIn(engine).length === 2,
+        "B1's append to land on its own sidecar",
+      );
+
+      // The window: a pass held at B's sidecar sync, with A2's
+      // withdrawal counted. The scheduler runs free while the drain
+      // waits on the gate, so a queued A2 dispatches — and withdraws —
+      // inside the hold.
+      await waitUntil(
+        () => (servingManager?.syncGateHits ?? 0) > 0,
+        "a drain pass held at B's sidecar",
+      );
+      await waitUntil(
+        () => deferrals() >= 1,
+        "A2's withdrawal inside the held pass",
+      );
+      expect(storedLog()).toEqual(["A"]);
+
+      // HEAL FIRST, then release: with the gate healthy, an unbarriered
+      // pass would queue B1 and dispatch it immediately — the overtake —
+      // while A2 waits for the next re-drain.
+      {
+        const tx = clientRuntime.edit();
+        gateCell.withTx(tx).set(7);
+        expect((await tx.commit()).error).toBeUndefined();
+      }
+      servingManager!.syncGateWhen = undefined;
+      servingManager!.syncGate = undefined;
+      gate.resolve();
+
+      await waitUntil(
+        () => storedLog().length === 3,
+        "all three consequences to land after the pass resumes",
+        30_000,
+      );
+      // THE PIN: arrival order held across the mid-pass gap.
+      expect(storedLog()).toEqual(["A", "A", "B"]);
+    } finally {
+      if (servingManager !== undefined) {
+        servingManager.syncGateWhen = undefined;
+        servingManager.syncGate = undefined;
+      }
+      gate.resolve();
+      cancelDemand();
+    }
+  });
+
+  it("a permanently unresolvable argument hardens into a §5 DROP whose notice names the REAL class (review-6459 F2): the handler was runnable and dispatched — the deferrals were withdrawn dispatches, not load attempts, and the durable drop record must not say otherwise", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const { result } = await standUp(clientRuntime, GATED_BUMP_PATTERN, {
+      arg: "notice-arg",
+      result: "notice-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    (result.key("bump") as unknown as { send(value: unknown): unknown })
+      .send({});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    await waitUntil(
+      () => sidecarIdsIn(engine).length === 1,
+      "the event append to land",
+    );
+    const sidecarId = sidecarIdsIn(engine)[0];
+    const readEntry = () =>
+      (Engine.read(engine, { id: sidecarId })?.value as
+        | StreamEventsDocValue
+        | undefined)?.entries?.[0];
+
+    // NEVER heal the gate: the 250ms backstop re-dispatches the entry
+    // through the whole 8-deferral budget (~2s), each dispatch
+    // withdrawn (handler-not-run), and the terminal §5 notice seals.
+    // This also exercises the threshold machinery end-to-end with THIS
+    // cause (the review's coverage gap: it was code-traced, not
+    // test-run).
+    await waitUntil(
+      () => readEntry()?.status === "dropped",
+      "the terminal §5 DROP notice to seal",
+      30_000,
+    );
+    const entry = readEntry()!;
+    // THE PIN: the drop record names the real class. The old
+    // boilerplate — "no runnable handler after 8 deferred load
+    // attempts" — was false in both clauses for this cause: a handler
+    // existed, loaded and runnable, and the deferrals were dispatches
+    // whose transaction was withdrawn, not load attempts.
+    expect(entry.reason).toContain(
+      "handler did not run after 8 withdrawn dispatches",
+    );
+    expect(entry.reason).not.toContain("no runnable handler");
+    // The underlying runner reason still rides the notice.
+    expect(entry.reason).toContain("argument is undefined");
+    // The disposition machinery is unchanged: counted, and the entry is
+    // terminally consumed (the notice IS the consequence).
+    expect(
+      (host!.stats().events as { dropped?: number }).dropped ?? 0,
+    ).toBeGreaterThanOrEqual(1);
+    expect(entry.consequenced).toBe(true);
     cancelDemand();
   });
 
