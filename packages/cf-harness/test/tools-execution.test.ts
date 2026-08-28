@@ -121,13 +121,17 @@ class FakeSandboxRuntime implements SandboxRuntime {
     | { type: "runShell"; request: SandboxShellRequest }
   > = [];
 
+  readonly #shellResults: SandboxCommandResult[];
+
   constructor(
-    private readonly shellResults: SandboxCommandResult[] = [{
+    shellResults: SandboxCommandResult[] = [{
       stdout: "",
       stderr: "",
       exitCode: 0,
     }],
-  ) {}
+  ) {
+    this.#shellResults = shellResults;
+  }
 
   describe(): SandboxRuntimeDescription {
     return {
@@ -156,14 +160,14 @@ class FakeSandboxRuntime implements SandboxRuntime {
   run(request: SandboxCommandRequest): Promise<SandboxCommandResult> {
     this.calls.push({ type: "run", request });
     return Promise.resolve(
-      this.shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+      this.#shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
     );
   }
 
   runShell(request: SandboxShellRequest): Promise<SandboxCommandResult> {
     this.calls.push({ type: "runShell", request });
     return Promise.resolve(
-      this.shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+      this.#shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
     );
   }
 }
@@ -189,18 +193,22 @@ class MultiRootFakeSandboxRuntime extends FakeSandboxRuntime {
 class FakeProcessRunner implements ProcessRunner {
   readonly calls: ProcessRunRequest[] = [];
 
+  readonly #results: ProcessRunResult[];
+
   constructor(
-    private readonly results: ProcessRunResult[] = [{
+    results: ProcessRunResult[] = [{
       stdout: "",
       stderr: "",
       exitCode: 0,
     }],
-  ) {}
+  ) {
+    this.#results = results;
+  }
 
   run(request: ProcessRunRequest): Promise<ProcessRunResult> {
     this.calls.push(request);
     return Promise.resolve(
-      this.results.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+      this.#results.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
     );
   }
 }

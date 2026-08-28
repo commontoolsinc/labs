@@ -115,13 +115,21 @@ export class EngineObjectManager implements ObjectStorageManager {
   #missing = new Set<string>();
   #readCount = 0;
 
+  readonly #engine: Engine.Engine;
+  readonly #branch: string;
+  readonly #readSeq?: number;
+
   constructor(
-    private readonly engine: Engine.Engine,
-    private readonly branch: string,
+    engine: Engine.Engine,
+    branch: string,
     readonly principal?: string,
     readonly sessionId?: string,
-    private readonly readSeq?: number,
-  ) {}
+    readSeq?: number,
+  ) {
+    this.#engine = engine;
+    this.#branch = branch;
+    this.#readSeq = readSeq;
+  }
 
   /** The scope INSTANCE an address resolves to for this manager: the
    * explicit key where the caller named one (protocol.md §2's read row),
@@ -142,14 +150,14 @@ export class EngineObjectManager implements ObjectStorageManager {
     scope: CellScope = DEFAULT_SCOPE,
     scopeKey?: ScopeKey,
   ): Engine.EntityState | null {
-    return Engine.readState(this.engine, {
+    return Engine.readState(this.#engine, {
       id,
       scope,
       ...(scopeKey === undefined ? {} : { scopeKey }),
       principal: this.principal,
       sessionId: this.sessionId,
-      branch: this.branch,
-      ...(this.readSeq === undefined ? {} : { seq: this.readSeq }),
+      branch: this.#branch,
+      ...(this.#readSeq === undefined ? {} : { seq: this.#readSeq }),
     });
   }
 
@@ -158,7 +166,7 @@ export class EngineObjectManager implements ObjectStorageManager {
    * for seq 0 / an unknown seq. Memoized per engine; see
    * {@link Engine.commitClassOfSeq}. */
   coverClassOf(seq: number): CommitClass | undefined {
-    return Engine.commitClassOfSeq(this.engine, seq);
+    return Engine.commitClassOfSeq(this.#engine, seq);
   }
 
   load(

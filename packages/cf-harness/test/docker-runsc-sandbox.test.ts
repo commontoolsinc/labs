@@ -18,11 +18,15 @@ import type {
 class FakeProcessRunner implements ProcessRunner {
   requests: ProcessRunRequest[] = [];
 
-  constructor(private readonly results: ProcessRunResult[]) {}
+  readonly #results: ProcessRunResult[];
+
+  constructor(results: ProcessRunResult[]) {
+    this.#results = results;
+  }
 
   run(request: ProcessRunRequest): Promise<ProcessRunResult> {
     this.requests.push(request);
-    const result = this.results.shift();
+    const result = this.#results.shift();
     if (result === undefined) {
       throw new Error(`unexpected process request: ${request.command}`);
     }
