@@ -1704,6 +1704,11 @@ export async function main(argv: string[] = Deno.args) {
         cfcWritebacks.markRunnerCommitFailed(handle.ino, operation, reason);
       }
     };
+    const completeWrite = (kind: string): 0 => {
+      writeStats.flushed++;
+      console.log(`[write-trace] flush-ok ino=${handle.ino} kind=${kind}`);
+      return 0;
+    };
     try {
       if (writeTarget?.kind === "ignored") {
         if (handle.version === flushVersion) {
@@ -1744,9 +1749,7 @@ export async function main(argv: string[] = Deno.args) {
           handle.buffer = new Uint8Array(0); // fire-and-forget
           handle.bufferValid = false;
         }
-        writeStats.flushed++;
-        console.log(`[write-trace] flush-ok ino=${handle.ino} kind=handler`);
-        return 0;
+        return completeWrite("handler");
       }
 
       if (writeTarget?.kind === "source") {
@@ -1868,9 +1871,7 @@ export async function main(argv: string[] = Deno.args) {
         if (handle.version === flushVersion) {
           handle.dirty = handle.truncatePending = false;
         }
-        writeStats.flushed++;
-        console.log(`[write-trace] flush-ok ino=${handle.ino} kind=source`);
-        return 0;
+        return completeWrite("source");
       }
 
       if (
@@ -1907,11 +1908,7 @@ export async function main(argv: string[] = Deno.args) {
         } catch {
           // Stale inode after subscription rebuild — ignore.
         }
-        writeStats.flushed++;
-        console.log(
-          `[write-trace] flush-ok ino=${handle.ino} kind=fsProjection`,
-        );
-        return 0;
+        return completeWrite("fsProjection");
       }
 
       let value: unknown;
@@ -1969,9 +1966,7 @@ export async function main(argv: string[] = Deno.args) {
         // rebuilt the tree with the correct data.
       }
 
-      writeStats.flushed++;
-      console.log(`[write-trace] flush-ok ino=${handle.ino} kind=value`);
-      return 0;
+      return completeWrite("value");
     } catch (e) {
       const logPrefix = writeTarget?.kind === "handler" ||
           (callableNode?.kind === "callable" &&
