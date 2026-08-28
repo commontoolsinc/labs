@@ -4764,6 +4764,33 @@ describe("runtime-processor", () => {
       });
     });
 
+    describe("setMemoryMessageCompression()", () => {
+      it("forwards the requested mode to storage", async () => {
+        const modes: boolean[] = [];
+        const processor = {
+          runtime: {
+            storageManager: {
+              setMessageCompressionEnabled: (enabled: boolean) => {
+                modes.push(enabled);
+                return Promise.resolve();
+              },
+            },
+          },
+          setMemoryMessageCompression:
+            RuntimeProcessor.prototype.setMemoryMessageCompression,
+        } as unknown as RuntimeProcessor;
+        await RuntimeProcessor.prototype.handleRequest.call(
+          processor,
+          {
+            type: RequestType.SetMemoryMessageCompression,
+            enabled: false,
+          },
+        );
+
+        expect(modes).toEqual([false]);
+      });
+    });
+
     describe("piecesFor()", () => {
       it("returns only existing contexts, and creates none lazily", async () => {
         const { processor, runtime, homeSpace } = makeProcessorState();

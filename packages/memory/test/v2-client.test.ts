@@ -3498,6 +3498,52 @@ Deno.test("memory v2 client stores the server's advertised flags (capability han
   }
 });
 
+Deno.test("memory v2 client keeps compression disabled when the server omits the capability", async () => {
+  let receiver = (_payload: string) => {};
+  let advertisedCompression: boolean | undefined;
+  const compressionStates: boolean[] = [];
+  const transport: Transport = {
+    supportsMessageCompression: true,
+    send(payload): Promise<void> {
+      const message = decodeMemoryBoundary(payload) as {
+        type?: string;
+        flags?: { messageCompressionV1?: boolean };
+      };
+      if (message.type === "hello") {
+        advertisedCompression = message.flags?.messageCompressionV1;
+        receiver(encodeMemoryBoundary({
+          type: "hello.ok",
+          protocol: MEMORY_PROTOCOL,
+          flags: {
+            modernCellRep: getMemoryProtocolFlags().modernCellRep,
+          },
+          sessionOpen: {
+            audience: TEST_SESSION_OPEN_AUDIENCE,
+            challenge: sessionOpenChallenge,
+          },
+        }));
+      }
+      return Promise.resolve();
+    },
+    async close() {},
+    setReceiver(next) {
+      receiver = next;
+    },
+    setCloseReceiver() {},
+    setMessageCompressionEnabled(enabled) {
+      compressionStates.push(enabled);
+    },
+  };
+
+  const client = await connect({ transport });
+  try {
+    assertEquals(advertisedCompression, true);
+    assertEquals(compressionStates, [false, false]);
+  } finally {
+    await client.close();
+  }
+});
+
 Deno.test("memory v2 client wraps close errors with connection error names", async () => {
   const client = await connect({
     transport: new CloseOnSessionOpenTransport(),

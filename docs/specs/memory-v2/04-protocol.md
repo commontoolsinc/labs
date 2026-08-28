@@ -51,6 +51,7 @@ The client MUST declare its protocol version in the first WebSocket message:
   "protocol": "memory",
   "flags": {
     "modernCellRep": true,
+    "messageCompressionV1": true,
     "syncSchemaTableV2": true,
     "verdictCatchUpMarkers": true,
     "entityIdListing": true,
@@ -69,6 +70,7 @@ If the server accepts the protocol, it returns:
   "protocol": "memory",
   "flags": {
     "modernCellRep": true,
+    "messageCompressionV1": true,
     "syncSchemaTableV2": true,
     "verdictCatchUpMarkers": true,
     "entityIdListing": true,
@@ -89,6 +91,61 @@ If the server accepts the protocol, it returns:
 If the server does not support the requested version or the required data-model
 flags do not match what it implements, it returns a typed error response and
 does not mark the connection ready.
+
+`hello` and `hello.ok` are always ordinary memory text messages. When both
+peers advertise `messageCompressionV1`, either peer may send later messages as
+a versioned binary compression envelope. Its fixed header is followed directly
+by one gzip member:
+
+```text
+bytes 0..3   ASCII "mcmp"
+byte 4       envelope version 1
+bytes 5..8   uncompressed UTF-8 byte length, unsigned 32-bit big-endian
+bytes 9..    raw gzip bytes
+```
+
+A binary first frame violates the protocol because the connection has not yet
+exchanged `hello`. Any binary frame on a connection that did not negotiate
+`messageCompressionV1` is likewise a protocol violation. Memory WebSocket
+hosts close the connection with WebSocket code 1003 in both cases.
+
+A peer expands the binary frame before decoding the memory message inside it.
+Messages below 1,024 UTF-8 bytes stay in their ordinary text form, as do
+messages whose binary envelope would not be smaller. Receivers therefore accept
+both ordinary text and compressed binary messages after negotiation. Expansion
+is limited to 256 MiB per envelope and must produce exactly the declared byte
+count. Compression work preserves WebSocket message order in both directions.
+
+The capability defaults to `false` when absent. A new peer connected to an old
+peer consequently keeps every message in the ordinary form. Each reconnect
+starts again with an uncompressed `hello`; compression from the previous
+connection does not carry across WebSocket boundaries.
+The local `setMessageCompressionConfig(false)` rollback override suppresses
+advertisement on clients and servers, keeping connections text-only even when
+both builds support compression.
+
+After compression negotiation, a client may change the send mode in both
+directions without reconnecting by sending an ordinary text control frame:
+
+```json
+{
+  "type": "memory.compression",
+  "requestId": "debug-1",
+  "enabled": false
+}
+```
+
+The server applies the requested mode to its later sends and returns the same
+control frame as an acknowledgement. It returns `enabled: false` when the
+connection did not negotiate compression. Both peers continue accepting text
+and binary frames after a negotiated connection disables sending compression,
+so compressed work already in flight remains valid. Control frames share the
+application-message queues and therefore cannot reorder the messages around
+them.
+
+The browser shell exposes this exchange as
+`await commonfabric.setMemoryMessageCompression(false)`. Passing `true`
+re-enables compression on connections which negotiated the capability.
 
 Memory hosts include `sessionOpen.audience` and `sessionOpen.challenge` in
 `hello.ok`. The audience is the server DID the client must sign for. Toolshed
@@ -324,6 +381,7 @@ interface HelloMessage {
   protocol: "memory";
   flags: {
     modernCellRep: boolean;
+    messageCompressionV1?: boolean;
     syncSchemaTableV2?: boolean;
     entityIdListing?: boolean;
     entityIdPagination?: boolean;
@@ -896,6 +954,10 @@ Transport security, origin checks, and product-level signing prompts remain
 part of the complete security boundary.
 
 The memory protocol does not add encryption above WebSocket.
+The `messageCompressionV1` envelope changes representation only and provides
+no confidentiality or integrity protection. Compressed frame sizes reveal
+plaintext-length and repeated-substring correlations, so callers must not treat
+wire length as confidential.
 Remote deployments must expose the route over `wss` or another TLS-protected
 transport.
 Plain `ws` is only appropriate for local development or a trusted private

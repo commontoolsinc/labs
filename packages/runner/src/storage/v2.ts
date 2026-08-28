@@ -926,6 +926,11 @@ export class StorageManager implements IStorageManager {
     this.#telemetry = telemetry;
   }
 
+  /** Changes memory-message compression for live and later remote sessions. */
+  async setMessageCompressionEnabled(enabled: boolean): Promise<void> {
+    await this.#sessionFactory.setMessageCompressionEnabled?.(enabled);
+  }
+
   static open(options: Options) {
     const dynamicHosts = new Map<string, string>();
     const manager = new this(

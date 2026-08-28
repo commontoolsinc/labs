@@ -260,6 +260,9 @@ export enum RequestType {
   /** Turns telemetry notifications on or off. */
   SetTelemetryEnabled = "runtime:setTelemetryEnabled",
 
+  /** Changes memory WebSocket compression without reconnecting. */
+  SetMemoryMessageCompression = "runtime:setMemoryMessageCompression",
+
   /**
    * Turns the worker's console bridge on or off. Answered by the worker entry
    * rather than by the runtime -- the console patch lives there -- and so
@@ -1216,6 +1219,14 @@ export type SetTelemetryEnabledRequest = BaseRequest & {
   /**
    * Whether telemetry notifications are sent.
    */
+  enabled: boolean;
+};
+
+/** The {@link RequestType.SetMemoryMessageCompression} request. */
+export type SetMemoryMessageCompressionRequest = BaseRequest & {
+  type: RequestType.SetMemoryMessageCompression;
+
+  /** Whether live and later memory WebSocket sessions send compressed frames. */
   enabled: boolean;
 };
 
@@ -2367,6 +2378,7 @@ export type IPCClientRequest =
   | SetLoggerLevelRequest
   | SetLoggerEnabledRequest
   | SetTelemetryEnabledRequest
+  | SetMemoryMessageCompressionRequest
   | SetForwardWorkerConsoleRequest
   | ResetLoggerBaselinesRequest
   | GetSettleStatsRequest
@@ -2917,6 +2929,10 @@ export type Commands = {
   };
   [RequestType.SetTelemetryEnabled]: {
     request: SetTelemetryEnabledRequest;
+    response: EmptyResponse;
+  };
+  [RequestType.SetMemoryMessageCompression]: {
+    request: SetMemoryMessageCompressionRequest;
     response: EmptyResponse;
   };
   [RequestType.SetForwardWorkerConsole]: {
