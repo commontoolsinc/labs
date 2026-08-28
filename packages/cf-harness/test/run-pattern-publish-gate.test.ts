@@ -3,7 +3,11 @@ import { expect } from "@std/expect";
 import { normalize } from "@std/path/posix";
 import { createSession, Identity } from "@commonfabric/identity";
 import { PiecesController } from "@commonfabric/piece/ops";
-import { Runtime } from "@commonfabric/runner";
+import {
+  computeEntryIdentity,
+  ensureCompilerStack,
+  Runtime,
+} from "@commonfabric/runner";
 import { StorageManager } from "@commonfabric/runner/storage/cache.deno";
 import { CfHarnessEngine } from "../src/engine.ts";
 import type { HarnessFetch } from "../src/contracts/http-fetch.ts";
@@ -18,6 +22,18 @@ import type {
 } from "../src/sandbox/types.ts";
 
 const signer = await Identity.fromPassphrase("cf-harness publish gate");
+
+/**
+ * The content identity `/main.tsx` carrying `source` compiles under — what the
+ * index stores a published entry beneath, and what a `cf:pattern:` import
+ * resolves.
+ */
+const entryIdentityOf = async (source: string): Promise<string> => {
+  await ensureCompilerStack();
+  return computeEntryIdentity("/main.tsx", [
+    { name: "/main.tsx", contents: source },
+  ]);
+};
 
 /**
  * The sortable table that is live in the pattern index, byte for byte as
@@ -103,6 +119,20 @@ export default pattern<Io, Io>(({ rating }) => ({
 }));
 `;
 
+/** A source that composes a published pattern and renders the result. */
+const composedSource = (doublerId: string): string =>
+  `import { pattern, UI, computed } from "commonfabric";
+import doubler from "cf:pattern:${doublerId}";
+interface Input { n: number; }
+export default pattern<Input, object>(({ n }) => {
+  const half = doubler({ n });
+  return {
+    half,
+    [UI]: <div><span>{computed(() => String(half.doubled))}</span></div>,
+  };
+});
+`;
+
 /** A pure computation. Nothing to render, and nothing the gate applies to. */
 const DOUBLER = `import { computed, pattern } from "commonfabric";
 interface Input { n: number; }
@@ -159,7 +189,9 @@ interface IndexStub {
 }
 
 /** An index that accepts every publication and records every event. */
-const stubIndex = (): IndexStub => {
+const stubIndex = (
+  served: Record<string, unknown> = {},
+): IndexStub => {
   const calls: { fn: string; body: Record<string, unknown> }[] = [];
   const fetchFn: HarnessFetch = (input, init) => {
     const fn = String(input).split("/").pop() ?? "";
@@ -173,6 +205,16 @@ const stubIndex = (): IndexStub => {
           JSON.stringify({ patternId: body.patternId, created: true }),
           { status: 200 },
         ),
+      );
+    }
+    if (fn === "getPattern") {
+      const record = served[body.patternId as string];
+      return Promise.resolve(
+        record === undefined
+          ? new Response(JSON.stringify({ error: "unknown pattern" }), {
+            status: 404,
+          })
+          : new Response(JSON.stringify(record), { status: 200 }),
       );
     }
     return Promise.resolve(
@@ -563,6 +605,78 @@ describe("run_pattern publish render gate", () => {
     const output = result.output as RunPatternToolSuccessOutput;
     expect(output.patternPublication?.reason).toBe("probe-failed");
     expect(output.patternPublication?.status).toBe("recorded");
+  });
+
+  it("gives a composed pattern a verdict rather than no verdict", async () => {
+    // The claim this exercises is one a reviewer had to correct me on: the
+    // probe runs in its own runtime, so a `cf:pattern:` import has to be
+    // materialized into THAT space, under the run's own CFC mode, or the
+    // compile cannot resolve it and every composed pattern comes back
+    // uncertified. Nothing tested that branch, which is why the mode was
+    // missing from it in the first place.
+    // Enforcing, not disabled: the content-addressed source cache a
+    // `cf:pattern:` import resolves from is only written under an enforcing
+    // mode, for the live run and the probe alike. A disabled-mode session
+    // cannot compile a composed source at all, so this is the mode the case
+    // exists in.
+    const enforcing = new Runtime({
+      apiUrl: new URL("http://toolshed.test"),
+      storageManager,
+      cfcEnforcementMode: "enforce-explicit",
+    });
+    const enforcingPieces = new PiecesController(
+      await createSession({
+        identity: signer,
+        spaceName: `publish-gate-cfc-${crypto.randomUUID()}`,
+      }),
+      enforcing,
+    );
+    await enforcingPieces.synced();
+    const doublerId = await entryIdentityOf(DOUBLER);
+    const index = stubIndex({
+      [doublerId]: {
+        patternId: doublerId,
+        ownerDid: "did:key:zOwner",
+        createdAt: "2026-08-01T00:00:00.000Z",
+        description: "Doubles a number",
+        hashtags: ["math"],
+        dependencies: [],
+        program: {
+          main: "/main.tsx",
+          files: [{ name: "/main.tsx", contents: DOUBLER }],
+        },
+      },
+    });
+    const engine = new CfHarnessEngine({
+      sandboxRuntime: new FakeSandboxRuntime(),
+      runId: `publish-gate-${crypto.randomUUID()}`,
+      cfcEnforcementMode: "enforce-explicit",
+      fabricSessionFactory: () =>
+        Promise.resolve({ pieces: enforcingPieces, identity: signer }),
+      patternIndexClientFactory: () =>
+        Promise.resolve(
+          new PatternIndexClient({
+            baseUrl: "https://index.test",
+            fetchFn: index.fetchFn,
+            signer,
+          }),
+        ),
+    });
+    const result = await engine.invokeBuiltinTool("run_pattern", {
+      sourceText: composedSource(doublerId),
+      inputs: { n: 3 },
+      description: "Doubles a number and shows it",
+    });
+    await engine.flushPatternIndexPublications();
+    const output = result.output as RunPatternToolSuccessOutput;
+    await enforcing.dispose();
+
+    // A verdict, not `probe-failed` — the composed import resolved inside the
+    // isolated runtime.
+    expect(output.patternPublication?.reason).toBe("ui-rendered");
+    expect(output.patternPublication?.status).toBe("discoverable");
+    expect(published(index)).toHaveLength(1);
+    expect(published(index)[0].body.dependencies).toEqual([doublerId]);
   });
 
   it("offers only the last iteration of a capability a session authored", async () => {
