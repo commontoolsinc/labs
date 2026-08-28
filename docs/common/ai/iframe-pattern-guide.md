@@ -338,7 +338,7 @@ generated TypeScript bindings. They may use reserved words. When the exact name
 Run the checked-in helper from the repository root:
 
 ```bash
-deno run -A skills/pattern-iframe/scripts/write-wrapper.ts \
+deno run -A tools/write-iframe-wrapper.ts \
   --contract packages/patterns/quick-notes/contract.ts \
   --guest packages/patterns/quick-notes/guest.ts \
   --out packages/patterns/quick-notes/main.tsx
