@@ -182,6 +182,28 @@ count a composition of seeded work as evidence against the seeding.
 
 Hops beyond the first are not resolved, and the report says so.
 
+## The batch publishes into the corpus it is measuring
+
+It does, and that is deliberate rather than an oversight. The loop under
+measurement **is** the publishing loop: a session that builds something
+contributes it, and a run made publish-inert would measure a different system
+from the one the question is about. The console cannot be made inert in any case
+— `--no-pattern-index-publish` is the `cf-harness` CLI's flag and the console
+never reads it (CT-2119).
+
+What makes the reading sound is the ordering, not stillness. The index snapshot
+is taken **before the first task** and again **after the last**, so the "before"
+reading is of a corpus that was verified, and everything the batch adds appears
+as the difference between the two rather than as an unexplained delta. A reader
+who sees "the batch publishes into the corpus it is measuring" without that
+ordering will reasonably conclude someone made a mistake.
+
+Two consequences worth stating. A batch is not repeatable against the same
+corpus — the second run starts from what the first one left, and its "index
+before" will say so. And a batch run before a publish gate lands accumulates
+entries that gate never saw, which is a fact about the corpus that outlives the
+batch; where that is the case, the report's preamble should say it.
+
 ## What the report holds
 
 Per task: the exact text the session was given, the session and run identifiers,
