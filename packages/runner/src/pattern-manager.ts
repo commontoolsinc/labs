@@ -391,23 +391,19 @@ export class PatternManager {
   // lives in `compileCacheWrites` and cannot await itself.
   private pendingCacheWriteBacks = new Set<Promise<unknown>>();
   // In-flight replications keyed by TARGET space, ordered by a monotonic
-  // ticket (OW45's lunch forever-park; CI run 33138358110 ON shard 7). A
-  // replication OUT OF a space can race the SIBLING replication still
-  // supplying that space: the content-cache hit's
-  // `replicate(cached.space -> space)` fires fire-and-forget, and the
-  // runner's cross-space child replication (`replicate(space -> child)`)
-  // follows within the same handler run. The one-shot origin read then
-  // found the origin empty, threw "source closure unavailable in origin
-  // space", and nothing ever re-issued it (the documented retry is "the
-  // next child creation", which never comes for a create-once flow like a
-  // user profile): the child space never received its program closure and
-  // every demanded root parked `pattern-unloadable` forever — the OW46
-  // detector's exact shape. The sibling lives in `compileCacheWrites`,
-  // the one set the origin read must NOT await wholesale (it would await
-  // itself), so replications also register HERE and the read awaits only
-  // the STRICTLY OLDER entries targeting its origin — registration order
-  // makes the await graph acyclic (no from/to mutual wait), and genuine
-  // absence still throws loudly after the awaited siblings settle.
+  // ticket. A replication's origin may itself be mid-supply by an earlier
+  // replication INTO it (e.g. the content-cache hit's fire-and-forget
+  // sibling ahead of the runner's cross-space child replication in one
+  // handler run); a one-shot origin read would then fail with nothing
+  // ever re-issuing it, and the target space's demanded roots park
+  // `pattern-unloadable` forever (verification-coverage.md OW45, the
+  // lunch forever-park — the incident evidence lives there). The sibling
+  // lives in `compileCacheWrites`, the one set the origin read must NOT
+  // await wholesale (it would await itself), so replications also
+  // register HERE and the read awaits only the STRICTLY OLDER entries
+  // targeting its origin — registration order keeps the await graph
+  // acyclic (no from/to mutual wait), and genuine absence still throws
+  // loudly after the awaited siblings settle.
   private replicationsIntoSpace = new Map<
     MemorySpace,
     Set<{ ticket: number; settled: Promise<unknown> }>
@@ -418,12 +414,12 @@ export class PatternManager {
   // record-only — a later slot invalidation forces a re-verify on read,
   // and the fallback read below re-verifies fail-closed anyway, so a
   // stale record costs one failed read, never a wrong copy). These are
-  // `replicateClosures`' FALLBACK ORIGINS (OW45's lunch forever-park,
-  // CI probe 2): the caller-named origin is a provenance heuristic —
-  // the in-memory artifact index serves patterns with no per-space
-  // persist, so the parent space of a running piece can lack the
+  // `replicateClosures`' FALLBACK ORIGINS: the caller-named origin is a
+  // provenance heuristic — the in-memory artifact index serves patterns
+  // with no per-space persist, so a running piece's space can lack the
   // closure entirely — while the closure is content-addressed, so any
-  // recorded persist target holds byte-identical, integrity-gated docs.
+  // recorded persist target holds byte-identical, integrity-gated docs
+  // (verification-coverage.md OW45 carries the incident evidence).
   private persistedClosureSpaces = new Map<string, Set<MemorySpace>>();
 
   /** Record a durable closure persist target for {@link replicateClosures}'
@@ -689,10 +685,8 @@ export class PatternManager {
     const entryRef = this.getArtifactEntryRef(pattern);
     if (!entryRef) return;
     // Ticket + registration BEFORE the async body starts, so a replication
-    // issued later in the same synchronous stretch (the runner's child
-    // replication inside the handler run that content-hit this one's
-    // sibling) observes this entry when it awaits its origin's suppliers
-    // (see `replicationsIntoSpace`).
+    // issued later in the same synchronous stretch observes this entry
+    // when it awaits its origin's suppliers (see `replicationsIntoSpace`).
     const ticket = this.nextReplicationTicket++;
     const replication = this.replicateClosures(
       entryRef.identity,
@@ -754,14 +748,11 @@ export class PatternManager {
     // not flushCompileCacheWrites: this replication promise is tracked there and
     // would await itself.
     await Promise.allSettled([...this.pendingCacheWriteBacks]);
-    // Then the SIBLING suppliers (OW45's lunch forever-park — the field
-    // comment on `replicationsIntoSpace` carries the incident): the origin
-    // may itself be mid-supply by an earlier-registered replication INTO it
-    // (the content-cache hit's fire-and-forget sibling). Await strictly
-    // older tickets only — acyclic by construction — then read; genuine
-    // absence still throws loudly below. Event-driven (the siblings' own
-    // completion), never a timer. Re-check per pass: a sibling can register
-    // between this replication's registration and this await.
+    // Then the SIBLING suppliers (see `replicationsIntoSpace`): the origin
+    // may itself be mid-supply by an earlier-registered replication INTO
+    // it. Await strictly older tickets only — acyclic by construction —
+    // then read; genuine absence still throws loudly below. Event-driven
+    // (the siblings' own completion), never a timer.
     const intoOrigin = this.replicationsIntoSpace.get(fromSpace);
     if (intoOrigin !== undefined) {
       const older = [...intoOrigin]
@@ -850,20 +841,16 @@ export class PatternManager {
     };
     let origin = await readOrigin(fromSpace);
     if (!origin.complete) {
-      // FALLBACK ORIGINS (OW45's lunch forever-park, CI probe 2, run
-      // 33160430927): the caller-named origin — the parent piece's space —
-      // is a PROVENANCE HEURISTIC, and it can be closure-less through no
-      // fault of any writer: `loadPatternByIdentity` serves a pattern from
-      // the manager's in-memory artifact index with NO per-space persist,
-      // so when another space's compile warmed the index first (CI's boot
-      // order), the parent space never receives the closure and the
-      // one-shot read here died — the child space then parked
-      // `pattern-unloadable` forever. The closure is CONTENT-ADDRESSED:
-      // any space this manager durably persisted this entry into holds
-      // byte-identical docs (the verified read recomputes identities and
-      // the CFC integrity gate stays fail-closed), so retry the read
-      // against the recorded persist targets before failing. Loud on use:
-      // the lane log shows when the heuristic origin was dry.
+      // FALLBACK ORIGINS (see `persistedClosureSpaces`): the caller-named
+      // origin is a provenance heuristic and can be closure-less through
+      // no fault of any writer — `loadPatternByIdentity` serves patterns
+      // from the in-memory artifact index with no per-space persist. The
+      // closure is CONTENT-ADDRESSED: any space this manager durably
+      // persisted this entry into holds byte-identical docs (the verified
+      // read recomputes identities and the CFC integrity gate stays
+      // fail-closed), so retry the read against the recorded persist
+      // targets before failing. Loud on use: the lane log shows when the
+      // heuristic origin was dry.
       const primaryReason = origin.reason;
       for (
         const fallback of this.persistedClosureSpaces.get(entryIdentity) ?? []
