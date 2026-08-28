@@ -8,6 +8,7 @@
 
 import { join } from "@std/path";
 import type { HarnessRunState } from "../src/run-state.ts";
+import type { HarnessHandleTable } from "../src/contracts/handle-table.ts";
 import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
 import {
   type ConsoleRunLens,
@@ -22,6 +23,12 @@ import {
   consoleRunSteps,
   type ConsoleStep,
 } from "./steps.ts";
+import {
+  type ConsoleGraph,
+  type ConsoleGraphRunInput,
+  consoleRunFamilyGraph,
+} from "./graph.ts";
+import { type ConsoleFlow, consoleRunFlow } from "./flow.ts";
 
 /**
  * A single path segment of the characters the artifact store itself writes.
@@ -58,7 +65,12 @@ export interface ConsoleRunDetail {
   lens: ConsoleRunLens;
   /** The run as a timeline, which is what the step scrubber reads. */
   steps: readonly ConsoleStep[];
-  /** Every handle the run introduced, resolved against its own table. */
+  /**
+   * Every handle the run introduced, resolved against its own table first and
+   * against its neighbours' tables after — a token minted in an earlier turn
+   * resolves to nothing in this run's own salted table, and an argument naming
+   * that cell would otherwise read as coming from nowhere.
+   */
   handles: readonly ConsoleHandle[];
   /** The artifacts this run wrote, by name, for the raw pane to fetch. */
   artifactNames: readonly string[];
@@ -198,16 +210,223 @@ export const readConsoleRun = async (
     runState.policyEvents,
     runState.cfcInvocationContexts ?? [],
   );
+  // A token minted in an earlier turn resolves to nothing in this run's own
+  // table, and an argument naming that cell by link would then read as coming
+  // from nowhere. The neighbours' tables are what give it an address, and so a
+  // name and an origin.
+  const neighbours = await neighbouringHandles(artifactRoot);
+  const table: HarnessHandleTable = {
+    type: "cf-harness.handle-table",
+    version: 1,
+    salt: runState.handleTable?.salt ?? runId,
+    entries: [
+      ...neighbours.flatMap((handle) =>
+        handle.ref === undefined || handle.addressKey === undefined ? [] : [{
+          token: handle.token,
+          kind: "address" as const,
+          ref: handle.ref,
+          addressKey: handle.addressKey,
+        }]
+      ),
+      ...(runState.handleTable?.entries ?? []),
+    ],
+  };
   return {
     summary: summarizeConsoleRun(runState, transcript),
     runState,
     transcript,
     lens: consoleRunLens(transcript),
     steps,
-    handles: consoleRunHandles(steps, runState.handleTable),
+    handles: consoleRunHandles(steps, table),
     artifactNames: await namesPresent(root, RUN_ARTIFACT_NAMES),
     toolOutputNames: await toolOutputNames(root),
   };
+};
+
+/**
+ * The data-flow graph of a run and the `delegate_task` children beneath it.
+ *
+ * The family rather than the run alone, because that is where the routing
+ * lives: a parent commonly names a cell its child produced, and a graph drawn
+ * per run shows that cell arriving from nowhere. A subagent run asked for
+ * directly graphs its own subtree, which is what someone who opened a child
+ * asked to see.
+ *
+ * Descendants are found by name — the harness ids a child `<parent>.subagent.N`
+ * — so this reads one directory listing rather than every run's state.
+ */
+export const readConsoleRunFamilyGraph = async (
+  artifactRoot: string,
+  runId: string,
+): Promise<ConsoleGraph | undefined> => {
+  const family = await readConsoleRunFamily(artifactRoot, runId);
+  return family === undefined
+    ? undefined
+    : consoleRunFamilyGraph(family.root, family.descendants);
+};
+
+/** The conversation map of a run and the children beneath it. */
+export const readConsoleRunFlow = async (
+  artifactRoot: string,
+  runId: string,
+): Promise<ConsoleFlow | undefined> => {
+  const family = await readConsoleRunFamily(artifactRoot, runId);
+  if (family === undefined) {
+    return undefined;
+  }
+  const posture = family.runState.fabricSessionCfc;
+  return consoleRunFlow(
+    family.root,
+    family.descendants,
+    posture === undefined ? undefined : {
+      enforcementMode: posture.enforcementMode,
+      flowLabels: posture.flowLabels,
+      ...(posture.posture !== undefined ? { posture: posture.posture } : {}),
+    },
+  );
+};
+
+/**
+ * A run and its `delegate_task` descendants, each reading its handles against
+ * the neighbours' tables as well as its own. Both the map and the graph are
+ * built from this, and neither wants to know how a family is found on disk.
+ */
+const readConsoleRunFamily = async (
+  artifactRoot: string,
+  runId: string,
+): Promise<
+  | {
+    root: ConsoleGraphRunInput;
+    descendants: ConsoleGraphRunInput[];
+    runState: HarnessRunState;
+  }
+  | undefined
+> => {
+  const root = await readConsoleRun(artifactRoot, runId);
+  if (root === undefined) {
+    return undefined;
+  }
+  const descendants: ConsoleGraphRunInput[] = [];
+  try {
+    for await (const entry of Deno.readDir(artifactRoot)) {
+      if (!entry.isDirectory || !entry.name.startsWith(`${runId}.`)) {
+        continue;
+      }
+      const child = await readConsoleRun(artifactRoot, entry.name);
+      if (child !== undefined) {
+        descendants.push({
+          runId: entry.name,
+          steps: child.steps,
+          handles: child.handles,
+        });
+      }
+    }
+  } catch {
+    // A run with no siblings on disk is a family of one.
+  }
+  const neighbours = await neighbouringHandles(artifactRoot);
+  // A run's own table wins, so it is appended last.
+  const withNeighbours = (run: ConsoleGraphRunInput): ConsoleGraphRunInput => ({
+    ...run,
+    handles: [...neighbours, ...run.handles],
+  });
+  return {
+    root: withNeighbours({ runId, steps: root.steps, handles: root.handles }),
+    descendants: descendants.map(withNeighbours),
+    runState: root.runState,
+  };
+};
+
+/**
+ * Every handle any run on disk minted, by token.
+ *
+ * A handle table is salted per run, so a token minted in one turn resolves to
+ * nothing in the next turn's table — and a later turn that wires the earlier
+ * turn's cell by link would draw two nodes for the one cell. Reading the
+ * neighbours' tables lets the token resolve to the address it always stood
+ * for, which is what merges them.
+ *
+ * The salt makes a token effectively unique to the run that minted it, so a
+ * token meaning two addresses across runs would be a coincidence rather than
+ * the ordinary case; a run's own table is consulted first regardless.
+ */
+const neighbouringHandles = async (
+  artifactRoot: string,
+): Promise<ConsoleHandle[]> => {
+  const names: string[] = [];
+  try {
+    for await (const entry of Deno.readDir(artifactRoot)) {
+      if (entry.isDirectory && isSafeSegment(entry.name)) {
+        names.push(entry.name);
+      }
+    }
+  } catch {
+    return [];
+  }
+  // The index is keyed by which runs exist AND by when each was last written,
+  // because a run mints handles as it goes: keying on the set of names alone
+  // would hold a running turn's first snapshot and report every cell it minted
+  // after that as unresolved. A stat per run is still far cheaper than parsing
+  // every run's state on a timeline that re-reads whenever a tool completes.
+  const stamps: string[] = [];
+  for (const name of names.sort()) {
+    let stamp = "absent";
+    try {
+      const info = await Deno.stat(join(artifactRoot, name, "run-state.json"));
+      // Size as well as time: two writes inside one millisecond share an
+      // mtime, and a run that mints a handle grows its table.
+      stamp = `${info.mtime?.getTime() ?? 0}:${info.size}`;
+    } catch {
+      // A run whose state cannot be read contributes no entries either way.
+    }
+    stamps.push(`${name}@${stamp}`);
+  }
+  const key = `${artifactRoot}\n${stamps.join("\n")}`;
+  const cached = neighbourIndex.get(key);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const handles = await readNeighbouringHandles(artifactRoot, names);
+  neighbourIndex.clear();
+  neighbourIndex.set(key, handles);
+  return handles;
+};
+
+/**
+ * The last neighbour index built, by the set of runs it was built from. One
+ * entry: an index built from a different set is one this server will not ask
+ * for again.
+ */
+const neighbourIndex = new Map<string, ConsoleHandle[]>();
+
+const readNeighbouringHandles = async (
+  artifactRoot: string,
+  names: readonly string[],
+): Promise<ConsoleHandle[]> => {
+  const handles: ConsoleHandle[] = [];
+  try {
+    for (const name of names) {
+      const entry = { name };
+      const runState = await readJson<HarnessRunState>(
+        join(artifactRoot, entry.name, "run-state.json"),
+      );
+      for (const entryHandle of runState?.handleTable?.entries ?? []) {
+        handles.push({
+          token: entryHandle.token,
+          ref: entryHandle.ref,
+          addressKey: entryHandle.addressKey,
+          introducedAtStep: 0,
+          // A neighbour's entry resolves an address and nothing more; what the
+          // handle was used for belongs to the run that used it.
+          uses: [],
+          confidentiality: [],
+        });
+      }
+    }
+  } catch {
+    // No neighbours to read is simply no extra resolution.
+  }
+  return handles;
 };
 
 /**

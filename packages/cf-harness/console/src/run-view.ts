@@ -25,6 +25,7 @@ export class ConsoleRunView extends LitElement {
     runId: { attribute: false },
     detail: { attribute: false },
     pane: { attribute: false },
+    focusStep: { attribute: false },
     rawName: { attribute: false },
     rawText: { attribute: false },
     error: { attribute: false },
@@ -33,6 +34,8 @@ export class ConsoleRunView extends LitElement {
   declare runId: string | undefined;
   declare detail: ConsoleRunDetail | undefined;
   declare pane: Pane;
+  /** The step the map asked the timeline to show. */
+  declare focusStep: number | undefined;
   declare rawName: string | undefined;
   declare rawText: string | undefined;
   declare error: string | undefined;
@@ -300,6 +303,7 @@ export class ConsoleRunView extends LitElement {
             <console-steps
               .steps=${detail.steps}
               .handles=${detail.handles}
+              .selected=${this.focusStep ?? 0}
             ></console-steps>
           `
           : this.pane === "patterns"

@@ -19,10 +19,19 @@ body {
   font: 15px/1.55 ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
+/*
+ * A column running the height of the window: the composer takes what it needs
+ * at the top and the workbench takes the rest, so the three panes below scroll
+ * inside themselves rather than the page scrolling to reach them.
+ */
 main {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
   margin: 0 auto;
-  max-width: 64rem;
-  padding: 2.5rem 1.25rem 4rem;
+  /* Three columns of content — runs, the timeline, the map — need the room. */
+  max-width: 112rem;
+  padding: 1.75rem 1.5rem 1.5rem;
 }
 
 header {
@@ -239,12 +248,28 @@ button[disabled] {
   word-break: break-word;
 }
 
-/* The inspector: the run list beside the run that is open. */
+/*
+ * The three readings of a run, side by side: the runs there are, the run being
+ * read, and the map of how it went. Each column scrolls on its own, so a long
+ * run list cannot push the other two off the top of a very tall page.
+ */
 
 .workbench {
   display: grid;
   gap: 1.5rem;
-  grid-template-columns: 18rem minmax(0, 1fr);
+  grid-template-columns: 17rem minmax(0, 1fr) 26rem;
+  /*
+   * The columns fill whatever is left below the composer rather than a guessed
+   * offset from the top: a fixed `100vh - Nrem` puts the bottom past the fold,
+   * which makes the page scroll to reach a column that then scrolls again.
+   */
+  flex: 1;
+  min-height: 0;
+}
+
+.workbench > * {
+  overflow-y: auto;
+  padding-right: 0.35rem;
 }
 
 /*
@@ -257,9 +282,14 @@ button[disabled] {
   min-width: 0;
 }
 
-@media (max-width: 56rem) {
+@media (max-width: 80rem) {
   .workbench {
     grid-template-columns: minmax(0, 1fr);
+    height: auto;
+  }
+
+  .workbench > * {
+    overflow-y: visible;
   }
 }
 
@@ -751,4 +781,487 @@ button[disabled] {
   .index-search {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* The data-flow graph. */
+
+.gsummary {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+/*
+ * The picture is as wide as the run is long, so it scrolls inside the pane.
+ * Without the max-width a wide graph would size the grid column and push the
+ * whole page sideways, which is the trap the JSON blocks sit in too.
+ */
+.gcanvas {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  max-width: 100%;
+  overflow: auto;
+}
+
+.gnode {
+  cursor: pointer;
+}
+
+.gnode rect {
+  fill: #fff;
+  stroke: var(--line);
+  stroke-width: 1.5;
+}
+
+.gnode.pattern rect {
+  fill: #fbfcff;
+  stroke: var(--accent);
+}
+
+.gnode.cell rect {
+  fill: #f6fbf8;
+  stroke: var(--ok);
+}
+
+.gnode.error rect,
+.gnode.denied rect {
+  stroke: var(--bad);
+  stroke-dasharray: 4 3;
+}
+
+.gnode.chosen rect {
+  stroke-width: 2.5;
+}
+
+.gnode.leading rect {
+  filter: drop-shadow(0 0 4px rgba(31, 111, 235, 0.45));
+}
+
+.gnode text {
+  fill: var(--ink);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+}
+
+.gnode text.gsub {
+  fill: var(--muted);
+  font-size: 9.5px;
+}
+
+.gatom {
+  fill: #1f4fa8;
+}
+
+.gedge path {
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 1.5;
+}
+
+.gedge.reads path {
+  stroke: var(--accent);
+  stroke-dasharray: 5 3;
+}
+
+.gedge text {
+  fill: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px;
+  text-anchor: middle;
+}
+
+#arrow path {
+  fill: var(--muted);
+  stroke: none;
+}
+
+.gdetail {
+  margin-top: 0.9rem;
+}
+
+/* The timeline, with the data flow alongside it. */
+
+.map-column {
+  min-width: 0;
+}
+
+/* A call's arguments, each read as a reference or as a plain value. */
+
+.args {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.arg {
+  align-items: baseline;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  min-width: 0;
+  padding: 0.35rem 0.6rem;
+}
+
+.arg.reference {
+  border-color: var(--accent);
+}
+
+.arg-key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.arg-key::after {
+  color: var(--muted);
+  content: ":";
+}
+
+.arg-ref {
+  color: var(--accent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.arg-token,
+.arg-address {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
+}
+
+.arg-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+
+.arg-note {
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.arg-shape {
+  color: var(--ok);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+}
+
+.arg-origin {
+  background: #fff;
+  border-color: var(--accent);
+  color: var(--accent);
+  font-size: 0.72rem;
+  padding: 0.05rem 0.45rem;
+}
+
+.arg-origin:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* A cell, drawn one way everywhere it appears. */
+
+.cell {
+  align-items: baseline;
+  background: #f2f7ff;
+  border: 1px solid #cddffb;
+  border-radius: 999px;
+  cursor: default;
+  display: inline-flex;
+  gap: 0.3rem;
+  max-width: 100%;
+  padding: 0.05rem 0.5rem;
+  position: relative;
+}
+
+.cell.labelled {
+  border-color: #1f4fa8;
+}
+
+.cell-dot {
+  background: var(--ok);
+  border-radius: 50%;
+  flex: none;
+  height: 0.45rem;
+  width: 0.45rem;
+}
+
+.cell-name {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-atoms {
+  background: #1f4fa8;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 0.62rem;
+  line-height: 1.5;
+  padding: 0 0.32rem;
+}
+
+/*
+ * What a cell is, on hover: the handle, the address, the shape and the labels.
+ * Held out of flow so a chip never resizes the row it sits in, and above the
+ * panes below it.
+ */
+/*
+ * Fixed rather than absolute: every column is its own scroll container, and an
+ * absolutely-placed card is clipped by the nearest one however high its
+ * `z-index`. Fixed takes it out of that clipping entirely, and the chip places
+ * it from script on hover or focus.
+ */
+.cell-card {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgb(16 24 40 / 12%);
+  display: none;
+  max-width: 28rem;
+  min-width: 20rem;
+  padding: 0.5rem 0.65rem;
+  position: fixed;
+  z-index: 40;
+}
+
+.cell:hover .cell-card,
+.cell:focus-within .cell-card {
+  display: block;
+}
+
+.cell-row {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.12rem 0;
+}
+
+.cell-label {
+  color: var(--muted);
+  flex: none;
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  width: 4.2rem;
+}
+
+.cell-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+}
+
+.cell-wrap {
+  overflow-wrap: anywhere;
+}
+
+.cell-none {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+/* The conversation map, read top to bottom. */
+
+.flow-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.6rem;
+}
+
+.flow-turn {
+  border-left: 2px solid var(--line);
+  margin-bottom: 0.9rem;
+  padding-left: 0.7rem;
+}
+
+.flow-turn-head {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: inherit;
+  display: block;
+  margin-bottom: 0.4rem;
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  width: 100%;
+}
+
+.flow-turn-head:hover {
+  border-color: var(--accent);
+}
+
+.flow-turn-mark {
+  color: var(--muted);
+  display: block;
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.flow-turn-text {
+  display: -webkit-box;
+  font-size: 0.82rem;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.flow-nodes,
+.flow-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.flow-children {
+  border-left: 2px solid #cddffb;
+  margin: 0.25rem 0 0.25rem 0.5rem;
+  padding-left: 0.6rem;
+}
+
+.flow-node {
+  margin-bottom: 0.25rem;
+}
+
+.flow-row {
+  align-items: center;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: inherit;
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.25rem 0.5rem;
+  text-align: left;
+  width: 100%;
+}
+
+.flow-row:hover {
+  border-color: var(--accent);
+}
+
+.flow-node.here > .flow-row {
+  border-color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.flow-mark {
+  border-radius: 50%;
+  flex: none;
+  height: 0.5rem;
+  width: 0.5rem;
+}
+
+.flow-mark.ok {
+  background: var(--ok);
+}
+
+.flow-mark.error {
+  background: var(--bad);
+}
+
+.flow-mark.denied {
+  background: #b54708;
+}
+
+.flow-mark.none {
+  background: var(--line);
+}
+
+.flow-label {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+}
+
+.flow-cfc {
+  color: var(--muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.flow-step {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  margin-left: auto;
+}
+
+.flow-cells {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  padding: 0.2rem 0 0.2rem 1rem;
+}
+
+.flow-cell-line {
+  align-items: baseline;
+  display: flex;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.flow-arrow {
+  font-size: 0.66rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.flow-arrow.reads {
+  color: var(--accent);
+}
+
+.flow-arrow.produces {
+  color: var(--ok);
+}
+
+.flow-as {
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem;
+}
+
+.flow-text {
+  color: var(--muted);
+  display: -webkit-box;
+  font-size: 0.78rem;
+  overflow: hidden;
+  padding: 0.15rem 0 0.15rem 1rem;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.flow-arrow.enters {
+  color: #b54708;
+}
+
+.flow-posture {
+  color: var(--muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.03em;
+  width: 100%;
+}
+
+/*
+ * The console view is itself the flex column between the header and the
+ * bottom of the window, so the workbench inside it can take what is left.
+ */
+.console-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
 }
