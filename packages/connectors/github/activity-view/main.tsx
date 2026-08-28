@@ -218,7 +218,8 @@ export default pattern<GithubActivityInput, GithubActivityOutput>((state) => {
   const activeTab = new Writable.perSession<SyncedTab>("pull-requests");
 
   const parsed = computed(() => parseUrl(state.repoUrl.get()));
-  const apiUrl = computed(() => {
+  const fallbackApiUrl = computed(() => {
+    // Empty URL and prompt inputs keep both network-backed built-ins idle.
     if (state.pullRequestIndex !== undefined) return "";
     const { owner, repo } = parsed;
     if (owner && repo) {
@@ -227,9 +228,9 @@ export default pattern<GithubActivityInput, GithubActivityOutput>((state) => {
     return "";
   });
 
-  const commitsData = fetchJson<CommitResponse>({ url: apiUrl });
+  const commitsData = fetchJson<CommitResponse>({ url: fallbackApiUrl });
   const commits = commitsData.result;
-  const prompt = computed(() => {
+  const fallbackPrompt = computed(() => {
     const commitList = commits ?? [];
     if (commitList.length === 0) return "";
     const messages = commitList
@@ -241,7 +242,7 @@ export default pattern<GithubActivityInput, GithubActivityOutput>((state) => {
   const summary = generateText({
     system:
       "You are a concise technical writer. Summarize the recent development activity based on these commit messages. Focus on themes and notable changes. Keep it to 2-3 sentences.",
-    prompt,
+    prompt: fallbackPrompt,
   });
 
   const repoName = computed(() => {
@@ -256,7 +257,30 @@ export default pattern<GithubActivityInput, GithubActivityOutput>((state) => {
     )
   );
   const pullRequests = computed<GithubPullRequestFields[]>(() =>
-    indexedPullRequests
+    indexedPullRequests.map((row) => ({
+      id: row.id,
+      number: row.number,
+      url: row.url,
+      title: row.title,
+      repository: row.repository,
+      repositoryUrl: row.repositoryUrl,
+      baseRefName: row.baseRefName,
+      baseRefOid: row.baseRefOid,
+      headRefName: row.headRefName,
+      headRefOid: row.headRefOid,
+      headRepository: row.headRepository,
+      headRepositoryUrl: row.headRepositoryUrl,
+      isDraft: row.isDraft,
+      mergeable: row.mergeable,
+      mergeState: row.mergeState,
+      reviewDecision: row.reviewDecision,
+      checkState: row.checkState,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      observedAt: row.observedAt,
+      visibility: row.visibility,
+      status: row.status,
+    }))
   );
   const pullRequestCount = computed(() => indexedPullRequests.length);
   const repositoryCount = computed(() => {
