@@ -3767,6 +3767,12 @@ export async function repairFromCommand(
   // As the retarget does: the guard stays armed over the writing of what the
   // engine returned, and says that is where the process ended.
   progress.phase = "reporting";
+  // Before any of the reporting below, which writes files and renders: a
+  // throw there must not swallow the receipt for writes that already landed.
+  // `applied` is the engine's own count of rows it wrote, which settles what
+  // a row's verdict alone cannot — a failed row may have failed at the write,
+  // after it, or before reaching one.
+  if (report.applied > 0) noteWroteTo(spaceConfig.space);
   const print = deps.render ?? render;
   const printHint = deps.printHint ?? hint;
   if (options.json) {
@@ -3820,19 +3826,6 @@ export async function repairFromCommand(
       }
     }
   }
-  // A repaired row is a written document. So is a failed one under `--apply`:
-  // a row fails at the write, after it during verification, or before it
-  // reached one, and the row does not say which — its own problem text can
-  // read "the stored document satisfies the fixer, so the row landed". The
-  // ambiguous case is reported rather than withheld, because the operator
-  // needing the space is the one whose run did not finish cleanly.
-  //
-  // Named before the refusal below, which an incomplete run takes.
-  const wrote = report.rows.some((row) =>
-    row.verdict === "repaired" ||
-    (options.apply === true && row.verdict === "failed")
-  );
-  if (wrote) noteWroteTo(spaceConfig.space);
   for (const row of report.rows) {
     if (row.problem !== undefined) {
       printHint(`${row.verdict}: ${row.piece} ${row.problem}`);
@@ -4347,6 +4340,9 @@ export async function restoreFromCommand(
     ...(options.revision === undefined ? {} : { revisionId: options.revision }),
     ...(options.apply === true ? { apply: true } : {}),
   });
+  // Before the reporting below, which renders and can exit: a restore that
+  // landed is named whatever happens to the output describing it.
+  if (outcome.restored) noteWroteTo(pieceConfig.space);
   if (options.json) {
     print(outcome, { json: true });
   } else if (options.revision === undefined) {
@@ -4371,7 +4367,6 @@ export async function restoreFromCommand(
       `${outcome.revisions.length} revision(s); name one with --revision`,
     );
   } else if (outcome.restored) {
-    noteWroteTo(pieceConfig.space);
     printHint(`restored ${outcome.piece} to ${options.revision}`);
   } else if (outcome.selected?.current === true) {
     // Running the reference is not the same as standing where the restore
@@ -4671,19 +4666,6 @@ export function readCallTarget(
   return { piece: callableName, callableName: nextCallable, tail: rest };
 }
 
-// With args and env vars shadowing each other, and multiple
-// ways of defining service components, we cannot make the options
-// "required" with cliffy. Ensure that all required values are
-// available after parsing both args and env vars.
-//
-// The space can arrive three ways: `--url` embeds it, `--space` names it, and
-// a canonical `--piece` reference may carry it as a `/@did:.../` prefix. A
-// reference's space fills an absent `--space`; a present one must agree —
-// checked at parse time when the target space is a DID, and at session open
-// through `validateEmbeddedSpaces` when it is a name still to be resolved.
-// The piece arrives through `--piece` (or the positional address it carries)
-// or inside the `--url`: a URL that names one excludes the flag, and a
-// piece-less URL composes with it.
 /**
  * Was the space written on the command line? `explicit` answers for a caller
  * driving {@link parseSpaceOptions} directly; otherwise the process arguments
@@ -4705,6 +4687,19 @@ export function spaceWasWritten(
   );
 }
 
+// With args and env vars shadowing each other, and multiple
+// ways of defining service components, we cannot make the options
+// "required" with cliffy. Ensure that all required values are
+// available after parsing both args and env vars.
+//
+// The space can arrive three ways: `--url` embeds it, `--space` names it, and
+// a canonical `--piece` reference may carry it as a `/@did:.../` prefix. A
+// reference's space fills an absent `--space`; a present one must agree —
+// checked at parse time when the target space is a DID, and at session open
+// through `validateEmbeddedSpaces` when it is a name still to be resolved.
+// The piece arrives through `--piece` (or the positional address it carries)
+// or inside the `--url`: a URL that names one excludes the flag, and a
+// piece-less URL composes with it.
 export function parseSpaceOptions(
   input: PieceCLIOptions,
 ): SpaceConfig {
