@@ -187,7 +187,9 @@ export default pattern(() => {
   );
   const assert_renders_every_synced_pull_request = assert(() => {
     const text = textContent(subject[UI]);
-    return pullRequests.every((row) => text.includes(row.title));
+    return pullRequests.every((row) => text.includes(row.title)) &&
+      text.includes("runtime-adapter → main") &&
+      !text.includes("example/runner:runtime-adapter");
   });
   const assert_keeps_detail_cells_out_of_the_summary = assert(() =>
     subject.pullRequests.every((row) => !("detail" in row))

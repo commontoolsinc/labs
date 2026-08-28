@@ -400,9 +400,10 @@ export default pattern<GithubActivityInput, GithubActivityOutput>((state) => {
                                       #{row.number} {row.title}
                                     </a>
                                     <cf-text variant="caption" tone="muted">
-                                      {row.headRepository ??
-                                        row.repository}:{row.headRefName} →{" "}
-                                      {row.baseRefName}
+                                      {row.headRepository
+                                        ? `${row.headRepository}:`
+                                        : ""}
+                                      {row.headRefName} → {row.baseRefName}
                                     </cf-text>
                                   </cf-vstack>
                                 </td>

@@ -128,6 +128,12 @@ export function clearGenerateTextResult(): void {
 }
 
 export class Writable<T = unknown> {
+  static perSession = class<T = unknown> extends Writable<T> {
+    static of<T>(value: T): Writable<T> {
+      return new Writable.perSession<T>(value);
+    }
+  };
+
   #value: T;
 
   constructor(value: T) {
