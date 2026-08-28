@@ -411,6 +411,7 @@ if (Deno.env.get("SOURCE_COVERAGE_CHILD") === "1") {
     );
     for (
       const [label, color] of [
+        ["degraded", "danger"],
         ["Ready to land", "primary"],
         ["Tests running", "accent"],
         ["Tests failed", "danger"],
