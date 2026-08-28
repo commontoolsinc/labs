@@ -744,6 +744,26 @@ export interface LinkWalk {
 }
 
 /**
+ * The path to the value a walk is at, as a chain back to the root.
+ *
+ * A walk visits far more values than it reports, so it carries the path in the
+ * shape that costs one cell per step rather than a copy of the path so far per
+ * step, and materializes the array only where a result names a path. That is
+ * what lets one traversal serve both a caller wanting every link with its
+ * location and a caller wanting a count over every entity in a space.
+ */
+type Trail = { readonly parent: Trail; readonly segment: string } | null;
+
+/** The root-to-here segments of a trail, in that order. */
+function pathOf(at: Trail): readonly string[] {
+  const reversed: string[] = [];
+  for (let step = at; step !== null; step = step.parent) {
+    reversed.push(step.segment);
+  }
+  return reversed.reverse();
+}
+
+/**
  * Every link in a value that `bounds` reaches, in either at-rest form, each
  * with the path inside the value it sits at — and, beside them, where the
  * bounds stopped the walk and where it read a value only in part. The walk
@@ -775,7 +795,7 @@ export function linksWithPaths(
   const opaque: (readonly string[])[] = [];
   let budget = bounds.maxNodes;
   let budgetExhausted = false;
-  const walk = (held: Json, at: readonly string[]): void => {
+  const walk = (held: Json, at: Trail, depth: number): void => {
     if (budgetExhausted) return;
     // Budget before depth: once the budget is gone the walk is over, and a
     // path it declines from there is one it never reached rather than one it
@@ -784,30 +804,32 @@ export function linksWithPaths(
       budgetExhausted = true;
       return;
     }
-    if (at.length > bounds.maxDepth) {
-      tooDeep.push(at);
+    if (depth > bounds.maxDepth) {
+      tooDeep.push(pathOf(at));
       return;
     }
     budget -= 1;
     const link = decodedLinkOf(held);
     if (link) {
-      links.push({ link, at });
+      links.push({ link, at: pathOf(at) });
       return;
     }
     if (Array.isArray(held)) {
-      held.forEach((item, index) => walk(item, [...at, String(index)]));
+      held.forEach((item, index) =>
+        walk(item, { parent: at, segment: String(index) }, depth + 1)
+      );
       return;
     }
     if (isObjectNotArray(held)) {
       // Enumerable properties are the whole of a plain record and only a part
       // of anything else, so reading them is exact for the one and partial for
       // the other. Both are read; only the partial read is recorded.
-      if (!isNameWalkable(held)) opaque.push(at);
+      if (!isNameWalkable(held)) opaque.push(pathOf(at));
       for (const [key, child] of Object.entries(held)) {
-        walk(child, [...at, key]);
+        walk(child, { parent: at, segment: key }, depth + 1);
       }
     }
   };
-  walk(v, []);
+  walk(v, null, 0);
   return { links, tooDeep, opaque, budgetExhausted };
 }
