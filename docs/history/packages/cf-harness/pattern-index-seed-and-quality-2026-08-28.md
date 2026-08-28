@@ -264,6 +264,15 @@ produced it.
   it is answering completely about a state that is not final. Both read as
   "nothing more to see", and only the second survives a completeness check.
 
+  The same joint sits one layer below the reporting API, in any artifact a
+  producer writes. **A truncated run's output and a complete run's output are
+  the same shape.** A coverage profile from a test run killed by its own
+  timeout parses exactly like one from a run that finished, and a reader that
+  reports a file absent from such a profile as zero uncovered lines renders
+  four unmeasured files as perfectly covered. Anything reading a profile, a
+  log, or a page has to establish that the *producer* finished, not merely that
+  the output parsed.
+
   Nor does the workflow level close it by itself: it reports that the runs
   which *exist* have finished, not that every run exists. An empty list of
   workflow runs satisfies "all complete" vacuously, which is exactly the state
