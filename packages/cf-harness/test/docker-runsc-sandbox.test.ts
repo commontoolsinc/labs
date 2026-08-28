@@ -1294,3 +1294,55 @@ Deno.test("DockerRunscSandboxRuntime reports an unrunnable docker info as indete
     await Deno.remove(cfcInvocationContextDir, { recursive: true });
   }
 });
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes compares directories through path normalization", () => {
+  // `validateAbsoluteHostDir` accepts `.` and `..` segments, so one directory
+  // has more than one spelling and the two sides need not agree on which.
+  for (
+    const [registered, configured] of [
+      ["/host/./invocations", "/host/invocations"],
+      ["/host/invocations", "/host/other/../invocations"],
+      ["/host_mnt/Users/x/./invocations", "/Users/x/invocations"],
+    ]
+  ) {
+    assertEquals(
+      cfcTransportReadinessFromDockerRuntimes({
+        runtimeName: "runsc-cfc",
+        runtimes: dockerRuntimes([
+          `--cfc-invocation-context-dir=${registered}`,
+        ]),
+        cfcInvocationContextDir: configured,
+      }),
+      { status: "wired" },
+      `expected ${registered} to correspond to ${configured}`,
+    );
+  }
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes reports an incomparable path as indeterminate rather than unwired", () => {
+  // A runtime argument names a path inside the daemon's Linux VM. A harness
+  // directory in another path style cannot be compared with one, and reading
+  // that as a difference would refuse a host that may be wired correctly.
+  const readiness = cfcTransportReadinessFromDockerRuntimes({
+    runtimeName: "runsc-cfc",
+    runtimes: dockerRuntimes([
+      "--cfc-invocation-context-dir=/host_mnt/c/work/cfc",
+    ]),
+    cfcInvocationContextDir: "C:\\work\\cfc",
+  });
+
+  assertEquals(readiness.status, "indeterminate");
+});
+
+Deno.test("cfcTransportReadinessFromDockerRuntimes still reports an absent flag as unwired whatever the path style", () => {
+  // Absence is positive evidence on its own: nothing was registered to read
+  // anywhere, so the path style never enters into it.
+  assertEquals(
+    cfcTransportReadinessFromDockerRuntimes({
+      runtimeName: "runsc-cfc",
+      runtimes: dockerRuntimes(["--cfc"]),
+      cfcInvocationContextDir: "C:\\work\\cfc",
+    }),
+    { status: "unwired", unread: ["invocation-context"] },
+  );
+});

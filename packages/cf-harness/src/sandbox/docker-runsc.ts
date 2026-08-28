@@ -355,17 +355,36 @@ const stripTrailingSlashes = (path: string): string => {
   return trimmed.length === 0 ? "/" : trimmed;
 };
 
-const hostDirsCorrespond = (
+/**
+ * Whether a registered runtime argument and a harness directory name the same
+ * host directory.
+ *
+ * `incomparable` is its own answer rather than a `differ`. A Docker runtime
+ * argument always names a path inside the Linux VM the daemon runs in, so a
+ * harness directory that is not a POSIX absolute path cannot be compared with
+ * one textually; reporting that as a difference would be a reading of the path
+ * style rather than of the registration, and it would refuse a host that is
+ * wired correctly.
+ */
+const hostDirCorrespondence = (
   runtimeArgValue: string,
   harnessDir: string,
-): boolean => {
-  const runtimePath = stripTrailingSlashes(runtimeArgValue);
-  const harnessPath = stripTrailingSlashes(harnessDir);
-  return runtimePath === harnessPath ||
-    runtimePath ===
-      stripTrailingSlashes(
-        `${DOCKER_DESKTOP_HOST_MOUNT_PREFIX}${harnessPath}`,
-      );
+): "match" | "differ" | "incomparable" => {
+  if (!harnessDir.startsWith("/") || !runtimeArgValue.startsWith("/")) {
+    return "incomparable";
+  }
+  // Normalized before comparison: `.` and `..` segments survive
+  // `validateAbsoluteHostDir`, and two spellings of one directory must not
+  // read as two directories.
+  const runtimePath = stripTrailingSlashes(normalize(runtimeArgValue));
+  const harnessPath = stripTrailingSlashes(normalize(harnessDir));
+  if (runtimePath === harnessPath) {
+    return "match";
+  }
+  const projected = stripTrailingSlashes(
+    normalize(`${DOCKER_DESKTOP_HOST_MOUNT_PREFIX}${harnessPath}`),
+  );
+  return runtimePath === projected ? "match" : "differ";
 };
 
 /**
@@ -458,6 +477,7 @@ export const cfcTransportReadinessFromDockerRuntimes = (options: {
     };
   }
   const unread: CfcSidecarTransportKind[] = [];
+  const incomparable: CfcSidecarTransportKind[] = [];
   const transports: readonly [
     CfcSidecarTransportKind,
     string,
@@ -475,15 +495,31 @@ export const cfcTransportReadinessFromDockerRuntimes = (options: {
       continue;
     }
     const registered = runtimeFlagValue(args, flag);
-    if (
-      registered === undefined || !hostDirsCorrespond(registered, harnessDir)
-    ) {
+    // A flag that is absent is positive evidence whatever the paths look like:
+    // nothing was registered to read anywhere.
+    if (registered === undefined) {
+      unread.push(kind);
+      continue;
+    }
+    const correspondence = hostDirCorrespondence(registered, harnessDir);
+    if (correspondence === "incomparable") {
+      incomparable.push(kind);
+    } else if (correspondence === "differ") {
       unread.push(kind);
     }
   }
-  return unread.length > 0
-    ? { status: "unwired", unread }
-    : { status: "wired" };
+  if (unread.length > 0) {
+    return { status: "unwired", unread };
+  }
+  if (incomparable.length > 0) {
+    return {
+      status: "indeterminate",
+      reason:
+        `registered ${incomparable.join(" and ")} path could not be compared ` +
+        `with the directory cf-harness is configured with`,
+    };
+  }
+  return { status: "wired" };
 };
 
 const byteLength = (text: string): number => textEncoder.encode(text).length;
