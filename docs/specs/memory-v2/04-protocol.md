@@ -164,9 +164,15 @@ instead of parking them.
 DECLARED holdings — the `holdings` a resuming `session.open` and a
 re-establishing `session.watch.set` may carry (sections 4.1.2 and 4.3.5) — as
 the base of its delivery diff, in place of its own memory of the session. It is
-build-inherent and defaults to `false` when absent: against an older server the
-client declares nothing, and a reconnect takes the older paths (a resumed
-session diffed against the server's memory, a fresh one delivered in full).
+build-inherent and defaults to `false` when absent. A client whose consumer
+declares holdings treats the flag's absence as terminal at restore: the initial
+connection proceeds normally (nothing is held yet, so nothing needs declaring),
+but a reconnect MUST fail that session with an explicit error rather than
+silently fall back to the delivery paths the declaration exists to replace — a
+server-memory resume can elide a document the replica lost. A consumer that
+declares no holdings is unaffected: its sessions restore on the
+declaration-less paths (a resumed session diffed against the server's memory, a
+fresh one delivered in full) on any server.
 
 ### 4.1.2 Logical Sessions and Resume
 
@@ -198,13 +204,16 @@ interface SessionOpenRequest {
 }
 
 // One document the client declares it HOLDS: the id, the scope name (the
-// instance resolves from the session, as for every frame), the server seq
-// of the covering commit it has confirmed, and whether that is a
-// tombstone. A document the client does not list is one it does not hold,
-// whatever the server remembers delivering.
+// instance resolves from the session, as for every frame), the branch
+// (absent = the default branch; the diff keys by branch, so a same-id
+// document on another branch is a different holding and never stands in
+// for this one), the server seq of the covering commit it has confirmed,
+// and whether that is a tombstone. A document the client does not list is
+// one it does not hold, whatever the server remembers delivering.
 interface SessionHolding {
   id: EntityId;
   scope?: CellScope;
+  branch?: BranchId;
   seq: number;
   deleted?: true;
 }
@@ -276,8 +285,11 @@ Rules:
   it at. The server replaces its memory of what the session was delivered with
   that statement before computing the catch-up, so the delta re-delivers every
   document the client does not hold — one it never absorbed, or lost with a
-  replaced replica — and elides every one it does. A resume without `holdings`
-  is diffed against the server's memory, as before
+  replaced replica — and elides every one it does. A session with no watches
+  covers nothing: the catch-up retracts as `removes` whatever the declaration
+  (or, undeclared, the delivery memory) still lists, and clears the memory,
+  so nothing outside the empty union lingers as demand. A resume without
+  `holdings` is diffed against the server's memory
 - after reconnect, the client resumes the session, replays retained commits,
   applies inline catch-up `sync` when present, and only re-establishes the
   watch set if the session was reopened fresh — declaring its holdings on that

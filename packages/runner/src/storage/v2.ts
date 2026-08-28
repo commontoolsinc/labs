@@ -21,6 +21,7 @@ import {
 import {
   type ApplyOpOperation,
   type ApplyOpResolution,
+  type BranchName,
   canResolveScopeKey,
   type CellScope,
   type ClientCommit,
@@ -2695,13 +2696,25 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     () => this.#scopeKeyIdentity(),
   );
   #watchedIds = new Set<string>();
-  // The address behind each watched key, kept so the replica can DECLARE
-  // its holdings on a reconnect (`holdings()`): the frame that added the
-  // key is the only place its scope name and any explicit instance key
-  // are known, and a docKey alone cannot be turned back into either.
-  readonly #watchedAddresses = new Map<
+  // The last SessionSync snapshot ABSORBED for each watched key — its
+  // address as the frame named it and the seq and deletedness it carried —
+  // kept so the replica can DECLARE its holdings on a reconnect
+  // (`holdings()`). Delivery-backed on purpose: `record.confirmed` also
+  // advances by local promotion (`confirmPending`, an own accepted write
+  // extrapolated over the pending base), and a holding declared at a
+  // promoted seq would let the server elide the authoritative snapshot at
+  // that seq — a `patch` head's merged foreign content the promotion
+  // cannot reproduce. Only a frame this replica absorbed writes here.
+  readonly #delivered = new Map<
     string,
-    { id: URI; scope: CellScope | undefined; scopeKey: ScopeKey | undefined }
+    {
+      id: URI;
+      scope: CellScope | undefined;
+      scopeKey: ScopeKey | undefined;
+      branch: BranchName;
+      seq: number;
+      deleted: boolean;
+    }
   >();
   #nextLocalSeq = 1;
 
@@ -4338,7 +4351,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     }
     this.#docs.clear();
     this.#watchedIds.clear();
-    this.#watchedAddresses.clear();
+    this.#delivered.clear();
     this.resetConflictAdmissionState();
     this.rejectCaughtUpLocalSeqWaiters(new Error("memory replica reset"));
     this.cancelQueuedWatchRefresh();
@@ -5987,10 +6000,13 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
         this.instanceKey(upsert.scope, undefined, upsert.scopeKey),
       );
       this.#watchedIds.add(key);
-      this.#watchedAddresses.set(key, {
+      this.#delivered.set(key, {
         id: upsert.id as URI,
         scope: upsert.scope,
         scopeKey: upsert.scopeKey,
+        branch: upsert.branch,
+        seq: upsert.seq,
+        deleted: upsert.deleted === true,
       });
       // The settle input barrier's shadow case (Phase 2 revisit (a)):
       // a FOREIGN value integrating UNDER an own pending write is
@@ -6045,7 +6061,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
         this.instanceKey(remove.scope, undefined, remove.scopeKey),
       );
       this.#watchedIds.delete(key);
-      this.#watchedAddresses.delete(key);
+      this.#delivered.delete(key);
       if (record.pending.length > 0) {
         // A shadowed remove carries no seq on the wire: the sentinel 1
         // holds W entirely until the shadow clears (see the field doc).
@@ -6472,29 +6488,35 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
 
   /**
    * What this replica holds, stated for a reconnect (the wire
-   * `SessionHolding`; 04-protocol.md §4.1.2): every watched document the
-   * server has confirmed to it, at the seq it holds it at, a tombstone
-   * marked as such. The server takes the list as the delivery diff base
-   * in place of its own memory of the session, so a document absent here
-   * — never absorbed, quarantined, or wiped with a replaced replica — is
-   * delivered again, and one present stays elided. Confirmed state only:
-   * a pending local write is not something the server delivered, and a
-   * never-seen key (seq 0) is not held. A document delivered under an
+   * `SessionHolding`; 04-protocol.md §4.1.2): every watched document at
+   * the seq of the last frame this replica ABSORBED for it, a tombstone
+   * marked as such, on the branch the frame named. The server takes the
+   * list as the delivery diff base in place of its own memory of the
+   * session, so a document absent here — never absorbed, quarantined, or
+   * wiped with a replaced replica — is delivered again, and one present
+   * stays elided. Delivered state only, never `record.confirmed`: a local
+   * promotion advances the confirmed seq with a value the server never
+   * sent, and claiming that seq would elide the authoritative snapshot
+   * (INV-14's over-declare direction). An own write the server elided as
+   * this session's echo therefore declares the older delivered seq and is
+   * re-delivered — redundant, never a gap. A document delivered under an
    * explicit foreign instance key (lease-holder frames) is left unstated
    * — the wire declares instances by scope name — so it is re-delivered
    * rather than wrongly claimed for the session's own instance.
    */
   holdings(): SessionHolding[] {
     const holdings: SessionHolding[] = [];
-    for (const [key, address] of this.#watchedAddresses) {
-      if (address.scopeKey !== undefined) continue;
-      const record = this.#docs.get(key);
-      if (record === undefined || record.confirmed.seq <= 0) continue;
+    for (const delivered of this.#delivered.values()) {
+      if (delivered.scopeKey !== undefined) continue;
+      if (delivered.seq <= 0) continue;
       holdings.push({
-        id: address.id,
-        ...(address.scope !== undefined ? { scope: address.scope } : {}),
-        seq: record.confirmed.seq,
-        ...(record.confirmed.value === undefined ? { deleted: true } : {}),
+        id: delivered.id,
+        ...(delivered.scope !== undefined ? { scope: delivered.scope } : {}),
+        ...(delivered.branch === DEFAULT_BRANCH
+          ? {}
+          : { branch: delivered.branch }),
+        seq: delivered.seq,
+        ...(delivered.deleted ? { deleted: true } : {}),
       });
     }
     return holdings;

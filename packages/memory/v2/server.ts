@@ -111,6 +111,7 @@ import {
   buildDiffSync,
   buildFullSync,
   cacheKeyForEntity,
+  compareSyncAddress,
   groupedQueries,
   holdingsToCacheEntries,
   isEmptySync,
@@ -119,6 +120,7 @@ import {
   sameWatchSpec,
   type SessionCacheEntry,
   toCacheEntry,
+  toWireRemove,
   toWireUpsert,
   trackedIdsFromEntries,
 } from "./server-sync.ts";
@@ -4360,7 +4362,30 @@ export class Server {
             return message;
           };
           if (session.watches.length === 0) {
-            return await emptyCatchUp();
+            // A session with no watches covers nothing: whatever its
+            // delivery memory still lists — a lost frame's rolled-back
+            // tombstones, a resuming client's declared holdings — is
+            // retracted, and the memory and the tracked set are cleared,
+            // so nothing outside the empty union lingers as demand.
+            if (session.entities.size === 0) {
+              return await emptyCatchUp();
+            }
+            const serverSeq = Engine.serverSeq(await this.openEngine(space));
+            const sync: SessionSync = {
+              type: "sync",
+              fromSeq: session.lastSyncedSeq,
+              toSeq: serverSeq,
+              upserts: [],
+              removes: [...session.entities.values()]
+                .map((entry) =>
+                  toWireRemove(entry, session.leaseHolderReads === true)
+                )
+                .sort(compareSyncAddress),
+            };
+            session.entities = new Map();
+            session.trackedIds = new Set();
+            session.lastSyncedSeq = Math.max(session.lastSyncedSeq, serverSeq);
+            return await finishCatchUp(sync);
           }
           // The lease-holder read exemption for THIS pass, judged ONCE
           // on CURRENT holdership (protocol.md §2's read row is
@@ -6070,6 +6095,7 @@ const parseHoldings = (
       typeof entry.id !== "string" ||
       !isNonNegativeInteger(entry.seq) ||
       (entry.scope !== undefined && !isCellScope(entry.scope)) ||
+      (entry.branch !== undefined && typeof entry.branch !== "string") ||
       (entry.deleted !== undefined && entry.deleted !== true)
     ) {
       return null;
@@ -6077,6 +6103,7 @@ const parseHoldings = (
     holdings.push({
       id: entry.id as SessionHolding["id"],
       ...(entry.scope === undefined ? {} : { scope: entry.scope }),
+      ...(entry.branch === undefined ? {} : { branch: entry.branch }),
       seq: entry.seq,
       ...(entry.deleted === true ? { deleted: true } : {}),
     });

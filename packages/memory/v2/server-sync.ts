@@ -1,6 +1,5 @@
 import { internSchemaAsTaggedHashString } from "@commonfabric/data-model-schema";
 import {
-  type BranchName,
   type CellScope,
   DEFAULT_BRANCH,
   type EntitySnapshot,
@@ -106,18 +105,20 @@ export const toCacheEntry = (
  * elided, a changed or unlisted document is delivered, and a held
  * document the watch union no longer covers is removed — the same rules
  * the server's own delivery memory drives, with the client's statement
- * in that memory's place. `doc` is deliberately absent: a diff never reads
- * the previous entry's content.
+ * in that memory's place. Keyed by branch as the cache is: a holding
+ * names its branch (absent = the default), so a same-id document on
+ * another branch can never stand in for it. `doc` is deliberately absent:
+ * a diff never reads the previous entry's content.
  */
 export const holdingsToCacheEntries = (
   holdings: readonly SessionHolding[],
   identity: ScopeKeyIdentity,
-  branch: BranchName = DEFAULT_BRANCH,
 ): Map<string, SessionCacheEntry> => {
   const entries = new Map<string, SessionCacheEntry>();
   for (const holding of holdings) {
     const scope = holding.scope ?? DEFAULT_SCOPE;
     const scopeKey = resolveScopeKey(scope, identity);
+    const branch = holding.branch ?? DEFAULT_BRANCH;
     entries.set(cacheKeyForEntity(branch, holding.id, scopeKey), {
       branch,
       id: holding.id,
@@ -201,7 +202,7 @@ export const toWireRemove = (
   ...(keyed ? { scopeKey: entry.scopeKey } : {}),
 });
 
-const compareSyncAddress = (
+export const compareSyncAddress = (
   left: { branch: string; id: string; scope?: CellScope },
   right: { branch: string; id: string; scope?: CellScope },
 ): number =>

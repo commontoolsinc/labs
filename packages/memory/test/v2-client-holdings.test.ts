@@ -31,6 +31,8 @@ type Sent = { type?: string; holdings?: SessionHolding[] };
  * dropped, recording every request the client sends so the reconnect's
  * requests can be inspected. `retarget` points later connections at a
  * different server — the shape of a server that forgot the session.
+ * `stripSessionHoldings` erases that flag from the server's `hello.ok` —
+ * the shape of a server that cannot take a declaration.
  */
 class DroppableTransport implements Transport {
   readonly sent: Sent[] = [];
@@ -38,7 +40,10 @@ class DroppableTransport implements Transport {
   #closeReceiver: (error?: Error) => void = () => {};
   #connection: ReturnType<Server["connect"]> | null = null;
 
-  constructor(private server: Server) {}
+  constructor(
+    private server: Server,
+    private readonly stripSessionHoldings = false,
+  ) {}
 
   async send(payload: string): Promise<void> {
     this.sent.push(decodeMemoryBoundary(payload) as Sent);
@@ -71,10 +76,23 @@ class DroppableTransport implements Transport {
   private connection(): ReturnType<Server["connect"]> {
     if (this.#connection === null) {
       this.#connection = this.server.connect((message) => {
-        this.#receiver(encodeMemoryBoundary(message));
+        this.#receiver(encodeMemoryBoundary(this.project(message)));
       });
     }
     return this.#connection;
+  }
+
+  private project<T>(message: T): T {
+    if (this.stripSessionHoldings) {
+      const framed = message as { type?: string; flags?: object };
+      if (framed.type === "hello.ok" && framed.flags !== undefined) {
+        return {
+          ...framed,
+          flags: { ...framed.flags, sessionHoldings: false },
+        } as T;
+      }
+    }
+    return message;
   }
 }
 
@@ -157,6 +175,45 @@ describe("client holdings", () => {
     const reestablished = holdingsSentOn(transport, "session.watch.set");
     transport.disconnect();
     expect(await reestablished).toEqual(DECLARED);
+  });
+
+  it("terminates the session at restore when the server cannot take its declared holdings", async () => {
+    const server = newServer("client-holdings-unsupported");
+    const transport = new DroppableTransport(server, true);
+    const client = await connect({ transport });
+    cleanups.push(() => client.close(), () => server.close());
+    // The initial connection is allowed: nothing is held yet, so nothing
+    // needs declaring, and the mount and its watches work in full.
+    const session = await client.mount(SPACE, {}, testSessionOpenAuthFactory);
+    session.holdingsProvider = () => DECLARED;
+    await session.watchSet([{
+      id: "w",
+      kind: "graph",
+      query: {
+        roots: [{
+          id: "of:client-held",
+          selector: { path: [], schema: false },
+        }],
+      },
+    }]);
+    // Restoration is not: a declaration-bearing session cannot fall back
+    // to the delivery paths the declaration exists to replace, so the
+    // restore terminates the session with the cause.
+    await session.restore();
+    expect(session.closeError?.message).toContain("sessionHoldings");
+    await expect(session.watchSet([])).rejects.toThrow("sessionHoldings");
+  });
+
+  it("restores a session without a provider against a server that cannot take holdings", async () => {
+    const server = newServer("client-holdings-unsupported-no-provider");
+    const transport = new DroppableTransport(server, true);
+    const client = await connect({ transport });
+    cleanups.push(() => client.close(), () => server.close());
+    // No provider means no declaration to lose: the declaration-less
+    // delivery paths are this consumer's contract, on any server.
+    const session = await client.mount(SPACE, {}, testSessionOpenAuthFactory);
+    await session.restore();
+    expect(session.closeError).toBeUndefined();
   });
 
   it("declares nothing when no provider is installed", async () => {

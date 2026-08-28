@@ -269,6 +269,42 @@ describe("session holdings", () => {
     expect(sync?.removes ?? []).toEqual([]);
   });
 
+  it("keeps delivering a document whose only declared holding is on another branch", async () => {
+    // The diff keys by branch: a same-id, same-seq claim on branch "b"
+    // says nothing about the default-branch document, which is delivered.
+    const reader = await connect(server);
+    const session = (await open(reader, READER)).sessionId;
+    const sync = await watchSet(reader, session, [
+      { id: "of:holdings-a", branch: "b", seq: seqOf("of:holdings-a") },
+      { id: "of:holdings-b", seq: seqOf("of:holdings-b") },
+      { id: `cid:${leafHash}`, seq: seqOf(`cid:${leafHash}`) },
+    ]);
+    expect(ids(sync.upserts)).toEqual(["of:holdings-a"]);
+  });
+
+  it("retracts a declaration resumed onto a session with no watches", async () => {
+    // Zero watches cover nothing: the declared holdings are removed and
+    // nothing lingers as delivery memory or tracked demand — a following
+    // watch.set that declares nothing is delivered in full.
+    const first = await connect(server);
+    const opened = await open(first, READER);
+    const again = await connect(server);
+    const resumed = await open(
+      again,
+      READER,
+      { sessionId: opened.sessionId, sessionToken: opened.sessionToken },
+      roots.map((id) => ({ id, seq: seqOf(id) })),
+    );
+    expect(resumed.resumed).toBe(true);
+    const sync = resumed.sync as unknown as Sync | undefined;
+    expect(ids(sync?.removes ?? [])).toEqual(roots.toSorted());
+    expect(sync?.upserts ?? []).toEqual([]);
+    const full = await watchSet(again, opened.sessionId);
+    expect(ids(full.upserts)).toEqual(
+      [...roots, `cid:${leafHash}`].toSorted(),
+    );
+  });
+
   it("keeps the server's own memory as the base when a resume declares nothing", async () => {
     const first = await connect(server);
     const opened = await open(first, READER);

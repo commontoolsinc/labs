@@ -172,36 +172,60 @@ the server's per-session delivery memory (`session.entities`), the client's
 replica, and the diff base a reconnect's frame is computed against
 (`04-protocol.md` §4.1.2, §4.3.5, §4.6). Pushes can be LOST by the client (the
 OW61 absorb-defect class, bounded by `MaxLoss`), the replica can be WIPED under
-a live session (`SpaceReplica.reset()` on route replacement, `AllowReset`), and
-the session can EXPIRE while disconnected (a re-establishing reconnect instead
-of a resume). `Mode` selects the diff base: `memory` is the server's own memory
-on resume and nothing on re-establishment (the design before client-declared
-holdings); `holdings` is the client's declaration on both paths.
+a live session (`SpaceReplica.reset()` on route replacement, `AllowReset`), the
+session can EXPIRE while disconnected (a re-establishing reconnect instead of a
+resume), and the watch union can SHRINK — a lossy `Unwatch` whose removal frame
+the client may fail to absorb, down to the zero-watch union, so a reconnect can
+face a declared holding the union no longer covers (union growth is not
+modeled: a grown union's never-held documents are ordinary deliveries,
+indistinguishable from initial delivery). `Mode` selects the diff base:
+`memory` is the server's own memory on resume and nothing on re-establishment
+(the design before client-declared holdings); `holdings` is the client's
+declaration on both paths.
 
 Checked with TLC 2.19; every config finishes in seconds:
 
 | Config | Mode | MaxLoss | AllowReset | Result |
 | --- | --- | --- | --- | --- |
-| `SessionDelivery_Memory.cfg` | `memory` | 1 | yes | **ReconnectConverges violated** at depth 4 — a push the server records as delivered and the client loses, a disconnect, a resume: the diff against the server's memory elides the lost document, and the replica stays behind. This is the schema-doc quarantine residual (verification-coverage.md OW61) as a machine-found trace; kept as the regression witness. |
-| `SessionDelivery_MemoryFull.cfg` | `memory` | 0 | no | **NoRedundantDelivery violated** — with a perfect client the old design converges (`ReconnectConverges` holds at 202 distinct states when checked alone), but a re-established session is delivered in full: the whole union again, held or not. |
-| `SessionDelivery_Holdings.cfg` | `holdings` | 1 | yes | **All invariants hold** (684 distinct states, exhaustive at `MaxWrites = 3`): every reconnect — resumed or re-established, after any loss or wipe — brings the replica to the union's current state and re-delivers nothing it holds. |
+| `SessionDelivery_Memory.cfg` | `memory` | 1 | yes | **ReconnectConverges violated** at depth 4 — a push the server records as delivered and the client loses, a disconnect, a resume: the diff against the server's memory elides the lost document, and the replica stays behind. This is the schema-doc quarantine residual (verification-coverage.md OW61) as a machine-found trace; kept as the regression witness. (The same base fails the removal direction too — a lost removal the memory believes absorbed is never retracted — at greater depth; the reported trace is the shortest.) |
+| `SessionDelivery_MemoryFull.cfg` | `memory` | 0 | no | **NoRedundantDelivery violated** — with a perfect client the old design converges (`ReconnectConverges` holds at 602 distinct states when checked alone), but a re-established session is delivered in full: the whole union again, held or not. |
+| `SessionDelivery_Holdings.cfg` | `holdings` | 1 | yes | **All invariants hold** (2,164 distinct states, exhaustive at `MaxWrites = 3`): every reconnect — resumed or re-established, after any loss, wipe, or union shrink — brings the replica to the union's current state, retracts what the union no longer covers (the zero-watch reconcile included), and re-delivers nothing it holds. Negative control: emptying `Reconnect`'s `removed` set — the zero-watch shortcut — violates `ReconnectConverges` within a second (a lost removal, a disconnect, a resume: the stale document survives as held state), so the retraction clause is load-bearing, not decorative. |
 
-`ReconnectConverges` is INV-14 of `09-invariants.md`; `NoRedundantDelivery`
-is its efficiency companion, stated as an invariant so the full re-download
-the old design performed on a lapsed session is a checked witness rather than
-an anecdote.
+`ReconnectConverges` is INV-14 of `09-invariants.md`, its uncovered-document
+clause included; `NoRedundantDelivery` is its efficiency companion, stated as
+an invariant so the full re-download the old design performed on a lapsed
+session is a checked witness rather than an anecdote.
 
-**Scope of the certification.** The client is honest — its declaration IS its
-replica — so a client claiming documents it does not hold is outside the
-model, in the same trust class as a client fabricating reads. Catch-up frames
-are absorbed: the pre-watch loss they were once subject to is fixed and pinned
-separately (#6292, `precedingSyncs`), and the residual loss class the model
-exercises is the steady-state push. Commit replay (INV-11) remains outside
-both models. The wire's parse of `holdings` and the replica's construction of
-its declaration are checked by unit tests
-(`packages/memory/test/v2-session-holdings.test.ts`,
-`v2-client-holdings.test.ts`,
-`packages/runner/test/memory-v2-reconnect-holdings.test.ts`), not by TLC.
+**Scope of the certification.** What the Holdings result certifies is the
+SERVER's diff rule against a truthful declaration. The CLIENT's construction
+of that declaration is an assumed input — the declaration IS the replica,
+exactly — and each construction obligation is enforced by a unit test, not by
+TLC:
+
+- **Delivered state only.** The runtime derives the declaration from the last
+  frame the replica absorbed per document, never from a locally promoted
+  confirmed seq the server never sent — the replica in the model advances
+  only by absorbed delivery, so a promotion-shaped over-declaration is
+  unreachable here. Pinned by
+  `packages/runner/test/memory-v2-reconnect-holdings.test.ts` (an own
+  accepted write leaves the declared seq at the delivered frame's).
+- **Branch identity.** Document state is a bare seq, so a same-id document on
+  another branch is not representable; the wire type carries `branch` and the
+  diff keys by it. Pinned by the cross-branch case in
+  `packages/memory/test/v2-session-holdings.test.ts`.
+- **The parse.** Malformed holdings fail the message rather than degrade to
+  full delivery. Pinned at the wire boundary in the same file, with
+  `v2-client-holdings.test.ts` covering which requests carry the declaration
+  — and that a declaration-bearing session terminally fails restore against
+  a server that cannot take one, rather than silently rejoining the `memory`
+  row of this table.
+
+A client declaring documents it does not hold is outside the model, in the
+same trust class as a client fabricating reads. Catch-up frames are absorbed:
+the pre-watch loss they were once subject to is fixed and pinned separately
+(#6292, `precedingSyncs`), and the residual loss class the model exercises is
+the steady-state push and the removal frame. Commit replay (INV-11) remains
+outside both models.
 
 ## Changing the model
 

@@ -1110,12 +1110,16 @@ export type SessionDescriptor = {
  * instance resolves from the session's identity as it does for every
  * wire frame (protocol.md §1). `seq` is the server seq of the covering
  * commit the client has confirmed for the document; `deleted` marks a
- * known tombstone at that seq. A document the client does not list is
- * one it does not hold, whatever the server remembers delivering.
+ * known tombstone at that seq. `branch` names the branch the holding is of
+ * (absent = the default branch): the diff keys by branch, so a same-id
+ * document on another branch is a different holding and never stands in
+ * for this one. A document the client does not list is one it does not
+ * hold, whatever the server remembers delivering.
  */
 export type SessionHolding = {
   id: EntityId;
   scope?: CellScope;
+  branch?: BranchName;
   seq: number;
   deleted?: true;
 };
