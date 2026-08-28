@@ -98,6 +98,18 @@ export interface MeasurementSuite {
    * is which rather than leaving a reader to recognize identifiers by eye.
    */
   seededPatternIds?: readonly string[];
+
+  /**
+   * Seeded patterns superseded by a later publication of the same atom.
+   *
+   * Re-formatting a seed's source changes the bytes and so changes the
+   * identity, which publishes a second entry for the same program. Both are
+   * the seeder's work, so neither is pre-existing — but only one is
+   * reproducible from the committed source, and a session that composed the
+   * other composed a version the repository cannot rebuild. Marked apart for
+   * that reason, not counted against the seeding.
+   */
+  supersededPatternIds?: readonly string[];
 }
 
 /**
@@ -111,10 +123,8 @@ export const parseMeasurementSuite = (input: unknown): MeasurementSuite => {
   if (typeof input !== "object" || input === null) {
     throw new Error("a task suite must be a JSON object");
   }
-  const { label, notes, tasks, seededPatternIds } = input as Record<
-    string,
-    unknown
-  >;
+  const { label, notes, tasks, seededPatternIds, supersededPatternIds } =
+    input as Record<string, unknown>;
   if (typeof label !== "string" || label.trim() === "") {
     throw new Error("a task suite must carry a non-empty label");
   }
@@ -157,6 +167,9 @@ export const parseMeasurementSuite = (input: unknown): MeasurementSuite => {
     tasks: parsed,
     ...(seededPatternIds !== undefined
       ? { seededPatternIds: seededPatternIds as readonly string[] }
+      : {}),
+    ...(supersededPatternIds !== undefined
+      ? { supersededPatternIds: supersededPatternIds as readonly string[] }
       : {}),
   };
 };
@@ -414,6 +427,7 @@ export const preflightPosture = async (
  */
 export type ImportedPatternOrigin =
   | { kind: "seeded" }
+  | { kind: "seeded-superseded" }
   | { kind: "seeded-via-alias"; through: readonly string[] }
   | { kind: "pre-existing" }
   | { kind: "unresolved"; reason: string };
@@ -422,16 +436,20 @@ export type ImportedPatternOrigin =
 export const classifyImportedPattern = (
   patternId: string,
   seeded: ReadonlySet<string>,
+  superseded: ReadonlySet<string>,
   dependencies: readonly string[] | undefined,
 ): ImportedPatternOrigin => {
   if (seeded.has(patternId)) return { kind: "seeded" };
+  if (superseded.has(patternId)) return { kind: "seeded-superseded" };
   if (dependencies === undefined) {
     return {
       kind: "unresolved",
       reason: "the index did not say what this pattern depends on",
     };
   }
-  const through = dependencies.filter((dependency) => seeded.has(dependency));
+  const through = dependencies.filter((dependency) =>
+    seeded.has(dependency) || superseded.has(dependency)
+  );
   return through.length > 0
     ? { kind: "seeded-via-alias", through }
     : { kind: "pre-existing" };
@@ -957,16 +975,18 @@ export const resolveImportedPatternOrigins = async (
   client: ConsoleClient,
   importedPatternIds: readonly string[],
   seeded: readonly string[],
+  superseded: readonly string[] = [],
 ): Promise<Readonly<Record<string, ImportedPatternOrigin>>> => {
   const isSeeded = new Set(seeded);
+  const isSuperseded = new Set(superseded);
   const origins: Record<string, ImportedPatternOrigin> = {};
   for (const patternId of importedPatternIds) {
+    const known = isSeeded.has(patternId) || isSuperseded.has(patternId);
     origins[patternId] = classifyImportedPattern(
       patternId,
       isSeeded,
-      isSeeded.has(patternId)
-        ? undefined
-        : await client.dependenciesOf(patternId),
+      isSuperseded,
+      known ? undefined : await client.dependenciesOf(patternId),
     );
   }
   return origins;
@@ -1305,6 +1325,8 @@ const renderComposition = (
     switch (origin.kind) {
       case "seeded":
         return `\`${id}\` **(seeded)**`;
+      case "seeded-superseded":
+        return `\`${id}\` **(seeded, superseded duplicate — not reproducible from the committed source)**`;
       case "seeded-via-alias":
         return `\`${id}\` **(seeded, via alias of ${
           origin.through.join(", ")
@@ -1537,6 +1559,7 @@ export const main = async (
     client,
     importedPatternIds,
     suite.seededPatternIds ?? [],
+    suite.supersededPatternIds ?? [],
   );
   const indexAfter = preflight.kind === "refused"
     ? indexBefore

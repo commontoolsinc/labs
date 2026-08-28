@@ -739,28 +739,43 @@ describe("run-measurement-batch", () => {
 
   describe("classifyImportedPattern()", () => {
     const seeded = new Set(["seed-a", "seed-b"]);
+    const EMPTY: ReadonlySet<string> = new Set();
 
     it("returns `seeded` for a pattern the suite named", () => {
-      expect(classifyImportedPattern("seed-a", seeded, [])).toEqual({
+      expect(classifyImportedPattern("seed-a", seeded, EMPTY, [])).toEqual({
         kind: "seeded",
       });
     });
 
     it("returns `seeded-via-alias` for a pattern that depends on a seeded one", () => {
-      expect(classifyImportedPattern("alias", seeded, ["seed-b"])).toEqual({
-        kind: "seeded-via-alias",
-        through: ["seed-b"],
-      });
+      expect(classifyImportedPattern("alias", seeded, EMPTY, ["seed-b"]))
+        .toEqual({
+          kind: "seeded-via-alias",
+          through: ["seed-b"],
+        });
+    });
+
+    it("returns `seeded-superseded` for a seed a later publication replaced", () => {
+      expect(
+        classifyImportedPattern("old", seeded, new Set(["old"]), []),
+      ).toEqual({ kind: "seeded-superseded" });
+    });
+
+    it("returns `seeded-via-alias` for a pattern depending on a superseded seed", () => {
+      expect(
+        classifyImportedPattern("alias", seeded, new Set(["old"]), ["old"]),
+      ).toEqual({ kind: "seeded-via-alias", through: ["old"] });
     });
 
     it("returns `pre-existing` for a pattern depending on nothing seeded", () => {
-      expect(classifyImportedPattern("other", seeded, ["unrelated"])).toEqual({
-        kind: "pre-existing",
-      });
+      expect(classifyImportedPattern("other", seeded, EMPTY, ["unrelated"]))
+        .toEqual({
+          kind: "pre-existing",
+        });
     });
 
     it("returns `unresolved` rather than `pre-existing` when the index would not say", () => {
-      expect(classifyImportedPattern("other", seeded, undefined).kind)
+      expect(classifyImportedPattern("other", seeded, EMPTY, undefined).kind)
         .toBe("unresolved");
     });
   });

@@ -1,6 +1,6 @@
 {
   "label": "pattern index discovery and composition",
-  "notes": "The standing suite named by docs/pattern-index-measurement.md. No task names the pattern index, names a published pattern, or says the word \"reuse\". Each is a thing a person would ask for, worded so that a part the index already holds would answer part of it. Edit a task's text and the runs before and after are no longer comparable; add a task rather than reword one. The seeded atoms this batch was run against, by identifier: SortableTable = 1iaNBnIVU-vBRC3u01ciyrLjGM3YzH9xN4GYbUUMuLU; CheckList = AUIdfFdRbRcwyjms_C50_gndz4NP5pTuHPEZhn3OFRA; OptionPicker = KEL-gKzWRo32qpOtnjjjeKX1DvvUTeLfHHvSSn93WyY; AmountLedger = SvS30JCaGf2JsTXeLgd77F40GG0vJmGTaK7TCJjDhLg; Counter = docnE_YXUkal8R92pI4Lz7zAg0w_3J_6_RQmLYLUT2o; DiceRoller = zyovq-u-j6X3gxU2ZTChMwhTx4IvjoBickAoGy4_MEk. The report marks each imported identifier as seeded or pre-existing, because composing a seeded atom is the claim the seeding was for and composing an entry an earlier run left behind is not.",
+  "notes": "The standing suite named by docs/pattern-index-measurement.md. No task names the pattern index, names a published pattern, or says the word \"reuse\". Each is a thing a person would ask for, worded so that a part the index already holds would answer part of it. Edit a task's text and the runs before and after are no longer comparable; add a task rather than reword one. Seeded atoms reproducible from committed main: counter = docnE_YXUkal8R92pI4Lz7zAg0w_3J_6_RQmLYLUT2o; option-picker = KEL-gKzWRo32qpOtnjjjeKX1DvvUTeLfHHvSSn93WyY; amount-ledger = qNOJxo0JnozXU0KT-pw5UH1bVuevwfOOvImvFCkeyuM; check-list = 7bhoBrtm6fN1AaQ6N6tOFz7nYsYxrjBkXiuZiWIZ-tM; dice-roller = jOu9chUAHXuvnrJriemFp7qC-CvMfsmrqLD66xGimig; sortable-table = aP_glqGPYxIxzr3_YzmG4moxQtqa4aRr0iUJmPs0J3g. Superseded duplicates of four of them, published from source that was re-formatted afterwards and so cannot be rebuilt from the committed file: amount-ledger = SvS30JCaGf2JsTXeLgd77F40GG0vJmGTaK7TCJjDhLg; check-list = AUIdfFdRbRcwyjms_C50_gndz4NP5pTuHPEZhn3OFRA; dice-roller = zyovq-u-j6X3gxU2ZTChMwhTx4IvjoBickAoGy4_MEk; sortable-table = 1iaNBnIVU-vBRC3u01ciyrLjGM3YzH9xN4GYbUUMuLU. Both sets are the seeder's work; the report marks them apart because only one is reproducible, and neither is pre-existing.",
   "tasks": [
     {
       "id": "counter",
@@ -28,11 +28,17 @@
     }
   ],
   "seededPatternIds": [
-    "1iaNBnIVU-vBRC3u01ciyrLjGM3YzH9xN4GYbUUMuLU",
-    "AUIdfFdRbRcwyjms_C50_gndz4NP5pTuHPEZhn3OFRA",
-    "KEL-gKzWRo32qpOtnjjjeKX1DvvUTeLfHHvSSn93WyY",
-    "SvS30JCaGf2JsTXeLgd77F40GG0vJmGTaK7TCJjDhLg",
     "docnE_YXUkal8R92pI4Lz7zAg0w_3J_6_RQmLYLUT2o",
-    "zyovq-u-j6X3gxU2ZTChMwhTx4IvjoBickAoGy4_MEk"
+    "KEL-gKzWRo32qpOtnjjjeKX1DvvUTeLfHHvSSn93WyY",
+    "qNOJxo0JnozXU0KT-pw5UH1bVuevwfOOvImvFCkeyuM",
+    "7bhoBrtm6fN1AaQ6N6tOFz7nYsYxrjBkXiuZiWIZ-tM",
+    "jOu9chUAHXuvnrJriemFp7qC-CvMfsmrqLD66xGimig",
+    "aP_glqGPYxIxzr3_YzmG4moxQtqa4aRr0iUJmPs0J3g"
+  ],
+  "supersededPatternIds": [
+    "SvS30JCaGf2JsTXeLgd77F40GG0vJmGTaK7TCJjDhLg",
+    "AUIdfFdRbRcwyjms_C50_gndz4NP5pTuHPEZhn3OFRA",
+    "zyovq-u-j6X3gxU2ZTChMwhTx4IvjoBickAoGy4_MEk",
+    "1iaNBnIVU-vBRC3u01ciyrLjGM3YzH9xN4GYbUUMuLU"
   ]
 }
