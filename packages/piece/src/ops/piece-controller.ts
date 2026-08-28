@@ -3781,7 +3781,13 @@ export class PieceController<T = unknown> {
       // conclusion does not describe, so the write is dropped rather than
       // landing on the piece that replaced it.
       const candidate = this.#cell.withTx(tx);
-      const current = getPieceSourceSnapshot(candidate);
+      // The session pointer too: a keyless piece keeps no durable identity, so
+      // without it every comparison here would find no state and drop every
+      // record such a piece ever reaches.
+      const current = getPieceSourceSnapshot(
+        candidate,
+        this.#pieces.runtime.runner.sessionPatternPointerFor(this.#cell),
+      );
       if (
         current === undefined ||
         current.pattern.identity !== expected.pattern.identity ||
@@ -4206,7 +4212,10 @@ export class PieceController<T = unknown> {
       // offered a moment ago. The guard is the state the transition left, read
       // back rather than reconstructed, because recording an origin normalizes
       // it and this has to match what the piece now stores.
-      const settled = getPieceSourceSnapshot(this.#cell);
+      const settled = getPieceSourceSnapshot(
+        this.#cell,
+        this.#pieces.runtime.runner.sessionPatternPointerFor(this.#cell),
+      );
       // Only when the piece is still on the revision this transition wrote.
       // Another transition landing in between describes a different piece
       // than the candidate below, and recording against it would say that
