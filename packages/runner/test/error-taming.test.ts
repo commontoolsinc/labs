@@ -58,8 +58,11 @@ describe("Error.isError under SES lockdown", () => {
     });
 
     it("installs nothing when handed a non-function", () => {
-      // How a runtime without `Error.isError` declines. The pinned browser
-      // integration runtime takes this path. The shim defines nothing because
+      // How a runtime without `Error.isError` declines. Nothing this project
+      // runs on takes this path any more: a browser test drives a system
+      // Chrome, and astral's own download -- the one browser old enough to
+      // lack the method -- is reached only on a machine that has no browser
+      // installed at all. The shim defines nothing because
       // an `undefined` property fails SES's `isError: fn` permit and gets
       // stripped back out with an unpermitted-intrinsic report.
       //
