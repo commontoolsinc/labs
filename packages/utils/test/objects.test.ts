@@ -19,7 +19,7 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import {
-  constructorFromObject,
+  constructorOfObject,
   isInertPlainObject,
 } from "@commonfabric/utils/objects";
 
@@ -241,25 +241,25 @@ describe("objects", () => {
     });
   });
 
-  describe("constructorFromObject()", () => {
+  describe("constructorOfObject()", () => {
     it("returns the class an ordinary instance was built from", () => {
-      expect(constructorFromObject({})).toBe(Object);
-      expect(constructorFromObject([])).toBe(Array);
-      expect(constructorFromObject(new Map())).toBe(Map);
-      expect(constructorFromObject(new Date())).toBe(Date);
-      expect(constructorFromObject(/x/)).toBe(RegExp);
+      expect(constructorOfObject({})).toBe(Object);
+      expect(constructorOfObject([])).toBe(Array);
+      expect(constructorOfObject(new Map())).toBe(Map);
+      expect(constructorOfObject(new Date())).toBe(Date);
+      expect(constructorOfObject(/x/)).toBe(RegExp);
     });
 
     it("returns the subclass, not the base", () => {
       class Sub extends Map {}
-      expect(constructorFromObject(new Sub())).toBe(Sub);
+      expect(constructorOfObject(new Sub())).toBe(Sub);
     });
 
     it("returns the class of an instance whose prototype was replaced", () => {
       // The prototype is the whole of the answer, so re-pointing it re-points
       // the answer -- which is the property, not a wrinkle in it.
       const value = Object.setPrototypeOf({}, Map.prototype);
-      expect(constructorFromObject(value)).toBe(Map);
+      expect(constructorOfObject(value)).toBe(Map);
     });
 
     describe("an own `constructor` property does not answer", () => {
@@ -275,31 +275,31 @@ describe("objects", () => {
         ] as ReadonlyArray<[string, unknown]>
       ) {
         it(`returns \`Object\` for a record claiming ${label}`, () => {
-          expect(constructorFromObject({ constructor: forged, a: 1 }))
+          expect(constructorOfObject({ constructor: forged, a: 1 }))
             .toBe(Object);
         });
       }
 
       it("is not fooled by one that shadows the real class either", () => {
         const value = Object.assign(new Map(), { constructor: Error });
-        expect(constructorFromObject(value)).toBe(Map);
+        expect(constructorOfObject(value)).toBe(Map);
       });
     });
 
     describe("returns `undefined` where there is no class to read", () => {
       it("returns `undefined` for a null-prototype object", () => {
-        expect(constructorFromObject(Object.create(null))).toBe(undefined);
+        expect(constructorOfObject(Object.create(null))).toBe(undefined);
       });
 
       it("returns `undefined` for an object whose prototype was severed", () => {
         const value = Object.setPrototypeOf({ a: 1 }, null);
-        expect(constructorFromObject(value)).toBe(undefined);
+        expect(constructorOfObject(value)).toBe(undefined);
       });
 
       it("returns `undefined` when the constructor is not callable", () => {
         const proto = Object.create(null) as { constructor?: unknown };
         proto.constructor = "not a function";
-        expect(constructorFromObject(Object.create(proto))).toBe(undefined);
+        expect(constructorOfObject(Object.create(proto))).toBe(undefined);
       });
     });
   });
