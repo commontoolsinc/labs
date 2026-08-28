@@ -36,6 +36,11 @@ export interface MachineEdge {
   target: string;
 }
 
+/** Returns the stable logical identity for one directed machine wire. */
+export function machineEdgeId(source: string, target: string): string {
+  return `edge:${source.length}:${source}:${target.length}:${target}`;
+}
+
 export interface IframeInputData {
   title: string;
   subtitle: string;
@@ -134,32 +139,32 @@ export const DEFAULT_STATE: IframeStateData = {
   ],
   edges: [
     {
-      id: "edge-moonlight-paradox",
+      id: machineEdgeId("sensor-moonlight", "gate-paradox"),
       source: "sensor-moonlight",
       target: "gate-paradox",
     },
     {
-      id: "edge-contradiction-paradox",
+      id: machineEdgeId("sensor-contradiction", "gate-paradox"),
       source: "sensor-contradiction",
       target: "gate-paradox",
     },
     {
-      id: "edge-paradox-tomorrow",
+      id: machineEdgeId("gate-paradox", "delay-tomorrow"),
       source: "gate-paradox",
       target: "delay-tomorrow",
     },
     {
-      id: "edge-paradox-optimism",
+      id: machineEdgeId("gate-paradox", "transformer-optimism"),
       source: "gate-paradox",
       target: "transformer-optimism",
     },
     {
-      id: "edge-tomorrow-teacup",
+      id: machineEdgeId("delay-tomorrow", "actuator-teacup"),
       source: "delay-tomorrow",
       target: "actuator-teacup",
     },
     {
-      id: "edge-optimism-teacup",
+      id: machineEdgeId("transformer-optimism", "actuator-teacup"),
       source: "transformer-optimism",
       target: "actuator-teacup",
     },

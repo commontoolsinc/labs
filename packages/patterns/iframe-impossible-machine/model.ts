@@ -1,4 +1,9 @@
-import type { IframeStateData, MachineEdge, MachineNode } from "./contract.ts";
+import {
+  type IframeStateData,
+  type MachineEdge,
+  machineEdgeId,
+  type MachineNode,
+} from "./contract.ts";
 
 function clampSignal(value: number): number {
   return Math.min(1, Math.max(0, value));
@@ -9,6 +14,20 @@ function average(values: readonly number[]): number {
   return values.reduce((total, value) => total + value, 0) / values.length;
 }
 
+/** Canonicalizes legacy and concurrent duplicate wires by logical endpoints. */
+export function dedupeMachineEdges(
+  edges: readonly MachineEdge[],
+): MachineEdge[] {
+  const unique = new Map<string, MachineEdge>();
+  for (const edge of edges) {
+    const id = machineEdgeId(edge.source, edge.target);
+    if (!unique.has(id)) {
+      unique.set(id, { id, source: edge.source, target: edge.target });
+    }
+  }
+  return [...unique.values()];
+}
+
 /** Evaluates the machine at one logical tick without storing derived state. */
 export function evaluateSignals(
   state: IframeStateData,
@@ -16,7 +35,7 @@ export function evaluateSignals(
 ): Map<string, number> {
   const nodes = new Map(state.nodes.map((node) => [node.id, node]));
   const incoming = new Map<string, MachineEdge[]>();
-  for (const edge of state.edges) {
+  for (const edge of dedupeMachineEdges(state.edges)) {
     const edges = incoming.get(edge.target) ?? [];
     edges.push(edge);
     incoming.set(edge.target, edges);

@@ -96,6 +96,27 @@ describe("model", () => {
       expect(firstBytes.slice(44).some((byte) => byte !== 0)).toBe(true);
     });
 
+    it("emits PCM RIFF headers with internally consistent chunk lengths", () => {
+      const wav = buildSyntheticWav(1);
+      const view = new DataView(wav);
+      const ascii = (start: number, end: number) =>
+        new TextDecoder().decode(wav.slice(start, end));
+
+      expect(ascii(0, 4)).toBe("RIFF");
+      expect(view.getUint32(4, true)).toBe(wav.byteLength - 8);
+      expect(ascii(8, 12)).toBe("WAVE");
+      expect(ascii(12, 16)).toBe("fmt ");
+      expect(view.getUint32(16, true)).toBe(16);
+      expect(view.getUint16(20, true)).toBe(1);
+      expect(view.getUint16(22, true)).toBe(1);
+      expect(view.getUint32(24, true)).toBe(WAV_SAMPLE_RATE);
+      expect(view.getUint32(28, true)).toBe(WAV_SAMPLE_RATE * 2);
+      expect(view.getUint16(32, true)).toBe(2);
+      expect(view.getUint16(34, true)).toBe(16);
+      expect(ascii(36, 40)).toBe("data");
+      expect(view.getUint32(40, true)).toBe(wav.byteLength - 44);
+    });
+
     it("uses the minimum safe duration for a negative input", () => {
       expect(buildSyntheticWav(-1).byteLength).toBe(
         44 + WAV_SAMPLE_RATE * 2,

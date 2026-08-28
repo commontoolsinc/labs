@@ -30,7 +30,13 @@ const { signal } = abort;
 let hydrated = false;
 let disposed = false;
 let reviewerId = "";
-let audioUrl: string | undefined;
+let audioContext: AudioContext | undefined;
+let audioBuffer: AudioBuffer | undefined;
+let mediaDestination: MediaStreamAudioDestinationNode | undefined;
+let activeSource: AudioBufferSourceNode | undefined;
+let playbackOffsetSeconds = 0;
+let playbackStartedAt: number | undefined;
+let animationFrame: number | undefined;
 let activeCueIds = new Set<string>();
 let dialogMode: { kind: "new" } | { kind: "edit"; id: string } = {
   kind: "new",
@@ -73,6 +79,25 @@ audio.preload = "metadata";
 audio.setAttribute("aria-label", "Synthetic field recording");
 audio.dataset.testid = "field-recording";
 
+const scrubber = document.createElement("input");
+// A MediaStream has no finite media duration, so the recording's local
+// position and seek boundary live in this finite tape control.
+scrubber.type = "range";
+scrubber.min = "0";
+scrubber.max = String(DEFAULT_INPUT.durationSeconds);
+scrubber.step = "0.1";
+scrubber.value = "0";
+scrubber.disabled = true;
+scrubber.setAttribute("aria-label", "Local recording position");
+scrubber.dataset.testid = "local-playhead";
+const scrubberReadout = document.createElement("output");
+scrubberReadout.textContent = `00:00.0 / ${
+  formatTime(DEFAULT_INPUT.durationSeconds)
+}`;
+const scrubberRow = document.createElement("div");
+scrubberRow.className = "scrubber-row";
+scrubberRow.append(scrubber, scrubberReadout);
+
 const transportNote = document.createElement("p");
 transportNote.className = "transport-note";
 transportNote.textContent =
@@ -91,7 +116,14 @@ status.textContent = "Joining the shared tape…";
 status.dataset.ready = "false";
 status.dataset.testid = "tape-status";
 toolbar.append(addButton);
-tapeDeck.append(tapeHeading, audio, transportNote, toolbar, status);
+tapeDeck.append(
+  tapeHeading,
+  audio,
+  scrubberRow,
+  transportNote,
+  toolbar,
+  status,
+);
 
 const annotationsSection = document.createElement("section");
 annotationsSection.className = "annotations";
@@ -239,8 +271,13 @@ function syncCues(annotations: readonly TapeAnnotation[]): void {
 }
 
 function updateActiveCueIds(): void {
+  const playhead = playbackPosition();
   activeCueIds = new Set(
-    [...(textTrack.activeCues ?? [])].map((cue) => cue.id),
+    hydrated
+      ? (state.get()?.annotations ?? []).filter((annotation) =>
+        annotation.startSeconds <= playhead && annotation.endSeconds >= playhead
+      ).map((annotation) => annotation.id)
+      : [],
   );
   for (
     const card of annotationList.querySelectorAll<HTMLElement>(
@@ -285,7 +322,7 @@ function render(): void {
     }`;
     range.disabled = !hydrated;
     range.addEventListener("click", () => {
-      audio.currentTime = annotation.startSeconds;
+      void seekPlayback(annotation.startSeconds).catch(showError);
       void output.key("selectedAnnotationId").set(annotation.id).catch(
         showError,
       );
@@ -429,7 +466,7 @@ function openEditor(annotation?: TapeAnnotation): void {
       input.get()?.durationSeconds ?? DEFAULT_INPUT.durationSeconds,
     );
     const start = Math.min(
-      audio.currentTime,
+      playbackPosition(),
       Math.max(0, duration - 0.2),
     );
     const end = Math.min(duration, start + 1.5);
@@ -501,8 +538,123 @@ async function saveAnnotation(): Promise<void> {
   dialog.close();
 }
 
+function playbackDuration(): number {
+  return audioBuffer?.duration ?? normalizeDurationSeconds(
+    input.get()?.durationSeconds ?? DEFAULT_INPUT.durationSeconds,
+  );
+}
+
+function playbackPosition(): number {
+  const elapsed =
+    activeSource && audioContext && playbackStartedAt !== undefined
+      ? audioContext.currentTime - playbackStartedAt
+      : 0;
+  return Math.min(
+    playbackDuration(),
+    Math.max(0, playbackOffsetSeconds + elapsed),
+  );
+}
+
 function updateTimecode(): void {
-  timecode.textContent = formatTime(audio.currentTime);
+  const position = playbackPosition();
+  const duration = playbackDuration();
+  timecode.textContent = formatTime(position);
+  scrubber.value = String(position);
+  scrubberReadout.textContent = `${formatTime(position)} / ${
+    formatTime(duration)
+  }`;
+  updateActiveCueIds();
+}
+
+function stopPlaybackSource(): void {
+  if (!activeSource) return;
+  const position = playbackPosition();
+  const source = activeSource;
+  activeSource = undefined;
+  playbackStartedAt = undefined;
+  playbackOffsetSeconds = position;
+  source.onended = null;
+  try {
+    source.stop();
+  } catch (cause) {
+    if (
+      !(cause instanceof DOMException && cause.name === "InvalidStateError")
+    ) {
+      throw cause;
+    }
+  }
+  source.disconnect();
+}
+
+function updatePlaybackFrame(): void {
+  animationFrame = undefined;
+  updateTimecode();
+  if (activeSource && !audio.paused && !disposed) {
+    animationFrame = requestAnimationFrame(updatePlaybackFrame);
+  }
+}
+
+async function startPlayback(): Promise<void> {
+  if (!audioContext || !audioBuffer || !mediaDestination || activeSource) {
+    return;
+  }
+  if (playbackOffsetSeconds >= audioBuffer.duration) {
+    playbackOffsetSeconds = 0;
+  }
+  await audioContext.resume();
+  if (audio.paused || disposed) return;
+
+  const source = audioContext.createBufferSource();
+  source.buffer = audioBuffer;
+  source.connect(mediaDestination);
+  activeSource = source;
+  playbackStartedAt = audioContext.currentTime;
+  source.onended = () => {
+    if (activeSource !== source) return;
+    activeSource = undefined;
+    playbackStartedAt = undefined;
+    playbackOffsetSeconds = audioBuffer!.duration;
+    source.disconnect();
+    updateTimecode();
+    audio.pause();
+  };
+  source.start(0, playbackOffsetSeconds);
+  if (animationFrame === undefined) {
+    animationFrame = requestAnimationFrame(updatePlaybackFrame);
+  }
+}
+
+async function seekPlayback(seconds: number): Promise<void> {
+  const wasPlaying = activeSource !== undefined && !audio.paused;
+  stopPlaybackSource();
+  playbackOffsetSeconds = Math.min(
+    playbackDuration(),
+    Math.max(0, seconds),
+  );
+  updateTimecode();
+  if (wasPlaying) await startPlayback();
+}
+
+function waitForMediaReady(): Promise<void> {
+  if (audio.readyState >= HTMLMediaElement.HAVE_METADATA) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      audio.removeEventListener("loadedmetadata", loaded);
+      audio.removeEventListener("error", failed);
+    };
+    const loaded = () => {
+      cleanup();
+      resolve();
+    };
+    const failed = () => {
+      cleanup();
+      reject(new Error(audio.error?.message ?? "The recording did not load."));
+    };
+    audio.addEventListener("loadedmetadata", loaded);
+    audio.addEventListener("error", failed);
+  });
 }
 
 function teardown(): void {
@@ -512,9 +664,12 @@ function teardown(): void {
   stops.forEach((stop) => stop());
   if (dialog.open) dialog.close();
   audio.pause();
-  audio.removeAttribute("src");
-  audio.load();
-  if (audioUrl) URL.revokeObjectURL(audioUrl);
+  stopPlaybackSource();
+  if (animationFrame !== undefined) cancelAnimationFrame(animationFrame);
+  animationFrame = undefined;
+  audio.srcObject = null;
+  mediaDestination?.stream.getTracks().forEach((track) => track.stop());
+  void audioContext?.close().catch(() => undefined);
   const cues = textTrack.cues;
   if (cues) {
     for (const cue of [...cues]) textTrack.removeCue(cue);
@@ -528,9 +683,23 @@ const stops = [
   output.sink(renderSafely),
 ];
 
-audio.addEventListener("timeupdate", updateTimecode, { signal });
-audio.addEventListener("seeked", updateTimecode, { signal });
-textTrack.addEventListener("cuechange", updateActiveCueIds, { signal });
+audio.addEventListener("play", () => {
+  void startPlayback().catch((cause) => {
+    showError(cause);
+    audio.pause();
+  });
+}, { signal });
+audio.addEventListener("pause", () => {
+  try {
+    stopPlaybackSource();
+    updateTimecode();
+  } catch (cause) {
+    showError(cause);
+  }
+}, { signal });
+scrubber.addEventListener("input", () => {
+  void seekPlayback(Number(scrubber.value)).catch(showError);
+}, { signal });
 confidenceInput.addEventListener("input", () => {
   confidenceReadout.textContent = `${confidenceInput.value}%`;
 }, { signal });
@@ -564,22 +733,25 @@ void (async () => {
     if (!reviewerId) {
       throw new Error("The per-user output has no resolved identity.");
     }
-    audioUrl = URL.createObjectURL(
-      new Blob([
-        buildSyntheticWav(
-          normalizeDurationSeconds(inputValue.durationSeconds),
-        ),
-      ], {
-        type: "audio/wav",
-      }),
+    const duration = normalizeDurationSeconds(inputValue.durationSeconds);
+    // The iframe policy disables URL-backed media. Decode the recording in
+    // memory and route it through a MediaStream, which does not fetch a URL.
+    audioContext = new AudioContext();
+    audioBuffer = await audioContext.decodeAudioData(
+      buildSyntheticWav(duration),
     );
-    audio.src = audioUrl;
+    mediaDestination = audioContext.createMediaStreamDestination();
+    audio.srcObject = mediaDestination.stream;
+    await waitForMediaReady();
     audio.controls = true;
+    scrubber.max = String(audioBuffer.duration);
+    scrubber.disabled = false;
     hydrated = true;
     addButton.disabled = false;
     saveButton.disabled = false;
     status.textContent = "Shared tape ready";
     status.dataset.ready = "true";
+    updateTimecode();
     render();
   } catch (cause) {
     showError(cause);

@@ -29,12 +29,13 @@ import {
   type IframeInputData,
   type IframeOutputData,
   type IframeStateData,
+  machineEdgeId,
   type MachineNode,
   type MachineNodeKind,
   type MachineParameters,
   type MachinePosition,
 } from "./contract.ts";
-import { evaluateSignals } from "./model.ts";
+import { dedupeMachineEdges, evaluateSignals } from "./model.ts";
 
 const fabric = connectFabric();
 const { useCell } = createFabricReact(React, fabric);
@@ -509,7 +510,7 @@ function App() {
           throw new Error("Those modules are already connected.");
         }
         await stateCell.key("edges").push({
-          id: crypto.randomUUID(),
+          id: machineEdgeId(source, target),
           source,
           target,
         });
@@ -559,7 +560,11 @@ function App() {
     );
   }
 
-  const signals = evaluateSignals(stateValue, outputValue.simulationTick);
+  const machineState: IframeStateData = {
+    ...stateValue,
+    edges: dedupeMachineEdges(stateValue.edges),
+  };
+  const signals = evaluateSignals(machineState, outputValue.simulationTick);
   const flowNodes: MachineFlowNode[] = stateValue.nodes.map((node) => ({
     id: node.id,
     type: node.kind,
@@ -575,7 +580,7 @@ function App() {
     deletable: false,
     ariaLabel: `${KIND_LABELS[node.kind]}: ${node.label}`,
   }));
-  const flowEdges: Edge[] = stateValue.edges.map((edge) => {
+  const flowEdges: Edge[] = machineState.edges.map((edge) => {
     const signal = signals.get(edge.source) ?? 0;
     const active = outputValue.showSignals && signal >= 0.5;
     return {
@@ -638,7 +643,7 @@ function App() {
           </div>
           <div className="telemetry" aria-live="polite">
             <span>{stateValue.nodes.length} modules</span>
-            <span>{stateValue.edges.length} wires</span>
+            <span>{machineState.edges.length} wires</span>
             <strong>{activeActuators} firing</strong>
           </div>
         </header>
@@ -719,14 +724,17 @@ function App() {
               nodesConnectable={!pending}
               elementsSelectable={!pending}
               fitView
-              fitViewOptions={{ padding: 0.2 }}
+              fitViewOptions={{ padding: 0.1 }}
               minZoom={0.35}
               maxZoom={1.6}
               defaultEdgeOptions={{ type: "smoothstep" }}
               colorMode="dark"
             >
               <Background color="#26334a" gap={28} size={1.2} />
-              <Controls showInteractive={false} />
+              <Controls
+                showInteractive={false}
+                fitViewOptions={{ padding: 0.1 }}
+              />
               <MiniMap<MachineFlowNode>
                 pannable
                 zoomable

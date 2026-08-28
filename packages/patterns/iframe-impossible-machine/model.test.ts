@@ -1,12 +1,13 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
+import { machineEdgeId } from "./contract.ts";
 import type {
   IframeStateData,
   MachineNode,
   MachineNodeKind,
   MachineParameters,
 } from "./contract.ts";
-import { evaluateSignals } from "./model.ts";
+import { dedupeMachineEdges, evaluateSignals } from "./model.ts";
 
 const PARAMETERS: MachineParameters = {
   active: false,
@@ -107,5 +108,27 @@ describe("evaluateSignals()", () => {
         ["second", 0],
       ]),
     );
+  });
+
+  it("treats concurrent wires with the same endpoints as one input", () => {
+    const state: IframeStateData = {
+      nodes: [
+        node("source", "sensor", { active: true }),
+        node("gate", "gate", { operator: "xor" }),
+      ],
+      edges: [
+        { id: "client-a", source: "source", target: "gate" },
+        { id: "client-b", source: "source", target: "gate" },
+      ],
+    };
+
+    expect(evaluateSignals(state, 0).get("gate")).toBe(1);
+    expect(dedupeMachineEdges(state.edges)).toEqual([
+      {
+        id: machineEdgeId("source", "gate"),
+        source: "source",
+        target: "gate",
+      },
+    ]);
   });
 });

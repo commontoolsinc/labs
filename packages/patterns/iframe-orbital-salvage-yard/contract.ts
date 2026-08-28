@@ -42,7 +42,7 @@ export interface IframeStateData {
 export interface IframeOutputData {
   preferredTool: YardTool;
   accentColor: string;
-  bookmarkedModuleIds: string[];
+  bookmarks: Record<string, boolean>;
 }
 
 export const DEFAULT_INPUT: IframeInputData = {
@@ -149,7 +149,7 @@ export const DEFAULT_STATE: IframeStateData = {
 export const DEFAULT_OUTPUT: IframeOutputData = {
   preferredTool: "move",
   accentColor: "#f4b860",
-  bookmarkedModuleIds: [],
+  bookmarks: {},
 };
 
 export const IFRAME_PATTERN = {

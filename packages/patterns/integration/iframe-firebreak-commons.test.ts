@@ -506,6 +506,7 @@ describe("iframe Firebreak Commons", () => {
         expect(summary.actionText).toContain("cut a firebreak at");
       }
 
+      await alice.setValue("#crew-name", "Unsaved lookout");
       await bob.click("#advance");
       const advanced = await Promise.all([
         waitForTurn(alice, 2),
@@ -515,6 +516,8 @@ describe("iframe Firebreak Commons", () => {
       expect(advanced.every((value) => value.actionCount >= 3)).toBe(true);
       expect(advanced.every((value) => value.actionText.includes("advanced")))
         .toBe(true);
+      expect(advanced[0].crewName).toBe("Unsaved lookout");
+      expect(advanced[1].crewName).toBe("Commons crew");
     } finally {
       alice.close();
       bob.close();

@@ -162,12 +162,16 @@
     .workspace {
       display: grid;
       grid-template-columns: minmax(0, 1fr) 250px;
+      height: 100%;
       min-height: 0;
+      overflow: hidden;
     }
     .flow-shell {
       position: relative;
+      height: 100%;
       min-width: 0;
       min-height: 0;
+      overflow: hidden;
       border-right: 1px solid #24334c;
     }
     .inspector {
@@ -311,6 +315,9 @@
     .react-flow__renderer {
       z-index: 4;
     }
+    .react-flow__selection {
+      z-index: 6;
+    }
     .react-flow__nodes {
       pointer-events: none;
       transform-origin: 0 0;
@@ -322,11 +329,18 @@
       pointer-events: all;
       user-select: none;
     }
+    .react-flow__node-sensor,
+    .react-flow__node-gate,
+    .react-flow__node-delay,
+    .react-flow__node-transformer,
+    .react-flow__node-actuator {
+      width: 218px;
+    }
     .react-flow__node.draggable {
       cursor: grab;
     }
-    .react-flow__edges,
-    .react-flow__edges svg {
+    .react-flow .react-flow__edges,
+    .react-flow .react-flow__edges svg {
       position: absolute;
       overflow: visible;
       pointer-events: none;
@@ -338,6 +352,11 @@
     .react-flow__connection-path {
       fill: none;
     }
+    svg.react-flow__connectionline {
+      position: absolute;
+      z-index: 1001;
+      overflow: visible;
+    }
     .react-flow__edge.animated path {
       stroke-dasharray: 5;
       animation: dashdraw 0.55s linear infinite;
@@ -347,6 +366,16 @@
       animation: none;
     }
     .react-flow__edge-text {
+      pointer-events: none;
+      user-select: none;
+    }
+    .react-flow__edgelabel-renderer,
+    .react-flow__viewport-portal {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
       pointer-events: none;
       user-select: none;
     }
@@ -407,6 +436,12 @@
       width: 100%;
       height: 100%;
     }
+    .react-flow__minimap-mask {
+      fill: rgba(5, 12, 24, 0.72);
+    }
+    .react-flow__minimap-node {
+      stroke-width: 2;
+    }
     .react-flow__controls {
       display: flex;
       flex-direction: column;
@@ -454,7 +489,7 @@
     }
 
     .machine-node {
-      width: 218px;
+      width: 100%;
       overflow: hidden;
       border: 1px solid #3b4a63;
       border-top: 3px solid var(--node-color, #8da0bd);

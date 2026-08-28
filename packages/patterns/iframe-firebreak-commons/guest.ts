@@ -97,6 +97,7 @@ let disposed = false;
 let pendingActions = 0;
 let pendingDescription = "";
 let crewId = "";
+let crewDraftDirty = false;
 let inputValue: IframeInputData = DEFAULT_INPUT;
 let stateValue: IframeStateData = DEFAULT_STATE;
 let outputValue: IframeOutputData = DEFAULT_OUTPUT;
@@ -327,9 +328,11 @@ function render(): void {
 
   const baseDisabled = !hydrated || pendingActions > 0;
   controls.forEach((control) => control.disabled = baseDisabled);
-  crewNameInput.value = outputValue.crew.name;
-  crewColorSelect.value = outputValue.crew.color;
-  preferredToolSelect.value = outputValue.crew.preferredTool;
+  if (!crewDraftDirty) {
+    crewNameInput.value = outputValue.crew.name;
+    crewColorSelect.value = outputValue.crew.color;
+    preferredToolSelect.value = outputValue.crew.preferredTool;
+  }
   for (const button of toolButtons) {
     button.setAttribute(
       "aria-pressed",
@@ -451,6 +454,7 @@ function saveProfile(): void {
     await outputWrite.key("crew").set(crew);
     await output.pull();
     outputValue = output.get() ?? DEFAULT_OUTPUT;
+    crewDraftDirty = false;
   });
 }
 
@@ -494,6 +498,18 @@ viewButtons.forEach((button) => {
     renderSafely();
   }, { signal });
 });
+for (
+  const control of [
+    crewNameInput,
+    crewColorSelect,
+    preferredToolSelect,
+  ]
+) {
+  control.addEventListener("input", () => {
+    crewDraftDirty = true;
+    clearError();
+  }, { signal });
+}
 saveProfileButton.addEventListener("click", saveProfile, { signal });
 deployButton.addEventListener("click", deployCrew, { signal });
 advanceButton.addEventListener("click", advanceTurn, { signal });

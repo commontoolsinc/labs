@@ -33,9 +33,9 @@ import {
 import {
   findBestSnap,
   findConnections,
-  moduleConnectors,
   normalizeQuarterTurns,
 } from "./geometry.ts";
+import { createSalvageModule, isBookmarked, setBookmark } from "./model.ts";
 
 type ModuleVisual = {
   kind: ModuleKind;
@@ -449,7 +449,6 @@ function reconcileConnections(): void {
 }
 
 function renderManifest(): void {
-  const bookmarks = new Set(outputValue.bookmarkedModuleIds);
   moduleMirror.replaceChildren(
     ...stateValue.modules.map((module) => {
       const item = document.createElement("li");
@@ -461,7 +460,7 @@ function renderManifest(): void {
       button.ariaPressed = String(module.id === selectedModuleId);
       button.disabled = !hydrated || Boolean(pendingAction);
       label.textContent = `${
-        bookmarks.has(module.id) ? "★ " : ""
+        isBookmarked(outputValue.bookmarks, module.id) ? "★ " : ""
       }${module.label}`;
       kind.className = "module-kind";
       kind.textContent = module.kind;
@@ -488,9 +487,7 @@ function renderSelection(): void {
     }° · ${module.connectors.length} connector${
       module.connectors.length === 1 ? "" : "s"
     }`;
-    bookmarkButton.textContent = outputValue.bookmarkedModuleIds.includes(
-        module.id,
-      )
+    bookmarkButton.textContent = isBookmarked(outputValue.bookmarks, module.id)
       ? "Remove bookmark"
       : "Bookmark";
   }
@@ -619,42 +616,8 @@ async function snapSelected(): Promise<void> {
   await resolved.key("transform").set(result.transform);
 }
 
-const KIND_LABEL: Record<ModuleKind, string> = {
-  hub: "Junction hub",
-  habitat: "Habitat canister",
-  cargo: "Cargo spine",
-  solar: "Solar rig",
-  relay: "Relay mast",
-};
-
-const KIND_COLOR: Record<ModuleKind, Vector3Tuple> = {
-  hub: [0.28, 0.45, 0.57],
-  habitat: [0.29, 0.56, 0.43],
-  cargo: [0.69, 0.4, 0.18],
-  solar: [0.32, 0.41, 0.72],
-  relay: [0.57, 0.34, 0.64],
-};
-
 async function addModule(kind: ModuleKind): Promise<void> {
-  const modules = await modulesCell.pull();
-  const ordinal = modules.filter((module) => module.kind === kind).length + 1;
-  const angle = modules.length * 2.399_963;
-  const radius = 8.5 + modules.length % 3 * 1.4;
-  const module: StationModule = {
-    id: crypto.randomUUID(),
-    label: `${KIND_LABEL[kind]} ${ordinal}`,
-    kind,
-    color: KIND_COLOR[kind],
-    transform: {
-      position: [
-        roundHalf(Math.cos(angle) * radius),
-        1.2,
-        roundHalf(Math.sin(angle) * radius),
-      ],
-      rotationQuarterTurns: 0,
-    },
-    connectors: moduleConnectors(kind),
-  };
+  const module = createSalvageModule(kind, crypto.randomUUID());
   selectionAwaitingModuleId = module.id;
   try {
     await modulesCell.push(module);
@@ -668,10 +631,11 @@ async function toggleBookmark(): Promise<void> {
   const moduleId = selectedModuleId;
   if (!moduleId) return;
   const current = output.get() ?? outputValue;
-  const bookmarks = current.bookmarkedModuleIds.includes(moduleId)
-    ? current.bookmarkedModuleIds.filter((id) => id !== moduleId)
-    : [...current.bookmarkedModuleIds, moduleId];
-  await outputWrite.key("bookmarkedModuleIds").set(bookmarks);
+  await setBookmark(
+    outputWrite.key("bookmarks"),
+    moduleId,
+    !isBookmarked(current.bookmarks, moduleId),
+  );
 }
 
 function roundHalf(value: number): number {
