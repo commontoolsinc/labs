@@ -10,7 +10,7 @@
 
 /**
  * Tags identifying the classes this system recognizes for dispatch. These are
- * distinct from wire-format `TAGS` -- they identify *what the value is*, not
+ * distinct from wire-format `TAGS` -- they identify _what the value is_, not
  * what fabric type it becomes after conversion.
  *
  * Covers two categories:
