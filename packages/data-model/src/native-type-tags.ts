@@ -12,12 +12,11 @@
  * why the constructor switch has fallbacks beneath it rather than standing
  * alone.
  *
- * This module is the half of that dispatch which holds the fabric classes, and
- * so is layered above them. The half that needs none of them --  the tag
- * vocabulary, the native builtins, and the walk both halves share -- is in
- * `native-builtin-tags.ts`, and is what a module layered below the fabric
- * classes asks instead. The names that module defines are re-exported here, so
- * that a caller with no interest in the split sees one module.
+ * This module is the dispatch that knows every class the system has, fabric
+ * ones included, and so is layered above them. `native-builtin-tags.ts` is the
+ * dispatch a module layered below them asks instead, and `native-tags.ts` holds
+ * what the two share. Both are re-exported here, so that a caller with no
+ * interest in the split sees one module.
  */
 
 import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
@@ -28,17 +27,19 @@ import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricInstance } from "./interface.ts";
 import {
+  classOfNativeValue,
   NATIVE_TAGS,
   type NativeTag,
+} from "./native-tags.ts";
+import {
+  isNativeError,
   tagFromNativeBuiltinClass,
-  tagFromNativeValueUsing,
 } from "./native-builtin-tags.ts";
 
+export { NATIVE_TAGS, type NativeTag } from "./native-tags.ts";
 export {
   isNativeError,
   isValidFabricNativeObject,
-  NATIVE_TAGS,
-  type NativeTag,
 } from "./native-builtin-tags.ts";
 
 /**
@@ -46,13 +47,18 @@ export {
  * the constructor is a recognized type (JS builtins or system-defined
  * `FabricPrimitive`s), or `null` otherwise.
  *
- * The fabric classes are asked first, and the JS builtins are then asked by
- * `tagFromNativeBuiltinClass()`. Order does not decide anything between them:
- * a class is in one list or the other, never both.
+ * The builtins are asked first, by `tagFromNativeBuiltinClass()`. Order decides
+ * nothing between the two -- a class is in one list or the other, never both --
+ * so what it is chosen for is cost: a `switch` on object identity compares in
+ * order, and plain objects and arrays outnumber everything else this is asked
+ * about by a wide margin.
  */
 export function tagFromNativeClass(
   constructorFn: { prototype: unknown },
 ): NativeTag | null {
+  const builtin = tagFromNativeBuiltinClass(constructorFn);
+  if (builtin !== null) return builtin;
+
   switch (constructorFn) {
     case FabricBytes:
       return NATIVE_TAGS.FabricBytes;
@@ -67,7 +73,7 @@ export function tagFromNativeClass(
     case FabricRegExp:
       return NATIVE_TAGS.FabricRegExp;
     default:
-      return tagFromNativeBuiltinClass(constructorFn);
+      return null;
   }
 }
 
@@ -76,17 +82,34 @@ export function tagFromNativeClass(
  * value is a recognized convertible native instance, or `null` otherwise.
  * Non-object types (`null`, `undefined`, primitives) return `Primitive`.
  *
- * The walk to the value's class, and the array and native-error rules that
- * ride on it, are `tagFromNativeValueUsing()`'s; what this adds is the class
- * lookup that knows the fabric classes, plus the two fallbacks below for
- * values whose class was not recognized at all.
+ * An array is tagged `Array` before anything else is consulted.
+ * `Array.isArray()` is realm-agnostic and sees through both a subclass and a
+ * severed prototype, so every array reaches array handling and is decided by
+ * the array rule, which alone decides what an array may be.
  */
 export function tagFromNativeValue(value: unknown): NativeTag | null {
-  const tag = tagFromNativeValueUsing(value, tagFromNativeClass);
-  if (tag !== null) return tag;
+  if (value === null || typeof value !== "object") {
+    return NATIVE_TAGS.Primitive;
+  }
 
-  // Reaching here means the value is an object -- a non-object is tagged
-  // `Primitive` above -- whose class went unrecognized.
+  // Arrays first, and unconditionally: see above.
+  if (Array.isArray(value)) {
+    return NATIVE_TAGS.Array;
+  }
+
+  const ctor = classOfNativeValue(value);
+  if (ctor !== undefined) {
+    const tag = tagFromNativeClass(ctor);
+    if (tag !== null) return tag;
+  }
+
+  // Reaching here means the value's class went unrecognized.
+
+  // `Error`s with no reachable constructor -- e.g. one whose prototype has
+  // been severed, or one from another realm. An ordinary subclass (including
+  // `DOMException`) never gets here: the class lookup matches it via
+  // `prototype instanceof Error`.
+  if (isNativeError(value)) return NATIVE_TAGS.Error;
 
   // `FabricInstance` values (object-like protocol types).
   if (value instanceof FabricInstance) return NATIVE_TAGS.FabricInstance;
