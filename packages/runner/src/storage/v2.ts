@@ -5729,7 +5729,11 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     // internal-verifier read of the write-target doc, whose VALUE the
     // transaction read path serves from the same non-speculative stack
     // (v2-transaction.ts) — the verifier verifies durable policy state
-    // and names the durable basis, together. Content-addressed (cid:)
+    // and names the durable basis, together. A verifier read AT the CFC
+    // metadata path leaves the conflict set in the loop below and never
+    // reaches this emission, so the producer here is a verifier read at
+    // another path, a document's ["schema"] member among them.
+    // Content-addressed (cid:)
     // reads keep their ordinary overlay value there — identical to the
     // durable content by construction — while this exclusion still
     // covers their layers, so an echo-staged schema doc neither aborts
@@ -5857,6 +5861,19 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
         continue;
       }
 
+      // A runtime-internal read of a document's CFC metadata path resolves
+      // labels. It is outside the attempt's consumed set (CFC spec §18.6.2,
+      // read exclusions for runtime-internal reads), and a derived label
+      // records the join the attempt observed rather than subscribing to its
+      // sources (§8.9.4, point-in-time semantics). The read stays in the
+      // journal, so reactivity re-runs when the envelope changes; only the
+      // commit's conflict precondition drops it. A handler's own label
+      // introspection consumes through an explicit observation record rather
+      // than through this raw read.
+      if (isInternalVerifierRead(read.meta) && isCfcLabelPath(read.path)) {
+        continue;
+      }
+
       const scope = normalizeCellScope(read.scope);
 
       const opPaths = mergeableOpPathsByEntity.get(`${read.id}\0${scope}`);
@@ -5902,7 +5919,9 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
         // verify-durable and name-durable travel together. Confined to
         // the blind-write tx shape: `structuralTarget` survives the
         // unmark exactly so commit-time emission can recognize it, and
-        // a verifier read in any other tx keeps naming every layer.
+        // a verifier read in any other tx keeps naming every layer. The
+        // verifier reads that arrive here are the ones outside the CFC
+        // metadata path, which the loop above drops outright.
         (source !== undefined && isDurableReadTx(source)) ||
           (structuralTarget !== undefined &&
             isInternalVerifierRead(read.meta)),

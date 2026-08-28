@@ -8092,7 +8092,13 @@ supply; OW29/OW32/OW34 closed):
     `stale confirmed read … conflicted with` (the commit-outcome tap's
     signature, store-confirmed: basis = the draft mint's seq, head =
     the served seed's); a concurrent `/cfc` change still conflicts —
-    the precondition the ruling kept. Pinned red-first
+    the precondition the ruling kept. *(SUPERSEDED 2026-08-28: a
+    runtime-internal verifier read at `["cfc"]` no longer enters the
+    commit's conflict set, per CFC spec §18.6.2's read exclusion for
+    runtime-internal label-metadata reads and §8.9.4's point-in-time
+    derived-label semantics. The read stays journaled, so the
+    commit-set shape this entry pins — verifier reads sit AT
+    `["cfc"]`, never the doc root — is unchanged.)* Pinned red-first
     in `speculation-overlay.test.ts`, six ways: the CFC-relevant
     blind write over a standing echo EXPORTS (base red:
     `SpeculativeBasisError` naming the echo layer; exactly one engine

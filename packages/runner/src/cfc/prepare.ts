@@ -825,8 +825,8 @@ const storedMetadataFor = (
   scope: ReturnType<typeof normalizeCellScope>,
   type: MediaType,
 ): CfcMetadata | undefined => {
-  // Read AT ["cfc"], never the whole document: this read is a commit-time
-  // concurrency precondition scoped to what the verifier CONSUMES. A
+  // Read AT ["cfc"], never the whole document: the read is scoped to what
+  // the verifier CONSUMES, and it is what reactivity re-runs on. A
   // path-[] recursive read made the whole document a value dependency, so
   // a concurrent, metadata-irrelevant value write between the reader's
   // confirmed basis and the server head conflicted the commit — for a
@@ -835,8 +835,9 @@ const storedMetadataFor = (
   // typed input as a stale-confirmed-read conflict the moment the §6
   // layer-naming half was fixed (verification-coverage.md OW47's
   // re-close; the name-draft triage's arm (c), the path half of the
-  // ruled arm (b)). A concurrent /cfc change still conflicts — the
-  // precondition the ruling kept.
+  // ruled arm (b)). The read is marked as a runtime-internal verifier
+  // read, so it stays in the journal and drives reactivity while the
+  // commit's conflict set drops it (spec §18.6.2, §8.9.4).
   const metadata = tx.readOrThrow({
     space,
     id,
