@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
-    // What belongs here is `ES2026`, the version that defines
-    // `Error.isError()`. The pinned TypeScript does not recognize that
-    // target, and declares the method only in its `esnext` lib.
+    // `data-model` requires `Error.isError()`, which is introduced in
+    // ES2026. As of this writing, TypeScript does not recognize `es2026`,
+    // so we use `ESNext` instead.
     "target": "ESNext",
     "module": "NodeNext",
     "moduleResolution": "Node16",
