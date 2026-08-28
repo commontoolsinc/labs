@@ -255,7 +255,17 @@ describe("run_pattern publish render gate", () => {
   });
 
   afterEach(async () => {
-    for (const extra of extraRuntimes ?? []) await extra.dispose();
+    // Each disposal is isolated: a rejecting one must not skip the rest of
+    // the loop or the shared teardown below it. The inline disposal this
+    // replaced always reached the shared cleanup, and the loop that fixed one
+    // leak introduced another until it did too.
+    for (const extra of extraRuntimes ?? []) {
+      try {
+        await extra.dispose();
+      } catch {
+        // Keep tearing down the remaining runtimes and the shared manager.
+      }
+    }
     await runtime?.dispose();
     await storageManager?.close();
   });
