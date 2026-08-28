@@ -5290,17 +5290,19 @@ supply; OW29/OW32/OW34 closed):
   step) and was held only by a co-resident file's red in the same shard,
   while lunch-poll-vote passed its local half 8/8 and its probe went red at
   the probed surface for the second campaign running. **The current census
-  (2026-08-28, after the lunch lift PR's four probe boards) is ONE patterns
+  (2026-08-28, after the lunch lift PR's three probe boards) is ONE patterns
   entry: lunch-poll-vote's FILE entry, RESTORED.** default-app's reload
   STEP LIFTED 2026-08-28 — the owner ruled the SURFACE reading of the
   probe bar, under which its evidence was already complete (the LIFT block
   at the end of this row). lunch-poll-vote's lift was ATTEMPTED the same
   day on the probe's own artifact — the park root-caused into the
   closure-replication write path, two supplier geometries fixed red-first
-  on the PR — and every one of the PR's FOUR probe boards went red at the
-  probed surface, the last exposing the still-open third geometry (the
-  supplier compile mid-flight), so the entry is restored carrying the
-  accumulated map (the lunch ROOT-CAUSE, PROBE-2/3/4 blocks at the end of
+  on the PR — and every one of the PR's THREE probe boards went red at the
+  probed surface (runs 33160430927, 33164596936, 33165960083; four probes
+  across the arc, counting the pre-PR phase-3 board 33138358110 that opened
+  it), the last exposing the still-open third geometry (the supplier
+  compile mid-flight), so the entry is restored carrying the accumulated
+  map (the lunch ROOT-CAUSE, PROBE-2/3/4 blocks at the end of
   this row). The FLIP's bar remains a green ON lane and every list empty;
   this entry is again what holds the list (the co-resident `:133` debt the
   probe surfaced was paid by #6477 — the OBSERVATION's FIXED paragraph
@@ -7455,8 +7457,12 @@ supply; OW29/OW32/OW34 closed):
     work than the sibling's read-plus-write); watched red at the
     pre-fix head with the exact production error line and the child
     space empty; 6/6 green with the fix; mutation-killed (neutralizing
-    the await hunk alone reds it). Recorded residual, flagged not
-    filled: a CROSS-REPLICA supplier (a client/harness write-back
+    the await hunk alone reds it — the sibling step issues BOTH
+    replications from a second manager whose fallback-origin map is
+    empty, so the later fallback fix cannot mask this pin; moving them
+    back onto the compiling manager silently unpins the await).
+    Recorded residual, flagged not filled: a CROSS-REPLICA supplier (a
+    client/harness write-back
     arriving over the wire) is outside the await's reach — no observed
     red has that shape (the deduction above excludes it for this one),
     and building for it would be filling an unobserved gap. Also
@@ -7604,10 +7610,11 @@ supply; OW29/OW32/OW34 closed):
     coordinates so the next seat starts where this one stopped. The
     lift bar is unchanged (the ruled local-plus-CI-probe bar); the
     lift condition is now concretely the third geometry's close. What
-    four probes on one PR taught, recorded as method: each board's
-    artifact advanced the map exactly one geometry — the probe is not
-    a gate ceremony but the arc's only instrument that SEES the CI
-    boot order; and a declared hard stop kept the loop honest.
+    the arc's four probes taught — one before the PR, three on it —
+    recorded as method: each board's artifact advanced the map exactly
+    one geometry — the probe is not a gate ceremony but the arc's only
+    instrument that SEES the CI boot order; and a declared hard stop
+    kept the loop honest.
     The pin suite (`tasks/server-execution-on-skips.test.ts`) is bound,
     post-restore, to the SINGLE-entry registry: the patterns list holds
     exactly the restored FILE entry (reason pinned to the

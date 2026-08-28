@@ -42,6 +42,7 @@
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import { getLogger, type LogMessage } from "@commonfabric/utils/logger";
 import * as MemoryV2Server from "@commonfabric/memory/v2/server";
 import * as Engine from "@commonfabric/memory/v2/engine";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
@@ -148,6 +149,38 @@ describe("closure replication: the in-flight sibling supplier race", () => {
     await server.close();
   });
 
+  /** Run `body` with the `pattern-manager` logger's error lines captured,
+   * resolved exactly as the logger resolves them (its messages are lazy
+   * closures). The logger is a process-wide singleton, so the spy is an own
+   * property shadowing the prototype method, deleted again afterwards, and
+   * it delegates so the line still prints. */
+  const captureManagerErrors = async (
+    body: () => Promise<void>,
+  ): Promise<{ key: string; line: string }[]> => {
+    const managerLogger = getLogger("pattern-manager");
+    const realError = managerLogger.error.bind(managerLogger);
+    const captured: { key: string; line: string }[] = [];
+    const spied = managerLogger as unknown as {
+      error?: (key: string, ...messages: LogMessage[]) => void;
+    };
+    spied.error = (key: string, ...messages: LogMessage[]) => {
+      const parts = messages.flatMap((message) => {
+        const resolved = typeof message === "function"
+          ? (message as () => unknown)()
+          : message;
+        return Array.isArray(resolved) ? resolved : [resolved];
+      });
+      captured.push({ key, line: parts.map(String).join(" ") });
+      realError(key, ...messages);
+    };
+    try {
+      await body();
+    } finally {
+      delete spied.error;
+    }
+    return captured;
+  };
+
   /** The closure identities readable for `entry` in `space` on a fresh
    * transaction (the replication's own read shape). */
   const readableClosure = async (
@@ -195,39 +228,71 @@ describe("closure replication: the in-flight sibling supplier race", () => {
       const entry = runtime.patternManager.getArtifactEntryRef(pattern);
       if (entry === undefined) throw new Error("compile produced no entry ref");
       await runtime.patternManager.flushCompileCacheWrites();
-
-      // The SIBLING: supply the parent space B from A — fire-and-forget,
-      // in flight (the content-cache hit's shape).
-      runtime.patternManager.replicatePatternToSpace(pattern, spaceB, spaceA);
-      // The CHILD replication, issued synchronously after — the runner's
-      // CT-1687 call inside the same handler run. Its origin is B, whose
-      // supplier is still mid-read: unfixed, its one read of B finds
-      // nothing and the replication dies; C never becomes loadable — the
-      // lunch red's `pattern-unloadable` forever-park.
-      runtime.patternManager.replicatePatternToSpace(pattern, spaceC, spaceB);
-
-      await runtime.patternManager.flushCompileCacheWrites();
       await storageManager.synced();
 
-      // THE PIN: the child space holds the closure and a fresh runtime
-      // loads the pattern from it by identity — exactly what the child
-      // space's structure load needs to unpark.
-      const childState = await readableClosure(runtime, spaceC, entry.identity);
-      expect(childState.source).toContain(entry.identity);
-      const rt2 = new Runtime({
+      // BOTH replications run from a SECOND manager sharing the storage —
+      // the artifact entry ref rides a module-level side table, so it holds
+      // the same pattern object while having persisted NOTHING itself, i.e.
+      // its FALLBACK-ORIGIN map is empty. That is the point: the compiling
+      // manager recorded A as a persist target for this entry, so on THIS
+      // manager the fallback would rescue the child replication from A even
+      // with the sibling await deleted, and the mutation that removes the
+      // await alone would leave this step green. Here the only thing that
+      // can supply C is the await on the in-flight sibling — so the await is
+      // load-bearing on its own and a refactor that drops it reds this step.
+      const supplier = new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager,
         experimental: { serverExecution: true },
       });
       try {
-        const loaded = await rt2.patternManager.loadPatternByIdentity(
-          entry.identity,
-          entry.symbol,
-          spaceC,
+        // The SIBLING: supply the parent space B from A — fire-and-forget,
+        // in flight (the content-cache hit's shape).
+        supplier.patternManager.replicatePatternToSpace(
+          pattern,
+          spaceB,
+          spaceA,
         );
-        expect(loaded).toBeDefined();
+        // The CHILD replication, issued synchronously after — the runner's
+        // CT-1687 call inside the same handler run. Its origin is B, whose
+        // supplier is still mid-read: unfixed, its one read of B finds
+        // nothing and the replication dies; C never becomes loadable — the
+        // lunch red's `pattern-unloadable` forever-park.
+        supplier.patternManager.replicatePatternToSpace(
+          pattern,
+          spaceC,
+          spaceB,
+        );
+
+        await supplier.patternManager.flushCompileCacheWrites();
+        await storageManager.synced();
+
+        // THE PIN: the child space holds the closure and a fresh runtime
+        // loads the pattern from it by identity — exactly what the child
+        // space's structure load needs to unpark.
+        const childState = await readableClosure(
+          runtime,
+          spaceC,
+          entry.identity,
+        );
+        expect(childState.source).toContain(entry.identity);
+        const rt2 = new Runtime({
+          apiUrl: new URL(import.meta.url),
+          storageManager,
+          experimental: { serverExecution: true },
+        });
+        try {
+          const loaded = await rt2.patternManager.loadPatternByIdentity(
+            entry.identity,
+            entry.symbol,
+            spaceC,
+          );
+          expect(loaded).toBeDefined();
+        } finally {
+          await rt2.dispose();
+        }
       } finally {
-        await rt2.dispose();
+        await supplier.dispose();
       }
     },
   );
@@ -369,16 +434,38 @@ describe("closure replication: the in-flight sibling supplier race", () => {
         experimental: { serverExecution: true },
       });
       try {
-        rt2.patternManager.replicatePatternToSpace(pattern, spaceF, spaceD);
-        // The loud one-shot failure contract stands: the replication
-        // settles (a hang here would wedge every flushCompileCacheWrites
-        // caller — the client durability barrier's territory) and the
-        // target stays empty.
-        await rt2.patternManager.flushCompileCacheWrites();
-        await storageManager.synced();
+        const errors = await captureManagerErrors(async () => {
+          rt2.patternManager.replicatePatternToSpace(pattern, spaceF, spaceD);
+          // The loud one-shot failure contract stands: the replication
+          // settles (a hang here would wedge every flushCompileCacheWrites
+          // caller — the client durability barrier's territory) and the
+          // target stays empty.
+          await rt2.patternManager.flushCompileCacheWrites();
+          await storageManager.synced();
+        });
         const deadTarget = await readableClosure(rt2, spaceF, entry.identity);
         expect(deadTarget.source).toEqual([]);
         expect(deadTarget.compiled).toEqual([]);
+
+        // LOUD is half the contract, and the half a settle-and-empty
+        // assertion cannot see: turning the failing throw into a silent
+        // return also leaves the target empty. `closure-replication-failed`
+        // is the discriminating event every CI probe classification in this
+        // arc hung on — losing it blinds the next forensics pass with no
+        // lane going red. Exactly one line, because the replication is
+        // one-shot: no retry loop may hide behind the same log key.
+        const failures = errors.filter((error) =>
+          error.key === "closure-replication-failed"
+        );
+        expect(failures.length).toBe(1);
+        expect(failures[0].line).toContain(`entry=${entry.identity}`);
+        expect(failures[0].line).toContain(`from=${spaceD}`);
+        expect(failures[0].line).toContain(`to=${spaceF}`);
+        // The legacy reason string, preserved verbatim so the forensics
+        // greps written against the CI artifacts keep matching.
+        expect(failures[0].line).toContain(
+          "source closure unavailable in origin space",
+        );
       } finally {
         await rt2.dispose();
       }

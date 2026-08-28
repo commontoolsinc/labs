@@ -223,11 +223,13 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
     // was fully met by the evidence above. Full chain: verification-coverage.md
     // OW45 (the PHASE 3 block and the LIFT block that follows it).
     {
-      // RESTORED 2026-08-28 after FOUR direct-CI unskip probes on the lift
-      // PR (#6484) — the last one red at the surface with the declared
-      // hard stop honored. The park's WRITE PATH is now mapped three
-      // geometries deep, each caught by its probe's own artifact and the
-      // first two FIXED red-first on that PR (kept: the fixes are real —
+      // RESTORED 2026-08-28 after THREE direct-CI unskip probes on the
+      // lift PR (#6484) — four across the arc, counting the pre-PR
+      // phase-3 board that opened it — the last one red at the surface
+      // with the declared hard stop honored. The park's WRITE PATH is now
+      // mapped three geometries deep, each caught by its probe's own
+      // artifact and the first two FIXED red-first on that PR (kept: the
+      // fixes are real —
       // packages/runner/test/pattern-replication-sibling-race.test.ts):
       // (1) the in-flight SIBLING replication supplying the parent space
       // (sibling-await, `replicationsIntoSpace` tickets); (2) the parent
@@ -258,8 +260,9 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
         "space's program closure has NO reliable server-side supplier " +
         "when the create-profile event beats every persist of the " +
         "profile-home module. Three supplier geometries mapped on PR " +
-        "#6484's four probe boards (runs 33160430927, 33164596936, " +
-        "33165960083): the in-flight sibling replication (FIXED, " +
+        "#6484's three probe boards (runs 33160430927, 33164596936, " +
+        "33165960083; the arc's first probe, run 33138358110, ran " +
+        "pre-PR under phase 3): the in-flight sibling replication (FIXED, " +
         "sibling-await), the by-ORDER closure-less parent (the in-memory " +
         "index serves patterns with no per-space persist; FIXED, " +
         "module-keyed fallback origins), and the still-mid-flight " +

@@ -138,7 +138,8 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
 });
 
 // The one entry is the RESTORED lunch-poll-vote FILE entry (2026-08-28):
-// the lift PR (#6484) ran FOUR direct-CI unskip probe boards; every one
+// the lift PR (#6484) ran THREE direct-CI unskip probe boards (four
+// across the arc — the first opened it pre-PR, under phase 3); every one
 // red at the probed surface with one identical signature, each probe's
 // artifact advancing the map one geometry (sibling replication in flight
 // -> FIXED; by-ORDER closure-less parent via the in-memory index ->
