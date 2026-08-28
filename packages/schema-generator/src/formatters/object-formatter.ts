@@ -246,7 +246,11 @@ function hasFabricExecPlainObjectBase(
  * Formatter for object types (interfaces, type literals, etc.)
  */
 export class ObjectFormatter implements TypeFormatter {
-  constructor(private schemaGenerator: SchemaGenerator) {}
+  #schemaGenerator: SchemaGenerator;
+
+  constructor(schemaGenerator: SchemaGenerator) {
+    this.#schemaGenerator = schemaGenerator;
+  }
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
     // Handle object types (interfaces, type literals, classes)
@@ -270,7 +274,7 @@ export class ObjectFormatter implements TypeFormatter {
       return { type: "object", additionalProperties: true };
     }
 
-    const builtin = this.lookupBuiltInSchema(type, checker);
+    const builtin = this.#lookupBuiltInSchema(type, checker);
     if (builtin) return builtin;
 
     // Do not early-return for empty object types. Instead, try to enumerate
@@ -365,7 +369,7 @@ export class ObjectFormatter implements TypeFormatter {
       }
 
       // Delegate to the main generator (specific formatters handle wrappers/defaults)
-      const generated = this.schemaGenerator.formatChildType(
+      const generated = this.#schemaGenerator.formatChildType(
         resolvedPropType,
         context,
         propTypeNode,
@@ -405,7 +409,7 @@ export class ObjectFormatter implements TypeFormatter {
       ? undefined
       : stringIndex ?? numberIndex;
     if (chosenIndex) {
-      const apSchema = this.schemaGenerator.formatChildType(
+      const apSchema = this.#schemaGenerator.formatChildType(
         chosenIndex,
         context,
         undefined,
@@ -451,7 +455,7 @@ export class ObjectFormatter implements TypeFormatter {
     return schema;
   }
 
-  private lookupBuiltInSchema(
+  #lookupBuiltInSchema(
     type: ts.Type,
     checker: ts.TypeChecker,
   ): MutableJSONSchema | undefined {
