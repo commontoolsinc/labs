@@ -1,0 +1,30 @@
+{
+  "label": "pattern index discovery and composition",
+  "notes": "The standing suite named by docs/pattern-index-measurement.md. No task names the pattern index, names a published pattern, or says the word \"reuse\". Each is a thing a person would ask for, worded so that a part the index already holds would answer part of it. Edit a task's text and the runs before and after are no longer comparable; add a task rather than reword one.",
+  "tasks": [
+    {
+      "id": "counter",
+      "text": "Build me a simple counter with an increment button and a reset button."
+    },
+    {
+      "id": "reading-list",
+      "text": "Make me a page where I can keep the books I'm reading, and give each one a star rating."
+    },
+    {
+      "id": "friends-birthdays",
+      "text": "I want a page listing my friends with their birthdays, so I can see whose is coming up next."
+    },
+    {
+      "id": "project-notes",
+      "text": "Build me a page for my project notes where I can put labels on each note and filter down to one label."
+    },
+    {
+      "id": "trip-timeline",
+      "text": "Make a page that lays the days of a trip out in order so I can see what happens when."
+    },
+    {
+      "id": "monthly-expenses",
+      "text": "Give me a page where I can enter my monthly expenses and sort them by amount."
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+[
+  {
+    "role": "user",
+    "content": "Make me a packing list."
+  },
+  {
+    "role": "assistant",
+    "content": "Publishing what is already there.",
+    "toolCalls": [
+      {
+        "id": "a1",
+        "type": "function",
+        "function": {
+          "name": "run_pattern",
+          "arguments": "{\"sourceText\": \"import PackingList from \\\"cf:pattern:pub-packing-list\\\";\\nexport default PackingList;\\n\"}"
+        }
+      }
+    ]
+  },
+  {
+    "role": "tool",
+    "toolCallId": "a1",
+    "toolName": "run_pattern",
+    "content": "{\"outputId\": \"alias:run_pattern:1\", \"status\": \"ok\", \"handle\": \"cfh:a:alias\"}"
+  }
+]

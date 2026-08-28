@@ -40,7 +40,10 @@ cookie when it loads. Do not put it behind a public address.
   `search_patterns` and `record_feedback`, so a run can find an existing pattern
   rather than write one from scratch, and publishes what it worked out back to
   the index. It is also what the Index view reads; without one that view says so
-  and the server answers its route with a 404.
+  and the server answers its route with a 404. Driving a list of tasks through
+  this server unattended and counting what they did with the index is
+  [the measurement protocol](../docs/pattern-index-measurement.md), whose runner
+  reaches this server over the same routes the page does.
 
 ## Running it
 

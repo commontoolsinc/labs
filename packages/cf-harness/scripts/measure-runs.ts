@@ -1,0 +1,868 @@
+#!/usr/bin/env -S deno run --allow-read
+/**
+ * Count what console runs did with the pattern index.
+ *
+ * The console writes each run to `<artifact-root>/<run-id>/`, and a
+ * `delegate_task` child to `<run-id>.subagent.<n>/`. This walks that tree and
+ * counts, per run family: the searches issued and what the index answered
+ * them with, the `run_pattern` calls split by whether they named a published
+ * pattern or carried source, the `cf:pattern:` specifiers that source
+ * imported, the delegations, and the slugs assigned.
+ *
+ * What the count establishes and what it does not is the subject of
+ * [the measurement protocol](../docs/pattern-index-measurement.md). In short:
+ * these are counts of what a run *did*. Nothing here reads a rendered piece,
+ * so nothing here says whether what the run built works.
+ *
+ * Usage:
+ *   deno task measure-runs                       # every family under the root
+ *   deno task measure-runs <run-id> [<run-id>…]  # named families only
+ *   deno task measure-runs --json                # machine-readable
+ *   deno task measure-runs --artifact-root=DIR   # a root other than the default
+ */
+
+import { parseArgs } from "@std/cli/parse-args";
+import { join } from "@std/path";
+import type { HarnessTranscriptMessage } from "../src/contracts/transcript.ts";
+
+/** Where the console writes its runs, relative to its working directory. */
+export const DEFAULT_ARTIFACT_ROOT = ".cf-harness-console/runs";
+
+/** The suffix the harness gives a `delegate_task` child's run directory. */
+const SUBAGENT_MARKER = ".subagent.";
+
+const CF_PATTERN_SPECIFIER = /cf:pattern:([A-Za-z0-9_-]+)/g;
+
+/**
+ * A JSON payload lifted out of a transcript, or the reason it could not be
+ * read. Nothing here collapses an unreadable payload into a zero: a search
+ * whose answer is missing is a search nobody can say the index answered,
+ * which is a different reading from a search the index answered with nothing.
+ * The two are counted apart the whole way to the rendered report.
+ */
+export type TranscriptJson<Value> =
+  | { kind: "read"; value: Value }
+  | { kind: "unread"; reason: string };
+
+const read = <Value>(value: Value): TranscriptJson<Value> => ({
+  kind: "read",
+  value,
+});
+
+const unread = <Value>(reason: string): TranscriptJson<Value> => ({
+  kind: "unread",
+  reason,
+});
+
+const parseJson = <Value>(
+  text: string,
+  what: string,
+): TranscriptJson<Value> => {
+  try {
+    return read(JSON.parse(text) as Value);
+  } catch (error) {
+    return unread(
+      `${what} is not JSON: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+};
+
+/** What a `search_patterns` call asked the index for. */
+export interface SearchQuery {
+  tags: readonly string[];
+  text?: string;
+}
+
+/** What the index answered a `search_patterns` call with. */
+export type SearchAnswer =
+  | { status: "ok"; hits: number }
+  | { status: "error"; message: string };
+
+export interface MeasuredSearch {
+  query: TranscriptJson<SearchQuery>;
+  answer: TranscriptJson<SearchAnswer>;
+}
+
+/**
+ * What source carrying a `cf:pattern:` import does with it.
+ *
+ * A bare re-export — `import P from "cf:pattern:x"; export default P` — imports
+ * a published pattern and composes nothing. It is indistinguishable from real
+ * composition by import count alone, and the live index holds entries that are
+ * exactly this, one of them ranked third overall. Counting the two together
+ * would inflate the reuse reading with the behavior the measurement exists to
+ * tell apart, so they are counted separately the whole way to the report.
+ */
+export type SourceComposition = "no-imports" | "re-export" | "composition";
+
+/** What a `run_pattern` call was pointed at. */
+export type RunPatternTarget =
+  | { kind: "pattern-id"; patternId: string }
+  | {
+    kind: "source";
+    sourceLength: number;
+    importedPatternIds: readonly string[];
+    composition: SourceComposition;
+  };
+
+export interface MeasuredRunPattern {
+  target: TranscriptJson<RunPatternTarget>;
+  outcome: TranscriptJson<{ status: string }>;
+}
+
+export interface MeasuredDelegation {
+  profile: TranscriptJson<string>;
+}
+
+export interface MeasuredSlug {
+  slug: TranscriptJson<string>;
+}
+
+/** One run directory's calls against the index, and whether it was read. */
+export interface RunMeasurement {
+  runId: string;
+  role: "parent" | "subagent";
+  transcript: TranscriptJson<{ messages: number }>;
+  searches: readonly MeasuredSearch[];
+  runPatterns: readonly MeasuredRunPattern[];
+  delegations: readonly MeasuredDelegation[];
+  slugs: readonly MeasuredSlug[];
+}
+
+/**
+ * The counts a report adds up.
+ *
+ * Every field is an algebra rather than a judgement: a sum, a union of
+ * identifiers, or a record merged by summing its counts. So `mergeTotals` is
+ * commutative and associative, and the order runs are walked in cannot change
+ * a total. Nothing here is a choice between two readings, which is what would
+ * destroy that property.
+ *
+ * The four search fields partition `searches`, and the three `runPattern`
+ * target fields partition `runPatterns`: an unreadable payload lands in the
+ * `Unread` field rather than in the majority one.
+ */
+export interface MeasurementTotals {
+  runs: number;
+  runsUnread: number;
+  searches: number;
+  searchesWithHits: number;
+  searchesEmpty: number;
+  searchesRefused: number;
+  searchesUnread: number;
+  runPatterns: number;
+  runPatternsByPatternId: number;
+  runPatternsFromSource: number;
+  runPatternsUnreadTarget: number;
+
+  /**
+   * Source importing a published pattern, and the split of it. The two below
+   * partition this one; a single figure over both would read as composition
+   * and count bare re-exports towards it.
+   */
+  runPatternsImportingPatterns: number;
+  runPatternsComposing: number;
+  runPatternsReexporting: number;
+  runPatternOutcomes: Readonly<Record<string, number>>;
+  runPatternOutcomesUnread: number;
+  importedPatternIds: readonly string[];
+  delegations: number;
+  delegationProfiles: Readonly<Record<string, number>>;
+  delegationProfilesUnread: number;
+  slugs: number;
+  slugNames: readonly string[];
+}
+
+/** One run family: a parent run and the `delegate_task` children under it. */
+export interface RunFamilyMeasurement {
+  familyId: string;
+  runs: readonly RunMeasurement[];
+  totals: MeasurementTotals;
+}
+
+export interface MeasurementReport {
+  artifactRoot: string;
+  families: readonly RunFamilyMeasurement[];
+  totals: MeasurementTotals;
+}
+
+export const emptyTotals = (): MeasurementTotals => ({
+  runs: 0,
+  runsUnread: 0,
+  searches: 0,
+  searchesWithHits: 0,
+  searchesEmpty: 0,
+  searchesRefused: 0,
+  searchesUnread: 0,
+  runPatterns: 0,
+  runPatternsByPatternId: 0,
+  runPatternsFromSource: 0,
+  runPatternsUnreadTarget: 0,
+  runPatternsImportingPatterns: 0,
+  runPatternsComposing: 0,
+  runPatternsReexporting: 0,
+  runPatternOutcomes: {},
+  runPatternOutcomesUnread: 0,
+  importedPatternIds: [],
+  delegations: 0,
+  delegationProfiles: {},
+  delegationProfilesUnread: 0,
+  slugs: 0,
+  slugNames: [],
+});
+
+const mergeCounts = (
+  left: Readonly<Record<string, number>>,
+  right: Readonly<Record<string, number>>,
+): Readonly<Record<string, number>> => {
+  const merged: Record<string, number> = { ...left };
+  for (const [key, count] of Object.entries(right)) {
+    merged[key] = (merged[key] ?? 0) + count;
+  }
+  return merged;
+};
+
+const mergeNames = (
+  left: readonly string[],
+  right: readonly string[],
+): readonly string[] => [...new Set([...left, ...right])].sort();
+
+/** Adds two totals. Commutative and associative over every field. */
+export const mergeTotals = (
+  left: MeasurementTotals,
+  right: MeasurementTotals,
+): MeasurementTotals => ({
+  runs: left.runs + right.runs,
+  runsUnread: left.runsUnread + right.runsUnread,
+  searches: left.searches + right.searches,
+  searchesWithHits: left.searchesWithHits + right.searchesWithHits,
+  searchesEmpty: left.searchesEmpty + right.searchesEmpty,
+  searchesRefused: left.searchesRefused + right.searchesRefused,
+  searchesUnread: left.searchesUnread + right.searchesUnread,
+  runPatterns: left.runPatterns + right.runPatterns,
+  runPatternsByPatternId: left.runPatternsByPatternId +
+    right.runPatternsByPatternId,
+  runPatternsFromSource: left.runPatternsFromSource +
+    right.runPatternsFromSource,
+  runPatternsUnreadTarget: left.runPatternsUnreadTarget +
+    right.runPatternsUnreadTarget,
+  runPatternsImportingPatterns: left.runPatternsImportingPatterns +
+    right.runPatternsImportingPatterns,
+  runPatternsComposing: left.runPatternsComposing + right.runPatternsComposing,
+  runPatternsReexporting: left.runPatternsReexporting +
+    right.runPatternsReexporting,
+  runPatternOutcomes: mergeCounts(
+    left.runPatternOutcomes,
+    right.runPatternOutcomes,
+  ),
+  runPatternOutcomesUnread: left.runPatternOutcomesUnread +
+    right.runPatternOutcomesUnread,
+  importedPatternIds: mergeNames(
+    left.importedPatternIds,
+    right.importedPatternIds,
+  ),
+  delegations: left.delegations + right.delegations,
+  delegationProfiles: mergeCounts(
+    left.delegationProfiles,
+    right.delegationProfiles,
+  ),
+  delegationProfilesUnread: left.delegationProfilesUnread +
+    right.delegationProfilesUnread,
+  slugs: left.slugs + right.slugs,
+  slugNames: mergeNames(left.slugNames, right.slugNames),
+});
+
+export const foldTotals = (
+  totals: readonly MeasurementTotals[],
+): MeasurementTotals => totals.reduce(mergeTotals, emptyTotals());
+
+/** The counts one run contributes. */
+export const totalsOf = (run: RunMeasurement): MeasurementTotals => {
+  const totals = emptyTotals();
+  const runPatternOutcomes: Record<string, number> = {};
+  const delegationProfiles: Record<string, number> = {};
+  const importedPatternIds = new Set<string>();
+  const slugNames = new Set<string>();
+  let searchesWithHits = 0;
+  let searchesEmpty = 0;
+  let searchesRefused = 0;
+  let searchesUnread = 0;
+  let byPatternId = 0;
+  let fromSource = 0;
+  let unreadTarget = 0;
+  let importing = 0;
+  let composing = 0;
+  let reexporting = 0;
+  let outcomesUnread = 0;
+  let profilesUnread = 0;
+
+  for (const search of run.searches) {
+    if (search.answer.kind === "unread") {
+      searchesUnread += 1;
+    } else if (search.answer.value.status === "error") {
+      searchesRefused += 1;
+    } else if (search.answer.value.hits > 0) {
+      searchesWithHits += 1;
+    } else {
+      searchesEmpty += 1;
+    }
+  }
+  for (const call of run.runPatterns) {
+    if (call.target.kind === "unread") {
+      unreadTarget += 1;
+    } else if (call.target.value.kind === "pattern-id") {
+      byPatternId += 1;
+    } else {
+      fromSource += 1;
+      if (call.target.value.importedPatternIds.length > 0) {
+        importing += 1;
+        if (call.target.value.composition === "re-export") reexporting += 1;
+        else composing += 1;
+      }
+      for (const id of call.target.value.importedPatternIds) {
+        importedPatternIds.add(id);
+      }
+    }
+    if (call.outcome.kind === "unread") {
+      outcomesUnread += 1;
+    } else {
+      const status = call.outcome.value.status;
+      runPatternOutcomes[status] = (runPatternOutcomes[status] ?? 0) + 1;
+    }
+  }
+  for (const delegation of run.delegations) {
+    if (delegation.profile.kind === "unread") {
+      profilesUnread += 1;
+    } else {
+      const profile = delegation.profile.value;
+      delegationProfiles[profile] = (delegationProfiles[profile] ?? 0) + 1;
+    }
+  }
+  for (const slug of run.slugs) {
+    if (slug.slug.kind === "read") {
+      slugNames.add(slug.slug.value);
+    }
+  }
+
+  return {
+    ...totals,
+    runs: 1,
+    runsUnread: run.transcript.kind === "unread" ? 1 : 0,
+    searches: run.searches.length,
+    searchesWithHits,
+    searchesEmpty,
+    searchesRefused,
+    searchesUnread,
+    runPatterns: run.runPatterns.length,
+    runPatternsByPatternId: byPatternId,
+    runPatternsFromSource: fromSource,
+    runPatternsUnreadTarget: unreadTarget,
+    runPatternsImportingPatterns: importing,
+    runPatternsComposing: composing,
+    runPatternsReexporting: reexporting,
+    runPatternOutcomes,
+    runPatternOutcomesUnread: outcomesUnread,
+    importedPatternIds: [...importedPatternIds].sort(),
+    delegations: run.delegations.length,
+    delegationProfiles,
+    delegationProfilesUnread: profilesUnread,
+    slugs: run.slugs.length,
+    slugNames: [...slugNames].sort(),
+  };
+};
+
+/** The `cf:pattern:` specifiers a piece of pattern source imports. */
+export const importedPatternIdsOf = (
+  sourceText: string,
+): readonly string[] =>
+  [
+    ...new Set(
+      [...sourceText.matchAll(CF_PATTERN_SPECIFIER)].map(([, id]) => id),
+    ),
+  ].sort();
+
+const BLOCK_COMMENT = /\/\*[\s\S]*?\*\//g;
+const LINE_COMMENT = /(^|[^:])\/\/[^\n]*/g;
+const IMPORT_STATEMENT = /\bimport\s+[\s\S]*?\s+from\s*(['"])([^'"]+)\1\s*;?/g;
+const EXPORT_FROM_STATEMENT =
+  /\bexport\s+(?:\*|\{[\s\S]*?\})\s+from\s*(['"])([^'"]+)\1\s*;?/g;
+const DEFAULT_IMPORT =
+  /\bimport\s+([A-Za-z_$][\w$]*)\s*(?:,[\s\S]*?)?\s+from\s*(['"])([^'"]+)\2\s*;?/g;
+const EXPORT_DEFAULT_IDENT = /\bexport\s+default\s+([A-Za-z_$][\w$]*)\s*;?/g;
+
+const isPatternSpecifier = (specifier: string): boolean =>
+  specifier.startsWith("cf:pattern:");
+
+/**
+ * Whether pattern source composes the patterns it imports or merely re-exports
+ * one of them.
+ *
+ * The test is that nothing survives: strip the comments, the imports, the
+ * `export … from` re-exports and an `export default <imported binding>`, and a
+ * bare re-export has nothing left. Anything with a body left over is composing,
+ * which is the conservative direction — source written unusually is reported as
+ * composition rather than quietly discounted, and the two counts are reported
+ * apart so a reader can see which is which rather than trust the split.
+ */
+export const classifyPatternSource = (
+  sourceText: string,
+): SourceComposition => {
+  if (importedPatternIdsOf(sourceText).length === 0) return "no-imports";
+  const stripped = sourceText.replace(BLOCK_COMMENT, " ").replace(
+    LINE_COMMENT,
+    "$1",
+  );
+  const defaultBindings = new Set(
+    [...stripped.matchAll(DEFAULT_IMPORT)]
+      .filter(([, , , specifier]) => isPatternSpecifier(specifier))
+      .map(([, binding]) => binding),
+  );
+  const reexportsFromPattern = [...stripped.matchAll(EXPORT_FROM_STATEMENT)]
+    .some(([, , specifier]) => isPatternSpecifier(specifier));
+  const reexportsBinding = [...stripped.matchAll(EXPORT_DEFAULT_IDENT)]
+    .some(([, binding]) => defaultBindings.has(binding));
+  if (!reexportsFromPattern && !reexportsBinding) return "composition";
+  const remainder = stripped
+    .replace(IMPORT_STATEMENT, " ")
+    .replace(EXPORT_FROM_STATEMENT, " ")
+    .replace(EXPORT_DEFAULT_IDENT, " ");
+  return remainder.trim() === "" ? "re-export" : "composition";
+};
+
+const searchQueryOf = (
+  args: TranscriptJson<Record<string, unknown>>,
+): TranscriptJson<SearchQuery> => {
+  if (args.kind === "unread") return args;
+  const tags = Array.isArray(args.value.tags)
+    ? args.value.tags.filter((tag): tag is string => typeof tag === "string")
+    : [];
+  const text = args.value.text;
+  return read({
+    tags,
+    ...(typeof text === "string" ? { text } : {}),
+  });
+};
+
+const searchAnswerOf = (
+  output: TranscriptJson<Record<string, unknown>>,
+): TranscriptJson<SearchAnswer> => {
+  if (output.kind === "unread") return output;
+  const { status, results, message } = output.value;
+  if (status === "ok") {
+    return Array.isArray(results)
+      ? read({ status: "ok", hits: results.length })
+      : unread("a search reported `ok` and carried no results array");
+  }
+  if (status === "error") {
+    return read({
+      status: "error",
+      message: typeof message === "string" ? message : "(no message)",
+    });
+  }
+  return unread(
+    `a search reported no status this reader knows: ${String(status)}`,
+  );
+};
+
+const runPatternTargetOf = (
+  args: TranscriptJson<Record<string, unknown>>,
+): TranscriptJson<RunPatternTarget> => {
+  if (args.kind === "unread") return args;
+  const { patternId, sourceText } = args.value;
+  if (typeof patternId === "string") {
+    return read({ kind: "pattern-id", patternId });
+  }
+  if (typeof sourceText === "string") {
+    return read({
+      kind: "source",
+      sourceLength: sourceText.length,
+      importedPatternIds: importedPatternIdsOf(sourceText),
+      composition: classifyPatternSource(sourceText),
+    });
+  }
+  return unread("a run_pattern call named neither patternId nor sourceText");
+};
+
+const statusOf = (
+  output: TranscriptJson<Record<string, unknown>>,
+): TranscriptJson<{ status: string }> => {
+  if (output.kind === "unread") return output;
+  const status = output.value.status;
+  return typeof status === "string"
+    ? read({ status })
+    : unread("a tool result carried no status");
+};
+
+const stringFieldOf = (
+  args: TranscriptJson<Record<string, unknown>>,
+  field: string,
+): TranscriptJson<string> => {
+  if (args.kind === "unread") return args;
+  const value = args.value[field];
+  return typeof value === "string"
+    ? read(value)
+    : unread(`a tool call carried no ${field}`);
+};
+
+/**
+ * Reads a transcript's tool calls and pairs each with its result.
+ *
+ * Pairing is by `toolCallId` rather than by the order the two kinds of message
+ * happen to appear in. A turn abandoned mid-call leaves a call with no result,
+ * and a positional pairing would then answer every later call with the
+ * previous call's result — silently, and for the rest of the run.
+ */
+export const measureTranscript = (
+  runId: string,
+  role: RunMeasurement["role"],
+  transcript: readonly HarnessTranscriptMessage[],
+): RunMeasurement => {
+  const results = new Map<string, TranscriptJson<Record<string, unknown>>>();
+  for (const message of transcript) {
+    if (message.role === "tool") {
+      results.set(
+        message.toolCallId,
+        parseJson<Record<string, unknown>>(
+          message.content,
+          `the ${message.toolName} result`,
+        ),
+      );
+    }
+  }
+  const outputFor = (
+    toolCallId: string,
+  ): TranscriptJson<Record<string, unknown>> =>
+    results.get(toolCallId) ??
+      unread("the run recorded no result for this call");
+
+  const searches: MeasuredSearch[] = [];
+  const runPatterns: MeasuredRunPattern[] = [];
+  const delegations: MeasuredDelegation[] = [];
+  const slugs: MeasuredSlug[] = [];
+
+  for (const message of transcript) {
+    if (message.role !== "assistant") continue;
+    for (const call of message.toolCalls ?? []) {
+      const args = parseJson<Record<string, unknown>>(
+        call.function.arguments,
+        `the ${call.function.name} arguments`,
+      );
+      switch (call.function.name) {
+        case "search_patterns":
+          searches.push({
+            query: searchQueryOf(args),
+            answer: searchAnswerOf(outputFor(call.id)),
+          });
+          break;
+        case "run_pattern":
+          runPatterns.push({
+            target: runPatternTargetOf(args),
+            outcome: statusOf(outputFor(call.id)),
+          });
+          break;
+        case "delegate_task":
+          delegations.push({ profile: stringFieldOf(args, "profile") });
+          break;
+        case "assign_slug":
+          slugs.push({ slug: stringFieldOf(args, "slug") });
+          break;
+      }
+    }
+  }
+
+  return {
+    runId,
+    role,
+    transcript: read({ messages: transcript.length }),
+    searches,
+    runPatterns,
+    delegations,
+    slugs,
+  };
+};
+
+/** A run whose transcript could not be read, recorded as exactly that. */
+export const unreadRun = (
+  runId: string,
+  role: RunMeasurement["role"],
+  reason: string,
+): RunMeasurement => ({
+  runId,
+  role,
+  transcript: unread(reason),
+  searches: [],
+  runPatterns: [],
+  delegations: [],
+  slugs: [],
+});
+
+/** Which family a run directory belongs to, by the name the harness gave it. */
+export const familyIdOf = (runId: string): string => {
+  const marker = runId.indexOf(SUBAGENT_MARKER);
+  return marker === -1 ? runId : runId.slice(0, marker);
+};
+
+/**
+ * Groups run directory names into families, each family's runs sorted with
+ * the parent first and the children in the order the harness numbered them.
+ *
+ * A child whose parent directory is not in the listing still forms a family
+ * under the parent's id: the child's work happened, and dropping it would
+ * make the report quieter than the tree it read.
+ */
+export const runFamiliesOf = (
+  runIds: readonly string[],
+): ReadonlyMap<string, readonly string[]> => {
+  const families = new Map<string, string[]>();
+  for (const runId of [...runIds].sort()) {
+    const familyId = familyIdOf(runId);
+    const members = families.get(familyId) ?? [];
+    members.push(runId);
+    families.set(familyId, members);
+  }
+  return families;
+};
+
+const roleOf = (runId: string, familyId: string): RunMeasurement["role"] =>
+  runId === familyId ? "parent" : "subagent";
+
+const readTranscript = async (
+  path: string,
+): Promise<TranscriptJson<readonly HarnessTranscriptMessage[]>> => {
+  let text: string;
+  try {
+    text = await Deno.readTextFile(path);
+  } catch (error) {
+    return unread(
+      error instanceof Deno.errors.NotFound
+        ? "the run directory holds no transcript.json"
+        : `transcript.json could not be read: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+    );
+  }
+  const parsed = parseJson<unknown>(text, "transcript.json");
+  if (parsed.kind === "unread") return parsed;
+  return Array.isArray(parsed.value)
+    ? read(parsed.value as readonly HarnessTranscriptMessage[])
+    : unread("transcript.json is not an array of messages");
+};
+
+/** Measures one run directory, read or not. */
+export const measureRun = async (
+  artifactRoot: string,
+  runId: string,
+  role: RunMeasurement["role"],
+): Promise<RunMeasurement> => {
+  const transcript = await readTranscript(
+    join(artifactRoot, runId, "transcript.json"),
+  );
+  return transcript.kind === "read"
+    ? measureTranscript(runId, role, transcript.value)
+    : unreadRun(runId, role, transcript.reason);
+};
+
+/** Every run directory name under an artifact root. */
+export const listRunIds = async (
+  artifactRoot: string,
+): Promise<readonly string[]> => {
+  const runIds: string[] = [];
+  for await (const entry of Deno.readDir(artifactRoot)) {
+    if (entry.isDirectory) runIds.push(entry.name);
+  }
+  return runIds.sort();
+};
+
+export const measureRunFamily = async (
+  artifactRoot: string,
+  familyId: string,
+  members: readonly string[],
+): Promise<RunFamilyMeasurement> => {
+  const runs = members.length === 0
+    ? [
+      unreadRun(
+        familyId,
+        "parent",
+        "no run directory of this name is under the artifact root",
+      ),
+    ]
+    : await Promise.all(
+      members.map((runId) =>
+        measureRun(artifactRoot, runId, roleOf(runId, familyId))
+      ),
+    );
+  return { familyId, runs, totals: foldTotals(runs.map(totalsOf)) };
+};
+
+/**
+ * Measures the named families, or every family under the root when none are
+ * named. A named family with no directory is reported as unread rather than
+ * skipped.
+ */
+export const measureArtifactRoot = async (
+  artifactRoot: string,
+  familyIds: readonly string[] = [],
+): Promise<MeasurementReport> => {
+  const present = runFamiliesOf(await listRunIds(artifactRoot));
+  const wanted = familyIds.length === 0
+    ? [...present.keys()].sort()
+    : [...familyIds];
+  const families = await Promise.all(
+    wanted.map((familyId) =>
+      measureRunFamily(artifactRoot, familyId, present.get(familyId) ?? [])
+    ),
+  );
+  return {
+    artifactRoot,
+    families,
+    totals: foldTotals(families.map((family) => family.totals)),
+  };
+};
+
+const formatSearchQuery = (query: TranscriptJson<SearchQuery>): string => {
+  if (query.kind === "unread") return `(unread: ${query.reason})`;
+  const parts: string[] = [];
+  if (query.value.tags.length > 0) {
+    parts.push(`tags=${query.value.tags.join(",")}`);
+  }
+  if (query.value.text !== undefined) {
+    parts.push(JSON.stringify(query.value.text));
+  }
+  return parts.length === 0 ? "(no query)" : parts.join(" ");
+};
+
+const formatSearchAnswer = (
+  answer: TranscriptJson<SearchAnswer>,
+): string =>
+  answer.kind === "unread"
+    ? `NOT READ (${answer.reason})`
+    : answer.value.status === "error"
+    ? `refused (${answer.value.message})`
+    : `${answer.value.hits} hits`;
+
+const formatCounts = (counts: Readonly<Record<string, number>>): string => {
+  const entries = Object.entries(counts).sort(([left], [right]) =>
+    left.localeCompare(right)
+  );
+  return entries.length === 0
+    ? "none"
+    : entries.map(([key, count]) => `${key}=${count}`).join(" ");
+};
+
+/** The per-call lines one run contributes to the rendered report. */
+export const renderRunLines = (run: RunMeasurement): readonly string[] => {
+  const label = run.role === "parent" ? "parent" : run.runId;
+  const lines: string[] = [];
+  if (run.transcript.kind === "unread") {
+    return [`  [${label}] NOT READ: ${run.transcript.reason}`];
+  }
+  for (const search of run.searches) {
+    lines.push(
+      `  [${label}] search ${formatSearchQuery(search.query)} -> ${
+        formatSearchAnswer(search.answer)
+      }`,
+    );
+  }
+  for (const call of run.runPatterns) {
+    const outcome = call.outcome.kind === "unread"
+      ? `NOT READ (${call.outcome.reason})`
+      : call.outcome.value.status;
+    const target = call.target.kind === "unread"
+      ? `NOT READ (${call.target.reason})`
+      : call.target.value.kind === "pattern-id"
+      ? `by id ${call.target.value.patternId}`
+      : `source ${call.target.value.sourceLength}B${
+        call.target.value.importedPatternIds.length === 0
+          ? ""
+          : `${
+            call.target.value.composition === "re-export"
+              ? " BARE RE-EXPORT of"
+              : " composes"
+          } ${call.target.value.importedPatternIds.join(",")}`
+      }`;
+    lines.push(`  [${label}] run_pattern ${target} -> ${outcome}`);
+  }
+  for (const delegation of run.delegations) {
+    lines.push(
+      `  [${label}] delegate -> ${
+        delegation.profile.kind === "read"
+          ? delegation.profile.value
+          : `NOT READ (${delegation.profile.reason})`
+      }`,
+    );
+  }
+  for (const slug of run.slugs) {
+    lines.push(
+      `  [${label}] assign_slug ${
+        slug.slug.kind === "read"
+          ? slug.slug.value
+          : `NOT READ (${slug.slug.reason})`
+      }`,
+    );
+  }
+  return lines;
+};
+
+/** The totals block, as lines. */
+export const renderTotalsLines = (
+  totals: MeasurementTotals,
+): readonly string[] => [
+  `  runs: ${totals.runs} (${totals.runsUnread} not read)`,
+  `  searches: ${totals.searches} = ${totals.searchesWithHits} with hits + ${totals.searchesEmpty} empty + ${totals.searchesRefused} refused + ${totals.searchesUnread} not read`,
+  `  run_pattern: ${totals.runPatterns} = ${totals.runPatternsByPatternId} by id + ${totals.runPatternsFromSource} from source + ${totals.runPatternsUnreadTarget} not read`,
+  `  run_pattern source importing a published pattern: ${totals.runPatternsImportingPatterns} = ${totals.runPatternsComposing} composing + ${totals.runPatternsReexporting} bare re-export`,
+  `  run_pattern outcomes: ${
+    formatCounts(totals.runPatternOutcomes)
+  } (${totals.runPatternOutcomesUnread} not read)`,
+  `  imported patterns: ${
+    totals.importedPatternIds.length === 0
+      ? "none"
+      : totals.importedPatternIds.join(" ")
+  }`,
+  `  delegations: ${totals.delegations} by profile ${
+    formatCounts(totals.delegationProfiles)
+  } (${totals.delegationProfilesUnread} not read)`,
+  `  slugs: ${totals.slugs}${
+    totals.slugNames.length === 0 ? "" : ` — ${totals.slugNames.join(" ")}`
+  }`,
+];
+
+/** The whole report, as lines. */
+export const renderReportLines = (
+  report: MeasurementReport,
+): readonly string[] => {
+  const lines: string[] = [`artifact root: ${report.artifactRoot}`];
+  for (const family of report.families) {
+    lines.push("", `===== RUN ${family.familyId} (${family.runs.length} runs)`);
+    for (const run of family.runs) lines.push(...renderRunLines(run));
+    lines.push(...renderTotalsLines(family.totals));
+  }
+  lines.push("", `===== ALL ${report.families.length} FAMILIES`);
+  lines.push(...renderTotalsLines(report.totals));
+  return lines;
+};
+
+export const main = async (
+  args: readonly string[],
+  log: (line: string) => void = console.log,
+): Promise<number> => {
+  const flags = parseArgs([...args], {
+    boolean: ["json"],
+    string: ["artifact-root"],
+    default: { "artifact-root": DEFAULT_ARTIFACT_ROOT },
+  });
+  const report = await measureArtifactRoot(
+    flags["artifact-root"],
+    flags._.map(String),
+  );
+  if (flags.json) {
+    log(JSON.stringify(report, null, 2));
+  } else {
+    for (const line of renderReportLines(report)) log(line);
+  }
+  return 0;
+};
+
+if (import.meta.main) Deno.exit(await main(Deno.args));
