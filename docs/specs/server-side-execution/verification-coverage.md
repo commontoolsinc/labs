@@ -6726,6 +6726,21 @@ supply; OW29/OW32/OW34 closed):
     shards), and the honest reading is that the lift bar for this file
     should require a green DIRECT CI unskip probe, not a local count alone.
     That is a bar change, so it is the owner's call, flagged not taken.
+    **RULED 2026-08-27 (owner: "agreed") — THE BAR CHANGE IS TAKEN, AND IT
+    BINDS EVERY ON-SKIP ENTRY, NOT ONLY THIS FILE.** An entry lifts only on
+    BOTH (1) its own local campaign bar AND (2) a GREEN DIRECT-CI UNSKIP
+    PROBE: a commit on the lift branch that removes the entry's guard, a CI
+    board that demonstrably RAN the un-skipped surface, and that probed lane
+    green. A local campaign is evidence about the box it ran on; only the
+    lane is evidence about the lane. Both of this row's entries carry a
+    member with exactly that profile (the fifth-face load-park member: local
+    control 0/12 against CI 2/2 red; this file's 2026-08-26 split: local 0/8
+    against CI 1/1 red), so the probe is not ceremony — it is the only
+    observation that has ever caught them. A RED probe WITHDRAWS that
+    entry's lift: the signature is captured from the job log and classified
+    against this row's recorded members, and any sibling entry's lift stands
+    or falls on its own probe. No rerun-looping — one probe board,
+    classified honestly.
     **THE ENSURE-ON PROFILE-SURFACE MEMBER ROOT-CAUSED AND FIXED
     2026-08-25 (PR #6312) — the n=3 side probe's "create surface never renders"
     shape and the #6248 board's profile-shard family, reproduced
