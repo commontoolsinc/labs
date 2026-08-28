@@ -3567,7 +3567,7 @@ export function createSchemaMemo(): SchemaMemo {
 // Map.
 const schemaMemoIdentityBindings = new WeakMap<SchemaMemo, string>();
 
-const schemaMemoIdentityKey = (identity: ScopeKeyIdentity): string =>
+export const schemaMemoIdentityKey = (identity: ScopeKeyIdentity): string =>
   // Injective over the pair: JSON escapes every delimiter, and `null`
   // keeps an ABSENT component distinct from an empty string. A raw
   // `\0`-joined key let two DISTINCT identities collide (a NUL inside a

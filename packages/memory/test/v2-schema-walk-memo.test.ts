@@ -2,12 +2,17 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { applyCommit, open as openEngine } from "../v2/engine.ts";
 import { type TrackedGraphState, trackGraph } from "../v2/query.ts";
-import { createSchemaWalkMemoStore } from "../v2/schema-walk-memo.ts";
+import {
+  CapturingSchemaTracker,
+  createSchemaWalkMemoStore,
+  SchemaWalkMemoSession,
+} from "../v2/schema-walk-memo.ts";
 import { Server } from "../v2/server.ts";
 import {
   encodeMemoryBoundary,
   getMemoryProtocolFlags,
   MEMORY_PROTOCOL,
+  resolveScopeKey,
   type ResponseMessage,
   type ServerMessage,
   type SessionOpenAuthMetadata,
@@ -498,5 +503,371 @@ describe("v2 schema walk memo", () => {
     expect(
       server.schemaWalkMemoDiagnostics("did:key:z6Mk-never-evaluated"),
     ).toEqual({ entries: 0, hits: 0, misses: 0, evictions: 0, poisons: 0 });
+  });
+
+  it("refuses a negative entry bound instead of evicting forever", () => {
+    expect(() => createSchemaWalkMemoStore(-1)).toThrow(RangeError);
+    expect(() => createSchemaWalkMemoStore(1.5)).toThrow(RangeError);
+    expect(createSchemaWalkMemoStore(0).maxEntries).toBe(0);
+  });
+
+  it("stores nothing for a query root naming an explicit scope instance", async () => {
+    const space = "did:key:z6Mk-walk-memo-explicit";
+    const engine = await openEngine({
+      url: new URL("memory:///walk-memo-explicit"),
+    });
+    seed(engine, space, 1, [
+      {
+        op: "set",
+        id: "of:doc:owned",
+        scope: "session",
+        value: { value: { leaf: "a" } },
+      },
+    ], { sessionId: "wm-s1", principal: "did:key:z6Mk-wm-p1" });
+    const store = createSchemaWalkMemoStore();
+    // A lease holder reads a named instance rather than its own, so memo
+    // keys built from the evaluating identity would name the wrong
+    // document; the whole class bypasses.
+    trackGraph(
+      space,
+      engine,
+      {
+        roots: [{
+          id: "of:doc:owned",
+          scope: "session",
+          entityScopeKey: resolveScopeKey("session", {
+            principal: "did:key:z6Mk-wm-p1",
+            sessionId: "wm-s1",
+          }),
+          selector: { path: [], schema: true },
+        }],
+      },
+      undefined,
+      {
+        principal: "did:key:z6Mk-wm-p2",
+        sessionId: "wm-s2",
+        schemaWalkMemo: store,
+      },
+    );
+    expect(store.entries.size).toBe(0);
+  });
+
+  it("invalidates a parent whose grandchild changed", async () => {
+    const space = "did:key:z6Mk-walk-memo-grandchild";
+    const engine = await openEngine({
+      url: new URL("memory:///walk-memo-grandchild"),
+    });
+    seed(engine, space, 1, [
+      { op: "set", id: "of:doc:c", value: { value: { leaf: "c1" } } },
+      {
+        op: "set",
+        id: "of:doc:b",
+        value: { value: { next: link(space, "of:doc:c") } },
+      },
+      {
+        op: "set",
+        id: "of:doc:a",
+        value: { value: { next: link(space, "of:doc:b") } },
+      },
+    ]);
+    const store = createSchemaWalkMemoStore();
+    const identity = { principal: "did:key:z6Mk-wm-p1", sessionId: "wm-s1" };
+    trackGraph(space, engine, QUERY_FOR("of:doc:a"), undefined, {
+      ...identity,
+      schemaWalkMemo: store,
+    });
+    // Only the deepest document changes: A's and B's own revisions still
+    // match, so invalidation has to travel up through the child links.
+    seed(engine, space, 2, [
+      { op: "set", id: "of:doc:c", value: { value: { leaf: "c2" } } },
+    ]);
+    const after = trackGraph(space, engine, QUERY_FOR("of:doc:a"), undefined, {
+      ...identity,
+      schemaWalkMemo: store,
+    });
+    const c = after.state.entities.get(
+      `${space}/space/of:doc:c` as Parameters<
+        typeof after.state.entities.get
+      >[0],
+    );
+    expect((c?.document as { value?: { leaf?: string } })?.value?.leaf).toBe(
+      "c2",
+    );
+  });
+
+  it("stops serving a subtree when one of its siblings is gone", async () => {
+    const space = "did:key:z6Mk-walk-memo-siblings";
+    const engine = await openEngine({
+      url: new URL("memory:///walk-memo-siblings"),
+    });
+    // R -> A -> {B, C}: A is deep enough to be served from an entry, and
+    // its two subtrees let one validate before the other fails.
+    seed(engine, space, 1, [
+      { op: "set", id: "of:doc:b", value: { value: { leaf: "b" } } },
+      { op: "set", id: "of:doc:c", value: { value: { leaf: "c1" } } },
+      {
+        op: "set",
+        id: "of:doc:a",
+        value: {
+          value: {
+            left: link(space, "of:doc:b"),
+            right: link(space, "of:doc:c"),
+          },
+        },
+      },
+      {
+        op: "set",
+        id: "of:doc:r",
+        value: { value: { next: link(space, "of:doc:a") } },
+      },
+    ]);
+    const store = createSchemaWalkMemoStore();
+    const identity = { principal: "did:key:z6Mk-wm-p1", sessionId: "wm-s1" };
+    const off = trackGraph(space, engine, QUERY_FOR("of:doc:r"), undefined, {
+      ...identity,
+    });
+    trackGraph(space, engine, QUERY_FOR("of:doc:r"), undefined, {
+      ...identity,
+      schemaWalkMemo: store,
+    });
+    seed(engine, space, 2, [
+      { op: "set", id: "of:doc:c", value: { value: { leaf: "c2" } } },
+    ]);
+    const after = trackGraph(space, engine, QUERY_FOR("of:doc:r"), undefined, {
+      ...identity,
+      schemaWalkMemo: store,
+    });
+    const plainAfter = trackGraph(
+      space,
+      engine,
+      QUERY_FOR("of:doc:r"),
+      undefined,
+      { ...identity },
+    );
+    expect(reachOf(after.state)).toEqual(reachOf(plainAfter.state));
+    expect(reachOf(off.state).entities.length).toBe(
+      reachOf(after.state).entities.length,
+    );
+    const c = after.state.entities.get(
+      `${space}/space/of:doc:c` as Parameters<
+        typeof after.state.entities.get
+      >[0],
+    );
+    expect((c?.document as { value?: { leaf?: string } })?.value?.leaf).toBe(
+      "c2",
+    );
+  });
+
+  it("re-records a miss when its referrer is rewritten to another absent target", async () => {
+    const space = "did:key:z6Mk-walk-memo-referrer";
+    const engine = await openEngine({
+      url: new URL("memory:///walk-memo-referrer"),
+    });
+    // The referrer's link dead-ends: nothing was ever written at the
+    // target, so only the REFERRER's revision distinguishes the two
+    // states of this graph.
+    seed(engine, space, 1, [
+      {
+        op: "set",
+        id: "of:doc:p",
+        value: { value: { to: link(space, "of:doc:absent1") } },
+      },
+      {
+        op: "set",
+        id: "of:doc:a",
+        value: { value: { via: link(space, "of:doc:p") } },
+      },
+    ]);
+    const store = createSchemaWalkMemoStore();
+    const identity = { principal: "did:key:z6Mk-wm-p1", sessionId: "wm-s1" };
+    const cold = trackGraph(space, engine, QUERY_FOR("of:doc:a"), undefined, {
+      ...identity,
+      schemaWalkMemo: store,
+    });
+    expect(reachOf(cold.state).missed.some((k) => k.includes("absent1")))
+      .toBe(true);
+
+    seed(engine, space, 2, [
+      {
+        op: "set",
+        id: "of:doc:p",
+        value: { value: { to: link(space, "of:doc:absent2") } },
+      },
+    ]);
+    const after = trackGraph(space, engine, QUERY_FOR("of:doc:a"), undefined, {
+      ...identity,
+      schemaWalkMemo: store,
+    });
+    const missed = reachOf(after.state).missed;
+    expect(missed.some((k) => k.includes("absent2"))).toBe(true);
+    expect(missed.some((k) => k.includes("absent1"))).toBe(false);
+  });
+
+  it("serves a repeated schema-narrowed subtree and keeps its reach", async () => {
+    const space = "did:key:z6Mk-walk-memo-schema";
+    const engine = await openEngine({
+      url: new URL("memory:///walk-memo-schema"),
+    });
+    const shapedLink = (id: string) => ({
+      "/": {
+        "link@1": {
+          path: [],
+          id,
+          space,
+          schema: {
+            type: "object",
+            properties: { leaf: { type: "string" } },
+          },
+        },
+      },
+    });
+    // Both arms narrow the SAME document under the SAME schema, so the
+    // second visit consumes the first's result rather than re-entering
+    // it — the dependency the entry must record to stay invalidatable.
+    seed(engine, space, 1, [
+      { op: "set", id: "of:doc:shared", value: { value: { leaf: "one" } } },
+      {
+        op: "set",
+        id: "of:doc:a",
+        value: {
+          value: {
+            l: shapedLink("of:doc:shared"),
+            r: shapedLink("of:doc:shared"),
+          },
+        },
+      },
+    ]);
+    const store = createSchemaWalkMemoStore();
+    const identity = { principal: "did:key:z6Mk-wm-p1", sessionId: "wm-s1" };
+    const off = trackGraph(space, engine, QUERY_FOR("of:doc:a"), undefined, {
+      ...identity,
+    });
+    const cold = trackGraph(space, engine, QUERY_FOR("of:doc:a"), undefined, {
+      ...identity,
+      schemaWalkMemo: store,
+    });
+    expect(cold.stats.schemaTraversals).toBeGreaterThan(0);
+    expect(reachOf(cold.state)).toEqual(reachOf(off.state));
+
+    const warm = trackGraph(space, engine, QUERY_FOR("of:doc:a"), undefined, {
+      ...identity,
+      schemaWalkMemo: store,
+    });
+    expect(warm.stats.crossTraversalMemoHits).toBeGreaterThan(0);
+    expect(reachOf(warm.state)).toEqual(reachOf(off.state));
+
+    seed(engine, space, 2, [
+      { op: "set", id: "of:doc:shared", value: { value: { leaf: "two" } } },
+    ]);
+    const after = trackGraph(space, engine, QUERY_FOR("of:doc:a"), undefined, {
+      ...identity,
+      schemaWalkMemo: store,
+    });
+    const shared = after.state.entities.get(
+      `${space}/space/of:doc:shared` as Parameters<
+        typeof after.state.entities.get
+      >[0],
+    );
+    expect(
+      (shared?.document as { value?: { leaf?: string } })?.value?.leaf,
+    ).toBe("two");
+  });
+
+  describe("frame bookkeeping", () => {
+    const openSession = async (label: string) => {
+      const space = `did:key:z6Mk-walk-memo-frames-${label}`;
+      const engine = await openEngine({
+        url: new URL(`memory:///walk-memo-frames-${label}`),
+      });
+      seed(engine, space, 1, [
+        { op: "set", id: "of:doc:x", value: { value: { leaf: 1 } } },
+      ]);
+      const store = createSchemaWalkMemoStore();
+      const tracker = new CapturingSchemaTracker();
+      const session = new SchemaWalkMemoSession({
+        store,
+        engine,
+        space,
+        branch: "",
+        identity: {
+          principal: "did:key:z6Mk-wm-p1",
+          sessionId: "wm-s1",
+        },
+        tracker,
+      });
+      const doc = (id: string) =>
+        ({
+          address: {
+            id,
+            space,
+            scope: "space" as const,
+            type: "application/json",
+            path: [],
+          },
+          value: { value: {} },
+          // deno-lint-ignore no-explicit-any
+        }) as any;
+      return { session, store, doc };
+    };
+
+    it("stores nothing for a computation cut short by a value cycle", async () => {
+      const { session, store, doc } = await openSession("poison");
+      session.enter(doc("of:doc:x"), true);
+      session.poison();
+      session.exit(doc("of:doc:x"), true, { ok: null });
+      expect(store.entries.size).toBe(0);
+      expect(store.poisons).toBe(1);
+    });
+
+    it("stores nothing for a frame whose child computation was abandoned", async () => {
+      const { session, store, doc } = await openSession("abandon");
+      session.enter(doc("of:doc:x"), true);
+      session.enter(doc("of:doc:x"), false);
+      session.abandon();
+      session.exit(doc("of:doc:x"), true, { ok: null });
+      expect(store.entries.size).toBe(0);
+    });
+
+    it("stores nothing for a frame whose child was cut short by a cycle", async () => {
+      const { session, store, doc } = await openSession("poison-parent");
+      session.enter(doc("of:doc:x"), true);
+      session.enter(doc("of:doc:x"), false);
+      session.poison();
+      session.exit(doc("of:doc:x"), false, { ok: null });
+      session.exit(doc("of:doc:x"), true, { ok: null });
+      expect(store.entries.size).toBe(0);
+    });
+
+    it("records nothing while no computation is open", async () => {
+      const { session, store, doc } = await openSession("no-frame");
+      const recorded: string[] = [];
+      const record = session.wrapMissRecorder((missKey) => {
+        recorded.push(missKey);
+      });
+      // Reach outside any (document, schema) computation — a root's own
+      // registrations and misses belong to no frame — attributes to
+      // nothing, but still reaches the walk's own recorder.
+      record(
+        "space/space/of:doc:absent",
+        { path: [], schema: true },
+        undefined,
+      );
+      session.dependency(doc("of:doc:other"), true);
+      session.exit(doc("of:doc:x"), true, { ok: null });
+      expect(store.entries.size).toBe(0);
+      expect(recorded).toEqual(["space/space/of:doc:absent"]);
+    });
+
+    it("keys a frame to its identity when it consumed an unrecorded subtree", async () => {
+      const { session, store, doc } = await openSession("dependency");
+      session.enter(doc("of:doc:x"), true);
+      // No entry exists for the consumed subtree, so the frame cannot be
+      // shown identity-independent and narrows to its evaluating identity.
+      session.dependency(doc("of:doc:unknown"), true);
+      session.exit(doc("of:doc:x"), true, { ok: null });
+      expect(store.entries.size).toBe(1);
+      expect([...store.entries.keys()].every((key) => key.includes("|I[")))
+        .toBe(true);
+    });
   });
 });

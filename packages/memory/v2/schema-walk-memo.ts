@@ -5,6 +5,7 @@ import {
   type IMemorySpaceValueAttestation,
   MapSetStringToPathSelectors,
   type NormalizedFullLink,
+  schemaMemoIdentityKey,
   type SchemaPathSelector,
   schemaTrackerKey,
   type TraverseResult,
@@ -77,15 +78,25 @@ const DEFAULT_MAX_ENTRIES = 32_768;
 
 export const createSchemaWalkMemoStore = (
   maxEntries: number = DEFAULT_MAX_ENTRIES,
-): SchemaWalkMemoStore => ({
-  engine: null,
-  entries: new Map(),
-  maxEntries,
-  hits: 0,
-  misses: 0,
-  evictions: 0,
-  poisons: 0,
-});
+): SchemaWalkMemoStore => {
+  // Validated here rather than defended against at each eviction: a
+  // negative bound can never be satisfied, so an eviction loop holding to
+  // it would run until the process died.
+  if (!Number.isInteger(maxEntries) || maxEntries < 0) {
+    throw new RangeError(
+      `schema walk memo maxEntries must be a non-negative integer: ${maxEntries}`,
+    );
+  }
+  return {
+    engine: null,
+    entries: new Map(),
+    maxEntries,
+    hits: 0,
+    misses: 0,
+    evictions: 0,
+    poisons: 0,
+  };
+};
 
 export const schemaWalkMemoDiagnostics = (
   store: SchemaWalkMemoStore,
@@ -206,12 +217,6 @@ const parseTrackerKey = (
   };
 };
 
-/** Injective over the pair (JSON escapes delimiters; `null` keeps an
- * absent component distinct from an empty string) — the same form the
- * shared-memo identity tripwire uses. */
-const identityKeyOf = (identity: ScopeKeyIdentity): string =>
-  JSON.stringify([identity.principal ?? null, identity.sessionId ?? null]);
-
 /** Injective over the segments (JSON escapes the separator). */
 const pathKeyOf = (path: readonly string[]): string => JSON.stringify(path);
 
@@ -272,7 +277,7 @@ export class SchemaWalkMemoSession implements CrossTraversalSchemaMemo {
     this.#space = options.space;
     this.#branch = options.branch;
     this.#identity = options.identity;
-    this.#identityKey = identityKeyOf(options.identity);
+    this.#identityKey = schemaMemoIdentityKey(options.identity);
     this.#tracker = options.tracker;
     this.#currentSeq = Engine.serverSeq(options.engine);
     options.tracker.bind(this);
@@ -418,40 +423,21 @@ export class SchemaWalkMemoSession implements CrossTraversalSchemaMemo {
    * current seq needs only entry PRESENCE down the closure (revisions
    * move only with commits); a stale stamp re-checks every read revision
    * and re-resolves each child at its current revision, then stamps.
-   * Marks made provisionally during a failed closure are wiped: a node
-   * marked valid through a dependency cycle whose anchor later fails
-   * must not stay cached as valid. */
+   *
+   * A key reads as INVALID while its own closure is being checked, so a
+   * dependency cycle resolves to "recompute it" rather than recursing
+   * forever or resting on an assumption a later failure would falsify.
+   * Stored entries cannot form such a cycle today — a value cycle
+   * poisons every frame containing it, and poisoned frames are never
+   * stored — so this costs nothing and needs no cycle bookkeeping. */
   #validate(key: string, entry: SchemaWalkMemoEntry): boolean {
-    const marked: string[] = [];
-    const valid = this.#validateInner(key, entry, marked);
-    if (!valid) {
-      for (const provisional of marked) {
-        if (this.#validated.get(provisional) === true) {
-          this.#validated.delete(provisional);
-        }
-      }
-    }
-    return valid;
-  }
-
-  #validateInner(
-    key: string,
-    entry: SchemaWalkMemoEntry,
-    marked: string[],
-  ): boolean {
     const known = this.#validated.get(key);
-    // An in-progress key (marked below before recursing) reads as valid:
-    // a dependency cycle is valid exactly when every document on it sits
-    // at the revision its entry names, which the per-node checks
-    // establish — and a wrong provisional mark is wiped by the caller.
     if (known !== undefined) return known;
-    this.#validated.set(key, true);
-    marked.push(key);
+    this.#validated.set(key, false);
     const stamped = entry.validatedAt === this.#currentSeq;
     if (!stamped) {
       for (const read of entry.readRevs) {
         if (this.#revisionOf(read.scope, read.id) !== read.revision) {
-          this.#validated.set(key, false);
           return false;
         }
       }
@@ -475,15 +461,15 @@ export class SchemaWalkMemoSession implements CrossTraversalSchemaMemo {
       }
       if (
         childKey === undefined || childEntry === undefined ||
-        !this.#validateInner(childKey, childEntry, marked)
+        !this.#validate(childKey, childEntry)
       ) {
-        this.#validated.set(key, false);
         return false;
       }
       resolved.push(childKey);
     }
     this.#resolvedChildren.set(key, resolved);
     entry.validatedAt = this.#currentSeq;
+    this.#validated.set(key, true);
     return true;
   }
 

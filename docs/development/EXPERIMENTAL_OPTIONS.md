@@ -1062,8 +1062,8 @@ the per-epic implementation notes).
   (`boolean | { maxEntries?: number }`) in
   [`packages/memory/v2/server.ts`](../../packages/memory/v2/server.ts).
   Server-side only; not env-wired yet and invisible on the wire.
-- **Added by.** Gideon Wald, for the
-  [revision-keyed schema memo plan](../plans/revision-keyed-schema-memo.md).
+- **Added by.** Gideon Wald, for the revision-keyed schema memo plan
+  (#6464).
 - **Purpose.** Serves per-document schema-walk subtrees across evaluations
   from a per-space, revision-keyed memo, so the first evaluation after a
   commit — and any evaluation of a query shape the whole-evaluation cache

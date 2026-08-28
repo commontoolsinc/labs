@@ -36,6 +36,7 @@ import {
   type NormalizedFullLink,
   type ObjectStorageManager,
   type SchemaMemo,
+  schemaMemoIdentityKey,
   SchemaObjectTraverser,
   type SchemaPathSelector,
   schemaTrackerCoversSelector,
@@ -58,6 +59,7 @@ export {
   createSchemaMemo,
   MapSetStringToPathSelectors,
   type SchemaMemo,
+  schemaMemoIdentityKey,
   schemaTrackerCoversSelector,
   schemaTrackerKey,
 };

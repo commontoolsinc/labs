@@ -1390,10 +1390,17 @@ export const trackGraph = (
     );
     reuse?.managers?.set(managerKey, manager);
   }
-  const memoStore =
-    options.readSeq === undefined && options.keyedSnapshots !== true
-      ? options.schemaWalkMemo
-      : undefined;
+  // Eligibility, in addition to the evaluation cache's own gates: a root
+  // naming an explicit scope INSTANCE (protocol.md §2's read row) reads
+  // and tracks THAT instance, while memo keys resolve their instance from
+  // the evaluating identity — so an explicit-instance evaluation could
+  // otherwise store and serve entries under the identity's own instance
+  // key. That whole class (lease-holder reads) bypasses.
+  const memoStore = options.readSeq === undefined &&
+      options.keyedSnapshots !== true &&
+      query.roots.every((root) => root.entityScopeKey === undefined)
+    ? options.schemaWalkMemo
+    : undefined;
   if (memoStore !== undefined && memoStore.engine !== engine) {
     memoStore.engine = engine;
     memoStore.entries.clear();
