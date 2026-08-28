@@ -312,6 +312,18 @@ a clock from a remote server's response header rather than from the machine
 that had been reporting the time. Two parties agreeing is not independence
 either, when one of them told the other.
 
+The outside sources were all of different kinds, and that is worth stating
+because the practice compresses badly. A control is constructed; a clock came
+from a machine with no stake in the answer; a fresh clone came from the remote
+rather than from the working tree that had drifted; a mutation came from
+deliberately breaking something believed to be right; a positive control came
+from a case whose answer was known in advance. Compressed to "add a control",
+this gets applied wherever a control is cheap and skipped wherever the outside
+source has to be found. The question that generalizes is the harder one:
+**what could confirm this that does not share my error** — and the answer is
+sometimes a remote server, sometimes another person, sometimes a build broken
+on purpose.
+
 Its companion, arrived at the hard way: **a regression test that has not been
 seen to fail is not evidence.** The `no-ui` fix above shipped first with a
 mechanism asserted rather than measured, and with a test that still passed when
