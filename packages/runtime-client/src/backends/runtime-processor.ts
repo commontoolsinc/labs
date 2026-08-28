@@ -1306,7 +1306,44 @@ export class RuntimeProcessor {
     this.runtime.prepareTxForCommit(tx);
     // Local visibility is established by commit(); the promise tracks remote
     // confirmation/rollback and must not block cell IPC.
-    tx.commit();
+    // PROBE (temporary, diagnosis branch only): the result of this commit is
+    // otherwise dropped on the floor, and several of its failure arms
+    // (rejectCommitBeforeStorage's CFC gates; the storage conflict drop) are
+    // zero-log — a lost USER input dies with no console trace. Surface every
+    // failed UI cell write with its error class so the group-chat :133 red
+    // names its mechanism.
+    void tx.commit().then((result) => {
+      if (result?.error !== undefined) {
+        console.error(
+          "[PROBE ui-cell-write-failed]",
+          JSON.stringify({
+            blind,
+            error: {
+              name: (result.error as { name?: string }).name,
+              message: (result.error as { message?: string }).message,
+            },
+            cell: {
+              id: request.cell.id,
+              path: request.cell.path,
+              scope: request.cell.scope ?? "space",
+            },
+          }),
+        );
+      }
+    }).catch((cause) => {
+      console.error(
+        "[PROBE ui-cell-write-failed]",
+        JSON.stringify({
+          blind,
+          thrown: String(cause),
+          cell: {
+            id: request.cell.id,
+            path: request.cell.path,
+            scope: request.cell.scope ?? "space",
+          },
+        }),
+      );
+    });
   }
 
   handleCellSend(request: CellSendRequest): void {
