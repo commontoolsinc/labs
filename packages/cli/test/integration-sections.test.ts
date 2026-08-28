@@ -1,0 +1,156 @@
+/**
+ * The `case "$SECTION"` table at the end of integration/integration.sh decides
+ * which steps a run executes. CI dispatches three of its arms, one per leg of
+ * the cli-integration-test matrix, and a run with no section argument
+ * dispatches `all`.
+ *
+ * A step no CI arm reaches runs nowhere: it is maintained and it passes when
+ * someone runs it by hand, and no run of the repository reports on it. `wish`
+ * was in that state, reachable only from `all`, while test/wish.test.ts
+ * described the session-backed read as covered by the integration lane. These
+ * hold the table to reaching every step from both directions, and hold the
+ * recorded step names to matching the functions that run them.
+ */
+
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+
+const SCRIPT = await Deno.readTextFile(
+  new URL("../integration/integration.sh", import.meta.url),
+);
+const WORKFLOW = await Deno.readTextFile(
+  new URL("../../../.github/workflows/deno.yml", import.meta.url),
+);
+
+/** The shell function that runs a step, by the table's naming rule. */
+function stepFunction(step: string): string {
+  return `run_${step.replaceAll("-", "_")}`;
+}
+
+/** One section of the dispatch table and the steps it runs, in order. */
+interface Arm {
+  section: string;
+  steps: string[];
+}
+
+interface DispatchTable {
+  arms: Arm[];
+
+  /** Body lines that are not a recorded step name paired with its call. */
+  malformed: string[];
+}
+
+/**
+ * Reads the dispatch table. An arm's body is pairs of a
+ * `cf_test_step_begin <step>` line and the call that runs that step; anything
+ * else is reported through `malformed` rather than dropped, so a step written
+ * in an unexpected form cannot slip past the coverage checks below.
+ */
+function parseDispatchTable(script: string): DispatchTable {
+  const lines = script.split("\n");
+  const open = lines.indexOf('case "$SECTION" in');
+  if (open < 0) {
+    throw new Error('integration.sh has no `case "$SECTION" in` table');
+  }
+  const arms: Arm[] = [];
+  const malformed: string[] = [];
+  let arm: Arm | undefined;
+  let pending: string | undefined;
+  const unpaired = (step: string) =>
+    `${arm?.section}: ${step} is not followed by ${stepFunction(step)}`;
+  for (const line of lines.slice(open + 1)) {
+    if (line === "esac") break;
+    const opened = line.match(/^ {2}(\S+)\)$/);
+    if (opened) {
+      if (pending !== undefined) malformed.push(unpaired(pending));
+      pending = undefined;
+      // `*)` is the unknown-section error, not a list of steps.
+      arm = opened[1] === "*" ? undefined : { section: opened[1], steps: [] };
+      if (arm !== undefined) arms.push(arm);
+      continue;
+    }
+    if (arm === undefined) continue;
+    if (line === "    ;;") {
+      if (pending !== undefined) malformed.push(unpaired(pending));
+      pending = undefined;
+      arm = undefined;
+      continue;
+    }
+    const begins = line.match(/^ {4}cf_test_step_begin (\S+)$/);
+    if (begins) {
+      if (pending !== undefined) malformed.push(unpaired(pending));
+      pending = begins[1];
+      continue;
+    }
+    if (pending === undefined) {
+      malformed.push(`${arm.section}: ${line.trim()} runs outside a step`);
+      continue;
+    }
+    if (line === `    ${stepFunction(pending)}`) {
+      arm.steps.push(pending);
+    } else {
+      malformed.push(unpaired(pending));
+    }
+    pending = undefined;
+  }
+  return { arms, malformed };
+}
+
+/** Every step runner the script defines. */
+function definedFunctions(script: string): string[] {
+  return [...script.matchAll(/^(run_[a-z_]+)\(\) \{$/gm)].map((m) => m[1]);
+}
+
+/** The cli-integration-test job's block of the workflow. */
+function ciJobBlock(workflow: string): string {
+  const start = workflow.indexOf("\n  cli-integration-test:\n");
+  if (start < 0) throw new Error("deno.yml has no cli-integration-test job");
+  const rest = workflow.slice(start + 1);
+  const next = rest.search(/\n {2}[a-z][a-z0-9-]*:\n/);
+  return next < 0 ? rest : rest.slice(0, next + 1);
+}
+
+/** The sections that job's matrix dispatches, one per leg. */
+function ciSections(workflow: string): string[] {
+  return [...ciJobBlock(workflow).matchAll(/^ +core_section: (\S+)$/gm)]
+    .map((m) => m[1]);
+}
+
+const { arms, malformed } = parseDispatchTable(SCRIPT);
+const bySection = new Map(arms.map((arm) => [arm.section, arm.steps]));
+const everyStep = [...new Set(arms.flatMap((arm) => arm.steps))].sort();
+
+describe("integration-sections", () => {
+  it("pairs every recorded step name with the function that runs it", () => {
+    expect(malformed).toEqual([]);
+  });
+
+  it("dispatches every step runner the script defines", () => {
+    const dispatched = new Set(everyStep.map(stepFunction));
+    const orphans = definedFunctions(SCRIPT)
+      .filter((fn) => !dispatched.has(fn));
+    expect(orphans).toEqual([]);
+  });
+
+  it("runs every step under `all`", () => {
+    const all = new Set(bySection.get("all") ?? []);
+    expect(everyStep.filter((step) => !all.has(step))).toEqual([]);
+  });
+
+  it("runs every step under a section CI dispatches", () => {
+    const sections = ciSections(WORKFLOW);
+    expect(sections.length).toBeGreaterThan(0);
+    const unknown = sections.filter((section) => !bySection.has(section));
+    expect(unknown).toEqual([]);
+    const covered = new Set(
+      sections.flatMap((section) => bySection.get(section) ?? []),
+    );
+    expect(everyStep.filter((step) => !covered.has(step))).toEqual([]);
+  });
+
+  it("reads the CI section from the matrix leg it is named for", () => {
+    expect(ciJobBlock(WORKFLOW)).toContain(
+      "CF_CLI_INTEGRATION_SECTION: ${{ matrix.core_section }}",
+    );
+  });
+});

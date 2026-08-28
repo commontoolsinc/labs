@@ -1277,6 +1277,11 @@ run_piece_data_files() {
 # Each step records as its own test, named "integration.sh <step>"; the begin
 # markers close the previous step's record and the exit trap closes the last
 # one, so a failing step is recorded with the failure.
+#
+# `all` runs every step, and every step also runs under one of the sections CI
+# dispatches: piece-values, piece-call, and piece-links. Both hold in
+# packages/cli/test/integration-sections.test.ts, which reads this table and
+# the cli-integration-test matrix in .github/workflows/deno.yml.
 case "$SECTION" in
   all)
     cf_test_step_begin piece-values
@@ -1291,6 +1296,16 @@ case "$SECTION" in
     run_piece_call_retry
     cf_test_step_begin three-topic-fixture
     run_three_topic_fixture
+    cf_test_step_begin verbs-walkthrough
+    run_verbs_walkthrough
+    cf_test_step_begin verb-session-gaps
+    run_verb_session_gaps
+    cf_test_step_begin completion-walkthrough
+    run_completion_walkthrough
+    cf_test_step_begin topics-restore-drill
+    run_topics_restore_drill
+    cf_test_step_begin bulk-survey-drill
+    run_bulk_survey_drill
     cf_test_step_begin wish
     run_wish
     ;;
@@ -1309,6 +1324,8 @@ case "$SECTION" in
   piece-links)
     cf_test_step_begin piece-links
     run_piece_links
+    cf_test_step_begin wish
+    run_wish
     ;;
   piece-call)
     cf_test_step_begin piece-call
