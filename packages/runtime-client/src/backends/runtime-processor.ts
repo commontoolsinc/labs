@@ -53,19 +53,15 @@ import {
   type IOperationStorageCapability,
   isCell,
   isCellResult,
-  markRendererInputTx,
-  markUiInputBlindWriteTx,
   normalizeSpaceHost,
   PatternCoverageCollector,
   Runtime,
   runtimePresets,
   RuntimeTelemetry,
   RuntimeTelemetryEvent,
-  setBlindStructuralTarget,
   setPatternEnvironment,
   type SigilLink,
   SpaceHostValidationError,
-  unmarkUiInputBlindWriteTx,
 } from "@commonfabric/runner";
 import type { RuntimeOptions } from "@commonfabric/runner";
 import {
@@ -1282,67 +1278,23 @@ export class RuntimeProcessor {
     request: CellSetRequest | CellPushRequest,
     blind: boolean,
   ): void {
-    const tx = this.runtime.edit();
     const cell = getCell(this.runtime, request.cell);
     const value = mapCellRefsToSigilLinks(request.value);
-    if (blind) {
-      markUiInputBlindWriteTx(tx);
-      // Renderer-input provenance that survives to commit, so the scheduler can
-      // shape the resulting subscriber wake (timing side-channel mitigation,
-      // channels 4/5). A `blind` write is exactly a renderer `$value` input write.
-      markRendererInputTx(tx);
-      // The resolved storage address of the write target; its parent is the
-      // structural existence/shape precondition for the blind write.
-      const link = cell.withTx(tx).resolveAsCell().getAsNormalizedFullLink();
-      setBlindStructuralTarget(tx, {
-        id: link.id,
-        space: link.space,
-        scope: link.scope,
-        path: link.path.slice(0, -1),
-      });
-    }
-    cell.withTx(tx).set(value);
-    if (blind) unmarkUiInputBlindWriteTx(tx);
-    this.runtime.prepareTxForCommit(tx);
-    // Local visibility is established by commit(); the promise tracks remote
-    // confirmation/rollback and must not block cell IPC.
-    // PROBE (temporary, diagnosis branch only): the result of this commit is
-    // otherwise dropped on the floor, and several of its failure arms
-    // (rejectCommitBeforeStorage's CFC gates; the storage conflict drop) are
-    // zero-log — a lost USER input dies with no console trace. Surface every
-    // failed UI cell write with its error class so the group-chat :133 red
-    // names its mechanism.
-    void tx.commit().then((result) => {
-      if (result?.error !== undefined) {
-        console.error(
-          "[PROBE ui-cell-write-failed]",
-          JSON.stringify({
-            blind,
-            error: {
-              name: (result.error as { name?: string }).name,
-              message: (result.error as { message?: string }).message,
-            },
-            cell: {
-              id: request.cell.id,
-              path: request.cell.path,
-              scope: request.cell.scope ?? "space",
-            },
-          }),
-        );
-      }
-    }).catch((cause) => {
-      console.error(
-        "[PROBE ui-cell-write-failed]",
-        JSON.stringify({
-          blind,
-          thrown: String(cause),
-          cell: {
-            id: request.cell.id,
-            path: request.cell.path,
-            scope: request.cell.scope ?? "space",
-          },
-        }),
-      );
+    // The commit-retry seam for UI writes (Runtime.commitUiCellWrite): the
+    // blind marking, the structural-parent precondition, and the commit run
+    // there, per attempt, under the ruled retryable-rejection vocabulary —
+    // a `stale confirmed read` conflict (a serving wave landing structure
+    // on the doc mid-typing) is retried after catch-up instead of silently
+    // dropping the user's input, and a finally-lost write is loudly counted
+    // (`runtime.ui-cell-write` / `lost`). One lane per cell address, so a
+    // retry never re-asserts an older input over a newer one.
+    //
+    // Local visibility is established by the first commit attempt; the
+    // returned promise tracks remote confirmation, retries, and the loss
+    // report, and must not block cell IPC.
+    void this.runtime.commitUiCellWrite(cell, value, {
+      blind,
+      supersedeKey: this.operationSessionKey(request.cell),
     });
   }
 

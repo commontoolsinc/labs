@@ -130,75 +130,13 @@ describe("cfc group chat demo integration test", () => {
       "#host-message-draft",
       "Fake hello from Alice",
     );
-    // PROBE (temporary, diagnosis branch only): discriminate the two §2b
-    // candidate mechanisms for the 4/6 red at the click below — (a) the
-    // served hostSendDisabled flip is merely still in flight when the click
-    // loop gives up, vs (b) the draft write is wedged client-side and the
-    // flip never comes (rootcause §2b / OW47 S-E shape). If (a), the wait
-    // below resolves quickly and the file goes green; if (b), it hangs to
-    // waitForCondition's 300 s net with the write absent from the store.
-    const fillDiag = await page.evaluate(() =>
-      JSON.stringify(
-        (globalThis as unknown as { __cfFillDiag?: unknown }).__cfFillDiag ??
-          null,
-      )
-    );
-    console.log(`PROBE host-draft fillDiag: ${fillDiag}`);
-    await waitForRuntimeIdle(page);
-    console.log("PROBE runtime idle returned after host-draft fill");
-    try {
-      await waitForDisabled(page, "#host-send-button", false);
-      console.log("PROBE host-send-button ENABLED");
-    } catch (err) {
-      // The served enable never came (the wedge). Census the worker's logger
-      // counts — the silent drop classes (e.g. commit-conflict) are counted
-      // even when they do not log — then refill the draft to discriminate a
-      // one-shot loss (fresh write lands, button enables) from a standing
-      // poison (every subsequent write dies too, §2b's Bob shape).
-      const counts = await page.evaluate(async () => {
-        const rt = (globalThis as unknown as {
-          commonfabric?: {
-            rt?: { getLoggerCounts?: () => Promise<unknown> };
-          };
-        }).commonfabric?.rt;
-        const all = await rt?.getLoggerCounts?.();
-        return JSON.stringify(
-          (all as { counts?: unknown })?.counts ?? all ?? null,
-        );
-      });
-      console.log(`PROBE loggerCounts at hang: ${counts}`);
-      await fillCfInput(page, "#host-message-draft", "Fake hello retry");
-      const refill = await page.evaluate(() => {
-        const findHost = (root: Document | ShadowRoot): Element | undefined => {
-          for (const element of root.querySelectorAll("*")) {
-            if (element.id === "host-send-button") return element;
-            if (element.shadowRoot) {
-              const match = findHost(element.shadowRoot);
-              if (match) return match;
-            }
-          }
-          return undefined;
-        };
-        return new Promise<string>((resolve) => {
-          const deadline = Date.now() + 15_000;
-          const check = () => {
-            const host = findHost(document);
-            const button = host?.shadowRoot?.querySelector("button");
-            const disabled = button instanceof HTMLButtonElement
-              ? button.disabled
-              : undefined;
-            if (disabled === false) return resolve("ENABLED");
-            if (Date.now() > deadline) {
-              return resolve(`still-disabled (${String(disabled)})`);
-            }
-            setTimeout(check, 250);
-          };
-          check();
-        });
-      });
-      console.log(`PROBE after refill: ${String(refill)}`);
-      throw err;
-    }
+    // Wait for the send button to ENABLE before clicking, exactly like the
+    // trusted sends below (S-G, rootcause §2b): `hostSendDisabled` derives
+    // from the draft, and under the server-execution ON arm that derivation
+    // is a served round trip — clicking an interim-disabled cf-button
+    // retargets the click to the host element and the send never fires.
+    // Correct under the OFF arm too (the enable is just immediate there).
+    await waitForDisabled(page, "#host-send-button", false);
     await clickCfButton(page, "#host-send-button");
     await waitForRuntimeIdle(page);
     await waitForTextAbsent(
