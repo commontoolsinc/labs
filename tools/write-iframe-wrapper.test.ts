@@ -280,7 +280,8 @@ export const IFRAME_PATTERN = { name: "ModuleString" } as const;
       );
       await Deno.writeTextFile(
         guest,
-        `document.body.dataset.syntax = "import(";\n`,
+        `document.body.dataset.syntax = "import(";\n` +
+          `document.body.dataset.replacement = "$& $\` $'";\n`,
       );
       await Deno.writeTextFile(
         html,
@@ -298,6 +299,8 @@ export const IFRAME_PATTERN = { name: "ModuleString" } as const;
       expect(moduleString).toContain("\\u0069mport");
       expect(moduleString).toContain("\\u003c!--");
       expect(moduleString).toContain("--\\u003e");
+      expect(generatedGuestHtml(generated).match(/<!doctype html>/gi))
+        .toHaveLength(1);
     } finally {
       await removeDirectory(directory);
     }

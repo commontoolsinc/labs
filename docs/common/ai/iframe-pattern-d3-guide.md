@@ -188,14 +188,16 @@ const cancelOutput = output.sink((value) => {
   render();
 });
 
-const [pulledInput, pulledState, pulledOutput] = await Promise.all([
+await Promise.all([
   input.pull(),
   state.pull(),
   output.pull(),
 ]);
-inputValue = pulledInput ?? DEFAULT_INPUT;
-stateValue = pulledState ?? await stateWrite.initialize(DEFAULT_STATE);
-outputValue = pulledOutput ?? await outputWrite.initialize(DEFAULT_OUTPUT);
+if (state.get() === undefined) await stateWrite.initialize(DEFAULT_STATE);
+if (output.get() === undefined) await outputWrite.initialize(DEFAULT_OUTPUT);
+inputValue = input.get() ?? DEFAULT_INPUT;
+stateValue = state.get() ?? DEFAULT_STATE;
+outputValue = output.get() ?? DEFAULT_OUTPUT;
 hydrated = true;
 addButton.disabled = false;
 render();
@@ -212,6 +214,10 @@ globalThis.addEventListener("pagehide", () => {
 again after host updates. That first call does not prove the host has supplied
 the latest value. Keep all actions disabled until one joint `Promise.all` of
 `pull()` calls resolves for every resource the action reads.
+
+Use the pulls only as a joint readiness barrier. Read values with `get()` after
+every pull and initialization has settled, so a newer sink event that arrives
+during the barrier cannot be replaced by an older individual pull result.
 
 `initialize()` atomically supplies a default only while the Cell is undefined.
 Use it for first materialization; never issue a whole-state `set()` merely to

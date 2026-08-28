@@ -187,14 +187,16 @@ const cancelOutput = output.sink((value) => {
   outputValue = value ?? DEFAULT_OUTPUT;
 });
 
-const [pulledInput, pulledState, pulledOutput] = await Promise.all([
+await Promise.all([
   input.pull(),
   state.pull(),
   output.pull(),
 ]);
-inputValue = pulledInput ?? DEFAULT_INPUT;
-stateValue = pulledState ?? await stateWrite.initialize(DEFAULT_STATE);
-outputValue = pulledOutput ?? await outputWrite.initialize(DEFAULT_OUTPUT);
+if (state.get() === undefined) await stateWrite.initialize(DEFAULT_STATE);
+if (output.get() === undefined) await outputWrite.initialize(DEFAULT_OUTPUT);
+inputValue = input.get() ?? DEFAULT_INPUT;
+stateValue = state.get() ?? DEFAULT_STATE;
+outputValue = output.get() ?? DEFAULT_OUTPUT;
 hydrated = true;
 spawnButton.disabled = false;
 renderAuthoritativeState();
@@ -212,6 +214,10 @@ globalThis.addEventListener("pagehide", () => {
 host changes. Its first callback is not a readiness signal. Keep controls and
 gameplay disabled until one joint `Promise.all` of `pull()` calls has resolved
 for every resource an action reads.
+
+Use the pulls only as a joint readiness barrier. Read values with `get()` after
+every pull and initialization has settled, so a newer sink event that arrives
+during the barrier cannot be replaced by an older individual pull result.
 
 `initialize()` is the atomic first-use operation. It stores a default only
 while the Cell is undefined and returns the transaction's winner. Never blind-
