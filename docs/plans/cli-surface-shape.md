@@ -645,7 +645,7 @@ means, and it is the one the rest of the surface reads against — a projection
 cannot be written after the verb until it lands.
 
 **9 and 11 land together, as one change.** Step 9 on its own gives the
-canonical reference a vocabulary two other spellings already have and retires
+canonical reference a vocabulary another spelling already has and retires
 neither, so the surface it leaves is the same four spellings with more overlap
 between them — capability added to the accretion this document exists to
 reduce. What makes 9 worth doing is 11: the reference earns the human
