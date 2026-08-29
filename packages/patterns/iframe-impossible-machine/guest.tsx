@@ -37,13 +37,19 @@ import {
 } from "./contract.ts";
 import {
   canonicalizeMachineEdges,
+  createActionRunner,
+  createSelectionRequestTracker,
   createsFeedbackCycle,
+  errorFrom,
   evaluateSignals,
-  interaction,
+  findAppendOnlyItem,
   isActuatorFiring,
   machineNodePresentation,
+  nodeControlBoundaryProps,
   presentSignal,
+  settleCommittedPositionDraft,
   type SignalPresentation,
+  updateLatestValue,
 } from "./model.ts";
 
 const fabric = connectFabric();
@@ -215,7 +221,7 @@ function NodeFrame({
           {data.signal.label}
         </output>
       </header>
-      <div {...interaction.nodeControlBoundaryProps()}>{children}</div>
+      <div {...nodeControlBoundaryProps()}>{children}</div>
       {hasOutput && (
         <Handle
           id="output"
@@ -385,13 +391,13 @@ function App() {
   const [connectSource, setConnectSource] = React.useState("");
   const [connectTarget, setConnectTarget] = React.useState("");
   const bootstrapStarted = React.useRef(false);
-  const actionRunner = React.useRef(interaction.createActionRunner({
+  const actionRunner = React.useRef(createActionRunner({
     setGlobalPending: setPending,
     setActionError,
     setBusyNodeCounts,
   })).current;
   const selectionRequestTracker = React.useRef(
-    interaction.createSelectionRequestTracker(null),
+    createSelectionRequestTracker(null),
   );
 
   React.useEffect(() => {
@@ -422,7 +428,7 @@ function App() {
         ]);
         if (active) setMaterialized(true);
       } catch (cause) {
-        if (active) setInitializationError(interaction.errorFrom(cause));
+        if (active) setInitializationError(errorFrom(cause));
       }
     })();
     return () => {
@@ -436,7 +442,7 @@ function App() {
   const locateNodeCell = React.useCallback(async (nodeId: string) => {
     const nodesCell = stateCell.key("nodes");
     const nodes = await nodesCell.pull();
-    const located = interaction.findAppendOnlyItem(nodes, nodeId);
+    const located = findAppendOnlyItem(nodes, nodeId);
     if (!located) throw new Error(`Module ${nodeId} no longer exists.`);
     const nodeCell = nodesCell.key(located.index);
     const node = await nodeCell.pull();
@@ -466,7 +472,7 @@ function App() {
         const node = await locateNodeCell(nodeId);
         await node.key("position").set(position);
         await state.refresh();
-        interaction.settleCommittedPositionDraft(
+        settleCommittedPositionDraft(
           draftPositionsRef,
           setDraftPositions,
           nodeId,
@@ -551,7 +557,7 @@ function App() {
       update: (current: IframeOutputData[K]) => IframeOutputData[K],
     ) =>
       runAction(async () => {
-        await interaction.updateLatestValue(outputCell.key(key), update);
+        await updateLatestValue(outputCell.key(key), update);
         await output.refresh();
       }),
     [output.refresh, runAction],

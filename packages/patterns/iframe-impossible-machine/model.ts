@@ -4,7 +4,16 @@ import {
   machineEdgeId,
   type MachineNode,
 } from "./contract.ts";
-export * as interaction from "./interaction.ts";
+export {
+  createActionRunner,
+  createSelectionRequestTracker,
+  errorFrom,
+  findAppendOnlyItem,
+  nodeControlBoundaryProps,
+  settleCommittedPositionDraft,
+  stopNodeControlPropagation,
+  updateLatestValue,
+} from "./interaction.ts";
 
 export interface MachineNodePresentation {
   code: string;

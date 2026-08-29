@@ -30,13 +30,13 @@ describe("Impossible Machine document shell", () => {
     );
 
     expect(source).toContain(
-      "<div {...interaction.nodeControlBoundaryProps()}>{children}</div>",
+      "<div {...nodeControlBoundaryProps()}>{children}</div>",
     );
-    expect(source).toContain("interaction.updateLatestValue(");
+    expect(source).toContain("await updateLatestValue(");
     expect(source).toContain("void tracker.request(");
     expect(source).toContain("const actionRunner = React.useRef(");
     expect(source).toContain("const runNodeAction = actionRunner.runNode");
-    expect(source).toContain("interaction.findAppendOnlyItem(");
+    expect(source).toContain("const located = findAppendOnlyItem(");
     expect(source).not.toContain("nodesCell.key(index).resolve()");
     expect(source).toContain("nodesDraggable");
     expect(source).toContain("nodesConnectable");

@@ -9,13 +9,12 @@ import {
   settleCommittedPositionDraft,
   stopNodeControlPropagation,
   updateLatestValue,
-} from "./interaction.ts";
-import { interaction as interactionFromModel } from "./model.ts";
+} from "./model.ts";
 
 describe("Impossible Machine interaction lifecycle", () => {
   it("exposes the interaction boundary through the guest model", () => {
-    expect(interactionFromModel.findAppendOnlyItem).toBe(findAppendOnlyItem);
-    expect(interactionFromModel.createActionRunner).toBe(createActionRunner);
+    expect(typeof findAppendOnlyItem).toBe("function");
+    expect(typeof createActionRunner).toBe("function");
   });
 
   it("keeps an append-only item address stable as later items arrive", () => {
