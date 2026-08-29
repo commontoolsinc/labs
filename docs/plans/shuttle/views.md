@@ -16,8 +16,9 @@ disciplines it leans on are in
   sits in one module, and state and key handling are pure and testable
   without a terminal.
 - **Everything live obeys the settle discipline**: one repaint per quiet
-  runtime (guard plus `idle()`), never a timer. Sinks are canceled on view
-  exit.
+  runtime (guard plus `idle()`), never a timer. A view's own sinks are
+  canceled on exit; a watch's sink belongs to the watch, which outlives
+  the view (see "Watches are session objects").
 - **Cold-browse mode reaches into views**: an unmistakable banner, stored
   values labeled as stored, no sinks, no warming; `r` re-pulls stored state
   (a storage read, not a pattern run).
@@ -50,6 +51,24 @@ summary, callables with their doc annotations, and pattern identity in one
 frame. It renders as a snapshot with refresh on demand rather than live —
 the live piece watch is deferred — so it costs no sink and ships beside
 the other two.
+
+## Watches are session objects
+
+`watch <ref>` arms a watch — a session-level subscription with its own
+handle — and opens the value view as one lens onto it. `q` closes the lens
+and leaves the watch armed. While the prompt is up, an armed watch shows
+its changes two ways:
+
+- **Event lines.** Each settled change appends one line —
+  `watch topics/3: replies 14 → 15` — and the prompt is redrawn beneath
+  it, so cause and effect interleave in one transcript that doubles as a
+  record.
+- **The pinned strip.** A reserved region above the prompt renders armed
+  watches' current values live while scrollback flows past it.
+
+`watches` lists what is armed (`where` shows it too); `unwatch <handle>`
+disarms. Terminal output that has scrolled off is never mutated: liveness
+lives in the strip and the event lines, and history stays append-only.
 
 ## Keys
 
@@ -104,3 +123,5 @@ first work item, made in `packages/cli` where the substrate lives.
    watch. (The shallow-sink question is settled above: not expressible
    through `Cell.sink`; the raw-document seam and its proving gate are
    issue [#6534](https://github.com/commontoolsinc/labs/issues/6534).)
+2. The pinned strip's layout: its height, and what it shows when more
+   watches are armed than fit.

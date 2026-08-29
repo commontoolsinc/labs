@@ -75,7 +75,8 @@ stale computed state visible.
 **B3 — watch and views** (after A4; view-substrate export entries added
 here). `Cell.sink` with the guard-plus-`idle()` settling discipline; the
 value, list, and structured piece-overview views on the `cf view` pager
-substrate; cold-browse mode. Governed by [`views.md`](views.md); it opens
+substrate; session watches with prompt event lines and the pinned strip;
+cold-browse mode. Governed by [`views.md`](views.md); it opens
 with the two experiments and the raw-document-subscription proving test
 from issue [#6534](https://github.com/commontoolsinc/labs/issues/6534),
 falling back to the capped deep sink if the seam disappoints.

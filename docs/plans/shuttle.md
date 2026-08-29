@@ -12,44 +12,57 @@ The codename is the loom's shuttle — the part that travels back and forth
 through the warp carrying the weft — beside the user-facing shell's "weaver".
 
 ```text
-shuttle estuary/board> ls
-  topics/ (16)   members/ (11)   settings
 shuttle estuary/board> watch topics/3
 ┌ topics/3 ──────────────────── ● live ┐
 │ title    "verb contracts"            │
-│ replies  14 → 15                     │
-│ updated  just now                    │
-└── q: back to prompt ─────────────────┘
+│ replies  14                          │
+└── q: back (watch stays armed) ───────┘
 shuttle estuary/board> call topics/3/add-reply --body "hi"
+watch topics/3: replies 14 → 15
+shuttle estuary/board>
 ```
 
 ## Why
 
-Every `cf` invocation names the whole world. The target surface — api-url,
-identity, space, piece — has a single definition (`targetOptions` in
-`packages/cli/commands/piece.ts`) and recurs across nearly every command;
-`CF_API_URL` and `CF_IDENTITY` absorb two of its members and the rest are
-retyped per command. Composition between commands is copying an address one
-command printed into the next (the composition axis of
+Weaver is where a person stands inside the woven fabric: rendered pieces,
+live interfaces, the product. Shuttle is the same sense of presence one
+layer down — standing in the substrate itself, where cells, links, scopes,
+and reactions are visible as themselves. When the rendered surface
+misbehaves, this is the layer a person needs to see: what a cell actually
+holds, when it settled, which overlay a read went through, what a verb call
+wrote.
+
+The substrate is reactive, and no tool shows it moving at this layer. `cf`
+prints snapshots; the FUSE mount is bounded by cache staleness; `cf
+inspect` is offline forensics; weaver shows the rendered product, not the
+mechanism. Shuttle's watches and live views make the mechanism observable:
+arm a watch, issue the cause, see the reaction arrive — cause and effect
+interleaved in one transcript that doubles as a record.
+
+The moving half of context has no home. `CF_API_URL`, `CF_IDENTITY`, and
+`CF_SPACE` absorb the constant half, and
+[`cli-surface-shape.md`](cli-surface-shape.md) step 8's rationale — "a
+parameter that is required everywhere and identical across a working
+session is one a caller should state once" — caps out exactly there,
+because piece, path, and scope are not identical across a session: they
+change with every step, because they are the work. The fabric's reference
+grammar is right-anchored —
+`/[@did:key:…/]of:fid1:<id>[@scope][/path…][#argument]`, documented at the
+top of `packages/cli/lib/llm-friendly-ref.ts` — with omitted levels
+supplied by context, and shuttle makes that context a position you
+navigate: **a place is the context that fills in the omitted levels of a
+reference**, moved by `cd`, relative references, and handles instead of by
+copying printed addresses between commands (the composition axis of
 [`../common/verbs/session-walkthrough.md`](../common/verbs/session-walkthrough.md)).
 
-The fabric's canonical reference grammar already treats context as
-first-class. A reference is right-anchored —
-`/[@did:key:…/]of:fid1:<id>[@scope][/path…][#argument]`, documented at the
-top of `packages/cli/lib/llm-friendly-ref.ts` — and omitted levels are
-supplied by context. Today that context is flags and two environment
-variables. Shuttle makes it a mutable, navigable value: **a place is the
-context that fills in the omitted levels of a reference.**
-
-[`cli-surface-shape.md`](cli-surface-shape.md) step 8 records the same
-observation for the space alone: "a parameter that is required everywhere and
-identical across a working session is one a caller should state once."
-Shuttle generalizes that from the space to the whole prefix, inside one
-interactive process.
-
-Reading state today is one-shot prints, the FUSE mount, or the offline
-inspector. The substrate is reactive; none of those show a value changing.
-The live-view half exists to make reactivity visible.
+Underneath both, a persistent runtime session is a capability one-shot
+commands cannot have at any flag cost: warm pieces serving live computed
+values without a per-command `--step`, subscriptions feeding watches and
+views, pagination cursors, the handle table, invocation-session
+continuity. And where an environment variable makes context ambient and
+invisible, the prompt renders the whole ambient record — place, scope,
+warm or cold — so what every command is about to touch is visible before
+it runs.
 
 ## Settled decisions
 
@@ -188,6 +201,13 @@ The live-view half exists to make reactivity visible.
     form: calling what a listing showed must not need a reference split by
     hand. No new reference syntax — the path is already canonical; the
     sugar is in the verb.
+28. **Watches are session objects.** `watch` arms a subscription that
+    outlives its view: leaving the view keeps it armed, each settled
+    change appends one event line at the prompt, and a pinned strip above
+    the prompt renders armed watches' values live while scrollback flows
+    past. `watches` lists what is armed, `unwatch` disarms, and scrollback
+    stays append-only — liveness lives in the strip and the event lines,
+    never in mutated history.
 
 The line grammar itself — resolution rules, facets, listings, run-state and
 write surfaces, and the redirection/pipe proposals — is drafted in
@@ -234,8 +254,10 @@ several) stay reachable later.
 Shuttle rides the addressing decisions of
 [`cli-surface-shape.md`](cli-surface-shape.md) rather than making its own:
 
-- Step 8 (`CF_SPACE` ambient) is the one-shot cousin of decision 6; the
-  serializable place is the shared seam.
+- Step 8's `CF_SPACE` is on main: the constant half of the context is
+  ambient for one-shot `cf` too, which is what isolates the moving half —
+  piece, path, scope — as shuttle's ground. The serializable ambient
+  record stays the shared seam for any further convergence.
 - Step 9 (space by name, piece by slug, positionally) is what `cd` and the
   prompt want — names, not hashes. Shuttle should consume that work, not
   duplicate it.

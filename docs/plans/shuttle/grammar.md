@@ -11,8 +11,8 @@ redirection surface. Ruled points are stated plainly; anything marked
 <verb> [reference] [arguments…] [options…]
 ```
 
-Navigation verbs are shuttle-native: `cd`, `ls`, `pwd`, `watch`, `back`
-(`cd -` returns to the previous place). Data verbs are `cf`'s own — `get`,
+Navigation verbs are shuttle-native: `cd`, `ls`, `pwd`, `watch`,
+`unwatch`, `watches`, `back` (`cd -` returns to the previous place). Data verbs are `cf`'s own — `get`,
 `set`, `call`, `wish`, `verbs`, `describe`, … — accepting their existing
 read and projection options (`--filter`, `--select`, `--schema`, `--json`),
 with the place supplying target options. `!` marks "this runs on the local
