@@ -275,6 +275,31 @@ describe("syncArgumentLinkTargets", () => {
     expect(syncedIds).toContain(id(behindPlain));
   });
 
+  it("holds a value declared `unknown` in either spelling of `type`", async () => {
+    const { make, commit } = docBuilder("unknown reference");
+    const behindScalar = make("behind scalar", { n: 1 });
+    const scalar = make("scalar", { child: behindScalar });
+    const behindArray = make("behind array", { n: 2 });
+    const array = make("array", { child: behindArray });
+    const root = make("root", { scalar, array });
+    await commit();
+    await run(root, {
+      type: "object",
+      properties: {
+        // `unknown` asks for reference semantics: compared by identity, not
+        // read through, opaque at this hop and every deeper one. The reader
+        // honors both spellings of `type`, so the pre-sync has to as well,
+        // or it warms documents a run declared it would never read.
+        scalar: { type: "unknown" },
+        array: { type: ["unknown", "string"] },
+      },
+    } as JSONSchema);
+    expect(syncedIds).toContain(id(scalar));
+    expect(syncedIds).not.toContain(id(behindScalar));
+    expect(syncedIds).toContain(id(array));
+    expect(syncedIds).not.toContain(id(behindArray));
+  });
+
   it("treats an `asCell` marker behind a `$ref` as a reference, and an unresolvable `$ref` as readable", async () => {
     const { make, commit } = docBuilder("ref arms");
     const behindRef = make("behind ref", { n: 1 });
