@@ -11,6 +11,8 @@
  * event would put a second clone of it on the return leg and bury exactly that.
  */
 
+import type { BenchWorkerAck } from "@commonfabric/test-support/bench-worker";
+
 import type { RealmEncodedValue } from "@commonfabric/data-model/codec-realm";
 import { fabricFromRealmValue } from "@commonfabric/data-model/codecs";
 import { stripSigilCfcLabelViews } from "@commonfabric/runner/cfc";
@@ -20,9 +22,6 @@ export type EventRequest = {
   /** The `dom-event` message, encoded as the transport encodes it. */
   readonly payload: RealmEncodedValue;
 };
-
-/** What this side reports. One boolean, so the return leg costs nothing. */
-export type EventAck = { readonly ok: boolean; readonly error?: string };
 
 self.onmessage = (ev: MessageEvent<EventRequest>) => {
   try {
@@ -35,10 +34,10 @@ self.onmessage = (ev: MessageEvent<EventRequest>) => {
 
     stripSigilCfcLabelViews(message.event);
 
-    self.postMessage({ ok: true } satisfies EventAck);
+    self.postMessage({ ok: true } satisfies BenchWorkerAck);
   } catch (e) {
     self.postMessage(
-      { ok: false, error: (e as Error).message } satisfies EventAck,
+      { ok: false, error: (e as Error).message } satisfies BenchWorkerAck,
     );
   }
 };
