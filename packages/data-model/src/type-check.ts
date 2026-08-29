@@ -341,9 +341,12 @@ export function isValidFabricNativeObject(
     case VALUE_TAGS.Set:
     case VALUE_TAGS.Date:
     case VALUE_TAGS.Uint8Array:
-    case VALUE_TAGS.RegExp:
+    case VALUE_TAGS.RegExp: {
       return true;
-    default:
+    }
+
+    default: {
       return false;
+    }
   }
 }

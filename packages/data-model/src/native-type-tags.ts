@@ -57,20 +57,33 @@ export function tagFromNativeClass(
   if (builtin !== null) return builtin;
 
   switch (constructorFn) {
-    case FabricBytes:
+    case FabricBytes: {
       return VALUE_TAGS.FabricBytes;
-    case FabricEpochNsec:
+    }
+
+    case FabricEpochNsec: {
       return VALUE_TAGS.EpochNsec;
-    case FabricEpochDay:
+    }
+
+    case FabricEpochDay: {
       return VALUE_TAGS.EpochDay;
-    case FabricHash:
+    }
+
+    case FabricHash: {
       return VALUE_TAGS.Hash;
-    case FabricKeyPair:
+    }
+
+    case FabricKeyPair: {
       return VALUE_TAGS.FabricKeyPair;
-    case FabricRegExp:
+    }
+
+    case FabricRegExp: {
       return VALUE_TAGS.FabricRegExp;
-    default:
+    }
+
+    default: {
       return null;
+    }
   }
 }
 

@@ -18,10 +18,13 @@ export function tagFromNativeBuiltinClass(
   switch (constructorFn) {
     // The two commonest by a distance, and a `switch` on object identity
     // compares in order, so they are asked first.
-    case Object:
+    case Object: {
       return VALUE_TAGS.Object;
-    case Array:
+    }
+
+    case Array: {
       return VALUE_TAGS.Array;
+    }
 
     // `Error` and standard subclasses all map to the `Error` tag.
     case Error:
@@ -30,19 +33,29 @@ export function tagFromNativeBuiltinClass(
     case SyntaxError:
     case ReferenceError:
     case URIError:
-    case EvalError:
+    case EvalError: {
       return VALUE_TAGS.Error;
+    }
 
-    case Map:
+    case Map: {
       return VALUE_TAGS.Map;
-    case Set:
+    }
+
+    case Set: {
       return VALUE_TAGS.Set;
-    case Date:
+    }
+
+    case Date: {
       return VALUE_TAGS.Date;
-    case Uint8Array:
+    }
+
+    case Uint8Array: {
       return VALUE_TAGS.Uint8Array;
-    case RegExp:
+    }
+
+    case RegExp: {
       return VALUE_TAGS.RegExp;
+    }
 
     default: {
       // Catch exotic `Error` subclasses (e.g. custom subclasses with
