@@ -15,7 +15,6 @@ import {
   MarkerType,
   MiniMap,
   type Node,
-  type NodeChange,
   type NodeProps,
   Position,
   ReactFlow,
@@ -36,7 +35,11 @@ import {
   type MachineParameters,
   type MachinePosition,
 } from "./contract.ts";
-import * as flowLifecycle from "./flow-lifecycle.ts";
+import {
+  type CanvasReactRuntime,
+  createMachineCanvas,
+  type MachineCanvasProps,
+} from "./machine-canvas.ts";
 import * as model from "./model.ts";
 
 const fabric = connectFabric();
@@ -360,177 +363,14 @@ const NODE_TYPES = {
   actuator: ActuatorNode,
 };
 
-interface MachineCanvasProps {
-  /** Durable node data projected into React Flow's node model. */
-  authoritativeNodes: MachineFlowNode[];
-  /** Canonical durable edges rendered on the canvas. */
-  edges: Edge[];
-  /** Connects two nodes through the shared action queue. */
-  onConnect(connection: {
-    source: string | null;
-    target: string | null;
-  }): void;
-  /** Persists a user-local node selection. */
-  onNodeSelection(nodeId: string): Promise<boolean>;
-  /** Latest authoritative PerUser selection. */
-  authoritativeSelection: string | null;
-  /** Persists a dropped position and returns the authoritative result. */
-  onPositionCommit(
-    nodeId: string,
-    position: MachinePosition,
-  ): Promise<MachinePosition | undefined>;
-}
-
-/** Owns pointer-lifetime state without rerendering the surrounding app. */
-function MachineCanvas({
-  authoritativeNodes,
-  edges,
-  onConnect,
-  onNodeSelection,
-  authoritativeSelection,
-  onPositionCommit,
-}: MachineCanvasProps) {
-  const [nodes, setNodes] = React.useState(authoritativeNodes);
-  const draftsRef = React.useRef<
-    Record<string, flowLifecycle.PositionDraft<MachinePosition>>
-  >({});
-  const authoritativeNodesRef = React.useRef(authoritativeNodes);
-  const selectionDraftRef = React.useRef<
-    { nodeId: string; token: number; confirmed: boolean } | undefined
-  >(undefined);
-  const selectionSequenceRef = React.useRef(0);
-  const authoritativeSelectionRef = React.useRef(authoritativeSelection);
-
-  React.useLayoutEffect(() => {
-    authoritativeNodesRef.current = authoritativeNodes;
-    authoritativeSelectionRef.current = authoritativeSelection;
-    if (
-      selectionDraftRef.current?.confirmed === true &&
-      selectionDraftRef.current.nodeId === authoritativeSelection
-    ) {
-      selectionDraftRef.current = undefined;
-    }
-    setNodes((current) =>
-      flowLifecycle.reconcileCollaborativeNodes(
-        current,
-        authoritativeNodes,
-        draftsRef.current,
-        selectionDraftRef.current?.nodeId,
-      )
-    );
-  }, [authoritativeNodes, authoritativeSelection]);
-
-  const handleNodeChanges = React.useCallback(
-    (changes: NodeChange<MachineFlowNode>[]) => {
-      flowLifecycle.capturePositionDrafts(changes, draftsRef);
-      setNodes((current) => applyNodeChanges(changes, current));
-    },
-    [],
-  );
-
-  const handleNodeDragStop = React.useCallback(
-    (node: MachineFlowNode) => {
-      const draft = draftsRef.current[node.id] ?? {
-        position: node.position,
-        token: 0,
-      };
-      void onPositionCommit(node.id, draft.position).then((committed) => {
-        const result = flowLifecycle.reconcilePositionCommit(
-          draftsRef,
-          node.id,
-          draft,
-          committed,
-          authoritativeNodesRef.current.find(
-            (candidate) => candidate.id === node.id,
-          )?.position,
-        );
-        if (!result.settled || result.position === undefined) {
-          return;
-        }
-        const position = result.position;
-        setNodes((current) =>
-          current.map((candidate) =>
-            candidate.id === node.id ? { ...candidate, position } : candidate
-          )
-        );
-      });
-    },
-    [onPositionCommit],
-  );
-
-  const handleNodeSelection = React.useCallback(
-    (nodeId: string) => {
-      if (
-        authoritativeSelection === nodeId &&
-        selectionDraftRef.current === undefined
-      ) return;
-      const draft = {
-        nodeId,
-        token: ++selectionSequenceRef.current,
-        confirmed: false,
-      };
-      selectionDraftRef.current = draft;
-      setNodes((current) =>
-        flowLifecycle.reconcileCollaborativeNodes(
-          current,
-          authoritativeNodesRef.current,
-          draftsRef.current,
-          nodeId,
-        )
-      );
-      void onNodeSelection(nodeId).then((succeeded) => {
-        if (selectionDraftRef.current?.token !== draft.token) return;
-        if (succeeded) {
-          selectionDraftRef.current = { ...draft, confirmed: true };
-          if (authoritativeSelectionRef.current !== nodeId) return;
-        }
-        selectionDraftRef.current = undefined;
-        setNodes((current) =>
-          flowLifecycle.reconcileCollaborativeNodes(
-            current,
-            authoritativeNodesRef.current,
-            draftsRef.current,
-          )
-        );
-      });
-    },
-    [authoritativeSelection, onNodeSelection],
-  );
-
-  return (
-    <ReactFlow<MachineFlowNode, Edge>
-      nodes={nodes}
-      edges={edges}
-      nodeTypes={NODE_TYPES}
-      onNodesChange={handleNodeChanges}
-      onNodeClick={(_event, node) => handleNodeSelection(node.id)}
-      onNodeDragStop={(_event, node) => handleNodeDragStop(node)}
-      onConnect={onConnect}
-      nodesDraggable
-      nodesConnectable
-      elementsSelectable
-      fitView
-      fitViewOptions={{ padding: 0.1 }}
-      minZoom={0.35}
-      maxZoom={1.6}
-      defaultEdgeOptions={{ type: "smoothstep" }}
-      colorMode="dark"
-    >
-      <Background color="#26334a" gap={28} size={1.2} />
-      <Controls
-        showInteractive={false}
-        fitViewOptions={{ padding: 0.1 }}
-      />
-      <MiniMap<MachineFlowNode>
-        pannable
-        zoomable
-        nodeColor={(node) => KIND_COLORS[node.type ?? "sensor"]}
-        nodeStrokeColor="#07111f"
-        maskColor="rgba(5, 12, 24, 0.72)"
-      />
-    </ReactFlow>
-  );
-}
+const MachineCanvas = createMachineCanvas<MachineFlowNode>(
+  React as unknown as CanvasReactRuntime,
+  { ReactFlow, Background, Controls, MiniMap, applyNodeChanges },
+  NODE_TYPES,
+  KIND_COLORS,
+) as React.ComponentType<
+  MachineCanvasProps<MachineFlowNode>
+>;
 
 function App() {
   const input = useCell<IframeInputData | undefined>("input");
