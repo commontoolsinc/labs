@@ -968,18 +968,41 @@ Deno.test("server-execution lane roles match the flipped default (testing.md §2
     );
   }
 
+  // Each step that SELECTS the arm carries its own assertion: the step
+  // that starts the toolshed, and the step that runs the test processes.
+  // A job-wide substring is satisfied by any single occurrence — the
+  // posture probe's `::error::` prose selects nothing and satisfies it —
+  // so the two selecting steps could disagree, and a lane that starts its
+  // server on one arm while running its tests on the other is a MIXED
+  // posture that every test still passes. The posture probe cannot stand
+  // in for this: it reads the SERVER, so the arm the test processes run
+  // under is unexamined unless asserted here. Comments are stripped on
+  // both, so a note naming an arm never counts as selecting it.
   for (
-    const jobId of [
-      "package-integration-test-server-execution-off",
-      "pattern-integration-test-server-execution-off",
+    const { jobId, runStep } of [
+      {
+        jobId: "package-integration-test-server-execution-off",
+        runStep: "🧪 Run ${{ matrix.step_name }} (flag OFF)",
+      },
+      {
+        jobId: "pattern-integration-test-server-execution-off",
+        runStep: "🧩 Run end-to-end patterns integration tests (flag OFF)",
+      },
     ]
   ) {
     const job = jobBlock(contents, jobId);
-    assertStringIncludes(
-      job,
-      "EXPERIMENTAL_SERVER_EXECUTION=false",
-      `${jobId}: the OFF guard must select the OFF arm explicitly`,
-    );
+    for (
+      const stepName of [
+        "🔌 Start Toolshed server for testing (flag OFF)",
+        runStep,
+      ]
+    ) {
+      assertStringIncludes(
+        withoutComments(stepBlock(job, stepName)),
+        "EXPERIMENTAL_SERVER_EXECUTION=false",
+        `${jobId}: "${stepName}" must select the OFF arm explicitly`,
+      );
+    }
     assertStringIncludes(
       job,
       ".servingLoop == null",
