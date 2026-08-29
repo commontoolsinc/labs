@@ -71,8 +71,10 @@ are passed as `new Runtime({ experimental: { ... } })`. Each flag defaults to
 `contentAddressedSchemas`, `plainResultReceipts`, `computedCellIds`,
 `lazyMaterialization` and `readerSchemaPrecedence` default on;
 `serverExecution` resolves an unset flag to the ONE first-party default
-`SERVER_EXECUTION_DEFAULT_ENABLED` in the deployed-topology presets — `false`
-today, Phase 7 having landed flip-ready DARK (its section); the other flags in
+`SERVER_EXECUTION_DEFAULT_ENABLED` in the deployed-topology presets — `true`
+since the Phase 7 flip (2026-08-28; its section), with an explicit `false`
+selecting the OFF arm, the soak's rollback lever (the single-process presets
+read no default and stay OFF — the section says how); the other flags in
 this category default off unless their section says otherwise.
 
 The mapping from environment variable to flag is defined once, canonically, as
@@ -1294,7 +1296,8 @@ The background piece service's main and worker processes use the same mapping
 and the same presets, so the server-side wirings agree on how a value parses.
 
 The CLI is not one of them. `cf`, the pieces controller behind it, the agents
-host and `cast-admin` are clients of a deployment rather than part of one, and
+host, the GitHub connector host and `cast-admin` are clients of a deployment
+rather than part of one, and
 they resolve their posture from that deployment first — the environment
 supplies their overrides, not their starting point. Their wiring is
 [Clients that are not built alongside their
@@ -1336,7 +1339,8 @@ The shell disagrees with its server only by explicit define: toolshed bakes
 the defines and serves the bundle, so the two ship one posture per deploy.
 Every other client is installed, deployed, or checked out on its own
 schedule — the `cf` binary, the pieces controller a FUSE mount opens, the
-agents host, the background-piece admin CLI — and the environment they read
+agents host, the GitHub connector host, the background-piece admin CLI — and
+the environment they read
 belongs to whoever launched them, not to the deployment they talk to. Left
 there, the operator has to know a deployment's flags and set them by hand, and
 nothing reports it when they do not.
@@ -1346,7 +1350,7 @@ These clients take the posture from the server instead. Each one calls
 before constructing its `Runtime`:
 
 ```
-cf / pieces controller / agents host / cast-admin
+cf / pieces controller / agents host / github host / cast-admin
   |
   +-- GET <apiUrl>/api/meta  --> { experimental: { <flag>: <boolean>, ... } }
   |     the posture the SERVER runs at

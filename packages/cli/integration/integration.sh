@@ -109,13 +109,20 @@ new_invocation_id() {
 # the OFF arm's receipt-collision witness, and the ON arm's witness is
 # BEHAVIORAL — same invocation echoed, exit 0, and exactly one message
 # (which still fails if --invocation were ignored outright).
+#
+# The probe carries connect and total deadlines. A toolshed that ACCEPTS the
+# connection and then stalls would otherwise hold this helper — and with it
+# the whole retry suite, which calls it per assertion — for as long as the
+# server stays silent, with no output and no step-level diagnosis. A stats
+# endpoint that cannot answer within seconds is a dead deployment; the arm
+# then reads OFF and the assertion that follows fails loudly.
 server_execution_on() {
   case "${EXPERIMENTAL_SERVER_EXECUTION:-}" in
     true) return 0 ;;
     false) return 1 ;;
   esac
-  curl -fsS "$API_URL/api/health/stats" 2>/dev/null \
-    | jq -e '.servingLoop != null' > /dev/null 2>&1
+  curl --connect-timeout 5 --max-time 15 -fsS "$API_URL/api/health/stats" \
+    2>/dev/null | jq -e '.servingLoop != null' > /dev/null 2>&1
 }
 
 # The session this run's invocation ids are chosen within. `cf piece call`

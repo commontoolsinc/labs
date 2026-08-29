@@ -38,15 +38,28 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
-**Delta 2026-08-28 (the FLIP PR —
+**Delta 2026-08-28, last updated 2026-08-29 (the FLIP PR —
 [#6535](https://github.com/commontoolsinc/labs/pull/6535), OPEN, the
 owner merges it personally; the soak starts at ITS merge): `SERVER_EXECUTION_DEFAULT_ENABLED` →
-`true`, with every ordered gate met on main at the base (e16780fca —
-rebased onto it 2026-08-29 from 4e02f75c4, the gate claims re-verified
-at the new base): the
+`true`, with every ordered gate met on main at the base (22c93b540 —
+rebased onto it 2026-08-29, from e16780fca and originally 4e02f75c4;
+the gate claims re-verified at each new base): the
 ON-skip registry EMPTY across all four suites (the ruled-3b-close lift,
 #6528), OW31's ruled posture BUILT, OW45–OW53 CLOSED, and the OW38(ii)
-bar RULED met ("topics numbers are fine", 2026-08-24).** The PR carries,
+bar RULED met ("topics numbers are fine", 2026-08-24).** The 2026-08-29
+updates this block carries, since the events they record post-date its
+2026-08-28 heading: the two rebases above; the DECLARED-RESULT STOP
+RULED (task 6's block — the serving side writes the verb
+receipt/result); and the bot-review AMENDMENT (the deployed-topology
+gates' startup wait made event-driven, their temporary identity no
+longer leaked, the CLI health probes bounded, and the CLI lane's gate
+now cross-checking `cf`'s resolved arm against the server's published
+one). The OFF-world half of those same findings landed separately on
+main as
+[#6545](https://github.com/commontoolsinc/labs/pull/6545) — the GitHub
+connector host adopting the deployment's posture, and the pattern
+shard selectors failing loudly on an empty selection — which is the
+base this branch now sits on. The PR carries,
 beside the one-liner and the absolute pin's re-tense: the LANE-ROLE SWAP
 (default lanes = the ON arm, probed serving-loop-present +
 shell-define-unset, carrying the empty ON skip list; the pre-flip
@@ -2170,13 +2183,20 @@ their protocol and full numbers are in the
 [stage-C closeout](../history/plans/server-execution-v2/stage-c-closeout.md)
 and the reports beside it):**
 
+*Reading the posture column after the flip: every `DEFAULT` row records
+the default AS OF THAT RUN — OFF, by the 2026-08-16 dark-landing ruling
+— not the default today. The flip PR makes the DEFAULT lanes the ON
+arm, so those gates re-run under ON on its own board rather than being
+re-tensed in place here; the `explicit ON` rows are what the ON arm
+exercised at the time.*
+
 | gate | posture | result |
 | --- | --- | --- |
 | `sx2-serving-loop`, `sx2-speculation`, `sx2-events`, `sx2-effect-channel`, `sx2-scale` | explicit `EXPERIMENTAL_SERVER_EXECUTION=true` everywhere (the ON arm — the sx2 arm detection reads env-else-default) | see the PR's bar (fixer re-run, fresh store) |
-| same five | DEFAULT (unset = OFF by ruling) | see the PR's bar (fixer re-run) |
-| runner package integration (14) | DEFAULT (OFF) | 14/14 GREEN |
+| same five | DEFAULT at the run's date (unset = OFF by the dark-landing ruling; the flip makes DEFAULT the ON arm) | see the PR's bar (fixer re-run) |
+| runner package integration (14) | DEFAULT at the run's date (OFF) | 14/14 GREEN |
 | runner package integration | explicit ON, UNIFORM (the 4 tests that talk to the lane's toolshed declare ON; the 8 in-process-app harness tests are OFF by construction) | 13/14 GREEN + `pattern-and-data-persistence` RED → ON-skip-listed (OW33); the pre-fix "14/14 under ON" was a MIXED posture (OFF clients) |
-| runtime-client package integration | DEFAULT (OFF) | 45 steps GREEN |
+| runtime-client package integration | DEFAULT at the run's date (OFF) | 45 steps GREEN |
 | runtime-client package integration | explicit ON, UNIFORM (the worker declares ON) | 43 steps GREEN + 2 STEP entries ignored loudly (CT-1606 PerUser header render 3/3 red; single-navigateTo dispatch 1/3 red — OW33) |
 | `counter` | full ON | 1 red / 3 green in the build's runs (OW30's controller write-destination race — intermittent); green in the review's run; server exhausts 2/5 waves with no client loop |
 | `topics-navigation` | full ON | RED fast (`missing required property myName`, OW30 class) — ON-skip-listed (and, since the fixer, actually skipped) |
