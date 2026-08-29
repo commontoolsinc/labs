@@ -125,7 +125,7 @@ class DroppableTransport implements MemoryV2Client.Transport {
     if (message.type === "transact" && this.#verdictWaiting !== null) {
       this.#transactRequestId = message.requestId ?? null;
     }
-    await this.connection().receive(payload);
+    await this.#openConnection().receive(payload);
   }
 
   close(): Promise<void> {
@@ -158,7 +158,7 @@ class DroppableTransport implements MemoryV2Client.Transport {
     queueMicrotask(() => this.#closeReceiver(new Error("disconnect")));
   }
 
-  private connection(): ReturnType<MemoryV2Server.Server["connect"]> {
+  #openConnection(): ReturnType<MemoryV2Server.Server["connect"]> {
     if (this.#connection === null) {
       this.#connection = this.#server.connect((message) => {
         const framed = message as {

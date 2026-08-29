@@ -40,14 +40,17 @@ class DroppableTransport implements Transport {
   #closeReceiver: (error?: Error) => void = () => {};
   #connection: ReturnType<Server["connect"]> | null = null;
 
-  constructor(
-    private server: Server,
-    private readonly stripSessionHoldings = false,
-  ) {}
+  #server: Server;
+  readonly #stripSessionHoldings: boolean;
+
+  constructor(server: Server, stripSessionHoldings = false) {
+    this.#server = server;
+    this.#stripSessionHoldings = stripSessionHoldings;
+  }
 
   async send(payload: string): Promise<void> {
     this.sent.push(decodeMemoryBoundary(payload) as Sent);
-    await this.connection().receive(payload);
+    await this.#openConnection().receive(payload);
   }
 
   close(): Promise<void> {
@@ -70,20 +73,20 @@ class DroppableTransport implements Transport {
   }
 
   retarget(server: Server): void {
-    this.server = server;
+    this.#server = server;
   }
 
-  private connection(): ReturnType<Server["connect"]> {
+  #openConnection(): ReturnType<Server["connect"]> {
     if (this.#connection === null) {
-      this.#connection = this.server.connect((message) => {
-        this.#receiver(encodeMemoryBoundary(this.project(message)));
+      this.#connection = this.#server.connect((message) => {
+        this.#receiver(encodeMemoryBoundary(this.#project(message)));
       });
     }
     return this.#connection;
   }
 
-  private project<T>(message: T): T {
-    if (this.stripSessionHoldings) {
+  #project<T>(message: T): T {
+    if (this.#stripSessionHoldings) {
       const framed = message as { type?: string; flags?: object };
       if (framed.type === "hello.ok" && framed.flags !== undefined) {
         return {

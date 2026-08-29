@@ -526,14 +526,17 @@ describe("WebSocketTransport failure signaling", () => {
     readonly started = Promise.withResolvers<void>();
     readonly released = Promise.withResolvers<void>();
 
-    constructor(private readonly contents = new Uint8Array([0]).buffer) {
+    readonly #contents: ArrayBuffer;
+
+    constructor(contents = new Uint8Array([0]).buffer) {
       super();
+      this.#contents = contents;
     }
 
     override async arrayBuffer(): Promise<ArrayBuffer> {
       this.started.resolve();
       await this.released.promise;
-      return this.contents;
+      return this.#contents;
     }
   }
 
