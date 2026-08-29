@@ -104,40 +104,21 @@ export function isValidFabricValueLayer(
 }
 
 /**
- * Indicates whether the value is a `FabricValue` -- a recursive check of exact
- * structural membership in the `FabricValue` type, independent of frozen-ness.
+ * Helper for `assertValidFabricValueLayer()`, which names the class of a value
+ * it is refusing.
  *
- * Returns `true` for any scalar (`null`, `undefined`, `boolean`, `number` --
- * including `-0`, `NaN`, and `±Infinity` -- `string`, `bigint`, and
- * registry-interned (`Symbol.for(...)`) symbols), any `FabricInstance` or
- * `FabricPrimitive`, a direct `Array` instance holding `FabricValue`s with no
- * named or symbol-keyed properties, `length` aside (sparse holes allowed), or a
- * plain object whose values are all `FabricValue`s. Returns `false` for a
- * `function` or a unique (uninterned) symbol -- whether the value itself or
- * reached anywhere within it -- for an accessor-backed (getter/setter) property
- * anywhere, plain-object keyed or array-indexed alike, which makes its
- * container non-inert, for an `Array` subclass instance or other
- * indirectly-rooted array, whose prototype is live code the same way an
- * accessor is, and for any other class instance (`Date`, `Map`, ...) not
- * representable as a `FabricValue`. Handles circular references.
- *
- * This is a *membership* check, not a frozen-ness check: a structurally-valid
- * but unfrozen object or array is still a `FabricValue`. For the deep-frozen
- * question, see `isValidDeepFrozenFabricValue()`. A `FabricInstance` is a
- * member by type (it is a `FabricSpecialObject`); this does not recurse into
- * its private interior, whose contents are `FabricValue`s by the instance's
- * construction contract and are reachable only via frozen-semantic protocols
- * that a membership check must not invoke.
- *
- * Contrast the shallow, single-level sibling `isValidFabricValueLayer()` and
- * `isValidFabricConvertibleValue()` (which additionally accepts native values
- * *convertible* to fabric form).
- *
- * This is the admission test the encoding path's input contract is written
- * against: a value this accepts encodes, and one it does not gets whatever
- * best-effort handling costs correct input nothing. See
- * `BaseCodecEngine.encode()`.
+ * The class is read from the prototype rather than from the value, for the
+ * reason the dispatch reads it there: an own `constructor` property is
+ * ordinary data, so a value could otherwise choose the name it is refused
+ * under. A name that is not a string is treated as no name at all, since the
+ * message is built from it and a diagnostic must not fail while reporting.
  */
+function refusedClassNameOf(value: object): string {
+  const name = (constructorOfObject(value) as { name?: unknown } | undefined)
+    ?.name;
+  return (typeof name === "string" && name !== "") ? name : typeof value;
+}
+
 /**
  * Throws unless the value is usable as a `FabricValueLayer`, naming what is
  * wrong with it when it is not. This is `isValidFabricValueLayer()` asked so
@@ -191,7 +172,7 @@ export function assertValidFabricValueLayer(
   if (isValidFabricNativeObject(value)) {
     throw new Error(
       `Not already a \`FabricValue\`: ${
-        backtickQuote((value as object).constructor?.name ?? typeof value)
+        backtickQuote(refusedClassNameOf(value as object))
       } (a \`FabricNativeObject\`, so conversion is what decides it)`,
     );
   }
@@ -226,11 +207,46 @@ export function assertValidFabricValueLayer(
   // Death before confusion!
   throw new Error(
     `Not representable as a \`FabricValue\`: ${
-      backtickQuote((value as object).constructor?.name ?? typeof value)
+      backtickQuote(refusedClassNameOf(value as object))
     } (not a recognized fabric type)`,
   );
 }
 
+/**
+ * Indicates whether the value is a `FabricValue` -- a recursive check of exact
+ * structural membership in the `FabricValue` type, independent of frozen-ness.
+ *
+ * Returns `true` for any scalar (`null`, `undefined`, `boolean`, `number` --
+ * including `-0`, `NaN`, and `±Infinity` -- `string`, `bigint`, and
+ * registry-interned (`Symbol.for(...)`) symbols), any `FabricInstance` or
+ * `FabricPrimitive`, a direct `Array` instance holding `FabricValue`s with no
+ * named or symbol-keyed properties, `length` aside (sparse holes allowed), or a
+ * plain object whose values are all `FabricValue`s. Returns `false` for a
+ * `function` or a unique (uninterned) symbol -- whether the value itself or
+ * reached anywhere within it -- for an accessor-backed (getter/setter) property
+ * anywhere, plain-object keyed or array-indexed alike, which makes its
+ * container non-inert, for an `Array` subclass instance or other
+ * indirectly-rooted array, whose prototype is live code the same way an
+ * accessor is, and for any other class instance (`Date`, `Map`, ...) not
+ * representable as a `FabricValue`. Handles circular references.
+ *
+ * This is a *membership* check, not a frozen-ness check: a structurally-valid
+ * but unfrozen object or array is still a `FabricValue`. For the deep-frozen
+ * question, see `isValidDeepFrozenFabricValue()`. A `FabricInstance` is a
+ * member by type (it is a `FabricSpecialObject`); this does not recurse into
+ * its private interior, whose contents are `FabricValue`s by the instance's
+ * construction contract and are reachable only via frozen-semantic protocols
+ * that a membership check must not invoke.
+ *
+ * Contrast the shallow, single-level sibling `isValidFabricValueLayer()` and
+ * `isValidFabricConvertibleValue()` (which additionally accepts native values
+ * *convertible* to fabric form).
+ *
+ * This is the admission test the encoding path's input contract is written
+ * against: a value this accepts encodes, and one it does not gets whatever
+ * best-effort handling costs correct input nothing. See
+ * `BaseCodecEngine.encode()`.
+ */
 export function isValidFabricValue(value: unknown): value is FabricValue {
   // Fast leaf paths first, so a function or a primitive returns without
   // allocating the cycle-tracking set or the recursion closure below.

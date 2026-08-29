@@ -949,6 +949,50 @@ describe("type-check", () => {
         );
       });
 
+      describe("names the class from the prototype, not from the value", () => {
+        // The refusal message is built from the class name, and an own
+        // `constructor` property is ordinary data -- so reading it off the
+        // value would let a value choose the name it is refused under, and
+        // would let it make the refusal fail instead of report. Each case
+        // below is refused as `Widget`, which is what its prototype says.
+        class Widget {}
+
+        function widgetWith(descriptor: PropertyDescriptor): unknown {
+          const widget = new Widget();
+          Object.defineProperty(widget, "constructor", descriptor);
+          return widget;
+        }
+
+        for (
+          const [label, value] of [
+            [
+              "an own `constructor` naming another class",
+              widgetWith({ value: Date }),
+            ],
+            [
+              "a `constructor.name` that is not a string",
+              widgetWith({ value: { name: 123 } }),
+            ],
+            [
+              "a `constructor` whose getter throws",
+              widgetWith({
+                get() {
+                  throw new Error("the diagnostic must not propagate this");
+                },
+              }),
+            ],
+            ["a `constructor` of `null`", widgetWith({ value: null })],
+          ] as ReadonlyArray<[string, unknown]>
+        ) {
+          it(`refuses ${label} as \`Widget\``, () => {
+            expect(() => assertValidFabricValueLayer(value)).toThrow(
+              "Not representable as a `FabricValue`: `Widget` (not a " +
+                "recognized fabric type)",
+            );
+          });
+        }
+      });
+
       it("names a class instance as an unrecognized type", () => {
         expect(() => assertValidFabricValueLayer(new PlainClass())).toThrow(
           "Not representable as a `FabricValue`: `PlainClass` (not a " +
