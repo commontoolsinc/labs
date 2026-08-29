@@ -128,6 +128,24 @@ export function refusedClassNameOf(value: object): string {
 }
 
 /**
+ * Helper for `assertValidFabricValueLayer()`, which reports whether a value's
+ * class is `Array` -- true of an array, and of a non-array whose prototype
+ * chain says otherwise.
+ */
+function classIsArray(value: unknown): boolean {
+  if ((value === null) || (typeof value !== "object")) return false;
+  try {
+    const ctor = constructorOfObject(value);
+    return (ctor !== undefined) &&
+      (tagFromNativeBuiltinClass(ctor) === VALUE_TAGS.Array);
+  } catch {
+    // A value whose class cannot be read is not claiming to be an `Array`,
+    // and this runs while a refusal is being explained, so it must not throw.
+    return false;
+  }
+}
+
+/**
  * Throws unless the value is usable as a `FabricValueLayer`, naming what is
  * wrong with it when it is not. This is `isValidFabricValueLayer()` asked so
  * that the answer carries a reason: that predicate decides the outcome and
@@ -152,13 +170,18 @@ export function assertValidFabricValueLayer(
   // test below distinguishes two reasons from each other; none of them decides
   // the outcome, which the call above already did.
 
-  if (Array.isArray(value)) {
+  if (Array.isArray(value) || classIsArray(value)) {
     // An array in this system is _inert_: a direct `Array` instance, which may
     // only carry numeric index properties, each a data property. A named or
     // symbol-keyed property has no fabric representation, and an
     // accessor-backed index is live code rather than inert data -- as is the
     // prototype of an `Array` subclass instance, which can make iteration
     // yield differently than the indices say.
+    //
+    // A value whose class is `Array` without being one gets this reason too.
+    // It is not an array, so the rule that decides arrays never reached it,
+    // but `Array` is what it presents itself as and so what a reader is owed
+    // an answer about -- and it is the reason the conversion gives.
     throw new Error(
       "Not representable as a `FabricValue`: array that is not an inert array",
     );

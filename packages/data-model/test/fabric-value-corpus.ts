@@ -46,6 +46,17 @@ export class ArraySubclass extends Array {}
 export class WeirdError extends RangeError {}
 
 /**
+ * Returns a non-array whose prototype is `Array.prototype`, so that its class
+ * reads as `Array` while `Array.isArray()` says otherwise.
+ */
+function nonArrayWithArrayPrototype(): unknown {
+  const value = Object.create(Array.prototype) as Record<string, unknown>;
+  value[0] = "a";
+  value.length = 1;
+  return value;
+}
+
+/**
  * Returns an array whose prototype has been re-pointed at `Date.prototype`, so
  * that its class reads as `Date` and only the array rule still sees an array.
  */
@@ -81,6 +92,10 @@ export const LAYER_CORPUS: ReadonlyArray<[string, unknown]> = [
   ["an inert plain object", { a: 1 }],
   ["an array carrying a named property", Object.assign([1], { z: 1 })],
   ["an `Array` subclass instance", ArraySubclass.from([1, 2])],
+  [
+    "a non-array whose `prototype` is `Array.prototype`",
+    nonArrayWithArrayPrototype(),
+  ],
   [
     "an array whose `prototype` is `Date.prototype`",
     arrayWithDatePrototype(),
