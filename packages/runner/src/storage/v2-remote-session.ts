@@ -198,7 +198,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
    * overtake earlier asynchronous compression.
    */
   async send(payload: string): Promise<void> {
-    const opening = this.open();
+    const opening = this.#open();
     const compressionEnabled = this.#sendCompressionEnabled;
     const send = this.#sending.then(async () => {
       const socket = await opening;
@@ -239,7 +239,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
     await closed;
   }
 
-  private async open(): Promise<WebSocket> {
+  async #open(): Promise<WebSocket> {
     if (this.#socket?.readyState === WebSocket.OPEN) {
       return this.#socket;
     }
@@ -369,7 +369,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
     const response = Promise.withResolvers<boolean>();
     void response.promise.catch(() => {});
     this.#compressionRequests.set(requestId, response);
-    const opening = this.open();
+    const opening = this.#open();
     const send = this.#sending.then(async () => {
       const socket = await opening;
       if (this.#socket !== socket) {
@@ -448,10 +448,16 @@ export class RemoteSessionFactory implements SessionFactory {
   #compressionEnabled = true;
   #transports = new Set<WebSocketTransport>();
 
+  readonly #resolveAddress: (space: MemorySpace) => URL;
+  readonly #defaultSigner: Signer;
+
   constructor(
-    private readonly resolveAddress: (space: MemorySpace) => URL,
-    private readonly defaultSigner: Signer,
-  ) {}
+    resolveAddress: (space: MemorySpace) => URL,
+    defaultSigner: Signer,
+  ) {
+    this.#resolveAddress = resolveAddress;
+    this.#defaultSigner = defaultSigner;
+  }
 
   /** Changes compression on live sessions and the default for later ones. */
   async setMessageCompressionEnabled(enabled: boolean): Promise<void> {
@@ -474,12 +480,12 @@ export class RemoteSessionFactory implements SessionFactory {
 
   async create(
     space: MemorySpace,
-    signer = this.defaultSigner,
+    signer = this.#defaultSigner,
     mountOptions: MemoryClient.MountOptions = {},
     signal?: AbortSignal,
   ) {
     const transport = new WebSocketTransport(
-      toSpaceWebSocketAddress(this.resolveAddress(space), space),
+      toSpaceWebSocketAddress(this.#resolveAddress(space), space),
       this.#compressionEnabled,
       () => this.#transports.delete(transport),
     );

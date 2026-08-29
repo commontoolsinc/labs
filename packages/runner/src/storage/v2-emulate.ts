@@ -46,16 +46,20 @@ export const newLoopbackServer = (options?: {
   });
 
 class EmulatedSessionFactory implements SessionFactory {
+  readonly #getServer: () => MemoryV2Server.Server;
+
   constructor(
-    private readonly getServer: () => MemoryV2Server.Server,
-  ) {}
+    getServer: () => MemoryV2Server.Server,
+  ) {
+    this.#getServer = getServer;
+  }
 
   async create(
     space: MemorySpace,
     signer?: Signer,
     mountOptions: MemoryV2Client.MountOptions = {},
   ) {
-    const transport = MemoryV2Client.loopback(this.getServer());
+    const transport = MemoryV2Client.loopback(this.#getServer());
     const client = await MemoryV2Client.connect({ transport });
     const session = await client.mount(
       space,
