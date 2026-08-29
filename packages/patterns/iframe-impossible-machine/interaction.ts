@@ -22,47 +22,6 @@ export function findAppendOnlyItem<T extends Readonly<{ id: string }>>(
   return index < 0 ? undefined : { index, item: items[index]! };
 }
 
-/** Clears only the local position draft acknowledged by a completed write. */
-export function clearCommittedPositionDraft<
-  T extends Readonly<{ x: number; y: number }>,
->(
-  drafts: Record<string, T>,
-  nodeId: string,
-  committed: T,
-): Record<string, T> {
-  const latest = drafts[nodeId];
-  if (
-    latest === undefined || latest.x !== committed.x ||
-    latest.y !== committed.y
-  ) {
-    return drafts;
-  }
-  const next = { ...drafts };
-  delete next[nodeId];
-  return next;
-}
-
-/** Clears a committed draft from both the synchronous and rendered stores. */
-export function settleCommittedPositionDraft<
-  T extends Readonly<{ x: number; y: number }>,
->(
-  draftsRef: { current: Record<string, T> },
-  setDrafts: (
-    update: (current: Record<string, T>) => Record<string, T>,
-  ) => void,
-  nodeId: string,
-  committed: T,
-): void {
-  draftsRef.current = clearCommittedPositionDraft(
-    draftsRef.current,
-    nodeId,
-    committed,
-  );
-  setDrafts((current) =>
-    clearCommittedPositionDraft(current, nodeId, committed)
-  );
-}
-
 /** Converts an unknown action failure into the UI's error value. */
 export function errorFrom(cause: unknown): Error {
   return cause instanceof Error ? cause : new Error(String(cause));
@@ -155,7 +114,7 @@ export interface SelectionRequestTracker {
   request(
     nodeId: string,
     writeSelection: (nodeId: string) => Promise<unknown>,
-  ): Promise<void>;
+  ): Promise<boolean>;
 }
 
 /** Keeps rapid node selections ordered without repeating the latest request. */
@@ -183,7 +142,7 @@ export function createSelectionRequestTracker(
       }
     },
     async request(nodeId, writeSelection) {
-      if (latestRequestedSelection === nodeId) return;
+      if (latestRequestedSelection === nodeId) return true;
       const sequence = ++requestSequence;
       latestRequestedSelection = nodeId;
       latestRequestedSequence = sequence;
@@ -210,6 +169,7 @@ export function createSelectionRequestTracker(
           latestRequestedSequence = latestSuccessfulSequence;
         }
       }
+      return succeeded;
     },
   };
 }

@@ -371,7 +371,9 @@ interface MachineCanvasProps {
     target: string | null;
   }): void;
   /** Persists a user-local node selection. */
-  onNodeSelection(nodeId: string): void;
+  onNodeSelection(nodeId: string): Promise<boolean>;
+  /** Latest authoritative PerUser selection. */
+  authoritativeSelection: string | null;
   /** Persists a dropped position and returns the authoritative result. */
   onPositionCommit(
     nodeId: string,
@@ -385,43 +387,58 @@ function MachineCanvas({
   edges,
   onConnect,
   onNodeSelection,
+  authoritativeSelection,
   onPositionCommit,
 }: MachineCanvasProps) {
   const [nodes, setNodes] = React.useState(authoritativeNodes);
-  const draftsRef = React.useRef<Record<string, MachinePosition>>({});
+  const draftsRef = React.useRef<
+    Record<string, flowLifecycle.PositionDraft<MachinePosition>>
+  >({});
+  const authoritativeNodesRef = React.useRef(authoritativeNodes);
+  const selectionDraftRef = React.useRef<
+    { nodeId: string; token: number; confirmed: boolean } | undefined
+  >(undefined);
+  const selectionSequenceRef = React.useRef(0);
+  const authoritativeSelectionRef = React.useRef(authoritativeSelection);
 
   React.useLayoutEffect(() => {
+    authoritativeNodesRef.current = authoritativeNodes;
+    authoritativeSelectionRef.current = authoritativeSelection;
+    if (
+      selectionDraftRef.current?.confirmed === true &&
+      selectionDraftRef.current.nodeId === authoritativeSelection
+    ) {
+      selectionDraftRef.current = undefined;
+    }
     setNodes((current) =>
       flowLifecycle.reconcileCollaborativeNodes(
         current,
         authoritativeNodes,
         draftsRef.current,
+        selectionDraftRef.current?.nodeId,
       )
     );
-  }, [authoritativeNodes]);
+  }, [authoritativeNodes, authoritativeSelection]);
 
   const handleNodeChanges = React.useCallback(
     (changes: NodeChange<MachineFlowNode>[]) => {
-      setNodes((current) =>
-        flowLifecycle.applyCollaborativeNodeChanges(
-          changes,
-          current,
-          draftsRef,
-          applyNodeChanges,
-        )
-      );
+      flowLifecycle.capturePositionDrafts(changes, draftsRef);
+      setNodes((current) => applyNodeChanges(changes, current));
     },
     [],
   );
 
   const handleNodeDragStop = React.useCallback(
     (node: MachineFlowNode) => {
-      const position = draftsRef.current[node.id] ?? node.position;
-      void onPositionCommit(node.id, position).then((committed) => {
-        if (!flowLifecycle.settlePositionDraft(draftsRef, node.id, position)) {
+      const draft = draftsRef.current[node.id] ?? {
+        position: node.position,
+        token: 0,
+      };
+      void onPositionCommit(node.id, draft.position).then((committed) => {
+        if (!flowLifecycle.settlePositionDraft(draftsRef, node.id, draft)) {
           return;
         }
-        const replacement = committed ?? authoritativeNodes.find(
+        const replacement = committed ?? authoritativeNodesRef.current.find(
           (candidate) => candidate.id === node.id,
         )?.position;
         if (replacement === undefined) return;
@@ -434,7 +451,46 @@ function MachineCanvas({
         );
       });
     },
-    [authoritativeNodes, onPositionCommit],
+    [onPositionCommit],
+  );
+
+  const handleNodeSelection = React.useCallback(
+    (nodeId: string) => {
+      if (
+        authoritativeSelection === nodeId &&
+        selectionDraftRef.current === undefined
+      ) return;
+      const draft = {
+        nodeId,
+        token: ++selectionSequenceRef.current,
+        confirmed: false,
+      };
+      selectionDraftRef.current = draft;
+      setNodes((current) =>
+        flowLifecycle.reconcileCollaborativeNodes(
+          current,
+          authoritativeNodesRef.current,
+          draftsRef.current,
+          nodeId,
+        )
+      );
+      void onNodeSelection(nodeId).then((succeeded) => {
+        if (selectionDraftRef.current?.token !== draft.token) return;
+        if (succeeded) {
+          selectionDraftRef.current = { ...draft, confirmed: true };
+          if (authoritativeSelectionRef.current !== nodeId) return;
+        }
+        selectionDraftRef.current = undefined;
+        setNodes((current) =>
+          flowLifecycle.reconcileCollaborativeNodes(
+            current,
+            authoritativeNodesRef.current,
+            draftsRef.current,
+          )
+        );
+      });
+    },
+    [authoritativeSelection, onNodeSelection],
   );
 
   return (
@@ -443,7 +499,7 @@ function MachineCanvas({
       edges={edges}
       nodeTypes={NODE_TYPES}
       onNodesChange={handleNodeChanges}
-      onNodeClick={(_event, node) => onNodeSelection(node.id)}
+      onNodeClick={(_event, node) => handleNodeSelection(node.id)}
       onNodeDragStop={(_event, node) => handleNodeDragStop(node)}
       onConnect={onConnect}
       nodesDraggable
@@ -856,9 +912,10 @@ function App() {
           <div className="flow-shell" aria-label="Collaborative machine canvas">
             <MachineCanvas
               authoritativeNodes={flowNodes}
+              authoritativeSelection={outputValue.selectedNodeId}
               edges={flowEdges}
               onNodeSelection={(nodeId) =>
-                void tracker.request(
+                tracker.request(
                   nodeId,
                   (selectedNodeId) =>
                     updatePreference(

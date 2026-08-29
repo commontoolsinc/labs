@@ -17,24 +17,29 @@ export interface PositionedNode {
   id: string;
   /** Current canvas position. */
   position: XYPosition;
+  /** Current React Flow selection state. */
+  selected?: boolean;
+}
+
+/** One pointer-generated position draft with a unique gesture token. */
+export interface PositionDraft<PositionType extends XYPosition = XYPosition> {
+  /** Latest position in this gesture. */
+  position: PositionType;
+  /** Monotonic per-node identity for this version of the draft. */
+  token: number;
 }
 
 /** Mutable position drafts captured synchronously from React Flow changes. */
 export interface PositionDraftsRef {
   /** Latest unsaved positions, keyed by stable machine-node ID. */
-  current: Record<string, XYPosition>;
+  current: Record<string, PositionDraft>;
 }
 
-/** Applies one React Flow change batch and records its durable positions. */
-export function applyCollaborativeNodeChanges<
-  NodeType extends PositionedNode,
-  ChangeType extends { type: string },
->(
+/** Captures durable positions synchronously from one React Flow change batch. */
+export function capturePositionDrafts<ChangeType extends { type: string }>(
   changes: ChangeType[],
-  nodes: NodeType[],
   draftsRef: PositionDraftsRef,
-  applyChanges: (changes: ChangeType[], nodes: NodeType[]) => NodeType[],
-): NodeType[] {
+): void {
   const positions = changes.filter(
     (change): change is ChangeType & {
       id: string;
@@ -43,13 +48,12 @@ export function applyCollaborativeNodeChanges<
       change.type === "position" &&
       (change as { position?: XYPosition }).position !== undefined,
   );
-  Object.assign(
-    draftsRef.current,
-    Object.fromEntries(
-      positions.map((change) => [change.id, change.position!]),
-    ),
-  );
-  return applyChanges(changes, nodes);
+  for (const change of positions) {
+    draftsRef.current[change.id] = {
+      position: change.position,
+      token: (draftsRef.current[change.id]?.token ?? 0) + 1,
+    };
+  }
 }
 
 /**
@@ -59,7 +63,8 @@ export function applyCollaborativeNodeChanges<
 export function reconcileCollaborativeNodes<NodeType extends PositionedNode>(
   nodes: NodeType[],
   authoritativeNodes: NodeType[],
-  drafts: Readonly<Record<string, XYPosition>>,
+  drafts: Readonly<Record<string, PositionDraft>>,
+  selectedNodeId?: string,
 ): NodeType[] {
   const currentById = new Map(nodes.map((node) => [node.id, node]));
   return authoritativeNodes.map((authoritative) => {
@@ -67,7 +72,10 @@ export function reconcileCollaborativeNodes<NodeType extends PositionedNode>(
     return {
       ...current,
       ...authoritative,
-      position: drafts[authoritative.id] ?? authoritative.position,
+      position: drafts[authoritative.id]?.position ?? authoritative.position,
+      selected: selectedNodeId === undefined
+        ? authoritative.selected
+        : authoritative.id === selectedNodeId,
     };
   });
 }
@@ -76,13 +84,10 @@ export function reconcileCollaborativeNodes<NodeType extends PositionedNode>(
 export function settlePositionDraft(
   draftsRef: PositionDraftsRef,
   nodeId: string,
-  committed: XYPosition,
+  committed: PositionDraft,
 ): boolean {
   const latest = draftsRef.current[nodeId];
-  if (
-    latest === undefined || latest.x !== committed.x ||
-    latest.y !== committed.y
-  ) {
+  if (latest === undefined || latest.token !== committed.token) {
     return false;
   }
   const next = { ...draftsRef.current };

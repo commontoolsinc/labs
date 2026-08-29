@@ -5,14 +5,15 @@ import { applyNodeChanges } from "@xyflow/react";
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 import {
-  applyCollaborativeNodeChanges,
+  capturePositionDrafts,
+  type PositionDraft,
   reconcileCollaborativeNodes,
   settlePositionDraft,
 } from "./flow-lifecycle.ts";
 
 type TestNode = Node<Record<string, never>>;
 
-describe("applyCollaborativeNodeChanges()", () => {
+describe("React Flow lifecycle", () => {
   it("retains drag state and untouched node identity", () => {
     const dragged: TestNode = {
       id: "dragged",
@@ -30,19 +31,19 @@ describe("applyCollaborativeNodeChanges()", () => {
       position: { x: 12, y: 8 },
       dragging: true,
     }];
-    const draftsRef = { current: {} };
+    const draftsRef: { current: Record<string, PositionDraft> } = {
+      current: {},
+    };
 
-    const result = applyCollaborativeNodeChanges(
-      changes,
-      [dragged, untouched],
-      draftsRef,
-      applyNodeChanges,
-    );
+    capturePositionDrafts(changes, draftsRef);
+    const result = applyNodeChanges(changes, [dragged, untouched]);
 
     expect(result[0]?.position).toEqual({ x: 12, y: 8 });
     expect(result[0]?.dragging).toBe(true);
     expect(result[1]).toBe(untouched);
-    expect(draftsRef.current).toEqual({ dragged: { x: 12, y: 8 } });
+    expect(draftsRef.current).toEqual({
+      dragged: { position: { x: 12, y: 8 }, token: 1 },
+    });
   });
 
   it("reconciles durable data without displacing an active drag", () => {
@@ -62,7 +63,7 @@ describe("applyCollaborativeNodeChanges()", () => {
     const result = reconcileCollaborativeNodes(
       [current],
       [authoritative],
-      { gate: current.position },
+      { gate: { position: current.position, token: 1 } },
     );
 
     expect(result[0]?.position).toEqual(current.position);
@@ -71,16 +72,48 @@ describe("applyCollaborativeNodeChanges()", () => {
   });
 
   it("clears only the position draft acknowledged by a write", () => {
-    const draftsRef = { current: { gate: { x: 30, y: 18 } } };
+    const changes: NodeChange<TestNode>[] = [{
+      id: "gate",
+      type: "position",
+      position: { x: 30, y: 18 },
+      dragging: false,
+    }];
+    const draftsRef: { current: Record<string, PositionDraft> } = {
+      current: {},
+    };
+    capturePositionDrafts(changes, draftsRef);
+    const first = draftsRef.current.gate!;
+    capturePositionDrafts(changes, draftsRef);
+    const second = draftsRef.current.gate!;
 
-    expect(settlePositionDraft(draftsRef, "gate", { x: 12, y: 9 })).toBe(
-      false,
-    );
-    expect(draftsRef.current).toEqual({ gate: { x: 30, y: 18 } });
+    expect(settlePositionDraft(draftsRef, "gate", first)).toBe(false);
+    expect(draftsRef.current).toEqual({ gate: second });
 
-    expect(settlePositionDraft(draftsRef, "gate", { x: 30, y: 18 })).toBe(
-      true,
-    );
+    expect(settlePositionDraft(draftsRef, "gate", second)).toBe(true);
     expect(draftsRef.current).toEqual({});
+  });
+
+  it("preserves a pending local selection during reconciliation", () => {
+    const first: TestNode = {
+      id: "first",
+      position: { x: 0, y: 0 },
+      selected: true,
+      data: {},
+    };
+    const second: TestNode = {
+      id: "second",
+      position: { x: 20, y: 20 },
+      selected: false,
+      data: {},
+    };
+
+    const result = reconcileCollaborativeNodes(
+      [first, second],
+      [{ ...first, selected: true }, { ...second, selected: false }],
+      {},
+      "second",
+    );
+
+    expect(result.map((node) => node.selected)).toEqual([false, true]);
   });
 });

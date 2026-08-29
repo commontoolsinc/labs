@@ -33,7 +33,11 @@ describe("Impossible Machine document shell", () => {
       "<div {...model.nodeControlBoundaryProps()}>{children}</div>",
     );
     expect(source).toContain("await model.updateLatestValue(");
-    expect(source).toContain("void tracker.request(");
+    expect(source).toContain("tracker.request(");
+    expect(source).toContain(
+      "authoritativeSelection={outputValue.selectedNodeId}",
+    );
+    expect(source).toContain("selectionDraftRef.current?.confirmed");
     expect(source).toContain("const actionRunner = React.useRef(");
     expect(source).toContain("const runNodeAction = actionRunner.runNode");
     expect(source).toContain("const located = model.findAppendOnlyItem(");
