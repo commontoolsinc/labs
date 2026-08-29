@@ -47,10 +47,10 @@ export type TraverseFixtureInvocation = {
   /** Address passed to `SchemaObjectTraverser.traverse()`. */
   address: TraverseFixtureAddress;
 
-  /** Index into the fixture's `#selectors` table. */
+  /** Index into the fixture's `selectors` table. */
   selector: number;
 
-  /** Index into the fixture's `#links` table, when traverse() got a link. */
+  /** Index into the fixture's `links` table, when traverse() got a link. */
   link?: number;
 
   /** `TraversalContext.includeMeta` (true on the query path). */

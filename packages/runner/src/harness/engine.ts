@@ -379,7 +379,7 @@ export class Engine extends EventTarget {
    * This is how a program is assembled from a source of truth — a directory, a
    * web address, the fabric — so it is where a declaration in the source is
    * acted on. Re-resolving a program the engine already holds goes through
-   * {@link resolveModules}, which follows imports and nothing else.
+   * `#resolveModules()`, which follows imports and nothing else.
    */
   async resolve(program: ProgramResolver): Promise<RuntimeProgram> {
     return await attachDeclaredDataFiles(
@@ -1307,7 +1307,7 @@ export class Engine extends EventTarget {
   /**
    * Evaluate a verified ESM record graph (public so the PatternManager can run
    * compile → cache write-back → evaluate as discrete steps). Thin wrapper over
-   * {@link evaluateGraph} with the source-compile registration strategy: module
+   * `#evaluateGraph()` with the source-compile registration strategy: module
    * identities are recomputed from `files`, paths carry the `/<id>` prefix, and
    * `files` flow into the export map for sub-pattern re-instantiation.
    * `dataFiles` names the members of `files` that are data, so a sub-pattern
