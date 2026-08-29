@@ -1384,12 +1384,18 @@ jobs:
             echo "AppArmor unprivileged-userns sysctl is unavailable; no change required."
           fi
 
-      # Both kinds of coverage: V8 runtime coverage via DENO_COVERAGE_DIR, and
-      # authored-pattern coverage via CF_PATTERN_COVERAGE_DIR, which the shell
-      # integration harness reads to turn on the browser worker's collector and
-      # to place the LCOV it pulls back at teardown. Absolute, because the
-      # harness resolves it against a working directory that differs between the
-      # two integration jobs. See docs/development/COVERAGE.md.
+      # V8 runtime coverage via DENO_COVERAGE_DIR only. AUTHORED-pattern
+      # coverage (CF_PATTERN_COVERAGE_DIR) moved to the OFF guard lane with
+      # the flip: instrumentation changes the compiled pattern's bytes, so
+      # under the ON default the client's collector compiles a DIFFERENT
+      # content-addressed variant than the serving side — the client's
+      # speculative `computed:` entries can then never be covered by the
+      # served watermark and authored writes over them are refused
+      # (speculation.md §6; the flip board's deterministic sx2-speculation
+      # red). Until serving-side instrumented-variant parity exists (the
+      # register's recorded post-soak obligation), authored coverage is
+      # collected where a single compiler world holds — the OFF lane.
+      # See docs/development/COVERAGE.md.
       # This is the DEFAULT-posture lane (server-execution v2: flag unset =
       # the first-party default, ON since the Phase 7 flip; testing.md §2)
       # — the FULL ON posture at the default resolution; the
@@ -1457,7 +1463,6 @@ jobs:
           API_URL=http://localhost:8000/ \
           PATTERN_INTEGRATION_SHARD="${{ matrix.shard }}/${{ matrix.total }}" \
           CF_COMPILE_CACHE_FILE="${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json" \
-          CF_PATTERN_COVERAGE_DIR="${{ github.workspace }}/coverage/lcov/pattern-runtime/pattern-integration-${{ matrix.shard }}" \
           DENO_COVERAGE_DIR=../../coverage/raw/pattern-integration-${{ matrix.shard }} \
           deno test --no-check --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
             --junit-path=../../test-results/patterns-${{ matrix.shard }}.xml \
@@ -1628,6 +1633,12 @@ jobs:
           # No skip filter here: tasks/server-execution-on-skips.ts binds to
           # the ON arm (the DEFAULT lanes since the flip); the OFF guard
           # runs the full shard list.
+          # AUTHORED-pattern coverage rides THIS lane since the flip (see
+          # the default lane's note: instrumentation diverges the compiled
+          # variant from what the serving side compiles, so collecting it
+          # under the ON default is unsound until serving-side variant
+          # parity exists — the register's post-soak obligation). The OFF
+          # arm is a single-compiler world, where the collection is sound.
           # --no-check: the Check job type-checks packages/patterns/integration
           # (tasks/check.sh).
           HEADLESS=1 \
@@ -1635,9 +1646,23 @@ jobs:
           EXPERIMENTAL_SERVER_EXECUTION=false \
           PATTERN_INTEGRATION_SHARD="${{ matrix.shard }}/${{ matrix.total }}" \
           CF_COMPILE_CACHE_FILE="${{ github.workspace }}/.compile-cache/pattern-integration-${{ matrix.shard }}.json" \
+          CF_PATTERN_COVERAGE_DIR="${{ github.workspace }}/coverage/lcov/pattern-runtime/pattern-integration-${{ matrix.shard }}" \
           deno test --no-check --v8-flags=--max-old-space-size=4096 --trace-leaks -A \
             --junit-path=../../test-results/patterns-server-execution-off-${{ matrix.shard }}.xml \
             "${TEST_FILES[@]}"
+
+      # The authored-pattern LCOV the harness wrote under pattern-runtime/
+      # (the collection moved here with the flip — see the run step's note).
+      # coverage-check globs every coverage-profile-* artifact, so these
+      # rows keep reaching the gate from the OFF lane.
+      - name: 📤 Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-profile-pattern-integration-off-${{ matrix.shard }}
+          path: coverage/lcov/
+          retention-days: 90
+          if-no-files-found: ignore
 
       - name: 📋 Upload toolshed log on failure
         if: failure()
@@ -1966,6 +1991,11 @@ jobs:
       - package-integration-test
       - cli-integration-test
       - pattern-integration-test
+      # The OFF guard pattern lane carries the authored-pattern coverage
+      # since the flip (variant-divergence note on the lanes); the gate
+      # must wait for its artifacts. The post-soak removal PR re-homes
+      # that collection before deleting the lane.
+      - pattern-integration-test-server-execution-off
       - pattern-reload-integration-test
       - pattern-unit-test
       - generated-patterns-integration-test
