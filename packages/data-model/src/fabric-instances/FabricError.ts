@@ -17,6 +17,7 @@ import type {
   FabricError as ApiFabricError,
   FabricErrorConstructor as ApiFabricErrorConstructor,
 } from "@/api.ts";
+import { constructorOfObject } from "@commonfabric/utils/objects";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
@@ -509,7 +510,25 @@ export class FabricError extends FabricNativeWrapper<Error>
    * conversion path is responsible for converting them when needed.
    */
   static fromNativeError(error: Error): FabricError {
-    const type = error.constructor.name;
+    // The class is read from the prototype, not from the value. An own
+    // `constructor` property is ordinary data, and this name is stored and
+    // used to rebuild the error on the way back, so reading it off the value
+    // would let a value choose the class it comes back as. A severed prototype
+    // names no class, and `Error` is what such a value still is.
+    let className: unknown;
+    try {
+      className = (constructorOfObject(error) as { name?: unknown } | undefined)
+        ?.name;
+    } catch {
+      // A `constructor` accessor on the prototype that throws. Reading it is
+      // this conversion's business and failing it is not: the value is an
+      // error, and the conversion owes a result rather than the accessor's
+      // exception.
+      className = undefined;
+    }
+    const type = (typeof className === "string") && (className !== "")
+      ? className
+      : "Error";
     const name = error.name === type ? null : error.name;
     const extras: Array<[string, FabricValue]> = [];
     for (const key of Object.keys(error)) {
@@ -524,7 +543,10 @@ export class FabricError extends FabricNativeWrapper<Error>
     return new FabricError({
       type,
       name,
-      message: error.message,
+      // `message` is normally inherited from `Error.prototype`, so a severed
+      // prototype leaves a message-less error without one at all. `FabricError`
+      // declares a `string`, and the empty string is what such an error means.
+      message: (typeof error.message === "string") ? error.message : "",
       stack: error.stack,
       cause: error.cause as FabricValue | undefined,
       extras,
