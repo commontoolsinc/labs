@@ -1502,7 +1502,7 @@ async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
         line.includes("handler:") ||
         line.includes("raw:") ||
         line.includes("postRun") ||
-        line.includes("Runner.#instantiatePatternNode") ||
+        line.includes("#instantiatePatternNode") ||
         line.includes("Runner.run") ||
         line.includes("Runner.setupInternal") ||
         line.includes("sendValueToBinding") ||
