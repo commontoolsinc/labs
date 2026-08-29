@@ -2,6 +2,7 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import {
+  activeSnapClaims,
   applyModuleTransforms,
   canBeginDrag,
   createSalvageModule,
@@ -73,13 +74,6 @@ describe("model", () => {
   describe("transform field writes", () => {
     it("composes claim-backed position and rotation edits by stable transform ID", async () => {
       let durable: ModuleTransform | undefined;
-      let claim: ModuleSnapClaim | null = {
-        id: "claim-a",
-        movingConnectorId: "port-lock",
-        targetModuleId: "anchor",
-        targetConnectorId: "north-lock",
-        rotationQuarterTurns: 3,
-      };
       let activeTransformId = "";
       const transform = mockTransform(
         () => durable,
@@ -96,13 +90,6 @@ describe("model", () => {
           return Promise.resolve();
         },
       };
-      const snap = {
-        set(value: ModuleSnapClaim | null) {
-          claim = value;
-          return Promise.resolve();
-        },
-      };
-
       await Promise.all([
         writeModuleTransformField(
           transformId,
@@ -111,7 +98,6 @@ describe("model", () => {
           effective,
           "position",
           [1, 1.2, 5],
-          snap,
         ),
         writeModuleTransformField(
           transformId,
@@ -120,7 +106,6 @@ describe("model", () => {
           effective,
           "rotationQuarterTurns",
           0,
-          snap,
         ),
       ]);
 
@@ -129,7 +114,28 @@ describe("model", () => {
         rotationQuarterTurns: 0,
       });
       expect(activeTransformId).toBe(transformId);
-      expect(claim).toBeNull();
+    });
+
+    it("releases only the observed claim ID without clearing a replacement", () => {
+      const observed: ModuleSnapClaim = {
+        id: "claim-a",
+        movingConnectorId: "port-lock",
+        targetModuleId: "anchor",
+        targetConnectorId: "north-lock",
+        rotationQuarterTurns: 3,
+      };
+      const replacement: ModuleSnapClaim = {
+        ...observed,
+        id: "claim-b",
+      };
+      const transformIds = {
+        mover: moduleTransformId("mover", observed.id),
+      };
+
+      expect(activeSnapClaims({ mover: observed }, transformIds)).toEqual({});
+      expect(activeSnapClaims({ mover: replacement }, transformIds)).toEqual({
+        mover: replacement,
+      });
     });
 
     it("projects a stored transform over its stable module manifest entry", () => {

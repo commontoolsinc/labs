@@ -139,7 +139,7 @@ describe("evaluateSignals()", () => {
     expect(evaluateSignals(state, 0).get("actuator")).toBe(1);
   });
 
-  it("evaluates the same canonical acyclic graph independently of wire order", () => {
+  it("evaluates the same canonical acyclic graph independently of node order", () => {
     const state: IframeStateData = {
       nodes: [
         node("first", "transformer", { offset: 0.2 }),
@@ -170,6 +170,13 @@ describe("evaluateSignals()", () => {
     );
     expect(createsFeedbackCycle(state.edges.slice(0, 1), "second", "first"))
       .toBe(true);
+  });
+
+  it("accepts legacy state without a disabled-edge map", () => {
+    const legacy = { nodes: [], edges: [] };
+
+    expect(canonicalizeMachineEdges(legacy.edges, undefined))
+      .toEqual({ edges: [], suppressed: [] });
   });
 
   it("preserves an established wire when concurrent additions close a cycle", () => {

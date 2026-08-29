@@ -177,6 +177,20 @@ describe("model", () => {
         resumePlayback: false,
       });
     });
+
+    it("restores playback when the final coalesced duration contains the original playhead", () => {
+      const originalPosition = 90;
+      expect(planDurationTransition(60, originalPosition, true)).toEqual({
+        durationSeconds: 60,
+        positionSeconds: 60,
+        resumePlayback: false,
+      });
+      expect(planDurationTransition(120, originalPosition, true)).toEqual({
+        durationSeconds: 120,
+        positionSeconds: 90,
+        resumePlayback: true,
+      });
+    });
   });
 
   describe("confidenceFor()", () => {

@@ -514,7 +514,7 @@ function App() {
         if (
           edges.some((edge) => edge.source === source && edge.target === target)
         ) {
-          if (latest.disabledEdges[edgeId] === true) {
+          if (latest.disabledEdges?.[edgeId] === true) {
             await stateCell.key("disabledEdges").key(edgeId).set(false);
             await state.refresh();
             return;
@@ -523,7 +523,7 @@ function App() {
         }
         if (
           createsFeedbackCycle(
-            canonicalizeMachineEdges(edges, latest.disabledEdges).edges,
+            canonicalizeMachineEdges(edges, latest.disabledEdges ?? {}).edges,
             source,
             target,
           )

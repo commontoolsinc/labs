@@ -711,7 +711,11 @@ async function seekPlayback(seconds: number): Promise<void> {
   if (wasPlaying) await startPlayback();
 }
 
-async function rebuildAudioBuffer(durationSeconds: number): Promise<void> {
+async function rebuildAudioBuffer(
+  durationSeconds: number,
+  transitionPositionSeconds: number,
+  resumeIntent: boolean,
+): Promise<void> {
   if (!audioContext) throw new Error("The audio engine is not available.");
   const buffer = await audioContext.decodeAudioData(
     buildSyntheticWav(durationSeconds),
@@ -720,8 +724,8 @@ async function rebuildAudioBuffer(durationSeconds: number): Promise<void> {
 
   const plan = planDurationTransition(
     buffer.duration,
-    playbackOffsetSeconds,
-    resumeAfterDurationSync,
+    transitionPositionSeconds,
+    resumeIntent,
   );
   audioBuffer = buffer;
   loadedDurationSeconds = durationSeconds;
@@ -733,7 +737,9 @@ async function rebuildAudioBuffer(durationSeconds: number): Promise<void> {
 
 async function synchronizeRequestedDurations(): Promise<void> {
   durationReady = false;
-  resumeAfterDurationSync = activeSource !== undefined && !audio.paused;
+  const transitionPositionSeconds = playbackOffsetSeconds;
+  const resumeIntent = activeSource !== undefined && !audio.paused;
+  resumeAfterDurationSync = resumeIntent;
   stopPlaybackSource();
   status.textContent = "Updating recording duration…";
   status.dataset.ready = "false";
@@ -750,7 +756,11 @@ async function synchronizeRequestedDurations(): Promise<void> {
       continue;
     }
     try {
-      await rebuildAudioBuffer(duration);
+      await rebuildAudioBuffer(
+        duration,
+        transitionPositionSeconds,
+        resumeIntent,
+      );
       failure = undefined;
       failedDurationSeconds = undefined;
     } catch (cause) {

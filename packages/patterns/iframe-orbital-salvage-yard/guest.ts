@@ -34,6 +34,7 @@ import {
   normalizeQuarterTurns,
 } from "./geometry.ts";
 import {
+  activeSnapClaims,
   applyModuleTransforms,
   canBeginDrag,
   createSalvageModule,
@@ -231,7 +232,10 @@ function effectiveModules(
       value.moduleTransforms,
       value.moduleTransformIds,
     ),
-    value.snapClaims ?? {},
+    activeSnapClaims(
+      value.snapClaims ?? {},
+      value.moduleTransformIds ?? {},
+    ),
     value.snapTargets ?? {},
   );
 }
@@ -621,7 +625,6 @@ async function writeTransformField<
     module.transform,
     key,
     value,
-    claim ? snapClaimsCell.key(module.id) : undefined,
   );
 }
 

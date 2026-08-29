@@ -97,7 +97,20 @@ export function applyModuleTransforms(
   });
 }
 
-/** Materializes one transform record, edits one field, then releases a snap. */
+/** Omits only claims whose exact ID was released into a manual transform. */
+export function activeSnapClaims(
+  claims: Readonly<Record<string, ModuleSnapClaim | null>>,
+  transformIds: Readonly<Record<string, string>>,
+): Record<string, ModuleSnapClaim | null> {
+  return Object.fromEntries(
+    Object.entries(claims).filter(([moduleId, claim]) =>
+      claim === null ||
+      transformIds[moduleId] !== moduleTransformId(moduleId, claim.id)
+    ),
+  );
+}
+
+/** Materializes one transform record and edits one field at a stable ID. */
 export async function writeModuleTransformField<
   Key extends keyof ModuleTransform,
 >(
@@ -107,12 +120,10 @@ export async function writeModuleTransformField<
   current: ModuleTransform,
   key: Key,
   value: ModuleTransform[Key],
-  claim?: WritableValue<ModuleSnapClaim | null>,
 ): Promise<void> {
   await transform.initialize(current);
   await transform.key(key).set(value);
   await activeTransformId.set(transformId);
-  await claim?.set(null);
 }
 
 /** Surfaces graphics bootstrap failures before preserving the thrown cause. */
