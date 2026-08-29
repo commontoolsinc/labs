@@ -898,6 +898,13 @@ describe("type-check", () => {
       // names a reason -- its outcome having been settled before the probe
       // that fails. The corpus carries no such value, and that bound is why.
       //
+      // Bounded the same way to a class that reads the SAME each time. Each of
+      // these two reads the constructor for itself, so a `constructor`
+      // accessor answering differently on successive reads can be named
+      // differently by each. Neither contradicts itself -- one refusal reads
+      // once -- and a value that answers differently each time it is asked is
+      // not one this agreement is for.
+      //
       // The exception is a `FabricNativeObject`, and it is the whole of the
       // exception: conversion has a say over one, and either mints its fabric
       // form or refuses it there. The vet has no say and does not pretend to,
@@ -997,6 +1004,46 @@ describe("type-check", () => {
             );
           });
         }
+
+        it("refuses a value whose class will not say its name", () => {
+          // `name` is an accessor too, so guarding the constructor read alone
+          // leaves the next read out in the open.
+          class NameThrows {}
+          Object.defineProperty(NameThrows.prototype, "constructor", {
+            value: Object.defineProperty(function () {}, "name", {
+              get() {
+                throw new Error("this must not reach the caller");
+              },
+            }),
+          });
+
+          expect(() => assertValidFabricValueLayer(new NameThrows())).toThrow(
+            "Not representable as a `FabricValue`: `object` (not a " +
+              "recognized fabric type)",
+          );
+        });
+
+        it("refuses a value whose constructor traps `prototype`", () => {
+          // A callable `Proxy` can throw from any read, `.prototype` included,
+          // which is what the class lookup would otherwise ask it for.
+          const trapped = new Proxy(function () {}, {
+            get(target, key) {
+              if (key === "prototype") {
+                throw new Error("this must not reach the caller");
+              }
+              return Reflect.get(target, key);
+            },
+          });
+          class ProxyCtor {}
+          Object.defineProperty(ProxyCtor.prototype, "constructor", {
+            value: trapped,
+          });
+
+          expect(() => assertValidFabricValueLayer(new ProxyCtor())).toThrow(
+            "Not representable as a `FabricValue`: `object` (not a " +
+              "recognized fabric type)",
+          );
+        });
 
         it("refuses a value whose class cannot be read, without propagating", () => {
           // The one shape that defeats the prototype read as well. Both the
