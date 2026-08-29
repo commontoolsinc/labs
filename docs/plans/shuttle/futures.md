@@ -1,6 +1,6 @@
 # Shuttle — futures
 
-Satellite of [`../shuttle.md`](../shuttle.md): the trajectory past v1.
+Satellite of [`README.md`](README.md): the trajectory past v1.
 Nothing here is v1 scope and nothing is a commitment to build order. The
 positions are taken now so that later features land coherently with the
 settled decisions; the candidates are ranked leads, to be ruled when their

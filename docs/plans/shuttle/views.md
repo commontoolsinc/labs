@@ -1,6 +1,6 @@
 # Shuttle — live views
 
-Satellite of [`../shuttle.md`](../shuttle.md): the full-screen half of the
+Satellite of [`README.md`](README.md): the full-screen half of the
 hybrid — what opens, how it behaves, and what it reuses. Governs milestone
 B3 of [`build-sequence.md`](build-sequence.md); the settle and lifecycle
 disciplines it leans on are in

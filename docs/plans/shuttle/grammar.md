@@ -1,6 +1,6 @@
 # Shuttle — line grammar and place resolution
 
-Satellite of [`../shuttle.md`](../shuttle.md): the command line's shape, how
+Satellite of [`README.md`](README.md): the command line's shape, how
 references resolve against the place, what listings show, and the write and
 redirection surface. Ruled points are stated plainly; anything marked
 *proposed* awaits a ruling.
@@ -12,7 +12,8 @@ redirection surface. Ruled points are stated plainly; anything marked
 ```
 
 Navigation verbs are shuttle-native: `cd`, `ls`, `pwd`, `watch`,
-`unwatch`, `watches`, `back` (`cd -` returns to the previous place). Data verbs are `cf`'s own — `get`,
+`unwatch`, `watches`, `back` (`cd -` returns to the previous place). Data
+verbs are `cf`'s own — `get`,
 `set`, `call`, `wish`, `verbs`, `describe`, … — accepting their existing
 read and projection options (`--filter`, `--select`, `--schema`, `--json`),
 with the place supplying target options. `!` marks "this runs on the local

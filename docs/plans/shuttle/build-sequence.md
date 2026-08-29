@@ -1,6 +1,6 @@
 # Shuttle — build sequence
 
-Satellite of [`../shuttle.md`](../shuttle.md): the order of construction,
+Satellite of [`README.md`](README.md): the order of construction,
 as small landable pull requests. Stage A is seam work inside `packages/cli`
 — each PR stands on its own merits there, shuttle or no shuttle, because a
 seam that lets a sibling inject a connection is the same seam that lets a

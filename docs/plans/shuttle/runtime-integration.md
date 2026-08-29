@@ -1,6 +1,6 @@
 # Shuttle — runtime integration
 
-Satellite of [`../shuttle.md`](../shuttle.md), grounding decision 9 (one
+Satellite of [`README.md`](README.md), grounding decision 9 (one
 in-process connection, `cf` verbs through shared library seams, a `!cf`
 subprocess escape). This records what the runtime and `packages/cli` offer
 today, the discipline a long-lived process must add, and the seam work in

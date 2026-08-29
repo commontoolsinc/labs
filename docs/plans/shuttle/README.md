@@ -2,7 +2,7 @@
 
 Status: v1 design settled — the decisions below are ruled, and nothing
 blocks construction. Nothing here is built yet; the order of construction is
-[`shuttle/build-sequence.md`](shuttle/build-sequence.md). This document
+[`build-sequence.md`](build-sequence.md). This document
 stays the working design state: new decisions land here as they are made.
 
 Shuttle is an interactive terminal tool for exploring and editing fabric
@@ -41,7 +41,7 @@ interleaved in one transcript that doubles as a record.
 
 The moving half of context has no home. `CF_API_URL`, `CF_IDENTITY`, and
 `CF_SPACE` absorb the constant half, and
-[`cli-surface-shape.md`](cli-surface-shape.md) step 8's rationale — "a
+[`cli-surface-shape.md`](../cli-surface-shape.md) step 8's rationale — "a
 parameter that is required everywhere and identical across a working
 session is one a caller should state once" — caps out exactly there,
 because piece, path, and scope are not identical across a session: they
@@ -53,7 +53,7 @@ supplied by context, and shuttle makes that context a position you
 navigate: **a place is the context that fills in the omitted levels of a
 reference**, moved by `cd`, relative references, and handles instead of by
 copying printed addresses between commands (the composition axis of
-[`../common/verbs/session-walkthrough.md`](../common/verbs/session-walkthrough.md)).
+[`../common/verbs/session-walkthrough.md`](../../common/verbs/session-walkthrough.md)).
 
 Underneath both, a persistent runtime session is a capability one-shot
 commands cannot have at any flag cost: warm pieces serving live computed
@@ -108,7 +108,7 @@ it runs.
    covering the rest of the surface. The known risk is drift where `cli`
    code is not yet factored as callable seams; the answer is to factor the
    seam in `cli`, not to reimplement the verb in shuttle.
-   [`shuttle/runtime-integration.md`](shuttle/runtime-integration.md) grounds
+   [`runtime-integration.md`](runtime-integration.md) grounds
    this decision: the connection and watch mechanics that exist, the
    lifecycle discipline a long-lived process adds, and the prerequisite seam
    work in `packages/cli`.
@@ -211,13 +211,13 @@ it runs.
 
 The line grammar itself — resolution rules, facets, listings, run-state and
 write surfaces, and the redirection/pipe proposals — is drafted in
-[`shuttle/grammar.md`](shuttle/grammar.md). The full-screen views are
-designed in [`shuttle/views.md`](shuttle/views.md). The order of
+[`grammar.md`](grammar.md). The full-screen views are
+designed in [`views.md`](views.md). The order of
 construction — the `cli` seam PRs and the shuttle milestones they gate — is
-[`shuttle/build-sequence.md`](shuttle/build-sequence.md). The trajectory
+[`build-sequence.md`](build-sequence.md). The trajectory
 past v1 — configuration in the fabric, the session scope as the variable
 store, the scripting layers, and the ranked candidates behind them — is
-[`shuttle/futures.md`](shuttle/futures.md).
+[`futures.md`](futures.md).
 
 ## The ambient model
 
@@ -255,7 +255,7 @@ several) stay reachable later.
 ## Relationship to the CLI surface arc
 
 Shuttle rides the addressing decisions of
-[`cli-surface-shape.md`](cli-surface-shape.md) rather than making its own:
+[`cli-surface-shape.md`](../cli-surface-shape.md) rather than making its own:
 
 - Step 8's `CF_SPACE` is on main: the constant half of the context is
   ambient for one-shot `cf` too, which is what isolates the moving half —
@@ -279,7 +279,7 @@ None blocking v1. The B3 seam-proving gate and its two preparatory
 experiments are recorded in decision 25 and issue
 [#6534](https://github.com/commontoolsinc/labs/issues/6534); the piece
 overview's liveness is deferred with the live piece watch
-([`shuttle/views.md`](shuttle/views.md)).
+([`views.md`](views.md)).
 
 ## Non-goals for v1
 
