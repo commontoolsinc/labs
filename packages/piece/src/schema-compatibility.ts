@@ -446,9 +446,9 @@ const comparableIfc = (ifc: unknown): unknown => {
  * an update whose durable argument the new schema cannot read is refused
  * instead of landing over unreadable state. Two sites do the checking, and the
  * line between them is whether the caller will (re)instantiate the graph, not
- * whether the piece happens to be running: `Runner.applySetupState` re-points
+ * whether the piece happens to be running: `Runner.#applySetupState` re-points
  * and validates the argument for a cold root and for the watcher's hot-swap,
- * both of which then instantiate; `Runner.validateStoredArgument` checks a
+ * both of which then instantiate; `Runner.#validateStoredArgument` checks a
  * piece that is being REUSED — its nodes stay as they are — and moves nothing
  * (`packages/runner/test/pattern-update-argument-validation.test.ts`).
  *

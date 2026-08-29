@@ -104,8 +104,7 @@ export function isValidFabricValueLayer(
 }
 
 /**
- * Helper for `assertValidFabricValueLayer()`, which names the class of a value
- * being refused.
+ * Reads a value's constructor, or `undefined` where there is none to read.
  *
  * The class is read from the prototype rather than from the value, for the
  * reason the dispatch reads it there: an own `constructor` property is
@@ -114,36 +113,37 @@ export function isValidFabricValueLayer(
  *
  * Nothing here is allowed to throw, because every caller is already on its way
  * to reporting a different problem and an error raised here would replace it.
- * Two ways that can happen, both reachable: a `constructor` accessor on the
- * prototype that throws, and a `name` that is not a string. Either is treated
- * as no name at all.
+ * A `constructor` accessor on the prototype that throws is the reachable way
+ * that happens.
  */
-function refusedClassNameOf(value: object): string {
-  let name: unknown;
+function constructorElseUndefined(
+  value: object,
+): { name?: unknown } | undefined {
   try {
-    name = (constructorOfObject(value) as { name?: unknown } | undefined)?.name;
+    return constructorOfObject(value) as { name?: unknown } | undefined;
   } catch {
-    return typeof value;
+    return undefined;
   }
-  return (typeof name === "string" && name !== "") ? name : typeof value;
 }
 
 /**
- * Helper for `assertValidFabricValueLayer()`, which reports whether a value's
- * class is `Array` — true of an array, and of a non-array whose prototype
- * chain says otherwise.
+ * Helper for `assertValidFabricValueLayer()`, which names the class of a value
+ * being refused, given the constructor already read from it. A `name` that is
+ * not a string is treated as no name at all.
  */
-function classIsArray(value: unknown): boolean {
-  if ((value === null) || (typeof value !== "object")) return false;
+function classNameOf(
+  ctor: { name?: unknown } | undefined,
+  value: unknown,
+): string {
+  let name: unknown;
   try {
-    const ctor = constructorOfObject(value);
-    return (ctor !== undefined) &&
-      (tagFromNativeBuiltinClass(ctor) === VALUE_TAGS.Array);
+    name = ctor?.name;
   } catch {
-    // A value whose class cannot be read is not claiming to be an `Array`,
-    // and this runs while a refusal is being explained, so it must not throw.
-    return false;
+    // `name` can be an accessor too, and this runs while a refusal is being
+    // explained. A class that will not say what it is called has no name here.
+    return typeof value;
   }
+  return (typeof name === "string" && name !== "") ? name : typeof value;
 }
 
 /**
@@ -171,7 +171,19 @@ export function assertValidFabricValueLayer(
   // test below distinguishes two reasons from each other; none of them decides
   // the outcome, which the call above already did.
 
-  if (Array.isArray(value) || classIsArray(value)) {
+  // Read once, and let every arm below share it. A `constructor` accessor is
+  // ordinary code and may answer differently each time it is asked, so asking
+  // it repeatedly would let one refusal name two different classes.
+  const ctor = ((value !== null) && (typeof value === "object"))
+    ? constructorElseUndefined(value)
+    : undefined;
+  // Compared with `Array` itself rather than asked of the tag lookup, which
+  // reads `.prototype` -- a read a callable `Proxy` can trap, and this is the
+  // refusal path. `Array` is the only constructor that lookup calls an array,
+  // so the two ask the same question.
+  const classIsArray = ctor === Array;
+
+  if (Array.isArray(value) || classIsArray) {
     // An array in this system is _inert_: a direct `Array` instance, which may
     // only carry numeric index properties, each a data property. A named or
     // symbol-keyed property has no fabric representation, and an
@@ -182,7 +194,7 @@ export function assertValidFabricValueLayer(
     // A value whose class is `Array` without being one gets this reason too.
     // It is not an array, so the rule that decides arrays never reached it,
     // but `Array` is what it presents itself as and so what a reader is owed
-    // an answer about.
+    // an answer about -- and it is the reason the conversion gives.
     throw new Error(
       "Not representable as a `FabricValue`: array that is not an inert array",
     );
@@ -215,7 +227,7 @@ export function assertValidFabricValueLayer(
   if (isNativeObject) {
     throw new Error(
       `Not already a \`FabricValue\`: ${
-        backtickQuote(refusedClassNameOf(value as object))
+        backtickQuote(classNameOf(ctor, value))
       } (a \`FabricNativeObject\`, so conversion is what decides it)`,
     );
   }
@@ -250,7 +262,7 @@ export function assertValidFabricValueLayer(
   // Death before confusion!
   throw new Error(
     `Not representable as a \`FabricValue\`: ${
-      backtickQuote(refusedClassNameOf(value as object))
+      backtickQuote(classNameOf(ctor, value))
     } (not a recognized fabric type)`,
   );
 }

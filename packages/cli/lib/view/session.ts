@@ -381,7 +381,7 @@ export class Session {
   //
 
   /** Every file and commit in the diff, in document order; the filter narrows
-   * this into the shown {@link jumpEntries}. */
+   * this into the shown `#jumpEntries`. */
   #jumpAll: JumpEntry[] = [];
   #jumpEntries: JumpEntry[] = [];
   #jumpFilter = "";

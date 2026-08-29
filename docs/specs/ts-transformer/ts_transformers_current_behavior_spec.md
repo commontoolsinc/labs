@@ -1848,7 +1848,7 @@ The JavaScript compiler exposes the sidecar through
 `CompiledTypeScriptModule.builderSourceSites`. Runner module artifacts persist
 it with module bytes through the in-memory and cell-backed caches; invalid or
 unknown sidecar data is discarded as debug-data loss without affecting module
-execution. After verified evaluation, `Engine.recordModuleProvenance` joins the
+execution. After verified evaluation, `Engine.#recordModuleProvenance` joins the
 module identity, runtime symbol, and source path into
 `cf:module/<identity>/<path>:<line>:<col>` and records it in the separate
 debug-only `authored-debug-source` `WeakMap`. Lazy `fn.src` and `fn.name`
@@ -3175,7 +3175,7 @@ CT-1886); stores hold claims minted under those spellings (see the
 spelling-compat note in the normalizer's doc comment).
 
 **Runtime consumption.** After a verified evaluation,
-`Engine.recordModuleProvenance` reads the annotation off each exported or
+`Engine.#recordModuleProvenance` reads the annotation off each exported or
 `__cfReg`-registered builder artifact (`readBindingIdentity`,
 `packages/runner/src/harness/verified-provenance.ts`) and records it as
 `VerifiedProvenance.bindingIdentity` against the implementation function.

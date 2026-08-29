@@ -766,7 +766,7 @@ export function eventSchemaJudgesRootFields(
  * never meets that; a caller writing JSON by hand or by model meets it first.
  *
  * Which positions drop, measured against the read a handler's event goes
- * through (`SchemaObjectTraverser.traverseObjectWithSchema`, runner
+ * through (`SchemaObjectTraverser.#traverseObjectWithSchema`, runner
  * traverse.ts, whose `addOptionalProperty` is a no-op on the
  * `validateAndTransform` path), for an object holding one declared and one
  * undeclared field:

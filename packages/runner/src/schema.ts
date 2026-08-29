@@ -1395,25 +1395,41 @@ export function createOpaqueReference(
 
 class TransformObjectCreator
   implements IObjectCreator<AnyCellWrapping<FabricValue>> {
+  #runtime: Runtime;
+
+  /**
+   * TypeScript-private rather than a `#` name: `test/schema-streams.test.ts`
+   * drives this member directly.
+   */
+  private tx: IExtendedStorageTransaction;
+  #synced: boolean;
+  #baseLink: NormalizedFullLink;
+  #cfcLabelView: CfcLabelView | undefined;
+
   constructor(
-    private runtime: Runtime,
-    private tx: IExtendedStorageTransaction,
-    private synced: boolean,
-    private baseLink: NormalizedFullLink,
-    private cfcLabelView: CfcLabelView | undefined,
+    runtime: Runtime,
+    tx: IExtendedStorageTransaction,
+    synced: boolean,
+    baseLink: NormalizedFullLink,
+    cfcLabelView: CfcLabelView | undefined,
   ) {
+    this.#runtime = runtime;
+    this.tx = tx;
+    this.#synced = synced;
+    this.#baseLink = baseLink;
+    this.#cfcLabelView = cfcLabelView;
   }
 
   setBase(
     baseLink: NormalizedFullLink,
     cfcLabelView: CfcLabelView | undefined,
   ): void {
-    this.baseLink = baseLink;
-    this.cfcLabelView = cloneCfcLabelView(cfcLabelView);
+    this.#baseLink = baseLink;
+    this.#cfcLabelView = cloneCfcLabelView(cfcLabelView);
   }
 
-  private labelViewFor(link: NormalizedFullLink): CfcLabelView | undefined {
-    return labelViewForLink(this.baseLink, this.cfcLabelView, link);
+  #labelViewFor(link: NormalizedFullLink): CfcLabelView | undefined {
+    return labelViewForLink(this.#baseLink, this.#cfcLabelView, link);
   }
 
   /**
@@ -1504,12 +1520,12 @@ class TransformObjectCreator
     value: T | undefined,
   ): T | undefined {
     return processDefaultValue(
-      this.runtime,
+      this.#runtime,
       this.tx,
       link,
       value,
-      this.synced,
-      this.labelViewFor(link),
+      this.#synced,
+      this.#labelViewFor(link),
     );
   }
 
@@ -1529,11 +1545,11 @@ class TransformObjectCreator
     link: NormalizedFullLink,
   ): AnyCellWrapping<FabricValue> {
     return createOpaqueReference(
-      this.runtime,
+      this.#runtime,
       link,
       this.tx,
-      this.synced,
-      this.labelViewFor(link),
+      this.#synced,
+      this.#labelViewFor(link),
     ) as AnyCellWrapping<FabricValue>;
   }
 
@@ -1549,11 +1565,11 @@ class TransformObjectCreator
   ): AnyCellWrapping<FabricValue> {
     return annotateWithBackToCellSymbols(
       value,
-      this.runtime,
+      this.#runtime,
       link,
       this.tx,
-      this.synced,
-      this.labelViewFor(link),
+      this.#synced,
+      this.#labelViewFor(link),
     );
   }
 
@@ -1570,11 +1586,11 @@ class TransformObjectCreator
     // object so we can get back to the cell if needed.
     if (link.schema === undefined || link.schema === true) {
       return createQueryResultProxy(
-        this.runtime,
+        this.#runtime,
         this.tx,
         link,
         0,
-        this.labelViewFor(link),
+        this.#labelViewFor(link),
       );
     } else if (isObjectOrArray(link.schema)) {
       // A reference-form schema resolves here — materialization is a
@@ -1612,26 +1628,26 @@ class TransformObjectCreator
           ? link
           : blockedHandleLink(link, followCap);
         return createCell(
-          this.runtime,
+          this.#runtime,
           {
             ...handleLink,
             schema: unwrapAsCellSchema(schema as JSONSchemaObj),
           },
           getTransactionForChildCells(this.tx),
-          this.synced,
+          this.#synced,
           cellKind,
-          this.labelViewFor(link),
+          this.#labelViewFor(link),
         ) as AnyCellWrapping<FabricValue>;
       }
       // If it's not a cell/stream, but the schema is true-ish, use a
       // QueryResultProxy
       if (ContextualFlowControl.isTrueSchema(schema)) {
         return createQueryResultProxy(
-          this.runtime,
+          this.#runtime,
           this.tx,
           link,
           0,
-          this.labelViewFor(link),
+          this.#labelViewFor(link),
         );
       }
       // link.schema is not true, and not asCell/asStream
@@ -1639,12 +1655,12 @@ class TransformObjectCreator
       if (schema.default !== undefined && value === undefined) {
         // processDefaultValue already annotates with back to cell
         return processDefaultValue(
-          this.runtime,
+          this.#runtime,
           this.tx,
           link,
           schema.default,
-          this.synced,
-          this.labelViewFor(link),
+          this.#synced,
+          this.#labelViewFor(link),
         );
       }
       // If we're an object, we may be missing some properties that have a
@@ -1670,7 +1686,7 @@ class TransformObjectCreator
             const valueObj = value as Record<string, any>;
             if (valueObj[propName] === undefined) {
               valueObj[propName] = processDefaultValue(
-                this.runtime,
+                this.#runtime,
                 this.tx,
                 {
                   ...link,
@@ -1678,8 +1694,8 @@ class TransformObjectCreator
                   schema: propSchema,
                 },
                 undefined,
-                this.synced,
-                rebaseCfcLabelView(this.labelViewFor(link), [propName]),
+                this.#synced,
+                rebaseCfcLabelView(this.#labelViewFor(link), [propName]),
               );
             }
           }
@@ -1690,11 +1706,11 @@ class TransformObjectCreator
     }
     return annotateWithBackToCellSymbols(
       value,
-      this.runtime,
+      this.#runtime,
       link,
       this.tx,
-      this.synced,
-      this.labelViewFor(link),
+      this.#synced,
+      this.#labelViewFor(link),
     );
   }
 }

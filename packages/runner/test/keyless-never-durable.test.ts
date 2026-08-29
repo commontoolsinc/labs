@@ -37,7 +37,7 @@ import {
  *   1. `Runner.setup()`'s durable `patternIdentity`/`patternSetupIdentity`
  *      stamps (`if (entryRef)` filters nothing — `entryRefForPattern`
  *      always mints);
- *   2. `Runner.substituteOpPatternRefs`' `$patternRef` sentinel for keyless
+ *   2. `Runner.#substituteOpPatternRefs`' `$patternRef` sentinel for keyless
  *      map/filter/flatMap ops (written into the node's durable inputs doc);
  *   3. the storage-boundary serializer itself (`patternToEncodableForm`):
  *      the mint sets the pattern's forward entry ref, so the designed

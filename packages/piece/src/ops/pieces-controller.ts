@@ -2109,7 +2109,7 @@ export class PiecesController<T = unknown> {
   }
 
   /**
-   * Runnability backstop for {@link startEnsuredDefaultPattern}'s cold-start
+   * Runnability backstop for `#startEnsuredDefaultPattern`'s cold-start
    * repair. Reached only when the pinned pattern's OWN setup repair failed in a
    * way that re-running it cannot fix — a root that loads but cannot run.
    * Exactly two signals qualify: the CFC migration rejected the commit (gated
