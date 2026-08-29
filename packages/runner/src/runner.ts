@@ -5107,7 +5107,7 @@ export class Runner {
     const argumentValue = argumentCell.getRawUntyped();
     // No declared schema here: the setup path scans the stored argument in
     // full, the undeclared-root form of the method below.
-    await this.#syncArgumentLinkTargets(
+    await this.syncArgumentLinkTargets(
       [{ cell: argumentCell }],
       "setupArgumentLinkTargetSync",
       [argumentValue],
@@ -5326,7 +5326,7 @@ export class Runner {
     // pass subscribed such targets in aborted transactions before any
     // commit). Each root's declared schema bounds its scan — see the method
     // for the exact rules and the fallback where a declaration runs out.
-    await this.#syncArgumentLinkTargets(
+    await this.syncArgumentLinkTargets(
       argumentRoots,
       "resumeArgumentLinkTargetSync",
     );
@@ -5363,7 +5363,7 @@ export class Runner {
    * only, and an unloadable target is skipped rather than failing the
    * resume.
    */
-  async #syncArgumentLinkTargets(
+  private async syncArgumentLinkTargets(
     roots: readonly ArgumentLinkRoot[],
     timingLabel: "resumeArgumentLinkTargetSync" | "setupArgumentLinkTargetSync",
     initialValues?: readonly (FabricValue | undefined)[],
