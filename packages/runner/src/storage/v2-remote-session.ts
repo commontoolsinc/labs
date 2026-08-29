@@ -239,6 +239,10 @@ export class WebSocketTransport implements MemoryClient.Transport {
     await closed;
   }
 
+  /**
+   * TypeScript-private rather than a `#` name:
+   * `test/scheduler-event-load-parking.test.ts` drives this member directly.
+   */
   private async open(): Promise<WebSocket> {
     if (this.#socket?.readyState === WebSocket.OPEN) {
       return this.#socket;
@@ -448,10 +452,16 @@ export class RemoteSessionFactory implements SessionFactory {
   #compressionEnabled = true;
   #transports = new Set<WebSocketTransport>();
 
+  readonly #resolveAddress: (space: MemorySpace) => URL;
+  readonly #defaultSigner: Signer;
+
   constructor(
-    private readonly resolveAddress: (space: MemorySpace) => URL,
-    private readonly defaultSigner: Signer,
-  ) {}
+    resolveAddress: (space: MemorySpace) => URL,
+    defaultSigner: Signer,
+  ) {
+    this.#resolveAddress = resolveAddress;
+    this.#defaultSigner = defaultSigner;
+  }
 
   /** Changes compression on live sessions and the default for later ones. */
   async setMessageCompressionEnabled(enabled: boolean): Promise<void> {
@@ -474,12 +484,12 @@ export class RemoteSessionFactory implements SessionFactory {
 
   async create(
     space: MemorySpace,
-    signer = this.defaultSigner,
+    signer = this.#defaultSigner,
     mountOptions: MemoryClient.MountOptions = {},
     signal?: AbortSignal,
   ) {
     const transport = new WebSocketTransport(
-      toSpaceWebSocketAddress(this.resolveAddress(space), space),
+      toSpaceWebSocketAddress(this.#resolveAddress(space), space),
       this.#compressionEnabled,
       () => this.#transports.delete(transport),
     );
