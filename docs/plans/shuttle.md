@@ -20,7 +20,7 @@ shuttle estuary/board> watch topics/3
 │ replies  14 → 15                     │
 │ updated  just now                    │
 └── q: back to prompt ─────────────────┘
-shuttle estuary/board> call topics/3 add-reply --body "hi"
+shuttle estuary/board> call topics/3/add-reply --body "hi"
 ```
 
 ## Why
@@ -176,6 +176,15 @@ The live-view half exists to make reactivity visible.
 26. **The piece overview ships structured, not live.** One frame —
     arguments, result summary, callables, pattern identity — rendered as a
     refreshable snapshot in B3; the live piece watch is deferred.
+27. **A callable is invocable by its path.** `call` keeps `cf`'s
+    address-plus-name form, and adds the one-reference form —
+    `call topics/3/add-reply`, `call %4` — that invokes the callable cell
+    the path names; arity disambiguates. A callable is a cell like
+    everything else (FUSE already invokes one as an executable file), and
+    inline callables in listings plus numbered handles require the path
+    form: calling what a listing showed must not need a reference split by
+    hand. No new reference syntax — the path is already canonical; the
+    sugar is in the verb.
 
 The line grammar itself — resolution rules, facets, listings, run-state and
 write surfaces, and the redirection/pipe proposals — is drafted in

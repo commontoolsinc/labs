@@ -156,6 +156,23 @@ legible space names arrive when the fabric grows them.
   is the only spelling that creates references, so the distinction is
   always visible on the line.
 
+## Calling a verb
+
+`call` keeps `cf`'s two-positional form — `call topics/3 add-reply` — so
+knowledge transfers, and adds the one-reference form:
+`call topics/3/add-reply` invokes the callable cell the path names,
+resolving with the same defaulting as `get`. Arity disambiguates: one
+reference argument invokes what the path names; a second positional is the
+callable name, `cf`-style.
+
+The path form exists because a callable is a cell like everything else —
+FUSE already mounts a handler as an executable file and `cf exec` runs it
+by path — and because listings surface callables inline and hand out
+handles: when `%4` is a callable row, `call %4` must work without
+splitting a reference by hand. This adds no reference-syntax capability;
+the path is already spellable in the canonical form, and the sugar is in
+the verb.
+
 ## Redirection and schemes
 
 The ambient data plane is the fabric: redirection targets fabric paths, and
