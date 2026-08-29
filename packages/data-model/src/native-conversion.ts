@@ -4,11 +4,11 @@
  * cross it.
  *
  * The inbound work splits along one question -- does conversion produce a new
- * value? Minting a native object's fabric form is one function, and the
- * shallow conversion is that asked first, then the vet in `type-check.ts` for
- * a value that minted nothing, plus a frozenness adjustment. A caller can
- * therefore ask either half without having to work the answer back out of what
- * it was handed.
+ * value? Minting a native object's fabric form is one function, and vetting a
+ * value that needs no minting is the other, in `type-check.ts`. The shallow
+ * conversion is those two asked in that order, plus a frozenness adjustment,
+ * so that a caller can ask either without having to work the answer back out
+ * of what it was handed.
  *
  * Inbound, anything not representable is refused rather than approximated: a
  * `Map`, a class instance, an unrecognized type all throw, on the principle
