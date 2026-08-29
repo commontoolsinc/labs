@@ -12,11 +12,13 @@ import {
  * The keys for the store map are of the form: `${address.id}/application/json`
  */
 export class StoreObjectManager implements ObjectStorageManager {
+  #store: Map<string, Revision<State>>;
   #readValues = new Map<string, IAttestation>();
   // Cache our read labels, and any docs we can't read
   public missingDocs = new Map<string, BaseMemoryAddress>();
 
-  constructor(private store = new Map<string, Revision<State>>()) {
+  constructor(store = new Map<string, Revision<State>>()) {
+    this.#store = store;
   }
 
   getReadDocs(): Iterable<IAttestation> {
@@ -34,8 +36,8 @@ export class StoreObjectManager implements ObjectStorageManager {
       return this.#readValues.get(key)!;
     }
     // we should only have one match
-    if (this.store.has(key)) {
-      const storeValue = this.store.get(key);
+    if (this.#store.has(key)) {
+      const storeValue = this.#store.get(key);
       const rv = { address: { ...address, path: [] }, value: storeValue?.is };
       this.#readValues.set(key, rv);
       return rv;

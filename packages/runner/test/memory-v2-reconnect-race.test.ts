@@ -91,7 +91,7 @@ class SabotagedReconnectTransport implements MemoryV2Client.Transport {
       this.droppedLocalSeqs.push(localSeq);
       this.#dropResponses = true;
       try {
-        await this.connection().receive(payload);
+        await this.#openConnection().receive(payload);
       } finally {
         this.#dropResponses = false;
         this.disconnect();
@@ -99,7 +99,7 @@ class SabotagedReconnectTransport implements MemoryV2Client.Transport {
       return;
     }
 
-    await this.connection().receive(payload);
+    await this.#openConnection().receive(payload);
   }
 
   close(): Promise<void> {
@@ -113,7 +113,7 @@ class SabotagedReconnectTransport implements MemoryV2Client.Transport {
     this.#closeReceiver(new Error("disconnect"));
   }
 
-  private connection(): ReturnType<MemoryV2Server.Server["connect"]> {
+  #openConnection(): ReturnType<MemoryV2Server.Server["connect"]> {
     if (this.#connection === null) {
       this.connectionCount++;
       this.onConnectionCount?.(this.connectionCount);

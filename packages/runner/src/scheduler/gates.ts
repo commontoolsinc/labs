@@ -96,11 +96,11 @@ export class SchedulerGates {
   }
 
   getDebounce(action: Action): number | undefined {
-    return this.gate(action)?.debounceMs;
+    return this.#gate(action)?.debounceMs;
   }
 
   clearDebounce(action: Action): void {
-    const gate = this.gate(action);
+    const gate = this.#gate(action);
     if (gate) delete gate.debounceMs;
     this.cancelDebounceTimer(action);
     this.clearComputationDebounceState(action, { cancelTimer: false });
@@ -117,7 +117,7 @@ export class SchedulerGates {
   }
 
   getNoDebounce(action: Action): boolean | undefined {
-    return this.gate(action)?.noAutoDebounce ? true : undefined;
+    return this.#gate(action)?.noAutoDebounce ? true : undefined;
   }
 
   canAutomaticallyDebounce(
@@ -126,7 +126,7 @@ export class SchedulerGates {
       readonly effects: ReadonlySet<Action>;
     },
   ): boolean {
-    if (this.gate(action)?.noAutoDebounce) return false;
+    if (this.#gate(action)?.noAutoDebounce) return false;
     return context.effects.has(action);
   }
 
@@ -164,7 +164,7 @@ export class SchedulerGates {
   }
 
   markActionHasRun(action: Action): void {
-    const gate = this.gate(action);
+    const gate = this.#gate(action);
     if (gate) delete gate.debounceReadyAt;
     this.#armThrottleFromStats(action);
   }
@@ -204,7 +204,7 @@ export class SchedulerGates {
     action: Action,
     options: { cancelTimer?: boolean } = {},
   ): void {
-    const gate = this.gate(action);
+    const gate = this.#gate(action);
     if (gate) delete gate.debounceReadyAt;
     if (options.cancelTimer ?? true) {
       this.cancelDebounceTimer(action);
@@ -212,7 +212,7 @@ export class SchedulerGates {
   }
 
   cancelDebounceTimer(action: Action): void {
-    const gate = this.gate(action);
+    const gate = this.#gate(action);
     if (gate) delete gate.debounceReadyAt;
   }
 
@@ -228,7 +228,7 @@ export class SchedulerGates {
       return undefined;
     }
     if (!context.isInvalid(action)) return undefined;
-    const readyAt = this.gate(action)?.debounceReadyAt;
+    const readyAt = this.#gate(action)?.debounceReadyAt;
     return readyAt !== undefined && readyAt > performance.now()
       ? readyAt
       : undefined;
@@ -252,7 +252,7 @@ export class SchedulerGates {
       readonly logDebounce: (message: string) => void;
     },
   ): void {
-    const debounceMs = this.gate(action)?.debounceMs;
+    const debounceMs = this.#gate(action)?.debounceMs;
 
     if (!debounceMs || debounceMs <= 0) {
       context.pending.add(action);
@@ -293,11 +293,11 @@ export class SchedulerGates {
   }
 
   getThrottle(action: Action): number | undefined {
-    return this.gate(action)?.throttleMs;
+    return this.#gate(action)?.throttleMs;
   }
 
   clearThrottle(action: Action): void {
-    const gate = this.gate(action);
+    const gate = this.#gate(action);
     if (!gate) return;
     delete gate.throttleMs;
     delete gate.throttleReadyAt;
@@ -346,7 +346,7 @@ export class SchedulerGates {
   }
 
   hasActiveDebounceTimer(action: Action): boolean {
-    const readyAt = this.gate(action)?.debounceReadyAt;
+    const readyAt = this.#gate(action)?.debounceReadyAt;
     return readyAt !== undefined && readyAt > performance.now();
   }
 
@@ -410,7 +410,7 @@ export class SchedulerGates {
     context: DebouncedComputationContext,
     now: number,
   ): void {
-    const debounceMs = this.gate(action)?.debounceMs;
+    const debounceMs = this.#gate(action)?.debounceMs;
     if (!debounceMs || debounceMs <= 0) return;
 
     this.cancelDebounceTimer(action);
@@ -434,7 +434,7 @@ export class SchedulerGates {
       readonly shouldDebounceFirstRun?: (action: Action) => boolean;
     },
   ): boolean {
-    const gate = this.gate(action);
+    const gate = this.#gate(action);
     const debounceMs = gate?.debounceMs;
     const hasRun = this.#state.nodes.get(action)?.status !== "never-ran";
     return context.computations.has(action) &&
@@ -445,7 +445,7 @@ export class SchedulerGates {
   }
 
   #armThrottleFromStats(action: Action): void {
-    const gate = this.gate(action);
+    const gate = this.#gate(action);
     const throttleMs = gate?.throttleMs;
     if (!gate || !throttleMs || throttleMs <= 0) {
       if (gate) delete gate.throttleReadyAt;
@@ -460,7 +460,7 @@ export class SchedulerGates {
     gate.throttleReadyAt = stats.lastRunTimestamp + throttleMs;
   }
 
-  private gate(action: Action): SchedulerGateState | undefined {
+  #gate(action: Action): SchedulerGateState | undefined {
     return this.#state.nodes.get(action)?.gate ?? this.#stagedGates.get(action);
   }
 
