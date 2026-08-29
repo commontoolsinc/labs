@@ -107,6 +107,16 @@ describe("FabricError", () => {
       expect(FabricError.fromNativeError(new Hostile("x")).type).toBe("Error");
     });
 
+    it("gives a message-less severed-prototype error an empty message", () => {
+      // `message` is inherited from `Error.prototype` unless the constructor
+      // was given one, so severing the prototype takes it away entirely.
+      // `FabricError` declares a `string`.
+      const bare = Object.setPrototypeOf(new Error(), null) as Error;
+      const converted = FabricError.fromNativeError(bare);
+      expect(typeof converted.message).toBe("string");
+      expect(converted.message).toBe("");
+    });
+
     it("names a severed-prototype error `Error`", () => {
       // Such a value names no class at all. It is still an error --
       // `Error.isError()` sees it, and the dispatch tags it so -- and the

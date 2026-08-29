@@ -543,7 +543,10 @@ export class FabricError extends FabricNativeWrapper<Error>
     return new FabricError({
       type,
       name,
-      message: error.message,
+      // `message` is normally inherited from `Error.prototype`, so a severed
+      // prototype leaves a message-less error without one at all. `FabricError`
+      // declares a `string`, and the empty string is what such an error means.
+      message: (typeof error.message === "string") ? error.message : "",
       stack: error.stack,
       cause: error.cause as FabricValue | undefined,
       extras,
