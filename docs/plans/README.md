@@ -148,6 +148,12 @@ a record: archive it to `docs/history/plans/` following the procedure in
   do one job under two names. Separate from the read-layer plan because it
   renames rather than adds, so its risk is what breaks for a caller who already
   learned the current spelling.
+- [Shuttle — a place-aware fabric shell](shuttle.md) is the working design
+  state for an interactive terminal tool: a REPL whose prompt carries a
+  mutable current place — the context that fills in the omitted levels of the
+  fabric's right-anchored references — plus full-screen live views, for
+  inspecting and editing space and piece state. Decisions so far and open
+  questions; nothing is built yet.
 - [Shell completion coverage](cli-completion-coverage.md) sequences the work
   that makes `cf completion` answer correctly across the surface it claims and
   reach the verb surface it does not: the slots that offer a wrong candidate,
