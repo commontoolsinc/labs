@@ -433,17 +433,17 @@ function App() {
   const runAction = actionRunner.run;
   const runNodeAction = actionRunner.runNode;
 
-  const resolveNode = React.useCallback(async (nodeId: string) => {
+  const locateNodeCell = React.useCallback(async (nodeId: string) => {
     const nodesCell = stateCell.key("nodes");
     const nodes = await nodesCell.pull();
-    const index = nodes.findIndex((node) => node.id === nodeId);
-    if (index < 0) throw new Error(`Module ${nodeId} no longer exists.`);
-    const resolved = await nodesCell.key(index).resolve();
-    const node = await resolved.pull();
+    const located = interaction.findAppendOnlyItem(nodes, nodeId);
+    if (!located) throw new Error(`Module ${nodeId} no longer exists.`);
+    const nodeCell = nodesCell.key(located.index);
+    const node = await nodeCell.pull();
     if (node.id !== nodeId) {
       throw new Error(`Module ${nodeId} moved while it was being edited.`);
     }
-    return resolved;
+    return nodeCell;
   }, []);
 
   const updateParameter = React.useCallback(
@@ -453,17 +453,17 @@ function App() {
       value: MachineParameters[K],
     ) =>
       runNodeAction(nodeId, async () => {
-        const node = await resolveNode(nodeId);
+        const node = await locateNodeCell(nodeId);
         await node.key("parameters").key(key).set(value);
         await state.refresh();
       }),
-    [resolveNode, runNodeAction, state.refresh],
+    [locateNodeCell, runNodeAction, state.refresh],
   );
 
   const persistPosition = React.useCallback(
     (nodeId: string, position: MachinePosition) =>
       runAction(async () => {
-        const node = await resolveNode(nodeId);
+        const node = await locateNodeCell(nodeId);
         await node.key("position").set(position);
         await state.refresh();
         interaction.settleCommittedPositionDraft(
@@ -473,7 +473,7 @@ function App() {
           position,
         );
       }),
-    [resolveNode, runAction, state.refresh],
+    [locateNodeCell, runAction, state.refresh],
   );
 
   const appendNode = React.useCallback(

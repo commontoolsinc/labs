@@ -4,6 +4,7 @@ import {
   createActionRunner,
   createSelectionRequestTracker,
   errorFrom,
+  findAppendOnlyItem,
   nodeControlBoundaryProps,
   settleCommittedPositionDraft,
   stopNodeControlPropagation,
@@ -11,6 +12,19 @@ import {
 } from "./interaction.ts";
 
 describe("Impossible Machine interaction lifecycle", () => {
+  it("keeps an append-only item address stable as later items arrive", () => {
+    const initial = [
+      { id: "sensor", value: 1 },
+      { id: "gate", value: 2 },
+    ];
+    const located = findAppendOnlyItem(initial, "gate");
+
+    expect(located).toEqual({ index: 1, item: initial[1] });
+    expect(findAppendOnlyItem([...initial, { id: "delay", value: 3 }], "gate"))
+      .toEqual({ index: 1, item: initial[1] });
+    expect(findAppendOnlyItem(initial, "missing")).toBeUndefined();
+  });
+
   it("stops embedded controls at the node boundary", () => {
     let stopped = false;
     stopNodeControlPropagation({ stopPropagation: () => stopped = true });

@@ -13,6 +13,15 @@ export function nodeControlBoundaryProps() {
   } as const;
 }
 
+/** Locates a stable ID in an array whose existing entries never move. */
+export function findAppendOnlyItem<T extends Readonly<{ id: string }>>(
+  items: readonly T[],
+  id: string,
+): { index: number; item: T } | undefined {
+  const index = items.findIndex((item) => item.id === id);
+  return index < 0 ? undefined : { index, item: items[index]! };
+}
+
 /** Clears only the local position draft acknowledged by a completed write. */
 export function clearCommittedPositionDraft<
   T extends Readonly<{ x: number; y: number }>,

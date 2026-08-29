@@ -36,6 +36,8 @@ describe("Impossible Machine document shell", () => {
     expect(source).toContain("void tracker.request(");
     expect(source).toContain("const actionRunner = React.useRef(");
     expect(source).toContain("const runNodeAction = actionRunner.runNode");
+    expect(source).toContain("interaction.findAppendOnlyItem(");
+    expect(source).not.toContain("nodesCell.key(index).resolve()");
     expect(source).toContain("nodesDraggable");
     expect(source).toContain("nodesConnectable");
     expect(source).toContain("elementsSelectable");
