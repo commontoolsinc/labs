@@ -24,6 +24,7 @@
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
+import { defer } from "@commonfabric/utils/defer";
 
 const BIN = Deno.env.get("BG_PIECE_SERVICE_BIN");
 const API_URL = Deno.env.get("API_URL");
@@ -31,23 +32,41 @@ const API_URL = Deno.env.get("API_URL");
 const STARTED_LINE = "Background Piece Service started successfully";
 const POSTURE_LINE =
   /Background Piece Service server-execution posture: (ON|OFF)/;
+/**
+ * A bounded DIAGNOSTIC backstop, never the wait itself: the startup wait
+ * below resolves on the line the stream reader delivers, raced against the
+ * child's own exit, so a slow runner cannot fail a healthy startup. This
+ * bound only exists to report a startup signal that never arrived at all
+ * (docs/development/waiting-in-tests.md: an event where one exists; a bound
+ * only where none does).
+ */
 const STARTUP_TIMEOUT_MS = 120_000;
 const SHUTDOWN_TIMEOUT_MS = 30_000;
 
-/** Collects a stream's lines into `sink`, resolving when the stream ends. */
+/**
+ * Collects a stream's lines into `sink`, resolving when the stream ends, and
+ * hands every line to `onLine` as it arrives — which is what lets the caller
+ * settle a deferred the instant the startup line is delivered, instead of
+ * re-reading the collected lines on a timer.
+ */
 const drain = async (
   stream: ReadableStream<Uint8Array>,
   sink: string[],
+  onLine: (line: string) => void,
 ): Promise<void> => {
   const decoder = new TextDecoder();
   let buffered = "";
+  const take = (line: string) => {
+    sink.push(line);
+    onLine(line);
+  };
   for await (const chunk of stream) {
     buffered += decoder.decode(chunk, { stream: true });
     const lines = buffered.split("\n");
     buffered = lines.pop() ?? "";
-    sink.push(...lines);
+    for (const line of lines) take(line);
   }
-  if (buffered.length > 0) sink.push(buffered);
+  if (buffered.length > 0) take(buffered);
 };
 
 describe(
@@ -72,30 +91,51 @@ describe(
       }).spawn();
 
       const lines: string[] = [];
-      const stdoutDone = drain(child.stdout, lines);
-      const stderrDone = drain(child.stderr, lines);
+      // The startup wait is an EVENT, not a poll: the stream readers settle
+      // this the instant the line is delivered.
+      const started = defer();
+      const noticeStartup = (line: string) => {
+        if (line.includes(STARTED_LINE)) started.resolve();
+      };
+      const stdoutDone = drain(child.stdout, lines, noticeStartup);
+      const stderrDone = drain(child.stderr, lines, noticeStartup);
 
-      const deadline = Date.now() + STARTUP_TIMEOUT_MS;
-      let exited: Deno.CommandStatus | undefined;
-      child.status.then((status) => {
-        exited = status;
+      // Raced against the child's own exit — the other way this wait ends —
+      // with the deadline as the diagnostic backstop only.
+      let backstopTimer: ReturnType<typeof setTimeout> | undefined;
+      const backstopFired = new Promise<"backstop">((resolve) => {
+        backstopTimer = setTimeout(
+          () => resolve("backstop"),
+          STARTUP_TIMEOUT_MS,
+        );
       });
-      while (!lines.some((line) => line.includes(STARTED_LINE))) {
-        if (exited !== undefined) {
-          throw new Error(
-            `bg-piece-service exited (code ${exited.code}) before startup ` +
-              `completed. Output:\n${lines.join("\n")}`,
-          );
-        }
-        if (Date.now() > deadline) {
+      const startup = await Promise.race([
+        started.promise.then(() => "started" as const),
+        child.status.then((status) => ({ exited: status })),
+        backstopFired,
+      ]);
+      clearTimeout(backstopTimer);
+
+      if (startup !== "started") {
+        if (startup === "backstop") {
           child.kill("SIGKILL");
           await Promise.allSettled([stdoutDone, stderrDone, child.status]);
           throw new Error(
-            `bg-piece-service did not report startup within ` +
-              `${STARTUP_TIMEOUT_MS} ms. Output:\n${lines.join("\n")}`,
+            `bg-piece-service never reported its startup signal ` +
+              `("${STARTED_LINE}"); the ${STARTUP_TIMEOUT_MS} ms diagnostic ` +
+              `backstop fired. Output:\n${lines.join("\n")}`,
           );
         }
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        // The child ended the wait by exiting. Flush both streams first, so
+        // the report carries everything it printed on the way down. The
+        // wording covers both shapes this takes — never started, or started
+        // and died — because either way the gate never got to read the
+        // posture of a running service.
+        await Promise.allSettled([stdoutDone, stderrDone]);
+        throw new Error(
+          `bg-piece-service exited (code ${startup.exited.code}) before the ` +
+            `gate could read its posture. Output:\n${lines.join("\n")}`,
+        );
       }
 
       try {

@@ -1177,18 +1177,37 @@ jobs:
       # cf binary ADOPTS the server's published posture
       # (experimentalOptionsForDeployedClient — /api/meta, authority
       # "server"), so every piece/acl/fuse flow below exercises the CLI ON.
-      # This probe pins the server half so the exercise is verified, not
-      # assumed.
-      - name: ✅ Verify the server-execution posture (default posture — server ON)
+      # The probe pins BOTH halves. A serving loop alone is only the
+      # server's: it says nothing about the arm `cf` resolves, and a client
+      # on the other arm is exactly the MIXED posture the P7 independent
+      # review found (finding 7) — which would make this lane's ON exercise
+      # a fiction that reads as a pass. So the probe also resolves the
+      # client arm the way `cf` does — an explicit
+      # EXPERIMENTAL_SERVER_EXECUTION wins, else the published posture —
+      # and refuses a run whose two arms disagree.
+      - name: ✅ Verify the server-execution posture (default posture — server ON, cf adopts ON)
         timeout-minutes: *posture-probe-timeout
         env:
           TOOLSHED_PORT: ${{ matrix.toolshed_port }}
         run: |
+          META=$(curl -fsS "http://localhost:${TOOLSHED_PORT}/api/meta")
           STATS=$(curl -fsS "http://localhost:${TOOLSHED_PORT}/api/health/stats")
+          echo "$META"
           echo "$STATS" | jq -e '.servingLoop != null' > /dev/null || {
             echo "::error::the toolshed did not start the serving loop in the CLI lane; the first-party default is ON (the Phase 7 flip) — the CLI would exercise the OFF arm and the deployed-topology gate would be vacuous"
             exit 1
           }
+          SERVER_ARM=$(echo "$META" | jq -r '.experimental.serverExecution // "unpublished"')
+          CLIENT_ARM="${EXPERIMENTAL_SERVER_EXECUTION:-$SERVER_ARM}"
+          if [ "$SERVER_ARM" != "true" ]; then
+            echo "::error::the toolshed is serving but publishes serverExecution=$SERVER_ARM on /api/meta; cf adopts what is published, so this lane would run a MIXED posture (an OFF client against a serving server)"
+            exit 1
+          fi
+          if [ "$CLIENT_ARM" != "$SERVER_ARM" ]; then
+            echo "::error::MIXED posture in the CLI lane: cf resolves serverExecution=$CLIENT_ARM (an explicit EXPERIMENTAL_SERVER_EXECUTION overrides the deployment's posture) while the toolshed publishes $SERVER_ARM; a mixed run is never a valid arm exercise"
+            exit 1
+          fi
+          echo "cf resolves serverExecution=$CLIENT_ARM against a toolshed publishing $SERVER_ARM and serving."
 
       - name: 📦 Install CLI integration dependencies
         uses: ./.github/actions/apt-install

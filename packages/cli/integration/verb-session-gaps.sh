@@ -59,14 +59,15 @@ ARGS="--api-url=$API_URL --identity=$CF_IDENTITY --space=$SPACE"
 
 # The host's server-execution posture (same probe as integration.sh): the
 # `deduplicated` key is the OFF arm's receipt-precondition witness and is
-# asserted per arm below.
+# asserted per arm below. Deadlines as in integration.sh: an
+# accepted-then-silent server must not hold the suite with no output.
 server_execution_on() {
   case "${EXPERIMENTAL_SERVER_EXECUTION:-}" in
     true) return 0 ;;
     false) return 1 ;;
   esac
-  curl -fsS "$API_URL/api/health/stats" 2>/dev/null \
-    | jq -e '.servingLoop != null' > /dev/null 2>&1
+  curl --connect-timeout 5 --max-time 15 -fsS "$API_URL/api/health/stats" \
+    2>/dev/null | jq -e '.servingLoop != null' > /dev/null 2>&1
 }
 # An id alone does not name an invocation — the session it was chosen within is
 # the other half, and `--invocation` is refused without one.

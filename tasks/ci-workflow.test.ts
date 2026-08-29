@@ -517,9 +517,13 @@ Deno.test("pattern shard selection fails loudly instead of running an empty shar
 
   const contents = withoutComments(await workflow("deno.yml"));
   for (
+    // Both pattern shard lanes under their post-flip names: the DEFAULT
+    // lane (the ON arm since the flip) and the explicit-`false` OFF
+    // regression guard — the pre-flip `-server-execution-on` job with its
+    // role inverted, which is where this pin's second job went.
     const jobId of [
       "pattern-integration-test",
-      "pattern-integration-test-server-execution-on",
+      "pattern-integration-test-server-execution-off",
     ]
   ) {
     const job = jobBlock(contents, jobId);
@@ -1007,6 +1011,43 @@ Deno.test("server-execution lane roles match the flipped default (testing.md §2
   assertStringIncludes(gate, "integration/posture-gate.test.ts");
   assertStringIncludes(gate, "integration/fabric-session-posture-gate.test.ts");
   assertStringIncludes(gate, ".servingLoop != null");
+});
+
+Deno.test("the CLI lane refuses a mixed server-execution posture", async () => {
+  // `cf` is a deployed CLIENT: it ADOPTS the arm the server publishes on
+  // /api/meta (experimentalOptionsForDeployedClient, authority "server")
+  // unless an explicit EXPERIMENTAL_SERVER_EXECUTION overrides it. A
+  // serving loop therefore proves only the SERVER's half — the review's
+  // finding-7 mixed posture (a client on the other arm) would still read
+  // as a passing ON exercise. The probe has to compare both arms and fail
+  // on a disagreement, which is what this pins.
+  const contents = await workflow("deno.yml");
+  const job = jobBlock(contents, "cli-integration-test");
+  const probe = stepBlock(
+    job,
+    "✅ Verify the server-execution posture (default posture — server ON, cf adopts ON)",
+  );
+
+  assertStringIncludes(
+    probe,
+    ".servingLoop != null",
+    "the CLI probe must require the server's serving loop",
+  );
+  assertStringIncludes(
+    probe,
+    ".experimental.serverExecution",
+    "the CLI probe must read the posture the server PUBLISHES, which is what cf adopts",
+  );
+  assertStringIncludes(
+    probe,
+    'CLIENT_ARM="${EXPERIMENTAL_SERVER_EXECUTION:-$SERVER_ARM}"',
+    "the CLI probe must resolve the client arm the way cf does: an explicit env wins, else the published posture",
+  );
+  assertStringIncludes(
+    probe,
+    '[ "$CLIENT_ARM" != "$SERVER_ARM" ]',
+    "the CLI probe must fail on a client/server arm disagreement",
+  );
 });
 
 Deno.test("server-execution OFF pattern failures upload the toolshed log", async () => {

@@ -50,8 +50,20 @@ processes RESOLVE the posture env-else-default (the runner integration
 tests that talk to the lane's toolshed; the runtime-client worker host —
 never a bare/ambient client, the mixed posture the Phase-7 review found,
 which under default-ON a raw env read would resurrect), and the
-default-built browser shell's define fallback is the same constant; a
-posture PROBE before each suite pins serving-loop PRESENT
+default-built browser shell's define fallback is the same constant. TWO
+files on the default pattern lane deliberately read the RAW env instead,
+and are exceptions rather than drift:
+`packages/patterns/integration/topic-board-child-contract.test.ts` and
+`packages/patterns/integration/convergence-storm.test.ts` key their
+ON-arm STEP-skip guard (`onArmStepSkip`) off it. Neither takes a RUNTIME
+posture from that read — the runtimes there adopt the lane toolshed's
+published posture (and the storm harness resolves env-else-default) — so
+the raw key decides only whether a listed step is skipped. With the
+skip registry EMPTY the guards are inert everywhere; the raw key leaves
+them undefined on the default (ON) lane, so a future entry for either
+file fails LOUD there (the step runs and reds, never a silent skip),
+which is the trigger to convert the key. Each file's own comment carries
+this. A posture PROBE before each suite pins serving-loop PRESENT
 (`/api/health/stats.servingLoop`) and shell define UNSET (`/api/meta`'s
 `shellServerExecutionDefine` null), so a silent un-flip of the default
 cannot move the REQUIRED lanes off ON. The explicit

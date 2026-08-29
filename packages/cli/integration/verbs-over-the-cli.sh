@@ -57,14 +57,15 @@ ARGS="--api-url=$API_URL --identity=$CF_IDENTITY --space=$SPACE"
 # steps assert arm-specific mechanics — the OFF arm's receipt-precondition
 # `deduplicated` key, the client-env plainResultReceipts authority, and what
 # a same-id retry of a THROWN handling does — and each says which truth it
-# is asserting.
+# is asserting. Deadlines as in integration.sh: an accepted-then-silent
+# server must not hold the walkthrough with no output.
 server_execution_on() {
   case "${EXPERIMENTAL_SERVER_EXECUTION:-}" in
     true) return 0 ;;
     false) return 1 ;;
   esac
-  curl -fsS "$API_URL/api/health/stats" 2>/dev/null \
-    | jq -e '.servingLoop != null' > /dev/null 2>&1
+  curl --connect-timeout 5 --max-time 15 -fsS "$API_URL/api/health/stats" \
+    2>/dev/null | jq -e '.servingLoop != null' > /dev/null 2>&1
 }
 echo "API_URL=$API_URL"
 echo "SPACE=$SPACE"

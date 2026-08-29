@@ -3243,197 +3243,9 @@ findings; the OWNER RULING — the flip lands DARK):
   OW28 → the honest benchmark → the flip PR (which also flips the
   absolute pin, the CI lane roles and their posture probes, and
   EXPERIMENTAL_OPTIONS.md; and MUST land with the ON skip list EMPTY).
-  **THE FLIP PR (#6535, 2026-08-28, base e16780fca — rebased onto it
-  2026-08-29 from the original base 4e02f75c4, with every gate claim
-  re-verified there; every ordered gate met: the
-  ON-skip registry EMPTY across all four suites (#6528, the
-  ruled-3b-close lift), OW31's ruled posture BUILT, OW45–OW53 CLOSED,
-  OW38(ii) RULED met ("topics numbers are fine"). The owner merges it
-  personally; the soak starts at ITS merge.** What it carries:
-  - The one-liner: `SERVER_EXECUTION_DEFAULT_ENABLED = true`
-    (`packages/memory/v2/server-execution-default.ts`), and the absolute
-    pin re-tensed to state the default IS ON
-    (`packages/toolshed/lib/server-execution-flag.test.ts` — watched RED
-    at the flipped constant before the re-tense).
-  - The LANE-ROLE SWAP, old → new (testing.md §2 re-tensed with it):
-    `build-toolshed-on` (bakes `true`) → `build-toolshed-off` (bakes
-    `"false"`); default `package-integration-test` /
-    `pattern-integration-test` lanes: OFF probe → ON probe
-    (serving-loop PRESENT + shell define UNSET) and they now carry the
-    ON skip list (EMPTY; the OFF guard never skips);
-    `package-integration-test-server-execution-on` /
-    `pattern-integration-test-server-execution-on` (explicit `true`,
-    variant `server-execution`) →
-    `...-server-execution-off` (explicit `false` on the OFF-built
-    binary, probe inverted, variant `server-execution-off` — the
-    default arm continues the unmarked history). The old ci-workflow
-    lane pins were watched RED on the swapped workflow, then
-    reconciled, plus a new lane-roles pin test (a partial revert of one
-    half now reds).
-  - The four-topology gate dispositions (the Phase-7 table row's
-    obligation, review finding 8), lane by lane:
-    (1) `background-piece-service` — had NO exercising lane; the new
-    `deployed-topology-gate` job starts the REAL binary against the
-    default (ON, probed) toolshed, asserts its new startup posture log
-    line (`main.ts`; the binary has no HTTP surface) and clean SIGTERM
-    exit — RED-FIRST with a forced-OFF service env (posture line "OFF"
-    vs expected "ON").
-    (2) cf-harness — had NO toolshed-backed lane (its integration suite
-    is CF_HARNESS_INTEGRATION-gated); the same job runs
-    `createHarnessFabricSessionFactory` (PKCS#8 from disk →
-    `PiecesController.initialize` → deployed-client adoption), asserts
-    the session's runtime resolved ON with nothing declared, and serves
-    one genuine flow (compile + create a piece, read the result back) —
-    RED-FIRST against a forced-OFF server.
-    (3) the CLI — `cli-integration-test` (all three suites) becomes the
-    ON exercise: `cf` ADOPTS the server's published posture
-    (`experimentalOptionsForDeployedClient`, authority "server") from
-    the default binary's /api/meta; the job gains the server-side ON
-    posture probe so the exercise is verified, not assumed. (`cf test`
-    / `cf dev` stay deliberately ambient-OFF — patternTest/localDev
-    presets.)
-    (4) `PiecesController` hosts — the default package/pattern lanes
-    are the ON exercise (sx2-scale's N controllers, the
-    pieces-controller helper, every integration file initializing a
-    controller against the lane's toolshed); the agents host
-    (`connectors/agents/host`) shares the same
-    `experimentalOptionsForDeployedClient` + remoteClient seam and is
-    covered at it (no dedicated lane exists for it — recorded).
-  - The UNIFORM-posture reconciliation the swap needs: 4 runner
-    integration files and the runtime-client integration host (worker
-    declaration + `onArmStepSkip` guard) resolve env-else-default via
-    the now-exported `withServerExecutionDefault` — under default-ON a
-    raw env read would resurrect the P7 finding-7 MIXED posture in the
-    default lanes.
-  - The topics multi-user LANE-POSTURE item (the topics measurement
-    report §5.1/§6, 2026-08-24: "the serverless multi-user pattern lane
-    — a lane-posture question the flip decision has to address either
-    way"), discharged as recorded: the pattern-tests lane runs with NO
-    server (`PACKAGES_WITHOUT_SERVER`) through the `patternTest`
-    preset, which deliberately does NOT read the constant — the lane
-    resolves the AMBIENT baseline (OFF) by construction, i.e. the
-    "lane pins OFF" arm realized structurally (pinned by the preset
-    conformance goldens: only productionServer/remoteClient carry the
-    constant). Verified live at the flipped head:
-    `topics/multi-user.test.tsx` 7/7 GREEN with the env unset (the
-    campaign's 5/7 red was under EXPLICIT env ON only). The
-    alternative the report named — the in-process surface growing the
-    serving role — is NOT taken; it would be its own design work if
-    ever wanted.
-  - **THE FIRST FLIP BOARD (run 33232274193) — seven reds, every one
-    classified from its assertion before any fix; the fix round rode
-    the same PR.** (1) `Test (2/8)`: the `startServerExecutionHost OFF
-    witness` unit pins keyed unset=OFF — re-keyed (unset = the
-    first-party default, gate-opens witnessed; OFF witness = the
-    explicit-false arm). (2) `sx2-speculation` in the default pattern
-    lane, DETERMINISTIC: the novel ON×coverage combination —
-    `CF_PATTERN_COVERAGE_DIR` makes the client compile the INSTRUMENTED
-    pattern variant while the serving side compiles uninstrumented, so
-    the client's speculative `computed:` entries (content-addressed by
-    module bytes) can never be covered by the served watermark, and an
-    authored write whose basis touches them is refused per
-    speculation.md §6. Repro: red with coverage, green without, same ON
-    toolshed. Disposition: authored-pattern coverage COLLECTS ON THE
-    OFF GUARD LANE through the soak (single-compiler world — sound;
-    the pre-flip default lane's own posture), the default lane keeps
-    V8 coverage. **OWED (post-soak, before the OFF lanes retire):
-    serving-side instrumented-variant parity — the serving compile
-    honoring the space's coverage variant — or a re-homed authored
-    coverage collection; pattern-reload still collects under its
-    now-ON self-booted toolshed and shares this mechanism (green so
-    far, named here as the residual to watch).** BOARD-READING
-    CONSEQUENCE through the soak: `coverage-check` now `needs` the OFF
-    pattern lane, so ANY red in that lane also SKIPS Coverage Check and
-    reds Status — board 33239003881 shows exactly that shape behind the
-    owned-elsewhere firebreak red. The coupling retires when the OWED
-    re-homing above lands. (3) CLI
-    `core-piece-values`: the "cannot project in a fresh session"
-    refusal DISSOLVES under ON by design (the serving loop
-    materializes the session-derived result; a fresh session projects
-    it) — the step is arm-aware now and under ON asserts the SERVED
-    value. (4) CLI `core-piece-call` dedup: retry left EXACTLY ONE
-    message (the dedupe-horizon skip works) but `deduplicated: true`
-    cannot be reported — verb receipts are deliberately unwritten
-    under ON — the script's ON arm asserts the behavioral witness
-    (same id, exit 0, exactly-one-message). (5) **RULED 2026-08-29 —
-    owner: "yes, Serving-side receipt/result write, as that is indeed
-    what i said before" — LANDED (was STOP-AND-REPORT: the verb
-    DECLARED-RESULT surface was ABSENT under ON; CLI topology, first
-    ON exercise).** The gap's mechanism, as reported to owner court:
-    `runner.ts handleJavaScriptHandlerResult` disabled the whole
-    receipt write under the flag (`receiptsEnabled = … &&
-    serverExecution !== true`) on events.md §4/N26's subsumption,
-    which subsumes only the EXACTLY-ONCE role — the receipt's
-    RESULT-CARRIAGE role (plainResultReceipts, verb contract WS-C/D —
-    `cf call`'s `.result`/`.receipt`) had no replacement sentence and
-    no serving-side writer. The ruling resolves the fork to a
-    SERVING-SIDE receipt/result write, on the owner's stated model:
-    "all handlers write result cells (even if the value is undefined),
-    and that CAS for that is the write-once guarantee." Landed
-    mechanism: the served handler run writes the receipt in its OWN
-    transaction (same wave as the entry's `consequenced` mark —
-    mark/effects atomic; §2b carriage as any served handler write) at
-    the same cause-derived address the client-era write used;
-    write-once by CAS with a lost CAS a LOUD no-op (never a second
-    write, never a wave failure — counter
-    `runner.servedReceiptCasLosses` + warn line); undefined-value
-    handlers write the `{}` witness; the flag-ON client's echo
-    publishes the address (`tx.handlingReceiptLink`) so the unchanged
-    CLI readback works — the durable-ack coupling already orders the
-    readback after the consequence. The client write stays disabled;
-    no create-only mark rides a wave. Spec: events.md §4 "Result
-    carriage" (the replacement sentence) + runtime-mapping.md N26(b)
-    re-tensed RULED. Pins (executor-events-down.test.ts, each
-    red-first at the pre-fix head and mutation-killed independently —
-    M1 drop-the-write kills the declared-value + `{}` pins, M2
-    skip-undefined kills the `{}` pin alone, M3 drop-the-CAS-check and
-    M4 CAS-loss-fails-the-wave each kill the CAS-loss pin alone):
-    declared value written by ONE derived commit whose
-    `consequence_of` names the event (revision-table single-writer
-    proof — the client never wrote); `{}` witness post-serve;
-    CAS-loss loud no-op with the standing value winning, the wave
-    still committing, and the OFF-arm probe's pre-created receipt
-    proving cross-arm address agreement. Witness red→green: CLI
-    three-topic fixture (integration.sh:908 umbrella declared-result
-    assert) RED at a5d5561dc vs a default-ON source toolshed, GREEN
-    with the fix on BOTH arms — including the dropped-response retry
-    and imposter replay now reading the ORIGINAL result back under ON
-    (their `deduplicated`-key asserts went arm-aware like flip-board
-    item (4); the D3 original-result assert_json_eq holds in both
-    arms). (6) `topic-board-pivot-contract` 4≠3
-    crossref rows: intermittent ON-arm convergence transient (~2/22
-    local only under load, 14 straight greens after; single CI
-    observation; clean titles = duplicated ROW). NOT patched — the
-    test's own comment records that the pivot "has been seen to
-    settle a row away … under server execution" and deliberately
-    asserts rather than awaits, so any wait-shape is the surface
-    owner's decision (flag-don't-fill); WATCHED intermittent, this
-    row is its record. (7) `iframe Firebreak Commons` red in BOTH
-    arms: INHERITED — the file (#6526) landed on main after this PR's
-    base and reaches the board only via the merge ref; main's own
-    board at d1eca661f failed the explicit-ON pattern lane on it.
-    The file's owner's, not the flip's.
-  - **The OFF→ON CONTRACT DELTA the first cf-ON exercise surfaced: a
-    THROWN handling durably CONSUMES its invocation id.** Under ON the
-    throw happens SERVER-side, where an error IS the consequence
-    (events.md §5): the errored handling is the event's recorded
-    outcome and the watermark advances past it, so a SAME-id retry
-    never re-executes. Its mechanical shape is a race the spec allows
-    either way — admission refuses the duplicate while the errored
-    entry is still above the dedupe horizon, or admits it and the
-    processing skip passes it (settled, no result; no receipt exists
-    for an errored handling) — and both agree on the semantic: nothing
-    runs, nothing is created. Under OFF the client-side refusal never
-    consumed the id, so the same id then executed. The caller's correct
-    move after an error is therefore a FRESH id. NOT a defect and
-    nothing to fix: a spec-consistent consequence of moving the
-    handling to the serving side, recorded here so the settled delta is
-    not re-litigated post-soak. Asserted arm-aware by
-    `packages/cli/integration/verbs-over-the-cli.sh` step 10 ("A thrown
-    call and its invocation id") — under ON the same-id retry yields no
-    result and leaves the note count unchanged, and a fresh id executes
-    the corrected call; under OFF the same id executes. The step's ON
-    comment points at this row.
+  The PR that discharged it is its own delta below (2026-08-29 —
+  #6535); the rest of THIS delta is the pre-flip world that PR
+  changed, and reads as the history it is.
 - CI lanes (testing.md §2 re-tensed): default lanes = the OFF posture
   (probe: server not serving, shell define unset); explicit-`true` ON
   lanes on `build-toolshed-on` (shell define baked `true`), FULL ON
@@ -3499,6 +3311,204 @@ findings; the OWNER RULING — the flip lands DARK):
   a byte-identical cross-user propagation number for the Deno client
   posture today. Recorded in the plan; the browser number waits for the
   two-user family.
+
+Delta 2026-08-29 — THE FLIP: the first-party default goes ON (the
+separate one-line flip PR the 2026-08-16 ruling above made owed —
+recorded here rather than inside that delta, whose own bullets state
+the pre-flip posture they were written in):
+
+**THE FLIP PR (#6535, 2026-08-28, base e16780fca — rebased onto it
+2026-08-29 from the original base 4e02f75c4, with every gate claim
+re-verified there; every ordered gate met: the
+ON-skip registry EMPTY across all four suites (#6528, the
+ruled-3b-close lift), OW31's ruled posture BUILT, OW45–OW53 CLOSED,
+OW38(ii) RULED met ("topics numbers are fine"). The owner merges it
+personally; the soak starts at ITS merge.** What it carries:
+
+- The one-liner: `SERVER_EXECUTION_DEFAULT_ENABLED = true`
+  (`packages/memory/v2/server-execution-default.ts`), and the absolute
+  pin re-tensed to state the default IS ON
+  (`packages/toolshed/lib/server-execution-flag.test.ts` — watched RED
+  at the flipped constant before the re-tense).
+- The LANE-ROLE SWAP, old → new (testing.md §2 re-tensed with it):
+  `build-toolshed-on` (bakes `true`) → `build-toolshed-off` (bakes
+  `"false"`); default `package-integration-test` /
+  `pattern-integration-test` lanes: OFF probe → ON probe
+  (serving-loop PRESENT + shell define UNSET) and they now carry the
+  ON skip list (EMPTY; the OFF guard never skips);
+  `package-integration-test-server-execution-on` /
+  `pattern-integration-test-server-execution-on` (explicit `true`,
+  variant `server-execution`) →
+  `...-server-execution-off` (explicit `false` on the OFF-built
+  binary, probe inverted, variant `server-execution-off` — the
+  default arm continues the unmarked history). The old ci-workflow
+  lane pins were watched RED on the swapped workflow, then
+  reconciled, plus a new lane-roles pin test (a partial revert of one
+  half now reds).
+- The four-topology gate dispositions (the Phase-7 table row's
+  obligation, review finding 8), lane by lane:
+  (1) `background-piece-service` — had NO exercising lane; the new
+  `deployed-topology-gate` job starts the REAL binary against the
+  default (ON, probed) toolshed, asserts its new startup posture log
+  line (`main.ts`; the binary has no HTTP surface) and clean SIGTERM
+  exit — RED-FIRST with a forced-OFF service env (posture line "OFF"
+  vs expected "ON").
+  (2) cf-harness — had NO toolshed-backed lane (its integration suite
+  is CF_HARNESS_INTEGRATION-gated); the same job runs
+  `createHarnessFabricSessionFactory` (PKCS#8 from disk →
+  `PiecesController.initialize` → deployed-client adoption), asserts
+  the session's runtime resolved ON with nothing declared, and serves
+  one genuine flow (compile + create a piece, read the result back) —
+  RED-FIRST against a forced-OFF server.
+  (3) the CLI — `cli-integration-test` (all three suites) becomes the
+  ON exercise: `cf` ADOPTS the server's published posture
+  (`experimentalOptionsForDeployedClient`, authority "server") from
+  the default binary's /api/meta; the job gains the server-side ON
+  posture probe so the exercise is verified, not assumed. (`cf test`
+  / `cf dev` stay deliberately ambient-OFF — patternTest/localDev
+  presets.)
+  (4) `PiecesController` hosts — the default package/pattern lanes
+  are the ON exercise (sx2-scale's N controllers, the
+  pieces-controller helper, every integration file initializing a
+  controller against the lane's toolshed); the agents host
+  (`connectors/agents/host`) shares the same
+  `experimentalOptionsForDeployedClient` + remoteClient seam and is
+  covered at it (no dedicated lane exists for it — recorded).
+- The UNIFORM-posture reconciliation the swap needs: 4 runner
+  integration files and the runtime-client integration host (worker
+  declaration + `onArmStepSkip` guard) resolve env-else-default via
+  the now-exported `withServerExecutionDefault` — under default-ON a
+  raw env read would resurrect the P7 finding-7 MIXED posture in the
+  default lanes.
+- The topics multi-user LANE-POSTURE item (the topics measurement
+  report §5.1/§6, 2026-08-24: "the serverless multi-user pattern lane
+  — a lane-posture question the flip decision has to address either
+  way"), discharged as recorded: the pattern-tests lane runs with NO
+  server (`PACKAGES_WITHOUT_SERVER`) through the `patternTest`
+  preset, which deliberately does NOT read the constant — the lane
+  resolves the AMBIENT baseline (OFF) by construction, i.e. the
+  "lane pins OFF" arm realized structurally (pinned by the preset
+  conformance goldens: only productionServer/remoteClient carry the
+  constant). Verified live at the flipped head:
+  `topics/multi-user.test.tsx` 7/7 GREEN with the env unset (the
+  campaign's 5/7 red was under EXPLICIT env ON only). The
+  alternative the report named — the in-process surface growing the
+  serving role — is NOT taken; it would be its own design work if
+  ever wanted.
+- **THE FIRST FLIP BOARD (run 33232274193) — seven reds, every one
+  classified from its assertion before any fix; the fix round rode
+  the same PR.** (1) `Test (2/8)`: the `startServerExecutionHost OFF
+  witness` unit pins keyed unset=OFF — re-keyed (unset = the
+  first-party default, gate-opens witnessed; OFF witness = the
+  explicit-false arm). (2) `sx2-speculation` in the default pattern
+  lane, DETERMINISTIC: the novel ON×coverage combination —
+  `CF_PATTERN_COVERAGE_DIR` makes the client compile the INSTRUMENTED
+  pattern variant while the serving side compiles uninstrumented, so
+  the client's speculative `computed:` entries (content-addressed by
+  module bytes) can never be covered by the served watermark, and an
+  authored write whose basis touches them is refused per
+  speculation.md §6. Repro: red with coverage, green without, same ON
+  toolshed. Disposition: authored-pattern coverage COLLECTS ON THE
+  OFF GUARD LANE through the soak (single-compiler world — sound;
+  the pre-flip default lane's own posture), the default lane keeps
+  V8 coverage. **OWED (post-soak, before the OFF lanes retire):
+  serving-side instrumented-variant parity — the serving compile
+  honoring the space's coverage variant — or a re-homed authored
+  coverage collection; pattern-reload still collects under its
+  now-ON self-booted toolshed and shares this mechanism (green so
+  far, named here as the residual to watch).** BOARD-READING
+  CONSEQUENCE through the soak: `coverage-check` now `needs` the OFF
+  pattern lane, so ANY red in that lane also SKIPS Coverage Check and
+  reds Status — board 33239003881 shows exactly that shape behind the
+  owned-elsewhere firebreak red. The coupling retires when the OWED
+  re-homing above lands. (3) CLI
+  `core-piece-values`: the "cannot project in a fresh session"
+  refusal DISSOLVES under ON by design (the serving loop
+  materializes the session-derived result; a fresh session projects
+  it) — the step is arm-aware now and under ON asserts the SERVED
+  value. (4) CLI `core-piece-call` dedup: retry left EXACTLY ONE
+  message (the dedupe-horizon skip works) but `deduplicated: true`
+  cannot be reported — verb receipts are deliberately unwritten
+  under ON — the script's ON arm asserts the behavioral witness
+  (same id, exit 0, exactly-one-message). (5) **RULED 2026-08-29 —
+  owner: "yes, Serving-side receipt/result write, as that is indeed
+  what i said before" — LANDED (was STOP-AND-REPORT: the verb
+  DECLARED-RESULT surface was ABSENT under ON; CLI topology, first
+  ON exercise).** The gap's mechanism, as reported to owner court:
+  `runner.ts handleJavaScriptHandlerResult` disabled the whole
+  receipt write under the flag (`receiptsEnabled = … &&
+  serverExecution !== true`) on events.md §4/N26's subsumption,
+  which subsumes only the EXACTLY-ONCE role — the receipt's
+  RESULT-CARRIAGE role (plainResultReceipts, verb contract WS-C/D —
+  `cf call`'s `.result`/`.receipt`) had no replacement sentence and
+  no serving-side writer. The ruling resolves the fork to a
+  SERVING-SIDE receipt/result write, on the owner's stated model:
+  "all handlers write result cells (even if the value is undefined),
+  and that CAS for that is the write-once guarantee." Landed
+  mechanism: the served handler run writes the receipt in its OWN
+  transaction (same wave as the entry's `consequenced` mark —
+  mark/effects atomic; §2b carriage as any served handler write) at
+  the same cause-derived address the client-era write used;
+  write-once by CAS with a lost CAS a LOUD no-op (never a second
+  write, never a wave failure — counter
+  `runner.servedReceiptCasLosses` + warn line); undefined-value
+  handlers write the `{}` witness; the flag-ON client's echo
+  publishes the address (`tx.handlingReceiptLink`) so the unchanged
+  CLI readback works — the durable-ack coupling already orders the
+  readback after the consequence. The client write stays disabled;
+  no create-only mark rides a wave. Spec: events.md §4 "Result
+  carriage" (the replacement sentence) + runtime-mapping.md N26(b)
+  re-tensed RULED. Pins (executor-events-down.test.ts, each
+  red-first at the pre-fix head and mutation-killed independently —
+  M1 drop-the-write kills the declared-value + `{}` pins, M2
+  skip-undefined kills the `{}` pin alone, M3 drop-the-CAS-check and
+  M4 CAS-loss-fails-the-wave each kill the CAS-loss pin alone):
+  declared value written by ONE derived commit whose
+  `consequence_of` names the event (revision-table single-writer
+  proof — the client never wrote); `{}` witness post-serve;
+  CAS-loss loud no-op with the standing value winning, the wave
+  still committing, and the OFF-arm probe's pre-created receipt
+  proving cross-arm address agreement. Witness red→green: CLI
+  three-topic fixture (integration.sh:908 umbrella declared-result
+  assert) RED at a5d5561dc vs a default-ON source toolshed, GREEN
+  with the fix on BOTH arms — including the dropped-response retry
+  and imposter replay now reading the ORIGINAL result back under ON
+  (their `deduplicated`-key asserts went arm-aware like flip-board
+  item (4); the D3 original-result assert_json_eq holds in both
+  arms). (6) `topic-board-pivot-contract` 4≠3
+  crossref rows: intermittent ON-arm convergence transient (~2/22
+  local only under load, 14 straight greens after; single CI
+  observation; clean titles = duplicated ROW). NOT patched — the
+  test's own comment records that the pivot "has been seen to
+  settle a row away … under server execution" and deliberately
+  asserts rather than awaits, so any wait-shape is the surface
+  owner's decision (flag-don't-fill); WATCHED intermittent, this
+  row is its record. (7) `iframe Firebreak Commons` red in BOTH
+  arms: INHERITED — the file (#6526) landed on main after this PR's
+  base and reaches the board only via the merge ref; main's own
+  board at d1eca661f failed the explicit-ON pattern lane on it.
+  The file's owner's, not the flip's.
+- **The OFF→ON CONTRACT DELTA the first cf-ON exercise surfaced: a
+  THROWN handling durably CONSUMES its invocation id.** Under ON the
+  throw happens SERVER-side, where an error IS the consequence
+  (events.md §5): the errored handling is the event's recorded
+  outcome and the watermark advances past it, so a SAME-id retry
+  never re-executes. Its mechanical shape is a race the spec allows
+  either way — admission refuses the duplicate while the errored
+  entry is still above the dedupe horizon, or admits it and the
+  processing skip passes it (settled, no result; no receipt exists
+  for an errored handling) — and both agree on the semantic: nothing
+  runs, nothing is created. Under OFF the client-side refusal never
+  consumed the id, so the same id then executed. The caller's correct
+  move after an error is therefore a FRESH id. NOT a defect and
+  nothing to fix: a spec-consistent consequence of moving the
+  handling to the serving side, recorded here so the settled delta is
+  not re-litigated post-soak. Asserted arm-aware by
+  `packages/cli/integration/verbs-over-the-cli.sh` step 10 ("A thrown
+  call and its invocation id") — under ON the same-id retry yields no
+  result and leaves the note count unchanged, and a fresh id executes
+  the corrected call; under OFF the same id executes. The step's ON
+  comment points at this row.
 
 Delta 2026-08-16 — fan-out stage A (OW17 leg 1: the instance-keyed
 serving replica + wire; the client arrival gate):
