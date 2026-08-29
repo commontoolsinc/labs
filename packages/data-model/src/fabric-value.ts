@@ -45,6 +45,7 @@ export {
   isFabricObjectOrArray,
   isFabricPlainContainer,
   isFabricPlainObject,
+  isValidFabricNativeObject,
   isValidFabricPlainObject,
   isValidFabricValue,
   isValidFabricValueLayer,
@@ -58,7 +59,5 @@ export {
   shallowCleanPlainObject,
   shallowFabricFromNativeValue,
 } from "./native-conversion.ts";
-
-export { isValidFabricNativeObject } from "./type-check.ts";
 
 export { valueEqual } from "./valueEqual.ts";
