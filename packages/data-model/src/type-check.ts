@@ -325,8 +325,9 @@ export function isValidFabricNativeObject(
 
   // Arrays first, and unconditionally, exactly as the full dispatch does it.
   // An array's class is USUALLY `Array`, whose tag is not one of the six
-  // below -- but a prototype can be re-pointed, and an array wearing
-  // `Date.prototype` would otherwise be reported as a convertible `Date`.
+  // below -- but a prototype can be re-pointed, and an array whose
+  // `prototype` is `Date.prototype` would otherwise be reported as a
+  // convertible `Date`.
   // `Array.isArray()` sees through that, and through a subclass and a severed
   // prototype besides, which is why the array rule alone decides what an array
   // may be.
