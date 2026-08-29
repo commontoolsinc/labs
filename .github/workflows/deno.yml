@@ -1394,7 +1394,18 @@ jobs:
         timeout-minutes: *work-timeout
         working-directory: packages/patterns
         run: |
-          mapfile -t TEST_FILES < <(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          # Command substitution (not a process substitution) so a selector
+          # failure fails this step under `bash -e` instead of reading as an
+          # empty list that runs ZERO test files and exits green. The
+          # selector throws on an empty selection (every shard carries the
+          # internally-sharded files), so an empty result here is only ever
+          # a failure — reject it loudly as the backstop.
+          SELECTED_FILES=$(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          if [ -z "$SELECTED_FILES" ]; then
+            echo "::error::select-pattern-integration-files.ts selected no files for shard ${{ matrix.shard }}/${{ matrix.total }}"
+            exit 1
+          fi
+          mapfile -t TEST_FILES <<< "$SELECTED_FILES"
           printf 'Pattern integration shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
           printf '  %s\n' "${TEST_FILES[@]}"
           mkdir -p ../../test-results
@@ -1551,7 +1562,19 @@ jobs:
         timeout-minutes: *work-timeout
         working-directory: packages/patterns
         run: |
-          mapfile -t SHARD_FILES < <(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          # Command substitution (not a process substitution) so a selector
+          # failure fails this step under `bash -e` instead of reading as an
+          # empty list that runs ZERO test files and exits green. The
+          # selector throws on an empty selection (every shard carries the
+          # internally-sharded files), so an empty result here is only ever
+          # a failure — reject it loudly as the backstop. The legitimate
+          # empty case lives one stage LATER, after the ON-skip filter.
+          SELECTED_FILES=$(deno run --allow-read ../../tasks/select-pattern-integration-files.ts ${{ matrix.shard }}/${{ matrix.total }})
+          if [ -z "$SELECTED_FILES" ]; then
+            echo "::error::select-pattern-integration-files.ts selected no files for shard ${{ matrix.shard }}/${{ matrix.total }}"
+            exit 1
+          fi
+          mapfile -t SHARD_FILES <<< "$SELECTED_FILES"
           printf 'Pattern integration shard ${{ matrix.shard }}/${{ matrix.total }} files:\n'
           printf '  %s\n' "${SHARD_FILES[@]}"
           # The explicit ON-arm skip list, applied by FILTERING this shard's
