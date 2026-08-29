@@ -17,11 +17,15 @@ import { expect } from "@std/expect";
 import {
   isFabricContainerValue,
   isFabricPlainObject,
+  isValidFabricNativeObject,
   isValidFabricPlainObject,
   isValidFabricValue,
   isValidFabricValueLayer,
 } from "@/type-check.ts";
 import type { FabricValue } from "@/interface.ts";
+import { VALUE_TAGS } from "@/VALUE_TAGS.ts";
+import { tagFromNativeValue } from "@/native-type-tags.ts";
+import { LAYER_CORPUS } from "./fabric-value-corpus.ts";
 import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
@@ -730,6 +734,78 @@ describe("type-check", () => {
         expect(isFabricPlainObject(/regex/ as unknown as FabricValue))
           .toBe(false);
       });
+    });
+  });
+
+  describe("isValidFabricNativeObject()", () => {
+    it("returns `true` for all convertible types", () => {
+      expect(isValidFabricNativeObject(new Error("e"))).toBe(true);
+      expect(isValidFabricNativeObject(new TypeError("e"))).toBe(true);
+      expect(isValidFabricNativeObject(new Map())).toBe(true);
+      expect(isValidFabricNativeObject(new Set())).toBe(true);
+      expect(isValidFabricNativeObject(new Date())).toBe(true);
+      expect(isValidFabricNativeObject(new Uint8Array())).toBe(true);
+    });
+
+    it("returns `true` for exotic `Error` subclass", () => {
+      class WeirdError extends RangeError {}
+      expect(isValidFabricNativeObject(new WeirdError("weird"))).toBe(true);
+    });
+
+    it("returns `true` for `RegExp`", () => {
+      expect(isValidFabricNativeObject(/abc/)).toBe(true);
+    });
+
+    it("returns `false` for non-convertible types", () => {
+      expect(isValidFabricNativeObject({})).toBe(false);
+      expect(isValidFabricNativeObject([])).toBe(false);
+      expect(isValidFabricNativeObject(new WeakMap())).toBe(false);
+    });
+
+    it("returns `false` for objects with `toJSON()`", () => {
+      expect(isValidFabricNativeObject({ toJSON: () => "x" })).toBe(false);
+    });
+
+    it("returns `false` for a non-object", () => {
+      expect(isValidFabricNativeObject(null)).toBe(false);
+      expect(isValidFabricNativeObject(undefined)).toBe(false);
+      expect(isValidFabricNativeObject(1)).toBe(false);
+      expect(isValidFabricNativeObject("a")).toBe(false);
+      expect(isValidFabricNativeObject(() => {})).toBe(false);
+    });
+  });
+
+  describe("`isValidFabricNativeObject()` over the corpus", () => {
+    // The predicate answers by a narrow route -- the array rule, the builtin
+    // class lookup, and an `Error` test -- while the full dispatch reaches the
+    // same values through the fabric classes as well. Deciding a subset of one
+    // answer by a different road is only correct if the two agree on every arm,
+    // which is what the corpus is for.
+    const nativeObjectTags: ReadonlyArray<string> = [
+      VALUE_TAGS.Error,
+      VALUE_TAGS.Map,
+      VALUE_TAGS.Set,
+      VALUE_TAGS.Date,
+      VALUE_TAGS.Uint8Array,
+      VALUE_TAGS.RegExp,
+    ];
+
+    for (const [label, value] of LAYER_CORPUS) {
+      it(`agrees with the full dispatch about ${label}`, () => {
+        const tag = tagFromNativeValue(value);
+        const viaDispatch = (tag !== null) && nativeObjectTags.includes(tag);
+        expect(isValidFabricNativeObject(value)).toBe(viaDispatch);
+      });
+    }
+
+    // Agreement is free for a predicate that has drifted to one side, so that
+    // the corpus lands on both answers is asserted rather than assumed.
+    it("is checked against both answers", () => {
+      const answers = LAYER_CORPUS.map(([, value]) =>
+        isValidFabricNativeObject(value)
+      );
+      expect(answers).toContain(true);
+      expect(answers).toContain(false);
     });
   });
 });

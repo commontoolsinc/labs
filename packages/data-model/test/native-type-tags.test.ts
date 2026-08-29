@@ -26,7 +26,9 @@ import {
   tagFromNativeClass,
   tagFromNativeValue,
 } from "@/native-type-tags.ts";
-import { isValidFabricNativeObject } from "@/native-conversion.ts";
+import { isValidFabricNativeObject } from "@/type-check.ts";
+import { tagFromNativeBuiltinClass } from "@/tagFromNativeBuiltinClass.ts";
+import { LAYER_CORPUS } from "./fabric-value-corpus.ts";
 
 describe("native-type-tags", () => {
   describe("tagFromNativeValue()", () => {
@@ -308,6 +310,47 @@ describe("native-type-tags", () => {
       it("returns `Date` tag for `Date`, whose `toJSON` is not consulted", () => {
         expect(tagFromNativeClass(Date)).toBe(VALUE_TAGS.Date);
       });
+    });
+  });
+
+  describe("the builtin lookup and the full class lookup", () => {
+    // `tagFromNativeClass()` asks `tagFromNativeBuiltinClass()` first and its
+    // own switch second, on the stated grounds that a class is in one list or
+    // the other and never both. Were a class in both, the order would silently
+    // decide its tag, so the corpus is walked to hold that apart.
+    const constructors = LAYER_CORPUS
+      .filter(([, value]) => (value !== null) && (typeof value === "object"))
+      .map(([label, value]) =>
+        [label, Object.getPrototypeOf(value as object)?.constructor] as const
+      )
+      .filter(([, ctor]) => typeof ctor === "function");
+
+    for (const [label, ctor] of constructors) {
+      it(`gives ${label} one tag, from one of the two`, () => {
+        const builtin = tagFromNativeBuiltinClass(ctor);
+        const full = tagFromNativeClass(ctor);
+        if (builtin !== null) {
+          // A builtin passes through the delegation unchanged.
+          expect(full).toBe(builtin);
+        } else {
+          // Anything else is the fabric switch's to answer, or nobody's.
+          expect(builtin).toBe(null);
+        }
+      });
+    }
+
+    // Both arms have to be populated, or the loop above proves nothing about
+    // the split it is checking.
+    it("reaches classes on both sides of the split", () => {
+      const builtins = constructors
+        .filter(([, ctor]) => tagFromNativeBuiltinClass(ctor) !== null);
+      const fabrics = constructors
+        .filter(([, ctor]) =>
+          (tagFromNativeBuiltinClass(ctor) === null) &&
+          (tagFromNativeClass(ctor) !== null)
+        );
+      expect(builtins.length).toBeGreaterThan(0);
+      expect(fabrics.length).toBeGreaterThan(0);
     });
   });
 });
