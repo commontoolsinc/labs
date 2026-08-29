@@ -3319,6 +3319,66 @@ findings; the OWNER RULING — the flip lands DARK):
     alternative the report named — the in-process surface growing the
     serving role — is NOT taken; it would be its own design work if
     ever wanted.
+  - **THE FIRST FLIP BOARD (run 33232274193) — seven reds, every one
+    classified from its assertion before any fix; the fix round rode
+    the same PR.** (1) `Test (2/8)`: the `startServerExecutionHost OFF
+    witness` unit pins keyed unset=OFF — re-keyed (unset = the
+    first-party default, gate-opens witnessed; OFF witness = the
+    explicit-false arm). (2) `sx2-speculation` in the default pattern
+    lane, DETERMINISTIC: the novel ON×coverage combination —
+    `CF_PATTERN_COVERAGE_DIR` makes the client compile the INSTRUMENTED
+    pattern variant while the serving side compiles uninstrumented, so
+    the client's speculative `computed:` entries (content-addressed by
+    module bytes) can never be covered by the served watermark, and an
+    authored write whose basis touches them is refused per
+    speculation.md §6. Repro: red with coverage, green without, same ON
+    toolshed. Disposition: authored-pattern coverage COLLECTS ON THE
+    OFF GUARD LANE through the soak (single-compiler world — sound;
+    the pre-flip default lane's own posture), the default lane keeps
+    V8 coverage. **OWED (post-soak, before the OFF lanes retire):
+    serving-side instrumented-variant parity — the serving compile
+    honoring the space's coverage variant — or a re-homed authored
+    coverage collection; pattern-reload still collects under its
+    now-ON self-booted toolshed and shares this mechanism (green so
+    far, named here as the residual to watch).** (3) CLI
+    `core-piece-values`: the "cannot project in a fresh session"
+    refusal DISSOLVES under ON by design (the serving loop
+    materializes the session-derived result; a fresh session projects
+    it) — the step is arm-aware now and under ON asserts the SERVED
+    value. (4) CLI `core-piece-call` dedup: retry left EXACTLY ONE
+    message (the dedupe-horizon skip works) but `deduplicated: true`
+    cannot be reported — verb receipts are deliberately unwritten
+    under ON — the script's ON arm asserts the behavioral witness
+    (same id, exit 0, exactly-one-message). (5) **STOP-AND-REPORT —
+    the verb DECLARED-RESULT surface is ABSENT under ON (CLI topology,
+    first ON exercise; owner-court).** Mechanism:
+    `runner.ts handleJavaScriptHandlerResult` disables the whole
+    receipt write under the flag (`receiptsEnabled = … &&
+    serverExecution !== true`), on events.md §4/N26's subsumption —
+    which subsumes only the EXACTLY-ONCE role; the receipt's
+    RESULT-CARRIAGE role (plainResultReceipts, verb contract WS-C/D —
+    `cf call`'s `.result`/`.receipt`) has NO replacement sentence
+    anywhere in the spec, and no serving-side writer exists. A
+    `cf call` on a result-declaring verb returns `status: settled`
+    with no result under the flipped default
+    (integration.sh:908's umbrella-create assert is the exact
+    witness; the CLI lane will red there until this is designed —
+    deliberately NOT arm-gated away). The fix needs a ruling: a
+    serving-side receipt write (result-carriage without the
+    create-only precondition role, keeping N26's invariant), or a new
+    served result channel. (6) `topic-board-pivot-contract` 4≠3
+    crossref rows: intermittent ON-arm convergence transient (~2/22
+    local only under load, 14 straight greens after; single CI
+    observation; clean titles = duplicated ROW). NOT patched — the
+    test's own comment records that the pivot "has been seen to
+    settle a row away … under server execution" and deliberately
+    asserts rather than awaits, so any wait-shape is the surface
+    owner's decision (flag-don't-fill); WATCHED intermittent, this
+    row is its record. (7) `iframe Firebreak Commons` red in BOTH
+    arms: INHERITED — the file (#6526) landed on main after this PR's
+    base and reaches the board only via the merge ref; main's own
+    board at d1eca661f failed the explicit-ON pattern lane on it.
+    The file's owner's, not the flip's.
 - CI lanes (testing.md §2 re-tensed): default lanes = the OFF posture
   (probe: server not serving, shell define unset); explicit-`true` ON
   lanes on `build-toolshed-on` (shell define baked `true`), FULL ON

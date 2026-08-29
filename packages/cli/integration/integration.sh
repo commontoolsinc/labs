@@ -96,6 +96,28 @@ new_invocation_id() {
   fi
 }
 
+# The server-execution arm this run's `cf` resolves (server-execution v2,
+# testing.md §2), decided the way the cf binary itself decides: an explicit
+# EXPERIMENTAL_SERVER_EXECUTION wins, else the deployment's own posture —
+# probed off /api/health/stats (`servingLoop` present = the toolshed
+# serves, and cf adopts the published ON posture). ON since the flip in
+# the default CI lane; a pre-flip toolshed, or the explicit-`false`
+# rollback arm, resolves OFF. Verb receipts are DELIBERATELY not written
+# under ON (events.md §4: exactly-once is the stream's eventWatermark, so
+# the receipt create-only mechanism must not coexist with it), which is
+# why the dedup asserts below branch on this: the `deduplicated` key is
+# the OFF arm's receipt-collision witness, and the ON arm's witness is
+# BEHAVIORAL — same invocation echoed, exit 0, and exactly one message
+# (which still fails if --invocation were ignored outright).
+server_execution_on() {
+  case "${EXPERIMENTAL_SERVER_EXECUTION:-}" in
+    true) return 0 ;;
+    false) return 1 ;;
+  esac
+  curl -fsS "$API_URL/api/health/stats" 2>/dev/null \
+    | jq -e '.servingLoop != null' > /dev/null 2>&1
+}
+
 # The session this run's invocation ids are chosen within. `cf piece call`
 # takes it from CF_INVOCATION_SESSION, and an id addresses an outcome only
 # within its session — so every retry below has to name the session its
@@ -698,7 +720,17 @@ run_piece_call_retry() {
     error "Retrying a killed-after-dispatch call should exit 0, got $RETRY_2_STATUS"
   fi
   echo "killed-after-dispatch: committed before kill = $COMMITTED_BEFORE_KILL"
-  if [ "$COMMITTED_BEFORE_KILL" = "1" ]; then
+  if server_execution_on; then
+    # ON: no receipt is written (events.md §4 subsumption), so there is no
+    # `deduplicated` key to assert either way; the dedupe-horizon skip's
+    # witness is the message count below — with the committed-before-kill
+    # value recorded above, "exactly one" is the strong assert in BOTH
+    # sub-cases (a retry that ignored --invocation would append a second
+    # message; an uncommitted first attempt retried cleanly leaves one).
+    if echo "$RETRY_2" | jq -e '.deduplicated == true' > /dev/null; then
+      error "No receipt exists under server execution, so the retry cannot claim receipt-level dedup, got: $RETRY_2"
+    fi
+  elif [ "$COMMITTED_BEFORE_KILL" = "1" ]; then
     echo "$RETRY_2" | jq -e '.deduplicated == true' > /dev/null ||
       error "The killed call had committed, so its retry must deduplicate, got: $RETRY_2"
   elif echo "$RETRY_2" | jq -e '.deduplicated == true' > /dev/null; then
@@ -725,8 +757,17 @@ run_piece_call_retry() {
   if [ "$REPLAY_STATUS" -ne 0 ]; then
     error "A same-id retry should exit 0, got status $REPLAY_STATUS"
   fi
-  echo "$REPLAY" | jq -e '.deduplicated == true' > /dev/null ||
-    error "A same-id retry should report deduplicated, got: $REPLAY"
+  if server_execution_on; then
+    # ON: receipt-level dedup reporting does not exist (no receipt is
+    # written); the behavioral witness is the count assert below plus the
+    # id echo here.
+    if echo "$REPLAY" | jq -e '.deduplicated == true' > /dev/null; then
+      error "No receipt exists under server execution, so the replay cannot claim receipt-level dedup, got: $REPLAY"
+    fi
+  else
+    echo "$REPLAY" | jq -e '.deduplicated == true' > /dev/null ||
+      error "A same-id retry should report deduplicated, got: $REPLAY"
+  fi
   echo "$REPLAY" | jq -e --arg id "$INVOCATION_3" '.invocation == $id' > /dev/null ||
     error "A same-id retry should echo the caller's invocation id, got: $REPLAY"
   assert_message_count "$RETRY_PIECE_3" 1 \

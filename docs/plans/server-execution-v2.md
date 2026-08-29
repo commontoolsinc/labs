@@ -2081,7 +2081,17 @@ Tasks:
       [#6535](https://github.com/commontoolsinc/labs/pull/6535), OPEN
       (the coordination-state delta above carries its contents; the
       owner reads and merges it personally — the soak starts at that
-      merge, and the OFF path stays the rollback lever through it)**. OW31 (the
+      merge, and the OFF path stays the rollback lever through it).
+      Its first board surfaced ONE owner-court STOP: the verb
+      DECLARED-RESULT surface is absent under ON — receipts are
+      unwritten under the flag by events.md §4/N26's exactly-once
+      subsumption, which replaced only that role and left the
+      receipt's result-carriage (plainResultReceipts; `cf call`'s
+      `.result`) with no substitute — the register's FLIP block item
+      (5) carries the mechanism, and the CLI piece-call lane's
+      umbrella-create assert stays red as the witness until it is
+      ruled (serving-side receipt write vs a new served result
+      channel)**. OW31 (the
       service-principal write-authority posture) was RULED 2026-08-18 —
       the serving identity never writes users' home spaces; genesis
       under the space's own keys, owner := the acting user — and its

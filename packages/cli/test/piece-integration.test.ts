@@ -12,6 +12,7 @@ import { afterAll, beforeAll, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { resolve } from "@std/path";
 import type { Identity } from "@commonfabric/identity";
+import { experimentalOptionsForDeployedClient } from "@commonfabric/runner";
 import { PiecesController } from "@commonfabric/piece/ops";
 import { writeTempIdentity } from "@commonfabric/integration/temp-identity";
 import { waitForCellValue } from "@commonfabric/integration/wait-for-cell-value";
@@ -49,6 +50,13 @@ let sessionScopedPieceId = "";
 let flags = "";
 let identityPath = "";
 let spaceConfig: SpaceConfig;
+// The server-execution arm `cf` itself runs at (server-execution v2,
+// testing.md §2): resolved exactly as the cf binary resolves it — the
+// deployed-client rule (explicit EXPERIMENTAL_* env, else the server's
+// published posture, else the first-party default). ON since the flip in
+// the default CI lane; the explicit-`false` OFF guard lane, and a
+// pre-flip toolshed, resolve OFF.
+let serverExecutionOn = false;
 
 // Resolves once the piece's result/content cell holds `expected`. Uses its
 // own controller, so readiness is judged from a fresh client's view of the
@@ -82,6 +90,10 @@ async function waitForContent(
 
 describe("cf cell get (integration)", { ignore: !API_URL }, () => {
   beforeAll(async () => {
+    serverExecutionOn = (await experimentalOptionsForDeployedClient({
+      apiUrl: new URL(API_URL!),
+      env: Deno.env.get,
+    })).serverExecution === true;
     const { identity, path } = await writeTempIdentity();
     identityPath = path;
     const spaceName = `cf-piece-get-test-${Date.now()}`;
@@ -148,12 +160,24 @@ describe("cf cell get (integration)", { ignore: !API_URL }, () => {
     expect(json.content).toBe(NOTE_CONTENT);
   });
 
-  it("reports present result data that cannot project in a fresh session", async () => {
+  it("reports present result data that cannot project in a fresh session (OFF) — and serves it under the flipped default (ON)", async () => {
     const sessionFlags =
       `--api-url ${API_URL} --identity ${identityPath} --space ${spaceConfig.space} --piece ${sessionResultPieceId}`;
-    const { code, stderr } = await integrationCf(
+    const { code, stdout, stderr } = await integrationCf(
       `cell get ${sessionFlags}`,
     );
+    if (serverExecutionOn) {
+      // Under ON the refusal scenario DISSOLVES by design: the serving
+      // loop materializes the session-derived result server-side
+      // (derived-class commits under the space's lease), so a fresh
+      // session projects the value that OFF could only report as
+      // present-but-unprojectable. The strong assert is the served
+      // value itself, not merely exit 0.
+      expect(code).toBe(0);
+      const json = JSON.parse(stdout.join(""));
+      expect(json.value).toBe("session-ready");
+      return;
+    }
     expect(code).toBe(1);
     expect(stderr.join("\n")).toContain("stored data is present");
     expect(stderr.join("\n")).toContain("--step");
