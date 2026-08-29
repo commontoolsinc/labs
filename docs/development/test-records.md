@@ -19,12 +19,12 @@ A test's identity has three required parts: **kind** (`unit`, `browser`,
 (the owning workspace member, or `repo`), and **name** (whatever the test's
 own runner reports — a bdd describe chain, a pattern file path, a task name,
 a script step). An optional **variant** separates the same test running
-in a non-default configuration. The default configuration is unmarked. The
-server-execution ON jobs use `server-execution` after variant-aware relay
-support is on the default branch. When server execution becomes the default,
-remove that marker from the ON jobs and mark the surviving explicit OFF jobs
-as `server-execution-off`. New default runs then continue the history of
-today's unmarked default jobs. One record is one JSON line; one uploaded
+in a non-default configuration. The default configuration is unmarked. Since
+the server-execution flip (2026-08-28) the default jobs run the ON posture
+unmarked — continuing the history of the previously unmarked default jobs —
+and the surviving explicit OFF regression-guard jobs use
+`server-execution-off`. The pre-flip explicit-ON jobs' `server-execution`
+marker is retired; their history stays queryable under it. One record is one JSON line; one uploaded
 object is a run's
 context line followed by its record lines. The schema, the line codecs, and
 their validators live in `packages/test-support/src/records/`.

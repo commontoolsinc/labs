@@ -7,7 +7,7 @@ import {
 } from "@/lib/server-execution-flag.ts";
 
 // The toolshed process's ONE flag resolution (server-execution v2 Phase 7,
-// flip-ready): unset means the FIRST-PARTY DEFAULT — the value of
+// the flip): unset means the FIRST-PARTY DEFAULT — the value of
 // `SERVER_EXECUTION_DEFAULT_ENABLED`, whichever it is — and an explicit
 // "false" is the OFF arm, an explicit "true" the ON arm. Pinned against
 // the constant, not a literal, so the tests state the contract rather
@@ -16,17 +16,18 @@ import {
 const envOf = (values: Record<string, string | undefined>) => (name: string) =>
   values[name];
 
-describe("the landing posture (server-execution v2 Phase 7, landed dark by owner ruling 2026-08-16)", () => {
-  it("the first-party default IS OFF — the flip to ON is its own separate one-line PR (docs/plans/server-execution-v2.md Phase 7 task 1) and must update this pin, the CI lane roles, and EXPERIMENTAL_OPTIONS.md together", () => {
+describe("the flipped posture (server-execution v2 Phase 7, the flip PR — default ON after the plan's ordered gates)", () => {
+  it("the first-party default IS ON — flipped by the flip PR (docs/plans/server-execution-v2.md Phase 7 task 1), which updates this pin, the CI lane roles, and EXPERIMENTAL_OPTIONS.md together; un-flipping is reverting that PR, never an edit here", () => {
     // Every other flip pin in the tree is deliberately RELATIVE to the
     // constant (so the flip PR is one line plus this pin); this is the
     // one ABSOLUTE pin, so a silent flip in EITHER direction cannot hide
-    // behind green relative pins — flipped silently ON, the REQUIRED
-    // default CI lanes would carry the ON posture (the P7 independent
-    // review's blocker: two two-browser gates red under ON); flipped
-    // silently OFF after the flip PR, the "ON arm" default lanes would
-    // run OFF with every test still green.
-    expect(SERVER_EXECUTION_DEFAULT_ENABLED).toBe(false);
+    // behind green relative pins — flipped silently OFF, the default
+    // lanes (the ON arm since the flip) would run OFF with every test
+    // still green while the explicit-`false` OFF guard lanes ran the
+    // same arm twice; flipped silently ON before the flip PR, the
+    // REQUIRED default lanes would have carried an unreviewed posture
+    // change (the P7 independent review's blocker class).
+    expect(SERVER_EXECUTION_DEFAULT_ENABLED).toBe(true);
   });
 });
 

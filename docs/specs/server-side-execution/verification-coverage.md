@@ -3235,6 +3235,81 @@ findings; the OWNER RULING — the flip lands DARK):
   OW28 → the honest benchmark → the flip PR (which also flips the
   absolute pin, the CI lane roles and their posture probes, and
   EXPERIMENTAL_OPTIONS.md; and MUST land with the ON skip list EMPTY).
+  **THE FLIP PR (2026-08-28, base 4e02f75c4 — every ordered gate met: the
+  ON-skip registry EMPTY across all four suites (#6528, the
+  ruled-3b-close lift), OW31's ruled posture BUILT, OW45–OW53 CLOSED,
+  OW38(ii) RULED met ("topics numbers are fine"). The owner merges it
+  personally; the soak starts at ITS merge.** What it carries:
+  - The one-liner: `SERVER_EXECUTION_DEFAULT_ENABLED = true`
+    (`packages/memory/v2/server-execution-default.ts`), and the absolute
+    pin re-tensed to state the default IS ON
+    (`packages/toolshed/lib/server-execution-flag.test.ts` — watched RED
+    at the flipped constant before the re-tense).
+  - The LANE-ROLE SWAP, old → new (testing.md §2 re-tensed with it):
+    `build-toolshed-on` (bakes `true`) → `build-toolshed-off` (bakes
+    `"false"`); default `package-integration-test` /
+    `pattern-integration-test` lanes: OFF probe → ON probe
+    (serving-loop PRESENT + shell define UNSET) and they now carry the
+    ON skip list (EMPTY; the OFF guard never skips);
+    `package-integration-test-server-execution-on` /
+    `pattern-integration-test-server-execution-on` (explicit `true`,
+    variant `server-execution`) →
+    `...-server-execution-off` (explicit `false` on the OFF-built
+    binary, probe inverted, variant `server-execution-off` — the
+    default arm continues the unmarked history). The old ci-workflow
+    lane pins were watched RED on the swapped workflow, then
+    reconciled, plus a new lane-roles pin test (a partial revert of one
+    half now reds).
+  - The four-topology gate dispositions (the Phase-7 table row's
+    obligation, review finding 8), lane by lane:
+    (1) `background-piece-service` — had NO exercising lane; the new
+    `deployed-topology-gate` job starts the REAL binary against the
+    default (ON, probed) toolshed, asserts its new startup posture log
+    line (`main.ts`; the binary has no HTTP surface) and clean SIGTERM
+    exit — RED-FIRST with a forced-OFF service env (posture line "OFF"
+    vs expected "ON").
+    (2) cf-harness — had NO toolshed-backed lane (its integration suite
+    is CF_HARNESS_INTEGRATION-gated); the same job runs
+    `createHarnessFabricSessionFactory` (PKCS#8 from disk →
+    `PiecesController.initialize` → deployed-client adoption), asserts
+    the session's runtime resolved ON with nothing declared, and serves
+    one genuine flow (compile + create a piece, read the result back) —
+    RED-FIRST against a forced-OFF server.
+    (3) the CLI — `cli-integration-test` (all three suites) becomes the
+    ON exercise: `cf` ADOPTS the server's published posture
+    (`experimentalOptionsForDeployedClient`, authority "server") from
+    the default binary's /api/meta; the job gains the server-side ON
+    posture probe so the exercise is verified, not assumed. (`cf test`
+    / `cf dev` stay deliberately ambient-OFF — patternTest/localDev
+    presets.)
+    (4) `PiecesController` hosts — the default package/pattern lanes
+    are the ON exercise (sx2-scale's N controllers, the
+    pieces-controller helper, every integration file initializing a
+    controller against the lane's toolshed); the agents host
+    (`connectors/agents/host`) shares the same
+    `experimentalOptionsForDeployedClient` + remoteClient seam and is
+    covered at it (no dedicated lane exists for it — recorded).
+  - The UNIFORM-posture reconciliation the swap needs: 4 runner
+    integration files and the runtime-client integration host (worker
+    declaration + `onArmStepSkip` guard) resolve env-else-default via
+    the now-exported `withServerExecutionDefault` — under default-ON a
+    raw env read would resurrect the P7 finding-7 MIXED posture in the
+    default lanes.
+  - The topics multi-user LANE-POSTURE item (the topics measurement
+    report §5.1/§6, 2026-08-24: "the serverless multi-user pattern lane
+    — a lane-posture question the flip decision has to address either
+    way"), discharged as recorded: the pattern-tests lane runs with NO
+    server (`PACKAGES_WITHOUT_SERVER`) through the `patternTest`
+    preset, which deliberately does NOT read the constant — the lane
+    resolves the AMBIENT baseline (OFF) by construction, i.e. the
+    "lane pins OFF" arm realized structurally (pinned by the preset
+    conformance goldens: only productionServer/remoteClient carry the
+    constant). Verified live at the flipped head:
+    `topics/multi-user.test.tsx` 7/7 GREEN with the env unset (the
+    campaign's 5/7 red was under EXPLICIT env ON only). The
+    alternative the report named — the in-process surface growing the
+    serving role — is NOT taken; it would be its own design work if
+    ever wanted.
 - CI lanes (testing.md §2 re-tensed): default lanes = the OFF posture
   (probe: server not serving, shell define unset); explicit-`true` ON
   lanes on `build-toolshed-on` (shell define baked `true`), FULL ON

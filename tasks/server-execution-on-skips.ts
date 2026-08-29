@@ -3,17 +3,18 @@
 // The EXPLICIT per-phase skip lists of the server-execution v2 ON arm
 // (docs/specs/server-side-execution/testing.md §2): in CI the integration
 // suites run twice — the DEFAULT lanes (flag unset = the first-party
-// default, which is OFF: Phase 7 landed flip-READY with the constant
-// `false` by owner ruling 2026-08-16, the flip being its own later PR) and
-// the explicit-`EXPERIMENTAL_SERVER_EXECUTION=true` ON lanes (the toolshed
-// server ON, the test processes ON, AND the binary's baked browser shell
-// ON-built — `build-toolshed-on`) — and the ON arm may skip a test only by
-// listing it here, with the plan phase whose not-yet-landed surface it
-// exercises and a reason. Never by silent filtering: the CI step prints
-// every skip from this file, and an empty list means the ON arm runs the
-// full suite. When the flip PR lands the lane roles swap (default = ON
-// with this list; explicit-`false` = the OFF regression guard on an
-// OFF-built binary) — the flip PR MUST land with this list EMPTY.
+// default, ON since the Phase 7 flip: these lanes ARE the ON arm and
+// carry this list) and the explicit-`EXPERIMENTAL_SERVER_EXECUTION=false`
+// OFF regression-guard lanes (the toolshed server OFF, the test processes
+// OFF, AND the binary's baked browser shell OFF-built —
+// `build-toolshed-off`; kept until the post-soak removal PR). The ON arm
+// may skip a test only by listing it here, with the plan phase whose
+// not-yet-landed surface it exercises and a reason. Never by silent
+// filtering: the CI step prints every skip from this file, and an empty
+// list means the ON arm runs the full suite — the OFF guard never skips.
+// The flip PR landed with this list EMPTY (its stated precondition);
+// before it the roles were inverted (default = OFF, explicit-`true` = the
+// ON arm on `build-toolshed-on`).
 //
 // An entry retires when its phase lands (docs/plans/server-execution-v2.md);
 // a file listed here that no longer exists fails the run, so the lists
@@ -349,8 +350,8 @@ export const serverExecutionOnIgnoreArg = (
  * The step-level guard a test FILE calls (see `ServerExecutionOnSkip.step`):
  * the entry for `step` in `file`, or undefined when the ON arm runs it.
  * Callers pass `ignore: serverExecutionOnStepSkip(...) !== undefined` only
- * when the process actually runs the ON posture (they read
- * EXPERIMENTAL_SERVER_EXECUTION themselves — the OFF arm never skips), and
+ * when the process actually runs the ON posture (they resolve it
+ * themselves, env-else-first-party-default — the OFF arm never skips), and
  * log the entry's reason when they skip, so the skip is never silent.
  */
 export const serverExecutionOnStepSkip = (

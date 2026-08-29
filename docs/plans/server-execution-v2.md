@@ -38,6 +38,41 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
+**Delta 2026-08-28 (the FLIP PR — OPEN, the owner merges it personally;
+the soak starts at ITS merge): `SERVER_EXECUTION_DEFAULT_ENABLED` →
+`true`, with every ordered gate met on main at the base (4e02f75c4): the
+ON-skip registry EMPTY across all four suites (the ruled-3b-close lift,
+#6528), OW31's ruled posture BUILT, OW45–OW53 CLOSED, and the OW38(ii)
+bar RULED met ("topics numbers are fine", 2026-08-24).** The PR carries,
+beside the one-liner and the absolute pin's re-tense: the LANE-ROLE SWAP
+(default lanes = the ON arm, probed serving-loop-present +
+shell-define-unset, carrying the empty ON skip list; the pre-flip
+explicit-`true` lanes become the explicit-`false` OFF regression guard
+on `build-toolshed-off` — the inversion of `build-toolshed-on` — with
+variant `server-execution-off`, per testing.md §2's identity contract);
+the DEPLOYED-TOPOLOGY obligation discharged (the Phase 7 table row):
+a new `deployed-topology-gate` job runs the REAL `bg-piece-service`
+binary (startup posture log line asserted; clean SIGTERM) and
+cf-harness's production fabric-session factory (posture adopted ON; one
+genuine piece flow) against the default toolshed, both red-first against
+forced-OFF; the CLI lanes gain the server posture probe (`cf` adopts the
+published posture — its gate); `PiecesController` hosts ride the default
+lanes (sx2-scale et al.). The Deno-side integration clients (4 runner
+files; the runtime-client host + its step-skip guard) resolve
+env-else-default via the now-exported `withServerExecutionDefault`, so
+the default lanes stay UNIFORM (the P7 finding-7 mixed posture does not
+resurrect). The topics multi-user LANE-POSTURE item (the measurement
+report's §5.1 flip-decision question) is discharged as recorded: the
+no-server pattern-tests lane resolves the AMBIENT baseline (OFF) by
+construction — the `patternTest` preset does not read the constant
+(conformance-golden-pinned) — verified live at the flipped head
+(`topics/multi-user.test.tsx` 7/7 with env unset); "grow the in-process
+serving role" stays the not-taken alternative. testing.md §2,
+EXPERIMENTAL_OPTIONS.md, and the register's FLIP PR block re-tensed
+with it. The OFF path is NOT removed — it is the soak's rollback lever;
+the post-soak removal PR (task 2) deletes it with the OFF lanes. The
+deltas below are the prior PRs' records.**
+
 **Delta 2026-08-28 (the ruled-3b-close PR): THE OWNER RULED THE 3B FORK
 — "go with (1) plus the (2-D) kick" — both mechanisms are LANDED
 red-first, and lunch-poll-vote's FILE entry is LIFTED: the ON-skip
@@ -2032,8 +2067,18 @@ Tasks:
       deployed-topology binaries the presets flip
       (`background-piece-service`, the CLI, cf-harness, every
       `PiecesController`) exercised ON by a gate — the flip PR's own
-      obligation (review finding 8: today nothing exercises them ON);
-      then (6) the flip PR, and the soak starts at ITS merge. OW31 (the
+      obligation (review finding 8: at the flip-ready landing nothing
+      exercised them ON) — *DISCHARGED BY THE FLIP PR (2026-08-28, the
+      four-topology dispositions in its register block and PR body:
+      `deployed-topology-gate` job for the bg-piece-service binary and
+      cf-harness's fabric session; the CLI lanes probed as `cf`'s gate
+      via posture adoption; `PiecesController` hosts on the default
+      package/pattern lanes)*;
+      then (6) the flip PR, and the soak starts at ITS merge — **IN
+      PROGRESS 2026-08-28: the flip PR is OPEN (the coordination-state
+      delta above carries its number and contents; the owner reads and
+      merges it personally — the soak starts at that merge, and the OFF
+      path stays the rollback lever through it)**. OW31 (the
       service-principal write-authority posture) was RULED 2026-08-18 —
       the serving identity never writes users' home spaces; genesis
       under the space's own keys, owner := the acting user — and its
@@ -2042,8 +2087,10 @@ Tasks:
 - [ ] Retire the flag; OFF path removed; `EXPERIMENTAL_OPTIONS.md` entry
       closed out — **SPLIT OUT: the post-soak removal PR** (named here as
       the flip's follow-up; it also removes the OFF regression-guard CI
-      lanes and the OFF-built binary job that the flip PR will introduce
-      by inverting today's `build-toolshed-on`).
+      lanes and the OFF-built binary job — `build-toolshed-off`, which
+      the flip PR introduced by inverting the pre-flip
+      `build-toolshed-on` — while the `deployed-topology-gate` job
+      STAYS: it gates the surviving default posture, not the OFF path).
 - [ ] Archive this plan to `docs/history/plans/` per the lifecycle
       (close-out, after the soak and the removal PR).
 
@@ -2114,7 +2161,7 @@ and the reports beside it):**
 | `topics-navigation` | full ON | RED fast (`missing required property myName`, OW30 class) — ON-skip-listed (and, since the fixer, actually skipped) |
 | `cfc-group-chat-demo-two-browsers` (the Phase-2 gate + the benchmark harness) | full ON — HEAD 2/2 and the unmodified Phase-6 BASE 1/1 (review); **fan-out stage B: 3/3 fresh-store, ON-built binary (2026-08-17)** | Phase 7: RED (300 s stall; the OW32 client loop, 40–56 k action runs / 5 min). **Fan-out stage B: GREEN 3/3 (1m08s / 1m21s / 1m23s), every step in seconds; client action runs 401–586 per browser; zero non-settling; serving loop waves 48–58, derivedCommits = waves, watermarkLag ≤ 12; UN-SKIPPED** |
 | lunch (`lunch-poll-vote`) | full ON — HEAD 2/2 (review); **fan-out stage B: 2 fresh-store runs on the final binary (2026-08-17)** | Phase 7: RED (the identity-less served `#profile` wish + the OW32 loop). **Fan-out stage B: BIMODAL 1/2 — run 4 GREEN 2m28s (login 1.6 s, runtimes idle 1.0 s, joins 12–640 ms, votes and merges in seconds); run 5 RED at "both browsers see 2 love it (merge)" — both vote events consequenced with no error, one vote's served `castVote` no-op'd (`nowTick` null in the actor's run); stays ON-skip-listed with that residual named** |
-| the deployed-topology binaries the presets flip (`background-piece-service`, CLI, cf-harness, `PiecesController` hosts) | ON | NO gate exercises them ON (review finding 8) — recorded as the flip PR's own obligation; with the constant `false` none flips today |
+| the deployed-topology binaries the presets flip (`background-piece-service`, CLI, cf-harness, `PiecesController` hosts) | ON | NO gate exercised them ON at the flip-ready landing (review finding 8) — recorded as the flip PR's own obligation. **DISCHARGED by the flip PR (2026-08-28)**: bg-piece-service + cf-harness get the `deployed-topology-gate` job (the real binary starts/serves and asserts its posture log line; the fabric-session factory resolves ON by adoption and serves one piece flow — both red-first against forced-OFF), the CLI's gate is the probed `cli-integration-test` lanes (`cf` adopts the server's published posture), and `PiecesController` hosts ride the default package/pattern lanes (sx2-scale's controllers; the pieces-controller helper) |
 | OFF-arm neutrality | full runner suite (OFF ambient) + memory + toolshed unit suites + explicit-OFF sx2 | see the PR's bar |
 | **STAGE-C BENCHMARK 1** (2026-08-17, `59b5329ae` ≡ fan-out B runtime; built binaries, posture-verified, fresh store, OFF→ON→OFF, loads 3–9; [report](../history/plans/server-execution-v2/stage-c/stage-c-benchmark-report.md)) — chat two-browsers series n=20 @2 s | OFF ×3 / ON ×3 (+1 at `fadc2efb1b`) | OFF median **227 / 328 / 477 ms** (p95 498–1 069); ON **0 series** — lockdown stall 300 s (t1, smoke0) or lease churn from t≈0 (t2: `lease.lost` 33, load 3.9); per-step ON 3.0–7.2 s vs OFF 4–47 ms where ON reached the step |
 | same benchmark — lunch two-user vote | OFF ×2 / ON ×1 | OFF ✓ 11 s, 16 s; ON **RED** at "both browsers see 2 love it (merge)" 300 s (option A propagates 7 873 ms vs 53/80; both cast green 22 943 ms vs 440/843) |
