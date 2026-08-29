@@ -7922,6 +7922,39 @@ supply; OW29/OW32/OW34 closed):
     and this block converts to a LIFT-ATTEMPT — the #6484 and #6502
     precedent. The flip PR's list-EMPTY precondition is met; its bar
     remains a green ON lane, not merely the empty registry.
+    **[CONFIRMED by PROBE 6 — GREEN at the probed surface; the
+    withdrawal clause went UNEXERCISED. This is the arc's first probe
+    to come back green at the lunch host-join surface, on the sixth
+    board across three PRs. The PROBE 6 block below carries the
+    reading.]**
+    **PROBE 6 (run
+    [33222653635](https://github.com/commontoolsinc/labs/actions/runs/33222653635),
+    head `1a5f3e66e`, THIS PR's own board — read settle-confirmed by
+    the arc coordinator): GREEN AT THE PROBED SURFACE.** All ten
+    server-execution ON shards succeeded — including ON shard 7 with
+    `lunch-poll-vote` RUNNING (the lift is in the branch; the shard
+    selector passed the file through, the local verification of which
+    is recorded in the lift commit). The park's whole chain — the
+    supplier geometries this arc mapped five probes deep — did not
+    fire at the surface that produced probes 2, 3, 4, and 5's reds:
+    the host's `#lp-join-button` rendered and the file went green
+    with the ruled close (event-driven re-supply + the serve-time
+    kick) live in the binary. THE LIFT STANDS: the ON-skip registry
+    is EMPTY and B1's list-EMPTY precondition is MET. The board's
+    sole red, classified and NOT conflated with the probe: Test
+    (3/8), `packages/cli/test/view-diffedit.test.ts:3630` — "diffedit:
+    abbreviated, compact, and email formats amend hunk edits",
+    AssertionError "commit 26953" — a CLI view-layer surface this
+    PR's diff cannot reach (the diff touches packages/runner's
+    replication path, wish.ts's sidecar cache, tasks/, docs/, and a
+    workflow comment; zero packages/cli files), with main green at
+    the base `a3eae3e97`; a second observation (shard relaunch on the
+    same run id) was in flight when this block landed — its verdict
+    belongs to the merge gate's ordinary every-lane-read bar, not to
+    the probe, whose ruled reading is the SURFACE. Per the arc's
+    method note: this record lands as a docs-only commit AFTER the
+    probe board settled — the probe's coordinates are immutable above;
+    the commit's own board is the ordinary merge gate, not a probe.
 
     **OBSERVATION, not owed by this row and NOT one of the two entries —
     `cfc-group-chat-demo.test.ts` is failing ON at current main, 4/6, and

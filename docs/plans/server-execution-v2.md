@@ -76,7 +76,13 @@ the heal machinery dormant locally, exactly the model), full runner
 suite green at the head, and THIS PR's own ON-lane board as the
 direct-CI unskip probe (PROBE 6) under the ruled SURFACE reading — a
 red at that surface restores the entry with the accumulated map and the
-honest classification. The deltas below are the prior PRs' records.**
+honest classification. PROBE 6 VERDICT (run 33222653635 at 1a5f3e66e,
+settle-confirmed): GREEN AT THE SURFACE — all ten ON shards succeeded,
+shard 7 RUNNING lunch-poll-vote; the lift STANDS and B1's list-EMPTY
+precondition is MET (the register's PROBE 6 block carries the full
+reading, including the board's sole red — a packages/cli view test this
+diff cannot reach, second observation with the merge gate). The deltas
+below are the prior PRs' records.**
 
 **Delta 2026-08-28 (the geometry-3 close PR, FINAL disposition — PROBE 5
 red at the surface, GEOMETRY 3B CONFIRMED on its pre-declared signature;
