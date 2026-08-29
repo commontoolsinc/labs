@@ -63,6 +63,35 @@ describe("FabricError", () => {
     expect({ ...se }).toEqual({});
   });
 
+  describe("`fromNativeError()` reads the class from the prototype", () => {
+    // The `type` this records is stored, and `errorClassFromType()` rebuilds
+    // the error from it on the way back -- so where the name is read from
+    // decides which class a value comes back as. An own `constructor` property
+    // is ordinary data, and reading it there would let a value pick that class
+    // for itself.
+    it("ignores an own `constructor` naming another class", () => {
+      const error = new Error("boom");
+      Object.defineProperty(error, "constructor", {
+        value: { name: "RangeError" },
+      });
+      expect(FabricError.fromNativeError(error).type).toBe("Error");
+    });
+
+    it("keeps the real class of a subclass instance", () => {
+      expect(FabricError.fromNativeError(new RangeError("r")).type).toBe(
+        "RangeError",
+      );
+    });
+
+    it("names a severed-prototype error `Error`", () => {
+      // Such a value names no class at all. It is still an error --
+      // `Error.isError()` sees it, and the dispatch tags it so -- and the
+      // conversion has to produce something rather than fail reading a name.
+      const severed = Object.setPrototypeOf(new Error("severed"), null);
+      expect(FabricError.fromNativeError(severed).type).toBe("Error");
+    });
+  });
+
   describe("constructor()", () => {
     it("wraps the `Error`'s `FabricValue`-shaped state", () => {
       const err = new TypeError("bad");
