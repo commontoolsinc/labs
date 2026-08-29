@@ -10,7 +10,7 @@ import { expect } from "@std/expect";
 
 import {
   createSelectionRequestTracker,
-  stopNodeControlPropagation,
+  nodeControlBoundaryProps,
 } from "./interaction.ts";
 
 function SelectionHarness(
@@ -53,10 +53,7 @@ function NodeControlHarness(
     },
     React.createElement(
       "div",
-      {
-        className: "node-parameters nodrag nopan",
-        onClick: stopNodeControlPropagation,
-      },
+      nodeControlBoundaryProps(),
       React.createElement(
         "select",
         {

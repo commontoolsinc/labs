@@ -30,7 +30,7 @@ describe("Impossible Machine document shell", () => {
     );
 
     expect(source).toContain(
-      "<interaction.NodeControls>{children}</interaction.NodeControls>",
+      "<div {...interaction.nodeControlBoundaryProps()}>{children}</div>",
     );
     expect(source).toContain("void tracker.request(");
     expect(source).toContain("const actionRunner = React.useRef(");

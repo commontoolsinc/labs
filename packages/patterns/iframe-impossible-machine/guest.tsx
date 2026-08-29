@@ -215,7 +215,7 @@ function NodeFrame({
           {data.signal.label}
         </output>
       </header>
-      <interaction.NodeControls>{children}</interaction.NodeControls>
+      <div {...interaction.nodeControlBoundaryProps()}>{children}</div>
       {hasOutput && (
         <Handle
           id="output"

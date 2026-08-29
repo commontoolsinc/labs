@@ -1,7 +1,3 @@
-// @deno-types="npm:@types/react@19.2.18"
-// deno-lint-ignore no-external-import
-import { createElement, type ReactNode } from "npm:react@19.2.8";
-
 /** Keeps embedded controls out of React Flow's node-selection lifecycle. */
 export function stopNodeControlPropagation(
   event: Pick<Event, "stopPropagation">,
@@ -9,17 +5,12 @@ export function stopNodeControlPropagation(
   event.stopPropagation();
 }
 
-/** Props shared by every embedded node-control boundary. */
-export const NODE_CONTROL_BOUNDARY_PROPS = {
-  className: "node-parameters nodrag nopan",
-  onClick: stopNodeControlPropagation,
-} as const;
-
-/** Contains node controls without leaking their clicks into React Flow. */
-export function NodeControls(
-  { children }: Readonly<{ children: ReactNode }>,
-) {
-  return createElement("div", NODE_CONTROL_BOUNDARY_PROPS, children);
+/** Returns the event boundary for controls embedded in a React Flow node. */
+export function nodeControlBoundaryProps() {
+  return {
+    className: "node-parameters nodrag nopan",
+    onClick: stopNodeControlPropagation,
+  } as const;
 }
 
 /** Clears only the local position draft acknowledged by a completed write. */

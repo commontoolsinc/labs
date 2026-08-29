@@ -4,8 +4,7 @@ import {
   createActionRunner,
   createSelectionRequestTracker,
   errorFrom,
-  NODE_CONTROL_BOUNDARY_PROPS,
-  NodeControls,
+  nodeControlBoundaryProps,
   settleCommittedPositionDraft,
   stopNodeControlPropagation,
 } from "./interaction.ts";
@@ -16,16 +15,9 @@ describe("Impossible Machine interaction lifecycle", () => {
     stopNodeControlPropagation({ stopPropagation: () => stopped = true });
 
     expect(stopped).toBe(true);
-    expect(NODE_CONTROL_BOUNDARY_PROPS.className).toBe(
-      "node-parameters nodrag nopan",
-    );
-    expect(NODE_CONTROL_BOUNDARY_PROPS.onClick).toBe(
-      stopNodeControlPropagation,
-    );
-    const element = NodeControls({ children: "Operator" });
-    expect(element.props).toEqual({
-      ...NODE_CONTROL_BOUNDARY_PROPS,
-      children: "Operator",
+    expect(nodeControlBoundaryProps()).toEqual({
+      className: "node-parameters nodrag nopan",
+      onClick: stopNodeControlPropagation,
     });
   });
 
