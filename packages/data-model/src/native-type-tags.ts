@@ -33,20 +33,6 @@ import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricInstance } from "./interface.ts";
 
 /**
- * Checks whether a value is a native `Error`.
- *
- * `Error.isError()` recognizes errors from other realms when the engine
- * provides it. Engines without it fall back to `instanceof`, which recognizes
- * errors that share the current realm's prototype hierarchy.
- */
-export function isNativeError(value: unknown): value is Error {
-  const isError = (Error as { isError?: (value: unknown) => boolean }).isError;
-  return typeof isError === "function"
-    ? isError(value)
-    : value instanceof Error;
-}
-
-/**
  * Maps a constructor to its tag. Returns the tag string if the constructor is a
  * recognized type (JS builtins or system-defined `FabricPrimitive`s), or `null`
  * otherwise.
@@ -130,7 +116,7 @@ export function tagFromNativeValue(value: unknown): ValueTag | null {
   // tagged `Object` so the object rule decides it by name, the same way an
   // indirect array is decided by the array rule.
   if (proto === null) {
-    return isNativeError(value) ? VALUE_TAGS.Error : VALUE_TAGS.Object;
+    return Error.isError(value) ? VALUE_TAGS.Error : VALUE_TAGS.Object;
   }
 
   // The class is read from the PROTOTYPE, not from the value. What is being
@@ -151,7 +137,7 @@ export function tagFromNativeValue(value: unknown): ValueTag | null {
   // `Error`s with no reachable constructor -- e.g. one from another realm. An
   // ordinary subclass (including `DOMException`) never gets here:
   // `tagFromNativeClass()` matches it via `prototype instanceof Error`.
-  if (isNativeError(value)) return VALUE_TAGS.Error;
+  if (Error.isError(value)) return VALUE_TAGS.Error;
 
   // `FabricInstance` values (object-like protocol types).
   if (value instanceof FabricInstance) return VALUE_TAGS.FabricInstance;

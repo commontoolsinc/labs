@@ -21,11 +21,7 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { VALUE_TAGS } from "@/VALUE_TAGS.ts";
-import {
-  isNativeError,
-  tagFromNativeClass,
-  tagFromNativeValue,
-} from "@/native-type-tags.ts";
+import { tagFromNativeClass, tagFromNativeValue } from "@/native-type-tags.ts";
 import { isValidFabricNativeObject } from "@/type-check.ts";
 import { tagFromNativeBuiltinClass } from "@/tagFromNativeBuiltinClass.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
@@ -126,28 +122,6 @@ describe("native-type-tags", () => {
     it("returns `Object` tag for null-prototype objects (no constructor)", () => {
       const obj = Object.create(null);
       expect(tagFromNativeValue(obj)).toBe(VALUE_TAGS.Object);
-    });
-
-    it("classifies values when `Error.isError` is unavailable", () => {
-      const descriptor = Object.getOwnPropertyDescriptor(Error, "isError");
-      Object.defineProperty(Error, "isError", {
-        value: undefined,
-        writable: true,
-        configurable: true,
-      });
-
-      try {
-        expect(isNativeError(new Error("test"))).toBe(true);
-        expect(tagFromNativeValue(Object.create(null))).toBe(
-          VALUE_TAGS.Object,
-        );
-      } finally {
-        if (descriptor) {
-          Object.defineProperty(Error, "isError", descriptor);
-        } else {
-          delete (Error as { isError?: unknown }).isError;
-        }
-      }
     });
 
     it("returns `null` for class instances", () => {
