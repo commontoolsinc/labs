@@ -93,8 +93,9 @@ it runs.
    command run from inside the shell receives the place explicitly — context
    injected into that invocation — never by mutating environment variables.
    The ambient record is one serializable value with one owner module, so
-   a later ambient adoption (step 8's `CF_SPACE`, or a fuller `CF_PLACE`)
-   can reuse the representation without redesign.
+   an ambient adoption fuller than step 8's `CF_SPACE` — a `CF_PLACE`
+   carrying the moving half — can reuse the representation without
+   redesign.
 7. **Vocabulary: navigation verbs plus `cf` verbs.** Navigation is
    shell-native (`cd`, `ls`, `pwd`, `watch`, …). Data verbs are exactly the
    `cf` ones (`get`, `set`, `call`, `wish`, `verbs`, `describe`, …) with the
