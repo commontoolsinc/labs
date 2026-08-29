@@ -191,6 +191,33 @@ export const ACCEPTED_CONTRACT_BREAKS: readonly AcceptedContractBreak[] = [
     record: "docs/history/parking-admin-floor-contract-break.md",
   },
   {
+    // Lot Watch's admin roster declared a `requiredIntegrity` floor nothing
+    // could satisfy: no `addIntegrity` mint on the roster path, and a floor
+    // atom that differed from the one its roles carry, so the roster read a
+    // roster change has to make could never witness the floor either. Under
+    // `cfcWriteFloor: "enforce"` every write to the roster is refused. The
+    // declaration gained the mint, the single `lot-watch-admin` atom, and a
+    // `writeAuthorizedBy` binding naming the one handler that may write it,
+    // so the roster is no longer written by any action that holds the cell.
+    pattern: "factory-outputs/lot-watch/main.tsx",
+    baselines: [
+      "20260729T022742Z-W-iDVp0QJ9fPJBsi",
+      "20260804T003803Z-MtNQDxsoMJZjryZC",
+    ],
+    // `ifc` is compared for exact equality, so any correction to an
+    // unsatisfiable floor reads as a break. The registry is not published in
+    // the result, so only the argument role names the roster's own path.
+    paths: ["argument.adminRegistry.admins"],
+    reason:
+      "The admin roster's integrity floor was unsatisfiable, so no write to " +
+      "it could be accepted once the write floor is enforced. Correcting the " +
+      "declaration changes the `ifc` at that path, which no shape of the " +
+      "pattern avoids. A piece holding a roster keeps its stored roles; what " +
+      "it loses is the ability to be updated in place to the corrected " +
+      "contract.",
+    record: "docs/history/lot-watch-admin-floor-contract-break.md",
+  },
+  {
     // The lunch poll's identity moved from display names to profile cells
     // (see docs/history/lunch-poll-identity-break.md). The proof reports two
     // paths here: the published name-keyed admin result went away, and the

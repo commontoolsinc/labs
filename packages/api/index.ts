@@ -288,6 +288,10 @@ export type MetaField =
   | "patternSetupIdentity" // setup-completion {identity, symbol} marker
   | "patternSource" // active web or `cf:` source origin
   | "pieceSourceHistory" // append-only source revisions and retention roots
+  | "pieceReconciliation" // what following the active origin last did:
+  // {outcome, at, origin, offered?, reason?, detail?} — a piece that refused
+  // or could not reach its origin looks otherwise exactly like one that is
+  // running what its origin offers
   | "patternRepository" // optional caller-supplied repository locator
   | "displacedPattern" // {identity, symbol, displacedAt}: the prior pattern
   // reference recorded when system-pattern auto-update replaces an unloadable

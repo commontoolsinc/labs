@@ -5290,13 +5290,20 @@ supply; OW29/OW32/OW34 closed):
   step) and was held only by a co-resident file's red in the same shard,
   while lunch-poll-vote passed its local half 8/8 and its probe went red at
   the probed surface for the second campaign running. **The current census
-  (2026-08-28, after the geometry-3 close PR's probe 5) is ONE patterns
-  entry: lunch-poll-vote's FILE entry, RESTORED a second time — the
-  geometry-3 close landed (the mid-flight-supplier once-await, red-first)
-  and its lift attempt's own probe went red at the surface with the
-  PRE-DECLARED geometry-3b signature (the GEOMETRY-3 CLOSE,
-  LIFT-ATTEMPT, and PROBE 5 blocks at the end of this row); the 3b
-  close is an owner-court fork.** default-app's reload
+  (2026-08-28, the ruled-3b-close PR) is EMPTY — every suite's list: the
+  owner ruled the 3b fork ("go with (1) plus the (2-D) kick"), both
+  mechanisms landed red-first, and lunch-poll-vote's FILE entry is
+  LIFTED a third time under the ruled local-plus-CI-probe bar with THIS
+  PR's own ON-lane board as the direct-CI unskip probe (the RULING and
+  RULED-CLOSE LIFT blocks at the end of this row; a red at the probed
+  surface restores the entry per the arc's standing method).** The
+  superseded 2026-08-28 census (after the geometry-3 close PR's probe 5)
+  was ONE patterns entry: lunch-poll-vote's FILE entry, RESTORED a
+  second time — the geometry-3 close landed (the mid-flight-supplier
+  once-await, red-first) and its lift attempt's own probe went red at
+  the surface with the PRE-DECLARED geometry-3b signature (the
+  GEOMETRY-3 CLOSE, LIFT-ATTEMPT, and PROBE 5 blocks at the end of this
+  row); the 3b close was an owner-court fork, since ruled. default-app's reload
   STEP LIFTED 2026-08-28 — the owner ruled the SURFACE reading of the
   probe bar, under which its evidence was already complete (the LIFT block
   at the end of this row). lunch-poll-vote's lift was ATTEMPTED the same
@@ -5310,8 +5317,10 @@ supply; OW29/OW32/OW34 closed):
   map (the lunch ROOT-CAUSE, PROBE-2/3/4 blocks at the end of
   this row); the geometry-3 close then fixed that third geometry and its
   lift attempt was withdrawn by probe 5 (geometry 3b). The
-  FLIP's bar remains a green ON lane and every list empty; this entry is
-  again what holds the list (the co-resident `:133` debt the
+  FLIP's bar remains a green ON lane and every list empty; under that
+  superseded census this entry was again what held the list, and under
+  the current one NOTHING does — the ruled-3b-close lift emptied it
+  (the co-resident `:133` debt the
   probe surfaced was paid by #6477 — the OBSERVATION's FIXED paragraph
   below). Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
@@ -7646,7 +7655,16 @@ supply; OW29/OW32/OW34 closed):
     takes NO retry: every `pendingCacheWriteBacks` member belongs to a
     compile or load (registry-covered) or to a sibling replication
     (ticket-covered at registration), so an empty-registry retry adds
-    no designed coverage — and it measurably re-rescues the sibling
+    no designed coverage [AMENDED per review-6502 F1: justification (a)
+    is overstated — zero-announce proves "no supplier REGISTERED at
+    snapshot time", a STRICT SUPERSET of "not started": a supplier that
+    completed entirely inside the read window (F1-ii) or a load that
+    resolved leaving its repair persist floating (F1-iii) also snapshots
+    empty while a bare re-consult would rescue. Both slivers share the
+    3b signature and are closed by the ruled 3b close (the RULING block
+    below): F1-ii by the registration-time map check, F1-iii by the
+    repair persist's own record waking the park] — and it measurably
+    re-rescues the sibling
     race nondeterministically, masking the sibling-await pin: the
     build's unconditional-retry draft turned the sibling-await
     mutation kill GREEN (the F1 masking class, recreated); the
@@ -7666,7 +7684,11 @@ supply; OW29/OW32/OW34 closed):
     nor a pre-populated map can rescue (the F1 lesson applied at
     birth); watched RED at pre-fix `bd9b1c10b` with the production
     `closure-replication-failed … source closure unavailable in origin
-    space` line and an empty target; with the fix, 5/5. The once-await
+    space` line and an empty target; with the fix, the suite green
+    [count made count-free per review-6502 F2: the suite was 6 steps at
+    this PR's final head (the F5-1 coverage step landed after this block
+    was written) and has since grown — counts live in the test file, not
+    here]. The once-await
     mutation (both awaits removed, warn + re-read kept) reds step 5
     ALONE, 5/5 stable; the four existing kills re-verified at the new
     head (sibling-await neutralized → step 1 red alone 3/3; fallback
@@ -7698,7 +7720,9 @@ supply; OW29/OW32/OW34 closed):
     TOUCHES THE ONE-SHOT CONTRACT ("a failure is logged and retried on
     the next child creation" would become "…and on the next persist
     event") — an OWNER-LEVEL DESIGN FORK, recorded here for the
-    owner's ruling; deliberately not built by this seat.
+    owner's ruling; deliberately not built by this seat. [RULED AND
+    BUILT 2026-08-28 — the RULING block below carries the ruling, the
+    landed mechanism, and the contract sentence now in effect.]
     The pin suite (`tasks/server-execution-on-skips.test.ts`) was bound,
     post-restore, to the SINGLE-entry registry: the patterns list held
     exactly the restored FILE entry (reason pinned to the
@@ -7707,9 +7731,15 @@ supply; OW29/OW32/OW34 closed):
     that file, and the whole-registry loop asserted it was the only entry
     anywhere — so any OTHER entry or a silent lift reddened a pin. [That
     binding was superseded by the GEOMETRY-3 LIFT-ATTEMPT below, and
-    PROBE 5's red re-superseded it: the suite is rebound to the
+    PROBE 5's red re-superseded it: the suite was rebound to the
     single-entry registry again, with acyclic alias chains for each
-    rename.] The
+    rename.] [And superseded a THIRD time by the RULED-CLOSE LIFT
+    below: the registry is EMPTY, so the suite is now rebound to the
+    empty state — every suite's list asserted empty, the report
+    carrying no SKIP or SKIP-STEP line, the shard filter dropping
+    nothing, and the whole-registry loop asserting NO entry anywhere,
+    so any new entry or a silent re-restore reddens a pin (17/17, two
+    further alias bridges for the renames).] The
     flip's bar remains a green ON lane AND every list empty (the
     co-resident `:133` blocker in the
     OBSERVATION below is PAID by #6477, its FIXED paragraph there).
@@ -7769,7 +7799,12 @@ supply; OW29/OW32/OW34 closed):
     failure are the harness process's (Deno-UA, 18:15:18.8–18:16:10.8 —
     probe 4 established that discrimination); the artifact carries no
     serving-side compile/persist lines at all in the window, consistent
-    with a supplier that had not begun. NOT geometry 3 (probe 4's
+    with a supplier that had not begun. [Per review-6502 F3, stated
+    plainly: the pre-declared signature's "closure appearing shortly
+    after" limb was NOT VERIFIABLE FROM THIS ARTIFACT — it carries no
+    persist-level lines at all, so that limb went unchecked; the
+    classification rests on the zero-announce limb plus the
+    no-serving-side-activity window, not on all three limbs.] NOT geometry 3 (probe 4's
     discriminator — compile waves already in flight 5–18 s before the
     failure — is absent here); NOT the close misbehaving (the
     empty-snapshot short-circuit's contract IS the byte-identical
@@ -7791,6 +7826,170 @@ supply; OW29/OW32/OW34 closed):
     space BEFORE serving profile creation, making the supplier
     deterministic rather than boot-order-dependent). Both are
     owner-court; this seat built neither, per the declared stop.
+    **RULING (2026-08-28) — the owner ruled on the 3b fork: "go with
+    (1) plus the (2-D) kick"** — option (1), event-driven re-supply,
+    composed with the (2-D) sidecar serve-time kick, accepting the
+    decision memo's recommendation (fork-3b-analysis) with its two
+    design details as LOAD-BEARING parts: the registry keys by the
+    WANTED (failing) identity, not the entry (a dependency-recursion
+    failure records under the dependency's identity, which is what its
+    supplier's persist will name), and failure registration checks the
+    fallback map ONCE, re-issuing immediately when a usable record
+    already exists (closing review-6502 F1's interleaving (b): a
+    supplier that completed inside the read window records before the
+    failure registers, and its record event may never recur).
+    Supply-side determinism as a PRINCIPLE — option (2-B),
+    activation-time awaited supply — is DEFERRED to its own arc: it
+    re-rules the lazy-activation model (space-server.ts's RULED
+    2026-08-02 block) and is not the 3b close.
+    **LANDED by the ruled-close PR:** (1) in pattern-manager.ts — a
+    supply-class replication failure (the classify-throw's reasons
+    only; store-level throws and persist failures keep today's behavior)
+    PARKS under the wanted identity in `parkedFailedReplications`
+    (FIFO-capped, loud eviction, replacement on re-park) and
+    `recordPersistedClosureSpaces` re-issues matching parks once per
+    persist event (fire-and-forget off the E4-awaited chain; records
+    into a park's own toSpace are skipped — the fallback read cannot use
+    them and the filter keeps a heal from waking itself; records into a
+    park's fromSpace DO wake it, deliberately: the observed lunch
+    supplier persists into the PARENT space, the child replication's
+    origin, and the primary re-read is what heals — pinned by the
+    late-carriage pin). A failed re-issue re-parks WITHOUT the
+    registration-time check (its read just consulted the map — the spin
+    guard) and waits for the next matching record. The one-shot
+    contract sentence is now IN EFFECT as pre-drafted above: "A failure
+    is logged and retried on the next child creation and on the next
+    persist event — never on the caller's commit path." Loudness
+    strictly increased: the failure line is byte-identical, plus
+    `closure-replication-parked` / `-reissued` (with trigger) /
+    `-healed` / `-park-evicted` (all warn). (2-D) in wish.ts — the
+    sidecar cache tracks its compile space and, serving a cached
+    pattern for a space it did not compile into (cached-run arms under
+    the serving posture, and chained demanders inside the memoized
+    fetch), fires the same replicate-into-the-demanding-space the
+    content-cache hit fires, once per (cache epoch, space): the
+    demanding space's supplier is REGISTERED at page-serve time, so the
+    child replication's strictly-older-ticket await covers the lunch
+    class by registration, with (1) as the structural backstop.
+    Red-first pins (all watched red at bare main d569f3722): the
+    record-triggered heal, the module-identity wake, the
+    registration-time check (mutation-isolated pairwise: wake deleted
+    reds the heal pins alone; check neutralized reds its pin alone),
+    the dependency-frame park (wanted=dependency, entry=importer — an
+    entry-keyed-park mutation reds it alone; its phase 1 also pins that
+    a PERSIST failure does not park), the no-storm control (genuine
+    absence: one loud failure, one park, nothing else ever), the
+    late-carriage admission (executor-cross-space: a parked §2b
+    delegation rides the heal into the provisioned space through the
+    accept gate's delegated admission — completeness, not freshness —
+    asserted on the landed commit row), and the serve/chained kick pins.
+    The existing kill matrix re-ran cell-for-cell with no mask; the one
+    mask the build itself would have created — the heal re-rescuing the
+    K1-mutated sibling race's END STATE (the F1 masking class,
+    recreated by design: healing is the product behavior) — was closed
+    by rebinding pin step 1's kill signal to ZERO failure lines
+    (first-try determinism is the ticket await's contract; recovery is
+    the heal's).
+    **WHAT STAYS OPEN under the ruled close, recorded honestly:** the
+    CROSS-REPLICA / never-records supplier (a wire-arrived closure this
+    manager never persists records nothing, so no wake fires) — reduced
+    to "heals at the server's first matching persist of the identity",
+    which the observed lunch class always eventually has; the
+    PRIOR-SESSION third-space closure (durable docs from an earlier
+    session are readable but unrecorded — same reduction); and the
+    SPIN-GUARD residue — every way a RE-ISSUE can re-park onto supply
+    that is already durable, because its re-park deliberately skips the
+    registration-time check (the spin guard: the failed attempt's read
+    just consulted that very map, so an immediate retry could only spin
+    on state it already read) and no later record of the identity ever
+    fires. Two constructors reach it, and the record must name both
+    (review-6528 F7 — the first was recorded alone and under-described
+    its own class): (i) the recursive-(b) sliver — a record landing
+    inside the RE-ISSUE's own read window, i.e. two independent
+    suppliers of one identity with the second completing inside that
+    window and none after; and (ii) a re-issue woken by a REAL,
+    STANDING record that then fails on a TRANSIENT store error — no
+    new record is needed at all, and the park sleeps on supply already
+    durable. Both are vanishingly narrow, loud at every step (a
+    failure, a re-issue, and a re-park line each), and strictly smaller
+    than the pre-ruling residue — in both, pre-ruling the same child
+    was one-shot dead, so a park that sleeps is a strict improvement,
+    never a regression. The alternative — re-checking the map on
+    re-park — is exactly the immediate-retry spin the guard exists to
+    prevent, so the code is right and the RECORD is what was owed.
+    Where truly nothing ever records, the loud one-shot behavior stands
+    — the correct floor under the wedge-loudly ruling.
+    **RULED-CLOSE LIFT (2026-08-28, this PR — the THIRD lift; the
+    ON-skip registry is EMPTY across all four suites and B1's
+    list-EMPTY precondition is met again):** the entry's lift condition
+    — "the owner-ruled 3b close … plus the ruled bar" — is met at this
+    head: the ruling is taken (the RULING block above), both mechanisms
+    are landed red-first with the full mutation ladder clean, and the
+    ruled local-plus-CI-probe bar's two halves are (1) campaign R, 8
+    counted runs quiet-and-loaded interleaved at the lift head (fresh
+    store + own 97xx port + posture probe per run, ensure defaulting
+    ON, toolshed self-sourced and sha-verified per ledger, LLM masked)
+    — the per-run ledgers, logs, and stores on the measuring box under
+    `/Users/berni/labs-worktrees/ruled-close-evidence/`, with the
+    ruled-close accounting per run (every closure-replication-* line
+    class counted; failed allowed only when followed by its heal) — and
+    (2) THIS PR's own ON-lane board as the DIRECT-CI UNSKIP PROBE
+    (PROBE 6 of the arc): ON shard 7 RUNS lunch-poll-vote, and the
+    probed surface's verdict decides under the ruled SURFACE reading.
+    A red at that surface WITHDRAWS this lift exactly per the arc's
+    standing clause — the entry is restored carrying the accumulated
+    map plus the new red's classification against the residue table
+    (which interleaving? the healed-too-late class? something new?),
+    and this block converts to a LIFT-ATTEMPT — the #6484 and #6502
+    precedent. The flip PR's list-EMPTY precondition is met; its bar
+    remains a green ON lane, not merely the empty registry.
+    **[CONFIRMED by PROBE 6 — GREEN at the probed surface; the
+    withdrawal clause went UNEXERCISED. This is the arc's first probe
+    to come back green at the lunch host-join surface, on the sixth
+    board across three PRs. The PROBE 6 block below carries the
+    reading.]**
+    **PROBE 6 (run
+    [33222653635](https://github.com/commontoolsinc/labs/actions/runs/33222653635),
+    head `1a5f3e66e`, THIS PR's own board — read settle-confirmed by
+    the arc coordinator): GREEN AT THE PROBED SURFACE.** All ten
+    server-execution ON shards succeeded — including ON shard 7 with
+    `lunch-poll-vote` RUNNING (the lift is in the branch; the shard
+    selector passed the file through, the local verification of which
+    is recorded in the lift commit). The park's whole chain — the
+    supplier geometries this arc mapped five probes deep — did not
+    fire at the surface that produced probes 2, 3, 4, and 5's reds:
+    the host's `#lp-join-button` rendered and the file went green
+    with the ruled close (event-driven re-supply + the serve-time
+    kick) live in the binary. THE LIFT STANDS: the ON-skip registry
+    is EMPTY and B1's list-EMPTY precondition is MET. The board's
+    sole red, classified and NOT conflated with the probe: Test
+    (3/8), `packages/cli/test/view-diffedit.test.ts:3630` — "diffedit:
+    abbreviated, compact, and email formats amend hunk edits",
+    AssertionError "commit 26953" — a CLI view-layer surface this
+    PR's diff cannot reach (the diff touches packages/runner's
+    replication path, wish.ts's sidecar cache, tasks/, docs/, and a
+    workflow comment; zero packages/cli files), with main green at
+    the base `a3eae3e97`; a second observation (shard relaunch on the
+    same run id) was in flight when this block landed — its verdict
+    belongs to the merge gate's ordinary every-lane-read bar, not to
+    the probe, whose ruled reading is the SURFACE. **Read the run
+    HEADER with this decomposition, not on its own:** the run's overall
+    conclusion is `cancelled`, because the relaunched Test (3/8) was
+    still running when this very record's push created the next board
+    at 00:23:34 and GitHub's concurrency rule cancelled it (00:23:59),
+    taking the jobs gated behind it with it — the relaunch never
+    concluded, so the second observation fell to the `bdaabf8ee` board,
+    where Test (3/8) is GREEN. The decomposition is clean either way:
+    on attempt 1 the only non-success jobs were Test (3/8), the Status
+    aggregate, and the four jobs Status gates (skipped); on attempt 2
+    all ten `Pattern Integration Tests / server-execution ON (n/10)`
+    shards were SUCCESS again. So a future
+    forensics pass that reads only the header's `cancelled` is reading
+    a push-cancelled relaunch, not a probe verdict — the same honesty
+    class as #6502's F3. Per the arc's
+    method note: this record lands as a docs-only commit AFTER the
+    probe board settled — the probe's coordinates are immutable above;
+    the commit's own board is the ordinary merge gate, not a probe.
 
     **OBSERVATION, not owed by this row and NOT one of the two entries —
     `cfc-group-chat-demo.test.ts` is failing ON at current main, 4/6, and
@@ -8092,7 +8291,13 @@ supply; OW29/OW32/OW34 closed):
     `stale confirmed read … conflicted with` (the commit-outcome tap's
     signature, store-confirmed: basis = the draft mint's seq, head =
     the served seed's); a concurrent `/cfc` change still conflicts —
-    the precondition the ruling kept. Pinned red-first
+    the precondition the ruling kept. *(SUPERSEDED 2026-08-28: a
+    runtime-internal verifier read at `["cfc"]` no longer enters the
+    commit's conflict set, per CFC spec §18.6.2's read exclusion for
+    runtime-internal label-metadata reads and §8.9.4's point-in-time
+    derived-label semantics. The read stays journaled, so the
+    commit-set shape this entry pins — verifier reads sit AT
+    `["cfc"]`, never the doc root — is unchanged.)* Pinned red-first
     in `speculation-overlay.test.ts`, six ways: the CFC-relevant
     blind write over a standing echo EXPORTS (base red:
     `SpeculativeBasisError` naming the echo layer; exactly one engine

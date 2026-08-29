@@ -157,7 +157,7 @@ export class XBodyView extends BaseView {
   @property({ type: Boolean })
   accessor embedded = false;
 
-  private _subPages = new Task(this, {
+  #subPages = new Task(this, {
     task: async ([activePattern, spaceRootPattern, embedded]) => {
       if (embedded) {
         return {
@@ -215,8 +215,8 @@ export class XBodyView extends BaseView {
 
     const sidebar = this.embedded
       ? undefined
-      : this._subPages?.value?.sidebarUI;
-    const fab = this.embedded ? undefined : this._subPages?.value?.fabUI;
+      : this.#subPages?.value?.sidebarUI;
+    const fab = this.embedded ? undefined : this.#subPages?.value?.fabUI;
     const runtimeError = this.runtimeError
       ? html`
         <cf-alert class="runtime-error" status="error">

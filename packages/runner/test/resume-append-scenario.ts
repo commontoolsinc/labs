@@ -51,7 +51,10 @@ class Gate {
    * the per-element result documents). The test awaits this instead of polling.
    */
   readonly firstHeld: Promise<void>;
-  constructor(private readonly match: RegExp) {
+  readonly #match: RegExp;
+
+  constructor(match: RegExp) {
+    this.#match = match;
     this.firstHeld = new Promise((resolve) => {
       this.#firstHeldResolve = resolve;
     });
@@ -63,7 +66,7 @@ class Gate {
       setReceiver: (receive: (payload: string) => void) => {
         this.#deliver = receive;
         inner.setReceiver((payload: string) => {
-          if (!this.#open && this.match.test(payload)) {
+          if (!this.#open && this.#match.test(payload)) {
             this.#held.push(payload);
             this.#firstHeldResolve?.();
             this.#firstHeldResolve = undefined;
@@ -88,13 +91,19 @@ class Gate {
 }
 
 class GatedSessionFactory implements SessionFactory {
+  #getServer: () => MemoryV2Server.Server;
+  #gate?: Gate;
+
   constructor(
-    private getServer: () => MemoryV2Server.Server,
-    private gate?: Gate,
-  ) {}
+    getServer: () => MemoryV2Server.Server,
+    gate?: Gate,
+  ) {
+    this.#getServer = getServer;
+    this.#gate = gate;
+  }
   async create(id: string, signer?: Signer) {
-    const base = MemoryV2Client.loopback(this.getServer());
-    const transport = this.gate ? this.gate.wrap(base) : base;
+    const base = MemoryV2Client.loopback(this.#getServer());
+    const transport = this.#gate ? this.#gate.wrap(base) : base;
     const client = await MemoryV2Client.connect({ transport });
     const session = await client.mount(
       id,

@@ -1074,7 +1074,8 @@ export type MemoryProtocolFlags = {
   operationCodecs?: readonly string[];
   /** Hash-keyed per-frame schema table. */
   syncSchemaTableV2: boolean;
-
+  /** The peer can exchange versioned binary gzip message envelopes. */
+  messageCompressionV1: boolean;
   /**
    * Server capability (CFC Phase 3.c): commit-folded `sqlite` writes to
    * rule-bearing tables are re-derived through the shared row-label evaluator
@@ -1151,6 +1152,7 @@ export type WireMemoryProtocolFlags = {
   applyOp?: boolean;
   operationCodecs?: readonly string[];
   syncSchemaTableV2?: boolean;
+  messageCompressionV1?: boolean;
   sqliteCommitRowLabelEval?: boolean;
   pendingReadStacks?: boolean;
   verdictCatchUpMarkers?: boolean;
@@ -1752,6 +1754,7 @@ const memoryLiveEnvironment = new NullLiveEnvironment(
 // Update that registry when adding or removing one.
 let commitPreconditionsEnabled = true;
 let syncSchemaTableEnabled = true;
+let messageCompressionEnabled = true;
 let ownWriteEchoEnabled = true;
 
 export {
@@ -1874,6 +1877,22 @@ export function resetSyncSchemaTableConfig(): void {
 }
 
 /**
+ * Ambient capability for binary gzip envelopes on memory WebSocket messages.
+ * Disabling it keeps both peers on ordinary text frames as a rollout backstop.
+ */
+export function setMessageCompressionConfig(enabled?: boolean): void {
+  messageCompressionEnabled = enabled ?? true;
+}
+
+export function getMessageCompressionConfig(): boolean {
+  return messageCompressionEnabled;
+}
+
+export function resetMessageCompressionConfig(): void {
+  messageCompressionEnabled = true;
+}
+
+/**
  * Ambient server behavior for own-write echo on sync frames (CT-1965): a
  * session's own accepted patch-produced heads ride the covering frame as full
  * post-apply documents, so promotion retires the pending overlay against
@@ -1899,6 +1918,7 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   commitPreconditions: getCommitPreconditionsConfig(),
   applyOp: true,
   operationCodecs: [CODEMIRROR_CHANGESET_CODEC],
+  messageCompressionV1: getMessageCompressionConfig(),
   // A build-inherent capability, not configuration: this build's engine always
   // evaluates row-label rules at commit (sqlite/commit-eval.ts), so it always
   // advertises the fact. Peers that see it absent (an older server) keep their
@@ -1985,6 +2005,14 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const messageCompressionV1 = value.messageCompressionV1;
+  if (
+    messageCompressionV1 !== undefined &&
+    typeof messageCompressionV1 !== "boolean"
+  ) {
+    return null;
+  }
+
   const sqliteCommitRowLabelEval = value.sqliteCommitRowLabelEval;
   if (
     sqliteCommitRowLabelEval !== undefined &&
@@ -2049,6 +2077,7 @@ export const parseMemoryProtocolFlags = (
       ? {}
       : { operationCodecs: [...operationCodecs].sort() as string[] }),
     syncSchemaTableV2: syncSchemaTableV2 === true,
+    messageCompressionV1: messageCompressionV1 === true,
     // Absent (an older peer) parses to false: the capability must be
     // POSITIVELY advertised for the runner to relax its write gate.
     sqliteCommitRowLabelEval: sqliteCommitRowLabelEval === true,
@@ -2082,6 +2111,7 @@ export const wireMemoryProtocolFlags = (
     ? {}
     : { operationCodecs: flags.operationCodecs }),
   syncSchemaTableV2: flags.syncSchemaTableV2,
+  messageCompressionV1: flags.messageCompressionV1,
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
   pendingReadStacks: flags.pendingReadStacks,
   verdictCatchUpMarkers: flags.verdictCatchUpMarkers,

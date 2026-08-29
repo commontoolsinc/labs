@@ -45,8 +45,10 @@ class RecordingLoopbackSessionFactory implements SessionFactory {
   readonly aclOperations: RecordedOperation[] = [];
   #aclDocId: string;
 
+  readonly #server: MemoryV2Server.Server;
+
   constructor(
-    private readonly server: MemoryV2Server.Server,
+    server: MemoryV2Server.Server,
     space: MemorySpace,
     // `false` suppresses the storage manager's ACL genesis at session open
     // (storage/v2.ts returns early when the factory does not advertise
@@ -54,6 +56,7 @@ class RecordingLoopbackSessionFactory implements SessionFactory {
     // whose ACL document does not exist yet.
     supportsAclBootstrap = true,
   ) {
+    this.#server = server;
     this.#aclDocId = `of:${space}`;
     this.supportsAclBootstrap = supportsAclBootstrap;
   }
@@ -73,7 +76,7 @@ class RecordingLoopbackSessionFactory implements SessionFactory {
     requested: MemoryV2Client.MountOptions = {},
   ) {
     const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.server),
+      transport: MemoryV2Client.loopback(this.#server),
     });
     const session = await client.mount(
       space,

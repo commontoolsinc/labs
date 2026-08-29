@@ -5,7 +5,7 @@ import {
   UserAgentOptions,
   WaitForOptions,
 } from "@astral/astral";
-import { closeAstralBrowser } from "./astral-adapter.ts";
+import { astralBinaryPath, closeAstralBrowser } from "./astral-adapter.ts";
 import { Page } from "./page.ts";
 
 const DEFAULT_ASTRAL_TIMEOUT = 60_000;
@@ -33,6 +33,9 @@ export class Browser {
     const browser = await launch({
       args,
       headless,
+      // `undefined` leaves the choice to astral, which is the answer when no
+      // system browser is installed.
+      path: astralBinaryPath(),
     });
     return new Browser(browser, { timeout });
   }

@@ -81,6 +81,10 @@ a record: archive it to `docs/history/plans/` following the procedure in
   confidentiality. Gated on a CFC review that has not happened.
 - [CFC runner implementation](runner_cfc_implementation.md) defines the
   commit-boundary enforcement workstreams and rollout.
+- [Finishing the piece source lifecycle](piece-source-lifecycle-completion.md)
+  compares the lifecycle spec against the repository and orders the remainder
+  as five pull requests in two tracks — what a revision records, and where a
+  space lives.
 - [Bulk piece operations](piece-bulk-operations.md) designs retargeting,
   repairing, and rolling back many pieces as one reviewable, resumable
   operation over a shared plan — with batching as an execution strategy

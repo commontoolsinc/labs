@@ -173,15 +173,23 @@ export class DirectoryHandleMap {
 export class FuseOperationState {
   readonly directoryHandles = new DirectoryHandleMap();
 
+  readonly #tree: FsTree;
+  readonly #preparer: FuseOperationPreparer | null | undefined;
+  readonly #isWritable: (ino: bigint) => boolean;
+
   constructor(
-    private readonly tree: FsTree,
-    private readonly preparer: FuseOperationPreparer | null | undefined,
-    private readonly isWritable: (ino: bigint) => boolean = () => false,
-  ) {}
+    tree: FsTree,
+    preparer: FuseOperationPreparer | null | undefined,
+    isWritable: (ino: bigint) => boolean = () => false,
+  ) {
+    this.#tree = tree;
+    this.#preparer = preparer;
+    this.#isWritable = isWritable;
+  }
 
   lookup(parentIno: bigint, name: string): bigint | undefined {
-    const ino = this.tree.lookup(parentIno, name);
-    return ino !== undefined && this.tree.getNode(ino) !== undefined
+    const ino = this.#tree.lookup(parentIno, name);
+    return ino !== undefined && this.#tree.getNode(ino) !== undefined
       ? ino
       : undefined;
   }
@@ -190,32 +198,32 @@ export class FuseOperationState {
     parentIno: bigint,
     name: string,
   ): Promise<bigint | undefined> {
-    if (this.preparer?.prepareLookupForReply) {
-      return await this.preparer.prepareLookupForReply(parentIno, name);
+    if (this.#preparer?.prepareLookupForReply) {
+      return await this.#preparer.prepareLookupForReply(parentIno, name);
     }
-    if (!this.preparer?.shouldPrepareLookup(parentIno, name)) {
+    if (!this.#preparer?.shouldPrepareLookup(parentIno, name)) {
       const ino = this.lookup(parentIno, name);
       if (ino !== undefined) this.retainLookup(ino);
       return ino;
     }
-    if (!await this.preparer.prepareLookup(parentIno, name)) return undefined;
+    if (!await this.#preparer.prepareLookup(parentIno, name)) return undefined;
     const ino = this.lookup(parentIno, name);
     if (ino !== undefined) this.retainLookup(ino);
     return ino;
   }
 
   retainLookup(ino: bigint): void {
-    this.preparer?.retainEntityProjectionLookup?.(ino);
+    this.#preparer?.retainEntityProjectionLookup?.(ino);
   }
 
   forget(ino: bigint, nlookup: bigint): void {
-    this.preparer?.releaseEntityProjectionLookup?.(ino, nlookup);
+    this.#preparer?.releaseEntityProjectionLookup?.(ino, nlookup);
   }
 
   openDirectory(ino: bigint): bigint | undefined {
-    if (this.tree.getNode(ino)?.kind !== "dir") return undefined;
+    if (this.#tree.getNode(ino)?.kind !== "dir") return undefined;
     const fh = this.directoryHandles.open(ino);
-    this.preparer?.retainEntityProjectionOpen?.(ino);
+    this.#preparer?.retainEntityProjectionOpen?.(ino);
     return fh;
   }
 
@@ -227,7 +235,7 @@ export class FuseOperationState {
       this.directoryHandles,
       fh,
       ino,
-      this.preparer,
+      this.#preparer,
     );
   }
 
@@ -240,14 +248,14 @@ export class FuseOperationState {
       this.directoryHandles.snapshot(
         fh,
         ino,
-        () => collectDirectorySnapshot(this.tree, ino, this.isWritable),
+        () => collectDirectorySnapshot(this.#tree, ino, this.#isWritable),
       );
   }
 
   closeDirectory(fh: bigint, ino: bigint): void {
     if (!this.directoryHandles.has(fh, ino)) return;
     this.directoryHandles.close(fh);
-    this.preparer?.releaseEntityProjectionOpen?.(ino);
+    this.#preparer?.releaseEntityProjectionOpen?.(ino);
   }
 }
 

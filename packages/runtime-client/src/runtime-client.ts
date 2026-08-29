@@ -789,6 +789,14 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     });
   }
 
+  /** Changes memory WebSocket compression without reconnecting. */
+  async setMemoryMessageCompression(enabled: boolean): Promise<void> {
+    await this.#conn.request<RequestType.SetMemoryMessageCompression>({
+      type: RequestType.SetMemoryMessageCompression,
+      enabled,
+    });
+  }
+
   /**
    * Enable or disable forwarding of the worker runtime's console output to the
    * main thread for the running worker. Takes effect immediately, without a

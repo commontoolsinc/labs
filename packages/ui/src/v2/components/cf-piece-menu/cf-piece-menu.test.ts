@@ -16,7 +16,9 @@ import {
   pieceMenuEntries,
 } from "./cf-piece-menu.ts";
 import {
+  describeFollowState,
   describeOrigin,
+  describeSourceFailure,
   formatTimestamp,
   shortIdentity,
 } from "./origin-view.ts";
@@ -225,6 +227,17 @@ function eventHandler(
   return handler;
 }
 
+/**
+ * Let a source action run to completion.
+ *
+ * Every stub in this file resolves immediately, so an action settles once the
+ * microtask queue drains. Draining it is what this waits for -- a count of
+ * `await`s would have to be recounted whenever an action gains a step.
+ */
+async function settled(): Promise<void> {
+  for (let drained = 0; drained < 16; drained++) await Promise.resolve();
+}
+
 const SPACE = "did:key:z6Mk-piece-menu" as const;
 const OWNER = "did:key:z6Mk-piece-menu-owner" as const;
 const VIEWER = "did:key:z6Mk-piece-menu-viewer" as const;
@@ -247,7 +260,10 @@ const SOURCE: PieceSourceView = {
   pieceId: "of:fid1:piece",
   name: "Recipe",
   pattern: { identity: "pattern-identity-value", symbol: "default" },
-  origin: { url: "https://example.test/recipe.tsx", kind: "web" },
+  origin: {
+    url: "https://toolshed.test/api/patterns/recipe.tsx",
+    kind: "system",
+  },
   entry: "/main.tsx",
   files: [
     { name: "/main.tsx", contents: "the main file" },
@@ -1326,8 +1342,10 @@ describe("the origin and history panel", () => {
     await menu.showPanel("origin");
 
     const rendered = shows(menu);
-    expect(rendered).toContain("External web URL");
-    expect(rendered).toContain("https://example.test/recipe.tsx");
+    expect(rendered).toContain("Deployment pattern");
+    expect(rendered).toContain(
+      "https://toolshed.test/api/patterns/recipe.tsx",
+    );
     expect(rendered).toContain(shortIdentity("pattern-identity-value"));
     expect(rendered).toContain("/main.tsx");
     expect(rendered).toContain("of:fid1:piece");
@@ -1525,6 +1543,537 @@ describe("the origin and history panel", () => {
     expect(shows(pattern)).not.toContain("piece-source-origin-current");
   });
 
+  it("names what following the origin last did on the panel", async () => {
+    const at = Date.UTC(2026, 7, 3, 10, 30, 0);
+    const menu = openMenu(
+      pieceCell(() =>
+        Promise.resolve({
+          ...SOURCE,
+          reconciliation: {
+            outcome: "refused" as const,
+            at,
+            origin: SOURCE.origin!.url,
+            reason: "incompatible-schema" as const,
+            offered: { identity: "offered-identity", symbol: "default" },
+          },
+        })
+      ),
+    );
+    await menu.showPanel("origin");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("New source refused");
+    expect(rendered).toContain(formatTimestamp(at));
+    expect(rendered).toContain("Reason:");
+    expect(rendered).toContain("inputs or outputs do not match");
+    expect(rendered).toContain(shortIdentity("offered-identity"));
+    expect(rendered).toContain("Update from the origin now");
+    expect(rendered).toContain("Update, ignoring the compatibility check");
+  });
+
+  it("says nothing is known about an origin nothing has looked at", async () => {
+    const menu = openMenu();
+    await menu.showPanel("origin");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("Source updates");
+    expect(rendered).toContain("Unknown");
+    expect(rendered).toContain(
+      "Nothing has looked for new source at this origin.",
+    );
+  });
+
+  it("says nothing beyond the facts about a piece that is up to date", async () => {
+    const menu = openMenu(
+      pieceCell(() =>
+        Promise.resolve({
+          ...SOURCE,
+          reconciliation: {
+            outcome: "followed" as const,
+            at: Date.UTC(2026, 7, 3, 10, 30, 0),
+            origin: SOURCE.origin!.url,
+            offered: SOURCE.pattern,
+          },
+        })
+      ),
+    );
+    await menu.showPanel("origin");
+
+    // Nothing is wrong with this piece, and a box with a button in it reads
+    // as a problem to fix.
+    const rendered = shows(menu);
+    expect(rendered).toContain("Up to date");
+    expect(rendered).not.toContain("piece-origin-follow-detail");
+    expect(rendered).not.toContain("piece-origin-update-now");
+    expect(rendered).not.toContain("piece-origin-force-update");
+  });
+
+  it("does not offer to override a refusal the piece cannot overrule", async () => {
+    const menu = openMenu(
+      pieceCell(() =>
+        Promise.resolve({
+          ...SOURCE,
+          reconciliation: {
+            outcome: "refused" as const,
+            at: Date.UTC(2026, 7, 3, 10, 30, 0),
+            origin: SOURCE.origin!.url,
+            reason: "identity-mismatch" as const,
+          },
+        })
+      ),
+    );
+    await menu.showPanel("origin");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("piece-origin-follow-detail");
+    expect(rendered).not.toContain("piece-origin-force-update");
+  });
+
+  it("asks the origin for an update on request", async () => {
+    const actions: unknown[] = [];
+    const menu = openMenu(pieceCell(
+      () =>
+        Promise.resolve({
+          ...SOURCE,
+          reconciliation: {
+            outcome: "refused" as const,
+            at: 1,
+            origin: SOURCE.origin!.url,
+            reason: "incompatible-schema" as const,
+          },
+        }),
+      {
+        update: (_pieceId, _space, action) => {
+          actions.push(action);
+          return Promise.resolve({ source: SOURCE });
+        },
+      },
+    ));
+    await menu.showPanel("origin");
+
+    clickTestId(menu, "piece-origin-update-now");
+    await settled();
+
+    expect(actions).toEqual([{ kind: "adopt" }]);
+  });
+
+  it("confirms the incompatibility itself when told to ignore it", async () => {
+    const calls: unknown[] = [];
+    const menu = openMenu(pieceCell(
+      () =>
+        Promise.resolve({
+          ...SOURCE,
+          reconciliation: {
+            outcome: "refused" as const,
+            at: 1,
+            origin: SOURCE.origin!.url,
+            reason: "incompatible-schema" as const,
+          },
+        }),
+      {
+        update: (_pieceId, _space, action, options) => {
+          calls.push({ action, options });
+          // The first attempt is refused; the second carries the token back.
+          return Promise.resolve(
+            calls.length === 1
+              ? {
+                source: SOURCE,
+                compatibilityWarning: "the input schema changed",
+                confirmationToken: "token-1",
+              }
+              : { source: SOURCE },
+          );
+        },
+      },
+    ));
+    await menu.showPanel("origin");
+
+    clickTestId(menu, "piece-origin-force-update");
+    await settled();
+
+    expect(calls).toEqual([
+      { action: { kind: "adopt" }, options: {} },
+      {
+        action: { kind: "adopt" },
+        options: { confirmationToken: "token-1" },
+      },
+    ]);
+    // The warning is spent rather than left on the panel to answer again.
+    expect(shows(menu)).not.toContain("piece-source-warning");
+  });
+
+  it("puts away a warning the panel raised when it is declined", async () => {
+    const calls: unknown[] = [];
+    const menu = openMenu(pieceCell(
+      () =>
+        Promise.resolve({
+          ...SOURCE,
+          reconciliation: {
+            outcome: "refused" as const,
+            at: 1,
+            origin: SOURCE.origin!.url,
+            reason: "incompatible-schema" as const,
+          },
+        }),
+      {
+        update: (_pieceId, _space, action, options) => {
+          calls.push({ action, options });
+          return Promise.resolve({
+            source: SOURCE,
+            compatibilityWarning: "the input schema changed",
+            confirmationToken: "token-1",
+          });
+        },
+      },
+    ));
+    await menu.showPanel("origin");
+
+    clickTestId(menu, "piece-origin-update-now");
+    await settled();
+    expect(shows(menu)).toContain("piece-source-warning");
+
+    clickTestId(menu, "piece-source-warning-cancel");
+
+    // Declining leaves the piece as it was, and asks nothing further of the
+    // runtime: the one attempt that raised the warning is all there was.
+    const rendered = shows(menu);
+    expect(rendered).not.toContain("piece-source-warning");
+    expect(rendered).toContain("piece-panel-origin");
+    expect(calls).toEqual([{ action: { kind: "adopt" }, options: {} }]);
+  });
+
+  it("does not offer to ignore a check that is not what refused it", async () => {
+    const menu = openMenu(
+      pieceCell(() =>
+        Promise.resolve({
+          ...SOURCE,
+          reconciliation: {
+            outcome: "refused" as const,
+            at: 1,
+            origin: SOURCE.origin!.url,
+            reason: "source-invalid" as const,
+          },
+        })
+      ),
+    );
+    await menu.showPanel("origin");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("piece-origin-update-now");
+    expect(rendered).not.toContain("piece-origin-force-update");
+  });
+
+  it("shows what a failed update concluded about the origin", async () => {
+    // A failed attempt still records a state of the piece, so the panel reads
+    // the piece again rather than going on showing what it knew before.
+    let reads = 0;
+    const menu = openMenu(pieceCell(
+      () => {
+        reads++;
+        return Promise.resolve(
+          reads === 1 ? SOURCE : {
+            ...SOURCE,
+            reconciliation: {
+              outcome: "unreachable" as const,
+              at: 1,
+              origin: SOURCE.origin!.url,
+              detail: "the origin answered 503",
+            },
+          },
+        );
+      },
+      { update: () => Promise.reject(new Error("nothing answers there")) },
+    ));
+    await menu.showPanel("origin");
+    expect(shows(menu)).toContain("Unknown");
+
+    clickTestId(menu, "piece-origin-update-now");
+    await settled();
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("Could not reach the origin");
+    expect(rendered).toContain("the origin answered 503");
+    expect(rendered).toContain("nothing answers there");
+  });
+
+  it("says a piece carrying an unfollowable origin is not detached", async () => {
+    const menu = openMenu(
+      pieceCell(() =>
+        Promise.resolve({
+          ...SOURCE,
+          origin: undefined,
+          unusableOrigin: {
+            recorded: "../recipes/main.tsx",
+            reason: "../recipes/main.tsx is not an absolute URL",
+          },
+        })
+      ),
+    );
+    await menu.showPanel("origin");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("Origin cannot be followed");
+    expect(rendered).toContain("../recipes/main.tsx");
+    // Detaching is the repair, so the action stays available.
+    expect(rendered).toContain("piece-origin-detach-source");
+  });
+
+  it("asks for an origin in a dialog over the panel", async () => {
+    const actions: unknown[] = [];
+    const menu = openMenu(pieceCell(undefined, {
+      update: (_pieceId, _space, action) => {
+        actions.push(action);
+        return Promise.resolve({ source: SOURCE });
+      },
+    }));
+    await menu.showPanel("origin");
+    expect(shows(menu)).not.toContain("piece-origin-entry");
+
+    clickTestId(menu, "piece-origin-enter-source");
+    const opened = shows(menu);
+    // A dialog of its own, over the panel, which stays rendered behind it.
+    expect(opened).toContain("piece-origin-entry");
+    expect(opened).toContain("Follow another source");
+    expect(opened).toContain("piece-panel-origin");
+    // The panel's own content keeps its place rather than being pushed down.
+    expect(opened).toContain("Source history");
+
+    eventHandler(menu, 'test-id="piece-origin-url"', "input")({
+      currentTarget: { value: "  https://example.test/other.tsx  " },
+    } as unknown as Event);
+    let prevented = false;
+    eventHandler(menu, 'test-id="piece-origin-entry"', "submit")({
+      preventDefault: () => {
+        prevented = true;
+      },
+    } as unknown as Event);
+    await settled();
+
+    expect(prevented).toBe(true);
+    expect(actions).toEqual([
+      { kind: "repoint", url: "https://example.test/other.tsx" },
+    ]);
+    expect(shows(menu)).not.toContain("piece-origin-entry");
+  });
+
+  it("keeps a typed origin in the dialog when following it fails", async () => {
+    const menu = openMenu(pieceCell(undefined, {
+      update: () => Promise.reject(new Error("nothing answers there")),
+    }));
+    await menu.showPanel("origin");
+    clickTestId(menu, "piece-origin-enter-source");
+    eventHandler(menu, 'test-id="piece-origin-url"', "input")({
+      currentTarget: { value: "https://example.test/missing.tsx" },
+    } as unknown as Event);
+    eventHandler(menu, 'test-id="piece-origin-entry"', "submit")({
+      preventDefault: () => {},
+    } as unknown as Event);
+    await settled();
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("Could not follow that source");
+    expect(rendered).toContain("nothing answers there");
+    expect(rendered).toContain("piece-origin-entry");
+    expect(rendered).toContain("https://example.test/missing.tsx");
+    // The failure is the dialog's to report; the panel does not repeat it.
+    expect(rendered).not.toContain("Could not change this piece's source");
+  });
+
+  it("dismisses the origin dialog without touching the panel", async () => {
+    const menu = openMenu();
+    await menu.showPanel("origin");
+    clickTestId(menu, "piece-origin-enter-source");
+    eventHandler(menu, 'test-id="piece-origin-url"', "input")({
+      currentTarget: { value: "https://example.test/other.tsx" },
+    } as unknown as Event);
+
+    clickTestId(menu, "piece-origin-entry-cancel");
+
+    const rendered = shows(menu);
+    expect(rendered).not.toContain("piece-origin-entry");
+    expect(rendered).toContain("piece-panel-origin");
+    // Reopening starts from an empty field rather than the abandoned one.
+    clickTestId(menu, "piece-origin-enter-source");
+    expect(shows(menu)).not.toContain("https://example.test/other.tsx");
+  });
+
+  it("offers to follow an incompatible typed origin anyway", async () => {
+    const calls: unknown[] = [];
+    const menu = openMenu(pieceCell(undefined, {
+      update: (_pieceId, _space, action, options) => {
+        calls.push({ action, options });
+        return Promise.resolve(
+          calls.length === 1
+            ? {
+              source: SOURCE,
+              compatibilityWarning: "the input schema changed",
+              confirmationToken: "token-1",
+            }
+            : { source: SOURCE },
+        );
+      },
+    }));
+    await menu.showPanel("origin");
+    clickTestId(menu, "piece-origin-enter-source");
+    eventHandler(menu, 'test-id="piece-origin-url"', "input")({
+      currentTarget: { value: "https://example.test/other.tsx" },
+    } as unknown as Event);
+    const submit = () =>
+      eventHandler(menu, 'test-id="piece-origin-entry"', "submit")({
+        preventDefault: () => {},
+      } as unknown as Event);
+    submit();
+    await settled();
+
+    // The question was asked here, so it is answered here: the dialog stays
+    // up, states the objection, and its submit becomes the override.
+    const warned = shows(menu);
+    expect(warned).toContain("piece-origin-entry");
+    expect(warned).toContain("piece-origin-entry-warning");
+    expect(warned).toContain("the input schema changed");
+    expect(warned).toContain("Follow this source anyway");
+    expect(warned).not.toContain("piece-source-warning");
+
+    submit();
+    await settled();
+
+    expect(calls).toEqual([
+      {
+        action: { kind: "repoint", url: "https://example.test/other.tsx" },
+        options: {},
+      },
+      {
+        action: { kind: "repoint", url: "https://example.test/other.tsx" },
+        options: { confirmationToken: "token-1" },
+      },
+    ]);
+    expect(shows(menu)).not.toContain("piece-origin-entry");
+  });
+
+  it("does nothing when the origin dialog is submitted empty", async () => {
+    const actions: unknown[] = [];
+    const menu = openMenu(pieceCell(undefined, {
+      update: (_pieceId, _space, action) => {
+        actions.push(action);
+        return Promise.resolve({ source: SOURCE });
+      },
+    }));
+    await menu.showPanel("origin");
+    clickTestId(menu, "piece-origin-enter-source");
+
+    // The submit button is disabled while the field is empty, but Enter in
+    // the field submits the form regardless.
+    eventHandler(menu, 'test-id="piece-origin-entry"', "submit")({
+      preventDefault: () => {},
+    } as unknown as Event);
+    await settled();
+
+    expect(actions).toEqual([]);
+    expect(shows(menu)).toContain("piece-origin-entry");
+  });
+
+  it("dismisses the origin dialog when its backdrop is clicked", async () => {
+    const menu = openMenu();
+    await menu.showPanel("origin");
+    clickTestId(menu, "piece-origin-enter-source");
+    expect(shows(menu)).toContain("piece-origin-entry");
+
+    eventHandler(menu, 'class="backdrop dimmed stacked"', "click")(
+      {} as unknown as Event,
+    );
+
+    const rendered = shows(menu);
+    expect(rendered).not.toContain("piece-origin-entry");
+    expect(rendered).toContain("piece-panel-origin");
+  });
+
+  it("takes a forced update that turns out to need no override", async () => {
+    const calls: unknown[] = [];
+    const menu = openMenu(pieceCell(
+      () =>
+        Promise.resolve({
+          ...SOURCE,
+          reconciliation: {
+            outcome: "refused" as const,
+            at: 1,
+            origin: SOURCE.origin!.url,
+            reason: "incompatible-schema" as const,
+          },
+        }),
+      {
+        update: (_pieceId, _space, action, options) => {
+          calls.push({ action, options });
+          return Promise.resolve({ source: SOURCE });
+        },
+      },
+    ));
+    await menu.showPanel("origin");
+
+    clickTestId(menu, "piece-origin-force-update");
+    await settled();
+
+    // The origin was resolved again and what it offers now is compatible, so
+    // there is no warning to confirm and the one attempt is the whole of it.
+    expect(calls).toEqual([{ action: { kind: "adopt" }, options: {} }]);
+  });
+
+  it("abandons a failed attempt rather than passing it to the panel", async () => {
+    const menu = openMenu(pieceCell(undefined, {
+      update: () => Promise.reject(new Error("nothing answers there")),
+    }));
+    await menu.showPanel("origin");
+    clickTestId(menu, "piece-origin-enter-source");
+    eventHandler(menu, 'test-id="piece-origin-url"', "input")({
+      currentTarget: { value: "https://example.test/missing.tsx" },
+    } as unknown as Event);
+    eventHandler(menu, 'test-id="piece-origin-entry"', "submit")({
+      preventDefault: () => {},
+    } as unknown as Event);
+    await settled();
+    expect(shows(menu)).toContain("nothing answers there");
+
+    clickTestId(menu, "piece-origin-entry-cancel");
+
+    // The question it answered is gone, so the answer goes with it.
+    const rendered = shows(menu);
+    expect(rendered).not.toContain("nothing answers there");
+    expect(rendered).not.toContain("Could not change this piece's source");
+    expect(rendered).toContain("piece-panel-origin");
+  });
+
+  it("drops the answer to a URL that has since been edited", async () => {
+    const menu = openMenu(pieceCell(undefined, {
+      update: () => Promise.reject(new Error("nothing answers there")),
+    }));
+    await menu.showPanel("origin");
+    clickTestId(menu, "piece-origin-enter-source");
+    const type = (value: string) =>
+      eventHandler(menu, 'test-id="piece-origin-url"', "input")({
+        currentTarget: { value },
+      } as unknown as Event);
+    type("https://example.test/missing.tsx");
+    eventHandler(menu, 'test-id="piece-origin-entry"', "submit")({
+      preventDefault: () => {},
+    } as unknown as Event);
+    await settled();
+
+    type("https://example.test/another.tsx");
+
+    // The failure was about the URL that was there before.
+    expect(shows(menu)).not.toContain("nothing answers there");
+  });
+
+  it("offers the origin field to a detached piece", async () => {
+    const menu = openMenu(
+      pieceCell(() => Promise.resolve({ ...SOURCE, origin: undefined })),
+    );
+    await menu.showPanel("origin");
+
+    const rendered = shows(menu);
+    expect(rendered).toContain("piece-origin-enter-source");
+    expect(rendered).not.toContain("piece-origin-detach-source");
+  });
+
   it("says a piece with no origin is detached", async () => {
     const menu = openMenu(
       pieceCell(() => Promise.resolve({ ...SOURCE, origin: undefined })),
@@ -1541,7 +2090,7 @@ describe("the origin and history panel", () => {
           ...SOURCE,
           origin: {
             url: "https://toolshed.test/api/patterns/system/home.tsx",
-            kind: "web",
+            kind: "system",
             recorded: "/api/patterns/system/home.tsx",
           },
         })
@@ -2846,6 +3395,26 @@ describe("dismissing the menu", () => {
     }
   });
 
+  it("dismisses the origin dialog before the panel behind it", async () => {
+    const menu = openMenu();
+    menu.connectedCallback();
+    try {
+      await menu.showPanel("origin");
+      clickTestId(menu, "piece-origin-enter-source");
+      expect(shows(menu)).toContain("piece-origin-entry");
+
+      pressKey("Escape");
+      const rendered = shows(menu);
+      expect(rendered).not.toContain("piece-origin-entry");
+      expect(rendered).toContain("Origin and history");
+
+      pressKey("Escape");
+      expect(shows(menu)).toContain("View source");
+    } finally {
+      menu.disconnectedCallback();
+    }
+  });
+
   it("dismisses on a right-click on the backdrop", () => {
     const menu = openMenu();
     let prevented = false;
@@ -2986,13 +3555,22 @@ describe("describeOrigin", () => {
       describeOrigin({ url: "cf:pattern:x", kind: "fabric-pattern" }).label,
     ).toBe("Exact pattern");
     expect(
-      describeOrigin({ url: "https://example.test/p.tsx", kind: "web" }).label,
-    ).toBe("External web URL");
+      describeOrigin({
+        url: "https://t.test/api/patterns/p.tsx",
+        kind: "system",
+      })
+        .label,
+    ).toBe("Deployment pattern");
   });
 
   it("says what each kind of origin can do", () => {
-    expect(describeOrigin({ url: "https://e.test/p.tsx", kind: "web" }).detail)
-      .toContain("can return new source later");
+    expect(
+      describeOrigin({
+        url: "https://t.test/api/patterns/p.tsx",
+        kind: "system",
+      })
+        .detail,
+    ).toContain("a new release of the deployment can replace it");
     expect(
       describeOrigin({ url: "cf:pattern:x", kind: "fabric-pattern" }).detail,
     ).toContain("always resolves to");
@@ -3011,5 +3589,259 @@ describe("formatTimestamp", () => {
     const stamped = formatTimestamp(Date.UTC(2026, 6, 24, 12, 0, 0));
     expect(stamped).toContain("2026");
     expect(stamped.length).toBeGreaterThan(0);
+  });
+});
+
+describe("describeFollowState", () => {
+  it("does not report a piece nothing has looked at as up to date", () => {
+    const description = describeFollowState(SOURCE);
+    expect(description.state).toBe("unknown");
+    // The row's heading supplies the subject for the terse label; the box has
+    // no heading over it, so it opens with a sentence that carries its own.
+    expect(description.label).toBe("Unknown");
+    expect(description.summary).toBe(
+      "Nothing has looked for new source at this origin.",
+    );
+    expect(description.at).toBeUndefined();
+    // Asking is what this state wants. Nothing has failed a check, so there
+    // is no check to offer to ignore.
+    expect(description.canUpdate).toBe(true);
+    expect(description.canForce).toBe(false);
+  });
+
+  it("separates an origin it could not reach from one it refused", () => {
+    const at = Date.UTC(2026, 7, 1, 9, 0, 0);
+    const unreachable = describeFollowState({
+      ...SOURCE,
+      reconciliation: {
+        outcome: "unreachable",
+        at,
+        origin: SOURCE.origin!.url,
+        detail: "the origin answered 503",
+      },
+    });
+    expect(unreachable.state).toBe("unreachable");
+    expect(unreachable.summary).toBe("This piece could not reach its origin.");
+    expect(unreachable.reason).toBe("the origin answered 503");
+    expect(unreachable.detail).toContain("may right itself");
+    expect(unreachable.canUpdate).toBe(true);
+    expect(unreachable.canForce).toBe(false);
+
+    const refused = describeFollowState({
+      ...SOURCE,
+      reconciliation: {
+        outcome: "refused",
+        at,
+        origin: SOURCE.origin!.url,
+        reason: "incompatible-schema",
+        offered: { identity: "candidate-identity", symbol: "default" },
+      },
+    });
+    expect(refused.state).toBe("refused");
+    expect(refused.summary).toContain("did not take it");
+    expect(refused.detail).toContain("will happen again");
+    // A compiler's report can run to many lines, so what the attempt said
+    // stays out of the sentence and gets a line of its own.
+    expect(refused.reason).toContain("inputs or outputs do not match");
+    expect(refused.offered).toEqual({
+      identity: "candidate-identity",
+      symbol: "default",
+    });
+    expect(refused.at).toBe(at);
+  });
+
+  it("has words for every reason a refusal can carry", () => {
+    // The reason a check recorded is shown when there is one; these are what
+    // the panel says when a refusal arrives carrying only its kind.
+    const reasons = [
+      ["incompatible-schema", "inputs or outputs do not match"],
+      ["argument-mismatch", "data this piece holds does not fit"],
+      ["source-invalid", "could not be used"],
+      ["identity-mismatch", "did not match the version"],
+      ["apply-failed", "could not be applied to this piece"],
+    ] as const;
+    for (const [reason, expected] of reasons) {
+      const described = describeFollowState({
+        ...SOURCE,
+        reconciliation: {
+          outcome: "refused",
+          at: 1,
+          origin: SOURCE.origin!.url,
+          reason,
+        },
+      });
+      expect(described.reason).toContain(expected);
+    }
+
+    // A refusal that names no reason at all still says something.
+    const bare = describeFollowState({
+      ...SOURCE,
+      reconciliation: { outcome: "refused", at: 1, origin: SOURCE.origin!.url },
+    });
+    expect(bare.reason).toContain("did not take what the origin offered");
+  });
+
+  it("says a refusal nothing can overrule is one, and why", () => {
+    const description = describeFollowState({
+      ...SOURCE,
+      reconciliation: {
+        outcome: "refused",
+        at: 1,
+        origin: SOURCE.origin!.url,
+        reason: "argument-mismatch",
+        detail: "missing required property profiles",
+      },
+    });
+    expect(description.canForce).toBe(false);
+    // A box with no override needs to say why, or it reads as one whose
+    // button someone forgot.
+    expect(description.detail).toContain("nothing to overrule");
+    expect(description.detail).toContain("data would have to change");
+    expect(description.reason).toBe("missing required property profiles");
+  });
+
+  it("offers to override only what an override could fix", () => {
+    const refusal = (
+      reason: "incompatible-schema" | "source-invalid" | "argument-mismatch",
+    ) =>
+      describeFollowState({
+        ...SOURCE,
+        reconciliation: {
+          outcome: "refused",
+          at: 1,
+          origin: SOURCE.origin!.url,
+          reason,
+        },
+      });
+    // Asking again is always on offer; ignoring the check is not, when the
+    // refusal named something ignoring it cannot fix.
+    expect(refusal("incompatible-schema").canUpdate).toBe(true);
+    expect(refusal("incompatible-schema").canForce).toBe(true);
+    expect(refusal("source-invalid").canUpdate).toBe(true);
+    expect(refusal("source-invalid").canForce).toBe(false);
+    expect(refusal("argument-mismatch").canUpdate).toBe(true);
+    expect(refusal("argument-mismatch").canForce).toBe(false);
+  });
+
+  it("reports a piece nothing has looked at as unknown", () => {
+    expect(describeFollowState(SOURCE).state).toBe("unknown");
+  });
+
+  it("tells a piece carrying an unfollowable string from a detached one", () => {
+    const unusable = describeFollowState({
+      ...SOURCE,
+      origin: undefined,
+      unusableOrigin: {
+        recorded: "../recipes/main.tsx",
+        reason: "../recipes/main.tsx is not an absolute URL",
+      },
+    });
+    expect(unusable.state).toBe("unusable");
+    expect(unusable.summary).toContain("Nothing can follow");
+    expect(unusable.detail).toContain("has not been detached");
+    expect(unusable.reason).toBe("../recipes/main.tsx is not an absolute URL");
+
+    expect(
+      describeFollowState({ ...SOURCE, origin: undefined }).state,
+    ).toBe("detached");
+  });
+});
+
+describe("what the source-updates box offers", () => {
+  /** The states that get a box, and the buttons each one earns. */
+  const CASES: Array<
+    [string, PieceSourceView, { box: boolean; update: boolean; force: boolean }]
+  > = [
+    ["up to date", {
+      ...SOURCE,
+      reconciliation: {
+        outcome: "followed",
+        at: 1,
+        origin: SOURCE.origin!.url,
+      },
+    }, { box: false, update: false, force: false }],
+    ["unknown", SOURCE, { box: true, update: true, force: false }],
+    ["unreachable", {
+      ...SOURCE,
+      reconciliation: {
+        outcome: "unreachable",
+        at: 1,
+        origin: SOURCE.origin!.url,
+      },
+    }, { box: true, update: true, force: false }],
+    ["refused over a contract", {
+      ...SOURCE,
+      reconciliation: {
+        outcome: "refused",
+        at: 1,
+        origin: SOURCE.origin!.url,
+        reason: "incompatible-schema",
+      },
+    }, { box: true, update: true, force: true }],
+    ["refused over data that does not fit", {
+      ...SOURCE,
+      reconciliation: {
+        outcome: "refused",
+        at: 1,
+        origin: SOURCE.origin!.url,
+        reason: "argument-mismatch",
+      },
+    }, { box: true, update: true, force: false }],
+    ["refused over unusable source", {
+      ...SOURCE,
+      reconciliation: {
+        outcome: "refused",
+        at: 1,
+        origin: SOURCE.origin!.url,
+        reason: "source-invalid",
+      },
+    }, { box: true, update: true, force: false }],
+    ["detached", { ...SOURCE, origin: undefined }, {
+      box: false,
+      update: false,
+      force: false,
+    }],
+    ["an origin nothing can follow", {
+      ...SOURCE,
+      origin: undefined,
+      unusableOrigin: { recorded: "x", reason: "x is not an absolute URL" },
+    }, { box: true, update: false, force: false }],
+  ];
+
+  for (const [name, source, expected] of CASES) {
+    it(`offers what ${name} earns`, async () => {
+      const menu = openMenu(pieceCell(() => Promise.resolve(source)));
+      await menu.showPanel("origin");
+      const rendered = shows(menu);
+      expect(rendered.includes("piece-origin-follow-detail")).toBe(
+        expected.box,
+      );
+      expect(rendered.includes("piece-origin-update-now")).toBe(
+        expected.update,
+      );
+      expect(rendered.includes("piece-origin-force-update")).toBe(
+        expected.force,
+      );
+    });
+  }
+});
+
+describe("describeSourceFailure", () => {
+  it("keeps an ordinary failure as it came", () => {
+    const failure = describeSourceFailure("nothing answers there");
+    expect(failure.summary).toBe("Could not follow that source.");
+    expect(failure.reason).toBe("nothing answers there");
+  });
+
+  it("says a source the piece's data cannot run is not one to insist on", () => {
+    const failure = describeSourceFailure(
+      "updated arguments do not match the candidate schema: " +
+        "missing required property profiles",
+    );
+    // Left as it came it reads as something that might work next time, beside
+    // a dialog offering no way to insist.
+    expect(failure.summary).toContain("cannot run on the data this piece");
+    expect(failure.summary).toContain("data would have to change first");
+    expect(failure.reason).toBe("missing required property profiles");
   });
 });

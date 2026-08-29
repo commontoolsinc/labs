@@ -34,6 +34,7 @@ import {
   type EntitySnapshot,
   getServerExecutionConfig,
   type GraphQuery,
+  type GraphQueryRoot,
   isScopeKey,
   resolveScopeKey,
   type ScopeKey,
@@ -84,17 +85,147 @@ export type TrackedGraphState = {
 };
 
 /**
+ * The costliest single root of one query evaluation.
+ *
+ * A query's roots are the union of every watch's roots on a branch, so a
+ * slow `watch.add` reports its duration against a watch COUNT and says
+ * nothing about which declaration spent it. This names the root that did.
+ *
+ * It names the root that PAID, which is not always the root to blame.
+ * Roots share coverage within an evaluation: the first to reach a document
+ * is charged for it, and a later root that would have reached the same
+ * document is skipped instead. So where several roots declare overlapping
+ * closures, the whole cost lands on whichever ran first, and bounding that
+ * one root moves the charge to the next rather than removing it. Read a
+ * large `slowestRoot` as "the cost is reachable from here", and confirm a
+ * suspected cause by checking that narrowing it lowers the request's own
+ * elapsed time — not merely that it lowers this root's.
+ */
+export type SlowestQueryRoot = {
+  id: string;
+  scope: CellScope;
+
+  /** The explicit scope INSTANCE the root named, on the lease-holder reads
+   * that may name one. Roots alike in every other field but this one are
+   * different reads of different instances, so without it the record
+   * cannot say which instance cost the time. */
+  entityScopeKey?: ScopeKey;
+
+  /** The selector's path, slash-joined; empty for a whole-document root. */
+  path: string;
+
+  /** The selector schema's interned tagged hash, absent when the root
+   * declares none. The hash rather than the schema itself: a board root's
+   * schema runs to kilobytes, and the hash is how the registry names it. */
+  schema?: string;
+  elapsedMs: number;
+
+  /** Engine documents read while visiting this root. */
+  reads: number;
+
+  /** The walk this root ran, as counters: how many documents it crossed
+   * (`dagTraversals`), what kind of structure it crossed them through, and
+   * how much the schema memo saved. `elapsedMs` says a root was expensive;
+   * this says what it did to get that way — a wide root crossing thousands
+   * of documents and one deep root re-walking a schema are the same
+   * duration and different bugs. */
+  walk: GraphQueryWalkStats;
+};
+
+/** One root's share of the walk counters its evaluation accumulated. */
+const walkStatsDelta = (
+  after: GraphQueryWalkStats,
+  before: GraphQueryWalkStats,
+): GraphQueryWalkStats => ({
+  coveredSelectorSkips: after.coveredSelectorSkips -
+    before.coveredSelectorSkips,
+  schemaTraversals: after.schemaTraversals - before.schemaTraversals,
+  pointerTraversals: after.pointerTraversals - before.pointerTraversals,
+  arrayTraversals: after.arrayTraversals - before.arrayTraversals,
+  objectTraversals: after.objectTraversals - before.objectTraversals,
+  dagTraversals: after.dagTraversals - before.dagTraversals,
+  getDocAtPathCalls: after.getDocAtPathCalls - before.getDocAtPathCalls,
+  schemaMemoHits: after.schemaMemoHits - before.schemaMemoHits,
+});
+
+/**
  * What one query cost: the walk's own counters, plus how many documents the
- * query read out of the engine.
+ * query read out of the engine, plus which of its roots was the expensive
+ * one.
  */
 export type QueryTraversalStats = GraphQueryWalkStats & {
   managerReads: number;
+
+  /** Roots this evaluation visited. A cache hit visits none. */
+  rootsVisited: number;
+
+  /** Summed elapsed time of those visits. Roots are visited in sequence,
+   * so this is directly comparable with the caller's own elapsed
+   * measurement, and what it leaves over is everything outside the root
+   * loop — entity assembly and schema-closure staging. Read the two
+   * together: they say whether a slow evaluation was slow at a root at
+   * all. */
+  rootsElapsedMs: number;
+
+  /** The costliest one, absent when no root was visited. */
+  slowestRoot?: SlowestQueryRoot;
 };
 
 const createQueryTraversalStats = (): QueryTraversalStats => ({
   managerReads: 0,
+  rootsVisited: 0,
+  rootsElapsedMs: 0,
   ...createGraphQueryWalkStats(),
 });
+
+/**
+ * Run one root's evaluation, charging what it cost to `stats` and keeping
+ * the costliest root seen so far.
+ *
+ * Two clock reads and one counter read per root, paid unconditionally,
+ * because which evaluation turns out to be the slow one is not knowable
+ * before it runs. The overhead is bounded by the same factor that makes a
+ * query large: a root cheap enough for two `performance.now()` calls to
+ * register against it did no document reads.
+ */
+const chargeRootVisit = (
+  root: GraphQueryRoot,
+  manager: EngineObjectManager,
+  stats: QueryTraversalStats,
+  visit: () => void,
+): void => {
+  const startedAt = performance.now();
+  const readsBefore = manager.readCount;
+  const walkBefore = { ...stats };
+  try {
+    visit();
+  } finally {
+    // Charged from `finally`, so a root that throws is attributed too: a
+    // slow failing root is at least as interesting as a slow passing one.
+    const elapsedMs = performance.now() - startedAt;
+    stats.rootsVisited++;
+    stats.rootsElapsedMs += elapsedMs;
+    if (
+      stats.slowestRoot === undefined ||
+      elapsedMs > stats.slowestRoot.elapsedMs
+    ) {
+      stats.slowestRoot = {
+        id: root.id,
+        scope: root.scope ?? DEFAULT_SCOPE,
+        ...(root.entityScopeKey === undefined
+          ? {}
+          : { entityScopeKey: root.entityScopeKey }),
+        path: root.selector.path.join("/"),
+        ...(root.selector.schema === undefined ? {} : {
+          schema: internSchemaAsTaggedHashString(root.selector.schema),
+        }),
+        elapsedMs,
+        reads: manager.readCount - readsBefore,
+        walk: walkStatsDelta(stats, walkBefore),
+      };
+    }
+  }
+};
 
 /**
  * The identity a manager's tracked-graph keys resolve against: the
@@ -1235,33 +1366,35 @@ export const trackGraph = (
   validateSelectorSchemaRefs(space, manager, branch, query.roots);
 
   for (const root of query.roots) {
-    const selector = toDocumentSelector(root.selector);
-    const rootScope = root.scope ?? DEFAULT_SCOPE;
-    // A root naming an explicit instance (protocol.md §2's read row —
-    // lease-holder only, admission enforced at the server layer) reads
-    // and tracks THAT instance; traversal beyond the root resolves under
-    // the session identity as today (per-run deep threading is the
-    // Phase 2 fan-out work).
-    const loaded = manager.load({
-      id: root.id,
-      scope: rootScope,
-      ...(root.entityScopeKey === undefined
-        ? {}
-        : { scopeKey: root.entityScopeKey }),
-      type: "application/json",
+    chargeRootVisit(root, manager, stats, () => {
+      const selector = toDocumentSelector(root.selector);
+      const rootScope = root.scope ?? DEFAULT_SCOPE;
+      // A root naming an explicit instance (protocol.md §2's read row —
+      // lease-holder only, admission enforced at the server layer) reads
+      // and tracks THAT instance; traversal beyond the root resolves under
+      // the session identity as today (per-run deep threading is the
+      // Phase 2 fan-out work).
+      const loaded = manager.load({
+        id: root.id,
+        scope: rootScope,
+        ...(root.entityScopeKey === undefined
+          ? {}
+          : { scopeKey: root.entityScopeKey }),
+        type: "application/json",
+      });
+      if (loaded !== null) {
+        walk.visit(
+          loaded,
+          selector,
+          rootDocKey(space, root, identityOf(manager)),
+        );
+      } else {
+        schemaTracker.add(
+          rootDocKey(space, root, identityOf(manager)),
+          selector,
+        );
+      }
     });
-    if (loaded !== null) {
-      walk.visit(
-        loaded,
-        selector,
-        rootDocKey(space, root, identityOf(manager)),
-      );
-    } else {
-      schemaTracker.add(
-        rootDocKey(space, root, identityOf(manager)),
-        selector,
-      );
-    }
   }
 
   const entities = entitiesFromTracker(space, schemaTracker, manager, branch);
@@ -1338,26 +1471,28 @@ export const extendTrackedGraph = (
   validateSelectorSchemaRefs(space, manager, state.branch, query.roots);
 
   for (const root of query.roots) {
-    const selector = toDocumentSelector(root.selector);
-    const rootScope = root.scope ?? DEFAULT_SCOPE;
-    const rootKey = rootDocKey(space, root, identityOf(manager));
-    touched.add(rootKey);
-    evaluateTrackedDocument(
-      space,
-      manager,
-      {
-        id: root.id,
-        scope: rootScope,
-        ...(root.entityScopeKey === undefined
-          ? {}
-          : { scopeKey: root.entityScopeKey }),
-      },
-      selector,
-      state.tracker,
-      missRecorderFor(state),
-      state.memo,
-      stats,
-    );
+    chargeRootVisit(root, manager, stats, () => {
+      const selector = toDocumentSelector(root.selector);
+      const rootScope = root.scope ?? DEFAULT_SCOPE;
+      const rootKey = rootDocKey(space, root, identityOf(manager));
+      touched.add(rootKey);
+      evaluateTrackedDocument(
+        space,
+        manager,
+        {
+          id: root.id,
+          scope: rootScope,
+          ...(root.entityScopeKey === undefined
+            ? {}
+            : { scopeKey: root.entityScopeKey }),
+        },
+        selector,
+        state.tracker,
+        missRecorderFor(state),
+        state.memo,
+        stats,
+      );
+    });
   }
 
   for (const address of manager.loadedAddresses()) {
@@ -1435,6 +1570,11 @@ export const queryGraph = (
 ): {
   serverSeq: number;
   entities: EntitySnapshot[];
+
+  /** What the evaluation cost. Carried out so the server can attribute a
+   * slow `graph.query` to a root; it is not part of the wire result, and
+   * the caller drops it before responding. */
+  stats: QueryTraversalStats;
 } => {
   const tracked = trackGraph(space, engine, query, reuse, {
     ...options,
@@ -1448,6 +1588,7 @@ export const queryGraph = (
     : [...tracked.state.entities.values()];
   return {
     serverSeq: tracked.serverSeq,
+    stats: tracked.stats,
     entities: entities
       .toSorted((left, right) => left.id.localeCompare(right.id)),
   };

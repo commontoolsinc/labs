@@ -13,10 +13,8 @@ import {
   type FabricPlainObject,
   type FabricValue,
 } from "@commonfabric/data-model/fabric-value";
-import {
-  NATIVE_TAGS,
-  tagFromNativeValue,
-} from "@commonfabric/data-model/native-type-tags";
+import { VALUE_TAGS } from "@commonfabric/data-model/VALUE_TAGS";
+import { tagFromNativeValue } from "@commonfabric/data-model/native-type-tags";
 import {
   getCellOrThrow,
   isCell,
@@ -80,7 +78,7 @@ function replaceCellsWithLinks(
     return converted;
   }
   const nativeTag = tagFromNativeValue(value);
-  if (nativeTag === NATIVE_TAGS.Error) {
+  if (nativeTag === VALUE_TAGS.Error) {
     const error = value as Error;
     const existing = seen.get(error);
     if (existing) return existing;
@@ -103,8 +101,8 @@ function replaceCellsWithLinks(
   }
   if (
     nativeTag !== null &&
-    nativeTag !== NATIVE_TAGS.Object &&
-    nativeTag !== NATIVE_TAGS.Primitive
+    nativeTag !== VALUE_TAGS.Object &&
+    nativeTag !== VALUE_TAGS.Primitive
   ) {
     return value;
   }

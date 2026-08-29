@@ -53,6 +53,8 @@ entity's value hashes to a specific value.
   tracking, watch sets, and catch-up sync.
 - `v2/client.ts` — the client half: session open and resume, optimistic commits,
   and watch subscriptions.
+- `v2/message-compression.ts` — the negotiated binary gzip envelope used by
+  remote WebSocket transports for messages where compression reduces wire size.
 - `v2/query.ts` — schema-aware graph queries that follow JSON Schema references
   across documents.
 - `v2/sqlite/` — the SQLite builtin: statement execution, column provenance, and

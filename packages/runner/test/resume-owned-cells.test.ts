@@ -43,10 +43,14 @@ function plainLoopback(
 }
 
 class LoopbackSessionFactory implements SessionFactory {
-  constructor(private readonly getServer: () => MemoryV2Server.Server) {}
+  readonly #getServer: () => MemoryV2Server.Server;
+
+  constructor(getServer: () => MemoryV2Server.Server) {
+    this.#getServer = getServer;
+  }
   async create(spaceId: string, sgnr?: Signer) {
     const client = await MemoryV2Client.connect({
-      transport: plainLoopback(this.getServer()),
+      transport: plainLoopback(this.#getServer()),
     });
     const session = await client.mount(
       spaceId,

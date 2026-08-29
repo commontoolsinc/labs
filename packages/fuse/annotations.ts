@@ -487,10 +487,16 @@ export function cfcDirectoryEntryNameDigest(name: string): string {
 }
 
 export class CfcProjectionAnnotator {
+  readonly #tree: AnnotatableTree;
+  readonly #base: CfcProjectionBase;
+
   constructor(
-    private readonly tree: AnnotatableTree,
-    private readonly base: CfcProjectionBase,
-  ) {}
+    tree: AnnotatableTree,
+    base: CfcProjectionBase,
+  ) {
+    this.#tree = tree;
+    this.#base = base;
+  }
 
   jsonContext(path: CfcPathSegment[]): CfcJsonAnnotationContext {
     return { annotator: this, path: [...path] };
@@ -510,15 +516,15 @@ export class CfcProjectionAnnotator {
   ): CfcProjectionRef {
     const ref: CfcProjectionRef = {
       type: "common-fabric-fuse-ref-v1",
-      space: this.base.space,
-      ...(this.base.entity === undefined ? {} : { entity: this.base.entity }),
-      ...(this.base.rootKind === undefined
+      space: this.#base.space,
+      ...(this.#base.entity === undefined ? {} : { entity: this.#base.entity }),
+      ...(this.#base.rootKind === undefined
         ? {}
-        : { rootKind: this.base.rootKind }),
-      ...(this.base.cell === undefined ? {} : { cell: this.base.cell }),
+        : { rootKind: this.#base.rootKind }),
+      ...(this.#base.cell === undefined ? {} : { cell: this.#base.cell }),
       path: [...path],
       projection,
-      generation: this.base.generation,
+      generation: this.#base.generation,
     };
     for (
       const [key, value] of Object.entries(overrides) as Array<
@@ -535,7 +541,7 @@ export class CfcProjectionAnnotator {
   }
 
   labelAt(path: readonly CfcPathSegment[]): CfcLabel {
-    const labels = labelViewEntriesAt(this.base.labelView, path);
+    const labels = labelViewEntriesAt(this.#base.labelView, path);
     if (labels.length === 0) {
       return failClosedLabel();
     }
@@ -637,11 +643,11 @@ export class CfcProjectionAnnotator {
     value: unknown,
   ): void {
     const contentLabel = this.subtreeLabel(value, path);
-    this.setNodeAnnotation(ino, {
+    this.#setNodeAnnotation(ino, {
       ref: this.ref("value", path),
       contentLabel,
       metadataLabels: defaultMetadataLabels(contentLabel),
-      incomplete: this.incompleteIfFailClosed(contentLabel, path),
+      incomplete: this.#incompleteIfFailClosed(contentLabel, path),
     });
   }
 
@@ -651,12 +657,12 @@ export class CfcProjectionAnnotator {
     value: unknown,
   ): void {
     const namespaceLabel = this.namespaceLabel(value, path);
-    this.setNodeAnnotation(ino, {
+    this.#setNodeAnnotation(ino, {
       ref: this.ref("dir", path),
       namespaceLabel,
       entries: { version: 1, entries: [] },
       metadataLabels: defaultMetadataLabels(namespaceLabel),
-      incomplete: this.incompleteIfFailClosed(namespaceLabel, path),
+      incomplete: this.#incompleteIfFailClosed(namespaceLabel, path),
     });
   }
 
@@ -666,11 +672,11 @@ export class CfcProjectionAnnotator {
     value: unknown,
   ): void {
     const contentLabel = this.subtreeLabel(value, path);
-    this.setNodeAnnotation(ino, {
+    this.#setNodeAnnotation(ino, {
       ref: this.ref("aggregate-json", path),
       contentLabel,
       metadataLabels: defaultMetadataLabels(contentLabel),
-      incomplete: this.incompleteIfFailClosed(contentLabel, path),
+      incomplete: this.#incompleteIfFailClosed(contentLabel, path),
     });
   }
 
@@ -682,7 +688,7 @@ export class CfcProjectionAnnotator {
     const linkTextLabel = this.labelAt(path);
     const targetLabel = targetIdentityLabel(target);
     const contentLabel = joinLabels(linkTextLabel, targetLabel);
-    this.setNodeAnnotation(ino, {
+    this.#setNodeAnnotation(ino, {
       ref: this.ref("symlink", path),
       contentLabel,
       metadataLabels: defaultMetadataLabels(contentLabel),
@@ -692,7 +698,7 @@ export class CfcProjectionAnnotator {
         linkTextLabel,
         targetIdentityLabel: targetLabel,
       },
-      incomplete: this.incompleteIfFailClosed(contentLabel, path),
+      incomplete: this.#incompleteIfFailClosed(contentLabel, path),
     });
   }
 
@@ -710,7 +716,7 @@ export class CfcProjectionAnnotator {
       ? cloneLabel(options.schemaLabel)
       : CFC_PUBLIC_LABEL;
     const descriptorLabel = joinLabels(schemaLabel);
-    this.setNodeAnnotation(ino, {
+    this.#setNodeAnnotation(ino, {
       ref: this.ref("callable", path, { cell: options.cellProp }),
       contentLabel: descriptorLabel,
       metadataLabels: defaultMetadataLabels(descriptorLabel),
@@ -721,7 +727,7 @@ export class CfcProjectionAnnotator {
         key: options.cellKey,
         descriptor: {
           contentLabel: descriptorLabel,
-          generation: this.base.generation,
+          generation: this.#base.generation,
         },
         schemaLabel,
         invocation: {
@@ -743,12 +749,12 @@ export class CfcProjectionAnnotator {
     },
   ): void {
     const contentLabel = options.contentLabel ?? failClosedLabel();
-    this.setNodeAnnotation(ino, {
+    this.#setNodeAnnotation(ino, {
       ref: this.ref(options.projection, options.path, options.ref),
       contentLabel,
       namespaceLabel: options.namespaceLabel,
       metadataLabels: defaultMetadataLabels(contentLabel),
-      incomplete: this.incompleteIfFailClosed(contentLabel, options.path),
+      incomplete: this.#incompleteIfFailClosed(contentLabel, options.path),
     });
   }
 
@@ -762,11 +768,11 @@ export class CfcProjectionAnnotator {
       existenceLabel?: CfcLabel;
     } = {},
   ): void {
-    const child = this.tree.getNode(childIno);
+    const child = this.#tree.getNode(childIno);
     if (!child?.cfc) return;
     const labelPath = options.labelPath ?? child.cfc.ref.path;
     const defaultEntryLabel = this.labelAt(labelPath);
-    this.tree.setCfcEntryAnnotation(parentIno, name, {
+    this.#tree.setCfcEntryAnnotation(parentIno, name, {
       name,
       nameDigest: cfcDirectoryEntryNameDigest(name),
       childRef: child.cfc.ref,
@@ -777,22 +783,22 @@ export class CfcProjectionAnnotator {
     });
   }
 
-  private setNodeAnnotation(
+  #setNodeAnnotation(
     ino: bigint,
     annotation: Omit<
       CfcNodeAnnotation,
       "version" | "generation" | "derivedSlots"
     >,
   ): void {
-    this.tree.setCfcAnnotation(ino, {
+    this.#tree.setCfcAnnotation(ino, {
       version: 1,
-      generation: this.base.generation,
+      generation: this.#base.generation,
       derivedSlots: emptyDerivedSlots(),
       ...annotation,
     });
   }
 
-  private incompleteIfFailClosed(
+  #incompleteIfFailClosed(
     label: CfcLabel,
     path: readonly CfcPathSegment[],
   ): CfcIncompleteAnnotation | undefined {

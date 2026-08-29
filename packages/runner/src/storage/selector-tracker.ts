@@ -88,17 +88,17 @@ const selectorRefFor = (selector: SchemaPathSelector): string =>
 
 // This class helps us maintain a client model of our server side subscriptions.
 export class SelectorTracker<T = Result<Unit, Error>> {
-  private refTracker = new MapSetStringToStrings();
-  private selectors = new Map<string, SchemaPathSelector>();
-  private standardizedSelector = new Map<string, SchemaPathSelector>();
-  private selectorPromises = new Map<string, Promise<T>>();
+  #refTracker = new MapSetStringToStrings();
+  #selectors = new Map<string, SchemaPathSelector>();
+  #standardizedSelector = new Map<string, SchemaPathSelector>();
+  #selectorPromises = new Map<string, Promise<T>>();
   readonly #identity: () => ScopeKeyIdentity;
 
   constructor(identity: () => ScopeKeyIdentity) {
     this.#identity = identity;
   }
 
-  private toKey({ id, scope, scopeKey }: BaseMemoryAddress): string {
+  #toKey({ id, scope, scopeKey }: BaseMemoryAddress): string {
     // An address that NAMES its instance (server-execution v2 stage A —
     // an instance-named load) keys by it; else the bound identity
     // resolves the scope name as before.
@@ -114,25 +114,25 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       return;
     }
     const selectorRef = selectorRefFor(selector);
-    this.refTracker.add(this.toKey(address), selectorRef);
-    this.selectors.set(selectorRef, selector);
-    this.standardizedSelector.set(selectorRef, {
+    this.#refTracker.add(this.#toKey(address), selectorRef);
+    this.#selectors.set(selectorRef, selector);
+    this.#standardizedSelector.set(selectorRef, {
       path: selector.path,
       schema: SelectorTracker.getStandardSchema(selector.schema),
     });
-    const promiseKey = `${this.toKey(address)}?${selectorRef}`;
-    this.selectorPromises.set(promiseKey, promise);
+    const promiseKey = `${this.#toKey(address)}?${selectorRef}`;
+    this.#selectorPromises.set(promiseKey, promise);
   }
 
   has(address: BaseMemoryAddress): boolean {
-    return this.refTracker.has(this.toKey(address));
+    return this.#refTracker.has(this.#toKey(address));
   }
 
   hasSelector(
     address: BaseMemoryAddress,
     selector: SchemaPathSelector,
   ): boolean {
-    const selectorRefs = this.refTracker.get(this.toKey(address));
+    const selectorRefs = this.#refTracker.get(this.#toKey(address));
     if (selectorRefs !== undefined) {
       const selectorRef = selectorRefFor(selector);
       return selectorRefs.has(selectorRef);
@@ -144,17 +144,17 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     address: BaseMemoryAddress,
     selector: SchemaPathSelector,
   ): [SchemaPathSelector?, Promise<T>?] {
-    const selectorRefs = this.refTracker.get(this.toKey(address));
+    const selectorRefs = this.#refTracker.get(this.#toKey(address));
     const noMatch: [SchemaPathSelector?, Promise<T>?] = [undefined, undefined];
     if (selectorRefs === undefined) {
       return noMatch;
     }
     const newSelectorRef = selectorRefFor(selector);
     if (selectorRefs.has(newSelectorRef)) {
-      const promiseKey = `${this.toKey(address)}?${newSelectorRef}`;
+      const promiseKey = `${this.#toKey(address)}?${newSelectorRef}`;
       return [
-        this.standardizedSelector.get(newSelectorRef)!,
-        this.selectorPromises.get(promiseKey)!,
+        this.#standardizedSelector.get(newSelectorRef)!,
+        this.#selectorPromises.get(promiseKey)!,
       ];
     }
     const newAddress = { ...address, path: selector.path };
@@ -167,7 +167,7 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     // comparison below doesn't recompute it per tracked selector.
     let newSchemaRefCount: number | undefined;
     for (const selectorRef of selectorRefs) {
-      const existingSelector = this.standardizedSelector.get(selectorRef)!;
+      const existingSelector = this.#standardizedSelector.get(selectorRef)!;
       const existingAddress = { ...address, path: existingSelector.path };
       if (Address.includes(existingAddress, newAddress)) {
         const existingSchema = existingSelector.schema;
@@ -194,8 +194,8 @@ export class SelectorTracker<T = Result<Unit, Error>> {
           SelectorTracker.checkAnyOf(subSchema, newSchemaHash) ||
           newSchema === false
         ) {
-          const promiseKey = `${this.toKey(address)}?${selectorRef}`;
-          return [existingSelector, this.selectorPromises.get(promiseKey)!];
+          const promiseKey = `${this.#toKey(address)}?${selectorRef}`;
+          return [existingSelector, this.#selectorPromises.get(promiseKey)!];
         } else {
           const sortedSubSchemaObj = isObjectOrArray(sortedSubSchema)
             ? sortedSubSchema
@@ -211,8 +211,11 @@ export class SelectorTracker<T = Result<Unit, Error>> {
               noDefsStandardHash(sortedSubSchemaObj) ===
                 noDefsStandardHash(newSchemaObj)
             ) {
-              const promiseKey = `${this.toKey(address)}?${selectorRef}`;
-              return [existingSelector, this.selectorPromises.get(promiseKey)!];
+              const promiseKey = `${this.#toKey(address)}?${selectorRef}`;
+              return [
+                existingSelector,
+                this.#selectorPromises.get(promiseKey)!,
+              ];
             }
           }
         }
@@ -222,9 +225,9 @@ export class SelectorTracker<T = Result<Unit, Error>> {
   }
 
   get(address: BaseMemoryAddress): IteratorObject<SchemaPathSelector> {
-    const selectorRefs = this.refTracker.get(this.toKey(address)) ?? [];
+    const selectorRefs = this.#refTracker.get(this.#toKey(address)) ?? [];
     return selectorRefs.values().map((selectorRef) =>
-      this.selectors.get(selectorRef)!
+      this.#selectors.get(selectorRef)!
     );
   }
 
@@ -233,23 +236,23 @@ export class SelectorTracker<T = Result<Unit, Error>> {
     selector: SchemaPathSelector,
   ): Promise<T> | undefined {
     const selectorRef = selectorRefFor(selector);
-    const promiseKey = `${this.toKey(address)}?${selectorRef}`;
-    return this.selectorPromises.get(promiseKey);
+    const promiseKey = `${this.#toKey(address)}?${selectorRef}`;
+    return this.#selectorPromises.get(promiseKey);
   }
 
   delete(address: BaseMemoryAddress, selector: SchemaPathSelector): void {
     const selectorRef = selectorRefFor(selector);
-    this.refTracker.deleteValue(this.toKey(address), selectorRef);
-    const promiseKey = `${this.toKey(address)}?${selectorRef}`;
-    this.selectorPromises.delete(promiseKey);
-    if (![...this.refTracker].some(([, refs]) => refs.has(selectorRef))) {
-      this.selectors.delete(selectorRef);
-      this.standardizedSelector.delete(selectorRef);
+    this.#refTracker.deleteValue(this.#toKey(address), selectorRef);
+    const promiseKey = `${this.#toKey(address)}?${selectorRef}`;
+    this.#selectorPromises.delete(promiseKey);
+    if (![...this.#refTracker].some(([, refs]) => refs.has(selectorRef))) {
+      this.#selectors.delete(selectorRef);
+      this.#standardizedSelector.delete(selectorRef);
     }
   }
 
   getAllPromises(): Iterable<Promise<T>> {
-    return this.selectorPromises.values();
+    return this.#selectorPromises.values();
   }
 
   getAllSubscriptions(): {
@@ -260,10 +263,10 @@ export class SelectorTracker<T = Result<Unit, Error>> {
       address: BaseMemoryAddress;
       selector: SchemaPathSelector;
     }[] = [];
-    for (const [factKey, selectorRefs] of this.refTracker) {
+    for (const [factKey, selectorRefs] of this.#refTracker) {
       const address = fromKey(factKey);
       for (const selectorRef of selectorRefs) {
-        const selector = this.selectors.get(selectorRef);
+        const selector = this.#selectors.get(selectorRef);
         if (selector) {
           subscriptions.push({ address, selector });
         }

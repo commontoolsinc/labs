@@ -4370,13 +4370,16 @@ describe("SchemaObjectTraverser slow-traverse reporting", () => {
   // what `readStore` is asserted on.
   class ClockAdvancingStore extends Map<string, Revision<State>> {
     advanced = false;
-    constructor(private readonly onFirstRead: () => void) {
+    readonly #onFirstRead: () => void;
+
+    constructor(onFirstRead: () => void) {
       super();
+      this.#onFirstRead = onFirstRead;
     }
     override get(key: string): Revision<State> | undefined {
       if (!this.advanced) {
         this.advanced = true;
-        this.onFirstRead();
+        this.#onFirstRead();
       }
       return super.get(key);
     }

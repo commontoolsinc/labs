@@ -26,7 +26,8 @@ import {
   MutableFabricContainerValueLayer,
   MutableFabricPlainObjectLayer,
 } from "./interface.ts";
-import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
+import { VALUE_TAGS } from "./VALUE_TAGS.ts";
+import { tagFromNativeValue } from "./native-type-tags.ts";
 import { deepFreeze, isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 import {
   isFabricContainerValue,
@@ -205,16 +206,16 @@ export function cloneHelper(
   switch (tagFromNativeValue(value)) {
     // Inherently immutable types -- frozenness is irrelevant, no cloning
     // needed regardless of force.
-    case NATIVE_TAGS.Primitive:
-    case NATIVE_TAGS.EpochNsec:
-    case NATIVE_TAGS.EpochDay:
-    case NATIVE_TAGS.FabricBytes:
-    case NATIVE_TAGS.FabricKeyPair:
-    case NATIVE_TAGS.FabricRegExp:
-    case NATIVE_TAGS.Hash:
+    case VALUE_TAGS.Primitive:
+    case VALUE_TAGS.EpochNsec:
+    case VALUE_TAGS.EpochDay:
+    case VALUE_TAGS.FabricBytes:
+    case VALUE_TAGS.FabricKeyPair:
+    case VALUE_TAGS.FabricRegExp:
+    case VALUE_TAGS.Hash:
       return value;
 
-    case NATIVE_TAGS.FabricInstance: {
+    case VALUE_TAGS.FabricInstance: {
       // Identity optimization: already-correct frozenness needs no clone.
       if (canReturnAsIs(value)) {
         return value;
@@ -225,7 +226,7 @@ export function cloneHelper(
       }
     }
 
-    case NATIVE_TAGS.Array: {
+    case VALUE_TAGS.Array: {
       if (canReturnAsIs(value)) return value;
       const arr = value as FabricValue[];
       if (deep) seen = trackForCircularity(arr, seen);
@@ -242,7 +243,7 @@ export function cloneHelper(
       return copy;
     }
 
-    case NATIVE_TAGS.Object: {
+    case VALUE_TAGS.Object: {
       if (canReturnAsIs(value)) return value;
       const obj = value as object;
       if (deep) seen = trackForCircularity(obj, seen);

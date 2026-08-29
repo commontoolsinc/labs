@@ -35,24 +35,24 @@ type PendingCommand = {
 
 export class InspectorProtocolClient extends EventTarget {
   readonly Console = {
-    enable: () => this.command("Console.enable"),
+    enable: () => this.#command("Console.enable"),
   };
 
   readonly Debugger = {
     enable: (params: Record<string, unknown>) =>
-      this.command("Debugger.enable", params),
+      this.#command("Debugger.enable", params),
   };
 
   readonly Profiler = {
-    enable: () => this.command("Profiler.enable"),
+    enable: () => this.#command("Profiler.enable"),
     setSamplingInterval: (params: { interval: number }) =>
-      this.command("Profiler.setSamplingInterval", params),
-    start: () => this.command<void>("Profiler.start"),
-    stop: () => this.command<{ profile: unknown }>("Profiler.stop"),
+      this.#command("Profiler.setSamplingInterval", params),
+    start: () => this.#command<void>("Profiler.start"),
+    stop: () => this.#command<{ profile: unknown }>("Profiler.stop"),
   };
 
   readonly Runtime = {
-    enable: () => this.command("Runtime.enable"),
+    enable: () => this.#command("Runtime.enable"),
   };
 
   readonly #socket: WebSocket;
@@ -94,7 +94,7 @@ export class InspectorProtocolClient extends EventTarget {
     await closed.promise;
   }
 
-  private command<T = unknown>(
+  #command<T = unknown>(
     method: string,
     params: Record<string, unknown> = {},
   ): Promise<T> {
