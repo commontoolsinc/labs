@@ -1043,7 +1043,7 @@ type RunnerRunOptions = {
 // Validation accepts it anywhere: the slot HAS a value — we just cannot read
 // it right now — so its schema check is deferred to instantiation-time
 // reactive reads, exactly like the running pattern's own reads of the same
-// slot. See validateArgument.
+// slot. See `#validateArgument`.
 const UNRESOLVED_LINK_PLACEHOLDER = Object.freeze({
   "unresolved cell link": true,
 });
@@ -2036,7 +2036,7 @@ export class Runner {
    * Mirrors the re-stage branch's deferrals deliberately, so the two paths
    * cannot disagree about what counts as valid: an argument doc that reads
    * nothing right now is skipped (CT-1917 — a nested piece's argument lives in
-   * its host's doc, and "not synced" is not "invalid"), and validateArgument
+   * its host's doc, and "not synced" is not "invalid"), and `#validateArgument`
    * itself defers any slot whose stored link chain cannot be read right now.
    */
   #validateStoredArgument<R>(
