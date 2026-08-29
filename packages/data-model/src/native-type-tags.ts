@@ -4,13 +4,20 @@
  * tags a wire format writes, which say what it became.
  *
  * The question is harder than an `instanceof` because the answer must not be
- * forgeable, and must still be reachable for a value that did not come from
- * here. A class is read off the prototype rather than off the value, since an
- * own `constructor` property is ordinary data that would otherwise let a plain
- * record present itself as an `Error`. A value from another realm, or one
- * whose prototype has been severed, has to be recognized regardless, which is
+ * forgeable. A class is read off the prototype rather than off the value,
+ * since an own `constructor` property is ordinary data that would otherwise
+ * let a plain record present itself as an `Error`.
+ *
+ * Two kinds of value are recognized with no reachable class at all, which is
  * why the constructor switch has fallbacks beneath it rather than standing
- * alone.
+ * alone: an array, by `Array.isArray()`, and an error, by `Error.isError()`.
+ * Each tests an internal slot rather than a prototype, so each holds across
+ * realms and through a severed prototype.
+ *
+ * Nothing else does. A `Date`, `Map`, `Set`, `RegExp` or `Uint8Array` is
+ * recognized by constructor identity, which is a per-realm question, and one
+ * of those from another realm is reported as unrecognized. Values from another
+ * realm are outside what this is asked about.
  */
 
 import { constructorOfPrototype } from "@commonfabric/utils/objects";
