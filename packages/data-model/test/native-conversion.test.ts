@@ -63,8 +63,14 @@ import {
   nativeFromFabricValue,
   shallowCleanArray,
   shallowCleanPlainObject,
+  shallowFabricFromNativeObjectElseUndefined,
   shallowFabricFromNativeValue,
 } from "@/native-conversion.ts";
+import { assertValidFabricValueLayer } from "@/type-check.ts";
+import { LAYER_CORPUS, WeirdError } from "./fabric-value-corpus.ts";
+
+/** A concrete fabric class, `toBeInstanceOf()` wanting a constructor. */
+type FabricClass = new (...args: never[]) => object;
 
 /**
  * Helper for the round-trip tests, which encodes a value to fabric form via
@@ -539,6 +545,75 @@ describe("native-conversion", () => {
       expect(Object.isFrozen(peShared)).toBe(true);
     });
   });
+  describe("shallowFabricFromNativeObjectElseUndefined()", () => {
+    // The `FabricNativeObject`s that have a fabric form, each with the class
+    // it mints.
+    const MINTED: ReadonlyArray<[string, unknown, FabricClass]> = [
+      ["a `Date`", new Date(1234), FabricEpochNsec],
+      ["a `Uint8Array`", new Uint8Array([1, 2, 3]), FabricBytes],
+      ["a `RegExp`", /abc/gi, FabricRegExp],
+      ["an `Error`", new Error("boom"), FabricError],
+      [
+        "a custom `Error` subclass instance",
+        new WeirdError("weird"),
+        FabricError,
+      ],
+      [
+        "an `Error` whose prototype was severed",
+        Object.setPrototypeOf(new Error("severed"), null),
+        FabricError,
+      ],
+    ];
+
+    describe("given a `FabricNativeObject` with a fabric form", () => {
+      for (const [label, value, cls] of MINTED) {
+        it(`returns a frozen \`${cls.name}\`, not the input, for ${label}`, () => {
+          const result = shallowFabricFromNativeObjectElseUndefined(value);
+          expect(result).toBeInstanceOf(cls);
+          expect(result).not.toBe(value);
+          expect(Object.isFrozen(result)).toBe(true);
+        });
+      }
+
+      it("throws for a `Date` carrying extra enumerable properties", () => {
+        const date = Object.assign(new Date(0), { extra: 1 });
+        expect(() => shallowFabricFromNativeObjectElseUndefined(date)).toThrow(
+          "Not representable as a `FabricValue`: `Date` with extra " +
+            "enumerable properties",
+        );
+      });
+    });
+
+    describe("given a value with nothing to mint", () => {
+      const mints = new Set(MINTED.map(([label]) => label));
+      for (const [label, value] of LAYER_CORPUS) {
+        if (mints.has(label)) continue;
+        it(`returns \`undefined\` for ${label}`, () => {
+          expect(shallowFabricFromNativeObjectElseUndefined(value)).toBe(
+            undefined,
+          );
+        });
+      }
+    });
+
+    // The `undefined` is not a verdict on the value: it reports that there was
+    // nothing to mint, which is as true of a `Map` -- a `FabricNativeObject`
+    // whose fabric form has yet to be built -- as of a function. What protects
+    // a caller is the pair, so this pins the pair rather than either half. A
+    // `Map` that reached a walk would be rebuilt from its (empty) entries as
+    // a bare `{}`.
+    it("leaves a `Map` and a `Set` to the vet, which refuses them", () => {
+      for (const value of [new Map(), new Set()]) {
+        expect(shallowFabricFromNativeObjectElseUndefined(value)).toBe(
+          undefined,
+        );
+        expect(() => assertValidFabricValueLayer(value)).toThrow(
+          "a `FabricNativeObject`, so conversion is what decides it",
+        );
+      }
+    });
+  });
+
   describe("shallowFabricFromNativeValue()", () => {
     describe("passes through primitives", () => {
       it("passes through booleans", () => {

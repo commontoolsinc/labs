@@ -3,6 +3,13 @@
  * directions, along with the predicate saying in advance whether a value can
  * cross it.
  *
+ * The inbound work splits along one question -- does conversion produce a new
+ * value? Minting a native object's fabric form is one function, and vetting a
+ * value that needs no minting is the other, in `type-check.ts`. The shallow
+ * conversion is those two asked in that order, plus a frozenness adjustment,
+ * so that a caller can ask either without having to work the answer back out
+ * of what it was handed.
+ *
  * Inbound, anything not representable is refused rather than approximated: a
  * `Map`, a class instance, an unrecognized type all throw, on the principle
  * that a wrong value is worse than none. A value that is already a deep-frozen
@@ -16,7 +23,6 @@
  * asked for.
  */
 
-import { backtickQuote } from "@commonfabric/utils/markdown";
 import {
   isInstance,
   isObjectOrArray,
@@ -42,13 +48,16 @@ import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { VALUE_TAGS } from "./VALUE_TAGS.ts";
 import { tagFromNativeValue } from "./native-type-tags.ts";
-import { isValidFabricNativeObject, refusedClassNameOf } from "./type-check.ts";
+import {
+  assertValidFabricValueLayer,
+  isValidFabricNativeObject,
+} from "./type-check.ts";
 import { cloneHelper } from "./value-clone.ts";
 import { isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 
 /**
- * Helper for `shallowFabricFromNativeValue()`, which rejects native objects
- * with extra enumerable properties.
+ * Helper for `shallowFabricFromNativeObjectElseUndefined()`, which rejects
+ * native objects with extra enumerable properties.
  */
 function rejectExtraProperties(value: object, typeName: string): void {
   if (Object.keys(value).length > 0) {
@@ -183,6 +192,64 @@ export function errorClassFromType(type: string): ErrorConstructor {
 }
 
 /**
+ * Returns the freshly-minted fabric form of a `Date`, `Uint8Array`, `RegExp`
+ * or `Error`, and `undefined` for every other value. The result is always
+ * frozen and always new: the whole of what this decides is whether conversion
+ * produces a value, and for these four it does. An inert array or plain object
+ * is already a fabric layer and mints nothing; so, at the other end, does a
+ * value with no fabric representation at all.
+ *
+ * **The `undefined` says nothing about whether the value is usable.** It
+ * reports only that there was nothing to mint, which is as true of a `Map` --
+ * a `FabricNativeObject` whose fabric form has yet to be built -- as it is of
+ * a function. Membership and convertibility are separate questions, and this
+ * answers neither: `assertValidFabricValueLayer()` decides what a value that
+ * minted nothing may do next, and the pair is meant to be asked in that order.
+ * A caller that skips the vet walks straight into a container it has not
+ * vetted, and a `Map` rebuilt from its (empty) entries is a bare `{}`.
+ *
+ * @param value The value to convert.
+ */
+export function shallowFabricFromNativeObjectElseUndefined(
+  value: unknown,
+): FabricValueLayer | undefined {
+  switch (tagFromNativeValue(value)) {
+    case VALUE_TAGS.Error: {
+      // Shallow conversion, so the native `Error` is wrapped without recursing
+      // into its internals (`cause`, custom properties): the result is only a
+      // _shallow_ `FabricError`, whose `.cause` may still be a raw `Error`. A
+      // caller needing a proper (fully-`FabricValue`) one uses the deep
+      // `fabricFromNativeValue()`; the cell write paths do so at the points
+      // where they treat a `FabricError` as an atomic leaf.
+      return Object.freeze(FabricError.fromNativeError(value as Error));
+    }
+
+    case VALUE_TAGS.Date: {
+      // A `Date` becomes a `FabricEpochNsec` (nanoseconds from the epoch).
+      // Extra enumerable properties cause rejection ("death before
+      // confusion").
+      rejectExtraProperties(value as object, "Date");
+      const nsec = BigInt((value as Date).getTime()) * 1_000_000n;
+      return new FabricEpochNsec(nsec);
+    }
+
+    case VALUE_TAGS.RegExp: {
+      // `FabricRegExp` rejects extra enumerable properties of its own accord.
+      return new FabricRegExp(value as RegExp);
+    }
+
+    case VALUE_TAGS.Uint8Array: {
+      // A native `Uint8Array` becomes a `FabricBytes`.
+      return new FabricBytes(value as Uint8Array);
+    }
+
+    default: {
+      return undefined;
+    }
+  }
+}
+
+/**
  * Performs shallow conversion from JS values to `FabricValue`. If the value is
  * already a frozen `FabricValue`, returns it as-is (identity optimization).
  *
@@ -195,175 +262,27 @@ export function shallowFabricFromNativeValue(
   value: unknown,
   freeze = true,
 ): FabricValueLayer {
-  // Top-level type dispatch via `tagFromNativeValue()` -- O(1) constructor
-  // switch with fallbacks for exotic `Error` subclasses, cross-realm arrays,
-  // and null-prototype objects. Returns `Primitive` for non-objects.
-  const tag = tagFromNativeValue(value);
+  const minted = shallowFabricFromNativeObjectElseUndefined(value);
 
-  switch (tag) {
-    // `FabricPrimitive`s are direct `FabricValue` members -- always frozen,
-    // pass through as-is regardless of the `freeze` argument.
-    case VALUE_TAGS.EpochNsec:
-    case VALUE_TAGS.EpochDay:
-    case VALUE_TAGS.FabricBytes:
-    case VALUE_TAGS.FabricKeyPair:
-    case VALUE_TAGS.FabricRegExp:
-    case VALUE_TAGS.Hash:
-      return value as FabricValueLayer;
-
-    case VALUE_TAGS.Error: {
-      // Shallow conversion: wrap the native `Error` without recursing into its
-      // internals (`cause`, custom properties). The result is therefore only a
-      // *shallow* `FabricError` -- its `.cause` may still be a raw `Error`.
-      // Callers that need a proper (fully-`FabricValue`) `FabricError` must use
-      // the deep `fabricFromNativeValue()` instead; the cell write paths do so
-      // at the points where they treat a `FabricError` as an atomic leaf.
-      const wrapped = FabricError.fromNativeError(value as Error);
-      if (freeze) Object.freeze(wrapped);
-      return wrapped;
-    }
-
-    case VALUE_TAGS.Date: {
-      // `Date` instances are converted to `FabricEpochNsec` (nanoseconds from
-      // epoch). Extra enumerable properties cause rejection ("death before
-      // confusion").
-      rejectExtraProperties(value as object, "Date");
-      const nsec = BigInt((value as Date).getTime()) * 1_000_000n;
-      const wrapped = new FabricEpochNsec(nsec);
-      if (freeze) Object.freeze(wrapped);
-      return wrapped;
-    }
-
-    case VALUE_TAGS.RegExp: {
-      // `RegExp` instances are converted to `FabricRegExp`, which rejects extra
-      // enumerable properties and is frozen at construction.
-      return new FabricRegExp(value as RegExp);
-    }
-
-    case VALUE_TAGS.Uint8Array: {
-      // Native `Uint8Array` instances are wrapped in `FabricBytes`.
-      // `FabricBytes` is frozen at construction (`FabricPrimitive` contract).
-      return new FabricBytes(value as Uint8Array);
-    }
-
-    case VALUE_TAGS.Array: {
-      // An array in this system is _inert_: a direct `Array` instance, which
-      // may only carry numeric index properties, each a data property. A named
-      // or symbol-keyed property has no fabric representation, and an
-      // accessor-backed index is live code rather than inert data -- as is the
-      // prototype of an `Array` subclass instance, which can make iteration
-      // yield differently than the indices say. Reject any of them outright
-      // rather than silently dropping or flattening ("death before
-      // confusion").
-      if (!isInertArray(value)) {
-        throw new Error(
-          "Not representable as a `FabricValue`: array that is not an " +
-            "inert array",
-        );
-      }
-      // Delegate frozenness handling to `cloneHelper()`.
-      return cloneHelper(
-        value as FabricValue,
-        freeze,
-        false,
-        false,
-        null,
-      );
-    }
-
-    case VALUE_TAGS.Object: {
-      // A plain object in this system is _inert_: `FabricPlainObject` is keyed
-      // by `string`, so a symbol key has no fabric representation, and neither
-      // does a non-enumerable string key; an accessor-backed property is live
-      // code rather than inert data. Reject any of them outright rather than
-      // dropping or flattening it on the way through ("death before
-      // confusion"), matching how an array's non-index properties are treated.
-      if (!isInertPlainObject(value)) {
-        throw new Error(
-          "Not representable as a `FabricValue`: object that is not an " +
-            "inert plain object",
-        );
-      }
-      // A restriction of this implementation rather than of the model, so it
-      // says so rather than blaming inertness: such an object _is_ inert, and
-      // a runtime that does not route property assignment through a prototype
-      // chain reserves no names at all.
-      const unsafeKey = unsafeObjectKeyIn(value as object);
-      if (unsafeKey !== undefined) {
-        throw new Error(
-          "Not representable as a `FabricValue`: object with a property name " +
-            `this runtime reserves (\`${unsafeKey}\`)`,
-        );
-      }
-      // Plain objects: delegate frozenness handling to `cloneHelper()`.
-      return cloneHelper(
-        value as FabricValue,
-        freeze,
-        false,
-        false,
-        null,
-      );
-    }
-
-    case VALUE_TAGS.FabricInstance: {
-      // `FabricInstance` values (`FabricError`, `UnknownValue`, etc.) are
-      // already valid `FabricValue` members. Delegate frozenness handling to
-      // `cloneHelper()`.
-      return cloneHelper(
-        value as FabricValue,
-        freeze,
-        false,
-        false,
-        null,
-      );
-    }
-
-    // deno-lint-ignore no-fallthrough
-    case VALUE_TAGS.Primitive: {
-      // Primitives: `null`, `undefined`, `boolean`, `string`, `number`,
-      // `bigint`, `symbol`, `function`. `null` is the only value here with
-      // `typeof "object"` (actual objects are routed to other tags by
-      // `tagFromNativeValue()`).
-      switch (typeof value) {
-        case "object":
-          // Only `null` reaches here (`typeof null === "object"`).
-          return null;
-        case "undefined":
-        case "boolean":
-        case "string":
-        case "number":
-        case "bigint":
-          return value;
-        case "function":
-          throw new Error(
-            "Not representable as a `FabricValue`: function",
-          );
-        case "symbol":
-          // Registry-interned symbols are valid `FabricValue`s; unique ones
-          // have no portable representation and are rejected.
-          if (Symbol.keyFor(value) === undefined) {
-            throw new Error(
-              "Not representable as a `FabricValue`: unique (uninterned) " +
-                "symbol",
-            );
-          }
-          return value;
-        default:
-          throw new Error(
-            `Shouldn't happen: Unrecognized type \`${typeof value}\``,
-          );
-      }
-    }
-
-    default:
-      // Unrecognized object types (`Map`, `Set`, class instances, etc.) --
-      // not valid `FabricValue`. Death before confusion!
-      throw new Error(
-        `Not representable as a \`FabricValue\`: ${
-          backtickQuote(refusedClassNameOf(value as object))
-        } (not a recognized fabric type)`,
-      );
+  if (minted !== undefined) {
+    // A mint is born frozen, so a caller that asked for a mutable result gets
+    // a thawed copy. Only a `FabricError` is thawable at all: a
+    // `FabricPrimitive` is frozen by its own contract and comes back as
+    // itself.
+    return freeze
+      ? minted
+      : cloneHelper(minted as FabricValue, false, false, false, null);
   }
+
+  // Nothing was minted, so the value has to be usable as it stands; this
+  // refuses it if it is not.
+  assertValidFabricValueLayer(value);
+
+  // Delegate frozenness handling to `cloneHelper()`, including its identity
+  // optimization, which hands back an already-correctly-frozen value
+  // untouched. A primitive and a `FabricPrimitive` alike come back as
+  // themselves, both being immutable whatever was asked for.
+  return cloneHelper(value as FabricValue, freeze, false, false, null);
 }
 
 // Sentinel value used to indicate an object is currently being processed
