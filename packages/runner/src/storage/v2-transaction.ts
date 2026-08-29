@@ -1202,7 +1202,7 @@ export class V2StorageTransaction implements IStorageTransaction {
   // op, fatal to a remove-by-value, and the builders are what tell them apart.
   poisonMergeableOp(address: IMemorySpaceAddress): void {
     // Only ever called right after a write on this transaction, so the tx is
-    // editable — no `#editable()` re-check. The write also made the address's
+    // editable — no editable() re-check. The write also made the address's
     // document writable, but a caller could resolve to a different (read-only)
     // slot, so a non-writable target is a real no-op.
     const doc = this.#writableMergeableTarget(address);

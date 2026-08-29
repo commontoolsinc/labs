@@ -3263,7 +3263,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
    *
    * An admitted commit touched this space's ACL document, so the
    * AUTHORIZATION VERDICT that terminated this replica's session may have
-   * changed. Record it; `#sessionHandle()` consumes it on the next load.
+   * changed. Record it; `sessionHandle()` consumes it on the next load.
    *
    * Why a latch instead of tearing the session down right here: the memory
    * server emits the admitted-commit notice BEFORE it runs
@@ -3276,7 +3276,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
    * dependent on it.
    *
    * Consumption is event-driven, not timed: the next load attempt calls
-   * `#sessionHandle()`, and the serving loop already re-attempts a deferred
+   * `sessionHandle()`, and the serving loop already re-attempts a deferred
    * event's load every drain (see the scheduler's `failHeadEventLoadPark`
    * and the SpaceServer's deferral backstop), so the heal arrives on the
    * cadence the deferral machinery already runs at.
@@ -3288,13 +3288,13 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
 
   /**
    * THE SESSION REMOUNT itself. Drop a memoized session that an ACL verdict
-   * terminated, so the next `#sessionHandle()` opens a fresh one.
+   * terminated, so the next `sessionHandle()` opens a fresh one.
    *
    * A revoked (or permanently denied) space session is TERMINAL for that
    * session object: `terminateSession` (memory/v2/client.ts) closes it,
    * clears its watch specs, and stores the verdict in `closeError`, which
    * `#assertOpen()` then rethrows for every later call. Nothing on the read
-   * or commit path ever dropped the memoized mount — `#sessionHandle()`
+   * or commit path ever dropped the memoized mount — `sessionHandle()`
    * clears it only in `close()`/`closeNow()` — so every subsequent pull
    * reused the same dead session and the space read `unauthorized` forever.
    * `storage/rejection.ts`'s `SessionError` note named this gap when it was
@@ -3321,7 +3321,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
    *     `{user: OWNER}` de-authorized it by design. The re-open binds the
    *     user, who is OWNER, and is admitted.
    *   - a GENUINE de-authorization (the user removed, ownership moved): the
-   *     re-open is DENIED at `session.open`. `#sessionHandle()`'s catch drops
+   *     re-open is DENIED at `session.open`. `sessionHandle()`'s catch drops
    *     the failed handle, the load keeps failing, and the served event
    *     keeps deferring — the ratified wedge, which OW54's give-up arm
    *     covers. Fail-closed, and loud.
@@ -4093,7 +4093,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
       return { ok: {} };
     }
     // The owed session remount, consumed BEFORE the watch-selector tracker
-    // is consulted below — not only at `#sessionHandle()`. A selector the
+    // is consulted below — not only at `sessionHandle()`. A selector the
     // tracker already covers is answered from it and never reaches a
     // session at all, so consuming only at the mount point leaves precisely
     // the docs the replica had successfully read being served out of a
@@ -7560,7 +7560,7 @@ const toRejectedError = (
   //  - `SessionError`: the commit was routed to a session the server no longer
   //    knows. Classified TERMINAL by the retry allow-list — not because the
   //    commit was evaluated (it was not), but because nothing on the retry path
-  //    remounts the session: `#sessionHandle()` memoizes the mount and clears it
+  //    remounts the session: `sessionHandle()` memoizes the mount and clears it
   //    on close, and (since 2026-08-26) when the space's ACL CHANGES — which a
   //    commit retry is not. The name still has to survive normalization here,
   //    or the caller sees a generic TransactionError instead of the real cause.

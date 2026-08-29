@@ -198,7 +198,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
    * overtake earlier asynchronous compression.
    */
   async send(payload: string): Promise<void> {
-    const opening = this.open();
+    const opening = this.#open();
     const compressionEnabled = this.#sendCompressionEnabled;
     const send = this.#sending.then(async () => {
       const socket = await opening;
@@ -239,11 +239,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
     await closed;
   }
 
-  /**
-   * TypeScript-private rather than a `#` name:
-   * `test/scheduler-event-load-parking.test.ts` drives this member directly.
-   */
-  private async open(): Promise<WebSocket> {
+  async #open(): Promise<WebSocket> {
     if (this.#socket?.readyState === WebSocket.OPEN) {
       return this.#socket;
     }
@@ -373,7 +369,7 @@ export class WebSocketTransport implements MemoryClient.Transport {
     const response = Promise.withResolvers<boolean>();
     void response.promise.catch(() => {});
     this.#compressionRequests.set(requestId, response);
-    const opening = this.open();
+    const opening = this.#open();
     const send = this.#sending.then(async () => {
       const socket = await opening;
       if (this.#socket !== socket) {

@@ -8,7 +8,7 @@
 // authorizes that pre-genesis session BY DESIGN — the service principal
 // holds no READ under the landed ACL, and there is no `"*"` grant.
 //
-// Nothing then re-established it. `SpaceReplica.#sessionHandle()`
+// Nothing then re-established it. `SpaceReplica.sessionHandle()`
 // memoizes the mount and drops it only in close(), so every later
 // cross-space read into that space reused the dead session and failed
 // `ConnectionError: memory session revoked: unauthorized`, forever. In
