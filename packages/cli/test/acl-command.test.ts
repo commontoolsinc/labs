@@ -9,8 +9,9 @@ function errorText(stderr: string[]): string {
 describe("cf acl", () => {
   it("reads the space options its environment declarations map", async () => {
     // `--api-url` and `--identity` reach the option parser through the
-    // command's `CF_API_URL` and `CF_IDENTITY` declarations, so the only
-    // option left unset is the one with no environment fallback.
+    // command's `CF_API_URL` and `CF_IDENTITY` declarations. `--space` has a
+    // `CF_SPACE` declaration too, and this call sets neither it nor the flag,
+    // so the space is the one option left unsupplied.
     const { code, stderr } = await cf("acl ls", {
       env: {
         CF_API_URL: "https://toolshed.test",

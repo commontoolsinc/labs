@@ -113,6 +113,7 @@ import {
   type UnreportedRunDeps,
 } from "../lib/unreported-run.ts";
 import { absPath } from "../lib/utils.ts";
+import { noteWroteTo } from "../lib/write-receipt.ts";
 
 // Hint system: print helpful next-step suggestions after operations
 let quietMode = false;
@@ -1439,7 +1440,8 @@ const PIECE_REGISTRY_LINK_EXAMPLE = [
 function pieceEnvStatus(): string {
   const identity = Deno.env.get("CF_IDENTITY");
   const apiUrl = Deno.env.get("CF_API_URL");
-  if (!identity && !apiUrl) return "";
+  const space = Deno.env.get("CF_SPACE");
+  if (!identity && !apiUrl && !space) return "";
   const lines: string[] = ["", "ENVIRONMENT:"];
   if (identity) {
     lines.push(
@@ -1449,6 +1451,11 @@ function pieceEnvStatus(): string {
   if (apiUrl) {
     lines.push(
       `  CF_API_URL  = ${apiUrl} (set, no need to pass --api-url)`,
+    );
+  }
+  if (space) {
+    lines.push(
+      `  CF_SPACE    = ${space} (set, no need to pass --space)`,
     );
   }
   return lines.join("\n");
@@ -1497,6 +1504,7 @@ export function targetOptions(
   option("-a,--api-url <url:string>", "URL of the fabric server instance.");
   env("CF_IDENTITY=<path:string>", "Path to an identity keyfile.");
   option("-i,--identity <path:string>", "Path to an identity keyfile.");
+  env("CF_SPACE=<space:string>", "The space name or DID.");
   option("-s,--space <space:string>", "The space name or DID");
   return cmd;
 }
@@ -3109,6 +3117,14 @@ export interface PieceCLIOptions {
   apiUrl?: string;
   identity?: string;
   space?: string;
+  /**
+   * Whether `space` was written on the command line rather than supplied by
+   * `CF_SPACE`. Cliffy merges an environment value into the option and keeps
+   * no record of which it was, and only an explicit one refuses `--url`.
+   * Defaults to reading the process arguments; a caller driving this function
+   * directly states it.
+   */
+  explicitSpace?: boolean;
   url?: string;
   mainExport?: string;
   repository?: string;
@@ -3751,6 +3767,12 @@ export async function repairFromCommand(
   // As the retarget does: the guard stays armed over the writing of what the
   // engine returned, and says that is where the process ended.
   progress.phase = "reporting";
+  // Before any of the reporting below, which writes files and renders: a
+  // throw there must not swallow the receipt for writes that already landed.
+  // `applied` is the engine's own count of rows it wrote, which settles what
+  // a row's verdict alone cannot — a failed row may have failed at the write,
+  // after it, or before reaching one.
+  if (report.applied > 0) noteWroteTo(spaceConfig.space);
   const print = deps.render ?? render;
   const printHint = deps.printHint ?? hint;
   if (options.json) {
@@ -3992,6 +4014,7 @@ export async function retargetFromCommand(
     report,
     {
       verb: "Retarget",
+      space: spaceConfig.space,
       ...(options.apply === true ? { apply: true } : {}),
       ...(options.out === undefined ? {} : { out: options.out }),
       ...(options.json === true ? { json: true } : {}),
@@ -4028,12 +4051,22 @@ function countApplyRow(progress: ApplyRunProgress, row: ApplyRow): void {
  */
 async function reportApplyRun(
   report: ApplyReport,
-  run: { verb: string; apply?: boolean; out?: string; json?: boolean },
+  run: {
+    verb: string;
+    apply?: boolean;
+    out?: string;
+    json?: boolean;
+    space?: string;
+  },
   deps: ApplyCommandDependencies,
   guard?: RunReportGuard,
 ): Promise<void> {
   const print = deps.render ?? render;
   const printHint = deps.printHint ?? hint;
+  // A dry run classifies and writes nothing, so the receipt follows the
+  // applied count rather than the flag: an `--apply` over a plan whose rows
+  // have all landed already writes nothing either.
+  if (run.space !== undefined && report.applied > 0) noteWroteTo(run.space);
   // The canonical FabricValue encoding, as the repair's report uses: one
   // encoding for one document, whichever destination it goes to.
   const encoded = jsonFromFabricValue(report as unknown as FabricValue);
@@ -4236,6 +4269,7 @@ export async function rollbackFromCommand(
     report,
     {
       verb: "Rollback",
+      space: spaceConfig.space,
       ...(options.apply === true ? { apply: true } : {}),
       ...(options.out === undefined ? {} : { out: options.out }),
       ...(options.json === true ? { json: true } : {}),
@@ -4306,6 +4340,9 @@ export async function restoreFromCommand(
     ...(options.revision === undefined ? {} : { revisionId: options.revision }),
     ...(options.apply === true ? { apply: true } : {}),
   });
+  // Before the reporting below, which renders and can exit: a restore that
+  // landed is named whatever happens to the output describing it.
+  if (outcome.restored) noteWroteTo(pieceConfig.space);
   if (options.json) {
     print(outcome, { json: true });
   } else if (options.revision === undefined) {
@@ -4563,8 +4600,10 @@ export function parsePieceOptions(
  * path's first segment are indistinguishable.
  *
  * A caller naming the target twice — `--piece` beside a positional address —
- * is refused rather than resolved, the same rule `--space` beside `--url`
- * follows. So is a second positional behind a path: only an address earns a
+ * is refused rather than resolved, the same rule an explicitly written
+ * `--space` beside `--url` follows. A space that arrived from `CF_SPACE` is
+ * not a second naming and does not refuse; `--url` supplies the space itself.
+ * So is a second positional behind a path refused: only an address earns a
  * path after it.
  */
 export function readTargetPositionals(
@@ -4627,13 +4666,36 @@ export function readCallTarget(
   return { piece: callableName, callableName: nextCallable, tail: rest };
 }
 
+/**
+ * Was the space written on the command line? `explicit` answers for a caller
+ * driving {@link parseSpaceOptions} directly; otherwise the process arguments
+ * do, which is where the distinction actually lives once cliffy has merged the
+ * environment into the option.
+ */
+export function spaceWasWritten(
+  explicit?: boolean,
+  argv: readonly string[] = Deno.args,
+): boolean {
+  if (explicit !== undefined) return explicit;
+  // Only the command's own section counts. `--` hands everything after it to
+  // a callable, where `--space` is that verb's argument and says nothing
+  // about which space the command targets.
+  const end = argv.indexOf("--");
+  const own = end === -1 ? argv : argv.slice(0, end);
+  return own.some((arg) =>
+    arg === "--space" || arg === "-s" || arg.startsWith("--space=")
+  );
+}
+
 // With args and env vars shadowing each other, and multiple
 // ways of defining service components, we cannot make the options
 // "required" with cliffy. Ensure that all required values are
 // available after parsing both args and env vars.
 //
-// The space can arrive three ways: `--url` embeds it, `--space` names it, and
-// a canonical `--piece` reference may carry it as a `/@did:.../` prefix. A
+// The space can arrive four ways: `--url` embeds it, `--space` names it,
+// `CF_SPACE` supplies it when the flag is absent, and a canonical `--piece`
+// reference may carry it as a `/@did:.../` prefix. Only a written `--space`
+// refuses `--url`; an ambient one yields to the space the URL carries. A
 // reference's space fills an absent `--space`; a present one must agree —
 // checked at parse time when the target space is a DID, and at session open
 // through `validateEmbeddedSpaces` when it is a name still to be resolved.
@@ -4643,7 +4705,18 @@ export function readCallTarget(
 export function parseSpaceOptions(
   input: PieceCLIOptions,
 ): SpaceConfig {
-  if (input.url && input.space) {
+  // The refusal is about two explicit spellings of one target, not about an
+  // ambient default a more specific spelling overrides: a caller who exports
+  // `CF_SPACE` for a session must still be able to paste a URL. `--url`
+  // supplies the space itself below, so the ambient value is replaced rather
+  // than reconciled.
+  //
+  // Cliffy merges an environment value into the option and keeps no record of
+  // which it was, so provenance is read off the command line. Comparing the
+  // value against `CF_SPACE` instead would call an explicit `--space` ambient
+  // whenever it happened to name the same space, which is the one case where
+  // a caller stated the target twice and deserves the refusal.
+  if (input.url && input.space && spaceWasWritten(input.explicitSpace)) {
     throw new ValidationError(
       `"--space" cannot be provided when using "--url".`,
       { exitCode: 1 },

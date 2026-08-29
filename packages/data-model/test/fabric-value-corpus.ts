@@ -3,9 +3,11 @@
  *
  * `tagFromNativeValue()` names what a value already is,
  * `isValidFabricNativeObject()` decides a subset of that answer by a narrower
- * route, and `isValidFabricValueLayer()` decides membership -- so each is
- * worth checking against the others rather than only against a hand-picked
- * case. This carries one entry per arm of the dispatch those functions make,
+ * route, `isValidFabricValueLayer()` decides membership, and
+ * `assertValidFabricValueLayer()` answers that last question in the form that
+ * carries a reason, which `shallowFabricFromNativeValue()` is held against
+ * word for word -- so each is worth checking against the others rather than
+ * only against a hand-picked case. This carries one entry per arm of the dispatch those functions make,
  * plus the shapes each arm accepts and refuses; an entry dropped from here is
  * an arm the cross-checks stop reaching.
  */
@@ -20,6 +22,17 @@ import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 
 /** A class with no fabric representation, wanted here by name. */
 export class PlainClass {}
+
+/**
+ * Returns a `PlainClass` instance carrying an own `constructor` property that
+ * names a different class, so that reading the class off the value and reading
+ * it off the prototype give different answers.
+ */
+function forgedConstructorInstance(): unknown {
+  const instance = new PlainClass();
+  Object.defineProperty(instance, "constructor", { value: Date });
+  return instance;
+}
 
 /**
  * An `Array` subclass, whose instances are live code rather than inert data.
@@ -76,6 +89,7 @@ export const LAYER_CORPUS: ReadonlyArray<[string, unknown]> = [
   ["an object carrying a reserved property name", { ["__proto__"]: 1 }],
   ["a null-prototype object", Object.assign(Object.create(null), { a: 1 })],
   ["a class instance", new PlainClass()],
+  ["a class instance with a forged `constructor`", forgedConstructorInstance()],
   ["a `FabricBytes`", new FabricBytes(new Uint8Array([1]))],
   ["a `FabricEpochNsec`", new FabricEpochNsec(0n)],
   ["a `FabricEpochDay`", new FabricEpochDay(0n)],

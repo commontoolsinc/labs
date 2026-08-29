@@ -42,7 +42,7 @@ import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import { VALUE_TAGS } from "./VALUE_TAGS.ts";
 import { tagFromNativeValue } from "./native-type-tags.ts";
-import { isValidFabricNativeObject } from "./type-check.ts";
+import { isValidFabricNativeObject, refusedClassNameOf } from "./type-check.ts";
 import { cloneHelper } from "./value-clone.ts";
 import { isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 
@@ -360,7 +360,7 @@ export function shallowFabricFromNativeValue(
       // not valid `FabricValue`. Death before confusion!
       throw new Error(
         `Not representable as a \`FabricValue\`: ${
-          backtickQuote((value as object).constructor?.name ?? typeof value)
+          backtickQuote(refusedClassNameOf(value as object))
         } (not a recognized fabric type)`,
       );
   }

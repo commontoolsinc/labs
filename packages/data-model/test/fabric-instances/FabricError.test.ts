@@ -63,6 +63,69 @@ describe("FabricError", () => {
     expect({ ...se }).toEqual({});
   });
 
+  describe("`fromNativeError()` reads the class from the prototype", () => {
+    // The `type` this records is stored, and `errorClassFromType()` rebuilds
+    // the error from it on the way back -- so where the name is read from
+    // decides which class a value comes back as. An own `constructor` property
+    // is ordinary data, and reading it there would let a value pick that class
+    // for itself.
+    it("ignores an own `constructor` naming another class", () => {
+      const error = new Error("boom");
+      Object.defineProperty(error, "constructor", {
+        value: { name: "RangeError" },
+      });
+      expect(FabricError.fromNativeError(error).type).toBe("Error");
+    });
+
+    it("keeps the real class of a subclass instance", () => {
+      expect(FabricError.fromNativeError(new RangeError("r")).type).toBe(
+        "RangeError",
+      );
+    });
+
+    it("ignores a prototype whose `constructor` is not callable", () => {
+      // The name has to come from something that could have constructed the
+      // value. A `constructor` that is not callable did not, so it names no
+      // class, and the value is recorded as the `Error` it still is.
+      class Sneaky extends Error {}
+      Object.defineProperty(Sneaky.prototype, "constructor", {
+        value: { name: "RangeError" },
+      });
+      expect(FabricError.fromNativeError(new Sneaky("x")).type).toBe("Error");
+    });
+
+    it("ignores a prototype whose `constructor` accessor throws", () => {
+      // Reading the class is this conversion's business; failing to read it is
+      // not the caller's problem, and the accessor's error must not arrive in
+      // place of a converted value.
+      class Hostile extends Error {}
+      Object.defineProperty(Hostile.prototype, "constructor", {
+        get() {
+          throw new Error("this must not reach the caller");
+        },
+      });
+      expect(FabricError.fromNativeError(new Hostile("x")).type).toBe("Error");
+    });
+
+    it("gives a message-less severed-prototype error an empty message", () => {
+      // `message` is inherited from `Error.prototype` unless the constructor
+      // was given one, so severing the prototype takes it away entirely.
+      // `FabricError` declares a `string`.
+      const bare = Object.setPrototypeOf(new Error(), null) as Error;
+      const converted = FabricError.fromNativeError(bare);
+      expect(typeof converted.message).toBe("string");
+      expect(converted.message).toBe("");
+    });
+
+    it("names a severed-prototype error `Error`", () => {
+      // Such a value names no class at all. It is still an error --
+      // `Error.isError()` sees it, and the dispatch tags it so -- and the
+      // conversion has to produce something rather than fail reading a name.
+      const severed = Object.setPrototypeOf(new Error("severed"), null);
+      expect(FabricError.fromNativeError(severed).type).toBe("Error");
+    });
+  });
+
   describe("constructor()", () => {
     it("wraps the `Error`'s `FabricValue`-shaped state", () => {
       const err = new TypeError("bad");

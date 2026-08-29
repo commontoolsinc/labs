@@ -18,6 +18,13 @@ profile into an LCOV file, and the job uploads it as a `coverage-profile-*`
 artifact. Most test jobs set `DENO_COVERAGE_DIR`, including both pattern
 integration jobs.
 
+A focused `*.browser.test.ts` file run through `deno-web-test` executes its
+application module inside Chrome. That browser execution proves DOM behavior,
+but it does not enter the Deno V8 profile. Put reusable policy and state
+transitions in an ordinary source module and exercise them from a plain Deno
+unit test as well; keep the browser case for the boundary only a real DOM can
+prove.
+
 Do not name a source file so that its path ends in `test.ts` (or `test.tsx`,
 `test.js`, `test.mjs`, `test.jsx`). `deno coverage` takes those for test files
 and leaves them out of the report, even though V8 records them and even if

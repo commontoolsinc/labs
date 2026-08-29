@@ -699,6 +699,83 @@ describe("runtimePresets conformance (CT-1814)", () => {
         expect(warnings.length).toBe(1);
         expect(String(warnings[0][0])).toContain(ADOPT_SERVER_FLAGS_ENV);
       });
+
+      it("an adopted server-OFF posture rides the deployed-topology presets explicitly, immune to the first-party default", async () => {
+        // The separately-installed-host shape (the #6535 Codex P1 on the
+        // GitHub host): nothing declared in the environment, talking to a
+        // server held on the explicit-OFF rollback posture. Adoption hands
+        // the preset an EXPLICIT `false`, and the presets' `??` fill then
+        // never consults `SERVER_EXECUTION_DEFAULT_ENABLED` — which is why
+        // the first arm of this pin references no constant: it must hold
+        // under EITHER value (that immunity is the rollback lever working
+        // across a staggered upgrade, not a restatement of the absolute
+        // pin in toolshed's server-execution-flag.test.ts).
+        const adopted = await experimentalOptionsForDeployedClient({
+          apiUrl: new URL("https://deployment.example"),
+          env: () => undefined,
+          fetch: () =>
+            Promise.resolve(metaResponse({
+              did: "did:key:z",
+              experimental: { serverExecution: false },
+            })),
+        });
+        expect(adopted.serverExecution).toBe(false);
+        for (const preset of ["remoteClient", "productionServer"] as const) {
+          expect(
+            runtimePresets[preset]({
+              apiUrl,
+              storageManager,
+              experimental: adopted,
+            })
+              .experimental?.serverExecution,
+          ).toBe(false);
+        }
+        // The arm adoption replaces: an env-only resolution leaves the
+        // unset flag ABSENT, and the preset fills it with the first-party
+        // constant — under a flipped default that is an ON client against
+        // the rolled-back OFF server, the mixed topology the adoption
+        // exists to prevent. Compared against the imported constant, not a
+        // literal, so this documents the exposure without pinning the
+        // constant's value.
+        expect(
+          runtimePresets.remoteClient({
+            apiUrl,
+            storageManager,
+            experimental: experimentalOptionsFromEnv(() => undefined),
+          }).experimental?.serverExecution,
+        ).toBe(SERVER_EXECUTION_DEFAULT_ENABLED);
+      });
+
+      it("an explicit environment outranks the published posture in both directions, through the preset", async () => {
+        // Both arms stay selectable on a deployed client: the env is the
+        // documented rollback lever and CI's way to pin a lane, so it must
+        // survive adoption AND the preset fill in each direction.
+        for (
+          const arm of [
+            { env: "true", server: false, resolved: true },
+            { env: "false", server: true, resolved: false },
+          ] as const
+        ) {
+          const adopted = await experimentalOptionsForDeployedClient({
+            apiUrl: new URL("https://deployment.example"),
+            env: (name) =>
+              name === "EXPERIMENTAL_SERVER_EXECUTION" ? arm.env : undefined,
+            fetch: () =>
+              Promise.resolve(metaResponse({
+                did: "did:key:z",
+                experimental: { serverExecution: arm.server },
+              })),
+          });
+          expect(adopted.serverExecution).toBe(arm.resolved);
+          expect(
+            runtimePresets.remoteClient({
+              apiUrl,
+              storageManager,
+              experimental: adopted,
+            }).experimental?.serverExecution,
+          ).toBe(arm.resolved);
+        }
+      });
     });
   });
 

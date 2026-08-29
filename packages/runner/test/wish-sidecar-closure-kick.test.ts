@@ -1,25 +1,27 @@
-// The (2-D) serve-time closure kick of the ruled 3b close
-// (verification-coverage.md OW45, RULING 2026-08-28): the sidecar pattern
-// cache is process-global while a serving runtime serves MANY spaces, and
-// its compile persists a closure only into the FIRST demanding space — so
-// every later space is served a pattern whose closure was never persisted
-// THERE, and a cross-space child replication out of such a space finds its
-// origin dry (the lunch host-join park's supplier hole, one channel of
-// it). The kick: serving a cached sidecar pattern for a space other than
-// the one it compiled into fires the same fire-and-forget
-// replicate-into-the-demanding-space the content-cache hit fires, so the
-// space's closure supplier is REGISTERED at page-serve time — before any
-// create-profile click can issue the child replication, whose
-// strictly-older-ticket await then covers the race by registration
-// instead of healing after the fact.
-//
-// This file pins the cache-level mechanism (`ensureClosureReplicated` and
-// the fetch-side kick for chained demanders) against real storage: the
-// demanding space ends up holding a loadable closure, exactly once per
-// (cache epoch, space). The wish launch arms wire the same call under
-// `runtime.servingPosture` (see wish.ts); the serving-stack end-to-end
-// coverage is the lunch surface itself (the arc's campaign + direct-CI
-// probe).
+/**
+ * The (2-D) serve-time closure kick of the ruled 3b close
+ * (verification-coverage.md OW45, RULING 2026-08-28): the sidecar pattern
+ * cache is process-global while a serving runtime serves MANY spaces, and
+ * its compile persists a closure only into the FIRST demanding space — so
+ * every later space is served a pattern whose closure was never persisted
+ * THERE, and a cross-space child replication out of such a space finds its
+ * origin dry (the lunch host-join park's supplier hole, one channel of
+ * it). The kick: serving a cached sidecar pattern for a space other than
+ * the one it compiled into fires the same fire-and-forget
+ * replicate-into-the-demanding-space the content-cache hit fires, so the
+ * space's closure supplier is REGISTERED at page-serve time — before any
+ * create-profile click can issue the child replication, whose
+ * strictly-older-ticket await then covers the race by registration
+ * instead of healing after the fact.
+ *
+ * This file pins the cache-level mechanism (`ensureClosureReplicated` and
+ * the fetch-side kick for chained demanders) against real storage: the
+ * demanding space ends up holding a loadable closure, exactly once per
+ * (cache epoch, space). The wish launch arms wire the same call under
+ * `runtime.servingPosture` (see wish.ts); the serving-stack end-to-end
+ * coverage is the lunch surface itself (the arc's campaign + direct-CI
+ * probe).
+ */
 
 import { afterEach, beforeEach, describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";

@@ -54,6 +54,22 @@ If a browser command did run inside the agent sandbox, disregard its
 browser-startup failure and rerun it outside the sandbox before interpreting
 the test result.
 
+### Focused browser regressions
+
+A package can reserve a `*.browser.test.ts` file for DOM behavior that needs a
+real browser but not a running shell, toolshed, or piece. The package test task
+must explicitly exclude that file from its plain `deno test` discovery and run
+it through `deno-web-test` in a separate browser step. The package-level task
+remains the one command authors and the root workspace runner invoke; it owns
+both steps.
+
+Use this route for a narrow browser boundary such as event propagation or
+layout API behavior. Use the browser integration lane when the test needs the
+running product, multiple identities, durable state, or worker behavior. Pair
+a focused browser regression with a plain Deno unit test for any extracted
+policy or state machine, because code executed inside Chrome does not enter
+Deno's V8 coverage profile.
+
 ### Tests that start Deno
 
 For deliberate import-map and lockfile changes, follow the

@@ -506,6 +506,41 @@ Deno.test("sharded pattern caches follow their shard topology", async () => {
   }
 });
 
+Deno.test("pattern shard selection fails loudly instead of running an empty shard", async () => {
+  // `mapfile -t X < <(deno run … select-pattern-integration-files.ts …)`
+  // discards the selector's exit status: a selector failure leaves the
+  // array empty WITHOUT failing the step, and the step then runs ZERO test
+  // files and exits green — a silently empty shard. The selector itself
+  // throws on an empty selection (every shard carries the
+  // internally-sharded files), so empty output is only ever a failure; the
+  // exit status is the discriminator, and only a plain command
+  // substitution propagates it under `bash -e`.
+  const contents = withoutComments(await workflow("deno.yml"));
+  for (
+    const jobId of [
+      "pattern-integration-test",
+      "pattern-integration-test-server-execution-on",
+    ]
+  ) {
+    const job = jobBlock(contents, jobId);
+    assert(
+      !/mapfile[^\n]*<\s*<\([^\n]*select-pattern-integration-files/.test(job),
+      `${jobId}: the shard selector must not feed mapfile through a ` +
+        `process substitution — that discards its exit status, and a ` +
+        `selector failure then runs an empty shard green`,
+    );
+    assertStringIncludes(
+      job,
+      "SELECTED_FILES=$(deno run --allow-read " +
+        "../../tasks/select-pattern-integration-files.ts",
+    );
+    assertStringIncludes(
+      job,
+      "::error::select-pattern-integration-files.ts selected no files",
+    );
+  }
+});
+
 Deno.test("Dashboard publishes only from main, never from a pull request", async () => {
   const deno = await workflow("deno.yml");
   const dashboard = await workflow("dashboard-image.yml");
