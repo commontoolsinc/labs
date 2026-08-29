@@ -34,9 +34,10 @@ select a React version for applications.
 Pattern discovery treats an ordinary non-test `.ts` or `.tsx` file under an
 `iframe-*` pattern as another pattern entry. Keep browser-only code in the root
 `guest.tsx`, or give an extracted browser helper the basename `guest.ts` or
-`guest.tsx`, as in `editor/guest.ts` above. This keeps the helper in the guest
-bundle without asking the pattern compiler to evaluate React or browser-only
-dependencies.
+`guest.tsx`, as in `editor/guest.ts` above. Import that helper from the root
+guest so the wrapper includes it in the bundle; the basename prevents pattern
+discovery from separately asking the pattern compiler to evaluate its React or
+browser-only dependencies.
 
 ## Describe input, state, and output
 
