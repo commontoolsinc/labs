@@ -50,6 +50,7 @@ export {
   runtimePresets,
   SERVER_EXPERIMENTAL_PATH,
   type UnitTestPresetParams,
+  withServerExecutionDefault,
 } from "./runtime-presets.ts";
 export type {
   UnsafeHostTrust,
