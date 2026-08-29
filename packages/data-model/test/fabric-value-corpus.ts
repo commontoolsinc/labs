@@ -3,9 +3,11 @@
  *
  * `tagFromNativeValue()` names what a value already is,
  * `isValidFabricNativeObject()` decides a subset of that answer by a narrower
- * route, and `isValidFabricValueLayer()` decides membership -- so each is
- * worth checking against the others rather than only against a hand-picked
- * case. This carries one entry per arm of the dispatch those functions make,
+ * route, `isValidFabricValueLayer()` decides membership, and
+ * `assertValidFabricValueLayer()` answers that last question in the form that
+ * carries a reason, which `shallowFabricFromNativeValue()` is held against
+ * word for word -- so each is worth checking against the others rather than
+ * only against a hand-picked case. This carries one entry per arm of the dispatch those functions make,
  * plus the shapes each arm accepts and refuses; an entry dropped from here is
  * an arm the cross-checks stop reaching.
  */

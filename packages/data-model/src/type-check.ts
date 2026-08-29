@@ -1,6 +1,8 @@
 /**
  * The predicates deciding whether a value belongs to the `FabricValue` type,
  * and the narrowings that ask a shape question about one that already does.
+ * The single-level predicate has a throwing form beside it, which decides
+ * exactly what the predicate decides and exists to say why the answer was no.
  *
  * Membership turns on inertness: a `FabricValue` is data, so anything that is
  * live code is refused -- a function, an accessor-backed property, the
@@ -14,6 +16,7 @@
  * refuses, the difference is stated on that narrowing rather than here.
  */
 
+import { backtickQuote } from "@commonfabric/utils/markdown";
 import { isInertArray } from "@commonfabric/utils/arrays";
 import {
   constructorOfObject,
@@ -135,6 +138,99 @@ export function isValidFabricValueLayer(
  * best-effort handling costs correct input nothing. See
  * `BaseCodecEngine.encode()`.
  */
+/**
+ * Throws unless the value is usable as a `FabricValueLayer`, naming what is
+ * wrong with it when it is not. This is `isValidFabricValueLayer()` asked so
+ * that the answer carries a reason: that predicate decides the outcome and
+ * this adds nothing to it, everything past the decision existing to say why it
+ * went the way it did.
+ *
+ * A `FabricNativeObject` gets a reason of its own: a `Date` and a `Map` alike
+ * are values conversion has a say over, which is a different position from a
+ * class instance that has no fabric form at all. The message says which, and
+ * sends the caller to ask.
+ *
+ * @param value The value to check.
+ */
+export function assertValidFabricValueLayer(
+  value: unknown,
+): asserts value is FabricValueLayer {
+  if (isValidFabricValueLayer(value)) {
+    return;
+  }
+
+  // Past here the value is refused, and all that is left is to say why. Each
+  // test below distinguishes two reasons from each other; none of them decides
+  // the outcome, which the call above already did.
+
+  if (Array.isArray(value)) {
+    // An array in this system is _inert_: a direct `Array` instance, which may
+    // only carry numeric index properties, each a data property. A named or
+    // symbol-keyed property has no fabric representation, and an
+    // accessor-backed index is live code rather than inert data -- as is the
+    // prototype of an `Array` subclass instance, which can make iteration
+    // yield differently than the indices say.
+    throw new Error(
+      "Not representable as a `FabricValue`: array that is not an inert array",
+    );
+  }
+
+  switch (typeof value) {
+    case "function": {
+      throw new Error("Not representable as a `FabricValue`: function");
+    }
+    case "symbol": {
+      // Registry-interned symbols are valid `FabricValue`s; unique ones have
+      // no portable representation.
+      throw new Error(
+        "Not representable as a `FabricValue`: unique (uninterned) symbol",
+      );
+    }
+  }
+
+  if (isValidFabricNativeObject(value)) {
+    throw new Error(
+      `Not already a \`FabricValue\`: ${
+        backtickQuote((value as object).constructor?.name ?? typeof value)
+      } (a \`FabricNativeObject\`, so conversion is what decides it)`,
+    );
+  }
+
+  if (isPlainObject(value)) {
+    // A reserved property name is a restriction of this implementation rather
+    // than of the model, so it says so rather than blaming inertness: such an
+    // object _is_ inert, and a runtime that does not route property assignment
+    // through a prototype chain reserves no names at all.
+    const unsafeKey = isInertPlainObject(value)
+      ? unsafeObjectKeyIn(value)
+      : undefined;
+    if (unsafeKey !== undefined) {
+      throw new Error(
+        "Not representable as a `FabricValue`: object with a property name " +
+          `this runtime reserves (\`${unsafeKey}\`)`,
+      );
+    }
+    // A plain object is _inert_ for the same reasons an array is:
+    // `FabricPlainObject` is keyed by `string`, so a symbol key has no fabric
+    // representation, and neither does a non-enumerable string key; an
+    // accessor-backed property is live code rather than inert data. A
+    // null-prototype object is refused here too: a record has one shape in
+    // this system, and a prototype is not part of what a value says as data.
+    throw new Error(
+      "Not representable as a `FabricValue`: object that is not an inert " +
+        "plain object",
+    );
+  }
+
+  // No recognized shape at all -- an ordinary class instance, most commonly.
+  // Death before confusion!
+  throw new Error(
+    `Not representable as a \`FabricValue\`: ${
+      backtickQuote((value as object).constructor?.name ?? typeof value)
+    } (not a recognized fabric type)`,
+  );
+}
+
 export function isValidFabricValue(value: unknown): value is FabricValue {
   // Fast leaf paths first, so a function or a primitive returns without
   // allocating the cycle-tracking set or the recursion closure below.
@@ -315,6 +411,9 @@ export function isFabricPlainObject(
  * Arrays, plain objects, and system-defined `FabricPrimitive`s are _not_
  * `FabricNativeObject`s -- they have their own handling paths in the
  * conversion layer.
+ *
+ * Membership is not convertibility: a `Map` and a `Set` are members whose
+ * fabric form has yet to be built.
  *
  * This function is a TypeScript type guard for `FabricNativeObject`.
  */
