@@ -38,6 +38,52 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
+**Delta 2026-08-28 (the ruled-3b-close PR): THE OWNER RULED THE 3B FORK
+— "go with (1) plus the (2-D) kick" — both mechanisms are LANDED
+red-first, and lunch-poll-vote's FILE entry is LIFTED: the ON-skip
+registry is EMPTY across ALL FOUR SUITES (the third lift; B1's
+list-EMPTY precondition met again).** (1) event-driven re-supply
+(pattern-manager.ts): a supply-class replication failure parks under the
+WANTED identity — the failing frame's own, the dependency's in a
+recursion frame — and `recordPersistedClosureSpaces` re-issues it on the
+next matching persist record (once per event, no timers, bounded; the
+failure line stays byte-identical and the park/re-issue/heal are loud);
+failure registration checks the map once so a record that landed inside
+the read window re-issues immediately (review-6502 F1-(b)); the one-shot
+contract now reads "…and on the next persist event", exactly the
+register's pre-drafted sentence. (2-D) serve-time kick (wish.ts): a
+cached sidecar pattern served for a space it did not compile into
+replicates its closure there at page-serve time, so the demanding
+space's supplier is REGISTERED before any create-profile click and the
+child replication's ticket await covers the lunch class by registration,
+with (1) as the structural backstop. Pins red-first at bare main
+d569f3722 (`pattern-replication-sibling-race.test.ts` steps 7–10 — heal,
+module-wake, registration-check, dependency-frame park; the
+executor-cross-space late-carriage pin — a parked §2b delegation rides
+the heal through the accept gate; the wish-sidecar-closure-kick pins);
+new mutations N1/N2/N3/N3b/N4 pairwise isolated; the existing kill
+matrix re-verified cell-for-cell, with K1's kill REBOUND to step 1's
+zero-failure-lines assertion (the heal masks its end-state by design —
+the F1 class recreated and closed before landing). The register's
+RULING block records the ruling, the landed mechanism, and what stays
+open (cross-replica never-records supplier — heals at the server's
+first matching persist; prior-session third-space closures; the
+recursive-(b) sliver). Lift evidence per the ruled local-plus-CI-probe
+bar: campaign R 8/8 quiet-and-loaded at the lift head (fresh store +
+posture probe per run, ensure-ON default, self-sourced sha-verified
+binary, LLM masked; structureLoadStuck 0, closure-replication-failed 0 —
+the heal machinery dormant locally, exactly the model), full runner
+suite green at the head, and THIS PR's own ON-lane board as the
+direct-CI unskip probe (PROBE 6) under the ruled SURFACE reading — a
+red at that surface restores the entry with the accumulated map and the
+honest classification. PROBE 6 VERDICT (run 33222653635 at 1a5f3e66e,
+settle-confirmed): GREEN AT THE SURFACE — all ten ON shards succeeded,
+shard 7 RUNNING lunch-poll-vote; the lift STANDS and B1's list-EMPTY
+precondition is MET (the register's PROBE 6 block carries the full
+reading, including the board's sole red — a packages/cli view test this
+diff cannot reach, second observation with the merge gate). The deltas
+below are the prior PRs' records.**
+
 **Delta 2026-08-28 (the geometry-3 close PR, FINAL disposition — PROBE 5
 red at the surface, GEOMETRY 3B CONFIRMED on its pre-declared signature;
 the entry is RESTORED and the owner fork is the live decision.** The

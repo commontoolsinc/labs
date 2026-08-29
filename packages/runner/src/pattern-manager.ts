@@ -80,6 +80,16 @@ import { fromURI, toURI } from "./uri-utils.ts";
 
 const logger = getLogger("pattern-manager");
 
+// Cap for `parkedFailedReplications` (distinct WANTED identities with at
+// least one parked failed replication). Parks only exist while a real
+// supply failure is outstanding — a handful per session in every observed
+// incident — so the cap is a safety net against a pathological session,
+// not a working-set bound; eviction is loud (`closure-replication-park-
+// evicted`) and costs at most one lost heal, never a wrong copy (the
+// evicted failure already logged its one-shot `closure-replication-failed`
+// line, exactly the pre-heal contract).
+const MAX_PARKED_FAILED_REPLICATIONS = 64;
+
 // Bound for the in-memory identity->module cache. Higher than the pattern cache
 // because a single bundle contributes one entry per module (a big space-root
 // bundle is ~10 modules), and entries are cheap (a reference to an already-live
@@ -115,7 +125,7 @@ const RESERVED_HOIST_EXPORT = /^__cfPattern_\d+$/;
  * A whole-bundle pre-pass rather than a check inside the registration loop,
  * so a refused bundle registers nothing at all: a module rejected after its
  * neighbors were indexed would leave the session holding half a bundle.
- * Only artifacts are checked — `#indexArtifact` admits nothing else, so a
+ * Only artifacts are checked — `indexArtifact` admits nothing else, so a
  * plain value under such a name can never be resolved as a hoist.
  */
 function assertNoReservedHoistExports(
@@ -316,10 +326,42 @@ function sourcePackagePaths(
     .filter((filename): filename is string => filename !== undefined);
 }
 
-export class PatternManager {
-  // A member below declared `private` rather than `#` is one the pattern-manager and cell-cache suites
-  // reach and drive directly; a `#` name would put it out of their reach.
+/**
+ * A closure-replication read failure whose remedy is SUPPLY: the wanted
+ * identity's closure was readable in no space this manager can reach
+ * (heuristic origin dry, fallback map dry or every candidate incomplete).
+ * Carries the WANTED identity — the identity whose read failed, which for
+ * a dependency-recursion frame is the DEPENDENCY's identity, not the
+ * entry's (`replicateClosures` re-enters with it as `entryIdentity`) — so
+ * the failure-registration site can park under the identity a future
+ * supply record will name (the ruled 3b close; see
+ * `parkedFailedReplications`).
+ *
+ * The class deliberately does NOT set `this.name`: `String(error)` in the
+ * `closure-replication-failed` line must stay `Error: <reason>` with the
+ * production reason strings byte-identical — five direct-CI probe
+ * classifications in the OW45 arc grep for exactly those lines.
+ */
+class ClosureReplicationSupplyError extends Error {
+  constructor(reason: string, readonly wantedIdentity: string) {
+    super(reason);
+  }
+}
 
+/** One parked failed replication (see `parkedFailedReplications`): enough
+ * to re-issue the ENTRY's full replication — fresh ticket, fresh visited
+ * set — when a matching supply records. `delegated` is the original §2b
+ * carriage; the accept gate's delegated admission validates completeness,
+ * not freshness (engine-wave-sink's protocol.md §2b row), so a late
+ * re-issue is the same admission shape as the fire-and-forget original. */
+type ParkedReplication = {
+  entryIdentity: string;
+  fromSpace: MemorySpace;
+  toSpace: MemorySpace;
+  delegated: WritebackDelegation | undefined;
+};
+
+export class PatternManager {
   // Single-flight dedup + in-memory result cache for `compileOrGetPattern`,
   // keyed by a content hash of the program (NOT a cell id, NOT the retired
   // patternId) so identical source returns one shared, already-compiled pattern
@@ -351,7 +393,7 @@ export class PatternManager {
   // identical source dedupes the expensive TS compile, but every space holding
   // a piece that points at the pattern still needs the closure persisted there
   // to reload by { identity, symbol } in a fresh runtime.
-  #compiledByContent = new Map<
+  private compiledByContent = new Map<
     string,
     { pattern: Pattern; space?: MemorySpace }
   >();
@@ -362,7 +404,7 @@ export class PatternManager {
   // THE in-memory reverse index for content-addressed builder artifacts: module
   // identity -> (symbol -> live value). The single source for
   // `artifactFromIdentitySync` (the inverse of the forward `valueToEntryRef`),
-  // populated by ONE path (`#indexArtifact`) from BOTH a module's `__cfReg`
+  // populated by ONE path (`indexArtifact`) from BOTH a module's `__cfReg`
   // registrations (hoists + non-exported top-level) AND its exports — so callers
   // never look in two places. SESSION-LIFETIME, deliberately unbounded (design
   // § Open questions 2, resolved): the sync resolution the list builtins and
@@ -376,7 +418,7 @@ export class PatternManager {
   // tests can shrink it.
   private maxEvaluatedModuleCacheSize = MAX_EVALUATED_MODULE_CACHE_SIZE;
   // ESM content-addressed compile-cache instrumentation.
-  #esmCacheStats = { hits: 0, misses: 0, byIdentityHits: 0 };
+  private esmCacheStats = { hits: 0, misses: 0, byIdentityHits: 0 };
   // In-memory identity -> module-namespace cache (CT-1623). Populated for EVERY
   // module of an evaluated ESM bundle (keyed by prefix-free content identity),
   // so a by-identity load of a sub-pattern reuses the already-live module from
@@ -407,11 +449,11 @@ export class PatternManager {
   // targeting its origin — registration order keeps the await graph
   // acyclic (no from/to mutual wait), and genuine absence still throws
   // loudly after the awaited siblings settle.
-  #replicationsIntoSpace = new Map<
+  private replicationsIntoSpace = new Map<
     MemorySpace,
     Set<{ ticket: number; settled: Promise<unknown> }>
   >();
-  #nextReplicationTicket = 0;
+  private nextReplicationTicket = 0;
   // Spaces this manager DURABLY persisted an entry's closure into
   // (recorded at the two tracked persists' success; session-lifetime,
   // record-only — a later slot invalidation forces a re-verify on read,
@@ -427,7 +469,34 @@ export class PatternManager {
   // spaces this manager actually persisted (strings + small DID sets) —
   // negligible today; revisit with an eviction policy only if serving
   // sessions get very long-lived.
-  #persistedClosureSpaces = new Map<string, Set<MemorySpace>>();
+  private persistedClosureSpaces = new Map<string, Set<MemorySpace>>();
+  // Failed replications PARKED for event-driven re-supply (the ruled 3b
+  // close — verification-coverage.md OW45, RULING 2026-08-28: the one
+  // supplier-timing geometry no await can see is a supplier that has not
+  // STARTED by consult time, so the failure parks and the supply's own
+  // RECORD re-issues it). Keyed by the WANTED identity — the identity
+  // whose READ failed, which for a dependency-recursion frame is the
+  // DEPENDENCY's identity, not the entry's: the dependency's supplier
+  // records the dependency's own module identities, so an entry-keyed
+  // registry would miss exactly that record event. The inner map keys by
+  // (entry, from, to) so a re-registration after a failed re-issue
+  // REPLACES its predecessor instead of accumulating. Entries drop at
+  // wake time — one wake per matching persist event; a re-issue that
+  // fails again re-parks and waits for the NEXT record, so there is no
+  // self-clocking loop — and otherwise die with the session. Growth:
+  // FIFO-capped at MAX_PARKED_FAILED_REPLICATIONS wanted keys (loud
+  // eviction); a stale park costs one wasted loud re-issue on a matching
+  // record, never a wrong copy (the re-issue re-runs the full verified,
+  // fail-closed read). The cap bounds WANTED KEYS only — the inner
+  // (entry, from, to) map is deliberately not capped in its own right
+  // (cubic PM-2 on #6528, adjudicated LOW): filling one takes that many
+  // DISTINCT real supply failures for a single identity, each carrying
+  // its own loud failure + park line, and ONE matching record wakes the
+  // whole set at once.
+  private parkedFailedReplications = new Map<
+    string,
+    Map<string, ParkedReplication>
+  >();
 
   /** Record a durable closure persist's target for
    * {@link replicateClosures}' fallback-origin read — under EVERY module
@@ -435,32 +504,162 @@ export class PatternManager {
    * write functions persist one addressable doc per module, and the
    * replicated entry is routinely a MODULE of a larger compiled closure
    * (a pattern served from the in-memory index carries its own module's
-   * identity while the space was supplied by its importer's persist). */
-  #recordPersistedClosureSpaces(
+   * identity while the space was supplied by its importer's persist).
+   *
+   * Also the WAKE half of the ruled 3b close: a recorded supply re-issues
+   * every parked failed replication WANTING the recorded identity. Skip
+   * parks whose `toSpace` is the recorded space — a record for the child
+   * itself cannot feed the read (the fallback loop skips `toSpace`), and
+   * the re-issue's own success records into its `toSpace`, so this filter
+   * is also what keeps a heal from waking itself. A record into a park's
+   * `fromSpace` DOES wake it: the re-issue's PRIMARY read consults that
+   * space, and the observed lunch geometry records exactly there (the
+   * sidecar supplier persists into the PARENT space — the child
+   * replication's origin). The re-issue is fire-and-forget via
+   * `queueMicrotask`: this method runs inside the persistence promise the
+   * E4 path AWAITS, so the hook must add neither latency nor a throw to
+   * that chain. */
+  private recordPersistedClosureSpaces(
     identities: Iterable<string>,
     space: MemorySpace,
   ): void {
     for (const identity of identities) {
-      let spaces = this.#persistedClosureSpaces.get(identity);
+      let spaces = this.persistedClosureSpaces.get(identity);
       if (spaces === undefined) {
         spaces = new Set();
-        this.#persistedClosureSpaces.set(identity, spaces);
+        this.persistedClosureSpaces.set(identity, spaces);
       }
       spaces.add(space);
+      const parked = this.parkedFailedReplications.get(identity);
+      if (parked === undefined) continue;
+      for (const [key, record] of [...parked]) {
+        if (record.toSpace === space) continue;
+        parked.delete(key);
+        queueMicrotask(() => {
+          try {
+            logger.warn("closure-replication-reissued", () => [
+              `entry=${record.entryIdentity}`,
+              `wanted=${identity}`,
+              `from=${record.fromSpace}`,
+              `to=${record.toSpace}`,
+              `trigger=persist-record:${space}`,
+            ]);
+            this.issueReplication(
+              record.entryIdentity,
+              record.fromSpace,
+              record.toSpace,
+              record.delegated,
+              { wantedIdentity: identity },
+            );
+          } catch (error) {
+            // Defensive: nothing in the re-issue path throws synchronously
+            // today, but a future edit must surface loudly here rather
+            // than as an unhandled microtask error.
+            logger.error("closure-replication-reissue-error", () => [
+              `entry=${record.entryIdentity}`,
+              `wanted=${identity}`,
+              String(error),
+            ]);
+          }
+        });
+      }
+      if (parked.size === 0) this.parkedFailedReplications.delete(identity);
     }
+  }
+
+  /** Failure-registration half of the ruled 3b close: park `record` under
+   * `wantedIdentity` so a future matching supply record re-issues it (see
+   * `parkedFailedReplications` and the wake in
+   * {@link recordPersistedClosureSpaces}).
+   *
+   * With `checkRecordedSupply` (first-time failures only — never the
+   * re-park of a failed re-issue), consult `persistedClosureSpaces` ONCE
+   * for the wanted identity and re-issue IMMEDIATELY when a usable record
+   * already exists: the record EVENT has already passed and may never
+   * recur (review-6502 F1-ii — a supplier that completed entirely inside
+   * the failing attempt's read window records before the failure
+   * registers, and parking then would wait for an event that already
+   * happened). Usable means any recorded space except `toSpace` (the
+   * fallback read skips the target; a record into the attempt's own
+   * `fromSpace` IS usable — the re-issue's primary read consults it). The
+   * check is skipped for failed re-issues because their read just
+   * consulted this very map — an immediate retry could only spin on state
+   * it already read; the next matching record wakes them instead. So
+   * immediate re-issues are bounded by original failures, wake re-issues
+   * by matching persist events — no timers, no polling, no self-clocking
+   * loop anywhere. */
+  private registerFailedReplication(
+    wantedIdentity: string,
+    record: ParkedReplication,
+    checkRecordedSupply: boolean,
+  ): void {
+    if (checkRecordedSupply) {
+      let usable = false;
+      for (
+        const space of this.persistedClosureSpaces.get(wantedIdentity) ?? []
+      ) {
+        if (space !== record.toSpace) {
+          usable = true;
+          break;
+        }
+      }
+      if (usable) {
+        logger.warn("closure-replication-reissued", () => [
+          `entry=${record.entryIdentity}`,
+          `wanted=${wantedIdentity}`,
+          `from=${record.fromSpace}`,
+          `to=${record.toSpace}`,
+          "trigger=recorded-at-registration",
+        ]);
+        this.issueReplication(
+          record.entryIdentity,
+          record.fromSpace,
+          record.toSpace,
+          record.delegated,
+          { wantedIdentity },
+        );
+        return;
+      }
+    }
+    let parked = this.parkedFailedReplications.get(wantedIdentity);
+    if (parked === undefined) {
+      parked = new Map();
+      this.parkedFailedReplications.set(wantedIdentity, parked);
+      while (
+        this.parkedFailedReplications.size > MAX_PARKED_FAILED_REPLICATIONS
+      ) {
+        const oldest = this.parkedFailedReplications.keys().next().value;
+        if (oldest === undefined) break;
+        this.parkedFailedReplications.delete(oldest);
+        logger.warn("closure-replication-park-evicted", () => [
+          `wanted=${oldest}`,
+          `cap=${MAX_PARKED_FAILED_REPLICATIONS}`,
+        ]);
+      }
+    }
+    parked.set(
+      `${record.entryIdentity}\0${record.fromSpace}\0${record.toSpace}`,
+      record,
+    );
+    logger.warn("closure-replication-parked", () => [
+      `entry=${record.entryIdentity}`,
+      `wanted=${wantedIdentity}`,
+      `from=${record.fromSpace}`,
+      `to=${record.toSpace}`,
+    ]);
   }
   // Maps each storage slot written during this PatternManager session to its
   // complete module set. One slot can hold only one closure shape at a time.
   private persistedCompileCacheClosures = new Map<string, string>();
   // Writes to one storage slot are serialized. Requests for the same closure
   // share the write that is already running.
-  #inProgressCompileCacheWrites = new Map<
+  private inProgressCompileCacheWrites = new Map<
     string,
     { closureSignature: string; persistence: Promise<void> }
   >();
   // A best-effort identity recovery that failed to persist skips the in-memory
   // artifact shortcuts on the next load so storage recovery runs again.
-  #failedCompileCacheRecoveries = new Set<string>();
+  private failedCompileCacheRecoveries = new Set<string>();
 
   constructor(readonly runtime: Runtime) {}
 
@@ -477,7 +676,7 @@ export class PatternManager {
     misses: number;
     byIdentityHits: number;
   } {
-    return { ...this.#esmCacheStats };
+    return { ...this.esmCacheStats };
   }
 
   /** Resolve once all in-flight compiled-cache write-backs have settled. */
@@ -572,7 +771,7 @@ export class PatternManager {
     ref: { identity: string; symbol: string },
   ): void {
     brandTrustedPattern(pattern);
-    this.#indexArtifact(ref.identity, ref.symbol, pattern);
+    this.indexArtifact(ref.identity, ref.symbol, pattern);
   }
 
   /**
@@ -635,7 +834,7 @@ export class PatternManager {
   // session-lifetime like the artifact index; a fresh session re-instantiates
   // the node and re-registers. Content-addressed key, so two structurally
   // identical nodes share one (equally valid) entry.
-  #keylessOpRefsByInputsDoc = new Map<
+  private keylessOpRefsByInputsDoc = new Map<
     string,
     { identity: string; symbol: string }
   >();
@@ -647,7 +846,7 @@ export class PatternManager {
     inputsDocKey: string,
     ref: { identity: string; symbol: string },
   ): void {
-    this.#keylessOpRefsByInputsDoc.set(inputsDocKey, ref);
+    this.keylessOpRefsByInputsDoc.set(inputsDocKey, ref);
   }
 
   /** The pristine in-session artifact for a keyless op registered under
@@ -655,7 +854,7 @@ export class PatternManager {
    * is not the instantiating session, so the embedded graph is all there
    * is). */
   keylessOpPatternFor(inputsDocKey: string): Pattern | undefined {
-    const ref = this.#keylessOpRefsByInputsDoc.get(inputsDocKey);
+    const ref = this.keylessOpRefsByInputsDoc.get(inputsDocKey);
     if (!ref) return undefined;
     const live = this.artifactFromIdentitySync(ref.identity, ref.symbol);
     return live !== undefined && isTrustedPattern(live)
@@ -686,7 +885,13 @@ export class PatternManager {
    * Closure replication is fire-and-forget (tracked in `compileCacheWrites`,
    * awaited by `flushCompileCacheWrites`): the child is loadable in-session
    * regardless, this only affects fresh runtimes. A failure is logged and
-   * retried on the next child creation — never on the caller's commit path.
+   * retried on the next child creation and on the next persist event —
+   * never on the caller's commit path. (The persist-event retry is the
+   * ruled 3b close: a supply-timing failure parks under the WANTED
+   * identity and `recordPersistedClosureSpaces` re-issues it when a
+   * matching supply records — see `parkedFailedReplications`. Genuine
+   * absence — an identity no server-side persist ever records — keeps
+   * exactly the loud one-shot behavior this contract always had.)
    */
   replicatePatternToSpace(
     pattern: Pattern | Module,
@@ -698,37 +903,79 @@ export class PatternManager {
 
     const entryRef = this.getArtifactEntryRef(pattern);
     if (!entryRef) return;
-    // Ticket + registration BEFORE the async body starts, so a replication
-    // issued later in the same synchronous stretch observes this entry
-    // when it awaits its origin's suppliers (see `#replicationsIntoSpace`).
-    const ticket = this.#nextReplicationTicket++;
+    this.issueReplication(entryRef.identity, fromSpace, toSpace, delegated);
+  }
+
+  /** Issue one closure replication fire-and-forget: fresh ticket and
+   * registration in `replicationsIntoSpace` BEFORE the async body starts
+   * (so a replication issued later in the same synchronous stretch
+   * observes this entry when it awaits its origin's suppliers) and in
+   * `compileCacheWrites` (so `flushCompileCacheWrites` and the durability
+   * barrier observe it). Shared by `replicatePatternToSpace` and the 3b
+   * heal's re-issues, so a re-issued replication is a FULL fresh
+   * replication — same ticket discipline, same acyclicity (the ticket
+   * await stays strictly-older-only; compiles and loads never await
+   * replications), same idempotent diff-to-no-op persists.
+   *
+   * Failures log the loud one-shot line unchanged; a SUPPLY-class failure
+   * (the wanted identity readable nowhere — never a store-level throw or
+   * a persist failure) additionally parks for event-driven re-supply.
+   * `reissueOf` marks a park-triggered re-issue: its success logs the
+   * heal line, and its failure re-parks WITHOUT the registration-time
+   * map check — the failed attempt's read just consulted the map, so an
+   * immediate retry could only spin on state it already read; the next
+   * matching record wakes it instead. */
+  private issueReplication(
+    entryIdentity: string,
+    fromSpace: MemorySpace,
+    toSpace: MemorySpace,
+    delegated: WritebackDelegation | undefined,
+    reissueOf?: { wantedIdentity: string },
+  ): void {
+    const ticket = this.nextReplicationTicket++;
     const replication = this.replicateClosures(
-      entryRef.identity,
+      entryIdentity,
       fromSpace,
       toSpace,
       undefined,
       delegated,
       ticket,
-    ).catch((error) => {
+    ).then(() => {
+      if (reissueOf !== undefined) {
+        logger.warn("closure-replication-healed", () => [
+          `entry=${entryIdentity}`,
+          `wanted=${reissueOf.wantedIdentity}`,
+          `from=${fromSpace}`,
+          `to=${toSpace}`,
+        ]);
+      }
+    }).catch((error) => {
       logger.error("closure-replication-failed", () => [
-        `entry=${entryRef.identity}`,
+        `entry=${entryIdentity}`,
         `from=${fromSpace}`,
         `to=${toSpace}`,
         String(error),
       ]);
+      if (error instanceof ClosureReplicationSupplyError) {
+        this.registerFailedReplication(
+          error.wantedIdentity,
+          { entryIdentity, fromSpace, toSpace, delegated },
+          reissueOf === undefined,
+        );
+      }
     });
-    let intoTarget = this.#replicationsIntoSpace.get(toSpace);
+    let intoTarget = this.replicationsIntoSpace.get(toSpace);
     if (intoTarget === undefined) {
       intoTarget = new Set();
-      this.#replicationsIntoSpace.set(toSpace, intoTarget);
+      this.replicationsIntoSpace.set(toSpace, intoTarget);
     }
     const registration = { ticket, settled: replication };
     intoTarget.add(registration);
     replication.finally(() => {
-      const entries = this.#replicationsIntoSpace.get(toSpace);
+      const entries = this.replicationsIntoSpace.get(toSpace);
       if (entries === undefined) return;
       entries.delete(registration);
-      if (entries.size === 0) this.#replicationsIntoSpace.delete(toSpace);
+      if (entries.size === 0) this.replicationsIntoSpace.delete(toSpace);
     });
     this.compileCacheWrites.add(replication);
     replication.finally(() => this.compileCacheWrites.delete(replication));
@@ -767,12 +1014,12 @@ export class PatternManager {
     // not flushCompileCacheWrites: this replication promise is tracked there and
     // would await itself.
     await Promise.allSettled([...this.pendingCacheWriteBacks]);
-    // Then the SIBLING suppliers (see `#replicationsIntoSpace`): the origin
+    // Then the SIBLING suppliers (see `replicationsIntoSpace`): the origin
     // may itself be mid-supply by an earlier-registered replication INTO
     // it. Await strictly older tickets only — acyclic by construction —
     // then read; genuine absence still throws loudly below. Event-driven
     // (the siblings' own completion), never a timer.
-    const intoOrigin = this.#replicationsIntoSpace.get(fromSpace);
+    const intoOrigin = this.replicationsIntoSpace.get(fromSpace);
     if (intoOrigin !== undefined) {
       const older = [...intoOrigin]
         .filter((entry) => entry.ticket < ticket)
@@ -859,7 +1106,7 @@ export class PatternManager {
       return { complete: true, sourceDocs, compiledDocs };
     };
     /** One full read attempt: the caller-named origin, then the FALLBACK
-     * ORIGINS (see `#persistedClosureSpaces`): the caller-named origin is a
+     * ORIGINS (see `persistedClosureSpaces`): the caller-named origin is a
      * provenance heuristic and can be closure-less through no fault of any
      * writer — `loadPatternByIdentity` serves patterns from the in-memory
      * artifact index with no per-space persist. The closure is
@@ -876,7 +1123,7 @@ export class PatternManager {
       const primary = await readOrigin(fromSpace);
       if (primary.complete) return primary;
       for (
-        const fallback of this.#persistedClosureSpaces.get(entryIdentity) ?? []
+        const fallback of this.persistedClosureSpaces.get(entryIdentity) ?? []
       ) {
         if (fallback === fromSpace || fallback === toSpace) continue;
         let read: Awaited<ReturnType<typeof readOrigin>>;
@@ -924,7 +1171,7 @@ export class PatternManager {
       // compiles and loads never await replications (their only
       // replication call is fire-and-forget), and a compile promise
       // resolves only after its E4 persist recorded into
-      // `#persistedClosureSpaces`.
+      // `persistedClosureSpaces`.
       //
       // EMPTY SNAPSHOT → NO RETRY, byte-identical one-shot throw below.
       // Deliberate, twice over: (a) with nothing in the registries there
@@ -938,8 +1185,16 @@ export class PatternManager {
       // ticket await — the exact masking that made the F1 pin soft. The
       // absence of a `closure-replication-await-inflight` line before a
       // `closure-replication-failed` line is therefore the pre-declared
-      // geometry-3b signature (a supplier compile that had not STARTED by
-      // consult time — see the register's residue record).
+      // geometry-3b signature. Precisely (review-6502 F1): zero-announce
+      // proves "no supplier REGISTERED at snapshot time" — a strict
+      // superset of "not started" that also admits a supplier completed
+      // inside the read window or a load resolved with its repair
+      // persist floating. All of it — 3b proper and both slivers — now
+      // ends in the same place: the throw below parks the failure for
+      // event-driven re-supply (the ruled 3b close; see
+      // `parkedFailedReplications` and the register's RULING block), so
+      // the short-circuit stays exactly as cheap and mask-free as
+      // designed while no rescueable interleaving is lost.
       const inFlightCompilations = [...this.inProgressCompilations.values()];
       const inFlightLoads = [...this.inProgressByIdentityLoads.values()];
       if (inFlightCompilations.length > 0 || inFlightLoads.length > 0) {
@@ -963,8 +1218,15 @@ export class PatternManager {
     }
     if (!origin.complete) {
       // The one-shot contract stands byte-identical on the still-failing
-      // path: same loud throw, same production reason string.
-      throw new Error(origin.reason);
+      // path: same loud throw, same production reason string (the error
+      // class keeps name "Error", so `String(error)` in the failure line
+      // is unchanged). The class carries the WANTED identity — THIS
+      // frame's `entryIdentity`, which for the dependency recursion is
+      // the dependency's own identity — so the catch in
+      // `issueReplication` can park the failure for event-driven
+      // re-supply under the identity a future persist record will name
+      // (the ruled 3b close).
+      throw new ClosureReplicationSupplyError(origin.reason, entryIdentity);
     }
     const { sourceDocs, compiledDocs } = origin;
     const modules: CacheableModule[] = [];
@@ -1009,7 +1271,7 @@ export class PatternManager {
       });
     }
     if (runtimeVersion === undefined) {
-      await this.#persistSourceCacheTracked(
+      await this.persistSourceCacheTracked(
         toSpace,
         modules,
         entryIdentity,
@@ -1096,9 +1358,9 @@ export class PatternManager {
     // CFC is enforced (the compiled-set integrity label only persists — and
     // is only trusted on read — under an enforcing mode; see cell-cache).
     if (cacheCtx && this.runtime.cfcEnforcementMode !== "disabled") {
-      return await this.#compileViaCellCache(program, cacheCtx);
+      return await this.compileViaCellCache(program, cacheCtx);
     }
-    const patternCoverage = this.#patternCoverageFor();
+    const patternCoverage = this.patternCoverageFor();
     const { id, graph, mainSpecifier, entryIdentity } = await this.runtime
       .harness.compileToRecordGraph(
         program,
@@ -1118,7 +1380,7 @@ export class PatternManager {
       mainSpecifier,
       program,
     );
-    return this.#patternFromEvaluation(result, program);
+    return this.patternFromEvaluation(result, program);
   }
 
   /**
@@ -1126,7 +1388,7 @@ export class PatternManager {
    * option wins, else the runtime-level default (`RuntimeOptions.patternCoverage`).
    * Undefined leaves the compile uninstrumented.
    */
-  #patternCoverageFor(
+  private patternCoverageFor(
     options?: TypeScriptHarnessProcessOptions,
   ): PatternCoverageCollector | undefined {
     return options?.patternCoverage ?? this.runtime.patternCoverage;
@@ -1147,7 +1409,7 @@ export class PatternManager {
    *
    * Registration is fused with evaluation here on purpose, so it cannot be
    * forgotten — mirroring what the runtime's own `compilePattern` /
-   * `#patternFromEvaluation` load path does. Reach for the bare
+   * `patternFromEvaluation` load path does. Reach for the bare
    * `Engine.compileAndEvaluateModules` only to inspect serialized/verified output
    * *without running* (engine unit tests), where stamping entry refs is unwanted.
    */
@@ -1155,7 +1417,7 @@ export class PatternManager {
     program: RuntimeProgram,
     options?: TypeScriptHarnessProcessOptions,
   ): Promise<EvaluateResult> {
-    const patternCoverage = this.#patternCoverageFor(options);
+    const patternCoverage = this.patternCoverageFor(options);
     const effectiveOptions: TypeScriptHarnessProcessOptions = {
       ...options,
       patternCoverage,
@@ -1202,7 +1464,7 @@ export class PatternManager {
    * miss the program is compiled and its modules are written back (source +
    * integrity-stamped compiled docs) on a fresh transaction before returning.
    */
-  async #compileViaCellCache(
+  private async compileViaCellCache(
     program: RuntimeProgram,
     cacheCtx: {
       space: MemorySpace;
@@ -1220,7 +1482,7 @@ export class PatternManager {
         space,
         cacheCtx.previousEntryIdentity,
       );
-    const patternCoverage = this.#patternCoverageFor();
+    const patternCoverage = this.patternCoverageFor();
     // The instrumented compile is a distinct cached variant: the coverage suffix
     // keeps its compiled bytes from colliding with an ordinary compile of the
     // same source under one key, and makes a coverage-on runtime miss (and
@@ -1243,7 +1505,7 @@ export class PatternManager {
       const moduleDelegations = previousSourceDocs === undefined
         ? new Map<string, ReadonlySet<string>>()
         : deriveModuleDelegations(previousSourceDocs, modules);
-      await this.#persistSourceCacheTracked(
+      await this.persistSourceCacheTracked(
         space,
         modules,
         entryIdentity,
@@ -1258,7 +1520,7 @@ export class PatternManager {
         mainSpecifier,
         program,
       );
-      return this.#patternFromEvaluation(result, program, entryIdentity);
+      return this.patternFromEvaluation(result, program, entryIdentity);
     }
     const cacheOpts = { runtimeVersion };
 
@@ -1269,14 +1531,14 @@ export class PatternManager {
     // (evaluateCachedModules re-verifies the graph, so an incomplete closure
     // throws and we recompile).
     if (cacheCtx.knownEntryIdentity && previousSourceDocs === undefined) {
-      const byIdentity = await this.#tryWarmLoadByIdentity(
+      const byIdentity = await this.tryWarmLoadByIdentity(
         cacheCtx.knownEntryIdentity,
         space,
         cacheOpts,
         program,
       );
       if (byIdentity) {
-        this.#esmCacheStats.byIdentityHits++;
+        this.esmCacheStats.byIdentityHits++;
         cacheCtx.onEntryIdentity?.(cacheCtx.knownEntryIdentity);
         return byIdentity;
       }
@@ -1436,9 +1698,9 @@ export class PatternManager {
     if (warmHit) {
       // The per-space storage closure was just READ from this space, i.e. it is
       // already durable here — no write-back.
-      this.#esmCacheStats.hits++;
+      this.esmCacheStats.hits++;
     } else {
-      this.#esmCacheStats[compiledBodiesServed ? "hits" : "misses"]++;
+      this.esmCacheStats[compiledBodiesServed ? "hits" : "misses"]++;
     }
     if (!warmHit || moduleDelegations.size > 0) {
       // Persist the module set into this space. AWAITED (identity E4): refs-only
@@ -1461,7 +1723,7 @@ export class PatternManager {
       );
     }
 
-    return this.#patternFromEvaluation(result, program, entryIdentity);
+    return this.patternFromEvaluation(result, program, entryIdentity);
   }
 
   /**
@@ -1470,7 +1732,7 @@ export class PatternManager {
    * bodies (no `resolve`, no `compile`). Returns the pattern, or `undefined`
    * if the closure is absent/incomplete/invalid (caller then recompiles).
    */
-  async #tryWarmLoadByIdentity(
+  private async tryWarmLoadByIdentity(
     entryIdentity: string,
     space: MemorySpace,
     cacheOpts: { runtimeVersion: string },
@@ -1479,7 +1741,7 @@ export class PatternManager {
     const harness = this.runtime.harness;
     // `cacheOpts.runtimeVersion` already selects the coverage variant, so the
     // bodies read below carry probes exactly when this is set.
-    const patternCoverage = this.#patternCoverageFor();
+    const patternCoverage = this.patternCoverageFor();
     const readTx = this.runtime.edit();
     let closure;
     let sourceClosure;
@@ -1571,7 +1833,7 @@ export class PatternManager {
           ...(patternCoverage ? { patternCoverage } : {}),
         },
       );
-      return this.#patternFromEvaluation(result, program, entryIdentity);
+      return this.patternFromEvaluation(result, program, entryIdentity);
     } catch (error) {
       // Incomplete/invalid cached closure — fall back to recompile.
       logger.warn("compile-cache-by-identity-miss", () => [
@@ -1602,7 +1864,7 @@ export class PatternManager {
     space: MemorySpace,
   ): Promise<Pattern | undefined> {
     const recoveryKey = compileCacheRecoveryKey(space, entryIdentity);
-    const retryFailedRecovery = this.#failedCompileCacheRecoveries.has(
+    const retryFailedRecovery = this.failedCompileCacheRecoveries.has(
       recoveryKey,
     );
     // In-memory artifact index: the pattern may already be live this session —
@@ -1614,7 +1876,7 @@ export class PatternManager {
     if (
       !retryFailedRecovery && indexed !== undefined && isTrustedPattern(indexed)
     ) {
-      this.#esmCacheStats.byIdentityHits++;
+      this.esmCacheStats.byIdentityHits++;
       return indexed;
     }
     // A keyless identity is session-only by construction: no source or
@@ -1637,9 +1899,9 @@ export class PatternManager {
     // space root). Reuse it directly — no storage closure read, no SES re-eval.
     const live = retryFailedRecovery
       ? undefined
-      : this.#patternFromEvaluatedModule(entryIdentity, symbol);
+      : this.patternFromEvaluatedModule(entryIdentity, symbol);
     if (live) {
-      this.#esmCacheStats.byIdentityHits++;
+      this.esmCacheStats.byIdentityHits++;
       return live;
     }
     // Check before single-flight: follower retries re-enter from the top and
@@ -1651,7 +1913,7 @@ export class PatternManager {
     const key = `${space}\0${entryIdentity}`;
     const runtimeVersion = moduleByteCacheRuntimeVersion(
       await getCompileCacheRuntimeVersion(),
-      { patternCoverage: this.#patternCoverageFor() !== undefined },
+      { patternCoverage: this.patternCoverageFor() !== undefined },
     );
     if (this.#coldLoadNegativeMemo.suppresses(key, runtimeVersion)) {
       return undefined;
@@ -1659,7 +1921,7 @@ export class PatternManager {
     // Single-flight the expensive tail (see `inProgressByIdentityLoads`).
     const pending = this.inProgressByIdentityLoads.get(key);
     if (pending === undefined) {
-      const load = this.#loadPatternByIdentityFromStorage(
+      const load = this.loadPatternByIdentityFromStorage(
         entryIdentity,
         symbol,
         space,
@@ -1686,13 +1948,13 @@ export class PatternManager {
    * SES evaluation, artifact indexing, and the cold-load recovery fallbacks.
    * Callers must hold the single-flight slot for `(space, entryIdentity)`.
    */
-  async #loadPatternByIdentityFromStorage(
+  private async loadPatternByIdentityFromStorage(
     entryIdentity: string,
     symbol: string,
     space: MemorySpace,
   ): Promise<Pattern | undefined> {
     const harness = this.runtime.harness;
-    const patternCoverage = this.#patternCoverageFor();
+    const patternCoverage = this.patternCoverageFor();
     // Select the same cached variant the compile path wrote. A coverage-on
     // runtime resumes from the instrumented closure; reading the ordinary key
     // here would serve uninstrumented bodies for an instrumented run.
@@ -1701,7 +1963,7 @@ export class PatternManager {
       { patternCoverage: patternCoverage !== undefined },
     );
     if (runtimeVersion === undefined) {
-      return await this.#tryColdLoadByIdentity(entryIdentity, symbol, space);
+      return await this.tryColdLoadByIdentity(entryIdentity, symbol, space);
     }
     const cacheOpts = { runtimeVersion };
 
@@ -1728,7 +1990,7 @@ export class PatternManager {
       this.persistedCompileCacheClosures.delete(
         compileCachePersistenceSlotKey(space, entryIdentity, cacheOpts),
       );
-      return await this.#tryColdLoadByIdentity(
+      return await this.tryColdLoadByIdentity(
         entryIdentity,
         symbol,
         space,
@@ -1787,11 +2049,11 @@ export class PatternManager {
           ...(patternCoverage ? { patternCoverage } : {}),
         },
       );
-      const pattern = this.#patternFromMain(result, symbol, entryIdentity);
-      this.#failedCompileCacheRecoveries.delete(
+      const pattern = this.patternFromMain(result, symbol, entryIdentity);
+      this.failedCompileCacheRecoveries.delete(
         compileCacheRecoveryKey(space, entryIdentity),
       );
-      this.#esmCacheStats.byIdentityHits++;
+      this.esmCacheStats.byIdentityHits++;
       return pattern;
     } catch (error) {
       logger.warn("load-pattern-by-identity-miss", () => [
@@ -1799,7 +2061,7 @@ export class PatternManager {
         `symbol=${symbol}`,
         String(error),
       ]);
-      return await this.#tryColdLoadByIdentity(
+      return await this.tryColdLoadByIdentity(
         entryIdentity,
         symbol,
         space,
@@ -1809,7 +2071,7 @@ export class PatternManager {
   }
 
   /** Record one deterministic compile failure for this session/version. */
-  #memoizeColdLoadFailure(
+  private memoizeColdLoadFailure(
     space: MemorySpace,
     entryIdentity: string,
     runtimeVersion: string | undefined,
@@ -1833,7 +2095,7 @@ export class PatternManager {
    * recompile from the verified source closure, letting fabric imports refetch
    * their own source closures from the same space.
    */
-  async #tryColdLoadByIdentity(
+  private async tryColdLoadByIdentity(
     entryIdentity: string,
     symbol: string,
     space: MemorySpace,
@@ -1872,7 +2134,7 @@ export class PatternManager {
       contents: doc.code,
     }));
 
-    const patternCoverage = this.#patternCoverageFor();
+    const patternCoverage = this.patternCoverageFor();
     try {
       const compiled = await harness.compileResolvedToRecordGraph(
         sourceFiles,
@@ -1917,7 +2179,7 @@ export class PatternManager {
           ...(patternCoverage ? { patternCoverage } : {}),
         },
       );
-      const pattern = this.#patternFromMain(result, symbol, entryIdentity);
+      const pattern = this.patternFromMain(result, symbol, entryIdentity);
       if (cacheOpts !== undefined) {
         const recoveryKey = compileCacheRecoveryKey(space, entryIdentity);
         const repair = this.persistCompileCacheTracked(
@@ -1927,9 +2189,9 @@ export class PatternManager {
           cacheOpts,
           moduleDelegations,
         ).then(() => {
-          this.#failedCompileCacheRecoveries.delete(recoveryKey);
+          this.failedCompileCacheRecoveries.delete(recoveryKey);
         }).catch((error) => {
-          this.#failedCompileCacheRecoveries.add(recoveryKey);
+          this.failedCompileCacheRecoveries.add(recoveryKey);
           logger.warn("load-pattern-by-identity-writeback-failed", () => [
             `entry=${entryIdentity}`,
             `symbol=${symbol}`,
@@ -1956,7 +2218,7 @@ export class PatternManager {
         patternCoverage === undefined &&
         isDeterministicCompileFailure(error)
       ) {
-        this.#memoizeColdLoadFailure(
+        this.memoizeColdLoadFailure(
           space,
           entryIdentity,
           cacheOpts?.runtimeVersion,
@@ -1970,10 +2232,10 @@ export class PatternManager {
   /**
    * Build a pattern object from an evaluation result by export `symbol`, with
    * NO program attached (the source-free by-identity path). Mirrors
-   * `#patternFromEvaluation` minus `setPatternProgram` — recovery of the program
+   * `patternFromEvaluation` minus `setPatternProgram` — recovery of the program
    * happens by identity via the source closure, not from the pattern object.
    */
-  #patternFromMain(
+  private patternFromMain(
     result: EvaluateResult,
     symbol: string,
     entryIdentity: string,
@@ -1999,8 +2261,8 @@ export class PatternManager {
     }
     // Trust gate stays pattern-only on purpose: the forward
     // `{ identity, symbol }` ref for a NON-pattern artifact was already set by
-    // `registerEvaluatedModules` via `#indexArtifact`, whose gate is the wider
-    // `isTrustedBuilderArtifact` — narrowing `#indexArtifact` would drop
+    // `registerEvaluatedModules` via `indexArtifact`, whose gate is the wider
+    // `isTrustedBuilderArtifact` — narrowing `indexArtifact` would drop
     // exported lift/handler forward refs (the gap Codex flagged on an earlier
     // revision of #3912).
     if (isTrustedPattern(pattern)) {
@@ -2016,7 +2278,7 @@ export class PatternManager {
    *
    * Public because it is the shared indexing step every path that RUNS a
    * just-evaluated pattern must perform: the runtime's own load path calls it via
-   * `#patternFromEvaluation`, and the namespace load seam `compileAndRegisterModules`
+   * `patternFromEvaluation`, and the namespace load seam `compileAndRegisterModules`
    * (used by the CLI test harness and the multi-user worker) calls it too.
    * Skipping it leaves anonymous map/filter/flatMap ops un-indexed, so
    * `getArtifactEntryRef` misses and the op falls back to its embedded graph
@@ -2044,7 +2306,7 @@ export class PatternManager {
         const sourcePath = result.sourcePathByIdentity?.get(identity);
         for (const exportName of Object.keys(exports)) {
           if (exportName === "__esModule") continue;
-          this.#indexArtifact(identity, exportName, exports[exportName]);
+          this.indexArtifact(identity, exportName, exports[exportName]);
           // Stamp where it came from. The by-identity reload path attaches no
           // program on purpose, so this is the only record a nested pattern
           // keeps of its own file — and without it nothing downstream can say
@@ -2068,7 +2330,7 @@ export class PatternManager {
       for (const [identity, entries] of sink) {
         const sourcePath = result.sourcePathByIdentity?.get(identity);
         for (const [symbol, value] of entries) {
-          this.#indexArtifact(identity, symbol, value);
+          this.indexArtifact(identity, symbol, value);
           if (sourcePath !== undefined) setPatternSourcePath(value, sourcePath);
         }
       }
@@ -2092,7 +2354,7 @@ export class PatternManager {
    * independently impossible: identity is a content hash, so a module can only
    * register under its own bytes' identity.)
    */
-  #indexArtifact(
+  private indexArtifact(
     identity: string,
     symbol: string,
     value: unknown,
@@ -2109,7 +2371,7 @@ export class PatternManager {
     bucket.set(symbol, value);
     // Forward map is FIRST-WRITE-WINS, deliberately, on two grounds:
     //   - One artifact instance legitimately reachable under two refs (e.g. both
-    //     a `__cfReg` entry AND an export, or set first by `#patternFromMain`)
+    //     a `__cfReg` entry AND an export, or set first by `patternFromMain`)
     //     keeps a single canonical `{ identity, symbol }` for serialization.
     //   - The reverse index above already overwrote, so by-identity LOOKUP
     //     (`artifactFromIdentitySync`) is always fresh; the forward ref only
@@ -2121,7 +2383,7 @@ export class PatternManager {
     // consumers tolerate this (it resolves to a real, addressable artifact).
     setArtifactEntryRef(value, { identity, symbol });
     // Note: content-addressed CFC provenance is recorded by the engine at
-    // evaluation time (Engine.#recordModuleProvenance) — the single home, so it
+    // evaluation time (Engine.recordModuleProvenance) — the single home, so it
     // covers every load path, not only ones routed through this indexing.
   }
 
@@ -2169,7 +2431,7 @@ export class PatternManager {
    * by-identity load, skipping the storage closure read + SES re-evaluation.
    * Returns undefined on a miss so the caller falls back to the cache path.
    */
-  #patternFromEvaluatedModule(
+  private patternFromEvaluatedModule(
     entryIdentity: string,
     symbol: string,
   ): Pattern | undefined {
@@ -2233,7 +2495,7 @@ export class PatternManager {
       modules.map((module) => module.identity),
       moduleDelegations,
     );
-    const predecessor = this.#inProgressCompileCacheWrites.get(
+    const predecessor = this.inProgressCompileCacheWrites.get(
       persistenceSlotKey,
     );
     if (predecessor?.closureSignature === closureSignature) {
@@ -2260,10 +2522,10 @@ export class PatternManager {
           moduleDelegations,
         ).catch(() => false);
         if (stored) {
-          this.#failedCompileCacheRecoveries.delete(
+          this.failedCompileCacheRecoveries.delete(
             compileCacheRecoveryKey(space, entryIdentity),
           );
-          this.#recordPersistedClosureSpaces(
+          this.recordPersistedClosureSpaces(
             [entryIdentity, ...modules.map((module) => module.identity)],
             space,
           );
@@ -2284,15 +2546,15 @@ export class PatternManager {
         persistenceSlotKey,
         closureSignature,
       );
-      this.#failedCompileCacheRecoveries.delete(
+      this.failedCompileCacheRecoveries.delete(
         compileCacheRecoveryKey(space, entryIdentity),
       );
-      this.#recordPersistedClosureSpaces(
+      this.recordPersistedClosureSpaces(
         [entryIdentity, ...modules.map((module) => module.identity)],
         space,
       );
     })();
-    this.#inProgressCompileCacheWrites.set(persistenceSlotKey, {
+    this.inProgressCompileCacheWrites.set(persistenceSlotKey, {
       closureSignature,
       persistence,
     });
@@ -2301,11 +2563,11 @@ export class PatternManager {
     try {
       await persistence;
     } finally {
-      const current = this.#inProgressCompileCacheWrites.get(
+      const current = this.inProgressCompileCacheWrites.get(
         persistenceSlotKey,
       );
       if (current?.persistence === persistence) {
-        this.#inProgressCompileCacheWrites.delete(persistenceSlotKey);
+        this.inProgressCompileCacheWrites.delete(persistenceSlotKey);
       }
       this.compileCacheWrites.delete(persistence);
       this.pendingCacheWriteBacks.delete(persistence);
@@ -2362,14 +2624,14 @@ export class PatternManager {
     }
   }
 
-  async #persistSourceCacheTracked(
+  private async persistSourceCacheTracked(
     space: MemorySpace,
     modules: CacheableModule[],
     entryIdentity: string,
     moduleDelegations: ModuleDelegationMap = new Map(),
     delegated?: WritebackDelegation,
   ): Promise<void> {
-    const writeBack = this.#writeBackSourceCache(
+    const writeBack = this.writeBackSourceCache(
       space,
       modules,
       entryIdentity,
@@ -2380,7 +2642,7 @@ export class PatternManager {
     this.pendingCacheWriteBacks.add(writeBack);
     try {
       await writeBack;
-      this.#recordPersistedClosureSpaces(
+      this.recordPersistedClosureSpaces(
         [entryIdentity, ...modules.map((module) => module.identity)],
         space,
       );
@@ -2390,7 +2652,7 @@ export class PatternManager {
     }
   }
 
-  async #writeBackSourceCache(
+  private async writeBackSourceCache(
     space: MemorySpace,
     modules: CacheableModule[],
     entryIdentity: string,
@@ -2398,7 +2660,7 @@ export class PatternManager {
     delegated?: WritebackDelegation,
   ): Promise<void> {
     const writebackStart = performance.now();
-    await this.#syncSourceCacheWriteTargets(space, modules);
+    await this.syncSourceCacheWriteTargets(space, modules);
     let committedModuleDelegations = moduleDelegations;
     const { error } = await this.runtime.editWithRetry((tx) => {
       // Compile-cache writeback is runtime-internal bookkeeping
@@ -2452,7 +2714,7 @@ export class PatternManager {
     delegated?: WritebackDelegation,
   ): Promise<void> {
     const writebackStart = performance.now();
-    await this.#syncCompileCacheWriteTargets(space, modules, opts);
+    await this.syncCompileCacheWriteTargets(space, modules, opts);
     // The closure is committed in CHUNKS of bounded module count rather than
     // one all-or-nothing transaction. A stale-refs recovery (compiler output
     // change over a pre-existing space) re-writes the entire closure; as a
@@ -2552,7 +2814,7 @@ export class PatternManager {
   // true state and commits on the first attempt; the retry budget in
   // writeBackCompileCache remains as a backstop. Same-microtask syncs batch
   // into a single server round trip.
-  async #syncSourceCacheWriteTargets(
+  private async syncSourceCacheWriteTargets(
     space: MemorySpace,
     modules: readonly CacheableModule[],
   ): Promise<void> {
@@ -2567,7 +2829,7 @@ export class PatternManager {
     );
   }
 
-  async #syncCompileCacheWriteTargets(
+  private async syncCompileCacheWriteTargets(
     space: MemorySpace,
     modules: readonly CacheableModule[],
     opts: { runtimeVersion: string },
@@ -2589,7 +2851,7 @@ export class PatternManager {
   }
 
   // Resolve a Pattern from an evaluate result.
-  #patternFromEvaluation(
+  private patternFromEvaluation(
     result: EvaluateResult,
     program: RuntimeProgram,
     entryIdentity?: string,
@@ -2668,11 +2930,11 @@ export class PatternManager {
     // evaluation.
     const dedupeKey = toURI(createRef({ src: program }, "pattern source"));
 
-    const cached = this.#compiledByContent.get(dedupeKey);
+    const cached = this.compiledByContent.get(dedupeKey);
     if (cached) {
       // Refresh recency (FIFO ~LRU).
-      this.#compiledByContent.delete(dedupeKey);
-      this.#compiledByContent.set(dedupeKey, cached);
+      this.compiledByContent.delete(dedupeKey);
+      this.compiledByContent.set(dedupeKey, cached);
       // The content cache is space-agnostic, but a piece persisted in `space`
       // needs the source/compiled closure IN that space to reload by
       // { identity, symbol } in a fresh runtime (the meta-cell fallback is
@@ -2695,11 +2957,11 @@ export class PatternManager {
       space ? { space } : undefined,
     )
       .then((pattern) => {
-        this.#compiledByContent.set(dedupeKey, { pattern, space });
-        while (this.#compiledByContent.size > MAX_EVALUATED_MODULE_CACHE_SIZE) {
-          const oldest = this.#compiledByContent.keys().next().value;
+        this.compiledByContent.set(dedupeKey, { pattern, space });
+        while (this.compiledByContent.size > MAX_EVALUATED_MODULE_CACHE_SIZE) {
+          const oldest = this.compiledByContent.keys().next().value;
           if (oldest === undefined) break;
-          this.#compiledByContent.delete(oldest);
+          this.compiledByContent.delete(oldest);
         }
         return pattern;
       })
