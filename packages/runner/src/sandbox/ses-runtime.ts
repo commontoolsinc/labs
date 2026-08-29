@@ -21,9 +21,13 @@ interface SESCompartmentLike {
 }
 
 class SESInternals {
-  private sourceMaps = new SourceMapParser();
+  #sourceMaps = new SourceMapParser();
 
-  constructor(private options: SESRuntimeOptions = {}) {}
+  #options: SESRuntimeOptions;
+
+  constructor(options: SESRuntimeOptions = {}) {
+    this.#options = options;
+  }
 
   exec<T>(callback: () => T): T {
     try {
@@ -40,7 +44,7 @@ class SESInternals {
   }
 
   loadSourceMapLazy(filename: string, provider: () => SourceMap | undefined) {
-    this.sourceMaps.loadLazy(filename, provider);
+    this.#sourceMaps.loadLazy(filename, provider);
   }
 
   mapPosition(
@@ -48,18 +52,18 @@ class SESInternals {
     line: number,
     column: number,
   ): MappedPosition | null {
-    return this.sourceMaps.mapPosition(filename, line, column);
+    return this.#sourceMaps.mapPosition(filename, line, column);
   }
 
   parseStack(stack: string): string {
-    const mappedStack = this.sourceMaps.parse(stack);
-    return this.options.hideInternalStackFrames
+    const mappedStack = this.#sourceMaps.parse(stack);
+    return this.#options.hideInternalStackFrames
       ? sanitizeInternalFrames(mappedStack)
       : mappedStack;
   }
 
   clear(): void {
-    this.sourceMaps.clear();
+    this.#sourceMaps.clear();
   }
 
   mapThrownError(error: unknown): unknown {
@@ -86,12 +90,17 @@ class SESInternals {
 }
 
 export class SESRuntime extends EventTarget {
-  private internals: SESInternals;
+  #internals: SESInternals;
+
+  /**
+   * TypeScript-private rather than a `#` name: `test/runtime.test.ts` drives
+   * this member directly.
+   */
   private callbackEvaluator: SESCallbackEvaluator;
 
   constructor(options: SESRuntimeOptions = {}) {
     super();
-    this.internals = new SESInternals(options);
+    this.#internals = new SESInternals(options);
     this.callbackEvaluator = new SESCallbackEvaluator(options);
   }
 
@@ -103,7 +112,7 @@ export class SESRuntime extends EventTarget {
    * reaches the scheduler carrying authored coordinates.
    */
   exec<T>(callback: () => T): T {
-    return this.internals.exec(callback);
+    return this.#internals.exec(callback);
   }
 
   mapPosition(
@@ -111,7 +120,7 @@ export class SESRuntime extends EventTarget {
     line: number,
     column: number,
   ): MappedPosition | null {
-    return this.internals.mapPosition(filename, line, column);
+    return this.#internals.mapPosition(filename, line, column);
   }
 
   /**
@@ -127,11 +136,11 @@ export class SESRuntime extends EventTarget {
     filename: string,
     provider: () => SourceMap | undefined,
   ): void {
-    this.internals.loadSourceMapLazy(filename, provider);
+    this.#internals.loadSourceMapLazy(filename, provider);
   }
 
   parseStack(stack: string): string {
-    return this.internals.parseStack(stack);
+    return this.#internals.parseStack(stack);
   }
 
   /**
@@ -140,7 +149,7 @@ export class SESRuntime extends EventTarget {
    * module evaluation outside an {@link exec} call (e.g. `loadModuleGraph`).
    */
   mapThrownError(error: unknown): unknown {
-    return this.internals.mapThrownError(error);
+    return this.#internals.mapThrownError(error);
   }
 
   evaluateCallback(source: string): unknown {
@@ -148,7 +157,7 @@ export class SESRuntime extends EventTarget {
   }
 
   clear(): void {
-    this.internals.clear();
+    this.#internals.clear();
     this.callbackEvaluator.clear();
   }
 }
@@ -282,14 +291,23 @@ function createCompartment(globals: Record<string, unknown>) {
 }
 
 class SESCallbackEvaluator {
-  private callbackCompartment: SESCompartmentLike | undefined;
+  #callbackCompartment: SESCompartmentLike | undefined;
+
+  /**
+   * TypeScript-private rather than a `#` name: `test/engine-ses.test.ts` drives
+   * this member directly.
+   */
   private callbackCreatorCache = new Map<string, () => unknown>();
 
-  constructor(private options: SESRuntimeOptions = {}) {}
+  #options: SESRuntimeOptions;
+
+  constructor(options: SESRuntimeOptions = {}) {
+    this.#options = options;
+  }
 
   evaluate(source: string): unknown {
     const normalizedSource = normalizeDirectFunctionSource(source);
-    const createCallback = this.getCachedCallbackCreator(normalizedSource);
+    const createCallback = this.#getCachedCallbackCreator(normalizedSource);
 
     return hardenVerifiedFunction((...args: unknown[]) => {
       const fn = createCallback();
@@ -306,16 +324,16 @@ class SESCallbackEvaluator {
 
   clear(): void {
     this.callbackCreatorCache.clear();
-    this.callbackCompartment = undefined;
+    this.#callbackCompartment = undefined;
   }
 
-  private getCachedCallbackCreator(source: string): () => unknown {
+  #getCachedCallbackCreator(source: string): () => unknown {
     const cached = this.callbackCreatorCache.get(source);
     if (cached) {
       return cached;
     }
 
-    const compartment = this.getSharedCallbackCompartment();
+    const compartment = this.#getSharedCallbackCompartment();
     const creator = compartment.evaluate(createCallbackCreatorSource(source));
     if (typeof creator !== "function") {
       throw new Error("Callback source must evaluate to a function creator");
@@ -325,14 +343,14 @@ class SESCallbackEvaluator {
     return creator as () => unknown;
   }
 
-  private getSharedCallbackCompartment(): SESCompartmentLike {
+  #getSharedCallbackCompartment(): SESCompartmentLike {
     ensureSESInitialized(true);
-    if (!this.callbackCompartment) {
-      this.callbackCompartment = createCompartment(
-        createCallbackCompartmentGlobals(this.options.globals ?? {}),
+    if (!this.#callbackCompartment) {
+      this.#callbackCompartment = createCompartment(
+        createCallbackCompartmentGlobals(this.#options.globals ?? {}),
       );
     }
-    return this.callbackCompartment;
+    return this.#callbackCompartment;
   }
 }
 

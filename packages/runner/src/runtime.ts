@@ -773,7 +773,7 @@ const initialCfcRuntimeStats = (): CfcRuntimeStats => ({
  * will fetch the objects and consider them valid, but will not walk into
  * their properties on the server traversal, so we don't need to return every
  * reachable object from these pieces.
- * @see SchemaObjectTraverser.traverseObjectWithSchema for more detail.
+ * @see SchemaObjectTraverser.#traverseObjectWithSchema for more detail.
  */
 export const spaceCellSchema = internSchema(
   {
@@ -997,11 +997,11 @@ export class Runtime {
   }
 
   /** Cache of resolved PatternFactory.inSpace("name") space DIDs. */
-  private readonly spaceNameToDid = new Map<string, MemorySpace>();
-  private defaultFrame?: Frame;
-  private queues = new Map<string, AsyncSemaphoreQueue>();
-  private writeDebugContext = new WriteDebugContextStorage<string>();
-  private cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
+  readonly #spaceNameToDid = new Map<string, MemorySpace>();
+  #defaultFrame?: Frame;
+  #queues = new Map<string, AsyncSemaphoreQueue>();
+  #writeDebugContext = new WriteDebugContextStorage<string>();
+  #cfcStats: CfcRuntimeStats = initialCfcRuntimeStats();
   readonly #policyManifests = new Map<string, PolicyArtifactManifestV1>();
   readonly #policyManifestSpaces = new Map<string, Set<MemorySpace>>();
   // Attesting space -> successor module identity -> direct predecessor
@@ -1040,7 +1040,7 @@ export class Runtime {
     }
   }
 
-  private moduleDelegationSnapshot(): Map<
+  #moduleDelegationSnapshot(): Map<
     MemorySpace,
     ReadonlyMap<string, readonly string[]>
   > {
@@ -1548,7 +1548,7 @@ export class Runtime {
       }
 
       // Push a default frame with this runtime so builder functions can access it
-      this.defaultFrame = pushFrame({ runtime: this });
+      this.#defaultFrame = pushFrame({ runtime: this });
     } catch (error) {
       this.#releaseServerExecutionEnabler();
       throw error;
@@ -1780,10 +1780,10 @@ export class Runtime {
     name: string,
     config?: QueueConfig,
   ): AsyncSemaphoreQueue {
-    let q = this.queues.get(name);
+    let q = this.#queues.get(name);
     if (!q) {
       q = new AsyncSemaphoreQueue(config ?? { maxConcurrency: 2 });
-      this.queues.set(name, q);
+      this.#queues.set(name, q);
     }
     return q;
   }
@@ -1879,10 +1879,10 @@ export class Runtime {
       if (!closeStorage) await this.settled(Infinity);
       // Abort any pending (not-yet-started) queued jobs so they don't start
       // after storage is torn down.
-      for (const queue of this.queues.values()) {
+      for (const queue of this.#queues.values()) {
         queue.abortPending();
       }
-      this.queues.clear();
+      this.#queues.clear();
       // Stop all running docs
       this.runner.stopAll();
 
@@ -1948,9 +1948,9 @@ export class Runtime {
       this.runner.dispose();
 
       // Pop the default frame
-      if (this.defaultFrame) {
-        popFrame(this.defaultFrame);
-        this.defaultFrame = undefined;
+      if (this.#defaultFrame) {
+        popFrame(this.#defaultFrame);
+        this.#defaultFrame = undefined;
       }
 
       // Dispose the Engine (clears compiler/runtime state and the console
@@ -2024,17 +2024,17 @@ export class Runtime {
       installPolicyManifest: (space, reference, tx) =>
         this.installCfcPolicyManifest(space, reference, tx),
       onRelevantTx: () => {
-        this.cfcStats.cfcRelevantTx += 1;
+        this.#cfcStats.cfcRelevantTx += 1;
       },
       onFlowLabelProbe: (outcome) => {
-        if (outcome === "memo") this.cfcStats.flowLabelProbeMemoHits += 1;
-        else this.cfcStats.flowLabelProbesComputed += 1;
+        if (outcome === "memo") this.#cfcStats.flowLabelProbeMemoHits += 1;
+        else this.#cfcStats.flowLabelProbesComputed += 1;
       },
       onPreparedTx: () => {
-        this.cfcStats.cfcPreparedTx += 1;
+        this.#cfcStats.cfcPreparedTx += 1;
       },
       onPrepareReject: (refusal) => {
-        this.cfcStats.cfcPrepareRejects += 1;
+        this.#cfcStats.cfcPrepareRejects += 1;
         // Every refusal is reported here, terminal or not. The scheduler's
         // error channel carries only the terminal ones (a refusal a fresh
         // attempt may resolve is retried rather than surfaced), so without
@@ -2049,34 +2049,34 @@ export class Runtime {
         });
       },
       onDigestInvalidation: () => {
-        this.cfcStats.cfcDigestInvalidations += 1;
+        this.#cfcStats.cfcDigestInvalidations += 1;
       },
       onOutboxFlush: () => {
-        this.cfcStats.cfcOutboxFlushes += 1;
+        this.#cfcStats.cfcOutboxFlushes += 1;
       },
       onSinkDedupHit: () => {
-        this.cfcStats.sinkDedupHits += 1;
+        this.#cfcStats.sinkDedupHits += 1;
       },
       onSinkReleaseReject: () => {
-        this.cfcStats.sinkReleaseRejects += 1;
+        this.#cfcStats.sinkReleaseRejects += 1;
       },
       // Stage-0 D4 precision counters: installed only when the deployment
       // opted in, so the default prepare path skips all measurement.
       ...(this.cfcPrefixProvenanceStats
         ? {
           onPrefixProvenance: (summary: CfcPrefixProvenanceSummary) => {
-            this.cfcStats.prefixProvenanceSummaries += 1;
-            this.cfcStats.prefixProtectedWrites += summary.protectedWrites;
-            this.cfcStats.prefixGatedReads += summary.prefixGatedReads;
-            this.cfcStats.prefixTxGlobalGatedReads +=
+            this.#cfcStats.prefixProvenanceSummaries += 1;
+            this.#cfcStats.prefixProtectedWrites += summary.protectedWrites;
+            this.#cfcStats.prefixGatedReads += summary.prefixGatedReads;
+            this.#cfcStats.prefixTxGlobalGatedReads +=
               summary.txGlobalGatedReads;
-            this.cfcStats.prefixBoundReal += summary.boundSources.real;
-            this.cfcStats.prefixBoundInfinityFallback +=
+            this.#cfcStats.prefixBoundReal += summary.boundSources.real;
+            this.#cfcStats.prefixBoundInfinityFallback +=
               summary.boundSources.infinityFallback;
-            this.cfcStats.prefixBoundClockLess +=
+            this.#cfcStats.prefixBoundClockLess +=
               summary.boundSources.clockLess;
-            this.cfcStats.prefixS7ExemptionFires += summary.s7ExemptionFires;
-            this.cfcStats.prefixClockLessReads += summary.clockLessReads;
+            this.#cfcStats.prefixS7ExemptionFires += summary.s7ExemptionFires;
+            this.#cfcStats.prefixClockLessReads += summary.clockLessReads;
           },
         }
         : {}),
@@ -2092,7 +2092,7 @@ export class Runtime {
     wrapped.setCfcSinkMaxConfidentiality(this.cfcSinkMaxConfidentiality);
     wrapped.setCfcPolicySnapshot(this.cfcPolicySnapshot);
     wrapped.setCfcTrustConfig(this.cfcTrustConfig);
-    wrapped.setCfcModuleDelegations(this.moduleDelegationSnapshot());
+    wrapped.setCfcModuleDelegations(this.#moduleDelegationSnapshot());
     wrapped.setCfcTrustSnapshot(this.trustSnapshotProvider());
     wrapped.configureSealDestination(
       this.#transactionSealDestination ?? this.#speculationDestination(),
@@ -2298,7 +2298,7 @@ export class Runtime {
   // subscription, so a later creation of the doc still arrives — one kick per
   // doc suffices. Scope is part of the key: scoped instances (user/session)
   // are distinct docs, and a kick for one scope must not suppress another's.
-  private missingDocLoadKicks = new Set<string>();
+  #missingDocLoadKicks = new Set<string>();
 
   /**
    * Asynchronously load a link target that a read found absent from the
@@ -2336,7 +2336,7 @@ export class Runtime {
     const key = `${space}\0${
       resolveScopeKey(scope, identity ?? this.scopeKeyIdentity)
     }\0${id}`;
-    if (this.missingDocLoadKicks.has(key)) return;
+    if (this.#missingDocLoadKicks.has(key)) return;
     // A same-space target the replica already has state for (or a manager
     // without lazy replication) needs no fetch.
     const sameSpace = sourceSpace === space;
@@ -2344,7 +2344,7 @@ export class Runtime {
     const reserved = sameSpace &&
       mgr.shouldPullDoc?.(space, id, scope, identity) === true;
     if (sameSpace && !reserved) return;
-    this.missingDocLoadKicks.add(key);
+    this.#missingDocLoadKicks.add(key);
     const load = identity === undefined
       ? this.getCellFromLink(link).sync()
       // The instance-named load: the storage manager names the run's
@@ -2359,22 +2359,22 @@ export class Runtime {
         // dedup set, and hand back the storage manager's reservation when
         // THIS kick took it — a cross-space kick never reserved, and must
         // not clear a reservation a concurrent same-space read holds.
-        this.missingDocLoadKicks.delete(key);
+        this.#missingDocLoadKicks.delete(key);
         if (reserved) mgr.retractDocPullKick?.(space, id, scope, identity);
       }),
     );
   }
 
   getCfcStats(): Readonly<CfcRuntimeStats> {
-    return { ...this.cfcStats };
+    return { ...this.#cfcStats };
   }
 
   resetCfcStats(): void {
-    this.cfcStats = initialCfcRuntimeStats();
+    this.#cfcStats = initialCfcRuntimeStats();
   }
 
   getWriteDebugContext(): string | undefined {
-    return this.writeDebugContext.getStore() ?? this.scheduler.currentActionId;
+    return this.#writeDebugContext.getStore() ?? this.scheduler.currentActionId;
   }
 
   createUnsafeHostTrust(
@@ -2409,7 +2409,7 @@ export class Runtime {
     if (!label) {
       return fn();
     }
-    return this.writeDebugContext.run(label, fn);
+    return this.#writeDebugContext.run(label, fn);
   }
 
   setWriteStackTraceMatchers(
@@ -2779,10 +2779,10 @@ export class Runtime {
     if (tx?.status().status === "ready") {
       return tx;
     }
-    return this.createReadTx();
+    return this.#createReadTx();
   }
 
-  private createReadTx(): IExtendedStorageTransaction {
+  #createReadTx(): IExtendedStorageTransaction {
     const tx = this.edit();
     tx.setReadOnly?.("runtime.readTx()");
     return tx;
@@ -3123,7 +3123,7 @@ export class Runtime {
    */
   resolveSpaceNameSync(name: string): MemorySpace | undefined {
     if (isMemorySpaceDID(name)) return name as MemorySpace;
-    return this.spaceNameToDid.get(name);
+    return this.#spaceNameToDid.get(name);
   }
 
   /**
@@ -3175,7 +3175,7 @@ export class Runtime {
       );
     }
     const did = session.space as MemorySpace;
-    this.spaceNameToDid.set(name, did);
+    this.#spaceNameToDid.set(name, did);
     return did;
   }
 

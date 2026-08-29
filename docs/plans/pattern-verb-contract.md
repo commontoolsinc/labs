@@ -135,9 +135,9 @@ callable layer predates:
   bindings cannot collide on one receipt.
 - Every handling gets a **canonical per-invocation result cell** addressed
   `{ resultFor: cause }`, where `cause = { $ctx: <bound closure>, $event:
-  <event id> }` — `Runner.instantiateJavaScriptHandlerNode` builds the `cause`
+  <event id> }` — `Runner.#instantiateJavaScriptHandlerNode` builds the `cause`
   (`$event: tx.dispatchedEventId ?? crypto.randomUUID()`) and
-  `Runner.handleJavaScriptHandlerResult` mints the cell from it, both in
+  `Runner.#handleJavaScriptHandlerResult` mints the cell from it, both in
   `packages/runner/src/runner.ts`; the `$ctx`/`$event` argument shape comes
   from `generateHandlerSchema` (`packages/runner/src/schema.ts`). So the
   address folds in the handler's binding, not the id alone. A return value
@@ -935,7 +935,7 @@ client retry needs.
 3. **How do plain JSON returns reach the receipt?** A return value containing
    reactives/cells projects into the receipt, while a **plain JSON return is
    discarded** — the receipt-only branch of
-   `Runner.handleJavaScriptHandlerResult` (`packages/runner/src/runner.ts`)
+   `Runner.#handleJavaScriptHandlerResult` (`packages/runner/src/runner.ts`)
    writes `{}`. For `topics` this mostly does not bite — `{ topic: piece }`
    carries a cell — but "retry reads back the original result" is incomplete
    without it. Options: a small runtime change writing the validated plain

@@ -47,10 +47,10 @@ export type TraverseFixtureInvocation = {
   /** Address passed to `SchemaObjectTraverser.traverse()`. */
   address: TraverseFixtureAddress;
 
-  /** Index into the fixture's `selectors` table. */
+  /** Index into the fixture's `#selectors` table. */
   selector: number;
 
-  /** Index into the fixture's `links` table, when traverse() got a link. */
+  /** Index into the fixture's `#links` table, when traverse() got a link. */
   link?: number;
 
   /** `TraversalContext.includeMeta` (true on the query path). */
@@ -90,21 +90,26 @@ const DEFAULT_MAX_INVOCATIONS = 20_000;
 
 /** @internal Exported for focused capture tests. */
 export class TraverseCaptureRecorder {
-  private docs = new Map<string, FabricValue>();
+  #docs = new Map<string, FabricValue>();
+
+  /**
+   * TypeScript-private rather than a `#` name:
+   * `test/traverse-replay/profile.ts` drives this member directly.
+   */
   private invocations: TraverseFixtureInvocation[] = [];
-  private selectors: SchemaPathSelector[] = [];
-  private selectorIndex = new Map<string, number>();
-  private links: NormalizedFullLink[] = [];
-  private linkIndex = new Map<string, number>();
-  private contextIds = new WeakMap<object, number>();
-  private nextContextId = 0;
-  private memoIds = new WeakMap<object, number>();
-  private nextMemoId = 0;
-  private capHit = false;
+  #selectors: SchemaPathSelector[] = [];
+  #selectorIndex = new Map<string, number>();
+  #links: NormalizedFullLink[] = [];
+  #linkIndex = new Map<string, number>();
+  #contextIds = new WeakMap<object, number>();
+  #nextContextId = 0;
+  #memoIds = new WeakMap<object, number>();
+  #nextMemoId = 0;
+  #capHit = false;
 
   constructor(private maxInvocations = DEFAULT_MAX_INVOCATIONS) {}
 
-  private idFor(map: WeakMap<object, number>, obj: object, next: () => number) {
+  #idFor(map: WeakMap<object, number>, obj: object, next: () => number) {
     let id = map.get(obj);
     if (id === undefined) {
       id = next();
@@ -113,32 +118,32 @@ export class TraverseCaptureRecorder {
     return id;
   }
 
-  private internSelector(selector: SchemaPathSelector): number {
+  #internSelector(selector: SchemaPathSelector): number {
     const key = hashStringOf(selector);
-    let index = this.selectorIndex.get(key);
+    let index = this.#selectorIndex.get(key);
     if (index === undefined) {
-      index = this.selectors.length;
+      index = this.#selectors.length;
       // Snapshot via deep-frozen clone (identity-passes already-frozen
       // selectors): callers may mutate or intern them later.
-      this.selectors.push(
+      this.#selectors.push(
         cloneIfNecessary(selector) as SchemaPathSelector,
       );
-      this.selectorIndex.set(key, index);
+      this.#selectorIndex.set(key, index);
     }
     return index;
   }
 
-  private internLink(link: NormalizedFullLink): number {
+  #internLink(link: NormalizedFullLink): number {
     const key = hashStringOf(link);
-    let index = this.linkIndex.get(key);
+    let index = this.#linkIndex.get(key);
     if (index === undefined) {
-      index = this.links.length;
-      this.links.push(
+      index = this.#links.length;
+      this.#links.push(
         cloneIfNecessary(
           link,
         ) as unknown as NormalizedFullLink,
       );
-      this.linkIndex.set(key, index);
+      this.#linkIndex.set(key, index);
     }
     return index;
   }
@@ -151,8 +156,8 @@ export class TraverseCaptureRecorder {
     memo: object | undefined,
   ): void {
     if (this.invocations.length >= this.maxInvocations) {
-      if (!this.capHit) {
-        this.capHit = true;
+      if (!this.#capHit) {
+        this.#capHit = true;
         logger.warn("capture", () => [
           `invocation cap (${this.maxInvocations}) hit; later traversals ` +
           "are not recorded (docs still are)",
@@ -169,16 +174,16 @@ export class TraverseCaptureRecorder {
         path: [...path],
         scope,
       },
-      selector: this.internSelector(selector),
-      ...(link !== undefined && { link: this.internLink(link) }),
+      selector: this.#internSelector(selector),
+      ...(link !== undefined && { link: this.#internLink(link) }),
       includeMeta: context.includeMeta,
-      context: this.idFor(
-        this.contextIds,
+      context: this.#idFor(
+        this.#contextIds,
         context,
-        () => this.nextContextId++,
+        () => this.#nextContextId++,
       ),
       ...(memo !== undefined && {
-        memo: this.idFor(this.memoIds, memo, () => this.nextMemoId++),
+        memo: this.#idFor(this.#memoIds, memo, () => this.#nextMemoId++),
       }),
     });
   }
@@ -187,6 +192,9 @@ export class TraverseCaptureRecorder {
    * Capture the full doc behind `address` (value at path `[]`) once per doc.
    * Reads through the *unwrapped* tx with a scheduling-ignored meta so the
    * extra read does not perturb reactivity logs.
+   *
+   * TypeScript-private rather than a `#` name:
+   * `test/traverse-replay/profile.ts` drives this member directly.
    */
   private captureDoc(
     tx: IExtendedStorageTransaction,
@@ -195,7 +203,7 @@ export class TraverseCaptureRecorder {
     // data: URIs carry their value in the id; replay decodes them directly.
     if (hasDataUriScheme(address.id)) return;
     const key = fixtureDocKey(address);
-    if (this.docs.has(key)) return;
+    if (this.#docs.has(key)) return;
     const { ok } = tx.read(
       {
         space: address.space,
@@ -207,7 +215,7 @@ export class TraverseCaptureRecorder {
       { meta: ignoreReadForScheduling },
     );
     if (ok !== undefined && ok.value !== undefined) {
-      this.docs.set(
+      this.#docs.set(
         key,
         cloneIfNecessary(ok.value),
       );
@@ -262,10 +270,10 @@ export class TraverseCaptureRecorder {
         source,
         capturedAt: new Date().toISOString(),
       },
-      selectors: this.selectors,
-      links: this.links,
+      selectors: this.#selectors,
+      links: this.#links,
       docs: Object.fromEntries(
-        [...this.docs.entries()].sort(([a], [b]) => a < b ? -1 : 1),
+        [...this.#docs.entries()].sort(([a], [b]) => a < b ? -1 : 1),
       ),
       invocations: this.invocations,
     };
@@ -279,9 +287,9 @@ export class TraverseCaptureRecorder {
     const fixture = this.toFixture(name, `CF_TRAVERSE_CAPTURE=${path}`);
     Deno.writeTextFileSync(path, JSON.stringify(fixture));
     logger.info("capture", () => [
-      `wrote ${path}: ${this.docs.size} docs, ` +
+      `wrote ${path}: ${this.#docs.size} docs, ` +
       `${this.invocations.length} invocations, ` +
-      `${this.selectors.length} selectors, ${this.links.length} links`,
+      `${this.#selectors.length} selectors, ${this.#links.length} links`,
     ]);
   }
 }

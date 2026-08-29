@@ -310,7 +310,7 @@ function schemaMemoLinkKey(link: NormalizedFullLink | undefined): string {
  *
  * Keyed on content (injective `pathKey()` encodings) plus cached schema
  * hashes (`hashSchema()`), in one module-level capped `Map`: callers
- * like `traversePointerWithSchema` mint a fresh selector object per call
+ * like `#traversePointerWithSchema` mint a fresh selector object per call
  * (only its `schema` is identity-stable), so a cache rooted on selector
  * identity would never hit, and every miss would mint yet another distinct
  * frozen selector for downstream code to full-hash. Memoization requires
@@ -321,7 +321,7 @@ function schemaMemoLinkKey(link: NormalizedFullLink | undefined): string {
  */
 const _linkHopSelectorCache = new Map<string, SchemaPathSelector>();
 
-/** See `BaseObjectTraverser.internCoverageSelector()`. */
+/** See `BaseObjectTraverser.#internCoverageSelector()`. */
 const _coverageSelectorCache = new Map<string, SchemaPathSelector>();
 
 function narrowAndCombineSelectorForLink(
@@ -392,7 +392,7 @@ function narrowAndCombineSelectorForLink(
  * instance state — so a module-level cache across cfc instances is sound.)
  * Mutable input falls back to the exact un-memoized computation.
  *
- * `markers` selects the `$comment` marker pair `traverseObjectWithSchema`
+ * `markers` selects the `$comment` marker pair `#traverseObjectWithSchema`
  * uses to detect properties it should not descend into.
  */
 const EMPTY_PROPERTIES_MARKER: JSONSchema = Object.freeze(
@@ -606,7 +606,7 @@ function combinatorRestSchema(
 
 /**
  * Per-branch precomputation for an anyOf schema. The per-node loop in
- * `_traverseWithSchemaInner` previously re-did, on EVERY visited node, work
+ * `#traverseWithSchemaInner` previously re-did, on EVERY visited node, work
  * that depends only on the schema: sorting branches (two `hasAsCell` filter
  * passes), merging rest+option per branch, and `canBranchMatch`'s static
  * derivations ($ref resolution, type-list normalization, required-props
@@ -826,11 +826,11 @@ export function resolveSchemaRefsCanonical(
  * A data structure that maps keys to sets of values, allowing multiple values
  * to be associated with a single key without duplication.
  *
- * When a `hashFunction` is provided, values are deduped using hash-based
+ * When a `#hashFunction` is provided, values are deduped using hash-based
  * lookup for O(1) add/hasValue. Structurally-equal values (per the hash
  * function) are treated as duplicates.
  *
- * When no `hashFunction` is provided, values are stored in a plain Set using
+ * When no `#hashFunction` is provided, values are stored in a plain Set using
  * reference equality.
  *
  * @template K The type of keys in the map
@@ -839,9 +839,9 @@ export function resolveSchemaRefsCanonical(
 export class MapSet<K, V> {
   // When hashFunction is set, use hash-based dedup: key → (hash → value)
   // When unset, use plain Set: key → Set<value>
-  private hashMap?: Map<K, Map<string, V>>;
-  private setMap?: Map<K, Set<V>>;
-  private hashFunction?: (value: V) => string;
+  #hashMap?: Map<K, Map<string, V>>;
+  #setMap?: Map<K, Set<V>>;
+  #hashFunction?: (value: V) => string;
 
   // Instrumentation counters (kept for diagnostics)
   deepEqualCalls = 0;
@@ -849,36 +849,36 @@ export class MapSet<K, V> {
 
   constructor(hashFunction?: (value: V) => string) {
     if (hashFunction) {
-      this.hashFunction = hashFunction;
-      this.hashMap = new Map();
+      this.#hashFunction = hashFunction;
+      this.#hashMap = new Map();
     } else {
-      this.setMap = new Map();
+      this.#setMap = new Map();
     }
   }
 
   /** Total number of keys in the map */
   public get size(): number {
-    if (this.hashMap) return this.hashMap.size;
-    return this.setMap!.size;
+    if (this.#hashMap) return this.#hashMap.size;
+    return this.#setMap!.size;
   }
 
   /** Total number of values across all keys */
   public get totalValues(): number {
     let count = 0;
-    if (this.hashMap) {
-      for (const m of this.hashMap.values()) count += m.size;
+    if (this.#hashMap) {
+      for (const m of this.#hashMap.values()) count += m.size;
     } else {
-      for (const s of this.setMap!.values()) count += s.size;
+      for (const s of this.#setMap!.values()) count += s.size;
     }
     return count;
   }
 
   public get(key: K): Set<V> | undefined {
-    if (this.hashMap) {
-      const m = this.hashMap.get(key);
+    if (this.#hashMap) {
+      const m = this.#hashMap.get(key);
       return m ? new Set(m.values()) : undefined;
     }
-    return this.setMap!.get(key);
+    return this.#setMap!.get(key);
   }
 
   /**
@@ -886,78 +886,78 @@ export class MapSet<K, V> {
    * `get()`, which copies in hash mode). Yields nothing for an absent key.
    */
   public *values(key: K): IterableIterator<V> {
-    if (this.hashMap) {
-      const m = this.hashMap.get(key);
+    if (this.#hashMap) {
+      const m = this.#hashMap.get(key);
       if (m) yield* m.values();
     } else {
-      const s = this.setMap!.get(key);
+      const s = this.#setMap!.get(key);
       if (s) yield* s;
     }
   }
 
   public add(key: K, value: V) {
-    if (this.hashMap) {
-      let m = this.hashMap.get(key);
+    if (this.#hashMap) {
+      let m = this.#hashMap.get(key);
       if (m === undefined) {
         m = new Map<string, V>();
-        this.hashMap.set(key, m);
+        this.#hashMap.set(key, m);
       }
-      const hash = this.hashFunction!(value);
+      const hash = this.#hashFunction!(value);
       if (!m.has(hash)) {
         m.set(hash, value);
       }
       return;
     }
     // Non-hash path (no equalFn)
-    const values = this.setMap!.get(key);
+    const values = this.#setMap!.get(key);
     if (values === undefined) {
-      this.setMap!.set(key, new Set([value]));
+      this.#setMap!.set(key, new Set([value]));
     } else {
       values.add(value);
     }
   }
 
   public has(key: K): boolean {
-    if (this.hashMap) return this.hashMap.has(key);
-    return this.setMap!.has(key);
+    if (this.#hashMap) return this.#hashMap.has(key);
+    return this.#setMap!.has(key);
   }
 
   public hasValue(key: K, value: V): boolean {
-    if (this.hashMap) {
-      const m = this.hashMap.get(key);
+    if (this.#hashMap) {
+      const m = this.#hashMap.get(key);
       if (!m) return false;
-      return m.has(this.hashFunction!(value));
+      return m.has(this.#hashFunction!(value));
     }
-    const values = this.setMap!.get(key);
+    const values = this.#setMap!.get(key);
     return values !== undefined && values.has(value);
   }
 
   public deleteValue(key: K, value: V): boolean {
-    if (this.hashMap) {
-      const m = this.hashMap.get(key);
+    if (this.#hashMap) {
+      const m = this.#hashMap.get(key);
       if (!m) return false;
-      const hash = this.hashFunction!(value);
+      const hash = this.#hashFunction!(value);
       const rv = m.delete(hash);
-      if (m.size === 0) this.hashMap.delete(key);
+      if (m.size === 0) this.#hashMap.delete(key);
       return rv;
     }
-    const values = this.setMap!.get(key);
+    const values = this.#setMap!.get(key);
     if (!values) return false;
     const rv = values.delete(value);
-    if (values.size === 0) this.setMap!.delete(key);
+    if (values.size === 0) this.#setMap!.delete(key);
     return rv;
   }
 
   public delete(key: K) {
-    if (this.hashMap) {
-      this.hashMap.delete(key);
+    if (this.#hashMap) {
+      this.#hashMap.delete(key);
     } else {
-      this.setMap!.delete(key);
+      this.#setMap!.delete(key);
     }
   }
 
   protected isHashing(): boolean {
-    return this.hashMap !== undefined;
+    return this.#hashMap !== undefined;
   }
 
   /**
@@ -966,15 +966,15 @@ export class MapSet<K, V> {
    * use the same hashing mode.
    */
   protected copyStateFrom(other: MapSet<K, V>): void {
-    if (this.hashMap !== undefined && other.hashMap !== undefined) {
-      for (const [key, values] of other.hashMap) {
-        this.hashMap.set(key, new Map(values));
+    if (this.#hashMap !== undefined && other.#hashMap !== undefined) {
+      for (const [key, values] of other.#hashMap) {
+        this.#hashMap.set(key, new Map(values));
       }
       return;
     }
-    if (this.setMap !== undefined && other.setMap !== undefined) {
-      for (const [key, values] of other.setMap) {
-        this.setMap.set(key, new Set(values));
+    if (this.#setMap !== undefined && other.#setMap !== undefined) {
+      for (const [key, values] of other.#setMap) {
+        this.#setMap.set(key, new Set(values));
       }
       return;
     }
@@ -985,12 +985,12 @@ export class MapSet<K, V> {
    * iterable
    */
   *[Symbol.iterator](): IterableIterator<[K, Set<V>]> {
-    if (this.hashMap) {
-      for (const [key, m] of this.hashMap) {
+    if (this.#hashMap) {
+      for (const [key, m] of this.#hashMap) {
         yield [key, new Set(m.values())];
       }
     } else {
-      for (const [key, values] of this.setMap!) {
+      for (const [key, values] of this.#setMap!) {
         yield [key, values];
       }
     }
@@ -1024,28 +1024,28 @@ export class MapSetStringToPathSelectors extends MapSet<
    * subset. May hold structurally-equal duplicates under distinct
    * identities; that only costs a redundant scan step, never correctness.
    */
-  private trueSchemaIndex = new Map<string, Set<SchemaPathSelector>>();
+  #trueSchemaIndex = new Map<string, Set<SchemaPathSelector>>();
 
   constructor(hashValues: boolean = false) {
     super(hashValues ? (v) => hashStringOf(v) : undefined);
   }
 
   trueSchemaSelectors(key: string): Iterable<SchemaPathSelector> {
-    return this.trueSchemaIndex.get(key) ?? [];
+    return this.#trueSchemaIndex.get(key) ?? [];
   }
 
-  private isIndexable(value: SchemaPathSelector): boolean {
+  #isIndexable(value: SchemaPathSelector): boolean {
     return value.schema !== undefined &&
       ContextualFlowControl.isTrueSchema(value.schema);
   }
 
   public override add(key: string, value: SchemaPathSelector) {
     super.add(key, value);
-    if (this.isIndexable(value)) {
-      let indexed = this.trueSchemaIndex.get(key);
+    if (this.#isIndexable(value)) {
+      let indexed = this.#trueSchemaIndex.get(key);
       if (indexed === undefined) {
         indexed = new Set();
-        this.trueSchemaIndex.set(key, indexed);
+        this.#trueSchemaIndex.set(key, indexed);
       }
       indexed.add(value);
     }
@@ -1058,20 +1058,20 @@ export class MapSetStringToPathSelectors extends MapSet<
     const rv = super.deleteValue(key, value);
     // Dedup in the base map is structural while the index is by identity, so
     // a removal can't be mirrored directly; rebuild the (small) key's index.
-    if (rv && this.trueSchemaIndex.has(key)) {
+    if (rv && this.#trueSchemaIndex.has(key)) {
       const rebuilt = new Set<SchemaPathSelector>();
       for (const existing of this.values(key)) {
-        if (this.isIndexable(existing)) rebuilt.add(existing);
+        if (this.#isIndexable(existing)) rebuilt.add(existing);
       }
-      if (rebuilt.size > 0) this.trueSchemaIndex.set(key, rebuilt);
-      else this.trueSchemaIndex.delete(key);
+      if (rebuilt.size > 0) this.#trueSchemaIndex.set(key, rebuilt);
+      else this.#trueSchemaIndex.delete(key);
     }
     return rv;
   }
 
   public override delete(key: string) {
     super.delete(key);
-    this.trueSchemaIndex.delete(key);
+    this.#trueSchemaIndex.delete(key);
   }
 
   /**
@@ -1083,8 +1083,8 @@ export class MapSetStringToPathSelectors extends MapSet<
   clone(): MapSetStringToPathSelectors {
     const cloned = new MapSetStringToPathSelectors(this.isHashing());
     cloned.copyStateFrom(this);
-    for (const [key, values] of this.trueSchemaIndex) {
-      cloned.trueSchemaIndex.set(key, new Set(values));
+    for (const [key, values] of this.#trueSchemaIndex) {
+      cloned.#trueSchemaIndex.set(key, new Set(values));
     }
     return cloned;
   }
@@ -1151,15 +1151,15 @@ export const schemaTrackerCoversSelector = (
 };
 
 export class CycleTracker<K> {
-  private partial: Set<K>;
-  private expectCycles: boolean;
+  #partial: Set<K>;
+  #expectCycles: boolean;
   constructor(expectCycles = false) {
-    this.expectCycles = expectCycles;
-    this.partial = new Set<K>();
+    this.#expectCycles = expectCycles;
+    this.#partial = new Set<K>();
   }
   include(k: K, context?: unknown): Disposable | null {
-    if (this.partial.has(k)) {
-      if (!this.expectCycles) {
+    if (this.#partial.has(k)) {
+      if (!this.#expectCycles) {
         logger.warn("traverse", () => [
           "Cycle Detected!",
           k,
@@ -1168,10 +1168,10 @@ export class CycleTracker<K> {
       }
       return null;
     }
-    this.partial.add(k);
+    this.#partial.add(k);
     return {
       [Symbol.dispose]: () => {
-        this.partial.delete(k);
+        this.#partial.delete(k);
       },
     };
   }
@@ -1201,6 +1201,8 @@ export class CompoundCycleTracker<
   Value = unknown,
 > {
   // partialKey (identity) → Map<interned extraKey hashString, Value?>
+  // TypeScript-private rather than a `#` name: `test/traverse.test.ts` drives
+  // this member directly.
   private partial: Map<EqualKey, Map<string, Value | undefined>>;
   constructor() {
     this.partial = new Map();
@@ -1379,10 +1381,13 @@ class ManagedStorageJournal implements ITransactionJournal {
 export class ManagedStorageTransaction implements IStorageTransaction {
   #readOnlySource?: string;
 
+  #manager: ObjectStorageManager;
+
   constructor(
-    private manager: ObjectStorageManager,
+    manager: ObjectStorageManager,
     public journal = new ManagedStorageJournal(),
   ) {
+    this.#manager = manager;
   }
 
   setReadOnly(reason = "runtime.readTx()"): void {
@@ -1397,7 +1402,7 @@ export class ManagedStorageTransaction implements IStorageTransaction {
     return this.#readOnlySource !== undefined;
   }
 
-  private assertWritable(method: string): void {
+  #assertWritable(method: string): void {
     if (this.#readOnlySource === undefined) {
       return;
     }
@@ -1415,7 +1420,7 @@ export class ManagedStorageTransaction implements IStorageTransaction {
     if (options?.trackReadWithoutLoad === true) {
       return { ok: { address, value: undefined } };
     }
-    const source = this.manager.load(address) ??
+    const source = this.#manager.load(address) ??
       { address: { ...address, path: [] } };
     return resolve(source, address);
   }
@@ -1423,15 +1428,15 @@ export class ManagedStorageTransaction implements IStorageTransaction {
     _address: IMemorySpaceAddress,
     _value?: FabricValue,
   ): Result<IAttestation, WriterError | WriteError> {
-    this.assertWritable("write()");
+    this.#assertWritable("write()");
     throw new Error("Method not implemented.");
   }
   abort(_reason?: unknown): Result<Unit, InactiveTransactionError> {
-    this.assertWritable("abort()");
+    this.#assertWritable("abort()");
     throw new Error("Method not implemented.");
   }
   commit(): Promise<Result<Unit, CommitError>> {
-    this.assertWritable("commit()");
+    this.#assertWritable("commit()");
     throw new Error("Method not implemented.");
   }
 }
@@ -1999,7 +2004,7 @@ export abstract class BaseObjectTraverser {
       // site 5): coverage proven for one scope instance is not coverage
       // of another.
       getTrackerKey(link, this.context.scopeKeyIdentity),
-      this.internCoverageSelector(targetSelector),
+      this.#internCoverageSelector(targetSelector),
     );
   }
 
@@ -2027,7 +2032,7 @@ export abstract class BaseObjectTraverser {
    * selectors for every one of them. Validity is global — the key is pure
    * content, and interning is process-wide.
    */
-  private internCoverageSelector(
+  #internCoverageSelector(
     selector: SchemaPathSelector,
   ): SchemaPathSelector {
     const schema = selector.schema ?? false;
@@ -3516,7 +3521,7 @@ export function assertSchemaMemoIdentity(
 
 export class SchemaObjectTraverser<V extends FabricValue>
   extends BaseObjectTraverser {
-  private sharedSchemaMemo?: SchemaMemo;
+  #sharedSchemaMemo?: SchemaMemo;
 
   constructor(
     tx: IExtendedStorageTransaction,
@@ -3532,7 +3537,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // assertSchemaMemoIdentity).
       assertSchemaMemoIdentity(sharedSchemaMemo, context.scopeKeyIdentity);
     }
-    this.sharedSchemaMemo = sharedSchemaMemo;
+    this.#sharedSchemaMemo = sharedSchemaMemo;
   }
 
   // Traversal stats counters
@@ -3546,29 +3551,29 @@ export class SchemaObjectTraverser<V extends FabricValue>
   anyOfPropertyMerges = 0;
   override getDocAtPathCalls = 0;
   // Track per-doc visit counts and unique paths
-  private docVisits = new Map<string, number>();
-  private uniquePaths = new Set<string>();
+  #docVisits = new Map<string, number>();
+  #uniquePaths = new Set<string>();
   // Read once per traversal, so one traversal collects and reports the same
   // way throughout.
-  private diagnostics = traverseDiagnosticsEnabled();
-  private maxDepth = 0;
-  private currentDepth = 0;
+  #diagnostics = traverseDiagnosticsEnabled();
+  #maxDepth = 0;
+  #currentDepth = 0;
   // Memoization cache for traverseWithSchema: key → result, scoped to one
   // traverse() call and cleared at the start of each.
   // The query path may instead use sharedSchemaMemo, which persists across
   // the traverse() calls of one selectSchema query; the read path never does,
   // because its entries are only sound within the traversal that made them.
-  private schemaMemo = new Map<
+  #schemaMemo = new Map<
     string,
     TraverseResult<FabricValue>
   >();
   schemaMemoHits = 0;
 
-  private get activeMemo(): Map<
+  get #activeMemo(): Map<
     string,
     TraverseResult<FabricValue>
   > {
-    return this.sharedSchemaMemo ?? this.schemaMemo;
+    return this.#sharedSchemaMemo ?? this.#schemaMemo;
   }
 
   protected override traverseLinkedDoc(
@@ -3608,7 +3613,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       this.selector,
       link,
       this.context,
-      this.sharedSchemaMemo,
+      this.#sharedSchemaMemo,
     );
     // Reset per-traverse stats (but NOT the shared memo)
     this.traverseWithSchemaCalls = 0;
@@ -3620,17 +3625,17 @@ export class SchemaObjectTraverser<V extends FabricValue>
     this.anyOfFastRejects = 0;
     this.anyOfPropertyMerges = 0;
     this.getDocAtPathCalls = 0;
-    this.docVisits.clear();
-    this.uniquePaths.clear();
-    this.diagnostics = traverseDiagnosticsEnabled();
-    this.maxDepth = 0;
-    this.currentDepth = 0;
+    this.#docVisits.clear();
+    this.#uniquePaths.clear();
+    this.#diagnostics = traverseDiagnosticsEnabled();
+    this.#maxDepth = 0;
+    this.#currentDepth = 0;
     this.schemaMemoHits = 0;
     // The private memo is per-traversal on both paths — the read path holds
     // its entries there precisely because they must not outlive the
     // traversal that recorded their reads — so it is cleared unconditionally.
     // The shared one belongs to the query and is left alone.
-    this.schemaMemo.clear();
+    this.#schemaMemo.clear();
     // A selector schema carrying external refs needs its schema documents
     // loaded before traversal resolves against them; a selector whose
     // closure this space does not hold selects nothing (the delivery
@@ -3664,7 +3669,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         "Call to traverse failed validation",
         doc,
         toIndentedDebugString(this.selector?.schema),
-        this.getDebugValue(doc),
+        this.#getDebugValue(doc),
       ]);
     }
     return rv;
@@ -3679,7 +3684,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
    * reaches the report body by passing an `elapsed` over the threshold — see
    * `SLOW_TRAVERSE_MS` for why that matters. `topDocs` reports real counts
    * only under `CF_TRAVERSE_DIAGNOSTICS=1`, which is what populates
-   * `docVisits`.
+   * `#docVisits`.
    */
   maybeReportSlowTraverse(
     elapsed: number,
@@ -3687,7 +3692,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
   ): void {
     if (elapsed <= SLOW_TRAVERSE_MS) return;
     // Find top visited docs
-    const topDocs = [...this.docVisits.entries()]
+    const topDocs = [...this.#docVisits.entries()]
       .sort((a, b) => b[1] - a[1])
       .slice(0, 5)
       .map(([id, count]) => `${id.slice(0, 20)}..=${count}`)
@@ -3707,12 +3712,12 @@ export class SchemaObjectTraverser<V extends FabricValue>
       `anyOfPropertyMerges=${this.anyOfPropertyMerges}`,
       `getDocAtPath=${this.getDocAtPathCalls}`,
       `dagMemo=${this.dagMemo.size}`,
-      `uniqueDocs=${this.docVisits.size}`,
-      `uniquePaths=${this.uniquePaths.size}`,
-      `maxDepth=${this.maxDepth}`,
-      `schemaMemo=${this.activeMemo.size}`,
+      `uniqueDocs=${this.#docVisits.size}`,
+      `uniquePaths=${this.#uniquePaths.size}`,
+      `maxDepth=${this.#maxDepth}`,
+      `schemaMemo=${this.#activeMemo.size}`,
       `schemaMemoHits=${this.schemaMemoHits}`,
-      this.diagnostics
+      this.#diagnostics
         ? `topDocs=${topDocs}`
         : "topDocs=n/a (set CF_TRAVERSE_DIAGNOSTICS=1)",
     ]);
@@ -3768,8 +3773,8 @@ export class SchemaObjectTraverser<V extends FabricValue>
           // right now there's no way for that to happen.
           return fail(TRAVERSE_FAILURES.undefinedLink);
         } else {
-          return this.isValidType(nextSelector.schema, "undefined")
-            ? { ok: this.traversePrimitive(nextDoc, nextSelector.schema) }
+          return this.#isValidType(nextSelector.schema, "undefined")
+            ? { ok: this.#traversePrimitive(nextDoc, nextSelector.schema) }
             : fail(TRAVERSE_FAILURES.undefinedLink);
         }
       }
@@ -3807,14 +3812,16 @@ export class SchemaObjectTraverser<V extends FabricValue>
     link?: NormalizedFullLink,
   ): TraverseResult<FabricValue> {
     this.traverseWithSchemaCalls++;
-    this.currentDepth++;
-    if (this.currentDepth > this.maxDepth) this.maxDepth = this.currentDepth;
+    this.#currentDepth++;
+    if (this.#currentDepth > this.#maxDepth) {
+      this.#maxDepth = this.#currentDepth;
+    }
     const docId = doc.address.id;
-    if (this.diagnostics) {
+    if (this.#diagnostics) {
       // Per-visit doc/path tracking for the slow-traverse log; the string
       // building is too hot to leave on by default (see TRAVERSE_DIAGNOSTICS).
-      this.docVisits.set(docId, (this.docVisits.get(docId) ?? 0) + 1);
-      this.uniquePaths.add(docId + "/" + doc.address.path.join("/"));
+      this.#docVisits.set(docId, (this.#docVisits.get(docId) ?? 0) + 1);
+      this.#uniquePaths.add(docId + "/" + doc.address.path.join("/"));
     }
     try {
       // Both paths memoize by doc address + schema. The read path adds the
@@ -3826,11 +3833,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // exact key was already traversed IN THIS TRAVERSAL: the first visit
       // registered those reads, and registering the same addresses again adds
       // nothing to the transaction's read set. It is also why the read path
-      // memoizes into `schemaMemo` and never into a shared one — an entry
+      // memoizes into `#schemaMemo` and never into a shared one — an entry
       // living past its traversal would answer a later traversal that never
       // recorded its reads, under a `TransformObjectCreator` whose base link
       // and CFC label view belong to a different materialization.
-      const memo = this.traverseCells ? this.activeMemo : this.schemaMemo;
+      const memo = this.traverseCells ? this.#activeMemo : this.#schemaMemo;
       const memoKey = this.traverseCells
         ? schemaMemoAddressKey(doc.address) + "|" + hashSchema(schema)
         : schemaMemoAddressKey(doc.address) + "|" + hashSchema(schema) + "|" +
@@ -3840,15 +3847,15 @@ export class SchemaObjectTraverser<V extends FabricValue>
         this.schemaMemoHits++;
         return cached;
       }
-      const result = this._traverseWithSchemaInner(doc, schema, link);
+      const result = this.#traverseWithSchemaInner(doc, schema, link);
       memo.set(memoKey, result);
       return result;
     } finally {
-      this.currentDepth--;
+      this.#currentDepth--;
     }
   }
 
-  private _traverseWithSchemaInner(
+  #traverseWithSchemaInner(
     doc: IMemorySpaceValueAttestation,
     schema: JSONSchema,
     link?: NormalizedFullLink,
@@ -3872,7 +3879,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         doc.value === undefined && resolved.default !== undefined &&
         (resolved.anyOf || resolved.oneOf || resolved.allOf)
       ) {
-        return { ok: this.applyDefault(doc, resolved) };
+        return { ok: this.#applyDefault(doc, resolved) };
       }
       // There are a lot of valid logical schema flags, and we only handle
       // a very limited set here, with no support for combinations.
@@ -3924,7 +3931,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
               "No matching anyOf",
               doc,
               sortedAnyOf,
-              this.getDebugValue(doc),
+              this.#getDebugValue(doc),
             ],
           );
           return fail(TRAVERSE_FAILURES.noMatchingAnyOf);
@@ -4020,7 +4027,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
             "No matching anyOf",
             doc,
             prepared,
-            this.getDebugValue(doc),
+            this.#getDebugValue(doc),
           ],
         );
         return fail(TRAVERSE_FAILURES.noMatchingAnyOf);
@@ -4061,7 +4068,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
               "No matching oneOf",
               doc,
               sortedOneOf,
-              this.getDebugValue(doc),
+              this.#getDebugValue(doc),
             ],
           );
           return fail(TRAVERSE_FAILURES.noMatchingOneOf);
@@ -4072,7 +4079,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
             "Multiple matching oneOf",
             doc,
             sortedOneOf,
-            this.getDebugValue(doc),
+            this.#getDebugValue(doc),
           ],
         );
         return fail(TRAVERSE_FAILURES.multipleMatchingOneOf);
@@ -4173,11 +4180,11 @@ export class SchemaObjectTraverser<V extends FabricValue>
     if (doc.value === undefined) {
       // If we have a default, annotate it and return it
       // Otherwise, return undefined
-      const defaultValue = this.applyDefault(doc, resolved);
+      const defaultValue = this.#applyDefault(doc, resolved);
       return (defaultValue !== undefined)
         ? { ok: defaultValue }
-        : this.isValidType(schemaObj, "undefined")
-        ? { ok: this.traversePrimitive(doc, schemaObj) }
+        : this.#isValidType(schemaObj, "undefined")
+        ? { ok: this.#traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
     }
 
@@ -4192,7 +4199,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     const jsonType = getJsonType(doc.value);
     if (
       jsonType !== null && !isSigilLink(doc.value) &&
-      this.isValidType(schemaObj, jsonType) === TypeValidity.Unknown
+      this.#isValidType(schemaObj, jsonType) === TypeValidity.Unknown
     ) {
       const opaqueLink = link ?? getNormalizedLink(doc.address, schemaObj);
       return {
@@ -4203,33 +4210,33 @@ export class SchemaObjectTraverser<V extends FabricValue>
 
     if (doc.value === null) {
       return isPlainTypeSchema(schemaObj, "null") ||
-          this.isValidType(schemaObj, "null")
-        ? { ok: this.traversePrimitive(doc, schemaObj) }
+          this.#isValidType(schemaObj, "null")
+        ? { ok: this.#traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
     } else if (isString(doc.value)) {
       return isPlainTypeSchema(schemaObj, "string") ||
-          this.isValidType(schemaObj, "string")
-        ? { ok: this.traversePrimitive(doc, schemaObj) }
+          this.#isValidType(schemaObj, "string")
+        ? { ok: this.#traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
     } else if (typeof doc.value === "number") {
       // All numbers, including `NaN` and the infinities: they are
       // first-class stored values, so they project like any other number.
       return isPlainTypeSchema(schemaObj, "number") ||
-          this.isValidType(schemaObj, getJsonNumberType(doc.value))
-        ? { ok: this.traversePrimitive(doc, schemaObj) }
+          this.#isValidType(schemaObj, getJsonNumberType(doc.value))
+        ? { ok: this.#traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
     } else if (isBoolean(doc.value)) {
       return isPlainTypeSchema(schemaObj, "boolean") ||
-          this.isValidType(schemaObj, "boolean")
-        ? { ok: this.traversePrimitive(doc, schemaObj) }
+          this.#isValidType(schemaObj, "boolean")
+        ? { ok: this.#traversePrimitive(doc, schemaObj) }
         : fail(TRAVERSE_FAILURES.invalidType);
     } else if (isSigilLink(doc.value)) {
       this.tx.read(doc.address, READ_FOR_SCHEDULING);
       // When traversing a pointer, use the unresolved schema, so we have
       // the same values in the schema tracker.
-      return this.traversePointerWithSchema(doc, schema, link);
+      return this.#traversePointerWithSchema(doc, schema, link);
     } else if (Array.isArray(doc.value)) {
-      const valid = this.isValidType(schemaObj, "array");
+      const valid = this.#isValidType(schemaObj, "array");
       if (valid === TypeValidity.False) {
         return fail(TRAVERSE_FAILURES.invalidType);
       }
@@ -4246,7 +4253,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // function that added it to the tracker, so don't do that here
         return { ok: this.tracker.getExisting(doc.value, schema) };
       }
-      const entries = this.traverseArrayWithSchema(doc, schemaObj, newLink);
+      const entries = this.#traverseArrayWithSchema(doc, schemaObj, newLink);
       if (!Array.isArray(entries)) {
         return fail(TRAVERSE_FAILURES.invalidArray);
       }
@@ -4272,7 +4279,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       // satisfies `required: ["length"]`), mirroring the anyOf prefilters'
       // `in` checks.
       if (
-        this.isValidType(schemaObj, schemaTypeOfFabricPrimitive(doc.value)) ===
+        this.#isValidType(schemaObj, schemaTypeOfFabricPrimitive(doc.value)) ===
           TypeValidity.False
       ) {
         return fail(TRAVERSE_FAILURES.invalidType);
@@ -4280,7 +4287,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       if (opaqueLeafMissesRequired(schemaObj, doc.value)) {
         return fail(TRAVERSE_FAILURES.invalidObject);
       }
-      return { ok: this.traversePrimitive(doc, schemaObj) };
+      return { ok: this.#traversePrimitive(doc, schemaObj) };
     } else if (doc.value instanceof FabricInstance) {
       // TODO(danfuzz): a `FabricInstance` (which can have model-visible
       // outgoing references) is not yet handled by schema traversal; correct
@@ -4291,7 +4298,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
           "`FabricInstance`) in schema traversal.",
       );
     } else if (isObjectOrArray(doc.value)) {
-      const valid = this.isValidType(schemaObj, "object");
+      const valid = this.#isValidType(schemaObj, "object");
       if (valid === TypeValidity.False) {
         return fail(TRAVERSE_FAILURES.invalidType);
       }
@@ -4304,7 +4311,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // function that added it to the tracker, so don't do that here
         return { ok: this.tracker.getExisting(doc.value, schemaObj) };
       }
-      const entries = this.traverseObjectWithSchema(doc, schemaObj, newLink);
+      const entries = this.#traverseObjectWithSchema(doc, schemaObj, newLink);
       if (entries === undefined || entries === null) {
         return fail(TRAVERSE_FAILURES.invalidObject);
       }
@@ -4334,7 +4341,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
    *  TypeValidity.False if it doesn't, and TypeValidity.Unknown if we match
    *  the "unknown" type.
    */
-  private isValidType(
+  #isValidType(
     schema: JSONSchema,
     valueType: JSONSchemaTypes,
   ): TypeValidity {
@@ -4348,19 +4355,19 @@ export class SchemaObjectTraverser<V extends FabricValue>
    * The prepared plan is finite and rejects recursive schema graphs, so shapes
    * that need cycle tracking stay on the general path as well.
    */
-  private traversePlainSchema(
+  #traversePlainSchema(
     doc: IMemorySpaceValueAttestation,
     plan: PlainSchemaPlan,
     link?: NormalizedFullLink,
   ): TraverseResult<FabricValue> | undefined {
     const { path: _path, ...address } = doc.address;
     const reads: PlainSchemaReads = { address, paths: [] };
-    const result = this.traversePlainSchemaWithReads(doc, plan, link, reads);
-    this.trackPlainSchemaReads(reads);
+    const result = this.#traversePlainSchemaWithReads(doc, plan, link, reads);
+    this.#trackPlainSchemaReads(reads);
     return result;
   }
 
-  private trackPlainSchemaReads(
+  #trackPlainSchemaReads(
     reads: PlainSchemaReads,
   ): void {
     if (reads.paths.length === 0) return;
@@ -4379,7 +4386,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     reads.paths.length = 0;
   }
 
-  private createPlainSchemaObject(
+  #createPlainSchemaObject(
     link: NormalizedFullLink,
     value:
       | (FabricValue | undefined)[]
@@ -4391,7 +4398,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
       this.objectCreator.createObject(link, value);
   }
 
-  private traversePlainSchemaWithReads(
+  #traversePlainSchemaWithReads(
     doc: IMemorySpaceValueAttestation,
     plan: PlainSchemaPlan,
     link: NormalizedFullLink | undefined,
@@ -4435,7 +4442,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         }
       });
       return valid
-        ? { ok: this.createPlainSchemaObject(newLink, newValue) }
+        ? { ok: this.#createPlainSchemaObject(newLink, newValue) }
         : fail(TRAVERSE_FAILURES.invalidArray);
     }
 
@@ -4473,7 +4480,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
           address: { ...doc.address, path: propPath },
           value: propValue,
         };
-        let result = this.traversePlainSchemaWithReads(
+        let result = this.#traversePlainSchemaWithReads(
           propDoc,
           childPlan,
           undefined,
@@ -4482,7 +4489,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         if (result === undefined) {
           // Preserve activity ordering when a child needs the general
           // traversal, which may register its own reads before returning.
-          this.trackPlainSchemaReads(reads);
+          this.#trackPlainSchemaReads(reads);
           result = this.traverseWithSchema(propDoc, childPlan.schema);
         }
         if (result.error === undefined) newValue[propKey] = result.ok;
@@ -4490,7 +4497,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     }
 
     return {
-      ok: this.createPlainSchemaObject(
+      ok: this.#createPlainSchemaObject(
         newLink,
         newValue,
       ),
@@ -4502,7 +4509,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
    * cell.set(arrayOfObjects). Complex paths, scopes, link schemas, redirects,
    * transaction errors, and query traversal retain followPointer().
    */
-  private plainArrayItemLinkTarget(
+  #plainArrayItemLinkTarget(
     doc: IMemorySpaceValueAttestation,
     selector: SchemaPathSelector,
   ): IMemorySpaceValueAddress | undefined {
@@ -4513,10 +4520,10 @@ export class SchemaObjectTraverser<V extends FabricValue>
     ) {
       return undefined;
     }
-    return this.ordinaryArrayItemLinkTarget(doc.value, doc.address);
+    return this.#ordinaryArrayItemLinkTarget(doc.value, doc.address);
   }
 
-  private ordinaryArrayItemLinkTarget(
+  #ordinaryArrayItemLinkTarget(
     value: FabricValue,
     source: IMemorySpaceValueAddress,
   ): IMemorySpaceValueAddress | undefined {
@@ -4539,18 +4546,18 @@ export class SchemaObjectTraverser<V extends FabricValue>
     };
   }
 
-  private followPlainArrayItemLink(
+  #followPlainArrayItemLink(
     doc: IMemorySpaceValueAttestation,
     selector: SchemaPathSelector,
   ): [IMemorySpaceValueAttestation, SchemaPathSelector] | undefined {
-    const target = this.plainArrayItemLinkTarget(doc, selector);
+    const target = this.#plainArrayItemLinkTarget(doc, selector);
     if (target === undefined) return undefined;
     const { ok, error } = this.tx.read(target, READ_NON_RECURSIVE);
     if (error !== undefined) {
       if (error.name !== "NotFoundError" || error.path.length !== 0) {
         return undefined;
       }
-      this.reportMissingPlainArrayItemLink(doc, selector, target);
+      this.#reportMissingPlainArrayItemLink(doc, selector, target);
       return [{ address: target, value: undefined }, {
         path: target.path,
         schema: selector.schema,
@@ -4563,7 +4570,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     }];
   }
 
-  private reportMissingPlainArrayItemLink(
+  #reportMissingPlainArrayItemLink(
     doc: IMemorySpaceValueAttestation,
     selector: SchemaPathSelector,
     target: IMemorySpaceValueAddress,
@@ -4586,7 +4593,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
    * one is immediately followed by that target's scheduling and schema reads,
    * preserving V2's last-document locality.
    */
-  private preparePlainArrayItemLinks(
+  #preparePlainArrayItemLinks(
     doc: IMemorySpaceValueAttestation,
     docArray: readonly FabricValue[],
     itemSchema: JSONSchema | undefined,
@@ -4617,7 +4624,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
         ...doc.address,
         path: appendToPath(doc.address.path, index.toString()),
       };
-      const target = this.ordinaryArrayItemLinkTarget(item, sourceAddress);
+      const target = this.#ordinaryArrayItemLinkTarget(item, sourceAddress);
       if (target === undefined) return undefined;
       sourceAddresses.push(sourceAddress);
       targets.push(target);
@@ -4639,7 +4646,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
    * @returns the newly created array with entries or undefined if one of our
    *  elements failed to validate.
    */
-  private traverseArrayWithSchema(
+  #traverseArrayWithSchema(
     doc: IMemorySpaceValueAttestation,
     schema: JSONSchemaObj,
     _link?: NormalizedFullLink,
@@ -4655,7 +4662,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     // upstream computations in pull mode.
     this.tx.read(doc.address, READ_NON_RECURSIVE_FOR_SCHEDULING);
 
-    const preparedPlainLinks = this.preparePlainArrayItemLinks(
+    const preparedPlainLinks = this.#preparePlainArrayItemLinks(
       doc,
       docArray,
       directItems,
@@ -4783,7 +4790,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
             (preparedResult?.ok?.value !== undefined || preparedMissing)
           ) {
             if (preparedMissing) {
-              this.reportMissingPlainArrayItemLink(
+              this.#reportMissingPlainArrayItemLink(
                 curDoc,
                 curSelector,
                 preparedTarget,
@@ -4807,7 +4814,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
               "top",
             );
           } else {
-            [linkDoc, linkSelector] = this.followPlainArrayItemLink(
+            [linkDoc, linkSelector] = this.#followPlainArrayItemLink(
               curDoc,
               curSelector,
             ) ??
@@ -4892,14 +4899,14 @@ export class SchemaObjectTraverser<V extends FabricValue>
           : undefined;
         const { ok: val, error } = (plan === undefined
           ? undefined
-          : this.traversePlainSchema(curDoc, plan)) ??
+          : this.#traversePlainSchema(curDoc, plan)) ??
           this.traverseWithSelector(curDoc, curSelector);
         if (error !== undefined) {
           // If our item doesn't match our schema, we may be able to use
           // undefined or null if those are valid according to our schema.
-          if (this.isValidType(curSelector.schema!, "undefined")) {
+          if (this.#isValidType(curSelector.schema!, "undefined")) {
             arrayObj[index] = undefined;
-          } else if (this.isValidType(curSelector.schema!, "null")) {
+          } else if (this.#isValidType(curSelector.schema!, "null")) {
             arrayObj[index] = null;
           } else {
             // This array is invalid; one or more items do not match the
@@ -4943,7 +4950,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
    * @param link optional link to pass to createObject callback
    * @returns An object with only the properties that matched the schema
    */
-  private traverseObjectWithSchema(
+  #traverseObjectWithSchema(
     doc: IMemorySpaceValueAttestation,
     schema: JSONSchemaObj,
     _link?: NormalizedFullLink,
@@ -5100,7 +5107,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
   // selector.path.
   // The doc.value should be a primitive cell link, and we've already
   // done a nonRecursive read on it.
-  private traversePointerWithSchema(
+  #traversePointerWithSchema(
     doc: IMemorySpaceValueAttestation,
     schema: JSONSchema,
     link?: NormalizedFullLink,
@@ -5170,8 +5177,8 @@ export class SchemaObjectTraverser<V extends FabricValue>
         // since we can't follow all the write-redirect links.
         return fail(TRAVERSE_FAILURES.undefinedLink);
       } else {
-        return this.isValidType(redirSelector.schema, "undefined")
-          ? { ok: this.traversePrimitive(redirDoc, redirSelector.schema) }
+        return this.#isValidType(redirSelector.schema, "undefined")
+          ? { ok: this.#traversePrimitive(redirDoc, redirSelector.schema) }
           : fail(TRAVERSE_FAILURES.undefinedLink);
       }
     }
@@ -5218,7 +5225,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     return this.traverseWithSelector(newDoc, newSelector!, link);
   }
 
-  private traversePrimitive(
+  #traversePrimitive(
     doc: IMemorySpaceValueAttestation,
     schema: JSONSchema,
   ): FabricValue {
@@ -5267,7 +5274,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     return false;
   }
 
-  private applyDefault(
+  #applyDefault(
     doc: IMemorySpaceValueAttestation,
     schema: JSONSchema,
   ): FabricValue {
@@ -5278,7 +5285,7 @@ export class SchemaObjectTraverser<V extends FabricValue>
     return undefined;
   }
 
-  private getDebugValue(doc: IMemorySpaceValueAttestation) {
+  #getDebugValue(doc: IMemorySpaceValueAttestation) {
     if (doc.value === undefined) {
       return "undefined";
     }

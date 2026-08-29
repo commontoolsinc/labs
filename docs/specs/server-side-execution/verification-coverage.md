@@ -6316,7 +6316,7 @@ supply; OW29/OW32/OW34 closed):
     reach the running piece's swap machinery THROUGH the stamp (setup
     wrote the pointer, the meta watcher fired, swapToPattern replaced
     the graph) — now a session swap channel
-    (`Runner.sessionPatternSwaps`) carries the live value to the
+    (`Runner.#sessionPatternSwaps`) carries the live value to the
     watcher's own swap closure with the same guards; real patterns
     keep the durable-stamp path byte-for-byte. Test pins that read the
     durable stamp for hand-built pieces were adjusted to the contract

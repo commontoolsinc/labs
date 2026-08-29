@@ -432,7 +432,7 @@ export default pattern<{ out: string }>(({ out }) => ({
   });
 });
 
-describe("$implRef resolution arm (Runner.resolveJavaScriptFunction)", () => {
+describe("$implRef resolution arm (Runner.#resolveJavaScriptFunction)", () => {
   // (The "provenance bundleId fallback" suite retired with the bundleId
   // verification arm — identity E5, data-wipe decision.)
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;

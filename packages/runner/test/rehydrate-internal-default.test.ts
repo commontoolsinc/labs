@@ -31,7 +31,7 @@ const space = signer.did();
 // value ("profile") and it is persisted, re-running the pattern must NOT revert
 // the cell to the build-time default.
 //
-// `Runner.applySetupState` reads the persisted internal value and merges the
+// `Runner.#applySetupState` reads the persisted internal value and merges the
 // build-time default UNDER it (persisted wins). But the internal cell lives in
 // a separate content-addressed doc reached only via the result cell's meta link
 // — not through the schema/value graph — so the run's awaited sync gate

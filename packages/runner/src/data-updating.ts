@@ -343,7 +343,7 @@ function computeToleratesMissing(schema: JSONSchema): boolean {
   }
   if (isObjectOrArray(resolved) && resolved.default != undefined) return true;
   // Type tolerance judged with the read side's own matcher (schemaAcceptsType
-  // wraps the logic extracted from SchemaObjectTraverser.isValidType,
+  // wraps the logic extracted from SchemaObjectTraverser.#isValidType,
   // including $ref resolution and allOf/anyOf/oneOf).
   return schemaAcceptsType(schema, "undefined");
 }

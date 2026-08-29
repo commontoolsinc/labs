@@ -294,7 +294,7 @@ describe("CFC builtin implementation identity", () => {
     const { main } = await runtime.harness.compileAndEvaluateModules(program);
 
     // The binding identity rides on the function's content-addressed
-    // provenance (recorded by Engine.recordModuleProvenance from the
+    // provenance (recorded by Engine.#recordModuleProvenance from the
     // transformer's annotation on the exported factory).
     expect(
       getVerifiedProvenance(
