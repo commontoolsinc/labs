@@ -100,6 +100,23 @@ ensureNotRenderThread();
 const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
   Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
 
+/**
+ * What opening a piece does beyond resolving its cell.
+ *
+ * `reconcile` rolls a stored source forward to the origin it follows — the
+ * healing every caller that opens a root has always relied on. `start` runs
+ * the pattern, which materializes everything its result reaches.
+ *
+ * They are separable because they are wanted separately: a caller that
+ * RENDERS a piece needs both, while a caller that reads what a piece
+ * exported needs the value it reads to be current without paying to run it.
+ * A boolean asks for both or neither.
+ */
+export type PieceOpen = { reconcile: boolean; start: boolean };
+
+const normalizePieceOpen = (open: boolean | PieceOpen): PieceOpen =>
+  typeof open === "boolean" ? { reconcile: open, start: open } : open;
+
 const PRIVILEGED_PIECE_LIST_SCHEMA = internSchema({
   type: "array",
   items: { type: "unknown", asCell: ["cell"] },
@@ -473,8 +490,9 @@ export class PiecesController<T = unknown> {
    * @returns The default pattern cell, or undefined if not set
    */
   async getDefaultPattern(
-    runIt: boolean = true,
+    open: boolean | PieceOpen = true,
   ): Promise<Cell<NameSchema> | undefined> {
+    const { reconcile, start } = normalizePieceOpen(open);
     const cell = await timePiecePhase(
       "getDefaultPattern.spaceCell.sync",
       () => this.#spaceCell.key("defaultPattern").sync(),
@@ -496,11 +514,11 @@ export class PiecesController<T = unknown> {
     }
     try {
       return await timePiecePhase(
-        `getDefaultPattern.get(runIt=${runIt})`,
+        `getDefaultPattern.get(reconcile=${reconcile},start=${start})`,
         () =>
           this.getPieceCell(
             defaultPattern,
-            runIt,
+            { reconcile, start },
             nameSchema,
           ),
       );
@@ -513,7 +531,7 @@ export class PiecesController<T = unknown> {
       // this runtime cannot load. Roll that one forward to the space's
       // official system root and retry the start ONCE. Every other failure
       // rethrows untouched.
-      if (!runIt) throw error;
+      if (!start) throw error;
       let healed: Cell<NameSchema>;
       try {
         const root = await this.getPieceCell(defaultPattern, false, nameSchema);
@@ -545,7 +563,7 @@ export class PiecesController<T = unknown> {
         await this.runtime.idle();
         return await timePiecePhase(
           "getDefaultPattern.get(retry-after-heal)",
-          () => this.getPieceCell(healed, runIt, nameSchema),
+          () => this.getPieceCell(healed, { reconcile, start }, nameSchema),
         );
       } catch (retryError) {
         pieceUpdateLogger.warn("default-root-heal-retry-failed", () => [
@@ -597,16 +615,26 @@ export class PiecesController<T = unknown> {
    * This is the discovery root, not a list of every stored piece root. Reads
    * the default pattern's pieceRegistry export.
    *
-   * A listing is a read, and a read does not need the root running. The
-   * export's only writer is {@link add}, which runs the root itself, so the
-   * persisted value is current at every quiescent moment — and resolving the
-   * root passively skips `runtime.start()`, which is the dominant phase of
-   * opening a space whose root reaches a large piece. Running is kept for the
-   * two cases that cannot be served from what is stored: a root that has
-   * never exported a registry here, and `add()`.
+   * A listing is a read, and a read does not need the root running. Every
+   * writer of this export — {@link add}, {@link remove}, the root's own
+   * remove handler, and patterns that reach it through `wish()` — persists
+   * what it writes, so the stored value is current at every quiescent
+   * moment, and a listing can be served from it.
+   *
+   * The root is still RECONCILED, so a listing keeps healing a stale root
+   * the way it always has; only `runtime.start()` is skipped, which is the
+   * dominant phase of opening a space whose root reaches a large piece.
+   * Running is kept for the cases that cannot be served from what is stored:
+   * a root that has never exported a registry here, one whose passive open
+   * fails, and `add()`.
    */
   async getPieceRegistry(): Promise<Cell<Cell<unknown>[]>> {
-    const passiveRoot = await this.getDefaultPattern(false);
+    // Reconciled but not started: healing is a correctness contract this
+    // path has always carried, and it costs a fraction of the start.
+    const passiveRoot = await this.getDefaultPattern({
+      reconcile: true,
+      start: false,
+    }).catch(() => undefined);
     if (passiveRoot) {
       const exported = this.#pieceRegistryExport(passiveRoot);
       await this.syncPieces(exported);
@@ -619,6 +647,9 @@ export class PiecesController<T = unknown> {
       }
     }
 
+    // The running path is the backstop, and it keeps its own rescue: a
+    // passive open that threw reaches it rather than surfacing, so a root
+    // this listing could previously heal is still healed here.
     const defaultPattern = await this.getDefaultPattern(true);
     if (!defaultPattern) {
       // Return empty array cell if no default pattern. Loud on purpose: any
@@ -715,22 +746,23 @@ export class PiecesController<T = unknown> {
    */
   async getPieceCell<S extends JSONSchema = JSONSchema>(
     id: string | Cell<unknown>,
-    runIt: boolean,
+    open: boolean | PieceOpen,
     asSchema: S,
     scope?: CellScope,
   ): Promise<Cell<Schema<S>>>;
   async getPieceCell<T = unknown>(
     id: string | Cell<unknown>,
-    runIt?: boolean,
+    open?: boolean | PieceOpen,
     asSchema?: JSONSchema,
     scope?: CellScope,
   ): Promise<Cell<T>>;
   async getPieceCell<T = unknown>(
     id: string | Cell<unknown>,
-    runIt: boolean = false,
+    open: boolean | PieceOpen = false,
     asSchema?: JSONSchema,
     scope?: CellScope,
   ): Promise<Cell<T>> {
+    const { reconcile, start } = normalizePieceOpen(open);
     // Get the piece cell
     const addressed: Cell<unknown> = isCell(id)
       ? id
@@ -761,7 +793,7 @@ export class PiecesController<T = unknown> {
     // further sync. Idempotent for a normal top-level piece.
     let piece = addressed.resolveAsCell();
 
-    if (runIt) {
+    if (reconcile) {
       const outcome = await timePiecePhase(
         "get.reconcileSource",
         () => reconcilePieceSource(this.runtime, piece),
@@ -769,10 +801,12 @@ export class PiecesController<T = unknown> {
       if (outcome === "updated") {
         // The transition committed through a transaction view, and the caller
         // may have handed us a cell bound to a read transaction older than it.
-        // Detach and resync, or the start below loads the identity the origin
+        // Detach and resync, or a start below loads the identity the origin
         // just replaced — and reads through the returned cell describe it.
         piece = await piece.withTx().sync();
       }
+    }
+    if (start) {
       // start() handles pattern loading and running. It's idempotent - no
       // effect if already running.
       await timePiecePhase(

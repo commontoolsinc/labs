@@ -884,6 +884,48 @@ describe("opening a space root", () => {
     expect(getPatternIdentityRef(healed)?.symbol).toBe("default");
   });
 
+  it("heals a stale root whose registry export is already persisted", async () => {
+    await setup();
+    const piece = await controller.ensureDefaultPattern();
+    const root = piece.getCell();
+
+    // The registry path serves a persisted export without running the root.
+    // A root that has ALREADY exported one therefore takes that path — so
+    // the healing has to happen there too, not only on the arm that runs.
+    // `pieceListSchema` defaults an absent export to `[]`, so an export
+    // persisted as empty is exactly the case that reads as present.
+    const { error: seeded } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).asSchema({
+        type: "object",
+        properties: { pieceRegistry: { type: "array" } },
+      }).key("pieceRegistry").set([]);
+    });
+    expect(seeded).toBeUndefined();
+
+    const staleIdentity = await identityForSource(
+      patternSource("unloadable-root-with-persisted-registry"),
+    );
+    await controller.stopPiece(root);
+    const { error } = await runtime.editWithRetry((tx) => {
+      root.withTx(tx).setMetaRaw("patternIdentity", {
+        identity: staleIdentity,
+        symbol: "default",
+      });
+    });
+    expect(error).toBeUndefined();
+
+    stub.setSource(SOURCE_V2);
+
+    const registry = await controller.getPieceRegistry();
+    await runtime.idle();
+
+    expect(registry).toBeDefined();
+    const healed = (await controller.getDefaultPattern(false))!;
+    expect(getPatternIdentityRef(healed)?.identity).toBe(
+      await identityForSource(SOURCE_V2),
+    );
+  });
+
   it("returns the started replacement when the rescue's retry succeeds", async () => {
     await setup();
     // The rescue's whole point is that the caller gets a root it can use. A
