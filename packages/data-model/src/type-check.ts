@@ -177,7 +177,18 @@ export function assertValidFabricValueLayer(
     }
   }
 
-  if (isValidFabricNativeObject(value)) {
+  // The outcome is already settled; this only picks which reason to give, so a
+  // value that makes the probe fail gets the generic reason rather than the
+  // probe's error in place of a refusal. A `constructor` accessor on the
+  // prototype that throws is the reachable way that happens.
+  let isNativeObject: boolean;
+  try {
+    isNativeObject = isValidFabricNativeObject(value);
+  } catch {
+    isNativeObject = false;
+  }
+
+  if (isNativeObject) {
     throw new Error(
       `Not already a \`FabricValue\`: ${
         backtickQuote(refusedClassNameOf(value as object))

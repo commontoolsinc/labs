@@ -892,6 +892,12 @@ describe("type-check", () => {
       // that function's, value for value -- which is what this pins, over the
       // whole corpus rather than over a chosen case.
       //
+      // The agreement is bounded to values whose class can be read at all. A
+      // value whose prototype has a throwing `constructor` accessor cannot be
+      // classified, so conversion fails on it outright, while the vet still
+      // names a reason -- its outcome having been settled before the probe
+      // that fails. The corpus carries no such value, and that bound is why.
+      //
       // The exception is a `FabricNativeObject`, and it is the whole of the
       // exception: conversion has a say over one, and either mints its fabric
       // form or refuses it there. The vet has no say and does not pretend to,
