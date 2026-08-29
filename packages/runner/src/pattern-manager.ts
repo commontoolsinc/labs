@@ -80,6 +80,16 @@ import { fromURI, toURI } from "./uri-utils.ts";
 
 const logger = getLogger("pattern-manager");
 
+// Cap for `parkedFailedReplications` (distinct WANTED identities with at
+// least one parked failed replication). Parks only exist while a real
+// supply failure is outstanding — a handful per session in every observed
+// incident — so the cap is a safety net against a pathological session,
+// not a working-set bound; eviction is loud (`closure-replication-park-
+// evicted`) and costs at most one lost heal, never a wrong copy (the
+// evicted failure already logged its one-shot `closure-replication-failed`
+// line, exactly the pre-heal contract).
+const MAX_PARKED_FAILED_REPLICATIONS = 64;
+
 // Bound for the in-memory identity->module cache. Higher than the pattern cache
 // because a single bundle contributes one entry per module (a big space-root
 // bundle is ~10 modules), and entries are cheap (a reference to an already-live
@@ -316,6 +326,41 @@ function sourcePackagePaths(
     .filter((filename): filename is string => filename !== undefined);
 }
 
+/**
+ * A closure-replication read failure whose remedy is SUPPLY: the wanted
+ * identity's closure was readable in no space this manager can reach
+ * (heuristic origin dry, fallback map dry or every candidate incomplete).
+ * Carries the WANTED identity — the identity whose read failed, which for
+ * a dependency-recursion frame is the DEPENDENCY's identity, not the
+ * entry's (`replicateClosures` re-enters with it as `entryIdentity`) — so
+ * the failure-registration site can park under the identity a future
+ * supply record will name (the ruled 3b close; see
+ * `parkedFailedReplications`).
+ *
+ * The class deliberately does NOT set `this.name`: `String(error)` in the
+ * `closure-replication-failed` line must stay `Error: <reason>` with the
+ * production reason strings byte-identical — five direct-CI probe
+ * classifications in the OW45 arc grep for exactly those lines.
+ */
+class ClosureReplicationSupplyError extends Error {
+  constructor(reason: string, readonly wantedIdentity: string) {
+    super(reason);
+  }
+}
+
+/** One parked failed replication (see `parkedFailedReplications`): enough
+ * to re-issue the ENTRY's full replication — fresh ticket, fresh visited
+ * set — when a matching supply records. `delegated` is the original §2b
+ * carriage; the accept gate's delegated admission validates completeness,
+ * not freshness (engine-wave-sink's protocol.md §2b row), so a late
+ * re-issue is the same admission shape as the fire-and-forget original. */
+type ParkedReplication = {
+  entryIdentity: string;
+  fromSpace: MemorySpace;
+  toSpace: MemorySpace;
+  delegated: WritebackDelegation | undefined;
+};
+
 export class PatternManager {
   // Single-flight dedup + in-memory result cache for `compileOrGetPattern`,
   // keyed by a content hash of the program (NOT a cell id, NOT the retired
@@ -425,6 +470,33 @@ export class PatternManager {
   // negligible today; revisit with an eviction policy only if serving
   // sessions get very long-lived.
   private persistedClosureSpaces = new Map<string, Set<MemorySpace>>();
+  // Failed replications PARKED for event-driven re-supply (the ruled 3b
+  // close — verification-coverage.md OW45, RULING 2026-08-28: the one
+  // supplier-timing geometry no await can see is a supplier that has not
+  // STARTED by consult time, so the failure parks and the supply's own
+  // RECORD re-issues it). Keyed by the WANTED identity — the identity
+  // whose READ failed, which for a dependency-recursion frame is the
+  // DEPENDENCY's identity, not the entry's: the dependency's supplier
+  // records the dependency's own module identities, so an entry-keyed
+  // registry would miss exactly that record event. The inner map keys by
+  // (entry, from, to) so a re-registration after a failed re-issue
+  // REPLACES its predecessor instead of accumulating. Entries drop at
+  // wake time — one wake per matching persist event; a re-issue that
+  // fails again re-parks and waits for the NEXT record, so there is no
+  // self-clocking loop — and otherwise die with the session. Growth:
+  // FIFO-capped at MAX_PARKED_FAILED_REPLICATIONS wanted keys (loud
+  // eviction); a stale park costs one wasted loud re-issue on a matching
+  // record, never a wrong copy (the re-issue re-runs the full verified,
+  // fail-closed read). The cap bounds WANTED KEYS only — the inner
+  // (entry, from, to) map is deliberately not capped in its own right
+  // (cubic PM-2 on #6528, adjudicated LOW): filling one takes that many
+  // DISTINCT real supply failures for a single identity, each carrying
+  // its own loud failure + park line, and ONE matching record wakes the
+  // whole set at once.
+  private parkedFailedReplications = new Map<
+    string,
+    Map<string, ParkedReplication>
+  >();
 
   /** Record a durable closure persist's target for
    * {@link replicateClosures}' fallback-origin read — under EVERY module
@@ -432,7 +504,21 @@ export class PatternManager {
    * write functions persist one addressable doc per module, and the
    * replicated entry is routinely a MODULE of a larger compiled closure
    * (a pattern served from the in-memory index carries its own module's
-   * identity while the space was supplied by its importer's persist). */
+   * identity while the space was supplied by its importer's persist).
+   *
+   * Also the WAKE half of the ruled 3b close: a recorded supply re-issues
+   * every parked failed replication WANTING the recorded identity. Skip
+   * parks whose `toSpace` is the recorded space — a record for the child
+   * itself cannot feed the read (the fallback loop skips `toSpace`), and
+   * the re-issue's own success records into its `toSpace`, so this filter
+   * is also what keeps a heal from waking itself. A record into a park's
+   * `fromSpace` DOES wake it: the re-issue's PRIMARY read consults that
+   * space, and the observed lunch geometry records exactly there (the
+   * sidecar supplier persists into the PARENT space — the child
+   * replication's origin). The re-issue is fire-and-forget via
+   * `queueMicrotask`: this method runs inside the persistence promise the
+   * E4 path AWAITS, so the hook must add neither latency nor a throw to
+   * that chain. */
   private recordPersistedClosureSpaces(
     identities: Iterable<string>,
     space: MemorySpace,
@@ -444,7 +530,123 @@ export class PatternManager {
         this.persistedClosureSpaces.set(identity, spaces);
       }
       spaces.add(space);
+      const parked = this.parkedFailedReplications.get(identity);
+      if (parked === undefined) continue;
+      for (const [key, record] of [...parked]) {
+        if (record.toSpace === space) continue;
+        parked.delete(key);
+        queueMicrotask(() => {
+          try {
+            logger.warn("closure-replication-reissued", () => [
+              `entry=${record.entryIdentity}`,
+              `wanted=${identity}`,
+              `from=${record.fromSpace}`,
+              `to=${record.toSpace}`,
+              `trigger=persist-record:${space}`,
+            ]);
+            this.issueReplication(
+              record.entryIdentity,
+              record.fromSpace,
+              record.toSpace,
+              record.delegated,
+              { wantedIdentity: identity },
+            );
+          } catch (error) {
+            // Defensive: nothing in the re-issue path throws synchronously
+            // today, but a future edit must surface loudly here rather
+            // than as an unhandled microtask error.
+            logger.error("closure-replication-reissue-error", () => [
+              `entry=${record.entryIdentity}`,
+              `wanted=${identity}`,
+              String(error),
+            ]);
+          }
+        });
+      }
+      if (parked.size === 0) this.parkedFailedReplications.delete(identity);
     }
+  }
+
+  /** Failure-registration half of the ruled 3b close: park `record` under
+   * `wantedIdentity` so a future matching supply record re-issues it (see
+   * `parkedFailedReplications` and the wake in
+   * {@link recordPersistedClosureSpaces}).
+   *
+   * With `checkRecordedSupply` (first-time failures only — never the
+   * re-park of a failed re-issue), consult `persistedClosureSpaces` ONCE
+   * for the wanted identity and re-issue IMMEDIATELY when a usable record
+   * already exists: the record EVENT has already passed and may never
+   * recur (review-6502 F1-ii — a supplier that completed entirely inside
+   * the failing attempt's read window records before the failure
+   * registers, and parking then would wait for an event that already
+   * happened). Usable means any recorded space except `toSpace` (the
+   * fallback read skips the target; a record into the attempt's own
+   * `fromSpace` IS usable — the re-issue's primary read consults it). The
+   * check is skipped for failed re-issues because their read just
+   * consulted this very map — an immediate retry could only spin on state
+   * it already read; the next matching record wakes them instead. So
+   * immediate re-issues are bounded by original failures, wake re-issues
+   * by matching persist events — no timers, no polling, no self-clocking
+   * loop anywhere. */
+  private registerFailedReplication(
+    wantedIdentity: string,
+    record: ParkedReplication,
+    checkRecordedSupply: boolean,
+  ): void {
+    if (checkRecordedSupply) {
+      let usable = false;
+      for (
+        const space of this.persistedClosureSpaces.get(wantedIdentity) ?? []
+      ) {
+        if (space !== record.toSpace) {
+          usable = true;
+          break;
+        }
+      }
+      if (usable) {
+        logger.warn("closure-replication-reissued", () => [
+          `entry=${record.entryIdentity}`,
+          `wanted=${wantedIdentity}`,
+          `from=${record.fromSpace}`,
+          `to=${record.toSpace}`,
+          "trigger=recorded-at-registration",
+        ]);
+        this.issueReplication(
+          record.entryIdentity,
+          record.fromSpace,
+          record.toSpace,
+          record.delegated,
+          { wantedIdentity },
+        );
+        return;
+      }
+    }
+    let parked = this.parkedFailedReplications.get(wantedIdentity);
+    if (parked === undefined) {
+      parked = new Map();
+      this.parkedFailedReplications.set(wantedIdentity, parked);
+      while (
+        this.parkedFailedReplications.size > MAX_PARKED_FAILED_REPLICATIONS
+      ) {
+        const oldest = this.parkedFailedReplications.keys().next().value;
+        if (oldest === undefined) break;
+        this.parkedFailedReplications.delete(oldest);
+        logger.warn("closure-replication-park-evicted", () => [
+          `wanted=${oldest}`,
+          `cap=${MAX_PARKED_FAILED_REPLICATIONS}`,
+        ]);
+      }
+    }
+    parked.set(
+      `${record.entryIdentity}\0${record.fromSpace}\0${record.toSpace}`,
+      record,
+    );
+    logger.warn("closure-replication-parked", () => [
+      `entry=${record.entryIdentity}`,
+      `wanted=${wantedIdentity}`,
+      `from=${record.fromSpace}`,
+      `to=${record.toSpace}`,
+    ]);
   }
   // Maps each storage slot written during this PatternManager session to its
   // complete module set. One slot can hold only one closure shape at a time.
@@ -683,7 +885,13 @@ export class PatternManager {
    * Closure replication is fire-and-forget (tracked in `compileCacheWrites`,
    * awaited by `flushCompileCacheWrites`): the child is loadable in-session
    * regardless, this only affects fresh runtimes. A failure is logged and
-   * retried on the next child creation — never on the caller's commit path.
+   * retried on the next child creation and on the next persist event —
+   * never on the caller's commit path. (The persist-event retry is the
+   * ruled 3b close: a supply-timing failure parks under the WANTED
+   * identity and `recordPersistedClosureSpaces` re-issues it when a
+   * matching supply records — see `parkedFailedReplications`. Genuine
+   * absence — an identity no server-side persist ever records — keeps
+   * exactly the loud one-shot behavior this contract always had.)
    */
   replicatePatternToSpace(
     pattern: Pattern | Module,
@@ -695,24 +903,66 @@ export class PatternManager {
 
     const entryRef = this.getArtifactEntryRef(pattern);
     if (!entryRef) return;
-    // Ticket + registration BEFORE the async body starts, so a replication
-    // issued later in the same synchronous stretch observes this entry
-    // when it awaits its origin's suppliers (see `replicationsIntoSpace`).
+    this.issueReplication(entryRef.identity, fromSpace, toSpace, delegated);
+  }
+
+  /** Issue one closure replication fire-and-forget: fresh ticket and
+   * registration in `replicationsIntoSpace` BEFORE the async body starts
+   * (so a replication issued later in the same synchronous stretch
+   * observes this entry when it awaits its origin's suppliers) and in
+   * `compileCacheWrites` (so `flushCompileCacheWrites` and the durability
+   * barrier observe it). Shared by `replicatePatternToSpace` and the 3b
+   * heal's re-issues, so a re-issued replication is a FULL fresh
+   * replication — same ticket discipline, same acyclicity (the ticket
+   * await stays strictly-older-only; compiles and loads never await
+   * replications), same idempotent diff-to-no-op persists.
+   *
+   * Failures log the loud one-shot line unchanged; a SUPPLY-class failure
+   * (the wanted identity readable nowhere — never a store-level throw or
+   * a persist failure) additionally parks for event-driven re-supply.
+   * `reissueOf` marks a park-triggered re-issue: its success logs the
+   * heal line, and its failure re-parks WITHOUT the registration-time
+   * map check — the failed attempt's read just consulted the map, so an
+   * immediate retry could only spin on state it already read; the next
+   * matching record wakes it instead. */
+  private issueReplication(
+    entryIdentity: string,
+    fromSpace: MemorySpace,
+    toSpace: MemorySpace,
+    delegated: WritebackDelegation | undefined,
+    reissueOf?: { wantedIdentity: string },
+  ): void {
     const ticket = this.nextReplicationTicket++;
     const replication = this.replicateClosures(
-      entryRef.identity,
+      entryIdentity,
       fromSpace,
       toSpace,
       undefined,
       delegated,
       ticket,
-    ).catch((error) => {
+    ).then(() => {
+      if (reissueOf !== undefined) {
+        logger.warn("closure-replication-healed", () => [
+          `entry=${entryIdentity}`,
+          `wanted=${reissueOf.wantedIdentity}`,
+          `from=${fromSpace}`,
+          `to=${toSpace}`,
+        ]);
+      }
+    }).catch((error) => {
       logger.error("closure-replication-failed", () => [
-        `entry=${entryRef.identity}`,
+        `entry=${entryIdentity}`,
         `from=${fromSpace}`,
         `to=${toSpace}`,
         String(error),
       ]);
+      if (error instanceof ClosureReplicationSupplyError) {
+        this.registerFailedReplication(
+          error.wantedIdentity,
+          { entryIdentity, fromSpace, toSpace, delegated },
+          reissueOf === undefined,
+        );
+      }
     });
     let intoTarget = this.replicationsIntoSpace.get(toSpace);
     if (intoTarget === undefined) {
@@ -935,8 +1185,16 @@ export class PatternManager {
       // ticket await — the exact masking that made the F1 pin soft. The
       // absence of a `closure-replication-await-inflight` line before a
       // `closure-replication-failed` line is therefore the pre-declared
-      // geometry-3b signature (a supplier compile that had not STARTED by
-      // consult time — see the register's residue record).
+      // geometry-3b signature. Precisely (review-6502 F1): zero-announce
+      // proves "no supplier REGISTERED at snapshot time" — a strict
+      // superset of "not started" that also admits a supplier completed
+      // inside the read window or a load resolved with its repair
+      // persist floating. All of it — 3b proper and both slivers — now
+      // ends in the same place: the throw below parks the failure for
+      // event-driven re-supply (the ruled 3b close; see
+      // `parkedFailedReplications` and the register's RULING block), so
+      // the short-circuit stays exactly as cheap and mask-free as
+      // designed while no rescueable interleaving is lost.
       const inFlightCompilations = [...this.inProgressCompilations.values()];
       const inFlightLoads = [...this.inProgressByIdentityLoads.values()];
       if (inFlightCompilations.length > 0 || inFlightLoads.length > 0) {
@@ -960,8 +1218,15 @@ export class PatternManager {
     }
     if (!origin.complete) {
       // The one-shot contract stands byte-identical on the still-failing
-      // path: same loud throw, same production reason string.
-      throw new Error(origin.reason);
+      // path: same loud throw, same production reason string (the error
+      // class keeps name "Error", so `String(error)` in the failure line
+      // is unchanged). The class carries the WANTED identity — THIS
+      // frame's `entryIdentity`, which for the dependency recursion is
+      // the dependency's own identity — so the catch in
+      // `issueReplication` can park the failure for event-driven
+      // re-supply under the identity a future persist record will name
+      // (the ruled 3b close).
+      throw new ClosureReplicationSupplyError(origin.reason, entryIdentity);
     }
     const { sourceDocs, compiledDocs } = origin;
     const modules: CacheableModule[] = [];
