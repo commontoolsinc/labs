@@ -1,5 +1,28 @@
 import type { IframeInputData, SimulationAction } from "./contract.ts";
 
+export interface RendererFailureAlarm {
+  description: string;
+  source: string;
+  lineno: number;
+  colno: number;
+  stacktrace: string;
+}
+
+/** Reports renderer construction failures through the pre-bridge guest alarm. */
+export function reportRendererFailure(
+  cause: unknown,
+  report: (alarm: RendererFailureAlarm) => void,
+): void {
+  const error = cause instanceof Error ? cause : new Error(String(cause));
+  report({
+    description: error.message,
+    source: "iframe-firebreak-commons",
+    lineno: 0,
+    colno: 0,
+    stacktrace: error.stack ?? error.message,
+  });
+}
+
 /** Surfaces a renderer bootstrap failure before preserving the thrown cause. */
 export function initializeRenderer<T>(
   create: () => T,

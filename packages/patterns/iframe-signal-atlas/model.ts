@@ -102,6 +102,30 @@ export function recentVisibleObservations(
     .slice(-2);
 }
 
+export interface RecentRouteSelection {
+  observations: SignalObservation[];
+  timeCursor: number;
+}
+
+/** Selects recent route endpoints against the current reactive time window. */
+export function recentRouteSelection(
+  observations: readonly SignalObservation[],
+  capturedTimeCursor: number,
+  band: SignalBandFilter,
+  timeStart: number,
+  timeEnd: number,
+): RecentRouteSelection {
+  const timeCursor = clampTimeCursor(
+    capturedTimeCursor,
+    timeStart,
+    timeEnd,
+  );
+  return {
+    observations: recentVisibleObservations(observations, timeCursor, band),
+    timeCursor,
+  };
+}
+
 export function propagationValues(
   observations: readonly SignalObservation[],
   timeCursor: number,

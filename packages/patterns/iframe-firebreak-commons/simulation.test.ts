@@ -14,6 +14,8 @@ import {
   normalizedBoardDimensions,
   normalizedMaximumTurns,
   reduceSimulation,
+  type RendererFailureAlarm,
+  reportRendererFailure,
   type TileState,
 } from "./simulation.ts";
 
@@ -38,6 +40,23 @@ describe("simulation", () => {
         }, (cause) => seen.push(cause))
       ).toThrow(failure);
       expect(seen).toEqual([failure]);
+    });
+  });
+
+  describe("reportRendererFailure()", () => {
+    it("raises a complete pre-bridge guest alarm", () => {
+      const reported: RendererFailureAlarm[] = [];
+      const failure = new Error("WebGL unavailable");
+
+      reportRendererFailure(failure, (alarm) => reported.push(alarm));
+
+      expect(reported).toEqual([{
+        description: "WebGL unavailable",
+        source: "iframe-firebreak-commons",
+        lineno: 0,
+        colno: 0,
+        stacktrace: failure.stack,
+      }]);
     });
   });
 

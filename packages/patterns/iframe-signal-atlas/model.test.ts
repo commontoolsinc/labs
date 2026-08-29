@@ -13,6 +13,7 @@ import {
   FIELD_HEIGHT,
   FIELD_WIDTH,
   propagationValues,
+  recentRouteSelection,
   recentVisibleObservations,
   reconcileTimeCursor,
   reconcileTimeCursorUntilInputStable,
@@ -122,6 +123,21 @@ describe("model", () => {
       expect(canClearSubmittedDraft(submittedGeneration, formGeneration))
         .toBe(false);
     });
+
+    it("lets an automatic window clamp clear the submitted cursor draft", () => {
+      const submittedGeneration = 5;
+      let currentGeneration = submittedGeneration;
+      let draft = 80;
+
+      draft = clampTimeCursor(draft, 0, 40);
+
+      expect(draft).toBe(40);
+      expect(canClearSubmittedDraft(submittedGeneration, currentGeneration))
+        .toBe(true);
+      currentGeneration++;
+      expect(canClearSubmittedDraft(submittedGeneration, currentGeneration))
+        .toBe(false);
+    });
   });
 
   describe("reconcileTimeCursor()", () => {
@@ -204,6 +220,24 @@ describe("model", () => {
         .toEqual(["early-pulse", "boundary-drift"]);
       expect(visibleObservations(observations, 20, "pulse").map(({ id }) => id))
         .toEqual(["early-pulse"]);
+    });
+  });
+
+  describe("recentRouteSelection()", () => {
+    it("uses a changed input window for endpoints and route departure", () => {
+      const selection = recentRouteSelection(
+        observations,
+        80,
+        "all",
+        0,
+        20,
+      );
+
+      expect(selection.timeCursor).toBe(20);
+      expect(selection.observations.map(({ id }) => id)).toEqual([
+        "early-pulse",
+        "boundary-drift",
+      ]);
     });
   });
 

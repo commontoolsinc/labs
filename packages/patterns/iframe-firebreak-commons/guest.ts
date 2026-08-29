@@ -1,7 +1,10 @@
 // The iframe generator bundles this pinned module into the self-contained guest.
 // deno-lint-ignore no-external-import
 import Phaser from "npm:phaser@4.2.1";
-import { connectFabric } from "@commonfabric/iframe-sandbox/guest";
+import {
+  connectFabric,
+  reportGuestError,
+} from "@commonfabric/iframe-sandbox/guest";
 import {
   type CrewColor,
   type CrewTool,
@@ -21,6 +24,7 @@ import {
   normalizedBoardDimensions,
   normalizedMaximumTurns,
   reduceSimulation,
+  reportRendererFailure,
   type SimulationSnapshot,
   type TileState,
 } from "./simulation.ts";
@@ -530,6 +534,7 @@ const game = initializeRenderer(
   (cause) => {
     showError(cause);
     syncStatus.textContent = "The wildfire map could not start.";
+    reportRendererFailure(cause, reportGuestError);
     abort.abort();
     fabric.disconnect();
   },

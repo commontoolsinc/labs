@@ -35,7 +35,7 @@ import {
   FIELD_HEIGHT,
   FIELD_WIDTH,
   propagationValues,
-  recentVisibleObservations,
+  recentRouteSelection,
   reconcileTimeCursorUntilInputStable,
   routePoints,
   visibleObservations,
@@ -615,19 +615,21 @@ async function connectRecent(criteria: {
 }): Promise<string> {
   await state.pull();
   stateValue = state.get() ?? DEFAULT_STATE;
-  const recent = recentVisibleObservations(
+  const selection = recentRouteSelection(
     stateValue.observations,
     criteria.timeCursor,
     criteria.band,
+    inputValue.timeStart,
+    inputValue.timeEnd,
   );
-  if (recent.length < 2) {
+  if (selection.observations.length < 2) {
     throw new Error("At least two observations must be visible to connect.");
   }
   return await addRoute({
-    fromObservationId: recent[0].id,
-    toObservationId: recent[1].id,
-    band: recent[1].band,
-    departedAt: criteria.timeCursor,
+    fromObservationId: selection.observations[0].id,
+    toObservationId: selection.observations[1].id,
+    band: selection.observations[1].band,
+    departedAt: selection.timeCursor,
   });
 }
 
@@ -861,7 +863,6 @@ const cancelInput = input.sink((value) => {
   inputGeneration++;
   inputValue = value ?? DEFAULT_INPUT;
   if (timeDraft !== undefined) {
-    timeDraftGeneration++;
     timeDraft = clampTimeCursor(
       timeDraft,
       inputValue.timeStart,
