@@ -1460,6 +1460,20 @@ async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
       .filter((entry) => entry.path.length === 0)
       .sort((a, b) => a.recordedAt - b.recordedAt);
 
+    // These match frame text, which is not a stable interface. Two hazards.
+    //
+    // A private method's frame carries no class name in a browser -- `at
+    // #instantiatePatternNode` -- while Deno's V8 writes `at
+    // Runner.#instantiatePatternNode` for the same method. A public one keeps
+    // its class in both (`at Runner.setupInternal`). Runner code captures
+    // these stacks in either runtime, so match a private member WITHOUT the
+    // class prefix: that form is a substring of both renderings, and a
+    // prefixed one silently matches nothing here.
+    //
+    // The `_CellImpl` names are the bundler's, not the source's. Renaming
+    // `CellImpl` or changing how the shell is bundled breaks them just as
+    // quietly, since a filter that matches nothing looks like a run with
+    // nothing to report.
     function classifyStack(stack?: string): string {
       if (!stack) return "unknown";
       if (
