@@ -997,6 +997,24 @@ describe("type-check", () => {
             );
           });
         }
+
+        it("refuses a value whose class cannot be read, without propagating", () => {
+          // The one shape that defeats the prototype read as well. Both the
+          // reason-picking probe and the name lookup fail on it, and the
+          // refusal has to survive each: an error raised while explaining a
+          // refusal would arrive in place of the refusal.
+          class Unreadable {}
+          Object.defineProperty(Unreadable.prototype, "constructor", {
+            get() {
+              throw new Error("this must not reach the caller");
+            },
+          });
+
+          expect(() => assertValidFabricValueLayer(new Unreadable())).toThrow(
+            "Not representable as a `FabricValue`: `object` (not a " +
+              "recognized fabric type)",
+          );
+        });
       });
 
       it("names a class instance as an unrecognized type", () => {
