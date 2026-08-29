@@ -17,6 +17,7 @@ import type {
   FabricError as ApiFabricError,
   FabricErrorConstructor as ApiFabricErrorConstructor,
 } from "@/api.ts";
+import { constructorOfObject } from "@commonfabric/utils/objects";
 import { isPlainObject, isUnsafeObjectKey } from "@commonfabric/utils/types";
 
 import { FabricNativeWrapper } from "./FabricNativeWrapper.ts";
@@ -514,8 +515,7 @@ export class FabricError extends FabricNativeWrapper<Error>
     // used to rebuild the error on the way back, so reading it off the value
     // would let a value choose the class it comes back as. A severed prototype
     // names no class, and `Error` is what such a value still is.
-    const ctor = (Object.getPrototypeOf(error) as { constructor?: unknown })
-      ?.constructor as { name?: unknown } | undefined;
+    const ctor = constructorOfObject(error) as { name?: unknown } | undefined;
     const type = (typeof ctor?.name === "string") && (ctor.name !== "")
       ? ctor.name
       : "Error";

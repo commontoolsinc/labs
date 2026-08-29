@@ -83,6 +83,17 @@ describe("FabricError", () => {
       );
     });
 
+    it("ignores a prototype whose `constructor` is not callable", () => {
+      // The name has to come from something that could have constructed the
+      // value. A `constructor` that is not callable did not, so it names no
+      // class, and the value is recorded as the `Error` it still is.
+      class Sneaky extends Error {}
+      Object.defineProperty(Sneaky.prototype, "constructor", {
+        value: { name: "RangeError" },
+      });
+      expect(FabricError.fromNativeError(new Sneaky("x")).type).toBe("Error");
+    });
+
     it("names a severed-prototype error `Error`", () => {
       // Such a value names no class at all. It is still an error --
       // `Error.isError()` sees it, and the dispatch tags it so -- and the
