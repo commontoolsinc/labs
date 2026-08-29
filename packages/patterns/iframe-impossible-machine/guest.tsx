@@ -44,7 +44,10 @@ import {
   presentSignal,
   type SignalPresentation,
 } from "./model.ts";
-import { NodeControlBoundary } from "./interaction.ts";
+import {
+  NodeControlBoundary,
+  useLatestRequestedSelection,
+} from "./interaction.ts";
 
 const fabric = connectFabric();
 const { useCell } = createFabricReact(React, fabric);
@@ -589,6 +592,14 @@ function App() {
   const inputValue = input.status === "ready" ? input.value : undefined;
   const stateValue = state.status === "ready" ? state.value : undefined;
   const outputValue = output.status === "ready" ? output.value : undefined;
+  const writeSelection = React.useCallback(
+    (nodeId: string) => updatePreference("selectedNodeId", nodeId),
+    [updatePreference],
+  );
+  const requestNodeSelection = useLatestRequestedSelection(
+    outputValue?.selectedNodeId ?? null,
+    writeSelection,
+  );
   const ready = materialized && inputValue !== undefined &&
     stateValue !== undefined && outputValue !== undefined;
 
@@ -803,10 +814,7 @@ function App() {
               edges={flowEdges}
               nodeTypes={NODE_TYPES}
               onNodesChange={handleNodeChanges}
-              onNodeClick={(_event, node) => {
-                if (outputValue.selectedNodeId === node.id) return;
-                void updatePreference("selectedNodeId", node.id);
-              }}
+              onNodeClick={(_event, node) => void requestNodeSelection(node.id)}
               onNodeDragStop={(_event, node) =>
                 void persistPosition(
                   node.id,

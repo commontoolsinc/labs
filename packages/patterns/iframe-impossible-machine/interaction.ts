@@ -22,3 +22,34 @@ export function NodeControlBoundary(
     children,
   );
 }
+
+/** Keeps rapid node selections ordered without repeating the latest request. */
+export function useLatestRequestedSelection(
+  authoritativeSelection: string | null,
+  writeSelection: (nodeId: string) => Promise<unknown>,
+): (nodeId: string) => Promise<void> {
+  const authoritativeRef = React.useRef(authoritativeSelection);
+  const latestRequestedRef = React.useRef(authoritativeSelection);
+  const pendingCountRef = React.useRef(0);
+  authoritativeRef.current = authoritativeSelection;
+
+  React.useEffect(() => {
+    if (pendingCountRef.current === 0) {
+      latestRequestedRef.current = authoritativeSelection;
+    }
+  }, [authoritativeSelection]);
+
+  return React.useCallback(async (nodeId: string) => {
+    if (latestRequestedRef.current === nodeId) return;
+    latestRequestedRef.current = nodeId;
+    pendingCountRef.current++;
+    try {
+      await writeSelection(nodeId);
+    } finally {
+      pendingCountRef.current--;
+      if (pendingCountRef.current === 0) {
+        latestRequestedRef.current = authoritativeRef.current;
+      }
+    }
+  }, [writeSelection]);
+}
