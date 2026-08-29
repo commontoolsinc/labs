@@ -1,3 +1,11 @@
+/**
+ * Unit tests for `stepPiece`'s write receipt. A step runs the pattern and
+ * commits what recomputation produced, so it names the space it wrote to
+ * like every other write path (docs/plans/cli-surface-shape.md, step 8);
+ * the injected controller stub is what lets the receipt be asserted
+ * without a live space.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
