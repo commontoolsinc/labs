@@ -45,6 +45,7 @@ import {
   type SignalPresentation,
 } from "./model.ts";
 import {
+  clearCommittedPositionDraft,
   createSelectionRequestTracker,
   stopNodeControlPropagation,
 } from "./interaction.ts";
@@ -509,12 +510,14 @@ function App() {
         const node = await resolveNode(nodeId);
         await node.key("position").set(position);
         await state.refresh();
-        delete draftPositionsRef.current[nodeId];
-        setDraftPositions((current) => {
-          const next = { ...current };
-          delete next[nodeId];
-          return next;
-        });
+        draftPositionsRef.current = clearCommittedPositionDraft(
+          draftPositionsRef.current,
+          nodeId,
+          position,
+        );
+        setDraftPositions((current) =>
+          clearCommittedPositionDraft(current, nodeId, position)
+        );
       }),
     [resolveNode, runAction, state.refresh],
   );

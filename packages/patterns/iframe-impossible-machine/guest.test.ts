@@ -1,5 +1,6 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
+import { clearCommittedPositionDraft } from "./interaction.ts";
 
 describe("Impossible Machine document shell", () => {
   it("keeps React Flow measurement and overlay layers explicitly sized", async () => {
@@ -38,5 +39,17 @@ describe("Impossible Machine document shell", () => {
     expect(source).toContain("return runAction(action, false).finally(() => {");
     expect(source).toContain("nodesDraggable\n              nodesConnectable");
     expect(source).not.toContain("nodesDraggable={!pending}");
+  });
+
+  it("preserves a newer drag while an earlier position write settles", () => {
+    const newerDraft = { x: 24, y: 18 };
+    const drafts = { gate: newerDraft };
+
+    expect(
+      clearCommittedPositionDraft(drafts, "gate", { x: 12, y: 9 }),
+    ).toBe(drafts);
+    expect(
+      clearCommittedPositionDraft(drafts, "gate", newerDraft),
+    ).toEqual({});
   });
 });
