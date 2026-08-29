@@ -898,6 +898,13 @@ describe("type-check", () => {
       // names a reason -- its outcome having been settled before the probe
       // that fails. The corpus carries no such value, and that bound is why.
       //
+      // Bounded the same way to a class that reads the SAME each time. Each of
+      // these two reads the constructor for itself, so a `constructor`
+      // accessor answering differently on successive reads can be named
+      // differently by each. Neither contradicts itself -- one refusal reads
+      // once -- and a value that answers differently each time it is asked is
+      // not one this agreement is for.
+      //
       // The exception is a `FabricNativeObject`, and it is the whole of the
       // exception: conversion has a say over one, and either mints its fabric
       // form or refuses it there. The vet has no say and does not pretend to,
