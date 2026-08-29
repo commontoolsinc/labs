@@ -35,5 +35,8 @@ describe("Impossible Machine document shell", () => {
     expect(source).toContain(
       "selectionRequestTracker.current.request(nodeId, writeSelection)",
     );
+    expect(source).toContain("return runAction(action, false).finally(() => {");
+    expect(source).toContain("nodesDraggable\n              nodesConnectable");
+    expect(source).not.toContain("nodesDraggable={!pending}");
   });
 });

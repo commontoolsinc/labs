@@ -438,16 +438,19 @@ function App() {
     };
   }, [input.refresh, output.refresh, state.refresh]);
 
-  const runAction = React.useCallback((action: () => Promise<void>) => {
+  const runAction = React.useCallback((
+    action: () => Promise<void>,
+    trackGlobalPending = true,
+  ) => {
     const next = actionTail.current.then(async () => {
-      setPending(true);
+      if (trackGlobalPending) setPending(true);
       setActionError(undefined);
       try {
         await action();
       } catch (cause) {
         setActionError(errorFrom(cause));
       } finally {
-        setPending(false);
+        if (trackGlobalPending) setPending(false);
       }
     });
     actionTail.current = next;
@@ -460,7 +463,7 @@ function App() {
         ...current,
         [nodeId]: (current[nodeId] ?? 0) + 1,
       }));
-      return runAction(action).finally(() => {
+      return runAction(action, false).finally(() => {
         setBusyNodeCounts((current) => {
           const count = current[nodeId] ?? 0;
           const next = { ...current };
@@ -661,8 +664,8 @@ function App() {
       ),
       disabled: (busyNodeCounts[node.id] ?? 0) > 0,
     },
-    draggable: !pending,
-    connectable: !pending,
+    draggable: true,
+    connectable: true,
     deletable: false,
     ariaLabel: `${KIND_LABELS[node.kind]}: ${node.label}`,
   }));
@@ -834,9 +837,9 @@ function App() {
                   draftPositionsRef.current[node.id] ?? node.position,
                 )}
               onConnect={(connection) => void appendEdge(connection)}
-              nodesDraggable={!pending}
-              nodesConnectable={!pending}
-              elementsSelectable={!pending}
+              nodesDraggable
+              nodesConnectable
+              elementsSelectable
               fitView
               fitViewOptions={{ padding: 0.1 }}
               minZoom={0.35}

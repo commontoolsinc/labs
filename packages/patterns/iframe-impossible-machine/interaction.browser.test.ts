@@ -39,6 +39,38 @@ function SelectionHarness(
   );
 }
 
+function NodeControlHarness(
+  { onNodeSelection }: Readonly<{ onNodeSelection: () => void }>,
+) {
+  const [nodePending, setNodePending] = React.useState(false);
+  return React.createElement(
+    "div",
+    {
+      onClick: () => {
+        onNodeSelection();
+        setNodePending(true);
+      },
+    },
+    React.createElement(
+      "div",
+      {
+        className: "node-parameters nodrag nopan",
+        onClick: stopNodeControlPropagation,
+      },
+      React.createElement(
+        "select",
+        {
+          "aria-label": "Gate operator",
+          defaultValue: "xor",
+          disabled: nodePending,
+        },
+        React.createElement("option", { value: "xor" }, "XOR"),
+        React.createElement("option", { value: "and" }, "AND"),
+      ),
+    ),
+  );
+}
+
 Deno.test("embedded controls do not select their React Flow node", async () => {
   if (typeof document === "undefined") return;
   const environment = globalThis as typeof globalThis & {
@@ -55,29 +87,15 @@ Deno.test("embedded controls do not select their React Flow node", async () => {
   try {
     await act(() => {
       root.render(
-        React.createElement(
-          "div",
-          { onClick: () => nodeSelections++ },
-          React.createElement(
-            "div",
-            {
-              className: "node-parameters nodrag nopan",
-              onClick: stopNodeControlPropagation,
-            },
-            React.createElement(
-              "select",
-              { "aria-label": "Gate operator", defaultValue: "xor" },
-              React.createElement("option", { value: "xor" }, "XOR"),
-              React.createElement("option", { value: "and" }, "AND"),
-            ),
-          ),
-        ),
+        React.createElement(NodeControlHarness, {
+          onNodeSelection: () => nodeSelections++,
+        }),
       );
     });
 
     const select = container.querySelector("select");
     expect(select).not.toBeNull();
-    select!.click();
+    await act(() => select!.click());
 
     expect(nodeSelections).toBe(0);
     expect(select!.disabled).toBe(false);
