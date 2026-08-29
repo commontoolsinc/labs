@@ -321,10 +321,10 @@ describe("native-type-tags", () => {
 
   describe("the builtin lookup and the full class lookup", () => {
     // `tagFromNativeClass()` asks `tagFromNativeBuiltinClass()` first and its
-    // own switch second, which is only sound because no class is answered by
-    // both. Were one in both, the delegation order would silently decide its
-    // tag -- and the builtin lookup's own fallback, which claims any `Error`
-    // subclass, would reach a fabric class that happened to be one.
+    // own switch second, so the builtin lookup's `Error` fallback -- which
+    // claims any `Error` subclass -- is reached ahead of the fabric classes.
+    // No fabric class is an `Error` subclass, which is what leaves that
+    // fallback nothing of theirs to claim; the group below holds it so.
     const fabricClasses = [
       FabricBytes,
       FabricEpochDay,
