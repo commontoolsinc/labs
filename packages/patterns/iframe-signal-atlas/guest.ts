@@ -36,7 +36,7 @@ import {
   FIELD_WIDTH,
   propagationValues,
   recentVisibleObservations,
-  reconcileTimeCursor,
+  reconcileTimeCursorUntilInputStable,
   routePoints,
   visibleObservations,
   visibleRoutes,
@@ -177,6 +177,7 @@ let actionQueue: Promise<void> = Promise.resolve();
 let databaseRefresh: Promise<void> = Promise.resolve();
 let timeDraft: number | undefined;
 let timeDraftGeneration = 0;
+let inputGeneration = 0;
 
 type DraftControl = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
 type DraftForm = { generation: number };
@@ -857,6 +858,7 @@ addHypothesisButton.addEventListener("click", () => {
 });
 
 const cancelInput = input.sink((value) => {
+  inputGeneration++;
   inputValue = value ?? DEFAULT_INPUT;
   if (timeDraft !== undefined) {
     timeDraftGeneration++;
@@ -867,18 +869,7 @@ const cancelInput = input.sink((value) => {
     );
   }
   if (hydrated) {
-    void enqueueAction(async () => {
-      await reconcileTimeCursor(
-        async () => {
-          await output.pull();
-          outputValue = output.get() ?? DEFAULT_OUTPUT;
-          return outputValue.timeCursor;
-        },
-        (value) => outputWrite.key("timeCursor").set(value),
-        inputValue.timeStart,
-        inputValue.timeEnd,
-      );
-    }).catch(showError);
+    void enqueueAction(reconcileCurrentTimeCursor).catch(showError);
   }
   render();
 });
@@ -906,6 +897,23 @@ function dispose(): void {
 }
 globalThis.addEventListener("pagehide", dispose, { once: true });
 
+async function reconcileCurrentTimeCursor(): Promise<void> {
+  const timeCursor = await reconcileTimeCursorUntilInputStable(
+    () => inputGeneration,
+    async () => {
+      await output.pull();
+      outputValue = output.get() ?? DEFAULT_OUTPUT;
+      return outputValue.timeCursor;
+    },
+    (value) => outputWrite.key("timeCursor").set(value),
+    () => ({
+      timeStart: inputValue.timeStart,
+      timeEnd: inputValue.timeEnd,
+    }),
+  );
+  outputValue = { ...outputValue, timeCursor };
+}
+
 try {
   await Promise.all([input.pull(), state.pull(), output.pull()]);
   await Promise.all([
@@ -915,16 +923,8 @@ try {
   inputValue = input.get() ?? DEFAULT_INPUT;
   stateValue = state.get() ?? DEFAULT_STATE;
   outputValue = output.get() ?? DEFAULT_OUTPUT;
-  const clampedTimeCursor = clampTimeCursor(
-    outputValue.timeCursor,
-    inputValue.timeStart,
-    inputValue.timeEnd,
-  );
-  if (clampedTimeCursor !== outputValue.timeCursor) {
-    await outputWrite.key("timeCursor").set(clampedTimeCursor);
-    outputValue = { ...outputValue, timeCursor: clampedTimeCursor };
-  }
   await refreshPersonalAtlas();
+  await reconcileCurrentTimeCursor();
   hydrated = true;
   restoreViewport();
   render();

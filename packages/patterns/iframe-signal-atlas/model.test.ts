@@ -15,6 +15,7 @@ import {
   propagationValues,
   recentVisibleObservations,
   reconcileTimeCursor,
+  reconcileTimeCursorUntilInputStable,
   routePoints,
   visibleObservations,
   visibleRoutes,
@@ -157,6 +158,43 @@ describe("model", () => {
       );
 
       expect(stored).toBe(40);
+    });
+  });
+
+  describe("reconcileTimeCursorUntilInputStable()", () => {
+    it("reconciles an input window that changes during hydration", async () => {
+      let generation = 0;
+      let timeEnd = 100;
+      let stored = 80;
+      let reads = 0;
+      const firstReadStarted = Promise.withResolvers<void>();
+      const releaseFirstRead = Promise.withResolvers<void>();
+
+      const reconciliation = reconcileTimeCursorUntilInputStable(
+        () => generation,
+        async () => {
+          reads++;
+          if (reads === 1) {
+            firstReadStarted.resolve();
+            await releaseFirstRead.promise;
+          }
+          return stored;
+        },
+        (value) => {
+          stored = value;
+          return Promise.resolve();
+        },
+        () => ({ timeStart: 0, timeEnd }),
+      );
+
+      await firstReadStarted.promise;
+      timeEnd = 40;
+      generation++;
+      releaseFirstRead.resolve();
+
+      expect(await reconciliation).toBe(40);
+      expect(stored).toBe(40);
+      expect(reads).toBe(2);
     });
   });
 

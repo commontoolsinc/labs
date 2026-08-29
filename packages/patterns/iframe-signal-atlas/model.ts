@@ -35,6 +35,26 @@ export async function reconcileTimeCursor(
   return clamped;
 }
 
+/** Repeats cursor reconciliation until no input window changed during it. */
+export async function reconcileTimeCursorUntilInputStable(
+  readInputGeneration: () => number,
+  readCurrent: () => Promise<number>,
+  writeCurrent: (value: number) => Promise<void>,
+  readWindow: () => { timeStart: number; timeEnd: number },
+): Promise<number> {
+  while (true) {
+    const generation = readInputGeneration();
+    const { timeStart, timeEnd } = readWindow();
+    const reconciled = await reconcileTimeCursor(
+      readCurrent,
+      writeCurrent,
+      timeStart,
+      timeEnd,
+    );
+    if (generation === readInputGeneration()) return reconciled;
+  }
+}
+
 /** Clears a submitted field only when it has not been edited since capture. */
 export function canClearSubmittedDraft(
   submittedGeneration: number,
