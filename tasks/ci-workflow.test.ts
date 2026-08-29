@@ -967,18 +967,41 @@ Deno.test("server-execution lane roles match the flipped default (testing.md §2
     );
   }
 
+  // The explicit arm is asserted at EACH site that SELECTS it — the step
+  // that starts the server, and the step that runs the test processes —
+  // never once over the whole job. A job-wide substring is satisfied by
+  // any single occurrence, including the posture probe's `::error::`
+  // prose, which selects nothing at all; both real sites could point at
+  // the ON arm with this pin still green. A lane that starts its server
+  // on one arm and runs its tests on the other is the P7 review's
+  // finding-7 MIXED posture, and the server-side probe below cannot see
+  // it: the probe reads the SERVER, so the test processes' arm is
+  // unexamined unless asserted here.
   for (
-    const jobId of [
-      "package-integration-test-server-execution-off",
-      "pattern-integration-test-server-execution-off",
+    const { jobId, runStep } of [
+      {
+        jobId: "package-integration-test-server-execution-off",
+        runStep: "🧪 Run ${{ matrix.step_name }} (flag OFF)",
+      },
+      {
+        jobId: "pattern-integration-test-server-execution-off",
+        runStep: "🧩 Run end-to-end patterns integration tests (flag OFF)",
+      },
     ]
   ) {
     const job = jobBlock(contents, jobId);
-    assertStringIncludes(
-      job,
-      "EXPERIMENTAL_SERVER_EXECUTION=false",
-      `${jobId}: the OFF guard must select the OFF arm explicitly`,
-    );
+    for (
+      const stepName of [
+        "🔌 Start Toolshed server for testing (flag OFF)",
+        runStep,
+      ]
+    ) {
+      assertStringIncludes(
+        stepBlock(job, stepName),
+        "EXPERIMENTAL_SERVER_EXECUTION=false",
+        `${jobId}: "${stepName}" must select the OFF arm explicitly`,
+      );
+    }
     assertStringIncludes(
       job,
       ".servingLoop == null",
