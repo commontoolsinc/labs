@@ -3,10 +3,6 @@ import { expect } from "@std/expect";
 
 import { BenchWorker } from "./bench-worker.ts";
 
-/** A far side that fails on startup, before any request can be in flight. */
-const DIES_AT_ONCE =
-  `data:application/javascript,throw new Error("dead on arrival");`;
-
 /** A far side that acknowledges whatever it is sent. */
 const ACKS =
   `data:application/javascript,self.onmessage=()=>self.postMessage({ok:true});`;
@@ -14,6 +10,13 @@ const ACKS =
 /** A far side that refuses whatever it is sent. */
 const REFUSES =
   `data:application/javascript,self.onmessage=()=>self.postMessage({ok:false,error:"no"});`;
+
+/** A far side that never answers, so a send stays in flight. */
+const SILENT = `data:application/javascript,self.onmessage=()=>{};`;
+
+/** A far side that fails on startup, before any request can be in flight. */
+const DIES_AT_ONCE =
+  `data:application/javascript,throw new Error("dead on arrival");`;
 
 describe("BenchWorker", () => {
   describe("send()", () => {
@@ -37,21 +40,53 @@ describe("BenchWorker", () => {
       }
     });
 
-    it("rejects rather than hanging when the far side died before the send", async () => {
-      // The case a benchmark cannot survive: a worker that fails during startup
-      // has no request to reject, so a failure not recorded then leaves every
-      // later send waiting on an acknowledgement that cannot come. A hung
-      // benchmark reports nothing at all, where a failed one reports why.
-      const worker = new BenchWorker<number>(DIES_AT_ONCE);
+    it("rejects a send made while another is in flight", async () => {
+      // The first send is still outstanding, so the second would take its
+      // acknowledgement and leave it unsettled.
+      const worker = new BenchWorker<number>(SILENT);
 
       try {
-        // Give the startup failure a turn to arrive, which is what puts the
-        // send after it rather than in a race with it.
-        await new Promise<void>((resolve) => setTimeout(resolve, 50));
-        await expect(worker.send(1)).rejects.toThrow("Far side failed");
+        const first = worker.send(1);
+
+        await expect(worker.send(2)).rejects.toThrow("already in flight");
+
+        // `close()` settles the first, which is what lets this end.
+        worker.close();
+        await expect(first).rejects.toThrow("closed");
       } finally {
         worker.close();
       }
+    });
+
+    it("rejects a send made after the far side has already failed", async () => {
+      // The failure that arrives with nothing in flight is the one a benchmark
+      // cannot survive unrecorded: nothing is there to reject, so a later send
+      // would wait for an acknowledgement that cannot come.
+      //
+      // Awaiting the first send is what puts this one after the failure rather
+      // than in a race with it -- the failure is what settles that send, so by
+      // the time it has, the record exists.
+      const worker = new BenchWorker<number>(DIES_AT_ONCE);
+
+      try {
+        await expect(worker.send(1)).rejects.toThrow("Far side failed");
+        await expect(worker.send(2)).rejects.toThrow("Far side failed");
+      } finally {
+        worker.close();
+      }
+    });
+  });
+
+  describe("close()", () => {
+    it("settles a request left in flight", async () => {
+      // Terminating leaves an acknowledgement unable to arrive, so a request
+      // still pending would wait for one forever.
+      const worker = new BenchWorker<number>(SILENT);
+      const pending = worker.send(1);
+
+      worker.close();
+
+      await expect(pending).rejects.toThrow("Far side was closed");
     });
   });
 });

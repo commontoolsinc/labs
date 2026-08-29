@@ -79,18 +79,17 @@ export class BenchWorker<Request> {
     // the first of them can arrive before the first send: a worker that dies
     // during startup has nothing to reject, and without the record every later
     // send would wait on it.
+    // A far side that posts something uncloneable throws where it posts, which
+    // arrives here as well: `postMessage()` refuses on the sending side rather
+    // than the receiving one, so an acknowledgement that cannot cross is an
+    // error rather than a `messageerror`. The ack this harness defines is a
+    // boolean and a string, so neither can arise from a far side that conforms.
     this.#worker.onerror = (ev: ErrorEvent) => {
       // Handled here, so it stops here: an error left to its default course
       // reaches the host as an unhandled worker error and takes the process
       // with it, which ends the run rather than the measurement.
       ev.preventDefault();
       this.#fail(new Error(`Far side failed: ${ev.message}`));
-    };
-
-    // Covers the far side receiving something it cannot deserialize, which no
-    // `error` event reports.
-    this.#worker.onmessageerror = () => {
-      this.#fail(new Error("Far side could not deserialize the message"));
     };
   }
 
@@ -104,14 +103,34 @@ export class BenchWorker<Request> {
   send(request: Request): Promise<void> {
     if (this.#terminal !== undefined) return Promise.reject(this.#terminal);
 
+    if (this.#pending !== undefined) {
+      // One at a time is what an iteration measures, so a second send would be
+      // measuring something else -- and it would take the first one's
+      // acknowledgement, leaving that request unsettled and this one settled by
+      // an answer to a message it did not send. Refused rather than queued: a
+      // benchmark that overlaps sends has the wrong shape, and hiding that
+      // behind a queue would let it report throughput while timing latency.
+      return Promise.reject(
+        new Error("A request is already in flight; sends do not overlap."),
+      );
+    }
+
     return new Promise((resolve, reject) => {
       this.#pending = { resolve, reject };
       this.#worker.postMessage(request);
     });
   }
 
-  /** Stops the worker. */
+  /**
+   * Stops the worker.
+   *
+   * Anything in flight is settled as failed first. Terminating leaves an
+   * acknowledgement unable to arrive, so a request left pending would wait for
+   * one forever -- and a benchmark closing its worker in a `finally` is exactly
+   * where that would strand a caller.
+   */
   close(): void {
+    this.#fail(new Error("Far side was closed."));
     this.#worker.terminate();
   }
 
