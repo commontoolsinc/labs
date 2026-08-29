@@ -214,7 +214,10 @@ write surfaces, and the redirection/pipe proposals — is drafted in
 [`shuttle/grammar.md`](shuttle/grammar.md). The full-screen views are
 designed in [`shuttle/views.md`](shuttle/views.md). The order of
 construction — the `cli` seam PRs and the shuttle milestones they gate — is
-[`shuttle/build-sequence.md`](shuttle/build-sequence.md).
+[`shuttle/build-sequence.md`](shuttle/build-sequence.md). The trajectory
+past v1 — configuration in the fabric, the session scope as the variable
+store, the scripting layers, and the ranked candidates behind them — is
+[`shuttle/futures.md`](shuttle/futures.md).
 
 ## The ambient model
 
