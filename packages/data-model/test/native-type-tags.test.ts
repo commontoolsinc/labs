@@ -21,12 +21,16 @@ import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
 import { VALUE_TAGS } from "@/VALUE_TAGS.ts";
-import {
-  isNativeError,
-  tagFromNativeClass,
-  tagFromNativeValue,
-} from "@/native-type-tags.ts";
-import { isValidFabricNativeObject } from "@/native-conversion.ts";
+import { tagFromNativeClass, tagFromNativeValue } from "@/native-type-tags.ts";
+import { isValidFabricNativeObject } from "@/type-check.ts";
+import { tagFromNativeBuiltinClass } from "@/tagFromNativeBuiltinClass.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
+import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
+import { LAYER_CORPUS } from "./fabric-value-corpus.ts";
 
 describe("native-type-tags", () => {
   describe("tagFromNativeValue()", () => {
@@ -118,28 +122,6 @@ describe("native-type-tags", () => {
     it("returns `Object` tag for null-prototype objects (no constructor)", () => {
       const obj = Object.create(null);
       expect(tagFromNativeValue(obj)).toBe(VALUE_TAGS.Object);
-    });
-
-    it("classifies values when `Error.isError` is unavailable", () => {
-      const descriptor = Object.getOwnPropertyDescriptor(Error, "isError");
-      Object.defineProperty(Error, "isError", {
-        value: undefined,
-        writable: true,
-        configurable: true,
-      });
-
-      try {
-        expect(isNativeError(new Error("test"))).toBe(true);
-        expect(tagFromNativeValue(Object.create(null))).toBe(
-          VALUE_TAGS.Object,
-        );
-      } finally {
-        if (descriptor) {
-          Object.defineProperty(Error, "isError", descriptor);
-        } else {
-          delete (Error as { isError?: unknown }).isError;
-        }
-      }
     });
 
     it("returns `null` for class instances", () => {
@@ -308,6 +290,56 @@ describe("native-type-tags", () => {
       it("returns `Date` tag for `Date`, whose `toJSON` is not consulted", () => {
         expect(tagFromNativeClass(Date)).toBe(VALUE_TAGS.Date);
       });
+    });
+  });
+
+  describe("the builtin lookup and the full class lookup", () => {
+    // `tagFromNativeClass()` asks `tagFromNativeBuiltinClass()` first and its
+    // own switch second, so the builtin lookup's `Error` fallback -- which
+    // claims any `Error` subclass -- is reached ahead of the fabric classes.
+    // No fabric class is an `Error` subclass, which is what leaves that
+    // fallback nothing of theirs to claim; the group below holds it so.
+    const fabricClasses = [
+      FabricBytes,
+      FabricEpochDay,
+      FabricEpochNsec,
+      FabricHash,
+      FabricKeyPair,
+      FabricRegExp,
+    ];
+
+    const constructors = LAYER_CORPUS
+      .filter(([, value]) => (value !== null) && (typeof value === "object"))
+      .map(([label, value]) =>
+        [label, Object.getPrototypeOf(value as object)?.constructor] as const
+      )
+      .filter(([, ctor]) => typeof ctor === "function");
+
+    // Partitioned here rather than inside a test, so that each assertion below
+    // is unconditional: a test that only asserts on one side of an `if` skips
+    // the case it was written for.
+    const builtinBacked = constructors
+      .filter(([, ctor]) => tagFromNativeBuiltinClass(ctor) !== null);
+
+    for (const [label, ctor] of builtinBacked) {
+      it(`passes ${label} through the delegation unchanged`, () => {
+        expect(tagFromNativeClass(ctor)).toBe(tagFromNativeBuiltinClass(ctor));
+      });
+    }
+
+    for (const cls of fabricClasses) {
+      it(`leaves \`${cls.name}\` to the fabric switch`, () => {
+        // The disjointness the delegation rests on, asserted against the
+        // fabric classes by name rather than against whatever the builtin
+        // lookup happens to decline.
+        expect(tagFromNativeBuiltinClass(cls)).toBe(null);
+        expect(tagFromNativeClass(cls)).not.toBe(null);
+      });
+    }
+
+    it("reaches classes on both sides of the split", () => {
+      expect(builtinBacked.length).toBeGreaterThan(0);
+      expect(fabricClasses.length).toBeGreaterThan(0);
     });
   });
 });
