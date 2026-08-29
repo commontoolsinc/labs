@@ -44,7 +44,7 @@ export function tagFromNativeBuiltinClass(
     case RegExp:
       return VALUE_TAGS.RegExp;
 
-    default:
+    default: {
       // Catch exotic `Error` subclasses (e.g. custom subclasses with
       // non-standard constructors). `Error.isError()` is no use here: it
       // recognizes actual `Error` instances, not a prototype chain, and what
@@ -57,5 +57,6 @@ export function tagFromNativeBuiltinClass(
         return VALUE_TAGS.Error;
       }
       return null;
+    }
   }
 }
