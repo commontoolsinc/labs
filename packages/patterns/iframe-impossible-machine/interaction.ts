@@ -81,8 +81,8 @@ export interface ActionRunnerSetters {
 
 /** Serialized actions with node-local pending state for embedded controls. */
 export interface ActionRunner {
-  run(action: () => Promise<void>): Promise<void>;
-  runNode(nodeId: string, action: () => Promise<void>): Promise<void>;
+  run(action: () => Promise<void>): Promise<boolean>;
+  runNode(nodeId: string, action: () => Promise<void>): Promise<boolean>;
 }
 
 /** Queues writes while keeping unrelated canvas controls interactive. */
@@ -102,20 +102,22 @@ export function createActionRunner(setters: ActionRunnerSetters): ActionRunner {
   function enqueue(
     action: () => Promise<void>,
     nodeId?: string,
-  ): Promise<void> {
+  ): Promise<boolean> {
     if (nodeId !== undefined) updateNodeBusyCount(nodeId, 1);
     const next = tail.then(async () => {
       if (nodeId === undefined) setters.setGlobalPending(true);
       setters.setActionError(undefined);
       try {
         await action();
+        return true;
       } catch (cause) {
         setters.setActionError(errorFrom(cause));
+        return false;
       } finally {
         if (nodeId === undefined) setters.setGlobalPending(false);
       }
     });
-    tail = next;
+    tail = next.then(() => undefined);
     return nodeId === undefined
       ? next
       : next.finally(() => updateNodeBusyCount(nodeId, -1));
@@ -140,25 +142,40 @@ export interface SelectionRequestTracker {
 export function createSelectionRequestTracker(
   initialSelection: string | null,
 ): SelectionRequestTracker {
-  let authoritativeSelection = initialSelection;
   let latestRequestedSelection = initialSelection;
+  let latestRequestedSequence = 0;
+  let latestSuccessfulSelection = initialSelection;
+  let latestSuccessfulSequence = 0;
+  let requestSequence = 0;
   let pendingCount = 0;
 
   return {
     reconcile(selection) {
-      authoritativeSelection = selection;
-      if (pendingCount === 0) latestRequestedSelection = selection;
+      if (pendingCount === 0) {
+        latestRequestedSelection = selection;
+        latestSuccessfulSelection = selection;
+        latestRequestedSequence = requestSequence;
+        latestSuccessfulSequence = requestSequence;
+      }
     },
     async request(nodeId, writeSelection) {
       if (latestRequestedSelection === nodeId) return;
+      const sequence = ++requestSequence;
       latestRequestedSelection = nodeId;
+      latestRequestedSequence = sequence;
       pendingCount++;
+      let succeeded = false;
       try {
-        await writeSelection(nodeId);
+        succeeded = (await writeSelection(nodeId)) !== false;
+        if (succeeded && sequence >= latestSuccessfulSequence) {
+          latestSuccessfulSelection = nodeId;
+          latestSuccessfulSequence = sequence;
+        }
       } finally {
         pendingCount--;
-        if (pendingCount === 0) {
-          latestRequestedSelection = authoritativeSelection;
+        if (!succeeded && sequence === latestRequestedSequence) {
+          latestRequestedSelection = latestSuccessfulSelection;
+          latestRequestedSequence = latestSuccessfulSequence;
         }
       }
     },

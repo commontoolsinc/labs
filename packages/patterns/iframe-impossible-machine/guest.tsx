@@ -89,7 +89,7 @@ type NodeActions = {
     nodeId: string,
     key: K,
     value: MachineParameters[K],
-  ): Promise<void>;
+  ): Promise<boolean>;
 };
 
 const NodeActionContext = React.createContext<NodeActions | undefined>(

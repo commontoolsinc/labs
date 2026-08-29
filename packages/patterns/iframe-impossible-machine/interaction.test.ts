@@ -75,8 +75,8 @@ describe("Impossible Machine interaction lifecycle", () => {
     expect(order).toEqual(["node:start"]);
 
     releaseNode();
-    await nodeAction;
-    await globalAction;
+    expect(await nodeAction).toBe(true);
+    expect(await globalAction).toBe(false);
 
     expect(order).toEqual(["node:start", "node:end", "global"]);
     expect(globalPending).toBe(false);
@@ -107,5 +107,25 @@ describe("Impossible Machine interaction lifecycle", () => {
     tracker.reconcile("node-a");
     await tracker.request("node-a", writeSelection);
     expect(writes).toEqual(["node-b", "node-a"]);
+
+    await tracker.request("node-b", writeSelection);
+    await tracker.request("node-b", writeSelection);
+    expect(writes).toEqual(["node-b", "node-a", "node-b"]);
+
+    await tracker.request("node-c", (nodeId) => {
+      writes.push(nodeId);
+      return Promise.resolve(false);
+    });
+    await tracker.request("node-c", (nodeId) => {
+      writes.push(nodeId);
+      return Promise.resolve(true);
+    });
+    expect(writes).toEqual([
+      "node-b",
+      "node-a",
+      "node-b",
+      "node-c",
+      "node-c",
+    ]);
   });
 });
