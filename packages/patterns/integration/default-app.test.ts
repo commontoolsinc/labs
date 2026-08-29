@@ -1468,12 +1468,12 @@ async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
     // The `_CellImpl` names are the bundler's, not the source's. Renaming
     // `CellImpl` or changing how the shell is bundled breaks every one of them.
     //
-    // A member converted to a `#` private name changes its own frame text, and
-    // the two V8 builds this repo runs disagree on the new form: Chromium 125
-    // writes `at #member`, Deno 2.9.4 writes `at Class.#member`, and a public
-    // member keeps its class in both. Both are V8, so the difference is an
-    // engine-build detail and not a browser-versus-Deno one. Match the bare
-    // `#member`, which is a substring of either form.
+    // A member converted to a `#` private name changes its own frame text.
+    // Chrome writes `at #member`, Deno writes `at Class.#member`, and a
+    // public member keeps its class in both. That split does not track the V8
+    // version -- these two are one minor apart -- so it says nothing about
+    // what a third engine, or a later Chrome, will write. Match the bare
+    // `#member`, which is a substring of both forms.
     function classifyStack(stack?: string): string {
       if (!stack) return "unknown";
       if (
