@@ -1460,21 +1460,6 @@ async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
       .filter((entry) => entry.path.length === 0)
       .sort((a, b) => a.recordedAt - b.recordedAt);
 
-    // These match frame text, which no engine promises to keep stable. How a
-    // frame names a PRIVATE method varies by engine version, not by whether
-    // the code is in a browser: Chromium 125 writes `at #instantiatePatternNode`
-    // and Deno 2.9.4 writes `at Runner.#instantiatePatternNode` for the same
-    // method, and both are V8. A public method keeps its class in both.
-    //
-    // So match a private member by its bare `#name`, which is a substring of
-    // either form. That also survives the prefix coming or going in a future
-    // engine, and a non-V8 engine whose frames are shaped differently again --
-    // this repo runs Chromium today, which is a fact about today.
-    //
-    // The `_CellImpl` names are the bundler's, not the source's. Renaming
-    // `CellImpl` or changing how the shell is bundled breaks them the same
-    // quiet way, since a filter that matches nothing looks like a run with
-    // nothing to report.
     function classifyStack(stack?: string): string {
       if (!stack) return "unknown";
       if (

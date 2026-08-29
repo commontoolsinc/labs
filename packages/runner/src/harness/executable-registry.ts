@@ -42,10 +42,10 @@ export class ExecutableRegistry {
   clear(): void {
     this.verifiedImplementationsByEntryRef.clear();
     this.#nextHostModuleId = 0;
-    // hostRegisteredFunctions is a WeakSet (uniterable); entries age out with
-    // their functions. Stale membership after clear() is harmless: it only
-    // suppresses a re-registration, and the entry-ref the function already
-    // carries stays valid for the life of the object.
+    // `#hostRegisteredFunctions` is a WeakSet (uniterable); entries age out
+    // with their functions. Stale membership after clear() is harmless: it
+    // only suppresses a re-registration, and the entry-ref the function
+    // already carries stays valid for the life of the object.
   }
 
   /**
