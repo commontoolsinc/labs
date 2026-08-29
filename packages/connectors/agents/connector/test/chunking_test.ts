@@ -1,5 +1,15 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { chunkEvents, encodedJsonBytes } from "../src/chunking.ts";
+
+Deno.test("event chunking rejects invalid byte targets", () => {
+  for (const targetBytes of [0, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    assertThrows(
+      () => chunkEvents([], targetBytes),
+      Error,
+      "targetBytes must be a positive safe integer",
+    );
+  }
+});
 
 Deno.test("chunkEvents keeps provider events whole and deterministic", () => {
   const events = [

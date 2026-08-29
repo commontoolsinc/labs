@@ -16,6 +16,14 @@ import {
   materializeStableArrayCells,
   planStableArrayCells,
 } from "../src/array-cell-identity.ts";
+import { canonicalJson } from "../src/canonical-json.ts";
+
+Deno.test("canonical JSON sorts object keys inside arrays", () => {
+  assertEquals(
+    canonicalJson([{ z: 1, a: 2 }, "tail"]),
+    '[{"a":2,"z":1},"tail"]',
+  );
+});
 
 Deno.test("connector hashes distinguish `FabricValue`s that JSON conflates", async () => {
   assertNotEquals(
