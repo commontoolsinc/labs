@@ -33,6 +33,14 @@ export class ArraySubclass extends Array {}
 export class WeirdError extends RangeError {}
 
 /**
+ * Returns an array whose prototype has been re-pointed at `Date.prototype`, so
+ * that its class reads as `Date` and only the array rule still sees an array.
+ */
+function arrayWearingDatePrototype(): unknown {
+  return Object.setPrototypeOf([1], Date.prototype);
+}
+
+/**
  * Returns an `Error` whose prototype has been severed, so that it names no
  * class and only the internal-slot test still sees it as an error.
  */
@@ -60,6 +68,7 @@ export const LAYER_CORPUS: ReadonlyArray<[string, unknown]> = [
   ["an inert plain object", { a: 1 }],
   ["an array carrying a named property", Object.assign([1], { z: 1 })],
   ["an `Array` subclass instance", ArraySubclass.from([1, 2])],
+  ["an array wearing `Date.prototype`", arrayWearingDatePrototype()],
   ["an object carrying a symbol key", { a: 1, [Symbol.for("k")]: 2 }],
   ["an object carrying a reserved property name", { ["__proto__"]: 1 }],
   ["a null-prototype object", Object.assign(Object.create(null), { a: 1 })],
