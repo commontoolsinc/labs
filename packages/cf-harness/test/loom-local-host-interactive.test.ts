@@ -573,3 +573,41 @@ Deno.test("local Loom interactive help does not require provider configuration o
   assertEquals(stderr.includes("provider-configuration-required"), false);
   assertEquals(stderr.includes("provider-auth-required"), false);
 });
+
+Deno.test("local Loom interactive carries the sandbox docker runtime pin into every turn", async () => {
+  // Loom starts chat sessions through this host, not the standalone
+  // entrypoint, and pins the runtime by environment variable. The batch lane
+  // honoured CF_HARNESS_SANDBOX_DOCKER_RUNTIME and this one dropped it, so on
+  // a host with an unusable gVisor build every sandboxed tool call in a chat
+  // session exited 159 while the same work succeeded from the CLI.
+  const home = await Deno.makeTempDir();
+  const credentials = new InMemoryHarnessCredentialStore();
+  await credentials.set("local", "openai-codex", {
+    type: "oauth",
+    providerId: "openai-codex",
+    accessToken: "access-secret",
+    refreshToken: "refresh-secret",
+    expiresAt: Date.now() + 60 * 60_000,
+    accountId: "account-secret",
+  });
+  const seen: RunHarnessInteractiveChatStdioOptions[] = [];
+  const host = await createLoomLocalCfHarnessHost({
+    harnessHome: home,
+    env: { CF_HARNESS_SANDBOX_DOCKER_RUNTIME: "runc" },
+    credentialStore: credentials,
+    providerSettingsStore: configured("openai-codex"),
+    fetchFn: () => Promise.reject(new Error("must not request")),
+    interactiveStdioRunner: (options) => {
+      seen.push(options);
+      return Promise.resolve();
+    },
+  });
+
+  await host.runInteractive([]);
+
+  assertEquals(seen.length, 1);
+  assertEquals(
+    seen[0].basePromptLoopOptions?.sandboxDockerRuntime,
+    "runc",
+  );
+});

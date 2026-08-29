@@ -650,6 +650,10 @@ export const runHarnessInteractiveChatStdioCli = async (
   );
   await run({
     ...options,
+    // Assignment rather than a merge is safe only because
+    // HarnessInteractiveChatStdioCliOptions has no basePromptLoopOptions of
+    // its own — `options` is the parsed argv, so there is never a caller value
+    // here to overwrite. If that type ever gains one, this becomes a merge.
     ...(Object.keys(provisioning).length > 0
       ? { basePromptLoopOptions: provisioning }
       : {}),

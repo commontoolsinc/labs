@@ -1329,7 +1329,7 @@ Deno.test("no provisioning flags leaves the run options untouched", async () => 
   // The other half of the standalone-entrypoint contract: adding these flags
   // must not change what happens when nobody passes them, or every existing
   // embedder gets a behaviour change for free.
-  assertEquals(await resolveInteractiveProvisioning({}, Deno.cwd()), {});
+  assertEquals(await resolveInteractiveProvisioning({}, Deno.cwd(), {}), {});
 
   const seen: RunHarnessInteractiveChatStdioOptions[] = [];
   await runHarnessInteractiveChatStdioCli(
@@ -1347,7 +1347,64 @@ Deno.test("no provisioning flags leaves the run options untouched", async () => 
 
 Deno.test("resolveInteractiveProvisioning carries a turn budget without mounts", async () => {
   assertEquals(
-    await resolveInteractiveProvisioning({ maxModelTurns: 32 }, Deno.cwd()),
+    await resolveInteractiveProvisioning({ maxModelTurns: 32 }, Deno.cwd(), {}),
     { maxModelTurns: 32 },
   );
+});
+
+Deno.test("resolveInteractiveProvisioning pins the sandbox docker runtime from the environment", async () => {
+  // CF_HARNESS_SANDBOX_DOCKER_RUNTIME reached the batch CLI only, so an
+  // interactive session on a host whose gVisor runtime is unusable had no way
+  // to select a working one: every sandboxed tool call died, and no flag or
+  // variable could change it.
+  assertEquals(
+    await resolveInteractiveProvisioning({}, Deno.cwd(), {
+      CF_HARNESS_SANDBOX_DOCKER_RUNTIME: "runc",
+    }),
+    { sandboxDockerRuntime: "runc" },
+  );
+
+  assertEquals(
+    await resolveInteractiveProvisioning({ maxModelTurns: 8 }, Deno.cwd(), {
+      CF_HARNESS_SANDBOX_DOCKER_RUNTIME: " runc ",
+    }),
+    { maxModelTurns: 8, sandboxDockerRuntime: "runc" },
+  );
+
+  // A blank value is absence, not a runtime named "" — the same reading the
+  // batch CLI gives it. Anything else hands docker an empty `--runtime` and
+  // fails the run over a variable someone exported empty.
+  assertEquals(
+    await resolveInteractiveProvisioning({}, Deno.cwd(), {
+      CF_HARNESS_SANDBOX_DOCKER_RUNTIME: "   ",
+    }),
+    {},
+  );
+  assertEquals(await resolveInteractiveProvisioning({}, Deno.cwd(), {}), {});
+});
+
+Deno.test("the standalone stdio entrypoint carries an environment runtime pin", async () => {
+  // The standalone entrypoint takes the helper's default env, so the pin has
+  // to survive that path too and not just a directly-passed env.
+  const previous = Deno.env.get("CF_HARNESS_SANDBOX_DOCKER_RUNTIME");
+  Deno.env.set("CF_HARNESS_SANDBOX_DOCKER_RUNTIME", "runc");
+  try {
+    const seen: RunHarnessInteractiveChatStdioOptions[] = [];
+    await runHarnessInteractiveChatStdioCli(
+      [],
+      Deno.cwd(),
+      (options) => {
+        seen.push(options);
+        return Promise.resolve();
+      },
+    );
+    assertEquals(seen.length, 1);
+    assertEquals(seen[0].basePromptLoopOptions?.sandboxDockerRuntime, "runc");
+  } finally {
+    if (previous === undefined) {
+      Deno.env.delete("CF_HARNESS_SANDBOX_DOCKER_RUNTIME");
+    } else {
+      Deno.env.set("CF_HARNESS_SANDBOX_DOCKER_RUNTIME", previous);
+    }
+  }
 });
