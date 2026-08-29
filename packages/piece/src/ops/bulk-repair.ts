@@ -764,9 +764,21 @@ export async function repairPieces(
    * through here is what makes the guard's count a fact about the run rather
    * than an admission that this process cannot see one.
    */
+  // Set when a caller's `onRow` throws, so the row loop's catch can tell that
+  // error from the operational ones it classifies. The row it was handed has
+  // already settled, and classifying the reporter's failure would put one
+  // piece in the report twice, under two verdicts, the second contradicting
+  // what the caller was just told.
+  let reporterThrew = false;
   const report = (row: RepairRow) => {
     rows.push(row);
-    options.onRow?.(row);
+    if (options.onRow === undefined) return;
+    try {
+      options.onRow(row);
+    } catch (error) {
+      reporterThrew = true;
+      throw error;
+    }
   };
   const planRows: PiecePlanRow[] = [];
   let applied = 0;
@@ -1068,6 +1080,10 @@ export async function repairPieces(
       emitRow(decision, false);
       stopped = true;
     } catch (error) {
+      // The reporter's own failure is not this row's outcome. The row it was
+      // handed has settled and the caller has seen it, so this leaves rather
+      // than reporting the same piece again under a contradicting verdict.
+      if (reporterThrew) throw error;
       // An operational failure — an unreachable piece, a write the schema
       // refuses — is this row's outcome, not the report's: the rows that
       // landed stay reported. The state check runs after the failure, so

@@ -652,6 +652,36 @@ describe("bulk-repair", () => {
       expect((await rawInput(b)).seed).toBe("bravo");
     });
 
+    it("leaves when the row reporter throws, rather than reporting the piece twice", async () => {
+      // The reporter is handed a row that has already settled. If its own
+      // failure were classified like an unreachable piece or a refused
+      // write, the same piece would appear twice in one report under two
+      // verdicts, the second contradicting what the caller was just told.
+      const a = await member("alpha");
+      const b = await member("bravo");
+      const seen: string[] = [];
+      let failure: unknown;
+      const report = await repairPieces(pieces, {
+        selector: { kind: "list", pieces: [a.id, b.id] },
+        fixer: upperSeed,
+        apply: true,
+        onRow: (row) => {
+          seen.push(row.piece);
+          throw new Error("the reporter gave up");
+        },
+      }).catch((error: unknown) => {
+        failure = error;
+        return undefined;
+      });
+
+      // One row reached the caller, and the run left rather than carrying on.
+      expect(seen).toEqual([a.id]);
+      expect((failure as Error | undefined)?.message).toBe(
+        "the reporter gave up",
+      );
+      expect(report).toBeUndefined();
+    });
+
     it("reports what the store returned after the write, not the fixer's answer", async () => {
       const a = await member("alpha");
       // The write path is free to normalize what it stores — schema-default
