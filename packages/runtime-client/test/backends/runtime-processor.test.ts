@@ -2144,6 +2144,83 @@ describe("runtime-processor", () => {
           });
         expect(result.page.cell).toEqual(ref);
       });
+
+      it("resolves the stored root without starting it when start is false", async () => {
+        const ref: CellRef = {
+          id: "of:stored-root" as CellRef["id"],
+          space: "did:key:test-space" as CellRef["space"],
+          scope: "space",
+          path: [],
+        };
+        const calls: string[] = [];
+        const cc = {
+          getDefaultPattern: (open: unknown) => {
+            calls.push(`getDefaultPattern:${JSON.stringify(open)}`);
+            return Promise.resolve({
+              getAsLink: () => cellRefToSigilLink(ref),
+            });
+          },
+          ensureDefaultPattern: () => {
+            calls.push("ensureDefaultPattern");
+            return Promise.reject(new Error("must not run the root"));
+          },
+        };
+        const processor = {
+          getSpaceCtx: () => cc,
+        } as unknown as RuntimeProcessor;
+
+        const result = await RuntimeProcessor.prototype
+          .handleGetSpaceRootPattern
+          .call(processor, {
+            type: RequestType.GetSpaceRootPattern,
+            space: "did:key:test-space",
+            start: false,
+          });
+
+        expect(result.page.cell).toEqual(ref);
+        // Reconciled but not started: a read of what the root exported still
+        // heals a stale root, and never boots it.
+        expect(calls).toEqual([
+          'getDefaultPattern:{"reconcile":true,"start":false}',
+        ]);
+      });
+
+      it("creates the root for a space that has none, even when start is false", async () => {
+        const ref: CellRef = {
+          id: "of:created-root" as CellRef["id"],
+          space: "did:key:test-space" as CellRef["space"],
+          scope: "space",
+          path: [],
+        };
+        const calls: string[] = [];
+        const cc = {
+          // A space whose root has never existed has nothing stored to read.
+          getDefaultPattern: () => {
+            calls.push("getDefaultPattern");
+            return Promise.resolve(undefined);
+          },
+          ensureDefaultPattern: () => {
+            calls.push("ensureDefaultPattern");
+            return Promise.resolve({
+              getCell: () => ({ getAsLink: () => cellRefToSigilLink(ref) }),
+            });
+          },
+        };
+        const processor = {
+          getSpaceCtx: () => cc,
+        } as unknown as RuntimeProcessor;
+
+        const result = await RuntimeProcessor.prototype
+          .handleGetSpaceRootPattern
+          .call(processor, {
+            type: RequestType.GetSpaceRootPattern,
+            space: "did:key:test-space",
+            start: false,
+          });
+
+        expect(result.page.cell).toEqual(ref);
+        expect(calls).toEqual(["getDefaultPattern", "ensureDefaultPattern"]);
+      });
     });
   });
 
