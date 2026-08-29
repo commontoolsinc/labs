@@ -3243,8 +3243,9 @@ findings; the OWNER RULING — the flip lands DARK):
   OW28 → the honest benchmark → the flip PR (which also flips the
   absolute pin, the CI lane roles and their posture probes, and
   EXPERIMENTAL_OPTIONS.md; and MUST land with the ON skip list EMPTY).
-  **THE FLIP PR (#6535, 2026-08-28, base 4e02f75c4 — every ordered gate
-  met: the
+  **THE FLIP PR (#6535, 2026-08-28, base e16780fca — rebased onto it
+  2026-08-29 from the original base 4e02f75c4, with every gate claim
+  re-verified there; every ordered gate met: the
   ON-skip registry EMPTY across all four suites (#6528, the
   ruled-3b-close lift), OW31's ruled posture BUILT, OW45–OW53 CLOSED,
   OW38(ii) RULED met ("topics numbers are fine"). The owner merges it
@@ -3340,7 +3341,12 @@ findings; the OWNER RULING — the flip lands DARK):
     honoring the space's coverage variant — or a re-homed authored
     coverage collection; pattern-reload still collects under its
     now-ON self-booted toolshed and shares this mechanism (green so
-    far, named here as the residual to watch).** (3) CLI
+    far, named here as the residual to watch).** BOARD-READING
+    CONSEQUENCE through the soak: `coverage-check` now `needs` the OFF
+    pattern lane, so ANY red in that lane also SKIPS Coverage Check and
+    reds Status — board 33239003881 shows exactly that shape behind the
+    owned-elsewhere firebreak red. The coupling retires when the OWED
+    re-homing above lands. (3) CLI
     `core-piece-values`: the "cannot project in a fresh session"
     refusal DISSOLVES under ON by design (the serving loop
     materializes the session-derived result; a fresh session projects
@@ -3407,6 +3413,27 @@ findings; the OWNER RULING — the flip lands DARK):
     base and reaches the board only via the merge ref; main's own
     board at d1eca661f failed the explicit-ON pattern lane on it.
     The file's owner's, not the flip's.
+  - **The OFF→ON CONTRACT DELTA the first cf-ON exercise surfaced: a
+    THROWN handling durably CONSUMES its invocation id.** Under ON the
+    throw happens SERVER-side, where an error IS the consequence
+    (events.md §5): the errored handling is the event's recorded
+    outcome and the watermark advances past it, so a SAME-id retry
+    never re-executes. Its mechanical shape is a race the spec allows
+    either way — admission refuses the duplicate while the errored
+    entry is still above the dedupe horizon, or admits it and the
+    processing skip passes it (settled, no result; no receipt exists
+    for an errored handling) — and both agree on the semantic: nothing
+    runs, nothing is created. Under OFF the client-side refusal never
+    consumed the id, so the same id then executed. The caller's correct
+    move after an error is therefore a FRESH id. NOT a defect and
+    nothing to fix: a spec-consistent consequence of moving the
+    handling to the serving side, recorded here so the settled delta is
+    not re-litigated post-soak. Asserted arm-aware by
+    `packages/cli/integration/verbs-over-the-cli.sh` step 10 ("A thrown
+    call and its invocation id") — under ON the same-id retry yields no
+    result and leaves the note count unchanged, and a fresh id executes
+    the corrected call; under OFF the same id executes. The step's ON
+    comment points at this row.
 - CI lanes (testing.md §2 re-tensed): default lanes = the OFF posture
   (probe: server not serving, shell define unset); explicit-`true` ON
   lanes on `build-toolshed-on` (shell define baked `true`), FULL ON

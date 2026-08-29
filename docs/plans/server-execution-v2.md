@@ -41,7 +41,9 @@ it in the PR that moves the state.
 **Delta 2026-08-28 (the FLIP PR —
 [#6535](https://github.com/commontoolsinc/labs/pull/6535), OPEN, the
 owner merges it personally; the soak starts at ITS merge): `SERVER_EXECUTION_DEFAULT_ENABLED` →
-`true`, with every ordered gate met on main at the base (4e02f75c4): the
+`true`, with every ordered gate met on main at the base (e16780fca —
+rebased onto it 2026-08-29 from 4e02f75c4, the gate claims re-verified
+at the new base): the
 ON-skip registry EMPTY across all four suites (the ruled-3b-close lift,
 #6528), OW31's ruled posture BUILT, OW45–OW53 CLOSED, and the OW38(ii)
 bar RULED met ("topics numbers are fine", 2026-08-24).** The PR carries,
@@ -2082,17 +2084,23 @@ Tasks:
       (the coordination-state delta above carries its contents; the
       owner reads and merges it personally — the soak starts at that
       merge, and the OFF path stays the rollback lever through it).
-      Its first board surfaced ONE owner-court STOP: the verb
-      DECLARED-RESULT surface is absent under ON — receipts are
-      unwritten under the flag by events.md §4/N26's exactly-once
-      subsumption, which replaced only that role and left the
-      receipt's result-carriage (plainResultReceipts; `cf call`'s
-      `.result`) with no substitute — the register's FLIP block item
-      (5) carries the mechanism, and the CLI piece-call lane's
-      umbrella-create assert stays red as the witness until it is
-      ruled (serving-side receipt write vs a new served result
-      channel)**. OW31 (the
-      service-principal write-authority posture) was RULED 2026-08-18 —
+      Its first board surfaced ONE owner-court STOP — RULED AND BUILT,
+      no longer standing: the verb DECLARED-RESULT surface was absent
+      under ON, because receipts went unwritten under the flag by
+      events.md §4/N26's exactly-once subsumption, which replaced only
+      that role and left the receipt's result-carriage
+      (plainResultReceipts; `cf call`'s `.result`) with no substitute.
+      The owner RULED it 2026-08-29 — "yes, Serving-side receipt/result
+      write, as that is indeed what i said before" — and the PR's
+      result-carriage commit (its fourth) builds it: the served handler
+      run writes the receipt in its OWN transaction (same wave as the
+      entry's `consequenced` mark) at the same cause-derived address the
+      client-era write used, write-once by CAS with a lost CAS a loud
+      no-op. The register's FLIP block item (5) carries the mechanism
+      and its pins; the CLI piece-call lane's umbrella-create assert —
+      the witness that was red — is GREEN (board 33239003881)**. OW31
+      (the service-principal write-authority posture) was RULED
+      2026-08-18 —
       the serving identity never writes users' home spaces; genesis
       under the space's own keys, owner := the acting user — and its
       build (register OW31's work order) was owed post-merge, BEFORE
@@ -2109,15 +2117,16 @@ Tasks:
 
 Success criteria:
 
-- [ ] The integration suites run ON-only and green. (NOT ticked — untrue
-      today: the default lanes are the OFF posture by ruling. *The rest
-      of this parenthetical was the 2026-08-16 state, since superseded:
-      the explicit-ON lanes were green only WITH the skip list's six
-      `phase-7` entries, which were RED under the full ON posture, not
-      vacuous — table below. The entries were lifted arc-by-arc and the
-      ON-skip registry is EMPTY across all four suites since #6528, the
-      ruled-3b-close lift — the explicit-ON lanes run green with no
-      skips; the Coordination-state delta above carries the lift.*)
+- [ ] The integration suites run ON-only and green. (NOT ticked — but no
+      longer for the old reason, which was the six `phase-7` skip
+      entries the explicit-ON lanes needed. The ON-skip registry has
+      been EMPTY across all four suites since #6528, and the flip PR
+      swaps the lane roles: the DEFAULT lanes ARE the ON arm and run the
+      full suite carrying that empty list. What stays untrue is
+      ON-ONLY — the explicit-`false` OFF regression-guard lanes are the
+      soak's rollback lever and run beside them by design. They retire
+      with the post-soak removal PR, which is when this box can be
+      ticked.)
 - [ ] Cross-user propagation beats the client-computed baseline on the
       byte-identical workloads (the §1 "faster, not tolerably slower"
       requirement). (NOT ticked — UNMEASURED: the measurement leg is
