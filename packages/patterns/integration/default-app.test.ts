@@ -1470,10 +1470,9 @@ async function collectWriteTraceOrderSummary(page: Page): Promise<unknown> {
     //
     // A member converted to a `#` private name changes its own frame text.
     // Chrome writes `at #member`, Deno writes `at Class.#member`, and a
-    // public member keeps its class in both. That split does not track the V8
-    // version -- these two are one minor apart -- so it says nothing about
-    // what a third engine, or a later Chrome, will write. Match the bare
-    // `#member`, which is a substring of both forms.
+    // public member keeps its class in both. Neither form is promised, and
+    // two engines agreeing says nothing about a third. Match the bare
+    // `#member`, a substring of both, rather than either whole form.
     function classifyStack(stack?: string): string {
       if (!stack) return "unknown";
       if (
