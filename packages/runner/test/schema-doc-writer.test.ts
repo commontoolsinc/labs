@@ -349,6 +349,79 @@ describe("schema-doc-writer", () => {
     }
   });
 
+  it("re-stages a schema document batched as two equal writes", async () => {
+    // The batch write path has its own no-op elisions, and a run of two
+    // equal writes to one document is what routes a write through them
+    // (a single write falls back to the unified single-write entry).
+    // The referenced document is deliberately absent from the realm
+    // registry, so the carrier's staging warns and skips: the batched
+    // writes are the commit's ONLY delivery vehicle. With the document
+    // visible only through speculation, both elisions must yield the
+    // same delivery the single-write path grants, or the carrier's
+    // reference ships unbacked and the commit is rejected.
+    const document: JSONSchemaObj = {
+      type: "object",
+      properties: { batchedVisibleField: { type: "string" } },
+      title: "batched-delivery-only",
+    };
+    const rootHash = internSchemaAsTaggedHashString(document);
+    const handCrafted = {
+      "/": {
+        "link@1": {
+          id: "of:batched-target",
+          path: [],
+          schema: { $ref: `cid:${rootHash}` },
+        },
+      },
+    };
+
+    const replica = writerStorage.open(space).replica;
+    replica.sealNative!(
+      {
+        operations: [{
+          op: "set" as const,
+          id: `cid:${rootHash}` as URI,
+          type: "application/json" as const,
+          value: { value: document },
+        }],
+      },
+      undefined,
+      new Promise(() => {}),
+      { speculative: true },
+    );
+    expect(writerStorage.isSchemaDocPersisted(space, rootHash)).toBe(false);
+
+    const tx = writer.edit();
+    tx.writeValueOrThrow(
+      { space, id: "of:batched-root" as URI, scope: "space", path: [] },
+      { crafted: handCrafted },
+    );
+    const schemaDocAddress = {
+      id: `cid:${rootHash}` as URI,
+      space,
+      path: [],
+      type: "application/json",
+    } as never;
+    tx.writeValuesOrThrow!([
+      { address: schemaDocAddress, value: document as never },
+      { address: schemaDocAddress, value: document as never },
+    ]);
+    expect((await tx.commit()).error).toBeUndefined();
+
+    const provider = readerStorage.open(space);
+    const synced = await provider.sync(`cid:${rootHash}` as URI, {
+      path: [],
+      schema: false,
+    });
+    expect(synced.error).toBeUndefined();
+    const stored = (provider as unknown as {
+      get: (uri: URI) => { value?: unknown } | undefined;
+    }).get(`cid:${rootHash}` as URI);
+    expect(
+      internSchemaAsTaggedHashString(stored?.value as JSONSchemaObj),
+    ).toBe(rootHash);
+  });
+
   it("externalizes a schema whose only external refs are embedded", () => {
     const vnodeRef = "https://commonfabric.org/schemas/vnode.json";
     const schema: JSONSchemaObj = {

@@ -2097,8 +2097,10 @@ export class V2StorageTransaction implements IStorageTransaction {
       // Presence-aware no-op detection (also keeps no-op deletes from
       // reaching `applyMutablePathWrite`, which would materialize
       // intermediates into `nextRoot` before the changed check).
-      // Authoritative mode records equal-VALUE writes anyway (see
-      // `writeWithinBranch`); delete no-ops still skip.
+      // Authoritative mode records equal-VALUE writes anyway, and an
+      // unconfirmed schema document is recorded for its delivery
+      // guarantee (see `writeWithinBranch` for both); delete no-ops
+      // still skip.
       const present = hasValueAtPath(nextRoot, address.path, {
         allowArrayLength: true,
       });
@@ -2106,7 +2108,8 @@ export class V2StorageTransaction implements IStorageTransaction {
         isDelete
           ? !present
           : (present && valueEqual(previousValue, isolatedValue) &&
-            !this.#authoritativeWrites)
+            !this.#authoritativeWrites &&
+            !this.mustDeliverSchemaDoc(space, address.id))
       ) {
         continue;
       }
@@ -2155,7 +2158,12 @@ export class V2StorageTransaction implements IStorageTransaction {
         return { error: result.error.from(space) };
       }
       nextRoot = result.ok.root;
-      if (!result.ok.changed && (isDelete || !this.#authoritativeWrites)) {
+      if (
+        !result.ok.changed &&
+        (isDelete ||
+          (!this.#authoritativeWrites &&
+            !this.mustDeliverSchemaDoc(space, address.id)))
+      ) {
         continue;
       }
       changed = true;
