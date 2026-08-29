@@ -3258,15 +3258,21 @@ findings; the OWNER RULING — the flip lands DARK):
   runner/runtime-client/shell `integration` tasks now hand deno a
   QUOTED glob; the pattern ON shard filters its list through the
   script's `--filter` mode; STEP-level entries exist (in-file guard
-  bound to the register, validated). Entries today (ALL `phase-7`, none
-  of the lists EMPTY — the P7 phase PR's "one entry" and every earlier
-  "EMPTY" wording were about a mechanism that never bit): patterns ×3
+  bound to the register, validated). Entries at this delta's date (ALL
+  `phase-7`, none of the lists EMPTY — the P7 phase PR's "one entry" and
+  every earlier "EMPTY" wording were about a mechanism that never bit):
+  patterns ×3
   (`topics-navigation`, `cfc-group-chat-demo-two-browsers`,
   `lunch-poll-vote` — the last two on OW32's characterized, unattributed
   loop), runner ×1 (`pattern-and-data-persistence` — OW33),
   runtime-client ×2 STEP entries in `client.test.ts` (OW33). Verified
   locally: runner integration 14/14 default posture, 13/14 + 1 skipped
   under ON; runtime-client 45 steps default, 43 + 2 ignored under ON.
+  [State at 2026-08-16, SUPERSEDED: the six entries were lifted
+  arc-by-arc and the ON-skip registry has been EMPTY across all four
+  suites since the ruled-3b-close lift (#6528, 2026-08-28 — the
+  RULED-CLOSE LIFT block below); the INERT-mechanism discovery, the
+  quoted-glob/`--filter` fix, and the register binding remain current.]
 - Rows: OW17 gains the review's CLASS VERDICT and the correction (the
   two-browser red is NOT evidenced as OW17; the lunch "(1)+(2)+(3) →
   join UI" narrative did not reproduce); OW25 DISCHARGED (the ON shell
@@ -3275,7 +3281,8 @@ findings; the OWNER RULING — the flip lands DARK):
   carries the characterization and fix shape (compile as an outbox
   effect kind + completion-class writeback); OW29 folds in the
   demand-root chain's list-builtin gap (fixed) and the wish-sidecar
-  question (flagged); NEW OW31 (write-authority posture — ruled item),
+  question (flagged); NEW OW31 (write-authority posture — ruled item;
+  since RULED 2026-08-18 and BUILT 2026-08-21 — its row above),
   OW32 (the client non-settling loop — first gate), OW33 (the ON-posture
   Deno-client family).
 - protocol.md §2 gains the `capabilityRef` vocabulary sentence (review
@@ -7917,6 +7924,16 @@ supply; OW29/OW32/OW34 closed):
     never a regression. The alternative — re-checking the map on
     re-park — is exactly the immediate-retry spin the guard exists to
     prevent, so the code is right and the RECORD is what was owed.
+    One bound worth stating outright (review-6528 F4): record events
+    include re-issues' OWN re-records — a re-issue that succeeds past
+    the already-stored short-circuit re-verifies and re-RECORDS the
+    entry's module set — so two parks whose wanted identities live in
+    each other's entries can in principle wake each other in a cycle.
+    That cycle is one wake per persist event, paced by real storage
+    I/O, loud at every step, sustainable only while every wanted-read
+    keeps failing as every entry verify-read keeps succeeding
+    (doc-specific persistent read pathology in every candidate space),
+    and it heals outright on the first good read.
     Where truly nothing ever records, the loud one-shot behavior stands
     — the correct floor under the wedge-loudly ruling.
     **RULED-CLOSE LIFT (2026-08-28, this PR — the THIRD lift; the
