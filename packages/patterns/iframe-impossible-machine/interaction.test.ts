@@ -219,4 +219,27 @@ describe("Impossible Machine interaction lifecycle", () => {
     expect(await first).toBe(false);
     expect(await duplicate).toBe(false);
   });
+
+  it("does not reuse a failed result after restoring an older selection", async () => {
+    const tracker = createSelectionRequestTracker("node-a");
+    let releaseOlder!: () => void;
+    const olderGate = new Promise<void>((resolve) => releaseOlder = resolve);
+    let restoredWrites = 0;
+
+    const older = tracker.request("node-b", () => olderGate);
+    expect(await tracker.request("node-c", () => Promise.resolve(false))).toBe(
+      false,
+    );
+
+    expect(
+      await tracker.request("node-a", () => {
+        restoredWrites++;
+        return Promise.resolve(true);
+      }),
+    ).toBe(true);
+    expect(restoredWrites).toBe(0);
+
+    releaseOlder();
+    expect(await older).toBe(true);
+  });
 });

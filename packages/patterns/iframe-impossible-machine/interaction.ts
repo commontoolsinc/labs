@@ -140,6 +140,7 @@ export function createSelectionRequestTracker(
         latestSuccessfulSelection = selection;
         latestRequestedSequence = requestSequence;
         latestSuccessfulSequence = requestSequence;
+        latestRequestedResult = Promise.resolve(true);
       }
     },
     request(nodeId, writeSelection) {
@@ -166,9 +167,11 @@ export function createSelectionRequestTracker(
             latestSuccessfulSelection = authoritativeSelection;
             latestRequestedSequence = authoritativeRequestSequence;
             latestSuccessfulSequence = authoritativeRequestSequence;
+            latestRequestedResult = Promise.resolve(true);
           } else if (!succeeded && sequence === latestRequestedSequence) {
             latestRequestedSelection = latestSuccessfulSelection;
             latestRequestedSequence = latestSuccessfulSequence;
+            latestRequestedResult = Promise.resolve(true);
           }
         }
         return succeeded;
