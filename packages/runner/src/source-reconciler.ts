@@ -688,6 +688,9 @@ export class SourceReconciler {
       const resolved = await this.#runtime.harness.resolve(
         new HttpProgramResolver(target.href, fetch),
       );
+      // Compiling writes to this space's caches, so a pass that has been
+      // stopped stops here rather than paying for source nobody will run.
+      if (signal.aborted) return undefined;
       const compiled = await this.#runtime.patternManager.compilePattern(
         resolved,
         { space },
