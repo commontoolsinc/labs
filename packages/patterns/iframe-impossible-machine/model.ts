@@ -4,6 +4,7 @@ import {
   machineEdgeId,
   type MachineNode,
 } from "./contract.ts";
+export * as interaction from "./interaction.ts";
 
 export interface MachineNodePresentation {
   code: string;

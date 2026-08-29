@@ -39,12 +39,12 @@ import {
   canonicalizeMachineEdges,
   createsFeedbackCycle,
   evaluateSignals,
+  interaction,
   isActuatorFiring,
   machineNodePresentation,
   presentSignal,
   type SignalPresentation,
 } from "./model.ts";
-import * as interaction from "./interaction.ts";
 
 const fabric = connectFabric();
 const { useCell } = createFabricReact(React, fabric);
