@@ -3325,7 +3325,7 @@ ruled-3b-close lift), OW31's ruled posture BUILT, OW45–OW53 CLOSED,
 OW38(ii) RULED met ("topics numbers are fine"). The owner merges it
 personally; the soak starts at ITS merge.** What it carries:
 
-**THE ROLLBACK LEVER (#TBD-LEVER), stacked on the flip PR and NOT to be
+**THE ROLLBACK LEVER (#6552), stacked on the flip PR and NOT to be
 merged unless the soak fails.** A pre-reviewed, pre-greened clean flip
 OFF: the minimal inverse of the default-coupled surfaces below (the
 constant, the absolute pin, the two deployed-topology gates' expected

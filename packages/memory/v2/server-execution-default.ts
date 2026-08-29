@@ -16,7 +16,7 @@
  * value: an explicit `true` is how CI exercises the ON arm (on an
  * ON-built binary), and it stays selectable either way.
  *
- * ROLLED BACK (the flip-OFF lever, PR TBD-LEVER): the Phase 7 flip PR
+ * ROLLED BACK (the flip-OFF lever, PR #6552): the Phase 7 flip PR
  * (#6535) made this `true`; this PR is its minimal inverse — the default
  * returns to `false` and EVERY mechanism the flip PR built is KEPT: the
  * serving-side result carriage, the deployed-topology posture gates, the

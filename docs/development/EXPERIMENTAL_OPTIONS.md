@@ -367,7 +367,7 @@ server](#clients-that-are-not-built-alongside-their-server).
   ROLLBACK state.** The ONE first-party default is
   `SERVER_EXECUTION_DEFAULT_ENABLED` in
   [`packages/memory/v2/server-execution-default.ts`](../../packages/memory/v2/server-execution-default.ts),
-  value `false` again since the flip-OFF lever (#TBD-LEVER) pulled the
+  value `false` again since the flip-OFF lever (#6552) pulled the
   Phase 7 flip (#6535, 2026-08-28) back. It is read by every
   deployed-topology entry point — the `productionServer` / `remoteClient`
   construction presets (toolshed's operator runtime, the background piece
@@ -405,7 +405,7 @@ server](#clients-that-are-not-built-alongside-their-server).
   OFF code path in the split-out post-soak PR (the plan's Phase 7 task 2,
   which also removes the guard lanes and the second toolshed build).
 - **Status on 2026-08-29 (the ROLLBACK).** The flip-OFF lever
-  (#TBD-LEVER) set the constant back to `false`: the minimal inverse of
+  (#6552) set the constant back to `false`: the minimal inverse of
   #6535's default-coupled surfaces, KEEPING every mechanism the flip PR
   built (the serving-side result carriage, the deployed-topology gates,
   the CLI lane's client/server agreement probe, the arm-aware CLI and
