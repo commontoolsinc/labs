@@ -35,22 +35,7 @@ import {
   type MachineParameters,
   type MachinePosition,
 } from "./contract.ts";
-import {
-  canonicalizeMachineEdges,
-  createActionRunner,
-  createSelectionRequestTracker,
-  createsFeedbackCycle,
-  errorFrom,
-  evaluateSignals,
-  findAppendOnlyItem,
-  isActuatorFiring,
-  machineNodePresentation,
-  nodeControlBoundaryProps,
-  presentSignal,
-  settleCommittedPositionDraft,
-  type SignalPresentation,
-  updateLatestValue,
-} from "./model.ts";
+import * as model from "./model.ts";
 
 const fabric = connectFabric();
 const { useCell } = createFabricReact(React, fabric);
@@ -84,7 +69,7 @@ const KIND_COLORS: Record<MachineNodeKind, string> = {
 
 type NodeViewData = {
   node: MachineNode;
-  signal: SignalPresentation;
+  signal: model.SignalPresentation;
   disabled: boolean;
 };
 
@@ -221,7 +206,7 @@ function NodeFrame({
           {data.signal.label}
         </output>
       </header>
-      <div {...nodeControlBoundaryProps()}>{children}</div>
+      <div {...model.nodeControlBoundaryProps()}>{children}</div>
       {hasOutput && (
         <Handle
           id="output"
@@ -357,7 +342,7 @@ function ActuatorNode(props: NodeProps<MachineFlowNode>) {
         disabled={disabled}
       />
       <p className="actuator-state">
-        {isActuatorFiring(node, props.data.signal.semantic)
+        {model.isActuatorFiring(node, props.data.signal.semantic)
           ? "Launched!"
           : "Standing by"}
       </p>
@@ -391,13 +376,13 @@ function App() {
   const [connectSource, setConnectSource] = React.useState("");
   const [connectTarget, setConnectTarget] = React.useState("");
   const bootstrapStarted = React.useRef(false);
-  const actionRunner = React.useRef(createActionRunner({
+  const actionRunner = React.useRef(model.createActionRunner({
     setGlobalPending: setPending,
     setActionError,
     setBusyNodeCounts,
   })).current;
   const selectionRequestTracker = React.useRef(
-    createSelectionRequestTracker(null),
+    model.createSelectionRequestTracker(null),
   );
 
   React.useEffect(() => {
@@ -428,7 +413,7 @@ function App() {
         ]);
         if (active) setMaterialized(true);
       } catch (cause) {
-        if (active) setInitializationError(errorFrom(cause));
+        if (active) setInitializationError(model.errorFrom(cause));
       }
     })();
     return () => {
@@ -442,7 +427,7 @@ function App() {
   const locateNodeCell = React.useCallback(async (nodeId: string) => {
     const nodesCell = stateCell.key("nodes");
     const nodes = await nodesCell.pull();
-    const located = findAppendOnlyItem(nodes, nodeId);
+    const located = model.findAppendOnlyItem(nodes, nodeId);
     if (!located) throw new Error(`Module ${nodeId} no longer exists.`);
     const nodeCell = nodesCell.key(located.index);
     const node = await nodeCell.pull();
@@ -472,7 +457,7 @@ function App() {
         const node = await locateNodeCell(nodeId);
         await node.key("position").set(position);
         await state.refresh();
-        settleCommittedPositionDraft(
+        model.settleCommittedPositionDraft(
           draftPositionsRef,
           setDraftPositions,
           nodeId,
@@ -486,7 +471,7 @@ function App() {
     (kind: MachineNodeKind) =>
       runAction(async () => {
         const id = crypto.randomUUID();
-        const presentation = machineNodePresentation(id);
+        const presentation = model.machineNodePresentation(id);
         const node: MachineNode = {
           id,
           kind,
@@ -522,8 +507,9 @@ function App() {
           throw new Error("Those modules are already connected.");
         }
         if (
-          createsFeedbackCycle(
-            canonicalizeMachineEdges(edges, latest.disabledEdges ?? {}).edges,
+          model.createsFeedbackCycle(
+            model.canonicalizeMachineEdges(edges, latest.disabledEdges ?? {})
+              .edges,
             source,
             target,
           )
@@ -557,7 +543,7 @@ function App() {
       update: (current: IframeOutputData[K]) => IframeOutputData[K],
     ) =>
       runAction(async () => {
-        await updateLatestValue(outputCell.key(key), update);
+        await model.updateLatestValue(outputCell.key(key), update);
         await output.refresh();
       }),
     [output.refresh, runAction],
@@ -595,7 +581,7 @@ function App() {
     );
   }
 
-  const canonicalEdges = canonicalizeMachineEdges(
+  const canonicalEdges = model.canonicalizeMachineEdges(
     stateValue.edges,
     stateValue.disabledEdges,
   );
@@ -603,7 +589,10 @@ function App() {
     ...stateValue,
     edges: canonicalEdges.edges,
   };
-  const signals = evaluateSignals(machineState, outputValue.simulationTick);
+  const signals = model.evaluateSignals(
+    machineState,
+    outputValue.simulationTick,
+  );
   const flowNodes: MachineFlowNode[] = stateValue.nodes.map((node) => ({
     id: node.id,
     type: node.kind,
@@ -611,7 +600,7 @@ function App() {
     selected: outputValue.selectedNodeId === node.id,
     data: {
       node,
-      signal: presentSignal(
+      signal: model.presentSignal(
         signals.get(node.id) ?? 0,
         outputValue.showSignals,
       ),
@@ -623,7 +612,7 @@ function App() {
     ariaLabel: `${KIND_LABELS[node.kind]}: ${node.label}`,
   }));
   const flowEdges: Edge[] = machineState.edges.map((edge) => {
-    const signal = presentSignal(
+    const signal = model.presentSignal(
       signals.get(edge.source) ?? 0,
       outputValue.showSignals,
     );
@@ -675,7 +664,7 @@ function App() {
   );
   const activeActuators =
     stateValue.nodes.filter((node) =>
-      isActuatorFiring(node, signals.get(node.id) ?? 0)
+      model.isActuatorFiring(node, signals.get(node.id) ?? 0)
     ).length;
 
   const handleNodeChanges = (changes: NodeChange<MachineFlowNode>[]) => {
@@ -826,7 +815,7 @@ function App() {
               <p>
                 {selected
                   ? `${KIND_LABELS[selected.kind]} · ${
-                    presentSignal(
+                    model.presentSignal(
                       signals.get(selected.id) ?? 0,
                       outputValue.showSignals,
                     ).label
