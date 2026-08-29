@@ -75,6 +75,23 @@ describe("BenchWorker", () => {
         worker.close();
       }
     });
+    it("does not latch when a request cannot be cloned", () => {
+      // The request never reaches the far side, so nothing is in flight and the
+      // refusal above must not treat it as though something were. A worker
+      // stuck refusing every later send would end the run, not the request.
+      const worker = new BenchWorker<unknown>(ACKS);
+
+      return (async () => {
+        try {
+          await expect(worker.send(() => {})).rejects.toThrow(
+            "could not be cloned",
+          );
+          await worker.send(1);
+        } finally {
+          worker.close();
+        }
+      })();
+    });
   });
 
   describe("close()", () => {

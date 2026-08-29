@@ -117,7 +117,21 @@ export class BenchWorker<Request> {
 
     return new Promise((resolve, reject) => {
       this.#pending = { resolve, reject };
-      this.#worker.postMessage(request);
+
+      try {
+        this.#worker.postMessage(request);
+      } catch (cause) {
+        // A request that cannot be cloned never reaches the far side, so
+        // nothing will acknowledge it and it is not in flight. Clearing before
+        // rejecting is what keeps the refusal above from latching: the record
+        // exists only for a request the far side has actually been given.
+        //
+        // The worker itself is unharmed -- what failed is this request rather
+        // than the crossing -- so no terminal failure is recorded and the next
+        // send proceeds.
+        this.#pending = undefined;
+        reject(cause instanceof Error ? cause : new Error(String(cause)));
+      }
     });
   }
 
