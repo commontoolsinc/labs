@@ -17,7 +17,7 @@ shuttle estuary/board> watch topics/3
 │ title    "verb contracts"            │
 │ replies  14                          │
 └── q: back (watch stays armed) ───────┘
-shuttle estuary/board> call topics/3 add-reply -- --body "hi"
+shuttle estuary/board> call topics/3 add-reply --body "hi"
 watch topics/3: replies 14 → 15
 shuttle estuary/board>
 ```

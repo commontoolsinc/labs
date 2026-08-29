@@ -218,12 +218,16 @@ Three spellings, and no fourth:
 - `call <ref> <name> [input]` — the typed form, matching `cf`'s
   (`call topics/3 add-reply '{"body":"hi"}'`), so knowledge transfers both
   ways. The input positional takes an inline JSON value or `-` to read the
-  payload from stdin, and `--` opens the callable's schema-derived flags
-  (`call topics/3 search -- --query milk`) — the same spellings
-  `cf piece call` documents.
+  payload from stdin. The verb name opens the callable's section, so its
+  schema-derived flags follow bare — `call topics/3 search --query milk` —
+  and `--` closes the section. That is
+  [`../cli-surface-shape.md`](../cli-surface-shape.md) step 10's form;
+  `cf` today still spells it with `--` opening the section, and shuttle
+  speaks step 10 from the start rather than teaching a spelling the arc
+  retires.
 - `call <piece-handle> <name> [input]` — a piece handle stands wherever a
   typed reference stands, so this is the typed form with the receiver
-  already in hand: `call %3 add-reply -- --body "shipped"` off a listing
+  already in hand: `call %3 add-reply --body "shipped"` off a listing
   whose rows are pieces.
 - `call <callable-handle> [input…]` — `call %4`, where the listing minted
   `%4` from a callable row. That handle carries receiver *and* name, so
