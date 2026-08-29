@@ -44,6 +44,7 @@ import {
   presentSignal,
   type SignalPresentation,
 } from "./model.ts";
+import { stopNodeControlPropagation } from "./interaction.ts";
 
 const fabric = connectFabric();
 const { useCell } = createFabricReact(React, fabric);
@@ -218,7 +219,12 @@ function NodeFrame({
           {data.signal.label}
         </output>
       </header>
-      <div className="node-parameters">{children}</div>
+      <div
+        className="node-parameters nodrag nopan"
+        onClick={stopNodeControlPropagation}
+      >
+        {children}
+      </div>
       {hasOutput && (
         <Handle
           id="output"
@@ -378,6 +384,9 @@ function App() {
   const [initializationError, setInitializationError] = React.useState<Error>();
   const [actionError, setActionError] = React.useState<Error>();
   const [pending, setPending] = React.useState(false);
+  const [busyNodeCounts, setBusyNodeCounts] = React.useState<
+    Readonly<Record<string, number>>
+  >({});
   const [draftPositions, setDraftPositions] = React.useState<
     Record<string, MachinePosition>
   >({});
@@ -439,6 +448,25 @@ function App() {
     return next;
   }, []);
 
+  const runNodeAction = React.useCallback(
+    (nodeId: string, action: () => Promise<void>) => {
+      setBusyNodeCounts((current) => ({
+        ...current,
+        [nodeId]: (current[nodeId] ?? 0) + 1,
+      }));
+      return runAction(action).finally(() => {
+        setBusyNodeCounts((current) => {
+          const count = current[nodeId] ?? 0;
+          const next = { ...current };
+          if (count > 1) next[nodeId] = count - 1;
+          else delete next[nodeId];
+          return next;
+        });
+      });
+    },
+    [runAction],
+  );
+
   const resolveNode = React.useCallback(async (nodeId: string) => {
     const nodesCell = stateCell.key("nodes");
     const nodes = await nodesCell.pull();
@@ -458,12 +486,12 @@ function App() {
       key: K,
       value: MachineParameters[K],
     ) =>
-      runAction(async () => {
+      runNodeAction(nodeId, async () => {
         const node = await resolveNode(nodeId);
         await node.key("parameters").key(key).set(value);
         await state.refresh();
       }),
-    [resolveNode, runAction, state.refresh],
+    [resolveNode, runNodeAction, state.refresh],
   );
 
   const persistPosition = React.useCallback(
@@ -612,7 +640,7 @@ function App() {
         signals.get(node.id) ?? 0,
         outputValue.showSignals,
       ),
-      disabled: pending,
+      disabled: (busyNodeCounts[node.id] ?? 0) > 0,
     },
     draggable: !pending,
     connectable: !pending,
@@ -780,8 +808,10 @@ function App() {
               edges={flowEdges}
               nodeTypes={NODE_TYPES}
               onNodesChange={handleNodeChanges}
-              onNodeClick={(_event, node) =>
-                void updatePreference("selectedNodeId", node.id)}
+              onNodeClick={(_event, node) => {
+                if (outputValue.selectedNodeId === node.id) return;
+                void updatePreference("selectedNodeId", node.id);
+              }}
               onNodeDragStop={(_event, node) =>
                 void persistPosition(
                   node.id,
