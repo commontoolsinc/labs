@@ -256,9 +256,11 @@ LLM-generated code start detached. Forking, directly editing, and reverting
 also detach a piece.
 
 An origin is claimed rather than inferred, and whoever brings a piece into being
-is who claims it. A person creating a piece from a URL claims that URL. The
-runtime claims the `system:` ref for a piece it instantiates from a pattern this
-deployment serves: the wish builtin's profile create, profile picker, and
+is who claims it. Reading a program from somewhere is not that claim: a URL a
+person created a piece from is a place a program was read once, and the piece is
+detached until someone says it should follow that place. The runtime does claim
+the `system:` ref for a piece it instantiates from a pattern this deployment
+serves: the wish builtin's profile create, profile picker, and
 suggestion surfaces are those pieces today, and nobody else is placed to say
 where their code comes from, because the runtime is what fetched it. Nothing
 reconstructs an origin from the names of the modules a piece happens to run. A
