@@ -41,6 +41,7 @@ import {
   evaluateSignals,
   findFeedbackNodeIds,
   isActuatorFiring,
+  machineNodePresentation,
   presentSignal,
   type SignalPresentation,
 } from "./model.ts";
@@ -483,18 +484,13 @@ function App() {
   const appendNode = React.useCallback(
     (kind: MachineNodeKind) =>
       runAction(async () => {
-        const existing = await stateCell.key("nodes").pull();
-        const ordinal = existing.filter((node) => node.kind === kind).length +
-          1;
-        const index = existing.length;
+        const id = crypto.randomUUID();
+        const presentation = machineNodePresentation(id);
         const node: MachineNode = {
-          id: crypto.randomUUID(),
+          id,
           kind,
-          label: `${KIND_LABELS[kind]} ${ordinal}`,
-          position: {
-            x: 100 + (index % 4) * 260,
-            y: 90 + (Math.floor(index / 4) % 3) * 220,
-          },
+          label: `${KIND_LABELS[kind]} · ${presentation.code}`,
+          position: presentation.position,
           parameters: defaultParameters(kind),
         };
         await stateCell.key("nodes").push(node);

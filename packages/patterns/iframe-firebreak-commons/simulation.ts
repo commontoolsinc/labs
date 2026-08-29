@@ -49,6 +49,8 @@ export interface BoardDimensions {
   rows: number;
 }
 
+export type ActionDisposition = "accepted" | "rejected" | "pending";
+
 function clampInteger(
   value: number,
   minimum: number,
@@ -66,6 +68,24 @@ export function normalizedBoardDimensions(
     columns: clampInteger(input.columns, MIN_COLUMNS, MAX_COLUMNS),
     rows: clampInteger(input.rows, MIN_ROWS, MAX_ROWS),
   };
+}
+
+/** Returns the turn limit used by both the reducer and renderer. */
+export function normalizedMaximumTurns(maximumTurns: number): number {
+  return clampInteger(maximumTurns, 1, 50);
+}
+
+/** Classifies an intent against the reducer's authoritative result. */
+export function actionDisposition(
+  snapshot: Pick<
+    SimulationSnapshot,
+    "acceptedActionIds" | "rejectedActionIds"
+  >,
+  actionId: string,
+): ActionDisposition {
+  if (snapshot.acceptedActionIds.includes(actionId)) return "accepted";
+  if (snapshot.rejectedActionIds.includes(actionId)) return "rejected";
+  return "pending";
 }
 
 function hashUnit(seed: number, label: string): number {
@@ -299,7 +319,7 @@ export function reduceSimulation(
   input: IframeInputData,
   actions: readonly SimulationAction[],
 ): SimulationSnapshot {
-  const maximumTurns = clampInteger(input.maximumTurns, 1, 50);
+  const maximumTurns = normalizedMaximumTurns(input.maximumTurns);
   const tiles = initialTiles(input);
   const acceptedActionIds: string[] = [];
   const rejectedActionIds: string[] = [];
@@ -359,14 +379,24 @@ export function reduceSimulation(
   );
 }
 
-export function describeTile(tile: TileState): string {
+export function describeTile(tile: TileState, currentTurn: number): string {
   const details: string[] = [tile.terrain];
   if (tile.fire > 0) details.push(`fire intensity ${tile.fire}`);
   if (tile.firebreak) details.push("firebreak protected");
-  if (tile.wetUntilTurn > 0) details.push("recently watered");
+  if (tile.wetUntilTurn >= currentTurn) details.push("recently watered");
   if (tile.residents > 0) {
+    const remaining = Math.max(
+      0,
+      tile.residents - tile.evacuatedResidents - tile.lostResidents,
+    );
+    details.push(`${tile.evacuatedResidents} residents evacuated`);
+    if (tile.lostResidents > 0) {
+      details.push(`${tile.lostResidents} residents lost`);
+    }
     details.push(
-      `${tile.evacuatedResidents} of ${tile.residents} residents evacuated`,
+      remaining === 0
+        ? "no residents awaiting evacuation"
+        : `${remaining} residents awaiting evacuation`,
     );
   }
   return `Column ${tile.x + 1}, row ${tile.y + 1}: ${details.join(", ")}`;

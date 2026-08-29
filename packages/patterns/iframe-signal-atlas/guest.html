@@ -341,6 +341,12 @@
       animation: flow 2.8s linear infinite;
     }
 
+    @media (prefers-reduced-motion: reduce) {
+      .flow-route {
+        animation: none;
+      }
+    }
+
     @keyframes flow {
       to {
         stroke-dashoffset: -24;
@@ -437,7 +443,7 @@
             </div>
           </div>
           <div class="map-frame">
-            <svg id="atlas" role="img"
+            <svg id="atlas"
               aria-label="Temporal signal propagation map"></svg>
             <div
               class="map-caption">Scroll or drag to explore. View movement stays local until you choose Save view.</div>

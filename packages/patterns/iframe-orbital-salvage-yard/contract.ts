@@ -21,6 +21,14 @@ export interface ModuleTransform {
   rotationQuarterTurns: number;
 }
 
+export interface ModuleSnapClaim {
+  id: string;
+  movingConnectorId: string;
+  targetModuleId: string;
+  targetConnectorId: string;
+  transform: ModuleTransform;
+}
+
 export interface StationModule {
   id: string;
   label: string;
@@ -37,6 +45,8 @@ export interface IframeInputData {
 
 export interface IframeStateData {
   modules: StationModule[];
+  snapClaims: Record<string, ModuleSnapClaim | null>;
+  snapTargets: Record<string, string | null>;
 }
 
 export interface IframeOutputData {
@@ -133,6 +143,8 @@ export const DEFAULT_INPUT: IframeInputData = {
 };
 
 export const DEFAULT_STATE: IframeStateData = {
+  snapClaims: {},
+  snapTargets: {},
   modules: [
     {
       id: "module-junction-nine",

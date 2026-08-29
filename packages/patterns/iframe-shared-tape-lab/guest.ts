@@ -7,12 +7,15 @@ import {
   type TapeAnnotation,
 } from "./contract.ts";
 import {
+  type AnnotationEdits,
   assessmentValues,
   buildSyntheticWav,
+  changedAnnotationEdits,
   confidenceFor,
   cueSpecs,
   formatTime,
   normalizeDurationSeconds,
+  writeAnnotationEdits,
 } from "./model.ts";
 
 const fabric = connectFabric();
@@ -38,9 +41,11 @@ let playbackOffsetSeconds = 0;
 let playbackStartedAt: number | undefined;
 let animationFrame: number | undefined;
 let activeCueIds = new Set<string>();
-let dialogMode: { kind: "new" } | { kind: "edit"; id: string } = {
-  kind: "new",
-};
+let dialogMode:
+  | { kind: "new" }
+  | { kind: "edit"; id: string; baseline: AnnotationEdits } = {
+    kind: "new",
+  };
 let dialogSaving = false;
 const assessmentDrafts = new Map<string, number>();
 const pendingAssessmentIds = new Set<string>();
@@ -459,7 +464,16 @@ function openEditor(annotation?: TapeAnnotation): void {
   if (dialogSaving) return;
   clearError();
   if (annotation) {
-    dialogMode = { kind: "edit", id: annotation.id };
+    dialogMode = {
+      kind: "edit",
+      id: annotation.id,
+      baseline: {
+        startSeconds: annotation.startSeconds,
+        endSeconds: annotation.endSeconds,
+        label: annotation.label,
+        note: annotation.note,
+      },
+    };
     dialogTitle.textContent = "Edit shared annotation";
     saveButton.textContent = "Save changes";
     startInput.value = annotation.startSeconds.toFixed(1);
@@ -537,16 +551,18 @@ async function saveAnnotation(): Promise<void> {
     if (index < 0) {
       throw new Error("That annotation is no longer available.");
     }
-    const current = annotations[index];
     const resolved = await annotationsCell.key(index).resolve();
-    await resolved.set({
-      ...current,
+    const next = {
       startSeconds,
       endSeconds,
       label,
       note,
-    });
-    await output.key("selectedAnnotationId").set(current.id);
+    };
+    await writeAnnotationEdits(
+      resolved,
+      changedAnnotationEdits(mode.baseline, next),
+    );
+    await output.key("selectedAnnotationId").set(mode.id);
   }
   dialog.close();
 }

@@ -37,6 +37,7 @@ interface GuestSummary {
   turn: string;
   status: string;
   crewName: string;
+  crewColor: string;
   selectedTool: string;
   actionCount: number;
   actionText: string;
@@ -308,6 +309,7 @@ class GuestDomDriver {
         turn: app?.getAttribute('data-turn') ?? '',
         status: app?.getAttribute('data-status') ?? '',
         crewName: document.querySelector('#crew-name')?.value ?? '',
+        crewColor: app?.getAttribute('data-crew-color') ?? '',
         selectedTool: selected?.getAttribute('data-tool') ?? '',
         actionCount: actions.length,
         actionText: actions.map((item) => item.textContent ?? '').join(' '),
@@ -343,6 +345,7 @@ function readySummary(driver: GuestDomDriver): Promise<GuestSummary> {
       turn: app.getAttribute('data-turn') ?? '',
       status: app.getAttribute('data-status') ?? '',
       crewName: document.querySelector('#crew-name')?.value ?? '',
+      crewColor: app.getAttribute('data-crew-color') ?? '',
       selectedTool: selected?.getAttribute('data-tool') ?? '',
       actionCount: actions.length,
       actionText: actions.map((item) => item.textContent ?? '').join(' '),
@@ -367,6 +370,7 @@ function waitForActionCount(
       turn: app.getAttribute('data-turn') ?? '',
       status: app.getAttribute('data-status') ?? '',
       crewName: document.querySelector('#crew-name')?.value ?? '',
+      crewColor: app.getAttribute('data-crew-color') ?? '',
       selectedTool: selected?.getAttribute('data-tool') ?? '',
       actionCount: actions.length,
       actionText: actions.map((item) => item.textContent ?? '').join(' '),
@@ -391,6 +395,7 @@ function waitForTurn(
       turn: app.getAttribute('data-turn') ?? '',
       status: app.getAttribute('data-status') ?? '',
       crewName: document.querySelector('#crew-name')?.value ?? '',
+      crewColor: app.getAttribute('data-crew-color') ?? '',
       selectedTool: selected?.getAttribute('data-tool') ?? '',
       actionCount: actions.length,
       actionText: actions.map((item) => item.textContent ?? '').join(' '),
@@ -490,7 +495,9 @@ describe("iframe Firebreak Commons", () => {
         return status.includes('Ready · Cedar One') ? status : false;
       }`);
       expect((await alice.summary()).crewName).toBe("Cedar One");
+      expect((await alice.summary()).crewColor).toBe("blue");
       expect((await bob.summary()).crewName).toBe("Commons crew");
+      expect((await bob.summary()).crewColor).toBe("amber");
 
       const [waterTile, firebreakTile] = await Promise.all([
         alice.clickFirst('.mirror-tile[data-fire="true"]'),
@@ -514,6 +521,7 @@ describe("iframe Firebreak Commons", () => {
       for (const summary of shared) {
         expect(summary.actionText).toContain("sent water to");
         expect(summary.actionText).toContain("cut a firebreak at");
+        expect(summary.actionText).not.toContain("Rejected");
       }
 
       await alice.setValue("#crew-name", "Unsaved lookout");

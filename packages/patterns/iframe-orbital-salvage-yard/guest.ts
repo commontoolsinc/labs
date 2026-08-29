@@ -26,6 +26,7 @@ import {
   type IframeOutputData,
   type IframeStateData,
   type ModuleKind,
+  type ModuleSnapClaim,
   type StationModule,
   type Vector3Tuple,
   type YardTool,
@@ -38,9 +39,13 @@ import {
 import {
   canBeginDrag,
   createSalvageModule,
+  dragDisposition,
+  initializeGraphics,
   isBookmarked,
   ownsDrag,
+  resolveSnapClaims,
   setBookmark,
+  snapTargetKey,
 } from "./model.ts";
 
 type ModuleVisual = {
@@ -54,6 +59,7 @@ type DragState = {
   moduleId: string;
   pointerId: number;
   position: Vector3Tuple;
+  rotationQuarterTurns: number;
   resolved: Promise<RemoteCell<StationModule>>;
   moved: boolean;
 };
@@ -65,6 +71,8 @@ const output = fabric.cell<IframeOutputData | undefined>("output");
 const stateWrite = fabric.cell<IframeStateData>("state");
 const outputWrite = fabric.cell<IframeOutputData>("output");
 const modulesCell = stateWrite.key("modules");
+const snapClaimsCell = stateWrite.key("snapClaims");
+const snapTargetsCell = stateWrite.key("snapTargets");
 
 const canvas = required<HTMLCanvasElement>("#scene");
 const heading = required<HTMLHeadingElement>("h1");
@@ -86,11 +94,26 @@ const connectionMirror = required<HTMLUListElement>("#connection-mirror");
 const status = required<HTMLElement>("#yard-status");
 const alert = required<HTMLElement>("[role=alert]");
 
-const engine = new Engine(canvas, true, {
-  preserveDrawingBuffer: false,
-  stencil: true,
-});
-const scene = new Scene(engine);
+const { engine, scene } = initializeGraphics(
+  () => {
+    const engine = new Engine(canvas, true, {
+      preserveDrawingBuffer: false,
+      stencil: true,
+    });
+    try {
+      return { engine, scene: new Scene(engine) };
+    } catch (cause) {
+      engine.dispose();
+      throw cause;
+    }
+  },
+  (cause) => {
+    showError(cause);
+    status.textContent = "The salvage yard could not start its 3D renderer.";
+    status.dataset.ready = "false";
+    fabric.disconnect();
+  },
+);
 scene.clearColor = new Color4(0.012, 0.025, 0.04, 1);
 const camera = new ArcRotateCamera(
   "salvage-orbit-camera",
@@ -193,7 +216,17 @@ function clearError(): void {
 
 function selectedModule(): StationModule | undefined {
   if (!selectedModuleId) return undefined;
-  return stateValue.modules.find((module) => module.id === selectedModuleId);
+  return effectiveModules().find((module) => module.id === selectedModuleId);
+}
+
+function effectiveModules(
+  value: Readonly<IframeStateData> = stateValue,
+): StationModule[] {
+  return resolveSnapClaims(
+    value.modules,
+    value.snapClaims ?? {},
+    value.snapTargets ?? {},
+  );
 }
 
 function updateControlState(): void {
@@ -370,7 +403,8 @@ function createVisual(module: StationModule): ModuleVisual {
 }
 
 function reconcileModules(): void {
-  const wanted = new Set(stateValue.modules.map((module) => module.id));
+  const modules = effectiveModules();
+  const wanted = new Set(modules.map((module) => module.id));
   for (const [id, visual] of moduleVisuals) {
     if (wanted.has(id)) continue;
     visual.root.dispose(false, true);
@@ -378,7 +412,7 @@ function reconcileModules(): void {
   }
 
   const accent = colorFromHex(outputValue.accentColor);
-  for (const module of stateValue.modules) {
+  for (const module of modules) {
     let visual = moduleVisuals.get(module.id);
     if (visual && visual.kind !== module.kind) {
       visual.root.dispose(false, true);
@@ -411,7 +445,8 @@ function reconcileModules(): void {
 }
 
 function reconcileConnections(): void {
-  const connections = findConnections(stateValue.modules);
+  const modules = effectiveModules();
+  const connections = findConnections(modules);
   const wanted = new Set(connections.map((connection) => connection.id));
   for (const [id, visual] of jointVisuals) {
     if (wanted.has(id)) continue;
@@ -437,10 +472,10 @@ function reconcileConnections(): void {
     ...(connections.length
       ? connections.map((connection) => {
         const item = document.createElement("li");
-        const first = stateValue.modules.find((module) =>
+        const first = modules.find((module) =>
           module.id === connection.first.moduleId
         );
-        const second = stateValue.modules.find((module) =>
+        const second = modules.find((module) =>
           module.id === connection.second.moduleId
         );
         item.textContent = `${first?.label ?? connection.first.moduleId} ↔ ${
@@ -456,7 +491,7 @@ function reconcileConnections(): void {
 
 function renderManifest(): void {
   moduleMirror.replaceChildren(
-    ...stateValue.modules.map((module) => {
+    ...effectiveModules().map((module) => {
       const item = document.createElement("li");
       const button = document.createElement("button");
       const label = document.createElement("strong");
@@ -580,29 +615,43 @@ async function moveSelected(delta: Vector3Tuple): Promise<void> {
   const moduleId = selectedModuleId;
   if (!moduleId) return;
   const resolved = await resolveModule(moduleId);
-  const module = await resolved.pull();
+  await resolved.pull();
+  const module = selectedModule();
+  if (!module) throw new Error("That salvage module is no longer available.");
   const [x, y, z] = module.transform.position;
-  await resolved.key("transform").key("position").set([
-    roundHalf(x + delta[0]),
-    Math.max(0.6, roundHalf(y + delta[1])),
-    roundHalf(z + delta[2]),
-  ]);
+  await resolved.key("transform").set({
+    position: [
+      roundHalf(x + delta[0]),
+      Math.max(0.6, roundHalf(y + delta[1])),
+      roundHalf(z + delta[2]),
+    ],
+    rotationQuarterTurns: module.transform.rotationQuarterTurns,
+  });
+  await snapClaimsCell.key(moduleId).set(null);
 }
 
 async function rotateSelected(delta: number): Promise<void> {
   const moduleId = selectedModuleId;
   if (!moduleId) return;
   const resolved = await resolveModule(moduleId);
-  const module = await resolved.pull();
-  await resolved.key("transform").key("rotationQuarterTurns").set(
-    normalizeQuarterTurns(module.transform.rotationQuarterTurns + delta),
-  );
+  await resolved.pull();
+  const module = selectedModule();
+  if (!module) throw new Error("That salvage module is no longer available.");
+  await resolved.key("transform").set({
+    position: [...module.transform.position],
+    rotationQuarterTurns: normalizeQuarterTurns(
+      module.transform.rotationQuarterTurns + delta,
+    ),
+  });
+  await snapClaimsCell.key(moduleId).set(null);
 }
 
 async function snapSelected(): Promise<void> {
   const moduleId = selectedModuleId;
   if (!moduleId) return;
-  const modules = await modulesCell.pull();
+  await state.pull();
+  const latestState = state.get() ?? DEFAULT_STATE;
+  const modules = effectiveModules(latestState);
   const moving = modules.find((module) => module.id === moduleId);
   if (!moving) throw new Error("That salvage module is no longer available.");
   const index = modules.findIndex((module) => module.id === moduleId);
@@ -619,7 +668,17 @@ async function snapSelected(): Promise<void> {
   if (!result) {
     throw new Error("Move this module within 4.5 meters of a compatible lock.");
   }
-  await resolved.key("transform").set(result.transform);
+  const claim: ModuleSnapClaim = {
+    id: crypto.randomUUID(),
+    movingConnectorId: result.movingConnectorId,
+    targetModuleId: result.targetModuleId,
+    targetConnectorId: result.targetConnectorId,
+    transform: result.transform,
+  };
+  await snapClaimsCell.key(moduleId).set(claim);
+  await snapTargetsCell.key(
+    snapTargetKey(claim.targetModuleId, claim.targetConnectorId),
+  ).set(claim.id);
 }
 
 async function addModule(kind: ModuleKind): Promise<void> {
@@ -655,7 +714,7 @@ function beginDrag(moduleId: string, pointerId: number): void {
   ) {
     return;
   }
-  const module = stateValue.modules.find((candidate) =>
+  const module = effectiveModules().find((candidate) =>
     candidate.id === moduleId
   );
   if (!module) return;
@@ -667,6 +726,7 @@ function beginDrag(moduleId: string, pointerId: number): void {
     moduleId,
     pointerId,
     position: [...module.transform.position],
+    rotationQuarterTurns: module.transform.rotationQuarterTurns,
     resolved: resolveModule(moduleId),
     moved: false,
   };
@@ -693,23 +753,29 @@ function updateDrag(pointerId: number): void {
   } · release to commit once`;
 }
 
-function finishDrag(pointerId: number): void {
-  if (!ownsDrag(drag, pointerId)) return;
+function endDrag(pointerId: number, cancelled: boolean): void {
+  const disposition = dragDisposition(drag, pointerId, cancelled);
+  if (disposition === "ignore") return;
   const completed = drag;
+  if (!completed) return;
   drag = undefined;
   if (canvas.hasPointerCapture(completed.pointerId)) {
     canvas.releasePointerCapture(completed.pointerId);
   }
   canvas.style.cursor = "grab";
   camera.attachControl(canvas, true);
-  if (!completed.moved) {
+  if (disposition === "restore") {
     renderAuthoritativeState();
     void completed.resolved.catch(showError);
     return;
   }
   void runAction("drag position", async () => {
     const resolved = await completed.resolved;
-    await resolved.key("transform").key("position").set(completed.position);
+    await resolved.key("transform").set({
+      position: completed.position,
+      rotationQuarterTurns: completed.rotationQuarterTurns,
+    });
+    await snapClaimsCell.key(completed.moduleId).set(null);
   });
 }
 
@@ -725,7 +791,7 @@ const pointerObserver = scene.onPointerObservable.add((pointerInfo) => {
   } else if (pointerInfo.type === PointerEventTypes.POINTERMOVE) {
     updateDrag(event.pointerId);
   } else if (pointerInfo.type === PointerEventTypes.POINTERUP) {
-    finishDrag(event.pointerId);
+    endDrag(event.pointerId, false);
   }
 });
 
@@ -791,10 +857,10 @@ accentInput.addEventListener("change", () => {
 }, { signal });
 resetCameraButton.addEventListener("click", resetCamera, { signal });
 globalThis.addEventListener("pointerup", (event) => {
-  finishDrag(event.pointerId);
+  endDrag(event.pointerId, false);
 }, { signal });
 globalThis.addEventListener("pointercancel", (event) => {
-  finishDrag(event.pointerId);
+  endDrag(event.pointerId, true);
 }, { signal });
 globalThis.addEventListener("resize", () => engine.resize(), { signal });
 canvas.addEventListener("webglcontextlost", (event) => {

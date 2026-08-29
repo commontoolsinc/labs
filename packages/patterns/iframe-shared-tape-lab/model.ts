@@ -7,6 +7,50 @@ export interface CueSpec {
   text: string;
 }
 
+export type AnnotationEdits = Pick<
+  TapeAnnotation,
+  "startSeconds" | "endSeconds" | "label" | "note"
+>;
+
+type AnnotationEditKey = keyof AnnotationEdits;
+
+export interface WritableAnnotationFields {
+  key(key: AnnotationEditKey): {
+    set(value: AnnotationEdits[AnnotationEditKey]): Promise<void>;
+  };
+}
+
+const ANNOTATION_EDIT_KEYS: readonly AnnotationEditKey[] = [
+  "startSeconds",
+  "endSeconds",
+  "label",
+  "note",
+];
+
+/** Returns only fields changed from the version presented to the editor. */
+export function changedAnnotationEdits(
+  baseline: AnnotationEdits,
+  next: AnnotationEdits,
+): Partial<AnnotationEdits> {
+  return Object.fromEntries(
+    ANNOTATION_EDIT_KEYS.filter((key) => baseline[key] !== next[key]).map(
+      (key) => [key, next[key]],
+    ),
+  );
+}
+
+/** Writes edited fields at independent paths so unrelated changes compose. */
+export async function writeAnnotationEdits(
+  cell: WritableAnnotationFields,
+  edits: Partial<AnnotationEdits>,
+): Promise<void> {
+  await Promise.all(
+    ANNOTATION_EDIT_KEYS.flatMap((key) =>
+      Object.hasOwn(edits, key) ? [cell.key(key).set(edits[key]!)] : []
+    ),
+  );
+}
+
 export const WAV_SAMPLE_RATE = 12_000;
 export const MIN_DURATION_SECONDS = 1;
 export const MAX_DURATION_SECONDS = 120;

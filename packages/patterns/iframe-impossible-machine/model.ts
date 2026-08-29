@@ -5,6 +5,37 @@ import {
   type MachineNode,
 } from "./contract.ts";
 
+export interface MachineNodePresentation {
+  code: string;
+  position: { x: number; y: number };
+}
+
+function stableHash(value: string, initial: number): number {
+  let hash = initial;
+  for (const character of value) {
+    hash ^= character.codePointAt(0)!;
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return hash >>> 0;
+}
+
+/** Derives collision-resistant presentation from a node's stable identity. */
+export function machineNodePresentation(
+  id: string,
+): MachineNodePresentation {
+  const hexadecimal = id.replaceAll("-", "");
+  const code = /^[0-9a-f]{32}$/i.test(hexadecimal)
+    ? BigInt(`0x${hexadecimal}`).toString(36).toUpperCase()
+    : id;
+  return {
+    code,
+    position: {
+      x: 80 + stableHash(id, 0x811c_9dc5) / 0x1_0000_0000 * 820,
+      y: 60 + stableHash(id, 0x9e37_79b9) / 0x1_0000_0000 * 430,
+    },
+  };
+}
+
 function clampSignal(value: number): number {
   return Math.min(1, Math.max(0, value));
 }

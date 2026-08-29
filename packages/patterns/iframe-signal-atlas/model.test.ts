@@ -49,19 +49,19 @@ const observations: SignalObservation[] = [
 
 describe("model", () => {
   describe("capturedAction()", () => {
-    it("keeps the event-time value when a queued action runs later", async () => {
-      let controlValue = "pulse";
-      const received: string[] = [];
-      const action = capturedAction(controlValue, (value) => {
+    it("keeps every event-time draft value when a queued action runs later", async () => {
+      let controlValue = { label: "Alpha", band: "pulse", time: 14 };
+      const received: Array<typeof controlValue> = [];
+      const action = capturedAction({ ...controlValue }, (value) => {
         received.push(value);
         return Promise.resolve();
       });
 
-      controlValue = "echo";
+      controlValue = { label: "Beta", band: "echo", time: 29 };
       await action();
 
-      expect(controlValue).toBe("echo");
-      expect(received).toEqual(["pulse"]);
+      expect(controlValue.label).toBe("Beta");
+      expect(received).toEqual([{ label: "Alpha", band: "pulse", time: 14 }]);
     });
   });
 
@@ -75,7 +75,7 @@ describe("model", () => {
   });
 
   describe("visibleRoutes()", () => {
-    it("requires an arrived route, the selected band, and both visible endpoints", () => {
+    it("requires a departed route, the selected band, and both visible endpoints", () => {
       const routes: SignalRoute[] = [
         {
           id: "visible",

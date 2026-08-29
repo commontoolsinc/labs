@@ -4,11 +4,14 @@ import { describe, it } from "@std/testing/bdd";
 import type { ConfidenceAssessment, TapeAnnotation } from "./contract.ts";
 import {
   buildSyntheticWav,
+  changedAnnotationEdits,
   confidenceFor,
   cueSpecs,
   formatTime,
   normalizeDurationSeconds,
   WAV_SAMPLE_RATE,
+  type WritableAnnotationFields,
+  writeAnnotationEdits,
 } from "./model.ts";
 
 const annotation: TapeAnnotation = {
@@ -22,6 +25,48 @@ const annotation: TapeAnnotation = {
 };
 
 describe("model", () => {
+  describe("annotation edits", () => {
+    it("composes disjoint edits from the same stale editor snapshot", async () => {
+      const stored = {
+        startSeconds: annotation.startSeconds,
+        endSeconds: annotation.endSeconds,
+        label: annotation.label,
+        note: annotation.note,
+      };
+      const baseline = { ...stored };
+      const cell: WritableAnnotationFields = {
+        key(key) {
+          return {
+            set(value) {
+              Object.assign(stored, { [key]: value });
+              return Promise.resolve();
+            },
+          };
+        },
+      };
+
+      await Promise.all([
+        writeAnnotationEdits(
+          cell,
+          changedAnnotationEdits(baseline, {
+            ...baseline,
+            label: "Updated label",
+          }),
+        ),
+        writeAnnotationEdits(
+          cell,
+          changedAnnotationEdits(baseline, {
+            ...baseline,
+            note: "Updated note",
+          }),
+        ),
+      ]);
+
+      expect(stored.label).toBe("Updated label");
+      expect(stored.note).toBe("Updated note");
+    });
+  });
+
   describe("formatTime()", () => {
     it("returns a tenths-precision tape timecode", () => {
       expect(formatTime(65.26)).toBe("01:05.3");

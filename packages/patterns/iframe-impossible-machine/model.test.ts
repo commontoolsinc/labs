@@ -13,6 +13,7 @@ import {
   evaluateSignals,
   findFeedbackNodeIds,
   isActuatorFiring,
+  machineNodePresentation,
   presentSignal,
 } from "./model.ts";
 
@@ -41,6 +42,21 @@ function node(
 }
 
 describe("evaluateSignals()", () => {
+  it("derives distinct presentation from concurrent stable node IDs", () => {
+    const first = machineNodePresentation(
+      "123e4567-e89b-12d3-a456-426614174000",
+    );
+    const second = machineNodePresentation(
+      "123e4567-e89b-12d3-a456-426614174001",
+    );
+
+    expect(first).toEqual(machineNodePresentation(
+      "123e4567-e89b-12d3-a456-426614174000",
+    ));
+    expect(first.code).not.toBe(second.code);
+    expect(first.position).not.toEqual(second.position);
+  });
+
   it("returns a delayed sensor signal only after the configured tick", () => {
     const state: IframeStateData = {
       nodes: [

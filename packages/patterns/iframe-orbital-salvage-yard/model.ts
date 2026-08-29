@@ -1,9 +1,11 @@
 import {
   moduleConnectors,
   type ModuleKind,
+  type ModuleSnapClaim,
   type StationModule,
   type Vector3Tuple,
 } from "./contract.ts";
+import { findConnections } from "./geometry.ts";
 
 export interface WritableBookmarkMap {
   key(moduleId: string): {
@@ -13,7 +15,10 @@ export interface WritableBookmarkMap {
 
 export interface PointerDragOwner {
   pointerId: number;
+  moved?: boolean;
 }
+
+export type DragDisposition = "ignore" | "restore" | "commit";
 
 export function canBeginDrag(
   active: PointerDragOwner | undefined,
@@ -26,6 +31,29 @@ export function ownsDrag<T extends PointerDragOwner>(
   pointerId: number,
 ): active is T {
   return active?.pointerId === pointerId;
+}
+
+/** Decides whether a pointer ending restores or commits its owned preview. */
+export function dragDisposition(
+  active: PointerDragOwner | undefined,
+  pointerId: number,
+  cancelled: boolean,
+): DragDisposition {
+  if (!ownsDrag(active, pointerId)) return "ignore";
+  return cancelled || !active.moved ? "restore" : "commit";
+}
+
+/** Surfaces graphics bootstrap failures before preserving the thrown cause. */
+export function initializeGraphics<T>(
+  create: () => T,
+  onFailure: (cause: unknown) => void,
+): T {
+  try {
+    return create();
+  } catch (cause) {
+    onFailure(cause);
+    throw cause;
+  }
 }
 
 const KIND_LABEL: Record<ModuleKind, string> = {
@@ -82,6 +110,87 @@ export function setBookmark(
   value: boolean,
 ): Promise<void> {
   return bookmarks.key(moduleId).set(value);
+}
+
+/**
+ * Resolves concurrent snap intents through a connector-shaped conflict domain.
+ * A target lock has one deterministic winner, independent of array order.
+ */
+export function resolveSnapClaims(
+  modules: readonly StationModule[],
+  claims: Readonly<Record<string, ModuleSnapClaim | null>>,
+  targets: Readonly<Record<string, string | null>>,
+): StationModule[] {
+  const modulesById = new Map(modules.map((module) => [module.id, module]));
+  const validClaims = Object.entries(claims).flatMap(([moduleId, claim]) => {
+    const moving = modulesById.get(moduleId);
+    const target = claim && modulesById.get(claim.targetModuleId);
+    if (
+      !claim || !moving || !target || moving.id === target.id ||
+      !moving.connectors.some((connector) =>
+        connector.id === claim.movingConnectorId
+      ) ||
+      !target.connectors.some((connector) =>
+        connector.id === claim.targetConnectorId
+      ) ||
+      targets[snapTargetKey(claim.targetModuleId, claim.targetConnectorId)] !==
+        claim.id
+    ) return [];
+    return [{ moduleId, claim }];
+  });
+  const claimantIds = new Set(validClaims.map(({ moduleId }) => moduleId));
+  const occupied = new Set(
+    findConnections(modules.filter((module) => !claimantIds.has(module.id)))
+      .flatMap((connection) => [
+        connectorKey(connection.first.moduleId, connection.first.id),
+        connectorKey(connection.second.moduleId, connection.second.id),
+      ]),
+  );
+  const winners = new Map<string, ModuleSnapClaim>();
+  validClaims.sort((left, right) => {
+    const leftTarget = connectorKey(
+      left.claim.targetModuleId,
+      left.claim.targetConnectorId,
+    );
+    const rightTarget = connectorKey(
+      right.claim.targetModuleId,
+      right.claim.targetConnectorId,
+    );
+    return leftTarget.localeCompare(rightTarget) ||
+      left.moduleId.localeCompare(right.moduleId);
+  });
+  for (const { moduleId, claim } of validClaims) {
+    const targetKey = connectorKey(
+      claim.targetModuleId,
+      claim.targetConnectorId,
+    );
+    if (occupied.has(targetKey)) continue;
+    occupied.add(targetKey);
+    winners.set(moduleId, claim);
+  }
+  return modules.map((module) => {
+    const winner = winners.get(module.id);
+    if (!winner) return module;
+    return {
+      ...module,
+      transform: {
+        position: [...winner.transform.position],
+        rotationQuarterTurns: winner.transform.rotationQuarterTurns,
+      },
+    };
+  });
+}
+
+/** Returns the shared conflict-domain key for one target connector. */
+export function snapTargetKey(
+  moduleId: string,
+  connectorId: string,
+): string {
+  return `${moduleId}::${connectorId}`;
+}
+
+function connectorKey(moduleId: string, connectorId: string): string {
+  return `${moduleId}\u0000${connectorId}`;
 }
 
 function stableModuleCode(id: string): string {

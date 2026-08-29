@@ -172,6 +172,7 @@ let hypotheses: HypothesisRow[] = [];
 let localTransform: ZoomTransform = zoomIdentity;
 let actionQueue: Promise<void> = Promise.resolve();
 let databaseRefresh: Promise<void> = Promise.resolve();
+let timeDraft: number | undefined;
 
 const zoomBehavior = zoom<SVGSVGElement, unknown>()
   .scaleExtent([0.75, 5])
@@ -277,8 +278,9 @@ function render(): void {
     outputValue.selectedObservationId === null;
   timeInput.min = String(inputValue.timeStart);
   timeInput.max = String(inputValue.timeEnd);
-  timeInput.value = String(outputValue.timeCursor);
-  timeValue.textContent = `T+${outputValue.timeCursor}`;
+  const displayedTime = timeDraft ?? outputValue.timeCursor;
+  timeInput.value = String(displayedTime);
+  timeValue.textContent = `T+${displayedTime}`;
   bandSelect.value = outputValue.band;
   terrainToggle.checked = outputValue.layers.terrain;
   propagationToggle.checked = outputValue.layers.propagation;
@@ -528,6 +530,7 @@ async function addRoute(options: {
   fromObservationId: string;
   toObservationId: string;
   band: SignalBand;
+  departedAt: number;
 }): Promise<string> {
   const from = stateValue.observations.find((observation) =>
     observation.id === options.fromObservationId
@@ -542,7 +545,7 @@ async function addRoute(options: {
     id: `route-${crypto.randomUUID()}`,
     fromObservationId: from.id,
     toObservationId: to.id,
-    departedAt: outputValue.timeCursor,
+    departedAt: options.departedAt,
     duration: Math.max(
       6,
       Math.round(Math.hypot(to.x - from.x, to.y - from.y) / 2),
@@ -553,20 +556,21 @@ async function addRoute(options: {
   return route.id;
 }
 
-async function connectRecent(): Promise<string> {
+function recentRouteDraft(): Parameters<typeof addRoute>[0] {
   const recent = recentVisibleObservations(
     stateValue.observations,
-    outputValue.timeCursor,
+    timeDraft ?? outputValue.timeCursor,
     outputValue.band,
   );
   if (recent.length < 2) {
     throw new Error("At least two observations must be visible to connect.");
   }
-  return await addRoute({
+  return {
     fromObservationId: recent[0].id,
     toObservationId: recent[1].id,
     band: recent[1].band,
-  });
+    departedAt: timeDraft ?? outputValue.timeCursor,
+  };
 }
 
 async function selectObservation(id: string | null): Promise<void> {
@@ -600,12 +604,10 @@ async function setLayer(
   await outputWrite.key("layers").key(layer).set(enabled);
 }
 
-async function saveViewport(): Promise<void> {
-  await outputWrite.key("viewport").set({
-    x: localTransform.x,
-    y: localTransform.y,
-    scale: localTransform.k,
-  });
+async function saveViewport(
+  viewport: IframeOutputData["viewport"],
+): Promise<void> {
+  await outputWrite.key("viewport").set(viewport);
 }
 
 function restoreViewport(): void {
@@ -670,13 +672,23 @@ async function refreshPersonalAtlas(): Promise<void> {
 }
 
 timeInput.addEventListener("input", () => {
-  timeValue.textContent = `T+${timeInput.value}`;
+  timeDraft = Number(timeInput.value);
+  timeValue.textContent = `T+${timeDraft}`;
 });
 timeInput.addEventListener("change", () => {
-  void enqueueAction(capturedAction(Number(timeInput.value), setTimeCursor))
-    .catch(
-      showError,
-    );
+  const capturedTime = Number(timeInput.value);
+  timeDraft = capturedTime;
+  void enqueueAction(capturedAction(capturedTime, setTimeCursor)).then(
+    () => {
+      if (Object.is(timeDraft, capturedTime)) timeDraft = undefined;
+      render();
+    },
+    (cause) => {
+      if (Object.is(timeDraft, capturedTime)) timeDraft = undefined;
+      showError(cause);
+      render();
+    },
+  );
 });
 bandSelect.addEventListener("change", () => {
   void enqueueAction(capturedAction(
@@ -709,21 +721,35 @@ routesToggle.addEventListener("change", () => {
   );
 });
 addObservationButton.addEventListener("click", () => {
-  void enqueueAction(async () => {
-    await addObservation({
-      label: observationLabel.value,
-      band: observationBand.value as SignalBand,
-      strength: Number(observationStrength.value),
-      observedAt: outputValue.timeCursor,
-    });
-    observationLabel.value = "";
-  }).catch(showError);
+  const draft = {
+    label: observationLabel.value,
+    band: observationBand.value as SignalBand,
+    strength: Number(observationStrength.value),
+    observedAt: timeDraft ?? outputValue.timeCursor,
+  };
+  void enqueueAction(capturedAction(draft, async (captured) => {
+    await addObservation(captured);
+    if (observationLabel.value === captured.label) {
+      observationLabel.value = "";
+    }
+  })).catch(showError);
 });
 connectRecentButton.addEventListener("click", () => {
-  void enqueueAction(connectRecent).catch(showError);
+  try {
+    void enqueueAction(capturedAction(recentRouteDraft(), addRoute)).catch(
+      showError,
+    );
+  } catch (cause) {
+    showError(cause);
+  }
 });
 saveViewButton.addEventListener("click", () => {
-  void enqueueAction(saveViewport).catch(showError);
+  const viewport = {
+    x: localTransform.x,
+    y: localTransform.y,
+    scale: localTransform.k,
+  };
+  void enqueueAction(capturedAction(viewport, saveViewport)).catch(showError);
 });
 restoreViewButton.addEventListener("click", restoreViewport);
 addBookmarkButton.addEventListener("click", () => {
@@ -732,17 +758,24 @@ addBookmarkButton.addEventListener("click", () => {
     showError(new Error("Choose a visible observation first."));
     return;
   }
-  void enqueueAction(async () => {
-    await addBookmark(selectedId, bookmarkNote.value);
-    bookmarkNote.value = "";
-  }).catch(showError);
+  const draft = { observationId: selectedId, note: bookmarkNote.value };
+  void enqueueAction(capturedAction(draft, async (captured) => {
+    await addBookmark(captured.observationId, captured.note);
+    if (bookmarkNote.value === captured.note) bookmarkNote.value = "";
+  })).catch(showError);
 });
 addHypothesisButton.addEventListener("click", () => {
-  void enqueueAction(async () => {
-    await addHypothesis(hypothesisTitle.value, hypothesisNarrative.value);
-    hypothesisTitle.value = "";
-    hypothesisNarrative.value = "";
-  }).catch(showError);
+  const draft = {
+    title: hypothesisTitle.value,
+    narrative: hypothesisNarrative.value,
+  };
+  void enqueueAction(capturedAction(draft, async (captured) => {
+    await addHypothesis(captured.title, captured.narrative);
+    if (hypothesisTitle.value === captured.title) hypothesisTitle.value = "";
+    if (hypothesisNarrative.value === captured.narrative) {
+      hypothesisNarrative.value = "";
+    }
+  })).catch(showError);
 });
 
 const cancelInput = input.sink((value) => {

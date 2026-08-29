@@ -7,8 +7,11 @@ import {
   type SimulationAction,
 } from "./contract.ts";
 import {
+  actionDisposition,
   advanceFire,
+  describeTile,
   normalizedBoardDimensions,
+  normalizedMaximumTurns,
   reduceSimulation,
   type TileState,
 } from "./simulation.ts";
@@ -182,6 +185,42 @@ describe("simulation", () => {
       });
       expect(reduceSimulation({ ...input, columns: 100, rows: 2 }, []).tiles)
         .toHaveLength(48);
+      expect(normalizedMaximumTurns(100)).toBe(50);
+      expect(normalizedMaximumTurns(-4)).toBe(1);
+    });
+
+    it("describes watering only while its protection is current", () => {
+      const tile = reduceSimulation(input, []).tiles[0];
+      tile.wetUntilTurn = 2;
+
+      expect(describeTile(tile, 2)).toContain("recently watered");
+      expect(describeTile(tile, 3)).not.toContain("recently watered");
+    });
+
+    it("describes evacuated, lost, and remaining residents separately", () => {
+      const tile = reduceSimulation(input, []).tiles.find((candidate) =>
+        candidate.terrain === "settlement"
+      )!;
+      tile.evacuatedResidents = 2;
+      tile.lostResidents = tile.residents - 2;
+
+      expect(describeTile(tile, 1)).toContain("2 residents evacuated");
+      expect(describeTile(tile, 1)).toContain(
+        `${tile.lostResidents} residents lost`,
+      );
+      expect(describeTile(tile, 1)).toContain(
+        "no residents awaiting evacuation",
+      );
+    });
+
+    it("distinguishes rejected intents from accepted board actions", () => {
+      const result = reduceSimulation(input, []);
+      result.acceptedActionIds.push("accepted");
+      result.rejectedActionIds.push("rejected");
+
+      expect(actionDisposition(result, "accepted")).toBe("accepted");
+      expect(actionDisposition(result, "rejected")).toBe("rejected");
+      expect(actionDisposition(result, "unseen")).toBe("pending");
     });
 
     it("advances a turn once when several crews append advance intents", () => {

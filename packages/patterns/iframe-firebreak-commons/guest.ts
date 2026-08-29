@@ -14,9 +14,11 @@ import {
   type SimulationAction,
 } from "./contract.ts";
 import {
+  actionDisposition,
   canonicalActions,
   describeTile,
   normalizedBoardDimensions,
+  normalizedMaximumTurns,
   reduceSimulation,
   type SimulationSnapshot,
   type TileState,
@@ -44,6 +46,12 @@ const TERRAIN_VIEW_COLORS: Record<TileState["terrain"], number> = {
   grass: 0x83a960,
   forest: 0x3b7047,
   settlement: 0xc9ad7e,
+};
+const CREW_COLORS: Record<CrewColor, number> = {
+  amber: 0xffd071,
+  blue: 0x72b7ff,
+  mint: 0x72dfb1,
+  violet: 0xc79aff,
 };
 
 const fabric = connectFabric();
@@ -128,7 +136,9 @@ function actionLabel(action: SimulationAction): string {
     ? outputValue.crew.name
     : `Crew ${action.actorId.slice(-5)}`;
   if (action.type === "advance-turn") {
-    return `${actor} advanced turn ${action.turn}.`;
+    return actionDisposition(snapshot, action.id) === "rejected"
+      ? `Rejected · ${actor} tried to advance turn ${action.turn}.`
+      : `${actor} advanced turn ${action.turn}.`;
   }
   const tile = snapshot.tiles.find((candidate) =>
     candidate.id === action.tileId
@@ -136,12 +146,19 @@ function actionLabel(action: SimulationAction): string {
   const position = tile
     ? `column ${tile.x + 1}, row ${tile.y + 1}`
     : action.tileId;
-  const verb = action.type === "water"
+  const successVerb = action.type === "water"
     ? "sent water to"
     : action.type === "firebreak"
     ? "cut a firebreak at"
     : "evacuated";
-  return `${actor} ${verb} ${position}.`;
+  const attemptVerb = action.type === "water"
+    ? "send water to"
+    : action.type === "firebreak"
+    ? "cut a firebreak at"
+    : "evacuate";
+  return actionDisposition(snapshot, action.id) === "rejected"
+    ? `Rejected · ${actor} tried to ${attemptVerb} ${position}.`
+    : `${actor} ${successVerb} ${position}.`;
 }
 
 function tileSymbol(tile: TileState): string {
@@ -236,7 +253,9 @@ function renderPhaser(): void {
       .setFillStyle(projectionColor(tile), tile.burned ? 0.58 : 1)
       .setStrokeStyle(
         selectedTileId === tile.id ? 4 : 1,
-        selectedTileId === tile.id ? 0xffdf91 : 0x1a271d,
+        selectedTileId === tile.id
+          ? CREW_COLORS[outputValue.crew.color]
+          : 0x1a271d,
         1,
       );
     projection.fire
@@ -293,7 +312,7 @@ function syncMirror(): void {
       "aria-pressed",
       String(selectedTileId === tile.id),
     );
-    button.setAttribute("aria-label", describeTile(tile));
+    button.setAttribute("aria-label", describeTile(tile, snapshot.turn));
     button.textContent = `${tile.x + 1},${tile.y + 1} ${tileSymbol(tile)}`
       .trim();
     mirror.append(button);
@@ -313,12 +332,17 @@ function render(): void {
   app.dataset.ready = String(hydrated);
   app.dataset.turn = String(snapshot.turn);
   app.dataset.status = snapshot.status;
+  app.dataset.crewColor = outputValue.crew.color;
   syncStatus.textContent = !hydrated
     ? "Synchronizing commons"
     : pendingActions > 0
     ? pendingDescription
+    : errorText.textContent
+    ? "Action needs attention"
     : `Ready · ${outputValue.crew.name}`;
-  turnOutput.textContent = `${snapshot.turn} / ${inputValue.maximumTurns}`;
+  turnOutput.textContent = `${snapshot.turn} / ${
+    normalizedMaximumTurns(inputValue.maximumTurns)
+  }`;
   activeFireOutput.textContent = String(snapshot.activeFireCount);
   evacuatedOutput.textContent = String(snapshot.evacuatedResidentCount);
   lostOutput.textContent = String(snapshot.lostResidentCount);
@@ -352,7 +376,7 @@ function render(): void {
     tile.id === selectedTileId
   );
   selectedTileText.textContent = selectedTile
-    ? describeTile(selectedTile)
+    ? describeTile(selectedTile, snapshot.turn)
     : "Select a map tile.";
   const acceptedActionIds = new Set(snapshot.acceptedActionIds);
   const hasActed = stateValue.actions.some((action) =>
@@ -414,6 +438,18 @@ async function appendAction(action: SimulationAction): Promise<void> {
   await stateWrite.key("actions").push(action);
   await state.pull();
   stateValue = state.get() ?? DEFAULT_STATE;
+  const result = reduceSimulation(inputValue, stateValue.actions);
+  const disposition = actionDisposition(result, action.id);
+  if (disposition === "rejected") {
+    throw new Error(
+      action.type === "advance-turn"
+        ? "Another crew advanced this turn first. Review the shared board and try again."
+        : "That deployment is no longer valid on the shared board. Choose another action.",
+    );
+  }
+  if (disposition !== "accepted") {
+    throw new Error("The shared simulation has not accepted that action yet.");
+  }
 }
 
 function deployCrew(): void {
