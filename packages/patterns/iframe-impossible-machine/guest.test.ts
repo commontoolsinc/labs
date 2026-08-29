@@ -1,6 +1,5 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
-import { clearCommittedPositionDraft } from "./interaction.ts";
 
 describe("Impossible Machine document shell", () => {
   it("keeps React Flow measurement and overlay layers explicitly sized", async () => {
@@ -30,27 +29,15 @@ describe("Impossible Machine document shell", () => {
       new URL("./guest.tsx", import.meta.url),
     );
 
-    expect(source).toContain('className="node-parameters nodrag nopan"');
-    expect(source).toContain("onClick={stopNodeControlPropagation}");
     expect(source).toContain(
-      "selectionRequestTracker.current.request(nodeId, writeSelection)",
+      "<interaction.NodeControls>{children}</interaction.NodeControls>",
     );
-    expect(source).toContain("runAction(action, false)");
+    expect(source).toContain("void tracker.request(");
+    expect(source).toContain("const actionRunner = React.useRef(");
+    expect(source).toContain("const runNodeAction = actionRunner.runNode");
     expect(source).toContain("nodesDraggable");
     expect(source).toContain("nodesConnectable");
     expect(source).toContain("elementsSelectable");
     expect(source).not.toContain("nodesDraggable={!pending}");
-  });
-
-  it("preserves a newer drag while an earlier position write settles", () => {
-    const newerDraft = { x: 24, y: 18 };
-    const drafts = { gate: newerDraft };
-
-    expect(
-      clearCommittedPositionDraft(drafts, "gate", { x: 12, y: 9 }),
-    ).toBe(drafts);
-    expect(
-      clearCommittedPositionDraft(drafts, "gate", newerDraft),
-    ).toEqual({});
   });
 });

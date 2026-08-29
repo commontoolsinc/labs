@@ -44,11 +44,7 @@ import {
   presentSignal,
   type SignalPresentation,
 } from "./model.ts";
-import {
-  clearCommittedPositionDraft,
-  createSelectionRequestTracker,
-  stopNodeControlPropagation,
-} from "./interaction.ts";
+import * as interaction from "./interaction.ts";
 
 const fabric = connectFabric();
 const { useCell } = createFabricReact(React, fabric);
@@ -116,10 +112,6 @@ function defaultParameters(kind: MachineNodeKind): MachineParameters {
     offset: 0,
     threshold: 0.6,
   };
-}
-
-function errorFrom(cause: unknown): Error {
-  return cause instanceof Error ? cause : new Error(String(cause));
 }
 
 function NumberParameter({
@@ -223,12 +215,7 @@ function NodeFrame({
           {data.signal.label}
         </output>
       </header>
-      <div
-        className="node-parameters nodrag nopan"
-        onClick={stopNodeControlPropagation}
-      >
-        {children}
-      </div>
+      <interaction.NodeControls>{children}</interaction.NodeControls>
       {hasOutput && (
         <Handle
           id="output"
@@ -397,10 +384,14 @@ function App() {
   const draftPositionsRef = React.useRef<Record<string, MachinePosition>>({});
   const [connectSource, setConnectSource] = React.useState("");
   const [connectTarget, setConnectTarget] = React.useState("");
-  const actionTail = React.useRef(Promise.resolve());
   const bootstrapStarted = React.useRef(false);
+  const actionRunner = React.useRef(interaction.createActionRunner({
+    setGlobalPending: setPending,
+    setActionError,
+    setBusyNodeCounts,
+  })).current;
   const selectionRequestTracker = React.useRef(
-    createSelectionRequestTracker(null),
+    interaction.createSelectionRequestTracker(null),
   );
 
   React.useEffect(() => {
@@ -431,7 +422,7 @@ function App() {
         ]);
         if (active) setMaterialized(true);
       } catch (cause) {
-        if (active) setInitializationError(errorFrom(cause));
+        if (active) setInitializationError(interaction.errorFrom(cause));
       }
     })();
     return () => {
@@ -439,43 +430,8 @@ function App() {
     };
   }, [input.refresh, output.refresh, state.refresh]);
 
-  const runAction = React.useCallback((
-    action: () => Promise<void>,
-    trackGlobalPending = true,
-  ) => {
-    const next = actionTail.current.then(async () => {
-      if (trackGlobalPending) setPending(true);
-      setActionError(undefined);
-      try {
-        await action();
-      } catch (cause) {
-        setActionError(errorFrom(cause));
-      } finally {
-        if (trackGlobalPending) setPending(false);
-      }
-    });
-    actionTail.current = next;
-    return next;
-  }, []);
-
-  const runNodeAction = React.useCallback(
-    (nodeId: string, action: () => Promise<void>) => {
-      setBusyNodeCounts((current) => ({
-        ...current,
-        [nodeId]: (current[nodeId] ?? 0) + 1,
-      }));
-      return runAction(action, false).finally(() => {
-        setBusyNodeCounts((current) => {
-          const count = current[nodeId] ?? 0;
-          const next = { ...current };
-          if (count > 1) next[nodeId] = count - 1;
-          else delete next[nodeId];
-          return next;
-        });
-      });
-    },
-    [runAction],
-  );
+  const runAction = actionRunner.run;
+  const runNodeAction = actionRunner.runNode;
 
   const resolveNode = React.useCallback(async (nodeId: string) => {
     const nodesCell = stateCell.key("nodes");
@@ -510,13 +466,11 @@ function App() {
         const node = await resolveNode(nodeId);
         await node.key("position").set(position);
         await state.refresh();
-        draftPositionsRef.current = clearCommittedPositionDraft(
-          draftPositionsRef.current,
+        interaction.settleCommittedPositionDraft(
+          draftPositionsRef,
+          setDraftPositions,
           nodeId,
           position,
-        );
-        setDraftPositions((current) =>
-          clearCommittedPositionDraft(current, nodeId, position)
         );
       }),
     [resolveNode, runAction, state.refresh],
@@ -606,19 +560,9 @@ function App() {
   const inputValue = input.status === "ready" ? input.value : undefined;
   const stateValue = state.status === "ready" ? state.value : undefined;
   const outputValue = output.status === "ready" ? output.value : undefined;
-  const writeSelection = React.useCallback(
-    (nodeId: string) => updatePreference("selectedNodeId", nodeId),
-    [updatePreference],
-  );
-  const authoritativeSelection = outputValue?.selectedNodeId ?? null;
-  React.useEffect(() => {
-    selectionRequestTracker.current.reconcile(authoritativeSelection);
-  }, [authoritativeSelection]);
-  const requestNodeSelection = React.useCallback(
-    (nodeId: string) =>
-      selectionRequestTracker.current.request(nodeId, writeSelection),
-    [writeSelection],
-  );
+  const tracker = selectionRequestTracker.current;
+  const selectedId = outputValue?.selectedNodeId ?? null;
+  React.useEffect(() => tracker.reconcile(selectedId), [selectedId, tracker]);
   const ready = materialized && inputValue !== undefined &&
     stateValue !== undefined && outputValue !== undefined;
 
@@ -833,7 +777,11 @@ function App() {
               edges={flowEdges}
               nodeTypes={NODE_TYPES}
               onNodesChange={handleNodeChanges}
-              onNodeClick={(_event, node) => void requestNodeSelection(node.id)}
+              onNodeClick={(_event, node) =>
+                void tracker.request(
+                  node.id,
+                  (nodeId) => updatePreference("selectedNodeId", nodeId),
+                )}
               onNodeDragStop={(_event, node) =>
                 void persistPosition(
                   node.id,
