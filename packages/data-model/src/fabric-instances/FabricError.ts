@@ -515,9 +515,19 @@ export class FabricError extends FabricNativeWrapper<Error>
     // used to rebuild the error on the way back, so reading it off the value
     // would let a value choose the class it comes back as. A severed prototype
     // names no class, and `Error` is what such a value still is.
-    const ctor = constructorOfObject(error) as { name?: unknown } | undefined;
-    const type = (typeof ctor?.name === "string") && (ctor.name !== "")
-      ? ctor.name
+    let className: unknown;
+    try {
+      className = (constructorOfObject(error) as { name?: unknown } | undefined)
+        ?.name;
+    } catch {
+      // A `constructor` accessor on the prototype that throws. Reading it is
+      // this conversion's business and failing it is not: the value is an
+      // error, and the conversion owes a result rather than the accessor's
+      // exception.
+      className = undefined;
+    }
+    const type = (typeof className === "string") && (className !== "")
+      ? className
       : "Error";
     const name = error.name === type ? null : error.name;
     const extras: Array<[string, FabricValue]> = [];

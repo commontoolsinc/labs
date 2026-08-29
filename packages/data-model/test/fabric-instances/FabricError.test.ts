@@ -94,6 +94,19 @@ describe("FabricError", () => {
       expect(FabricError.fromNativeError(new Sneaky("x")).type).toBe("Error");
     });
 
+    it("ignores a prototype whose `constructor` accessor throws", () => {
+      // Reading the class is this conversion's business; failing to read it is
+      // not the caller's problem, and the accessor's error must not arrive in
+      // place of a converted value.
+      class Hostile extends Error {}
+      Object.defineProperty(Hostile.prototype, "constructor", {
+        get() {
+          throw new Error("this must not reach the caller");
+        },
+      });
+      expect(FabricError.fromNativeError(new Hostile("x")).type).toBe("Error");
+    });
+
     it("names a severed-prototype error `Error`", () => {
       // Such a value names no class at all. It is still an error --
       // `Error.isError()` sees it, and the dispatch tags it so -- and the
