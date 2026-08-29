@@ -15,6 +15,7 @@ import {
   type PieceSelector,
   type PlanDiff,
   type RepairReport,
+  type RepairRow,
   type RestorableRevision,
 } from "@commonfabric/piece/ops";
 import ports from "@commonfabric/ports" with { type: "json" };
@@ -3743,16 +3744,16 @@ export async function repairFromCommand(
     fixerName: options.fixer,
     ...(options.plan === undefined ? {} : { planPath: absPath(options.plan) }),
     ...(options.apply === true ? { apply: true } : {}),
+    onRow: (row: RepairRow) => countApplyRow(progress, row),
   };
   // The repair runs one session rather than the retarget's grouped ones, but
   // it ends the same way: an await that stops settling drains the process at
   // code 0 with the fixer's writes half-made and nothing said about them.
   //
-  // Unwatched, because `repairPieces` reports its rows only in the report it
-  // returns — there is no row callback to hand it. So the guard says the
-  // count is unknown rather than zero: this run's rows really do settle, and
-  // a process that never saw them must not report their absence.
-  const progress = newApplyRunProgress(false);
+  // Watched, through the row reporter `repairPieces` offers: a run that stops
+  // settling can then be described by the rows that did, rather than by an
+  // admission that this process cannot see any.
+  const progress = newApplyRunProgress(true);
   const guard = guardRunReport(
     () => describeUnreportedApplyRun("Repair", progress),
     deps.guard ?? {},
@@ -4035,7 +4036,10 @@ function newApplyRunProgress(observed: boolean): ApplyRunProgress {
 }
 
 /** Count one settled row toward what a process-end report would say. */
-function countApplyRow(progress: ApplyRunProgress, row: ApplyRow): void {
+function countApplyRow(
+  progress: ApplyRunProgress,
+  row: { verdict: string },
+): void {
   progress.verdicts.set(
     row.verdict,
     (progress.verdicts.get(row.verdict) ?? 0) + 1,

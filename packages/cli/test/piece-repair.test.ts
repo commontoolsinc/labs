@@ -263,21 +263,20 @@ describe("piece-repair", () => {
       expect(process.errors.join("\n")).toContain(
         "Repair ended before it reported",
       );
-      // `repairPieces` takes no row callback, so its rows settle where this
-      // process cannot see them. The line must say the count is unknown: a
-      // repair that wrote half its documents and reported "no row settled"
-      // would be telling the operator something false.
+      // `repairPieces` reports each row as it settles, so this process is
+      // watching and a count of zero is a fact about the run rather than a
+      // blind spot. This run settles none before it is abandoned, and the
+      // line says so — the wording an unwatched run must never use.
       expect(process.errors.join("\n")).toContain(
-        "How many rows it settled is not known here",
+        "No row settled before it ended",
       );
-      expect(process.errors.join("\n")).not.toContain("No row settled");
+      expect(process.errors.join("\n")).not.toContain("is not known here");
       expect(abandoned).toBeInstanceOf(Promise);
     });
 
     it("says the report failed, not that the run never returned, when output throws", async () => {
-      // The repair counts no rows either way, so what its line must get right
-      // here is the other half: the engine DID return, and the reason its
-      // count is unknown is the missing row callback rather than the return.
+      // What this line must get right is that the engine DID return: the
+      // failure is the report's, not a run that never came back.
       const process = guardHarness();
       await expect(
         repairFromCommand(
@@ -297,9 +296,27 @@ describe("piece-repair", () => {
       expect(said).toContain("Repair ran to a report");
       expect(said).not.toContain("still in flight");
       expect(said).not.toContain("it did not return");
-      expect(said).toContain(
-        "this run counts its rows only in the report itself",
+      expect(said).not.toContain("this run counts its rows only in the report");
+    });
+
+    it("hands the engine a row reporter, which is what the guard counts", async () => {
+      // The guard can only name where an abandoned run reached if something
+      // told it which rows settled. Without this the command would be back to
+      // saying the count is unknown, which is the weaker of the two lines it
+      // can print and the one this wiring exists to stop.
+      let request: RepairRunRequest | undefined;
+      const process = guardHarness();
+      await captureStdout(() =>
+        repairFromCommand({ ...OPTIONS, path: "topics" }, {
+          runRepair: (_config, req) => {
+            request = req;
+            return Promise.resolve(REPORT);
+          },
+          printHint: () => {},
+          guard: process.deps,
+        })
       );
+      expect(typeof request?.onRow).toBe("function");
     });
 
     it("says nothing at process end once the run has reported", async () => {
