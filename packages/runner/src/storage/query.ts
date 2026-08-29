@@ -12,8 +12,8 @@ import {
  * The keys for the store map are of the form: `${address.id}/application/json`
  */
 export class StoreObjectManager implements ObjectStorageManager {
-  #readValues = new Map<string, IAttestation>();
   #store: Map<string, Revision<State>>;
+  #readValues = new Map<string, IAttestation>();
   // Cache our read labels, and any docs we can't read
   public missingDocs = new Map<string, BaseMemoryAddress>();
 
