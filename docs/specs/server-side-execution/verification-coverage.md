@@ -5317,8 +5317,10 @@ supply; OW29/OW32/OW34 closed):
   map (the lunch ROOT-CAUSE, PROBE-2/3/4 blocks at the end of
   this row); the geometry-3 close then fixed that third geometry and its
   lift attempt was withdrawn by probe 5 (geometry 3b). The
-  FLIP's bar remains a green ON lane and every list empty; this entry is
-  again what holds the list (the co-resident `:133` debt the
+  FLIP's bar remains a green ON lane and every list empty; under that
+  superseded census this entry was again what held the list, and under
+  the current one NOTHING does — the ruled-3b-close lift emptied it
+  (the co-resident `:133` debt the
   probe surfaced was paid by #6477 — the OBSERVATION's FIXED paragraph
   below). Rows, one per
   mechanism cluster; each row's trigger names the skip entry it
@@ -7729,9 +7731,15 @@ supply; OW29/OW32/OW34 closed):
     that file, and the whole-registry loop asserted it was the only entry
     anywhere — so any OTHER entry or a silent lift reddened a pin. [That
     binding was superseded by the GEOMETRY-3 LIFT-ATTEMPT below, and
-    PROBE 5's red re-superseded it: the suite is rebound to the
+    PROBE 5's red re-superseded it: the suite was rebound to the
     single-entry registry again, with acyclic alias chains for each
-    rename.] The
+    rename.] [And superseded a THIRD time by the RULED-CLOSE LIFT
+    below: the registry is EMPTY, so the suite is now rebound to the
+    empty state — every suite's list asserted empty, the report
+    carrying no SKIP or SKIP-STEP line, the shard filter dropping
+    nothing, and the whole-registry loop asserting NO entry anywhere,
+    so any new entry or a silent re-restore reddens a pin (17/17, two
+    further alias bridges for the renames).] The
     flip's bar remains a green ON lane AND every list empty (the
     co-resident `:133` blocker in the
     OBSERVATION below is PAID by #6477, its FIXED paragraph there).
@@ -7889,13 +7897,26 @@ supply; OW29/OW32/OW34 closed):
     which the observed lunch class always eventually has; the
     PRIOR-SESSION third-space closure (durable docs from an earlier
     session are readable but unrecorded — same reduction); and the
-    recursive-(b) sliver: a record landing inside a RE-ISSUE's own read
-    window with no later record ever stays parked (failed re-issues
-    deliberately skip the registration-time check — the spin guard —
-    and wait for the next record; two independent suppliers of one
-    identity with the second completing inside the re-issue's window
-    and none after is the residue's shape — vanishingly narrow, loud at
-    every step, and strictly smaller than the pre-ruling residue).
+    SPIN-GUARD residue — every way a RE-ISSUE can re-park onto supply
+    that is already durable, because its re-park deliberately skips the
+    registration-time check (the spin guard: the failed attempt's read
+    just consulted that very map, so an immediate retry could only spin
+    on state it already read) and no later record of the identity ever
+    fires. Two constructors reach it, and the record must name both
+    (review-6528 F7 — the first was recorded alone and under-described
+    its own class): (i) the recursive-(b) sliver — a record landing
+    inside the RE-ISSUE's own read window, i.e. two independent
+    suppliers of one identity with the second completing inside that
+    window and none after; and (ii) a re-issue woken by a REAL,
+    STANDING record that then fails on a TRANSIENT store error — no
+    new record is needed at all, and the park sleeps on supply already
+    durable. Both are vanishingly narrow, loud at every step (a
+    failure, a re-issue, and a re-park line each), and strictly smaller
+    than the pre-ruling residue — in both, pre-ruling the same child
+    was one-shot dead, so a park that sleeps is a strict improvement,
+    never a regression. The alternative — re-checking the map on
+    re-park — is exactly the immediate-retry spin the guard exists to
+    prevent, so the code is right and the RECORD is what was owed.
     Where truly nothing ever records, the loud one-shot behavior stands
     — the correct floor under the wedge-loudly ruling.
     **RULED-CLOSE LIFT (2026-08-28, this PR — the THIRD lift; the
@@ -7951,7 +7972,21 @@ supply; OW29/OW32/OW34 closed):
     the base `a3eae3e97`; a second observation (shard relaunch on the
     same run id) was in flight when this block landed — its verdict
     belongs to the merge gate's ordinary every-lane-read bar, not to
-    the probe, whose ruled reading is the SURFACE. Per the arc's
+    the probe, whose ruled reading is the SURFACE. **Read the run
+    HEADER with this decomposition, not on its own:** the run's overall
+    conclusion is `cancelled`, because the relaunched Test (3/8) was
+    still running when this very record's push created the next board
+    at 00:23:34 and GitHub's concurrency rule cancelled it (00:23:59),
+    taking the jobs gated behind it with it — the relaunch never
+    concluded, so the second observation fell to the `bdaabf8ee` board,
+    where Test (3/8) is GREEN. The decomposition is clean either way:
+    on attempt 1 the only non-success jobs were Test (3/8), the Status
+    aggregate, and the four jobs Status gates (skipped); on attempt 2
+    all ten `Pattern Integration Tests / server-execution ON (n/10)`
+    shards were SUCCESS again. So a future
+    forensics pass that reads only the header's `cancelled` is reading
+    a push-cancelled relaunch, not a probe verdict — the same honesty
+    class as #6502's F3. Per the arc's
     method note: this record lands as a docs-only commit AFTER the
     probe board settled — the probe's coordinates are immutable above;
     the commit's own board is the ordinary merge gate, not a probe.

@@ -125,6 +125,50 @@ const PROGRAM_WITH_LIB: RuntimeProgram = {
   ],
 };
 
+// The park registry's FIFO cap — MAX_PARKED_FAILED_REPLICATIONS in
+// pattern-manager.ts, counted in distinct WANTED identities. Hard-coded on
+// purpose: moving the cap has to be a deliberate change that re-reads the
+// eviction pin below, not a silent one.
+const PARK_CAP = 64;
+const EVICTION_LIB_COUNT = PARK_CAP + 1;
+const EVICTION_LIB_INDICES = Array.from(
+  { length: EVICTION_LIB_COUNT },
+  (_unused, index) => index,
+);
+
+// One program whose main imports EVICTION_LIB_COUNT standalone lib modules.
+// A single compile mints that many distinct content identities, each its own
+// closure root (the libs import nothing but the fabric), so the eviction pin
+// can park one replication per WANTED identity without paying for a compile
+// each time. Every lib is REFERENCED in main's result so none is shaken out.
+const EVICTION_PROGRAM: RuntimeProgram = {
+  main: "/main.tsx",
+  files: [
+    {
+      name: "/main.tsx",
+      contents: [
+        "import { pattern } from 'commonfabric';",
+        ...EVICTION_LIB_INDICES.map((index) =>
+          `import { lib${index} } from './lib${index}.tsx';`
+        ),
+        "export default pattern(() => ({",
+        "  label: 'eviction importer',",
+        ...EVICTION_LIB_INDICES.map((index) => `  lib${index},`),
+        "}));",
+      ].join("\n"),
+    },
+    ...EVICTION_LIB_INDICES.map((index) => ({
+      name: `/lib${index}.tsx`,
+      contents: [
+        "import { pattern } from 'commonfabric';",
+        `export const lib${index} = pattern(() => ({`,
+        `  label: 'eviction lib ${index}',`,
+        "}));",
+      ].join("\n"),
+    })),
+  ],
+};
+
 describe("closure replication: the in-flight sibling supplier race", () => {
   let server: MemoryV2Server.Server;
   let storageManager: EmulatedStorageManager;
@@ -1391,6 +1435,378 @@ describe("closure replication: the in-flight sibling supplier race", () => {
         expect(healed[0].line).toContain(`entry=${importerEntry.identity}`);
       } finally {
         delete editSpy.edit;
+        await rt2.dispose();
+      }
+    },
+  );
+
+  it(
+    "a record into a park's OWN toSpace does NOT wake it — the self-heal " +
+      "guard: a replication records only into its target, and the target " +
+      "is the one space a re-issue's read structurally skips (the fallback " +
+      "loop skips toSpace), so waking on it could only ever buy a doomed " +
+      "loud re-issue. And the skip is a SKIP, not a consume: a record into " +
+      "a THIRD space still wakes and heals the same park",
+    async () => {
+      const pattern = await runtime.patternManager.compileOrGetPattern(
+        PROGRAM,
+        spaceA,
+      );
+      const entry = runtime.patternManager.getArtifactEntryRef(pattern);
+      if (entry === undefined) throw new Error("compile produced no entry ref");
+      await runtime.patternManager.flushCompileCacheWrites();
+      await storageManager.synced();
+
+      const rt2 = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+        experimental: { serverExecution: true },
+      });
+      try {
+        // PHASE 1 — the park: a child replication from the forever-dry
+        // origin D into C, on a manager whose fallback map is empty.
+        const phase1 = await captureManagerLines(async () => {
+          rt2.patternManager.replicatePatternToSpace(pattern, spaceC, spaceD);
+          await rt2.patternManager.flushCompileCacheWrites();
+        });
+        const parked = phase1.filter((line) =>
+          line.key === "closure-replication-parked"
+        );
+        expect(parked.length).toBe(1);
+        expect(parked[0].line).toContain(`to=${spaceC}`);
+
+        // PHASE 2 — a SECOND replication lands the same closure in the
+        // park's OWN toSpace C, from the wet origin A. Its persist records
+        // the parked WANTED identity into C — the exact shape a park's own
+        // successful heal produces, and the one space
+        // `readOriginWithFallbacks` can never read from (it skips both
+        // `fromSpace` and `toSpace`). The wake must skip this record.
+        const phase2 = await captureManagerLines(async () => {
+          rt2.patternManager.replicatePatternToSpace(pattern, spaceC, spaceA);
+          await rt2.patternManager.flushCompileCacheWrites();
+          await rt2.patternManager.flushCompileCacheWrites();
+          await storageManager.synced();
+        });
+        expect(
+          phase2.filter((line) => line.key === "closure-replication-reissued")
+            .length,
+        ).toBe(0);
+        expect(
+          phase2.filter((line) => line.key === "closure-replication-healed")
+            .length,
+        ).toBe(0);
+        expect(
+          phase2.filter((line) => line.key === "closure-replication-failed")
+            .length,
+        ).toBe(0);
+        // …and the quiet is not vacuous: that second replication really
+        // landed its closure in C, so the persist — and therefore the
+        // record the wake had to skip — really happened.
+        const landedInC = await readableClosure(rt2, spaceC, entry.identity);
+        expect(landedInC.source).toContain(entry.identity);
+
+        // PHASE 3 — the park SURVIVED that skipped record (the guard
+        // `continue`s before the delete): a record into a THIRD space is
+        // usable supply, and it wakes and heals exactly this park.
+        const phase3 = await captureManagerLines(async () => {
+          await rt2.patternManager.compileOrGetPattern(PROGRAM, spaceG);
+          await rt2.patternManager.flushCompileCacheWrites();
+          await rt2.patternManager.flushCompileCacheWrites();
+          await storageManager.synced();
+        });
+        const reissued = phase3.filter((line) =>
+          line.key === "closure-replication-reissued"
+        );
+        expect(reissued.length).toBe(1);
+        expect(reissued[0].line).toContain(`wanted=${entry.identity}`);
+        expect(reissued[0].line).toContain(`trigger=persist-record:${spaceG}`);
+        expect(
+          phase3.filter((line) => line.key === "closure-replication-healed")
+            .length,
+        ).toBe(1);
+        // The heal read G, not C: the fallback loop skipped the target it
+        // was about to write (the same filter, one layer down).
+        const fallbacks = phase3.filter((line) =>
+          line.key === "closure-replication-fallback-origin"
+        );
+        expect(fallbacks.length).toBe(1);
+        expect(fallbacks[0].line).toContain(`fallback=${spaceG}`);
+        expect(fallbacks[0].line).toContain(`to=${spaceC}`);
+      } finally {
+        await rt2.dispose();
+      }
+    },
+  );
+
+  it(
+    "the park registry is FIFO-capped: the 65th distinct WANTED identity " +
+      "evicts the OLDEST loudly, and the evicted child drops back to the " +
+      "pre-ruling loud one-shot wedge — a later record of ITS identity " +
+      "wakes nothing, while a SURVIVING park's record still heals (so the " +
+      "silence is the eviction, not a broken wake)",
+    async () => {
+      const importer = await runtime.patternManager.compileOrGetPattern(
+        EVICTION_PROGRAM,
+        spaceA,
+      );
+      const importerEntry = runtime.patternManager.getArtifactEntryRef(
+        importer,
+      );
+      if (importerEntry === undefined) throw new Error("no importer entry");
+      await runtime.patternManager.flushCompileCacheWrites();
+      await storageManager.synced();
+
+      // Each lib module's own content identity, indexed by its DECLARED
+      // number — so the park order below is the loop's order and the FIFO
+      // victim is a fact rather than whatever the closure map iterates.
+      const libIdentities: string[] = new Array(EVICTION_LIB_COUNT);
+      {
+        const readTx = runtime.edit();
+        try {
+          const closure = await loadVerifiedSourceClosure(
+            runtime,
+            spaceA,
+            importerEntry.identity,
+            readTx,
+          );
+          for (const [identity, doc] of closure ?? []) {
+            const match = /^\/lib(\d+)\.tsx$/.exec(doc.filename ?? "");
+            if (match !== null) libIdentities[Number(match[1])] = identity;
+          }
+        } finally {
+          readTx.abort?.("park eviction lib identity lookup");
+        }
+      }
+      expect(new Set(libIdentities).size).toBe(EVICTION_LIB_COUNT);
+
+      // The pattern objects come from the COMPILING manager's in-memory
+      // artifact index — no storage read, no persist, the same index-served
+      // shape the lunch geometry hands the replication. rt2, the manager
+      // under test, therefore still has an empty fallback map, so every
+      // replication below is a genuine supply failure and parks.
+      const libPatterns: unknown[] = [];
+      for (const index of EVICTION_LIB_INDICES) {
+        const loaded = await runtime.patternManager.loadPatternByIdentity(
+          libIdentities[index],
+          `lib${index}`,
+          spaceA,
+        );
+        if (loaded === undefined) throw new Error(`no pattern for lib${index}`);
+        libPatterns.push(loaded);
+      }
+
+      const rt2 = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+        experimental: { serverExecution: true },
+      });
+      try {
+        const lines = await captureManagerLines(async () => {
+          // One park per identity, issued ONE AT A TIME: the registry's
+          // insertion order is the failure-REGISTRATION order, so
+          // serializing here is what makes "the oldest" deterministic.
+          for (const libPattern of libPatterns) {
+            rt2.patternManager.replicatePatternToSpace(
+              libPattern as never,
+              spaceC,
+              spaceD,
+            );
+            await rt2.patternManager.flushCompileCacheWrites();
+          }
+        });
+
+        expect(
+          lines.filter((line) => line.key === "closure-replication-parked")
+            .length,
+        ).toBe(EVICTION_LIB_COUNT);
+        // THE PIN: exactly one eviction, loud, naming the cap — and its
+        // victim is the OLDEST insertion. Evicting the NEWEST would make
+        // the cap a no-op for the very caller that hit it (the park just
+        // registered would be the one thrown away).
+        const evicted = lines.filter((line) =>
+          line.key === "closure-replication-park-evicted"
+        );
+        expect(evicted.length).toBe(1);
+        expect(evicted[0].line).toContain(`wanted=${libIdentities[0]}`);
+        expect(evicted[0].line).toContain(`cap=${PARK_CAP}`);
+        expect(evicted[0].line).not.toContain(
+          libIdentities[EVICTION_LIB_COUNT - 1],
+        );
+
+        // THE FATE PIN — both halves driven by REAL supply records.
+        const fate = await captureManagerLines(async () => {
+          // (a) the EVICTED identity's supplier records (into G): nothing
+          // wakes, because its park is gone. That is the documented cost of
+          // an eviction — the child sits where the pre-ruling one-shot left
+          // it, its loud failure line already logged.
+          rt2.patternManager.replicatePatternToSpace(
+            libPatterns[0] as never,
+            spaceG,
+            spaceA,
+          );
+          await rt2.patternManager.flushCompileCacheWrites();
+          await rt2.patternManager.flushCompileCacheWrites();
+          // (b) a SURVIVING park's identity records (into H): that one still
+          // wakes and heals.
+          rt2.patternManager.replicatePatternToSpace(
+            libPatterns[1] as never,
+            spaceH,
+            spaceA,
+          );
+          await rt2.patternManager.flushCompileCacheWrites();
+          await rt2.patternManager.flushCompileCacheWrites();
+          await storageManager.synced();
+        });
+
+        // Neither half is vacuously quiet: both supply replications
+        // succeeded, so both really recorded their identity — half (a)'s
+        // silence is the eviction and nothing else.
+        expect(
+          fate.filter((line) => line.key === "closure-replication-failed")
+            .length,
+        ).toBe(0);
+        const victimSupply = await readableClosure(
+          rt2,
+          spaceG,
+          libIdentities[0],
+        );
+        expect(victimSupply.source).toContain(libIdentities[0]);
+
+        const reissued = fate.filter((line) =>
+          line.key === "closure-replication-reissued"
+        );
+        expect(reissued.length).toBe(1);
+        expect(reissued[0].line).toContain(`wanted=${libIdentities[1]}`);
+        expect(reissued[0].line).toContain(`trigger=persist-record:${spaceH}`);
+        const healed = fate.filter((line) =>
+          line.key === "closure-replication-healed"
+        );
+        expect(healed.length).toBe(1);
+        expect(healed[0].line).toContain(`wanted=${libIdentities[1]}`);
+
+        // The same asymmetry read off the store: the survivor's child
+        // materialized in C; the evicted one's never did.
+        const survivor = await readableClosure(rt2, spaceC, libIdentities[1]);
+        expect(survivor.source).toContain(libIdentities[1]);
+        const victim = await readableClosure(rt2, spaceC, libIdentities[0]);
+        expect(victim.source).toEqual([]);
+      } finally {
+        await rt2.dispose();
+      }
+    },
+  );
+
+  it(
+    "a re-issue that throws SYNCHRONOUSLY is consumed by the wake's " +
+      "defensive catch and logged loudly — never an unhandled microtask " +
+      "error beside the persistence chain the E4 path awaits — and the " +
+      "park is DROPPED, not re-parked (the wake deletes before it " +
+      "re-issues): a later record of the same identity wakes nothing",
+    async () => {
+      const pattern = await runtime.patternManager.compileOrGetPattern(
+        PROGRAM,
+        spaceA,
+      );
+      const entry = runtime.patternManager.getArtifactEntryRef(pattern);
+      if (entry === undefined) throw new Error("compile produced no entry ref");
+      await runtime.patternManager.flushCompileCacheWrites();
+      await storageManager.synced();
+
+      const rt2 = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+        experimental: { serverExecution: true },
+      });
+      const managerSpy = rt2.patternManager as unknown as {
+        replicateClosures?: (...args: unknown[]) => unknown;
+      };
+      const realReplicateClosures = (rt2.patternManager as unknown as {
+        replicateClosures: (...args: unknown[]) => unknown;
+      }).replicateClosures.bind(rt2.patternManager);
+      try {
+        // PHASE 1 — the park, with the injection DISARMED.
+        const phase1 = await captureManagerLines(async () => {
+          rt2.patternManager.replicatePatternToSpace(pattern, spaceC, spaceD);
+          await rt2.patternManager.flushCompileCacheWrites();
+        });
+        expect(
+          phase1.filter((line) => line.key === "closure-replication-parked")
+            .length,
+        ).toBe(1);
+
+        // ARM: a replication whose TARGET is the parked child's space throws
+        // SYNCHRONOUSLY out of the shared issue path (an own-property shadow
+        // over the prototype method — this suite's injection idiom). Only
+        // the re-issue targets C, so the supplier persist that triggers the
+        // wake runs untouched.
+        let armed = true;
+        managerSpy.replicateClosures = (...args: unknown[]) => {
+          if (armed && args[2] === spaceC) {
+            throw new Error("injected synchronous re-issue failure");
+          }
+          return realReplicateClosures(...args);
+        };
+
+        // PHASE 2 — the supplier records into G, the wake fires, and the
+        // re-issue throws before it can even produce a replication promise:
+        // the only thing between that throw and an unhandled error is the
+        // microtask's defensive catch.
+        const phase2 = await captureManagerLines(async () => {
+          await rt2.patternManager.compileOrGetPattern(PROGRAM, spaceG);
+          await rt2.patternManager.flushCompileCacheWrites();
+          await rt2.patternManager.flushCompileCacheWrites();
+          await storageManager.synced();
+        });
+        armed = false;
+
+        const reissued = phase2.filter((line) =>
+          line.key === "closure-replication-reissued"
+        );
+        expect(reissued.length).toBe(1);
+        expect(reissued[0].line).toContain(`trigger=persist-record:${spaceG}`);
+        // THE PIN: the throw surfaced as its own loud, attributable line…
+        const reissueErrors = phase2.filter((line) =>
+          line.key === "closure-replication-reissue-error"
+        );
+        expect(reissueErrors.length).toBe(1);
+        expect(reissueErrors[0].level).toBe("error");
+        expect(reissueErrors[0].line).toContain(`entry=${entry.identity}`);
+        expect(reissueErrors[0].line).toContain(`wanted=${entry.identity}`);
+        expect(reissueErrors[0].line).toContain(
+          "injected synchronous re-issue failure",
+        );
+        // …nothing healed, and the supplier's own persist still settled —
+        // the hook added no throw to the chain it runs inside.
+        expect(
+          phase2.filter((line) => line.key === "closure-replication-healed")
+            .length,
+        ).toBe(0);
+        const inG = await readableClosure(rt2, spaceG, entry.identity);
+        expect(inG.source).toContain(entry.identity);
+
+        // PHASE 3 — what the code actually does with the park: the wake
+        // DELETED it before re-issuing and the catch does not put it back,
+        // so a later record of the same identity (into H) wakes nothing and
+        // the child stays exactly where the pre-ruling one-shot left it.
+        const phase3 = await captureManagerLines(async () => {
+          rt2.patternManager.replicatePatternToSpace(pattern, spaceH, spaceA);
+          await rt2.patternManager.flushCompileCacheWrites();
+          await rt2.patternManager.flushCompileCacheWrites();
+          await storageManager.synced();
+        });
+        expect(
+          phase3.filter((line) => line.key === "closure-replication-reissued")
+            .length,
+        ).toBe(0);
+        expect(
+          phase3.filter((line) =>
+            line.key === "closure-replication-reissue-error"
+          ).length,
+        ).toBe(0);
+        const child = await readableClosure(rt2, spaceC, entry.identity);
+        expect(child.source).toEqual([]);
+      } finally {
+        delete managerSpy.replicateClosures;
         await rt2.dispose();
       }
     },

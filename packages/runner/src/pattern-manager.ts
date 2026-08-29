@@ -487,7 +487,12 @@ export class PatternManager {
   // FIFO-capped at MAX_PARKED_FAILED_REPLICATIONS wanted keys (loud
   // eviction); a stale park costs one wasted loud re-issue on a matching
   // record, never a wrong copy (the re-issue re-runs the full verified,
-  // fail-closed read).
+  // fail-closed read). The cap bounds WANTED KEYS only — the inner
+  // (entry, from, to) map is deliberately not capped in its own right
+  // (cubic PM-2 on #6528, adjudicated LOW): filling one takes that many
+  // DISTINCT real supply failures for a single identity, each carrying
+  // its own loud failure + park line, and ONE matching record wakes the
+  // whole set at once.
   private parkedFailedReplications = new Map<
     string,
     Map<string, ParkedReplication>

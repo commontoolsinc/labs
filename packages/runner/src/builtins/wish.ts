@@ -1713,8 +1713,17 @@ export function createSidecarPatternCache(options: {
         // compile, so kick the closure replication once the pattern is
         // in hand. The starting demander's kick no-ops (space ===
         // compiledSpace). The floating continuation is safe: the fetch
-        // promise never rejects (fetchPattern catches), and the kick
-        // no-ops for a superseded fetch (pattern/compiledSpace reset).
+        // promise never rejects (fetchPattern catches), and while a
+        // superseding fetch is still IN FLIGHT the kick no-ops
+        // (pattern/compiledSpace were reset with the epoch). Precisely
+        // (cubic wish-1/2 on #6528, adjudicated LOW — the earlier
+        // wording "no-ops for a superseded fetch" was overbroad): once
+        // the REPLACEMENT fetch RESOLVES, this continuation can still
+        // fire and replicate the NEW epoch's pattern into this
+        // demander's space. Benign — the kick is fire-and-forget and
+        // content-addressed, the space serves the same sidecar family,
+        // and `kickedSpaces` was cleared with the epoch, so the mark it
+        // leaves belongs to the pattern that actually landed.
         const demandingSpace = compileSpace;
         void fetchPromise.then(() =>
           ensureClosureReplicated(runtime, demandingSpace)
