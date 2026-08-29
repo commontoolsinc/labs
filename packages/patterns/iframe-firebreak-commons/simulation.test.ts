@@ -6,7 +6,12 @@ import {
   type IframeInputData,
   type SimulationAction,
 } from "./contract.ts";
-import { reduceSimulation } from "./simulation.ts";
+import {
+  advanceFire,
+  normalizedBoardDimensions,
+  reduceSimulation,
+  type TileState,
+} from "./simulation.ts";
 
 const input: IframeInputData = {
   ...DEFAULT_INPUT,
@@ -109,6 +114,74 @@ describe("simulation", () => {
       expect(result.rejectedActionIds).toEqual(["alice-second"]);
       expect(result.activeFireCount).toBe(0);
       expect(result.status).toBe("contained");
+    });
+
+    it("allows a valid deployment after the same actor submits an invalid one", () => {
+      const initial = reduceSimulation(input, []);
+      const burning = initial.tiles.find((tile) => tile.fire > 0)!;
+      const buildable = initial.tiles.find((tile) =>
+        tile.fire === 0 &&
+        (tile.terrain === "forest" || tile.terrain === "grass")
+      )!;
+
+      const result = reduceSimulation(input, [
+        {
+          id: "alice-invalid",
+          actorId: "crew-alice",
+          turn: 1,
+          type: "firebreak",
+          tileId: burning.id,
+        },
+        {
+          id: "alice-valid",
+          actorId: "crew-alice",
+          turn: 1,
+          type: "firebreak",
+          tileId: buildable.id,
+        },
+      ]);
+
+      expect(result.rejectedActionIds).toContain("alice-invalid");
+      expect(result.acceptedActionIds).toContain("alice-valid");
+      expect(result.tiles.find((tile) => tile.id === buildable.id)?.firebreak)
+        .toBe(true);
+    });
+
+    it("does not spread from a wet tile extinguished during the advance", () => {
+      const source: TileState = {
+        id: "source",
+        x: 0,
+        y: 0,
+        terrain: "forest",
+        fire: 1,
+        firebreak: false,
+        wetUntilTurn: 1,
+        residents: 0,
+        evacuatedResidents: 0,
+        lostResidents: 0,
+        burned: false,
+      };
+      const target: TileState = {
+        ...source,
+        id: "target",
+        x: 1,
+        fire: 0,
+        wetUntilTurn: 0,
+      };
+
+      advanceFire({ ...input, seed: 0 }, 1, [source, target]);
+
+      expect(source.fire).toBe(0);
+      expect(target.fire).toBe(0);
+    });
+
+    it("normalizes custom dimensions for the simulation and renderer", () => {
+      expect(normalizedBoardDimensions({ columns: 100, rows: 2 })).toEqual({
+        columns: 12,
+        rows: 4,
+      });
+      expect(reduceSimulation({ ...input, columns: 100, rows: 2 }, []).tiles)
+        .toHaveLength(48);
     });
 
     it("advances a turn once when several crews append advance intents", () => {

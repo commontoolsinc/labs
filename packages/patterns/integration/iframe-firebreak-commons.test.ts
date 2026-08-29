@@ -23,6 +23,7 @@ import {
 } from "./pieces-controller.ts";
 
 const { API_URL, FRONTEND_URL, SPACE_NAME } = env;
+const GUEST_WAIT_BACKSTOP_MS = 5 * 60 * 1_000;
 
 type CdpResult = Record<string, unknown>;
 
@@ -220,18 +221,27 @@ class GuestDomDriver {
 
   async waitFor<T>(reader: string): Promise<T> {
     return await this.evaluate<T>(`new Promise((resolve, reject) => {
-      const observer = new MutationObserver(() => check());
+      const finish = (callback, value) => {
+        observer.disconnect();
+        clearTimeout(backstop);
+        callback(value);
+      };
       const check = () => {
         try {
           const value = (${reader})();
           if (value === false || value === null || value === undefined) return;
-          observer.disconnect();
-          resolve(value);
+          finish(resolve, value);
         } catch (error) {
-          observer.disconnect();
-          reject(error);
+          finish(reject, error);
         }
       };
+      const observer = new MutationObserver(() => check());
+      const backstop = setTimeout(() => {
+        finish(
+          reject,
+          new Error('Guest condition did not settle before the test backstop.'),
+        );
+      }, ${GUEST_WAIT_BACKSTOP_MS});
       observer.observe(document, {
         attributes: true,
         characterData: true,

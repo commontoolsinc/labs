@@ -7,7 +7,14 @@ import type {
   MachineNodeKind,
   MachineParameters,
 } from "./contract.ts";
-import { dedupeMachineEdges, evaluateSignals } from "./model.ts";
+import {
+  createsFeedbackCycle,
+  dedupeMachineEdges,
+  evaluateSignals,
+  findFeedbackNodeIds,
+  isActuatorFiring,
+  presentSignal,
+} from "./model.ts";
 
 const PARAMETERS: MachineParameters = {
   active: false,
@@ -69,6 +76,27 @@ describe("evaluateSignals()", () => {
     expect(evaluateSignals(orState, 0).get("gate")).toBe(1);
   });
 
+  it("uses odd parity for XOR gates with more than two inputs", () => {
+    const state: IframeStateData = {
+      nodes: [
+        node("first", "sensor", { active: true }),
+        node("second", "sensor", { active: true }),
+        node("third", "sensor", { active: true }),
+        node("fourth", "sensor", { active: true }),
+        node("gate", "gate", { operator: "xor" }),
+      ],
+      edges: [
+        { id: "first-gate", source: "first", target: "gate" },
+        { id: "second-gate", source: "second", target: "gate" },
+        { id: "third-gate", source: "third", target: "gate" },
+      ],
+    };
+
+    expect(evaluateSignals(state, 0).get("gate")).toBe(1);
+    state.edges.push({ id: "fourth-gate", source: "fourth", target: "gate" });
+    expect(evaluateSignals(state, 0).get("gate")).toBe(0);
+  });
+
   it("clamps transformed signals and applies actuator thresholds", () => {
     const state: IframeStateData = {
       nodes: [
@@ -90,11 +118,11 @@ describe("evaluateSignals()", () => {
     expect(evaluateSignals(state, 0).get("actuator")).toBe(1);
   });
 
-  it("returns zero for a graph cycle without an active source", () => {
+  it("makes feedback loops inert independently of node order", () => {
     const state: IframeStateData = {
       nodes: [
-        node("first", "transformer"),
-        node("second", "transformer"),
+        node("first", "transformer", { offset: 0.2 }),
+        node("second", "transformer", { offset: 0.3 }),
       ],
       edges: [
         { id: "first-second", source: "first", target: "second" },
@@ -102,12 +130,36 @@ describe("evaluateSignals()", () => {
       ],
     };
 
-    expect(evaluateSignals(state, 0)).toEqual(
+    const forward = evaluateSignals(state, 0);
+    const reversed = evaluateSignals(
+      { ...state, nodes: [...state.nodes].reverse() },
+      0,
+    );
+
+    expect(forward).toEqual(
       new Map([
         ["first", 0],
         ["second", 0],
       ]),
     );
+    expect(Object.fromEntries(reversed)).toEqual(Object.fromEntries(forward));
+    expect(findFeedbackNodeIds(state.edges)).toEqual(
+      new Set(["first", "second"]),
+    );
+    expect(createsFeedbackCycle(state.edges.slice(0, 1), "second", "first"))
+      .toBe(true);
+  });
+
+  it("hides signal presentation without changing actuator semantics", () => {
+    const actuator = node("actuator", "actuator", { threshold: 0.7 });
+
+    expect(presentSignal(0.9, false)).toEqual({
+      semantic: 0.9,
+      label: "Hidden",
+      highlighted: false,
+    });
+    expect(isActuatorFiring(actuator, presentSignal(0.9, false).semantic))
+      .toBe(true);
   });
 
   it("treats concurrent wires with the same endpoints as one input", () => {

@@ -1,9 +1,17 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import type { SignalObservation, SignalRoute } from "./contract.ts";
 import {
+  DEFAULT_STATE,
+  type SignalObservation,
+  type SignalRoute,
+} from "./contract.ts";
+import {
+  capturedAction,
+  FIELD_HEIGHT,
+  FIELD_WIDTH,
   propagationValues,
+  recentVisibleObservations,
   routePoints,
   visibleObservations,
   visibleRoutes,
@@ -40,6 +48,23 @@ const observations: SignalObservation[] = [
 ];
 
 describe("model", () => {
+  describe("capturedAction()", () => {
+    it("keeps the event-time value when a queued action runs later", async () => {
+      let controlValue = "pulse";
+      const received: string[] = [];
+      const action = capturedAction(controlValue, (value) => {
+        received.push(value);
+        return Promise.resolve();
+      });
+
+      controlValue = "echo";
+      await action();
+
+      expect(controlValue).toBe("echo");
+      expect(received).toEqual(["pulse"]);
+    });
+  });
+
   describe("visibleObservations()", () => {
     it("includes the temporal boundary and applies the selected band", () => {
       expect(visibleObservations(observations, 20, "all").map(({ id }) => id))
@@ -85,12 +110,49 @@ describe("model", () => {
           band: "drift",
         },
       ];
-      const visible = observations.slice(0, 2);
-      const visibleById = new Map(visible.map((item) => [item.id, item]));
-
       expect(
-        visibleRoutes(routes, visibleById, 20, "pulse").map(({ id }) => id),
+        visibleRoutes(routes, observations, 20, "pulse").map(({ id }) => id),
       ).toEqual(["visible"]);
+    });
+
+    it("filters routes by their band without hiding differently banded endpoints", () => {
+      const routes: SignalRoute[] = [{
+        id: "cross-band-endpoints",
+        fromObservationId: "early-pulse",
+        toObservationId: "boundary-drift",
+        departedAt: 20,
+        duration: 10,
+        band: "pulse",
+      }];
+      expect(
+        visibleRoutes(routes, observations, 20, "pulse").map(({ id }) => id),
+      ).toEqual(["cross-band-endpoints"]);
+    });
+  });
+
+  describe("recentVisibleObservations()", () => {
+    it("selects recent observations within the active time and band", () => {
+      expect(
+        recentVisibleObservations(observations, 21, "pulse").map(({ id }) =>
+          id
+        ),
+      ).toEqual(["early-pulse", "future-pulse"]);
+      expect(
+        recentVisibleObservations(observations, 20, "pulse").map(({ id }) =>
+          id
+        ),
+      ).toEqual(["early-pulse"]);
+    });
+  });
+
+  describe("DEFAULT_STATE", () => {
+    it("keeps every initial observation inside the rendered field", () => {
+      expect(
+        DEFAULT_STATE.observations.every((observation) =>
+          observation.x >= 0 && observation.x <= FIELD_WIDTH &&
+          observation.y >= 0 && observation.y <= FIELD_HEIGHT
+        ),
+      ).toBe(true);
     });
   });
 

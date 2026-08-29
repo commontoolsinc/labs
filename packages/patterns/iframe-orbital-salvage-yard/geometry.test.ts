@@ -1,11 +1,14 @@
 import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
-import { DEFAULT_STATE, type StationModule } from "./contract.ts";
+import {
+  DEFAULT_STATE,
+  moduleConnectors,
+  type StationModule,
+} from "./contract.ts";
 import {
   findBestSnap,
   findConnections,
-  moduleConnectors,
   normalizeQuarterTurns,
   rotateVectorY,
   worldConnectors,
@@ -27,6 +30,21 @@ function moduleAt(
 }
 
 describe("geometry", () => {
+  describe("moduleConnectors()", () => {
+    it("returns isolated clones from the connector definitions used by seeded modules", () => {
+      const first = moduleConnectors("hub");
+      const second = moduleConnectors("hub");
+      const seeded = DEFAULT_STATE.modules.find((module) =>
+        module.kind === "hub"
+      )!;
+
+      first[0].offset[0] = 99;
+
+      expect(second).toEqual(seeded.connectors);
+      expect(second[0].offset[0]).toBe(2.4);
+    });
+  });
+
   describe("normalizeQuarterTurns()", () => {
     it("returns a canonical rotation for positive and negative turns", () => {
       expect([
@@ -124,6 +142,20 @@ describe("geometry", () => {
       const moving = moduleAt("moving", [30, 1, 30]);
 
       expect(findBestSnap(moving, [anchored], 1)).toBeUndefined();
+    });
+
+    it("does not reuse an occupied connector in the initial assembly", () => {
+      const moving = moduleAt("moving", [5.5, 1.2, 0]);
+      const snap = findBestSnap(moving, DEFAULT_STATE.modules, 5);
+
+      expect(snap?.targetModuleId).toBe("module-cargo-kestrel");
+      expect(snap?.targetConnectorId).toBe("starboard-lock");
+      expect(snap?.movingConnectorId).toBe("port-lock");
+      expect(snap?.transform).toEqual({
+        position: [10.2, 1.2, 0],
+        rotationQuarterTurns: 0,
+      });
+      expect(snap?.travelDistance).toBeCloseTo(4.7);
     });
   });
 });

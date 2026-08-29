@@ -1,6 +1,5 @@
 import type {
   ModuleConnector,
-  ModuleKind,
   ModuleTransform,
   StationModule,
   Vector3Tuple,
@@ -26,79 +25,6 @@ export interface SnapResult {
   travelDistance: number;
 }
 
-const KIND_CONNECTORS: Record<ModuleKind, ModuleConnector[]> = {
-  hub: [
-    {
-      id: "east-lock",
-      label: "East lock",
-      offset: [2.4, 0, 0],
-      normal: [1, 0, 0],
-    },
-    {
-      id: "west-lock",
-      label: "West lock",
-      offset: [-2.4, 0, 0],
-      normal: [-1, 0, 0],
-    },
-    {
-      id: "north-lock",
-      label: "North lock",
-      offset: [0, 0, 2.4],
-      normal: [0, 0, 1],
-    },
-    {
-      id: "south-lock",
-      label: "South lock",
-      offset: [0, 0, -2.4],
-      normal: [0, 0, -1],
-    },
-  ],
-  habitat: [
-    {
-      id: "aft-lock",
-      label: "Aft lock",
-      offset: [0, 0, -2.6],
-      normal: [0, 0, -1],
-    },
-    {
-      id: "fore-lock",
-      label: "Fore lock",
-      offset: [0, 0, 2.6],
-      normal: [0, 0, 1],
-    },
-  ],
-  cargo: [
-    {
-      id: "port-lock",
-      label: "Port lock",
-      offset: [-2.6, 0, 0],
-      normal: [-1, 0, 0],
-    },
-    {
-      id: "starboard-lock",
-      label: "Starboard lock",
-      offset: [2.6, 0, 0],
-      normal: [1, 0, 0],
-    },
-  ],
-  solar: [
-    {
-      id: "truss-lock",
-      label: "Truss lock",
-      offset: [2.6, 0, 0],
-      normal: [1, 0, 0],
-    },
-  ],
-  relay: [
-    {
-      id: "base-lock",
-      label: "Base lock",
-      offset: [0, 0, -1.8],
-      normal: [0, 0, -1],
-    },
-  ],
-};
-
 export function normalizeQuarterTurns(value: number): number {
   return ((Math.round(value) % 4) + 4) % 4;
 }
@@ -118,14 +44,6 @@ export function rotateVectorY(
     default:
       return [x, y, z];
   }
-}
-
-export function moduleConnectors(kind: ModuleKind): ModuleConnector[] {
-  return KIND_CONNECTORS[kind].map((connector) => ({
-    ...connector,
-    offset: [...connector.offset],
-    normal: [...connector.normal],
-  }));
 }
 
 export function worldConnectors(module: StationModule): WorldConnector[] {
@@ -189,6 +107,12 @@ export function findBestSnap(
   otherModules: readonly StationModule[],
   maximumTravel = 4,
 ): SnapResult | undefined {
+  const occupiedConnectors = new Set(
+    findConnections(otherModules).flatMap((connection) => [
+      connectorKey(connection.first.moduleId, connection.first.id),
+      connectorKey(connection.second.moduleId, connection.second.id),
+    ]),
+  );
   let best: (SnapResult & { score: number }) | undefined;
   for (
     let rotationQuarterTurns = 0;
@@ -202,6 +126,11 @@ export function findBestSnap(
     const movingConnectors = worldConnectors(rotatedMoving);
     for (const target of otherModules) {
       for (const targetConnector of worldConnectors(target)) {
+        if (
+          occupiedConnectors.has(
+            connectorKey(target.id, targetConnector.id),
+          )
+        ) continue;
         for (const movingConnector of movingConnectors) {
           if (
             dot(movingConnector.worldNormal, targetConnector.worldNormal) >=
@@ -247,6 +176,10 @@ export function findBestSnap(
   if (!best) return undefined;
   const { score: _score, ...snap } = best;
   return snap;
+}
+
+function connectorKey(moduleId: string, connectorId: string): string {
+  return `${moduleId}\u0000${connectorId}`;
 }
 
 function add(first: Vector3Tuple, second: Vector3Tuple): Vector3Tuple {

@@ -35,7 +35,13 @@ import {
   findConnections,
   normalizeQuarterTurns,
 } from "./geometry.ts";
-import { createSalvageModule, isBookmarked, setBookmark } from "./model.ts";
+import {
+  canBeginDrag,
+  createSalvageModule,
+  isBookmarked,
+  ownsDrag,
+  setBookmark,
+} from "./model.ts";
 
 type ModuleVisual = {
   kind: ModuleKind;
@@ -643,7 +649,10 @@ function roundHalf(value: number): number {
 }
 
 function beginDrag(moduleId: string, pointerId: number): void {
-  if (!hydrated || pendingAction || outputValue.preferredTool !== "move") {
+  if (
+    !hydrated || pendingAction || outputValue.preferredTool !== "move" ||
+    !canBeginDrag(drag)
+  ) {
     return;
   }
   const module = stateValue.modules.find((candidate) =>
@@ -663,8 +672,8 @@ function beginDrag(moduleId: string, pointerId: number): void {
   };
 }
 
-function updateDrag(): void {
-  if (!drag) return;
+function updateDrag(pointerId: number): void {
+  if (!ownsDrag(drag, pointerId)) return;
   const pick = scene.pick(
     scene.pointerX,
     scene.pointerY,
@@ -684,10 +693,8 @@ function updateDrag(): void {
   } · release to commit once`;
 }
 
-function finishDrag(pointerId?: number): void {
-  if (!drag || (pointerId !== undefined && pointerId !== drag.pointerId)) {
-    return;
-  }
+function finishDrag(pointerId: number): void {
+  if (!ownsDrag(drag, pointerId)) return;
   const completed = drag;
   drag = undefined;
   if (canvas.hasPointerCapture(completed.pointerId)) {
@@ -711,12 +718,12 @@ const pointerObserver = scene.onPointerObservable.add((pointerInfo) => {
   if (pointerInfo.type === PointerEventTypes.POINTERDOWN) {
     if (event.button !== 0) return;
     const moduleId = pointerInfo.pickInfo?.pickedMesh?.metadata?.yardModuleId;
-    if (typeof moduleId === "string") {
+    if (typeof moduleId === "string" && canBeginDrag(drag)) {
       selectModule(moduleId);
       beginDrag(moduleId, event.pointerId);
     }
   } else if (pointerInfo.type === PointerEventTypes.POINTERMOVE) {
-    updateDrag();
+    updateDrag(event.pointerId);
   } else if (pointerInfo.type === PointerEventTypes.POINTERUP) {
     finishDrag(event.pointerId);
   }

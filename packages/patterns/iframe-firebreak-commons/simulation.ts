@@ -44,6 +44,11 @@ const MAX_COLUMNS = 12;
 const MIN_ROWS = 4;
 const MAX_ROWS = 10;
 
+export interface BoardDimensions {
+  columns: number;
+  rows: number;
+}
+
 function clampInteger(
   value: number,
   minimum: number,
@@ -51,6 +56,16 @@ function clampInteger(
 ): number {
   if (!Number.isFinite(value)) return minimum;
   return Math.min(maximum, Math.max(minimum, Math.round(value)));
+}
+
+/** Returns the board dimensions supported by both simulation and rendering. */
+export function normalizedBoardDimensions(
+  input: Pick<IframeInputData, "columns" | "rows">,
+): BoardDimensions {
+  return {
+    columns: clampInteger(input.columns, MIN_COLUMNS, MAX_COLUMNS),
+    rows: clampInteger(input.rows, MIN_ROWS, MAX_ROWS),
+  };
 }
 
 function hashUnit(seed: number, label: string): number {
@@ -77,8 +92,7 @@ function residentsFor(seed: number, id: string, terrain: Terrain): number {
 }
 
 function initialTiles(input: IframeInputData): TileState[] {
-  const columns = clampInteger(input.columns, MIN_COLUMNS, MAX_COLUMNS);
-  const rows = clampInteger(input.rows, MIN_ROWS, MAX_ROWS);
+  const { columns, rows } = normalizedBoardDimensions(input);
   const tiles: TileState[] = [];
   for (let y = 0; y < rows; y++) {
     for (let x = 0; x < columns; x++) {
@@ -195,7 +209,8 @@ function applyCrewAction(
   }
 }
 
-function advanceFire(
+/** Advances the mutable tile projection by one deterministic wildfire turn. */
+export function advanceFire(
   input: IframeInputData,
   turn: number,
   tiles: TileState[],
@@ -210,6 +225,7 @@ function advanceFire(
     } else {
       source.fire = Math.min(3, source.fire + 1) as FireIntensity;
     }
+    if (source.fire === 0) continue;
     if (source.fire === 3) {
       source.burned = true;
       source.lostResidents = Math.max(
@@ -305,8 +321,8 @@ export function reduceSimulation(
         rejectedActionIds.push(action.id);
         continue;
       }
-      actors.add(action.actorId);
       if (applyCrewAction(action, turn, tiles)) {
+        actors.add(action.actorId);
         acceptedActionIds.push(action.id);
       } else {
         rejectedActionIds.push(action.id);

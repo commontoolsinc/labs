@@ -2,8 +2,10 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import {
+  canBeginDrag,
   createSalvageModule,
   isBookmarked,
+  ownsDrag,
   setBookmark,
   type WritableBookmarkMap,
 } from "./model.ts";
@@ -12,6 +14,18 @@ const firstId = "123e4567-e89b-12d3-a456-426614174000";
 const secondId = "123e4567-e89b-12d3-a456-426614174001";
 
 describe("model", () => {
+  describe("pointer drag ownership", () => {
+    it("lets only the initiating pointer update and finish an active drag", () => {
+      const active = { pointerId: 17 };
+
+      expect(canBeginDrag(undefined)).toBe(true);
+      expect(canBeginDrag(active)).toBe(false);
+      expect(ownsDrag(active, 17)).toBe(true);
+      expect(ownsDrag(active, 23)).toBe(false);
+      expect(ownsDrag(undefined, 17)).toBe(false);
+    });
+  });
+
   describe("createSalvageModule()", () => {
     it("returns the same presentation and placement for one stable ID", () => {
       expect(createSalvageModule("cargo", firstId)).toEqual(

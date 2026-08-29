@@ -16,6 +16,7 @@ import {
 import {
   canonicalActions,
   describeTile,
+  normalizedBoardDimensions,
   reduceSimulation,
   type SimulationSnapshot,
   type TileState,
@@ -251,8 +252,9 @@ function renderPhaser(): void {
     projection.coordinate.setText(`${tile.x + 1},${tile.y + 1}`);
   }
 
-  const width = inputValue.columns * TILE_SIZE;
-  const height = inputValue.rows * TILE_SIZE;
+  const dimensions = normalizedBoardDimensions(inputValue);
+  const width = dimensions.columns * TILE_SIZE;
+  const height = dimensions.rows * TILE_SIZE;
   game.scale.resize(width, height);
   gameElement.setAttribute(
     "aria-label",
@@ -261,8 +263,9 @@ function renderPhaser(): void {
 }
 
 function syncMirror(): void {
+  const dimensions = normalizedBoardDimensions(inputValue);
   mirror.style.gridTemplateColumns =
-    `repeat(${inputValue.columns}, minmax(0, 1fr))`;
+    `repeat(${dimensions.columns}, minmax(0, 1fr))`;
   const present = new Set(snapshot.tiles.map((tile) => tile.id));
   for (const [id, button] of mirrorButtons) {
     if (present.has(id)) continue;
@@ -276,7 +279,6 @@ function syncMirror(): void {
       button.type = "button";
       button.className = "mirror-tile";
       button.dataset.tileId = tile.id;
-      button.setAttribute("role", "gridcell");
       button.addEventListener("click", () => selectTile(tile.id), { signal });
       mirrorButtons.set(tile.id, button);
     }
@@ -352,9 +354,10 @@ function render(): void {
   selectedTileText.textContent = selectedTile
     ? describeTile(selectedTile)
     : "Select a map tile.";
+  const acceptedActionIds = new Set(snapshot.acceptedActionIds);
   const hasActed = stateValue.actions.some((action) =>
-    action.turn === snapshot.turn && action.actorId === crewId &&
-    action.type !== "advance-turn"
+    acceptedActionIds.has(action.id) && action.turn === snapshot.turn &&
+    action.actorId === crewId && action.type !== "advance-turn"
   );
   deployButton.disabled = baseDisabled || !selectedTile || hasActed ||
     snapshot.status !== "active";

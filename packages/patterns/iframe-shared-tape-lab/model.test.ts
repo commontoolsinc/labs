@@ -27,6 +27,10 @@ describe("model", () => {
       expect(formatTime(65.26)).toBe("01:05.3");
     });
 
+    it("carries rounded tenths across a minute boundary", () => {
+      expect(formatTime(59.96)).toBe("01:00.0");
+    });
+
     it("returns zero for negative and non-finite positions", () => {
       expect([formatTime(-1), formatTime(Number.NaN)]).toEqual([
         "00:00.0",

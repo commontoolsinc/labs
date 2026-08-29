@@ -2,6 +2,16 @@ import type { SignalBand, SignalObservation, SignalRoute } from "./contract.ts";
 
 export type SignalBandFilter = SignalBand | "all";
 
+export const FIELD_WIDTH = 120;
+export const FIELD_HEIGHT = 75;
+
+export function capturedAction<Value, Result>(
+  value: Value,
+  action: (value: Value) => Promise<Result>,
+): () => Promise<Result> {
+  return () => action(value);
+}
+
 export function visibleObservations(
   observations: readonly SignalObservation[],
   timeCursor: number,
@@ -15,16 +25,30 @@ export function visibleObservations(
 
 export function visibleRoutes(
   routes: readonly SignalRoute[],
-  observationsById: ReadonlyMap<string, SignalObservation>,
+  observations: readonly SignalObservation[],
   timeCursor: number,
   band: SignalBandFilter,
 ): SignalRoute[] {
+  const visibleObservationIds = new Set(
+    observations.filter((observation) => observation.observedAt <= timeCursor)
+      .map((observation) => observation.id),
+  );
   return routes.filter((route) =>
     route.departedAt <= timeCursor &&
     (band === "all" || route.band === band) &&
-    observationsById.has(route.fromObservationId) &&
-    observationsById.has(route.toObservationId)
+    visibleObservationIds.has(route.fromObservationId) &&
+    visibleObservationIds.has(route.toObservationId)
   );
+}
+
+export function recentVisibleObservations(
+  observations: readonly SignalObservation[],
+  timeCursor: number,
+  band: SignalBandFilter,
+): SignalObservation[] {
+  return visibleObservations(observations, timeCursor, band)
+    .toSorted((left, right) => left.observedAt - right.observedAt)
+    .slice(-2);
 }
 
 export function propagationValues(

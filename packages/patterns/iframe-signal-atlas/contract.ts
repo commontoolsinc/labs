@@ -102,7 +102,7 @@ export const DEFAULT_STATE: IframeStateData = {
       id: "obs-lantern-68",
       label: "Lantern Bank",
       x: 50,
-      y: 79,
+      y: 71,
       observedAt: 68,
       strength: 0.84,
       band: "drift",

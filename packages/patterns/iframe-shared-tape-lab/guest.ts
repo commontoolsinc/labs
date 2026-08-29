@@ -41,6 +41,7 @@ let activeCueIds = new Set<string>();
 let dialogMode: { kind: "new" } | { kind: "edit"; id: string } = {
   kind: "new",
 };
+let dialogSaving = false;
 const assessmentDrafts = new Map<string, number>();
 const pendingAssessmentIds = new Set<string>();
 
@@ -443,7 +444,19 @@ function renderSafely(): void {
   }
 }
 
+function setDialogSaving(saving: boolean): void {
+  dialogSaving = saving;
+  startInput.disabled = saving;
+  endInput.disabled = saving;
+  labelInput.disabled = saving;
+  noteInput.disabled = saving;
+  confidenceInput.disabled = saving || dialogMode.kind === "edit";
+  cancelButton.disabled = saving;
+  saveButton.disabled = saving || !hydrated;
+}
+
 function openEditor(annotation?: TapeAnnotation): void {
+  if (dialogSaving) return;
   clearError();
   if (annotation) {
     dialogMode = { kind: "edit", id: annotation.id };
@@ -478,7 +491,7 @@ function openEditor(annotation?: TapeAnnotation): void {
     confidenceInput.disabled = false;
     confidenceReadout.textContent = "70%";
   }
-  saveButton.disabled = !hydrated;
+  setDialogSaving(false);
   dialog.showModal();
   labelInput.focus();
 }
@@ -504,7 +517,7 @@ async function saveAnnotation(): Promise<void> {
   if (!label) throw new TypeError("Give the annotation a label.");
   if (!note) throw new TypeError("Add a listening note.");
 
-  saveButton.disabled = true;
+  setDialogSaving(true);
   const mode = dialogMode;
   if (mode.kind === "new") {
     const annotation: TapeAnnotation = {
@@ -704,12 +717,16 @@ confidenceInput.addEventListener("input", () => {
   confidenceReadout.textContent = `${confidenceInput.value}%`;
 }, { signal });
 addButton.addEventListener("click", () => openEditor(), { signal });
-cancelButton.addEventListener("click", () => dialog.close(), { signal });
+cancelButton.addEventListener("click", () => {
+  if (!dialogSaving) dialog.close();
+}, { signal });
+dialog.addEventListener("cancel", (event) => {
+  if (dialogSaving) event.preventDefault();
+}, { signal });
 saveButton.addEventListener("click", () => {
   void saveAnnotation().catch((cause) => {
     showError(cause);
-    saveButton.disabled = false;
-  });
+  }).finally(() => setDialogSaving(false));
 }, { signal });
 globalThis.addEventListener("pagehide", teardown, { once: true, signal });
 
@@ -756,5 +773,6 @@ void (async () => {
   } catch (cause) {
     showError(cause);
     status.textContent = "Could not join the shared tape";
+    teardown();
   }
 })();

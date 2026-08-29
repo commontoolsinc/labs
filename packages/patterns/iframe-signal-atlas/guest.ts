@@ -29,7 +29,11 @@ import {
   type SignalRoute,
 } from "./contract.ts";
 import {
+  capturedAction,
+  FIELD_HEIGHT,
+  FIELD_WIDTH,
   propagationValues,
+  recentVisibleObservations,
   routePoints,
   visibleObservations,
   visibleRoutes,
@@ -52,8 +56,6 @@ type HypothesisRow = {
 
 const WIDTH = 960;
 const HEIGHT = 600;
-const FIELD_WIDTH = 120;
-const FIELD_HEIGHT = 75;
 const BAND_COLORS: Record<SignalBand, string> = {
   pulse: "#ffbd69",
   drift: "#72e0ca",
@@ -287,12 +289,17 @@ function render(): void {
     outputValue.timeCursor,
     outputValue.band,
   );
-  const observationsById = new Map(
-    visible.map((observation) => [observation.id, observation]),
+  const timeVisible = visibleObservations(
+    stateValue.observations,
+    outputValue.timeCursor,
+    "all",
+  );
+  const timeVisibleById = new Map(
+    timeVisible.map((observation) => [observation.id, observation]),
   );
   const routes = visibleRoutes(
     stateValue.routes,
-    observationsById,
+    stateValue.observations,
     outputValue.timeCursor,
     outputValue.band,
   );
@@ -362,7 +369,7 @@ function render(): void {
     .attr(
       "d",
       (route: SignalRoute) =>
-        flowLine(projectedRoutePoints(route, observationsById)),
+        flowLine(projectedRoutePoints(route, timeVisibleById)),
     )
     .attr("stroke", (route: SignalRoute) => BAND_COLORS[route.band])
     .attr("stroke-opacity", (route: SignalRoute) => {
@@ -374,8 +381,8 @@ function render(): void {
       return 0.24 + progress * 0.66;
     })
     .attr("aria-label", (route: SignalRoute) => {
-      const from = observationsById.get(route.fromObservationId)?.label;
-      const to = observationsById.get(route.toObservationId)?.label;
+      const from = timeVisibleById.get(route.fromObservationId)?.label;
+      const to = timeVisibleById.get(route.toObservationId)?.label;
       return `${route.band} route from ${from} to ${to}`;
     });
 
@@ -547,10 +554,11 @@ async function addRoute(options: {
 }
 
 async function connectRecent(): Promise<string> {
-  const recent = stateValue.observations
-    .filter((observation) => observation.observedAt <= outputValue.timeCursor)
-    .toSorted((left, right) => left.observedAt - right.observedAt)
-    .slice(-2);
+  const recent = recentVisibleObservations(
+    stateValue.observations,
+    outputValue.timeCursor,
+    outputValue.band,
+  );
   if (recent.length < 2) {
     throw new Error("At least two observations must be visible to connect.");
   }
@@ -665,25 +673,38 @@ timeInput.addEventListener("input", () => {
   timeValue.textContent = `T+${timeInput.value}`;
 });
 timeInput.addEventListener("change", () => {
-  void enqueueAction(() => setTimeCursor(Number(timeInput.value))).catch(
-    showError,
-  );
+  void enqueueAction(capturedAction(Number(timeInput.value), setTimeCursor))
+    .catch(
+      showError,
+    );
 });
 bandSelect.addEventListener("change", () => {
-  void enqueueAction(() => setBand(bandSelect.value as SignalBand | "all"))
+  void enqueueAction(capturedAction(
+    bandSelect.value as SignalBand | "all",
+    setBand,
+  ))
     .catch(showError);
 });
 terrainToggle.addEventListener("change", () => {
-  void enqueueAction(() => setLayer("terrain", terrainToggle.checked)).catch(
+  void enqueueAction(capturedAction(
+    terrainToggle.checked,
+    (enabled) => setLayer("terrain", enabled),
+  )).catch(
     showError,
   );
 });
 propagationToggle.addEventListener("change", () => {
-  void enqueueAction(() => setLayer("propagation", propagationToggle.checked))
+  void enqueueAction(capturedAction(
+    propagationToggle.checked,
+    (enabled) => setLayer("propagation", enabled),
+  ))
     .catch(showError);
 });
 routesToggle.addEventListener("change", () => {
-  void enqueueAction(() => setLayer("routes", routesToggle.checked)).catch(
+  void enqueueAction(capturedAction(
+    routesToggle.checked,
+    (enabled) => setLayer("routes", enabled),
+  )).catch(
     showError,
   );
 });

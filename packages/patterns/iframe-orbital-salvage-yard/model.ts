@@ -1,10 +1,31 @@
-import type { ModuleKind, StationModule, Vector3Tuple } from "./contract.ts";
-import { moduleConnectors } from "./geometry.ts";
+import {
+  moduleConnectors,
+  type ModuleKind,
+  type StationModule,
+  type Vector3Tuple,
+} from "./contract.ts";
 
 export interface WritableBookmarkMap {
   key(moduleId: string): {
     set(value: boolean): Promise<void>;
   };
+}
+
+export interface PointerDragOwner {
+  pointerId: number;
+}
+
+export function canBeginDrag(
+  active: PointerDragOwner | undefined,
+): boolean {
+  return active === undefined;
+}
+
+export function ownsDrag<T extends PointerDragOwner>(
+  active: T | undefined,
+  pointerId: number,
+): active is T {
+  return active?.pointerId === pointerId;
 }
 
 const KIND_LABEL: Record<ModuleKind, string> = {

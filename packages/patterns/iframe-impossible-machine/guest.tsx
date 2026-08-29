@@ -35,7 +35,15 @@ import {
   type MachineParameters,
   type MachinePosition,
 } from "./contract.ts";
-import { dedupeMachineEdges, evaluateSignals } from "./model.ts";
+import {
+  createsFeedbackCycle,
+  dedupeMachineEdges,
+  evaluateSignals,
+  findFeedbackNodeIds,
+  isActuatorFiring,
+  presentSignal,
+  type SignalPresentation,
+} from "./model.ts";
 
 const fabric = connectFabric();
 const { useCell } = createFabricReact(React, fabric);
@@ -69,7 +77,7 @@ const KIND_COLORS: Record<MachineNodeKind, string> = {
 
 type NodeViewData = {
   node: MachineNode;
-  signal: number;
+  signal: SignalPresentation;
   disabled: boolean;
 };
 
@@ -180,7 +188,7 @@ function NodeFrame({
   hasInput?: boolean;
   hasOutput?: boolean;
 }) {
-  const active = data.signal >= 0.5;
+  const active = data.signal.highlighted;
   return (
     <article
       className={`machine-node machine-node--${data.node.kind} ${
@@ -188,7 +196,7 @@ function NodeFrame({
       }`}
       data-node-id={id}
       data-node-kind={data.node.kind}
-      data-signal={data.signal.toFixed(2)}
+      data-signal={data.signal.semantic.toFixed(2)}
     >
       {hasInput && (
         <Handle
@@ -207,7 +215,7 @@ function NodeFrame({
           <strong>{data.node.label}</strong>
         </span>
         <output aria-label={`${data.node.label} signal`}>
-          {Math.round(data.signal * 100)}%
+          {data.signal.label}
         </output>
       </header>
       <div className="node-parameters">{children}</div>
@@ -346,7 +354,7 @@ function ActuatorNode(props: NodeProps<MachineFlowNode>) {
         disabled={disabled}
       />
       <p className="actuator-state">
-        {props.data.signal >= node.parameters.threshold
+        {isActuatorFiring(node, props.data.signal.semantic)
           ? "Launched!"
           : "Standing by"}
       </p>
@@ -509,6 +517,11 @@ function App() {
         ) {
           throw new Error("Those modules are already connected.");
         }
+        if (createsFeedbackCycle(edges, source, target)) {
+          throw new Error(
+            "Feedback loops are not supported. Choose a downstream module.",
+          );
+        }
         await stateCell.key("edges").push({
           id: machineEdgeId(source, target),
           source,
@@ -564,6 +577,7 @@ function App() {
     ...stateValue,
     edges: dedupeMachineEdges(stateValue.edges),
   };
+  const feedbackNodeIds = findFeedbackNodeIds(machineState.edges);
   const signals = evaluateSignals(machineState, outputValue.simulationTick);
   const flowNodes: MachineFlowNode[] = stateValue.nodes.map((node) => ({
     id: node.id,
@@ -572,7 +586,10 @@ function App() {
     selected: outputValue.selectedNodeId === node.id,
     data: {
       node,
-      signal: outputValue.showSignals ? signals.get(node.id) ?? 0 : 0,
+      signal: presentSignal(
+        signals.get(node.id) ?? 0,
+        outputValue.showSignals,
+      ),
       disabled: pending,
     },
     draggable: !pending,
@@ -581,8 +598,11 @@ function App() {
     ariaLabel: `${KIND_LABELS[node.kind]}: ${node.label}`,
   }));
   const flowEdges: Edge[] = machineState.edges.map((edge) => {
-    const signal = signals.get(edge.source) ?? 0;
-    const active = outputValue.showSignals && signal >= 0.5;
+    const signal = presentSignal(
+      signals.get(edge.source) ?? 0,
+      outputValue.showSignals,
+    );
+    const active = signal.highlighted;
     return {
       ...edge,
       type: "smoothstep",
@@ -595,9 +615,7 @@ function App() {
         stroke: active ? "#b7ffea" : "#546279",
         strokeWidth: active ? 3 : 1.5,
       },
-      label: outputValue.showSignals
-        ? `${Math.round(signal * 100)}%`
-        : undefined,
+      label: outputValue.showSignals ? signal.label : undefined,
       labelStyle: { fill: "#c7d3e6", fontWeight: 700, fontSize: 10 },
       labelBgStyle: { fill: "#111827", fillOpacity: 0.88 },
       labelBgPadding: [4, 2],
@@ -612,8 +630,7 @@ function App() {
   );
   const activeActuators =
     stateValue.nodes.filter((node) =>
-      node.kind === "actuator" &&
-      (signals.get(node.id) ?? 0) >= node.parameters.threshold
+      isActuatorFiring(node, signals.get(node.id) ?? 0)
     ).length;
 
   const handleNodeChanges = (changes: NodeChange<MachineFlowNode>[]) => {
@@ -752,8 +769,11 @@ function App() {
               <p>
                 {selected
                   ? `${KIND_LABELS[selected.kind]} · ${
-                    Math.round((signals.get(selected.id) ?? 0) * 100)
-                  }% signal`
+                    presentSignal(
+                      signals.get(selected.id) ?? 0,
+                      outputValue.showSignals,
+                    ).label
+                  } signal`
                   : "Selection, tick, and signal glow follow your user identity."}
               </p>
             </div>
@@ -821,6 +841,7 @@ function App() {
                 <i className="pulse" /> Low &lt; 50%
               </p>
               <p>Delay modules read an earlier tick.</p>
+              <p>Feedback loops are rejected; concurrent loops stay at 0%.</p>
             </div>
           </aside>
         </section>
@@ -829,6 +850,12 @@ function App() {
           <span id="machine-status">
             {pending ? "Committing to Fabric…" : "All controls are live"}
           </span>
+          {feedbackNodeIds.size > 0 && (
+            <span className="action-error" role="status">
+              Feedback loop detected · {feedbackNodeIds.size}{" "}
+              cyclic modules held at 0%
+            </span>
+          )}
           {actionError && (
             <span className="action-error" role="alert">
               {actionError.message}
