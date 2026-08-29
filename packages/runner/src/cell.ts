@@ -1242,8 +1242,8 @@ export class CellImpl<T extends FabricValue>
       );
     }
     if (cacheable) {
-      // Re-read this._link: validateAndTransform (via viewRef -> link) may have
-      // run ensureLink() and replaced it with the completed link object, which
+      // Re-read `#_link`: validateAndTransform (via viewRef -> link) may have
+      // run `#ensureLink()` and replaced it with the completed link object, which
       // is the identity subsequent get()s will hash.
       tx.setCachedReadResult!(this.#viewRefHash(), variant, value);
     }

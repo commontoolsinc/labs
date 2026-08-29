@@ -219,7 +219,7 @@ Prefer the structured traces above. When you need log output, use the focused
 loggers before raising the whole `scheduler` module:
 
 - `runner.trigger-flow` — which source action id re-enters `Runner.run()`,
-  `setupInternal()`, `instantiatePatternNode()`
+  `setupInternal()`, `#instantiatePatternNode()`
 - `runner.wish-flow` — is `wish()` launching suggestion patterns or just
   reading hot indexes?
 - `scheduler` — settle-loop internals (broad — last resort)
