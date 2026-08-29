@@ -129,6 +129,7 @@ export function createSelectionRequestTracker(
   let authoritativeRequestSequence = 0;
   let requestSequence = 0;
   let pendingCount = 0;
+  let latestRequestedResult = Promise.resolve(true);
 
   return {
     reconcile(selection) {
@@ -141,35 +142,39 @@ export function createSelectionRequestTracker(
         latestSuccessfulSequence = requestSequence;
       }
     },
-    async request(nodeId, writeSelection) {
-      if (latestRequestedSelection === nodeId) return true;
+    request(nodeId, writeSelection) {
+      if (latestRequestedSelection === nodeId) return latestRequestedResult;
       const sequence = ++requestSequence;
       latestRequestedSelection = nodeId;
       latestRequestedSequence = sequence;
       pendingCount++;
-      let succeeded = false;
-      try {
-        succeeded = (await writeSelection(nodeId)) !== false;
-        if (succeeded && sequence >= latestSuccessfulSequence) {
-          latestSuccessfulSelection = nodeId;
-          latestSuccessfulSequence = sequence;
+      const result = (async () => {
+        let succeeded = false;
+        try {
+          succeeded = (await writeSelection(nodeId)) !== false;
+          if (succeeded && sequence >= latestSuccessfulSequence) {
+            latestSuccessfulSelection = nodeId;
+            latestSuccessfulSequence = sequence;
+          }
+        } finally {
+          pendingCount--;
+          if (
+            pendingCount === 0 &&
+            authoritativeRequestSequence >= latestSuccessfulSequence
+          ) {
+            latestRequestedSelection = authoritativeSelection;
+            latestSuccessfulSelection = authoritativeSelection;
+            latestRequestedSequence = authoritativeRequestSequence;
+            latestSuccessfulSequence = authoritativeRequestSequence;
+          } else if (!succeeded && sequence === latestRequestedSequence) {
+            latestRequestedSelection = latestSuccessfulSelection;
+            latestRequestedSequence = latestSuccessfulSequence;
+          }
         }
-      } finally {
-        pendingCount--;
-        if (
-          pendingCount === 0 &&
-          authoritativeRequestSequence >= latestSuccessfulSequence
-        ) {
-          latestRequestedSelection = authoritativeSelection;
-          latestSuccessfulSelection = authoritativeSelection;
-          latestRequestedSequence = authoritativeRequestSequence;
-          latestSuccessfulSequence = authoritativeRequestSequence;
-        } else if (!succeeded && sequence === latestRequestedSequence) {
-          latestRequestedSelection = latestSuccessfulSelection;
-          latestRequestedSequence = latestSuccessfulSequence;
-        }
-      }
-      return succeeded;
+        return succeeded;
+      })();
+      latestRequestedResult = result;
+      return result;
     },
   };
 }

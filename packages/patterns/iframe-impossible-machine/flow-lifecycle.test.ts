@@ -8,6 +8,7 @@ import {
   capturePositionDrafts,
   type PositionDraft,
   reconcileCollaborativeNodes,
+  reconcilePositionCommit,
   settlePositionDraft,
 } from "./flow-lifecycle.ts";
 
@@ -115,5 +116,33 @@ describe("flow-lifecycle", () => {
     );
 
     expect(result.map((node) => node.selected)).toEqual([false, true]);
+  });
+
+  it("rolls back only a failed gesture that is still current", () => {
+    const first = { position: { x: 20, y: 20 }, token: 1 };
+    const second = { position: { x: 20, y: 20 }, token: 2 };
+    const draftsRef = { current: { gate: second } };
+
+    expect(
+      reconcilePositionCommit(
+        draftsRef,
+        "gate",
+        first,
+        undefined,
+        { x: 4, y: 6 },
+      ),
+    ).toEqual({ settled: false });
+    expect(draftsRef.current).toEqual({ gate: second });
+
+    expect(
+      reconcilePositionCommit(
+        draftsRef,
+        "gate",
+        second,
+        undefined,
+        { x: 4, y: 6 },
+      ),
+    ).toEqual({ settled: true, position: { x: 4, y: 6 } });
+    expect(draftsRef.current).toEqual({});
   });
 });

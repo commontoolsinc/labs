@@ -193,4 +193,30 @@ describe("Impossible Machine interaction lifecycle", () => {
     });
     expect(writes.at(-1)).toBe("node-d");
   });
+
+  it("shares the result of a duplicate pending selection", async () => {
+    const tracker = createSelectionRequestTracker("node-a");
+    let release!: (succeeded: boolean) => void;
+    const gate = new Promise<boolean>((resolve) => release = resolve);
+    let writes = 0;
+
+    const first = tracker.request("node-b", () => {
+      writes++;
+      return gate;
+    });
+    const duplicate = tracker.request("node-b", () => {
+      writes++;
+      return Promise.resolve(true);
+    });
+    let duplicateSettled = false;
+    void duplicate.then(() => duplicateSettled = true);
+
+    await Promise.resolve();
+    expect(writes).toBe(1);
+    expect(duplicateSettled).toBe(false);
+
+    release(false);
+    expect(await first).toBe(false);
+    expect(await duplicate).toBe(false);
+  });
 });

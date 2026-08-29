@@ -435,15 +435,22 @@ function MachineCanvas({
         token: 0,
       };
       void onPositionCommit(node.id, draft.position).then((committed) => {
-        if (committed === undefined) return;
-        if (!flowLifecycle.settlePositionDraft(draftsRef, node.id, draft)) {
+        const result = flowLifecycle.reconcilePositionCommit(
+          draftsRef,
+          node.id,
+          draft,
+          committed,
+          authoritativeNodesRef.current.find(
+            (candidate) => candidate.id === node.id,
+          )?.position,
+        );
+        if (!result.settled || result.position === undefined) {
           return;
         }
+        const position = result.position;
         setNodes((current) =>
           current.map((candidate) =>
-            candidate.id === node.id
-              ? { ...candidate, position: committed }
-              : candidate
+            candidate.id === node.id ? { ...candidate, position } : candidate
           )
         );
       });

@@ -95,3 +95,17 @@ export function settlePositionDraft(
   draftsRef.current = next;
   return true;
 }
+
+/** Reconciles only the gesture whose position write has settled. */
+export function reconcilePositionCommit<PositionType extends XYPosition>(
+  draftsRef: PositionDraftsRef,
+  nodeId: string,
+  draft: PositionDraft,
+  committed: PositionType | undefined,
+  authoritative: PositionType | undefined,
+): { settled: boolean; position?: PositionType } {
+  if (!settlePositionDraft(draftsRef, nodeId, draft)) {
+    return { settled: false };
+  }
+  return { settled: true, position: committed ?? authoritative };
+}
