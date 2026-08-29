@@ -26,18 +26,79 @@ re-fires their sinks. `watch` needs no polling.
 Two existing long-lived holders show the lifecycle discipline:
 
 - `packages/cf-harness`: `createHarnessFabricSessionFactory` builds one
-  controller, `cacheHarnessFabricSessionFactory` memoizes it so every
-  invocation of a run shares it, and a rejected construction clears the cache
-  so a transient failure is not replayed forever. That
-  reconnect-on-failure policy is the model to copy.
+  controller and `cacheHarnessFabricSessionFactory` memoizes it so every
+  invocation of a run shares it. Its cache clears on a **rejected
+  construction** and nothing else — the `session === attempt` test guards
+  against evicting a newer attempt, and is not a health probe — so it
+  covers the connection that never opened, not one that later drops.
 - `packages/fuse`: `CellBridge` takes an injectable `PiecesLoader` plus a
   separate `reconnectPiecesLoader` for recovery.
 
 `initialize` health-checks the server before it returns, so the first
 connection is proven live on the way up. What a long-lived process gives up is
 the repetition: `loadPieces` re-proves liveness on every verb, and a shell
-asks once. Liveness after that first connection is shuttle's to own, and the
-cf-harness reconnect-on-failure policy is the leaner fit.
+asks once.
+
+## Recovery already exists
+
+An established connection heals below shuttle, in the memory client
+(`packages/memory/v2/client.ts`) rather than the storage layer above it:
+
+- `Client.#onClose` marks the client disconnected, calls
+  `handleDisconnect()` on every `SpaceSession`, rejects in-flight requests
+  as `ConnectionError`, and starts `Client.#reconnect()` — a
+  single-flighted loop that re-runs `#hello()` and then `restore()`s each
+  session, backing off through `reconnectDelayMs` (25 ms base, 30 s cap,
+  jittered).
+- Standing watches survive it. `SpaceSession` remembers its selectors in
+  `#watchSpecs`; `restore()` applies the server's `sync` when the server
+  resumed the session and re-arms through `watchSetSync(#watchSpecs, …)`
+  when it did not. Both paths reuse the same `WatchView` instance, which is
+  what keeps `SpaceReplica.#consumeWatchView`'s standing loop delivering.
+  Outstanding commits replay through `#outstandingCommits`.
+- `SpaceReplica` deliberately does nothing on a drop, and says so:
+  `#consumeOwedSessionRemount` records that a transport drop is already
+  healed by the client's own `reconnect()`/`restore()` and must be left
+  alone.
+
+Two gaps around it. **Initial** construction is not retried —
+`SpaceReplica.sessionHandle()` clears its memo on failure and re-attempts
+only when a caller next asks for a session, which is the case cf-harness's
+cache exists for. And a **permanent** failure stops the loop rather than
+retrying: `isPermanentConnectionFailure` (a protocol-flag mismatch) sets
+`Client.#fatalError`, while `isPermanentAuthorizationError` routes a
+non-retriable denial to `#terminateSession` for that one space, leaving the
+client's other spaces alive.
+
+Shuttle therefore adds no recovery of its own. The repo's rule against retry
+loops applies with particular force here: the loop that belongs in this
+system already exists one layer down, and a second one would fight it.
+
+## Observing connection state
+
+What shuttle does need is unavailable today. The prompt's live marker and
+the views' reconnecting marker both want connection state, and nothing in
+the storage layer reports it:
+
+- `Client.isConnected()` exists but reaches no consumer — `SpaceReplica`
+  holds the client in a private field and surfaces nothing from it.
+- The notification channel carries no connection variant.
+  `IStorageNotificationCapability.subscribe` delivers commit, revert, load,
+  pull, integrate, and reset notifications only.
+- `IStorageManager.authorizationError(space)` is the one connection-adjacent
+  state a consumer can read, and it is a per-space poll for permanent
+  denial. Its own documentation records a hole: a denial that arrives during
+  reconnect is visible only as the session's `closeError`.
+- Nothing exposes "reconnecting" at all. `Client.#reconnecting`,
+  `#connected`, and `#fatalError` are private with no accessor, and
+  `#onClose` swallows the reconnect promise, so a consumer cannot tell quiet
+  because nothing changed from quiet because the socket is down and backoff
+  has reached its thirty-second cap.
+
+So the liveness work is an **observation seam**, added where the state
+already lives, reporting live, reconnecting, and permanently failed. That is
+what B1 owes, and the three states are what the prompt and the view markers
+render.
 
 ## Watch mechanics
 

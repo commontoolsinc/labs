@@ -17,7 +17,7 @@ shuttle estuary/board> watch topics/3
 │ title    "verb contracts"            │
 │ replies  14                          │
 └── q: back (watch stays armed) ───────┘
-shuttle estuary/board> call topics/3/add-reply --body "hi"
+shuttle estuary/board> call topics/3 add-reply --body "hi"
 watch topics/3: replies 14 → 15
 shuttle estuary/board>
 ```
@@ -47,8 +47,9 @@ session is one a caller should state once" — caps out exactly there,
 because piece, path, and scope are not identical across a session: they
 change with every step, because they are the work. The fabric's reference
 grammar is right-anchored —
-`/[@did:key:…/]of:fid1:<id>[@scope][/path…][#argument]`, documented at the
-top of `packages/cli/lib/llm-friendly-ref.ts` — with omitted levels
+`/[@did:key:…/]of:fid1:<id>[@scope][/path…]`, documented at the top of
+`packages/cli/lib/llm-friendly-ref.ts`, which adds the `#argument` suffix
+at the CLI's intake seams — with omitted levels
 supplied by context, and shuttle makes that context a position you
 navigate: **a place is the context that fills in the omitted levels of a
 reference**, moved by `cd`, relative references, and handles instead of by
@@ -189,19 +190,30 @@ it runs.
     page size, never collection size. The seam and solution lanes are
     issue [#6534](https://github.com/commontoolsinc/labs/issues/6534); B3
     opens by proving the seam, and falls back to a capped deep sink with
-    an honest label if it disappoints.
+    an honest label if it disappoints. The raw subscription serves the
+    base scope only — `SpaceReplica.sinkDocument` keys on the base
+    instance and takes no scope — so a list read under `@user` or
+    `@session` takes the capped deep sink, which reads through the scope
+    its cells carry. Making that seam scope-aware end to end is part of
+    #6534, not a shuttle workaround.
 26. **The piece overview ships structured, not live.** One frame —
     arguments, result summary, callables, pattern identity — rendered as a
     refreshable snapshot in B3; the live piece watch is deferred.
-27. **A callable is invocable by its path.** `call` keeps `cf`'s
-    address-plus-name form, and adds the one-reference form —
-    `call topics/3/add-reply`, `call %4` — that invokes the callable cell
-    the path names; arity disambiguates. A callable is a cell like
-    everything else (FUSE already invokes one as an executable file), and
-    inline callables in listings plus numbered handles require the path
-    form: calling what a listing showed must not need a reference split by
-    hand. No new reference syntax — the path is already canonical; the
-    sugar is in the verb.
+27. **Handles are structured.** A handle is a bound reference with
+    structure, not a string: a listing records each row's kind as it mints
+    the handle, and for a callable row it records the receiver and the
+    verb name. So `call %4` invokes what the listing showed through the
+    same root-level name resolution `cf` already performs, and arity
+    resolves against a kind known locally at mint time — a callable handle
+    means the positionals after it are input, a piece handle means the
+    next positional is the verb name. That delivers the ergonomic the
+    listing demands, calling what was shown without splitting a reference
+    by hand, and delivers it without a typed path grammar: `call` keeps
+    `cf`'s two-positional form (`call topics/3 add-reply`) as the typed
+    spelling, and a typed path ending in a callable is refused. This is
+    also how a verb is named everywhere else — a verb name is interface
+    vocabulary rather than a data path, and the receiver is the
+    addressable thing.
 28. **Watches are session objects.** `watch` arms a subscription that
     outlives its view: leaving the view keeps it armed, each settled
     change appends one event line at the prompt, and a pinned strip above
@@ -229,12 +241,16 @@ The ambient context is one record:
   inside it) and scope.
 - **External working location**, **browse mode**, **invocation session**.
 
-`cd` accepts relative path segments, `..`, absolute canonical references,
-slugs, space names, wish targets, and scope suffixes. Every reference a
-command takes resolves against the cwd; an absolute reference always works
-and never depends on it. The prompt renders position and scope compactly
-(an elided alias is checked against the target's declared name, never
-guessed).
+`cd` accepts relative path segments, `..`, rooted and complete canonical
+references, slugs, space names, wish targets, and scope suffixes. Every
+reference a command takes resolves against the cwd, and how much of the
+cwd it needs varies: a rooted `/of:…` fixes the piece and path but still
+draws its space from the place, so only a complete
+`/@did:key:…/of:…` names its cell from anywhere
+([`grammar.md`](grammar.md)). The place is result-rooted — `cd` refuses a
+reference carrying `#argument`, and arguments are reached per operand. The
+prompt renders position and scope compactly (an elided alias is checked
+against the target's declared name, never guessed).
 
 One place at a time in v1, but no global singleton: the implementation keeps
 place-per-instance so multiple places (tabs, split views, an agent holding

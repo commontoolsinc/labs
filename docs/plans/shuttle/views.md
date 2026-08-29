@@ -42,7 +42,7 @@ drills in place; leaving restores the parent's scroll and selection.
 │ %2  migration rehearsal   replies  3        │
 │▸%3  co-presence rollout   replies  8    +   │
 │ …                              14 of 16     │
-│ : call %3/add-reply --body "shipped"        │
+│ : call %3 add-reply --body "shipped"        │
 └ q back · enter drill · / filter · : command ┘
 ```
 
@@ -113,9 +113,26 @@ first work item, made in `packages/cli` where the substrate lives.
   problem and the solution lanes. B3 opens by proving that seam on the
   remote path; if it disappoints, the fallback is a capped deep sink with
   an honest "watching first N" label.
+- **The raw subscription serves the base scope only.**
+  `SpaceReplica.sinkDocument` (`packages/runner/src/storage/v2.ts`) accepts
+  no scope and keys its subscriber set with `docKey(uri, "space")` — the
+  base instance — so under `@user` or `@session` it would watch base
+  membership while the frame claimed to show an overlay. A list view
+  therefore takes the raw subscription only when the ambient scope is the
+  base, and the capped deep sink with its "watching first N" label under an
+  overlay, where `Cell.sink` reads through the scope the cell carries. The
+  keying vocabulary for the scope-aware version is already there — `docKey`
+  takes an instance, and the load path passes
+  `instance ?? normalizeCellScope(scope)` — so what has to grow a scope
+  parameter is that one signature, not the storage model. #6534's seam must
+  be scope-aware end to end before the raw path can serve an overlay.
 - Guard-plus-`idle()` settling, per `renderVDomToHtml`'s form.
 - The connection's state is visible in the frame (`● live`, cold banner,
-  or a reconnecting marker); on reconnect the view resyncs and repaints.
+  or a reconnecting marker), read from the observation seam B1 builds —
+  the storage layer publishes no connection state today
+  ([`runtime-integration.md`](runtime-integration.md)). On reconnect the
+  memory client re-arms the watch itself, so the view resyncs and repaints
+  without re-subscribing.
 
 ## Open questions
 

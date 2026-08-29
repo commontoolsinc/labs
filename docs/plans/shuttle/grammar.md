@@ -26,12 +26,46 @@ case that also injects place-derived flags.
 A reference on the line resolves against the place, right-anchored, exactly
 as the canonical grammar's context rule already works:
 
-- `/…` — absolute canonical reference; never depends on the place.
+- `/of:…` — a **rooted** reference: it names the piece and path from the
+  root, so no part of the position is read from the place — but it omits
+  the space, which the place still supplies. Rooted is not
+  place-independent.
+- `/@did:key:…/of:…` — a **complete** reference: it carries its own space,
+  so it denotes the same cell read from anywhere. Only this form is
+  place-independent, and it is what a printed address or a shared link
+  should be. Denoting is not reaching, though: a connection serves one
+  space, so a complete reference naming a different space than the place's
+  is refused rather than followed — `validateEmbeddedSpaces`
+  (`packages/cli/lib/llm-friendly-ref.ts`) already holds `cf` to that, and
+  shuttle v1 holds one connection.
 - `#…` — a wish target (entry point), resolvable from anywhere.
 - `..` — up one level; `cd -` — the previous place.
 - Anything else — relative: resolved as a child of the current position
   (a facet at a space root, a key or index inside a piece, a slug inside
   `slugs/`).
+
+The distinction is the parser's, not shuttle's: `parseLLMFriendlyLink`
+(`packages/runner/src/link-types.ts`) takes the space as a separate
+argument and uses it whenever the reference carries no `@did:key:…`
+prefix, overriding it with the embedded space when one is present. A
+rooted reference is therefore exactly as space-dependent as a relative
+one; it is the piece and path it fixes, not the space.
+
+Two spellings share the `#` character and nothing else. A lone `#name`
+token is a wish target, as above. `#argument` is a suffix on a reference
+and only that — it selects the piece's arguments cell, the same selection
+`--input` spells as a flag (`normalizeLLMFriendlyRef` in
+`packages/cli/lib/llm-friendly-ref.ts`, which strips it before the runner
+grammar sees the string, and refuses every other fragment).
+
+A place is **result-rooted**, and holds exactly space, piece, path, and
+scope. `cd` refuses a reference carrying `#argument` rather than dropping
+the suffix silently: a place that could root at the arguments cell would
+leave every later relative read ambiguous about which side of the piece it
+addressed, and the prompt would have to carry the distinction for as long
+as you stood there. Arguments are reached per operand instead —
+`get topics/3#argument`, and `--input` on the `cf` verbs that take it — so
+the choice is one visible token at each use.
 
 ## The space root and facets
 
@@ -72,6 +106,12 @@ continues the current one), so `cd %3` and `get %1/title` act on what a
 view showed without retyping anything. Handles are how a view feeds the
 next command without the view being a place; an interactive picker can
 layer on later and produce the same handles.
+
+A handle carries structure rather than a string. The listing records each
+row's kind as it mints one, and for a callable row the receiver and the
+verb name it stands for — which is what lets `call %4` invoke without a
+hand-split reference, and lets arity resolve locally (the "Calling a verb"
+section below).
 
 **A view is not necessarily a place.** A page of results, a search hit
 list, a filtered projection — these are things to look at and pick from,
@@ -173,20 +213,35 @@ legible space names arrive when the fabric grows them.
 
 ## Calling a verb
 
-`call` keeps `cf`'s two-positional form — `call topics/3 add-reply` — so
-knowledge transfers, and adds the one-reference form:
-`call topics/3/add-reply` invokes the callable cell the path names,
-resolving with the same defaulting as `get`. Arity disambiguates: one
-reference argument invokes what the path names; a second positional is the
-callable name, `cf`-style.
+Two forms, and no third:
 
-The path form exists because a callable is a cell like everything else —
-FUSE already mounts a handler as an executable file and `cf exec` runs it
-by path — and because listings surface callables inline and hand out
-handles: when `%4` is a callable row, `call %4` must work without
-splitting a reference by hand. This adds no reference-syntax capability;
-the path is already spellable in the canonical form, and the sugar is in
-the verb.
+- `call <ref> <name>` — the typed spelling, `cf`'s two-positional form
+  (`call topics/3 add-reply`), so knowledge transfers both ways.
+- `call <callable-handle> [input…]` — `call %4`, where the listing minted
+  `%4` from a callable row. The handle carries its receiver and verb name
+  (the listings section above), so it invokes through the same root-level
+  name resolution the typed form uses.
+
+A typed path ending in a callable — `call topics/3/add-reply` — is
+refused, and the error names the two-positional form to use instead.
+
+Both forms land on the resolution that exists. `resolvePieceCallable`
+(`packages/cli/lib/piece.ts`) takes a receiver and a callable *name*,
+resolving it against the piece's result cell, then its input cell, then
+its handlers. A handle that carries the name rather than a path is what
+keeps both forms on that one resolution, so neither needs a full-path
+callable resolver built first.
+
+Arity never has to guess, because a handle's kind is known locally the
+moment the listing mints it: a callable handle means the positionals after
+it are input, a piece handle means the next positional is the verb name.
+Nothing about parsing a line waits on what a reference turns out to
+resolve to.
+
+The split is the one the fabric already draws. A verb name is interface
+vocabulary, not a data path — the receiver is the addressable thing, and
+the name selects from what its interface offers. Two positional slots keep
+that visible on every line.
 
 ## Redirection and schemes
 

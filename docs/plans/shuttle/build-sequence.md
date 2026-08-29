@@ -60,35 +60,66 @@ follow `docs/development/DEPENDENCIES.md`. No behavior; the package
 compiles and its empty test task runs.
 
 **B1 — walking skeleton** (after A1; A2 for nothing yet). The place value
-and its owner module, the prompt, a readline loop, and `cd` / `ls` /
-`pwd` / `get` over one held `PiecesController` built cf-harness-style
-(memoized factory, cache cleared on rejected construction). Facets
-`slugs/` and `pieces/` only; `fuse/` waits. Liveness: this milestone is
-where the reconnect story is proven, because everything after leans on it.
+and its owner module — the whole pair, position *and* scope, because scope
+is half of what a place is (decision 20): `cd @user` and `cd @space` move
+it, the prompt renders it, and `pwd` prints both halves. The prompt, a
+readline loop, and `cd` / `ls` / `pwd` / `get` over one held
+`PiecesController`, with `cd -` for the previous place and `#name` wish
+targets navigable (`cd #favorites`, and the `wish` verb, over the
+`./lib/wish` export entry A1 adds). `where` lands here as the printing
+surface for the ambient record; later milestones add their dimensions to it
+as they add the dimensions themselves. Facets `slugs/` and `pieces/` only.
+
+Liveness, in two halves. The held controller is memoized cf-harness-style,
+which covers the construction that never succeeds — the case that cache
+actually addresses. Recovery of an *established* connection needs nothing
+from shuttle: the memory client reconnects and re-arms its watches by
+itself ([`runtime-integration.md`](runtime-integration.md)), so B1 proves
+that rather than rebuilding it — a test that drops the transport under a
+standing watch and shows the subscription still delivering afterwards. What
+B1 does build is the observation seam, reporting live, reconnecting, and
+permanently failed, because no such surface exists today and both the
+prompt and the view markers consume it. No retry loop in shuttle on either
+half.
 
 **B2 — writes, calls, handles** (after A2, A3). `set` with inline values,
-`edit` over `$EDITOR`, `call` through `callFromCommand`, numbered handles
-from listings, and the invocation session minted once at startup and
-passed explicitly. Warm-on-enter lands here, since `set` is what makes
-stale computed state visible.
+`edit` over `$EDITOR`, and `link` — the one spelling that writes a
+reference instead of copying a value (decision 14), and the only write of
+the three that has no `cf` equivalent to lean on. `call` through
+`callFromCommand`, with `verbs` and `describe` beside it, since listing a
+piece's callables is what makes `call` usable without leaving the shell.
+Numbered handles from listings land here, and `more` with them: `more`
+continues a listing *and its handle numbering* (decision 24), so it needs
+the handle table, not merely a page cursor. Handles are structured at mint
+— each row's kind, plus receiver and verb name for a callable row — which
+is what `call %n` resolves against (decision 27). The invocation session is
+minted once at startup and passed explicitly. Warm-on-enter lands here,
+since `set` is what makes stale computed state visible.
 
 **B3 — watch and views** (after A4; view-substrate export entries added
 here). `Cell.sink` with the guard-plus-`idle()` settling discipline; the
 value, list, and structured piece-overview views on the `cf view` pager
-substrate; session watches with prompt event lines and the pinned strip;
-cold-browse mode. Governed by [`views.md`](views.md); it opens
+substrate; session watches (`watch`, `watches`, `unwatch`) with prompt
+event lines and the pinned strip; cold-browse mode and the `where mode`
+dimension that toggles it. Governed by [`views.md`](views.md); it opens
 with the two experiments and the raw-document-subscription proving test
 from issue [#6534](https://github.com/commontoolsinc/labs/issues/6534),
 falling back to the capped deep sink if the seam disappoints.
 
 **B4 — redirection, schemes, pipes.** `>` and `<` over fabric paths,
 `file:` and `https:` read ends, the native tool set v0 and the local
-escape. The external working location (`xcd`/`xpwd`, the `x:` base) and
-the full `where` surface land here.
+escape. The external working location (`xcd`/`xpwd`, the `x:` base) lands
+here, and with it `where` reaches its full surface: every dimension
+settable, the heavyweight ones rebuilding the connection and saying so
+(decision 22).
 
-**B5 — search, pagination polish, `!cf` escape.** `search` at any place,
+**B5 — search, the `fuse/` facet, `!cf` escape.** `search` at any place,
 cursoring over large listings, and the subprocess escape with
-place-derived flags injected.
+place-derived flags injected. The `fuse/` facet (decision 11) lands here
+too: mirroring `packages/fuse`'s tree is a self-contained slice whose only
+prerequisite is B1's facet machinery, so it sits at the tail by scheduling
+rather than by dependency, and can move earlier if the mirror proves
+cheap.
 
 ## Working rules
 
