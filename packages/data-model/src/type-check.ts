@@ -135,7 +135,14 @@ function classNameOf(
   ctor: { name?: unknown } | undefined,
   value: unknown,
 ): string {
-  const name = ctor?.name;
+  let name: unknown;
+  try {
+    name = ctor?.name;
+  } catch {
+    // `name` can be an accessor too, and this runs while a refusal is being
+    // explained. A class that will not say what it is called has no name here.
+    return typeof value;
+  }
   return (typeof name === "string" && name !== "") ? name : typeof value;
 }
 
@@ -175,9 +182,11 @@ export function assertValidFabricValueLayer(
   const ctor = ((value !== null) && (typeof value === "object"))
     ? constructorElseUndefined(value)
     : undefined;
-  const classIsArray = (ctor !== undefined) &&
-    (tagFromNativeBuiltinClass(ctor as { prototype: unknown }) ===
-      VALUE_TAGS.Array);
+  // Compared with `Array` itself rather than asked of the tag lookup, which
+  // reads `.prototype` -- a read a callable `Proxy` can trap, and this is the
+  // refusal path. `Array` is the only constructor that lookup calls an array,
+  // so the two ask the same question.
+  const classIsArray = ctor === Array;
 
   if (Array.isArray(value) || classIsArray) {
     // An array in this system is _inert_: a direct `Array` instance, which may

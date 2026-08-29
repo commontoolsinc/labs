@@ -1005,6 +1005,46 @@ describe("type-check", () => {
           });
         }
 
+        it("refuses a value whose class will not say its name", () => {
+          // `name` is an accessor too, so guarding the constructor read alone
+          // leaves the next read out in the open.
+          class NameThrows {}
+          Object.defineProperty(NameThrows.prototype, "constructor", {
+            value: Object.defineProperty(function () {}, "name", {
+              get() {
+                throw new Error("this must not reach the caller");
+              },
+            }),
+          });
+
+          expect(() => assertValidFabricValueLayer(new NameThrows())).toThrow(
+            "Not representable as a `FabricValue`: `object` (not a " +
+              "recognized fabric type)",
+          );
+        });
+
+        it("refuses a value whose constructor traps `prototype`", () => {
+          // A callable `Proxy` can throw from any read, `.prototype` included,
+          // which is what the class lookup would otherwise ask it for.
+          const trapped = new Proxy(function () {}, {
+            get(target, key) {
+              if (key === "prototype") {
+                throw new Error("this must not reach the caller");
+              }
+              return Reflect.get(target, key);
+            },
+          });
+          class ProxyCtor {}
+          Object.defineProperty(ProxyCtor.prototype, "constructor", {
+            value: trapped,
+          });
+
+          expect(() => assertValidFabricValueLayer(new ProxyCtor())).toThrow(
+            "Not representable as a `FabricValue`: `object` (not a " +
+              "recognized fabric type)",
+          );
+        });
+
         it("refuses a value whose class cannot be read, without propagating", () => {
           // The one shape that defeats the prototype read as well. Both the
           // reason-picking probe and the name lookup fail on it, and the
