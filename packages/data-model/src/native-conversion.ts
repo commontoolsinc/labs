@@ -3,6 +3,13 @@
  * directions, along with the predicate saying in advance whether a value can
  * cross it.
  *
+ * The inbound work splits along one question -- does conversion produce a new
+ * value? Minting a native object's fabric form is one function, and the
+ * shallow conversion is that asked first, then the vet in `type-check.ts` for
+ * a value that minted nothing, plus a frozenness adjustment. A caller can
+ * therefore ask either half without having to work the answer back out of what
+ * it was handed.
+ *
  * Inbound, anything not representable is refused rather than approximated: a
  * `Map`, a class instance, an unrecognized type all throw, on the principle
  * that a wrong value is worse than none. A value that is already a deep-frozen
@@ -49,8 +56,8 @@ import { cloneHelper } from "./value-clone.ts";
 import { isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 
 /**
- * Helper for `shallowFabricFromNativeValue()`, which rejects native objects
- * with extra enumerable properties.
+ * Helper for `shallowFabricFromNativeObjectElseUndefined()`, which rejects
+ * native objects with extra enumerable properties.
  */
 function rejectExtraProperties(value: object, typeName: string): void {
   if (Object.keys(value).length > 0) {
