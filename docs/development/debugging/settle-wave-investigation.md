@@ -203,7 +203,7 @@ const trace = await commonfabric.getWriteStackTrace()
 
 Interpreting the captured stacks:
 
-- `Runner.setupInternal` / `Runner.#instantiatePatternNode` frames mean piece
+- `Runner.setupInternal` / `#instantiatePatternNode` frames mean piece
   instantiation/setup writes — usually noise, not churn
 - `diffAndUpdate`, `applyChangeSet`, or pattern handler frames point to runtime
   state updates after setup — usually the more interesting targets
