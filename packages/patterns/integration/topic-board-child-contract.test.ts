@@ -33,17 +33,28 @@ import { serverExecutionOnStepSkip } from "../../../tasks/server-execution-on-sk
 
 const { API_URL, SPACE_NAME } = env;
 
-// The server-execution v2 posture this test process runs (testing.md §2):
-// the CI ON lane sets EXPERIMENTAL_SERVER_EXECUTION=true; unset = OFF.
+// The RAW env posture, read only to key the skip guard below (testing.md
+// §2): the explicit-`false` OFF regression-guard lane sets
+// EXPERIMENTAL_SERVER_EXECUTION=false; the DEFAULT lanes leave it unset and
+// resolve the first-party default, which is ON since the flip. This value
+// is therefore undefined on the default (ON) lane — NOT the resolved
+// posture. The test's runtime posture is not taken from here: it is
+// whatever the lane's toolshed publishes and `PiecesController` adopts.
 const SERVER_EXECUTION_FROM_ENV = experimentalOptionsFromEnv(Deno.env.get)
   .serverExecution;
 
 // The ON arm's STEP-level skip guard (tasks/server-execution-on-skips.ts):
 // a step listed there for this file is skipped ONLY under the ON posture,
 // loudly (its reason is printed), and only while the entry exists — the OFF
-// arm and an unlisted step always run. No step of this file is listed
-// today; the guard stays wired on the pivot baseline case so a future
-// entry binds without re-plumbing.
+// arm and an unlisted step always run. The registry is EMPTY: no step of
+// any file is listed today, so this guard is inert everywhere and stays
+// wired on the pivot baseline case only so a future entry binds without
+// re-plumbing. Note
+// the key: it is the RAW env, while the on-skips module asks callers to
+// resolve env-else-first-party-default (as runtime-client's host now
+// does). Inert today for exactly that reason — undefined on the default
+// lane — and a future entry for this file would fail LOUD there (a red
+// lane, never a silent skip), which is when the key gets converted.
 function onArmStepSkip(step: string): { ignore: boolean } {
   if (SERVER_EXECUTION_FROM_ENV !== true) return { ignore: false };
   const entry = serverExecutionOnStepSkip(
