@@ -17,7 +17,7 @@ shuttle estuary/board> watch topics/3
 │ title    "verb contracts"            │
 │ replies  14                          │
 └── q: back (watch stays armed) ───────┘
-shuttle estuary/board> call topics/3 add-reply --body "hi"
+shuttle estuary/board> call topics/3 add-reply -- --body "hi"
 watch topics/3: replies 14 → 15
 shuttle estuary/board>
 ```
@@ -209,9 +209,9 @@ it runs.
     next positional is the verb name. That delivers the ergonomic the
     listing demands, calling what was shown without splitting a reference
     by hand, and delivers it without a typed path grammar: `call` keeps
-    `cf`'s two-positional form (`call topics/3 add-reply`) as the typed
-    spelling, and a typed path ending in a callable is refused. This is
-    also how a verb is named everywhere else — a verb name is interface
+    `cf`'s receiver-plus-name form (`call topics/3 add-reply`) as the
+    typed spelling, and a typed path ending in a callable is refused. This
+    is also how a verb is named everywhere else — a verb name is interface
     vocabulary rather than a data path, and the receiver is the
     addressable thing.
 28. **Watches are session objects.** `watch` arms a subscription that

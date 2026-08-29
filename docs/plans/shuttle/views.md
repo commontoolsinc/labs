@@ -42,7 +42,7 @@ drills in place; leaving restores the parent's scroll and selection.
 │ %2  migration rehearsal   replies  3        │
 │▸%3  co-presence rollout   replies  8    +   │
 │ …                              14 of 16     │
-│ : call %3 add-reply --body "shipped"        │
+│ : call %3 add-reply -- --body "shipped"     │
 └ q back · enter drill · / filter · : command ┘
 ```
 

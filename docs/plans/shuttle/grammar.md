@@ -213,35 +213,44 @@ legible space names arrive when the fabric grows them.
 
 ## Calling a verb
 
-Two forms, and no third:
+Three spellings, and no fourth:
 
-- `call <ref> <name>` — the typed spelling, `cf`'s two-positional form
-  (`call topics/3 add-reply`), so knowledge transfers both ways.
+- `call <ref> <name> [input]` — the typed form, matching `cf`'s
+  (`call topics/3 add-reply '{"body":"hi"}'`), so knowledge transfers both
+  ways. The input positional takes an inline JSON value or `-` to read the
+  payload from stdin, and `--` opens the callable's schema-derived flags
+  (`call topics/3 search -- --query milk`) — the same spellings
+  `cf piece call` documents.
+- `call <piece-handle> <name> [input]` — a piece handle stands wherever a
+  typed reference stands, so this is the typed form with the receiver
+  already in hand: `call %3 add-reply -- --body "shipped"` off a listing
+  whose rows are pieces.
 - `call <callable-handle> [input…]` — `call %4`, where the listing minted
-  `%4` from a callable row. The handle carries its receiver and verb name
-  (the listings section above), so it invokes through the same root-level
-  name resolution the typed form uses.
+  `%4` from a callable row. That handle carries receiver *and* name, so
+  the name is not spelled again.
 
 A typed path ending in a callable — `call topics/3/add-reply` — is
-refused, and the error names the two-positional form to use instead.
+refused, and the error names the `<ref> <name>` form to use instead.
 
-Both forms land on the resolution that exists. `resolvePieceCallable`
+All three land on the resolution that exists. `resolvePieceCallable`
 (`packages/cli/lib/piece.ts`) takes a receiver and a callable *name*,
 resolving it against the piece's result cell, then its input cell, then
 its handlers. A handle that carries the name rather than a path is what
-keeps both forms on that one resolution, so neither needs a full-path
-callable resolver built first.
+keeps every form on that one resolution, so none of them needs a
+full-path callable resolver built first.
 
-Arity never has to guess, because a handle's kind is known locally the
-moment the listing mints it: a callable handle means the positionals after
-it are input, a piece handle means the next positional is the verb name.
-Nothing about parsing a line waits on what a reference turns out to
-resolve to.
+One arity rule covers all three, and it never consults the fabric. The
+typed form has a fixed shape — reference, name, optional input — and a
+handle's kind is fixed when the listing mints it: a piece handle takes the
+verb name in the next positional, a callable handle takes input. So
+whether a positional is a name or a payload is known from the line and the
+handle table alone, and nothing about parsing waits on what a reference
+turns out to resolve to.
 
 The split is the one the fabric already draws. A verb name is interface
 vocabulary, not a data path — the receiver is the addressable thing, and
-the name selects from what its interface offers. Two positional slots keep
-that visible on every line.
+the name selects from what its interface offers. Keeping receiver and name
+in separate slots keeps that visible on every line.
 
 ## Redirection and schemes
 
