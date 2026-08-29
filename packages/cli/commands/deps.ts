@@ -36,6 +36,9 @@ export const deps: Command<any> = new Command()
     prefix: "CF_",
   })
   .globalOption("-i,--identity <path:string>", "Path to an identity keyfile.")
+  .globalEnv("CF_SPACE=<space:string>", "The space name or DID.", {
+    prefix: "CF_",
+  })
   .globalOption("-s,--space <space:string>", "The space name or DID")
   .command("update", "Pin mutable fabric imports in a local source file.")
   .arguments("<file:string>")

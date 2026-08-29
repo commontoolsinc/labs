@@ -47,6 +47,7 @@ import {
 } from "./cell-selection.ts";
 import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 import type { ExecCommandSpec } from "./exec-schema.ts";
+import { noteWroteTo, transactionWroteTo } from "./write-receipt.ts";
 
 export const CF_RUNTIME_ERROR_LOG = Symbol.for("cf.cli.runtimeErrorLog");
 
@@ -1625,6 +1626,13 @@ export async function executeResolvedCallable(
       );
     }
 
+    // The handling committed, so the space it committed to is named here —
+    // before the early return below, which a call without an invocation id
+    // takes. A deduplicated retry is excluded: it settles on the original
+    // outcome and commits nothing, so a receipt would name a write this
+    // invocation did not perform.
+    if (!deduplicated) noteWroteTo(resolved.space);
+
     if (invocationId === undefined) return {};
 
     // The handling's receipt address, taken off the transaction the commit
@@ -1793,6 +1801,12 @@ export async function executeResolvedCallable(
     await runtime.idle();
     runtime.prepareTxForCommit(tx);
     await tx.commit();
+    // A tool's result cell is durable, so a transaction that wrote one is a
+    // write to the space like a handler's is. Neither `commit()` resolving
+    // nor a `done` status proves that: an empty transaction commits
+    // successfully too. The journal's novelty for this space is what was
+    // actually written, so the receipt follows it.
+    if (transactionWroteTo(tx, resolved.space)) noteWroteTo(resolved.space);
 
     // Drain the tool to a fully settled state — scheduler idle, storage synced,
     // and every in-flight async builtin finished — so the result is final by the
