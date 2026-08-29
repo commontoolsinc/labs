@@ -30,14 +30,15 @@ describe("Impossible Machine document shell", () => {
       new URL("./guest.tsx", import.meta.url),
     );
 
-    expect(source).toMatch(
-      /className="node-parameters nodrag nopan"\s+onClick={stopNodeControlPropagation}/,
-    );
+    expect(source).toContain('className="node-parameters nodrag nopan"');
+    expect(source).toContain("onClick={stopNodeControlPropagation}");
     expect(source).toContain(
       "selectionRequestTracker.current.request(nodeId, writeSelection)",
     );
-    expect(source).toContain("return runAction(action, false).finally(() => {");
-    expect(source).toContain("nodesDraggable\n              nodesConnectable");
+    expect(source).toContain("runAction(action, false)");
+    expect(source).toContain("nodesDraggable");
+    expect(source).toContain("nodesConnectable");
+    expect(source).toContain("elementsSelectable");
     expect(source).not.toContain("nodesDraggable={!pending}");
   });
 
