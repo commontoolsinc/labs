@@ -474,10 +474,10 @@ export async function prepareWorkspace(
     // define read from this same environment in packages/shell/felt.config.ts
     // when buildShell runs below): the raw `EXPERIMENTAL_SERVER_EXECUTION`
     // value, or null when unset — the shell then follows the first-party
-    // default (ON since the Phase 7 flip). Surfaced on toolshed's /api/meta
-    // as `shellServerExecutionDefine` so CI's posture probes can verify the
-    // binary they run: the explicit-`false` OFF guard lanes require an
-    // OFF-built shell, and the default lanes require the define UNSET
+    // default (OFF again since the flip-OFF lever). Surfaced on toolshed's
+    // /api/meta as `shellServerExecutionDefine` so CI's posture probes can
+    // verify the binary they run: the explicit-`true` ON guard lanes
+    // require an ON-built shell, and the default lanes require the define UNSET
     // (docs/specs/server-side-execution/testing.md §2; the shell define is
     // baked, so a lane on the wrong binary would silently be a mixed
     // posture). Written to both markers because

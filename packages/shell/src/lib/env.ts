@@ -77,10 +77,10 @@ export const EXPERIMENTAL = {
   modernCellRep: flagValue(EXPERIMENTAL_MODERN_CELL_REP_DEFINE),
   computedCellIds: flagValue(EXPERIMENTAL_COMPUTED_CELL_IDS_DEFINE),
   // Server-execution v2 (docs/specs/server-side-execution/): the
-  // first-party default (the constant — `true` since the Phase 7 flip
-  // PR), overridable by the build define either way
-  // (`EXPERIMENTAL_SERVER_EXECUTION=false` builds the OFF-arm shell — the
-  // rollback lever and CI's regression guard). The worker refuses to
+  // first-party default (the constant — `false` again since the flip-OFF
+  // lever), overridable by the build define either way
+  // (`EXPERIMENTAL_SERVER_EXECUTION=true` builds the ON-arm shell — CI's
+  // explicit-ON guard lanes). The worker refuses to
   // initialize if its resolved posture disagrees with this declaration
   // (runtime-client's posture agreement).
   serverExecution: flagValue(EXPERIMENTAL_SERVER_EXECUTION_DEFINE) ??

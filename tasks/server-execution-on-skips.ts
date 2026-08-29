@@ -3,18 +3,19 @@
 // The EXPLICIT per-phase skip lists of the server-execution v2 ON arm
 // (docs/specs/server-side-execution/testing.md §2): in CI the integration
 // suites run twice — the DEFAULT lanes (flag unset = the first-party
-// default, ON since the Phase 7 flip: these lanes ARE the ON arm and
-// carry this list) and the explicit-`EXPERIMENTAL_SERVER_EXECUTION=false`
-// OFF regression-guard lanes (the toolshed server OFF, the test processes
-// OFF, AND the binary's baked browser shell OFF-built —
-// `build-toolshed-off`; kept until the post-soak removal PR). The ON arm
-// may skip a test only by listing it here, with the plan phase whose
-// not-yet-landed surface it exercises and a reason. Never by silent
-// filtering: the CI step prints every skip from this file, and an empty
-// list means the ON arm runs the full suite — the OFF guard never skips.
-// The flip PR landed with this list EMPTY (its stated precondition);
-// before it the roles were inverted (default = OFF, explicit-`true` = the
-// ON arm on `build-toolshed-on`).
+// default, OFF again since the flip-OFF lever rolled the Phase 7 flip
+// back: these lanes are the OFF regression guard and take NO list) and
+// the explicit-`EXPERIMENTAL_SERVER_EXECUTION=true` ON lanes (the toolshed
+// server ON, the test processes ON, AND the binary's baked browser shell
+// ON-built — `build-toolshed-on`) — and the ON arm may skip a test only by
+// listing it here, with the plan phase whose not-yet-landed surface it
+// exercises and a reason. Never by silent filtering: the CI step prints
+// every skip from this file, and an empty list means the ON arm runs the
+// full suite — the OFF arm never skips. This list is EMPTY, which is what
+// lets the lane roles swap in either direction without opening a coverage
+// hole. Between the flip PR and the lever the roles were inverted
+// (default = ON carrying this list; explicit-`false` = the OFF guard on
+// `build-toolshed-off`).
 //
 // An entry retires when its phase lands (docs/plans/server-execution-v2.md);
 // a file listed here that no longer exists fails the run, so the lists

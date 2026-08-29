@@ -3325,6 +3325,20 @@ ruled-3b-close lift), OW31's ruled posture BUILT, OW45–OW53 CLOSED,
 OW38(ii) RULED met ("topics numbers are fine"). The owner merges it
 personally; the soak starts at ITS merge.** What it carries:
 
+**THE ROLLBACK LEVER (#TBD-LEVER), stacked on the flip PR and NOT to be
+merged unless the soak fails.** A pre-reviewed, pre-greened clean flip
+OFF: the minimal inverse of the default-coupled surfaces below (the
+constant, the absolute pin, the two deployed-topology gates' expected
+arm, the CLI lane's expected arm, the lane roles — with the explicit-arm
+guard lanes becoming explicit-`true` so the ON arm keeps a CI exercise
+while rolled back), KEEPING every mechanism the flip PR built. It exists
+so a rollback under fire is one merge of an already-green board rather
+than a revert authored in the moment; reverting #6535 wholesale would rip
+out the kept machinery with the default. Its green board IS the rollback
+rehearsal. Closed unmerged if the soak succeeds; if it merges, the
+rolled-back world re-tenses the plan and this register in its own
+follow-up.
+
 - The one-liner: `SERVER_EXECUTION_DEFAULT_ENABLED = true`
   (`packages/memory/v2/server-execution-default.ts`), and the absolute
   pin re-tensed to state the default IS ON

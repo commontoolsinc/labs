@@ -104,56 +104,50 @@ describe("serverExecutionPolicyFromEnv", () => {
   });
 });
 
+// The OFF witness for the serving-loop bootstrap (OW45 arm-B
+// server-ensure stage 1's explicit pin; the arc's OFF byte-identity
+// bar): with the flag OFF — unset (the first-party default, OFF again
+// under the flip-OFF lever) or explicitly "false" —
+// `startServerExecutionHost`
+// returns undefined, so NO ExecutorHost exists, NO SpaceServer is ever
+// built, and the server-side space-root ensure path added by stage 1
+// (the SpaceServer activation owed-step) structurally does not exist
+// OFF. The seat's only reachability chain is toolshed bootstrap →
+// ExecutorHost → SpaceServer.activate, and it severs at its first link.
+//
+// The options are untouchable fakes on purpose: the flag check is the
+// function's FIRST act, so the OFF arm must touch neither the server
+// nor the identity — any use throws and fails the pin. Under a flipped
+// (ON) default the same untouchables witness the other direction: unset
+// opens the gate and the first touch of the identity is the proof. The
+// full ON construction is exercised by the explicit-`true` guard lanes,
+// never here.
 describe("startServerExecutionHost OFF witness", () => {
-  // The OFF witness for the serving-loop bootstrap (OW45 arm-B
-  // server-ensure stage 1's explicit pin; the arc's OFF byte-identity
-  // bar): with the flag OFF — explicitly "false", the rollback arm (the
-  // first-party default is ON since the Phase 7 flip PR) —
-  // `startServerExecutionHost`
-  // returns undefined, so NO ExecutorHost exists, NO SpaceServer is ever
-  // built, and the server-side space-root ensure path added by stage 1
-  // (the SpaceServer activation owed-step) structurally does not exist
-  // OFF. The seat's only reachability chain is toolshed bootstrap →
-  // ExecutorHost → SpaceServer.activate, and it severs at its first link.
-  //
-  // The options are untouchable fakes on purpose: the flag check is the
-  // function's FIRST act, so the OFF arm must touch neither the server
-  // nor the identity — any use throws and fails the pin. The same
-  // untouchables give the UNSET arm its witness in the other direction
-  // since the flip: unset resolves the first-party default (ON), the gate
-  // opens, and the construction's first touch of the identity is the
-  // proof — the full ON construction is exercised by the integration
-  // lanes and the deployed-topology gate, not here.
-
   const untouchable = <T extends object>(label: string): T =>
     new Proxy({} as T, {
       get(_target, property) {
         throw new Error(
-          `${label}.${String(property)} touched — on the OFF arm the ` +
-            "flag check must precede any use (the pin's failure); on " +
-            "the unset arm, since the flip, this touch is the " +
-            "gate-opened witness",
+          `${label}.${String(property)} touched on the OFF arm — the ` +
+            "flag check must precede any use",
         );
       },
     });
 
-  it("resolves the UNSET flag to the first-party default — ON since the flip PR: the gate opens (witnessed by the identity being touched), never the silent OFF arm", () => {
+  it("resolves the UNSET flag to the first-party default — OFF again under the flip-OFF lever: the gate stays shut, nothing is touched", () => {
     // Relative to the constant on purpose (the one absolute pin lives in
-    // server-execution-flag.test.ts): if the default were OFF this would
-    // return undefined without touching anything; with the flipped
-    // default the bootstrap proceeds past the gate and its first act on
-    // the ON path — logging the serving identity — touches the
-    // untouchable, which is exactly the witness that unset no longer
-    // resolves OFF.
-    expect(SERVER_EXECUTION_DEFAULT_ENABLED).toBe(true);
-    expect(() =>
-      startServerExecutionHost({
-        server: untouchable<MemoryServer>("server"),
-        identity: untouchable<Identity>("identity"),
-        apiUrl: new URL("http://toolshed.test"),
-        envGet: () => undefined,
-      })
-    ).toThrow("identity.did touched");
+    // server-execution-flag.test.ts): with a flipped (ON) default the
+    // bootstrap would proceed past the gate and its first act on the ON
+    // path — logging the serving identity — would touch the untouchable.
+    // Rolled back, unset resolves OFF and the function returns before it
+    // reads anything, which is what the untouchables witness.
+    expect(SERVER_EXECUTION_DEFAULT_ENABLED).toBe(false);
+    const host = startServerExecutionHost({
+      server: untouchable<MemoryServer>("server"),
+      identity: untouchable<Identity>("identity"),
+      apiUrl: new URL("http://toolshed.test"),
+      envGet: () => undefined,
+    });
+    expect(host).toBeUndefined();
   });
 
   it("is inert with the flag explicitly false", () => {
@@ -184,8 +178,8 @@ describe("startServerExecutionHost OFF witness", () => {
     it("adds nothing while the serving loop is off", () => {
       publishExperimentalPosture({ modernCellRep: false });
       try {
-        // Explicit "false" — the OFF arm's selector since the flip made
-        // the unset default ON.
+        // Explicit "false" — the OFF arm whichever way the first-party
+        // default points, so this pin does not move with a flip.
         startServerExecutionHost({
           server: untouchable<MemoryServer>("server"),
           identity: untouchable<Identity>("identity"),

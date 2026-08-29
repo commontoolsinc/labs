@@ -4,14 +4,20 @@
  * the P7 independent review's finding 8: cf-harness resolves the flag by
  * the presets, and no gate exercised that resolution ON).
  *
- * What it proves, against a real serving toolshed: the harness's OWN
+ * What it proves, against the lane's default toolshed: the harness's OWN
  * production session path — `createHarnessFabricSessionFactory` (PKCS#8
  * identity from disk → `PiecesController.initialize` → deployed-client
- * posture adoption → the remoteClient preset) — resolves the flipped
- * first-party default ON with NOTHING declared in the environment, and the
- * session executes one genuine flow (compile + instantiate a pattern,
- * read a served result back). The explicit-env ON lanes never exercised
- * this unset-flag path; the flip changes exactly it.
+ * posture adoption → the remoteClient preset) — resolves the first-party
+ * default with NOTHING declared in the environment (OFF again under the
+ * flip-OFF lever), and the session executes one genuine flow (compile +
+ * instantiate a pattern, read its result back). The explicit-env lanes
+ * never exercise this unset-flag path; a flip changes exactly it.
+ *
+ * The gate FOLLOWS the default in both directions — it is the flip's own
+ * tripwire, so its expected arm moves with the constant and with nothing
+ * else. Under the flip PR it expected a serving toolshed and a session
+ * resolving ON; rolled back it expects neither, and either appearing
+ * fails it loudly.
  *
  * Runs only in the "Deployed Topology Posture Gates" CI job (deno.yml),
  * which sets API_URL; it is in `integration/`, which the package's `test`
@@ -37,17 +43,17 @@ describe(
   "cf-harness deployed-topology posture gate",
   { ignore: !API_URL },
   () => {
-    it("the fabric session resolves the flipped default ON and serves one genuine flow", async () => {
+    it("the fabric session resolves the rolled-back default OFF and runs one genuine flow", async () => {
       // The gate exercises the DEFAULT resolution (unset flag → server
       // adoption → the first-party constant). An inherited explicit value
       // would make it vacuously test the env path instead.
       expect(Deno.env.get("EXPERIMENTAL_SERVER_EXECUTION")).toBe(undefined);
 
       // The server half of the posture, probed from the gate itself: the
-      // lane's toolshed really serves (the default binary since the flip).
+      // lane's default-built toolshed really does NOT serve (rolled back).
       const stats = await (await fetch(new URL("/api/health/stats", API_URL)))
         .json() as { servingLoop?: unknown };
-      expect(stats.servingLoop != null).toBe(true);
+      expect(stats.servingLoop != null).toBe(false);
 
       // The keyfile's path is tracked OUTSIDE the session setup: the outer
       // `finally` below owns it, so it is removed even when session
@@ -63,14 +69,14 @@ describe(
         });
         const session = await factory();
         try {
-          // The client half: the session's runtime resolved ON from the
+          // The client half: the session's runtime resolved OFF from the
           // deployment with nothing declared locally.
           expect(session.pieces.runtime.experimental.serverExecution).toBe(
-            true,
+            false,
           );
 
           // One genuine flow through the session: compile + instantiate a
-          // pattern and read its result back through the serving topology.
+          // pattern and read its result back through the resolved topology.
           const piece = await session.pieces.create(GATE_PATTERN);
           const statusCell = (await piece.result.getCell())
             .asSchema<{ status?: string }>()

@@ -4,14 +4,20 @@
  * the P7 independent review's finding 8: the deployed-topology binaries the
  * presets flip were built by CI but exercised ON by no gate).
  *
- * What it proves, on the real compiled binary against a real serving
- * toolshed: the binary STARTS, initializes its service (a genuine flow —
- * identity, session open, and the BG-pieces read/watch against the
- * toolshed), and RESOLVES the first-party server-execution default ON (the
- * `productionServer` preset's env-else-`SERVER_EXECUTION_DEFAULT_ENABLED`
- * resolution — exactly the path the flip changes, which explicit-env lanes
- * never exercise). The binary has no HTTP surface, so its startup posture
- * log line is the probe. It then shuts down cleanly on SIGTERM.
+ * What it proves, on the real compiled binary against the lane's
+ * default-built toolshed: the binary STARTS, initializes its service (a
+ * genuine flow — identity, session open, and the BG-pieces read/watch
+ * against the toolshed), and RESOLVES the first-party server-execution
+ * default — OFF again under the flip-OFF lever (the `productionServer`
+ * preset's env-else-`SERVER_EXECUTION_DEFAULT_ENABLED` resolution —
+ * exactly the path a flip changes, which explicit-env lanes never
+ * exercise). The binary has no HTTP surface, so its startup posture log
+ * line is the probe. It then shuts down cleanly on SIGTERM.
+ *
+ * The gate FOLLOWS the default in both directions — it is the flip's own
+ * tripwire, so its expected arm moves with the constant and with nothing
+ * else. Under the flip PR it expected ON; rolled back it expects OFF, and
+ * a serving-loop default would fail it loudly.
  *
  * Runs only in the "Deployed Topology Posture Gates" CI job (deno.yml),
  * which provides the two env inputs; it is in `integration/`, which the
@@ -73,7 +79,7 @@ describe(
   "bg-piece-service deployed-topology posture gate",
   { ignore: !BIN || !API_URL },
   () => {
-    it("the binary starts against the serving toolshed, resolves the default posture ON, and stops cleanly", async () => {
+    it("the binary starts against the lane's toolshed, resolves the default posture OFF, and stops cleanly", async () => {
       // The gate exercises the DEFAULT resolution (unset flag → the
       // first-party constant). An inherited explicit value would make it
       // vacuously test the env path instead — refuse to run that way.
@@ -145,7 +151,7 @@ describe(
         expect(
           postures,
           `expected exactly one posture line in:\n${lines.join("\n")}`,
-        ).toEqual(["ON"]);
+        ).toEqual(["OFF"]);
       } finally {
         // Clean shutdown is part of the gate: the SIGTERM handler stops the
         // service and exits 0.
