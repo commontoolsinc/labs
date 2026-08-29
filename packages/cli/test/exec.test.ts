@@ -3498,6 +3498,10 @@ function createExecHarness(options: {
           tracker.events.push("commit");
           return Promise.resolve();
         },
+        // The real transaction reports both, and the write receipt reads
+        // them rather than treating a resolved `commit()` as proof of a
+        // write. This stub stages none, so it reports none.
+        status: () => ({ status: "done", journal: { novelty: () => [] } }),
       }),
       prepareTxForCommit: () => {},
       getCell: (

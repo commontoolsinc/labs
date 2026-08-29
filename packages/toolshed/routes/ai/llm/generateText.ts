@@ -192,8 +192,8 @@ function truncateDescription(text: string): string {
 /**
  * Renders a failure the AI SDK recorded as one line of text. An HTTP status
  * separates a request the provider turned down from a rate limit or an
- * outage. The provider's response body is left out: it reaches the log
- * through the cause of the error this description goes into.
+ * outage. A normalized stream error includes the provider data the AI SDK
+ * wrapped; raw response bodies stay in the cause that reaches the log.
  */
 function describeStreamError(error: unknown): string {
   if (typeof error !== "object" || error === null) {
@@ -208,11 +208,23 @@ function describeStreamError(error: unknown): string {
       return truncateDescription(String(error));
     }
   }
-  const { statusCode } = error as { statusCode?: unknown };
+  const { data, statusCode } = error as {
+    data?: unknown;
+    statusCode?: unknown;
+  };
   const status = typeof statusCode === "number"
     ? `; HTTP status ${statusCode}`
     : "";
-  return `${error.name}: ${truncateDescription(error.message)}${status}`;
+  const description = `${error.name}: ${
+    truncateDescription(error.message)
+  }${status}`;
+  const providerData = error.name === "AI_StreamProviderError" &&
+      data !== undefined && data !== error
+    ? `; provider data: ${describeStreamError(data)}`
+    : "";
+  return providerData === ""
+    ? description
+    : truncateDescription(`${description}${providerData}`);
 }
 
 /**

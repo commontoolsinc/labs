@@ -121,6 +121,7 @@ import { validateEmbeddedSpaces } from "./llm-friendly-ref.ts";
 import { deriveDiskHandleId } from "./sqlite-source.ts";
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
 import { startVersionCheck } from "./version-check.ts";
+import { noteWroteTo } from "./write-receipt.ts";
 
 export interface EntryConfig {
   mainPath: string;
@@ -1423,6 +1424,10 @@ export async function newPiece(
       clearTimeout(timer)
     );
   });
+  // Here rather than after the registry add below: the piece now exists in
+  // the space, and a slug or registry step that throws afterwards leaves a
+  // partial write that the operator is owed the location of.
+  noteWroteTo(config.space);
 
   if (options?.slug) {
     await timeCliPhase(
@@ -1487,6 +1492,7 @@ export async function setPieceSlug(
         writeTargetMetadata: sourcePath.length === 0,
       }),
   );
+  noteWroteTo(config.space);
 }
 
 export async function setPiecePattern(
@@ -1519,6 +1525,7 @@ export async function setPiecePattern(
         : {}),
     },
   );
+  noteWroteTo(config.space);
 }
 
 /**
@@ -1649,6 +1656,7 @@ export async function applyPieceInput(config: PieceConfig, input: object) {
     resolvedConfig.pieceScope,
   );
   await piece.setInput(input);
+  noteWroteTo(config.space);
 }
 
 /**
@@ -3545,6 +3553,7 @@ export async function linkPieces(
         options,
       ),
   );
+  noteWroteTo(config.space);
 }
 
 /**
@@ -3583,6 +3592,9 @@ export async function linkSqliteDiskSource(
     handle.withTx(tx).set({ id, tables: {}, rev: 0 });
   });
   if (writeRes.error) throw writeRes.error;
+  // The handle is committed, so the space has been written to whether or not
+  // the registration and link below succeed.
+  noteWroteTo(config.space);
 
   // 2. Register the on-disk source with the server (read-only attach for `id`).
   const provider = pieces.runtime.storageManager.open(space);
@@ -4241,6 +4253,7 @@ export async function setCellCfcLabel(
   }
   await pieces.synced();
 
+  noteWroteTo(config.space);
   return cfcLabelViewForCommand(targetCell, path);
 }
 
@@ -4419,6 +4432,7 @@ export async function setCellValue(
   } else {
     await piece.result.set(value, path);
   }
+  noteWroteTo(config.space);
 }
 
 /**
@@ -4477,6 +4491,7 @@ export async function removePiece(config: PieceConfig): Promise<void> {
   if (!removed) {
     throw new Error(`Piece "${config.piece}" not found`);
   }
+  noteWroteTo(config.space);
 }
 
 interface RootPatternDeps {
@@ -4492,6 +4507,7 @@ export async function recreateSpaceRootPattern(
 ): Promise<string> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const piece = await pieces.recreateDefaultPattern();
+  noteWroteTo(config.space);
   return piece.id;
 }
 
@@ -4525,6 +4541,7 @@ export async function setHomePattern(
     customProgram: program,
     repository: entry.repository,
   });
+  noteWroteTo(homeConfig.space);
 }
 
 /**
@@ -4537,4 +4554,5 @@ export async function resetHomePattern(
   const homeConfig: SpaceConfig = { ...config, space: identity.did() };
   const pieces = await loadPieces(homeConfig);
   await pieces.recreateDefaultPattern();
+  noteWroteTo(homeConfig.space);
 }

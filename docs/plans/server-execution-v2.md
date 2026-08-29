@@ -1970,12 +1970,16 @@ Tasks:
       clients declaring the posture from the env (uniform, not mixed);
       the ON skip list — made EFFECTIVE by the fixer (it had been inert
       since Phase 4: `deno test --ignore` never applied to explicitly
-      listed files) — holds `phase-7` entries: patterns ×3
+      listed files) — held `phase-7` entries at this ruling's date:
+      patterns ×3
       (`topics-navigation`, `cfc-group-chat-demo-two-browsers`,
       `lunch-poll-vote`), runner ×1 (`pattern-and-data-persistence`),
       runtime-client ×2 STEP entries (`tasks/server-execution-on-skips.
       ts`, each with its loud reason; verification-coverage OW30/OW32/
-      OW33). **THE FLIP PR (one line: the constant → `true`, plus the
+      OW33) *— since lifted arc-by-arc: the ON-skip registry is EMPTY
+      across all four suites (#6528, the ruled-3b-close lift — the
+      Coordination-state delta above), so gate (5)'s list-EMPTY half
+      below is MET*. **THE FLIP PR (one line: the constant → `true`, plus the
       absolute pin, the lane roles + probes, EXPERIMENTAL_OPTIONS.md)
       lands only after these ORDERED GATES, in this order:** (1) OW32 —
       the client-side scheduler-non-settling loop TRIAGED and fixed (the
@@ -2033,8 +2037,8 @@ Tasks:
       service-principal write-authority posture) was RULED 2026-08-18 —
       the serving identity never writes users' home spaces; genesis
       under the space's own keys, owner := the acting user — and its
-      build (register OW31's work order) lands post-merge, BEFORE the
-      flip.
+      build (register OW31's work order) was owed post-merge, BEFORE
+      the flip: BUILT 2026-08-21 (the register's OW31 row).
 - [ ] Retire the flag; OFF path removed; `EXPERIMENTAL_OPTIONS.md` entry
       closed out — **SPLIT OUT: the post-soak removal PR** (named here as
       the flip's follow-up; it also removes the OFF regression-guard CI
@@ -2046,10 +2050,14 @@ Tasks:
 Success criteria:
 
 - [ ] The integration suites run ON-only and green. (NOT ticked — untrue
-      today: the default lanes are the OFF posture by ruling; the
-      explicit-ON lanes are green only WITH the skip list's six
-      `phase-7` entries, which are RED under the full ON posture, not
-      vacuous — table below.)
+      today: the default lanes are the OFF posture by ruling. *The rest
+      of this parenthetical was the 2026-08-16 state, since superseded:
+      the explicit-ON lanes were green only WITH the skip list's six
+      `phase-7` entries, which were RED under the full ON posture, not
+      vacuous — table below. The entries were lifted arc-by-arc and the
+      ON-skip registry is EMPTY across all four suites since #6528, the
+      ruled-3b-close lift — the explicit-ON lanes run green with no
+      skips; the Coordination-state delta above carries the lift.*)
 - [ ] Cross-user propagation beats the client-computed baseline on the
       byte-identical workloads (the §1 "faster, not tolerably slower"
       requirement). (NOT ticked — UNMEASURED: the measurement leg is

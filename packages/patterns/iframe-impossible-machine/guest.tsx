@@ -7,6 +7,7 @@ import React from "npm:react@19.2.8";
 // deno-lint-ignore no-external-import
 import { createRoot } from "npm:react-dom@19.2.8/client";
 import {
+  applyNodeChanges,
   Background,
   Controls,
   type Edge,
@@ -36,14 +37,11 @@ import {
   type MachinePosition,
 } from "./contract.ts";
 import {
-  canonicalizeMachineEdges,
-  createsFeedbackCycle,
-  evaluateSignals,
-  isActuatorFiring,
-  machineNodePresentation,
-  presentSignal,
-  type SignalPresentation,
-} from "./model.ts";
+  type CanvasReactRuntime,
+  createMachineCanvas,
+  type MachineCanvasProps,
+} from "./machine-canvas/guest.ts";
+import * as model from "./model.ts";
 
 const fabric = connectFabric();
 const { useCell } = createFabricReact(React, fabric);
@@ -77,7 +75,7 @@ const KIND_COLORS: Record<MachineNodeKind, string> = {
 
 type NodeViewData = {
   node: MachineNode;
-  signal: SignalPresentation;
+  signal: model.SignalPresentation;
   disabled: boolean;
 };
 
@@ -88,7 +86,7 @@ type NodeActions = {
     nodeId: string,
     key: K,
     value: MachineParameters[K],
-  ): Promise<void>;
+  ): Promise<boolean>;
 };
 
 const NodeActionContext = React.createContext<NodeActions | undefined>(
@@ -111,10 +109,6 @@ function defaultParameters(kind: MachineNodeKind): MachineParameters {
     offset: 0,
     threshold: 0.6,
   };
-}
-
-function errorFrom(cause: unknown): Error {
-  return cause instanceof Error ? cause : new Error(String(cause));
 }
 
 function NumberParameter({
@@ -218,7 +212,7 @@ function NodeFrame({
           {data.signal.label}
         </output>
       </header>
-      <div className="node-parameters">{children}</div>
+      <div {...model.nodeControlBoundaryProps()}>{children}</div>
       {hasOutput && (
         <Handle
           id="output"
@@ -354,7 +348,7 @@ function ActuatorNode(props: NodeProps<MachineFlowNode>) {
         disabled={disabled}
       />
       <p className="actuator-state">
-        {isActuatorFiring(node, props.data.signal.semantic)
+        {model.isActuatorFiring(node, props.data.signal.semantic)
           ? "Launched!"
           : "Standing by"}
       </p>
@@ -370,6 +364,25 @@ const NODE_TYPES = {
   actuator: ActuatorNode,
 };
 
+const MachineCanvas = createMachineCanvas<MachineFlowNode>(
+  React as unknown as CanvasReactRuntime,
+  {
+    ReactFlow,
+    Background,
+    Controls,
+    MiniMap,
+    applyNodeChanges: (changes, nodes) =>
+      applyNodeChanges(
+        changes as NodeChange<MachineFlowNode>[],
+        nodes,
+      ),
+  },
+  NODE_TYPES,
+  KIND_COLORS,
+) as React.ComponentType<
+  MachineCanvasProps<MachineFlowNode>
+>;
+
 function App() {
   const input = useCell<IframeInputData | undefined>("input");
   const state = useCell<IframeStateData | undefined>("state");
@@ -378,14 +391,20 @@ function App() {
   const [initializationError, setInitializationError] = React.useState<Error>();
   const [actionError, setActionError] = React.useState<Error>();
   const [pending, setPending] = React.useState(false);
-  const [draftPositions, setDraftPositions] = React.useState<
-    Record<string, MachinePosition>
+  const [busyNodeCounts, setBusyNodeCounts] = React.useState<
+    Readonly<Record<string, number>>
   >({});
-  const draftPositionsRef = React.useRef<Record<string, MachinePosition>>({});
   const [connectSource, setConnectSource] = React.useState("");
   const [connectTarget, setConnectTarget] = React.useState("");
-  const actionTail = React.useRef(Promise.resolve());
   const bootstrapStarted = React.useRef(false);
+  const actionRunner = React.useRef(model.createActionRunner({
+    setGlobalPending: setPending,
+    setActionError,
+    setBusyNodeCounts,
+  })).current;
+  const selectionRequestTracker = React.useRef(
+    model.createSelectionRequestTracker(null),
+  );
 
   React.useEffect(() => {
     if (bootstrapStarted.current) return;
@@ -415,7 +434,7 @@ function App() {
         ]);
         if (active) setMaterialized(true);
       } catch (cause) {
-        if (active) setInitializationError(errorFrom(cause));
+        if (active) setInitializationError(model.errorFrom(cause));
       }
     })();
     return () => {
@@ -423,33 +442,21 @@ function App() {
     };
   }, [input.refresh, output.refresh, state.refresh]);
 
-  const runAction = React.useCallback((action: () => Promise<void>) => {
-    const next = actionTail.current.then(async () => {
-      setPending(true);
-      setActionError(undefined);
-      try {
-        await action();
-      } catch (cause) {
-        setActionError(errorFrom(cause));
-      } finally {
-        setPending(false);
-      }
-    });
-    actionTail.current = next;
-    return next;
-  }, []);
+  const runAction = actionRunner.run;
+  const runNodeAction = actionRunner.runNode;
+  const runQuietAction = actionRunner.runQuiet;
 
-  const resolveNode = React.useCallback(async (nodeId: string) => {
+  const locateNodeCell = React.useCallback(async (nodeId: string) => {
     const nodesCell = stateCell.key("nodes");
     const nodes = await nodesCell.pull();
-    const index = nodes.findIndex((node) => node.id === nodeId);
-    if (index < 0) throw new Error(`Module ${nodeId} no longer exists.`);
-    const resolved = await nodesCell.key(index).resolve();
-    const node = await resolved.pull();
+    const located = model.findAppendOnlyItem(nodes, nodeId);
+    if (!located) throw new Error(`Module ${nodeId} no longer exists.`);
+    const nodeCell = nodesCell.key(located.index);
+    const node = await nodeCell.pull();
     if (node.id !== nodeId) {
       throw new Error(`Module ${nodeId} moved while it was being edited.`);
     }
-    return resolved;
+    return nodeCell;
   }, []);
 
   const updateParameter = React.useCallback(
@@ -458,35 +465,33 @@ function App() {
       key: K,
       value: MachineParameters[K],
     ) =>
-      runAction(async () => {
-        const node = await resolveNode(nodeId);
+      runNodeAction(nodeId, async () => {
+        const node = await locateNodeCell(nodeId);
         await node.key("parameters").key(key).set(value);
         await state.refresh();
       }),
-    [resolveNode, runAction, state.refresh],
+    [locateNodeCell, runNodeAction, state.refresh],
   );
 
   const persistPosition = React.useCallback(
-    (nodeId: string, position: MachinePosition) =>
-      runAction(async () => {
-        const node = await resolveNode(nodeId);
+    async (nodeId: string, position: MachinePosition) => {
+      const succeeded = await runQuietAction(async () => {
+        const node = await locateNodeCell(nodeId);
         await node.key("position").set(position);
         await state.refresh();
-        delete draftPositionsRef.current[nodeId];
-        setDraftPositions((current) => {
-          const next = { ...current };
-          delete next[nodeId];
-          return next;
-        });
-      }),
-    [resolveNode, runAction, state.refresh],
+      });
+      if (!succeeded) return undefined;
+      return stateCell.get()?.nodes.find((node) => node.id === nodeId)
+        ?.position ?? position;
+    },
+    [locateNodeCell, runQuietAction, state.refresh],
   );
 
   const appendNode = React.useCallback(
     (kind: MachineNodeKind) =>
       runAction(async () => {
         const id = crypto.randomUUID();
-        const presentation = machineNodePresentation(id);
+        const presentation = model.machineNodePresentation(id);
         const node: MachineNode = {
           id,
           kind,
@@ -522,8 +527,9 @@ function App() {
           throw new Error("Those modules are already connected.");
         }
         if (
-          createsFeedbackCycle(
-            canonicalizeMachineEdges(edges, latest.disabledEdges ?? {}).edges,
+          model.createsFeedbackCycle(
+            model.canonicalizeMachineEdges(edges, latest.disabledEdges ?? {})
+              .edges,
             source,
             target,
           )
@@ -554,10 +560,10 @@ function App() {
   const updatePreference = React.useCallback(
     <K extends keyof IframeOutputData>(
       key: K,
-      value: IframeOutputData[K],
+      update: (current: IframeOutputData[K]) => IframeOutputData[K],
     ) =>
       runAction(async () => {
-        await outputCell.key(key).set(value);
+        await model.updateLatestValue(outputCell.key(key), update);
         await output.refresh();
       }),
     [output.refresh, runAction],
@@ -566,6 +572,9 @@ function App() {
   const inputValue = input.status === "ready" ? input.value : undefined;
   const stateValue = state.status === "ready" ? state.value : undefined;
   const outputValue = output.status === "ready" ? output.value : undefined;
+  const tracker = selectionRequestTracker.current;
+  const selectedId = outputValue?.selectedNodeId ?? null;
+  React.useEffect(() => tracker.reconcile(selectedId), [selectedId, tracker]);
   const ready = materialized && inputValue !== undefined &&
     stateValue !== undefined && outputValue !== undefined;
 
@@ -592,7 +601,7 @@ function App() {
     );
   }
 
-  const canonicalEdges = canonicalizeMachineEdges(
+  const canonicalEdges = model.canonicalizeMachineEdges(
     stateValue.edges,
     stateValue.disabledEdges,
   );
@@ -600,27 +609,30 @@ function App() {
     ...stateValue,
     edges: canonicalEdges.edges,
   };
-  const signals = evaluateSignals(machineState, outputValue.simulationTick);
+  const signals = model.evaluateSignals(
+    machineState,
+    outputValue.simulationTick,
+  );
   const flowNodes: MachineFlowNode[] = stateValue.nodes.map((node) => ({
     id: node.id,
     type: node.kind,
-    position: draftPositions[node.id] ?? node.position,
+    position: node.position,
     selected: outputValue.selectedNodeId === node.id,
     data: {
       node,
-      signal: presentSignal(
+      signal: model.presentSignal(
         signals.get(node.id) ?? 0,
         outputValue.showSignals,
       ),
-      disabled: pending,
+      disabled: (busyNodeCounts[node.id] ?? 0) > 0,
     },
-    draggable: !pending,
-    connectable: !pending,
+    draggable: true,
+    connectable: true,
     deletable: false,
     ariaLabel: `${KIND_LABELS[node.kind]}: ${node.label}`,
   }));
   const flowEdges: Edge[] = machineState.edges.map((edge) => {
-    const signal = presentSignal(
+    const signal = model.presentSignal(
       signals.get(edge.source) ?? 0,
       outputValue.showSignals,
     );
@@ -672,30 +684,8 @@ function App() {
   );
   const activeActuators =
     stateValue.nodes.filter((node) =>
-      isActuatorFiring(node, signals.get(node.id) ?? 0)
+      model.isActuatorFiring(node, signals.get(node.id) ?? 0)
     ).length;
-
-  const handleNodeChanges = (changes: NodeChange<MachineFlowNode>[]) => {
-    const positions = changes.filter(
-      (change): change is Extract<
-        NodeChange<MachineFlowNode>,
-        { type: "position" }
-      > => change.type === "position" && change.position !== undefined,
-    );
-    if (positions.length === 0) return;
-    Object.assign(
-      draftPositionsRef.current,
-      Object.fromEntries(
-        positions.map((change) => [change.id, change.position!]),
-      ),
-    );
-    setDraftPositions((current) => ({
-      ...current,
-      ...Object.fromEntries(
-        positions.map((change) => [change.id, change.position!]),
-      ),
-    }));
-  };
 
   return (
     <NodeActionContext.Provider value={{ updateParameter }}>
@@ -738,7 +728,7 @@ function App() {
               onClick={() =>
                 void updatePreference(
                   "simulationTick",
-                  Math.max(0, outputValue.simulationTick - 1),
+                  (current) => Math.max(0, current - 1),
                 )}
             >
               −
@@ -754,7 +744,7 @@ function App() {
               onClick={() =>
                 void updatePreference(
                   "simulationTick",
-                  outputValue.simulationTick + 1,
+                  (current) => current + 1,
                 )}
             >
               +
@@ -766,7 +756,7 @@ function App() {
               aria-pressed={outputValue.showSignals}
               disabled={pending}
               onClick={() =>
-                void updatePreference("showSignals", !outputValue.showSignals)}
+                void updatePreference("showSignals", (current) => !current)}
             >
               Signal glow
             </button>
@@ -775,42 +765,22 @@ function App() {
 
         <section className="workspace">
           <div className="flow-shell" aria-label="Collaborative machine canvas">
-            <ReactFlow<MachineFlowNode, Edge>
-              nodes={flowNodes}
+            <MachineCanvas
+              authoritativeNodes={flowNodes}
+              authoritativeSelection={outputValue.selectedNodeId}
               edges={flowEdges}
-              nodeTypes={NODE_TYPES}
-              onNodesChange={handleNodeChanges}
-              onNodeClick={(_event, node) =>
-                void updatePreference("selectedNodeId", node.id)}
-              onNodeDragStop={(_event, node) =>
-                void persistPosition(
-                  node.id,
-                  draftPositionsRef.current[node.id] ?? node.position,
+              onNodeSelection={(nodeId) =>
+                tracker.request(
+                  nodeId,
+                  (selectedNodeId) =>
+                    updatePreference(
+                      "selectedNodeId",
+                      () => selectedNodeId,
+                    ),
                 )}
+              onPositionCommit={persistPosition}
               onConnect={(connection) => void appendEdge(connection)}
-              nodesDraggable={!pending}
-              nodesConnectable={!pending}
-              elementsSelectable={!pending}
-              fitView
-              fitViewOptions={{ padding: 0.1 }}
-              minZoom={0.35}
-              maxZoom={1.6}
-              defaultEdgeOptions={{ type: "smoothstep" }}
-              colorMode="dark"
-            >
-              <Background color="#26334a" gap={28} size={1.2} />
-              <Controls
-                showInteractive={false}
-                fitViewOptions={{ padding: 0.1 }}
-              />
-              <MiniMap<MachineFlowNode>
-                pannable
-                zoomable
-                nodeColor={(node) => KIND_COLORS[node.type ?? "sensor"]}
-                nodeStrokeColor="#07111f"
-                maskColor="rgba(5, 12, 24, 0.72)"
-              />
-            </ReactFlow>
+            />
           </div>
 
           <aside className="inspector">
@@ -820,7 +790,7 @@ function App() {
               <p>
                 {selected
                   ? `${KIND_LABELS[selected.kind]} · ${
-                    presentSignal(
+                    model.presentSignal(
                       signals.get(selected.id) ?? 0,
                       outputValue.showSignals,
                     ).label
