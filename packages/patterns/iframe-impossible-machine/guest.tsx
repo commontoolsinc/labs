@@ -44,7 +44,7 @@ import {
   presentSignal,
   type SignalPresentation,
 } from "./model.ts";
-import { stopNodeControlPropagation } from "./interaction.ts";
+import { NodeControlBoundary } from "./interaction.ts";
 
 const fabric = connectFabric();
 const { useCell } = createFabricReact(React, fabric);
@@ -219,12 +219,7 @@ function NodeFrame({
           {data.signal.label}
         </output>
       </header>
-      <div
-        className="node-parameters nodrag nopan"
-        onClick={stopNodeControlPropagation}
-      >
-        {children}
-      </div>
+      <NodeControlBoundary>{children}</NodeControlBoundary>
       {hasOutput && (
         <Handle
           id="output"
