@@ -1,9 +1,20 @@
 /** Owns the React Flow state that must survive collaborative rerenders. */
 
-import type { Edge, Node, NodeChange } from "@xyflow/react";
-import * as flowLifecycle from "./flow-lifecycle.ts";
+import * as flowLifecycle from "../flow-lifecycle.ts";
 
 type StateUpdate<T> = T | ((current: T) => T);
+
+/** React Flow node fields used by the canvas lifecycle. */
+export interface CanvasNode extends flowLifecycle.PositionedNode {
+  /** React Flow node renderer key. */
+  type?: string;
+}
+
+/** React Flow change fields inspected by the canvas lifecycle. */
+export interface CanvasNodeChange {
+  /** Kind of React Flow change. */
+  type: string;
+}
 
 /** The React operations used by the canvas, injectable for lifecycle tests. */
 export interface CanvasReactRuntime {
@@ -19,18 +30,18 @@ export interface CanvasReactRuntime {
 }
 
 /** The React Flow operations and components used by the canvas. */
-export interface CanvasFlowRuntime<N extends Node> {
+export interface CanvasFlowRuntime<N extends CanvasNode> {
   ReactFlow: unknown;
   Background: unknown;
   Controls: unknown;
   MiniMap: unknown;
-  applyNodeChanges(changes: NodeChange<N>[], nodes: N[]): N[];
+  applyNodeChanges(changes: CanvasNodeChange[], nodes: N[]): N[];
 }
 
 /** Durable callbacks and projections consumed by the collaborative canvas. */
-export interface MachineCanvasProps<N extends Node> {
+export interface MachineCanvasProps<N extends CanvasNode> {
   authoritativeNodes: N[];
-  edges: Edge[];
+  edges: readonly unknown[];
   onConnect(connection: {
     source: string | null;
     target: string | null;
@@ -44,7 +55,7 @@ export interface MachineCanvasProps<N extends Node> {
 }
 
 /** Creates the canvas component around an explicit, testable hook boundary. */
-export function createMachineCanvas<N extends Node>(
+export function createMachineCanvas<N extends CanvasNode>(
   react: CanvasReactRuntime,
   flow: CanvasFlowRuntime<N>,
   nodeTypes: Readonly<Record<string, unknown>>,
@@ -89,7 +100,7 @@ export function createMachineCanvas<N extends Node>(
     }, [authoritativeNodes, authoritativeSelection]);
 
     const handleNodeChanges = react.useCallback(
-      (changes: NodeChange<N>[]) => {
+      (changes: CanvasNodeChange[]) => {
         flowLifecycle.capturePositionDrafts(changes, draftsRef);
         setNodes((current) => flow.applyNodeChanges(changes, current));
       },

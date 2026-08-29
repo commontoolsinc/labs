@@ -15,6 +15,7 @@ import {
   MarkerType,
   MiniMap,
   type Node,
+  type NodeChange,
   type NodeProps,
   Position,
   ReactFlow,
@@ -39,7 +40,7 @@ import {
   type CanvasReactRuntime,
   createMachineCanvas,
   type MachineCanvasProps,
-} from "./machine-canvas.ts";
+} from "./machine-canvas/guest.ts";
 import * as model from "./model.ts";
 
 const fabric = connectFabric();
@@ -365,7 +366,17 @@ const NODE_TYPES = {
 
 const MachineCanvas = createMachineCanvas<MachineFlowNode>(
   React as unknown as CanvasReactRuntime,
-  { ReactFlow, Background, Controls, MiniMap, applyNodeChanges },
+  {
+    ReactFlow,
+    Background,
+    Controls,
+    MiniMap,
+    applyNodeChanges: (changes, nodes) =>
+      applyNodeChanges(
+        changes as NodeChange<MachineFlowNode>[],
+        nodes,
+      ),
+  },
   NODE_TYPES,
   KIND_COLORS,
 ) as React.ComponentType<

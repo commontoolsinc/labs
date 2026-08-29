@@ -12,7 +12,7 @@ import {
   type CanvasReactRuntime,
   createMachineCanvas,
   type MachineCanvasProps,
-} from "./machine-canvas.ts";
+} from "./machine-canvas/guest.ts";
 
 type TestNode = Node<{ label: string }, "sensor" | "gate">;
 
@@ -107,7 +107,8 @@ function createCanvas(harness: ReturnType<typeof createHookHarness>) {
       Background: "background",
       Controls: "controls",
       MiniMap: "minimap",
-      applyNodeChanges,
+      applyNodeChanges: (changes, nodes) =>
+        applyNodeChanges(changes as NodeChange<TestNode>[], nodes),
     },
     { sensor: "sensor-component", gate: "gate-component" },
     { sensor: "blue", gate: "purple" },

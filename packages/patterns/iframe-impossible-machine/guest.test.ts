@@ -29,7 +29,7 @@ describe("Impossible Machine document shell", () => {
       new URL("./guest.tsx", import.meta.url),
     );
     const canvasSource = await Deno.readTextFile(
-      new URL("./machine-canvas.ts", import.meta.url),
+      new URL("./machine-canvas/guest.ts", import.meta.url),
     );
 
     expect(source).toContain(
