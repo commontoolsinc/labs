@@ -14,8 +14,11 @@ primary rendering owner, in this order:
   `docs/common/ai/iframe-pattern-phaser-guide.md` in full.
 - For a data visualization whose DOM or SVG is owned by D3, read
   `docs/common/ai/iframe-pattern-d3-guide.md` in full.
-- For a React component tree, hooks, or an explicitly requested React guest,
-  read `docs/common/ai/iframe-pattern-react-guide.md` in full.
+- For a React component tree, hooks, an explicitly requested React guest, or a
+  stateful React-only editor, diagram, grid, or canvas library, read
+  `docs/common/ai/iframe-pattern-react-guide.md` in full. It owns the boundary
+  between durable Fabric data, React drafts, and library-managed interaction
+  state.
 - Otherwise read `docs/common/ai/iframe-pattern-guide.md` in full for a plain
   DOM guest.
 
@@ -27,6 +30,9 @@ extends beyond the generated wrapper.
 
 Keep the authored surface small:
 
+- Put the files under `packages/patterns/iframe-<name>/`. The `iframe-` prefix
+  is load-bearing: pattern discovery uses it to recognize `guest.ts` and
+  `guest.tsx` as browser sources rather than additional pattern entries.
 - `contract.ts` names the input, durable state, and output data shapes and their
   defaults.
 - `guest.ts` or `guest.tsx` owns the application. It may use plain DOM code or
@@ -40,24 +46,24 @@ Generate the wrapper with:
 
 ```bash
 deno run -A tools/write-iframe-wrapper.ts \
-  --contract packages/patterns/<name>/contract.ts \
-  --guest packages/patterns/<name>/guest.ts \
-  --out packages/patterns/<name>/main.tsx
+  --contract packages/patterns/iframe-<name>/contract.ts \
+  --guest packages/patterns/iframe-<name>/guest.ts \
+  --out packages/patterns/iframe-<name>/main.tsx
 ```
 
 Add `--react` when the authored guest is React TSX, as required by the React
 guide.
 
-Add `--html packages/patterns/<name>/guest.html` when the guest needs a custom
-document shell, and `--force` only when regenerating the named output. The HTML
-shell must contain `<!-- PATTERN_IFRAME_SCRIPT -->` exactly once.
+Add `--html packages/patterns/iframe-<name>/guest.html` when the guest needs a
+custom document shell, and `--force` only when regenerating the named output.
+The HTML shell must contain `<!-- PATTERN_IFRAME_SCRIPT -->` exactly once.
 
 Validate the generated pattern with:
 
 ```bash
-deno fmt packages/patterns/<name>
-deno check packages/patterns/<name>/<guest-file>
-deno task cf check packages/patterns/<name>/main.tsx --no-run
+deno fmt packages/patterns/iframe-<name>
+deno check packages/patterns/iframe-<name>/<guest-file>
+deno task cf check packages/patterns/iframe-<name>/main.tsx --no-run
 ```
 
 Replace `<guest-file>` with the authored `guest.ts` or `guest.tsx` filename.
