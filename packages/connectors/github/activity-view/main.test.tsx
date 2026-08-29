@@ -4,12 +4,12 @@ import {
   propValue,
   textContent,
 } from "../../../patterns/test/vnode-helpers.ts";
+import { renderGithubCommits } from "./commit-list.tsx";
 import GithubActivity, {
   type GithubHostHealth,
   type GithubPullRequestFields,
   type GithubPullRequestIndex,
   type PullRequestDetail,
-  renderGithubCommits,
 } from "./main.tsx";
 
 const publicCommits = [
@@ -223,9 +223,13 @@ export default pattern(() => {
     emptySubject.pullRequests.length === 0
   );
   const assert_renders_public_repository_commits = assert(() => {
-    const text = textContent(renderGithubCommits(publicCommits));
+    const ui = renderGithubCommits(publicCommits);
+    const text = textContent(ui);
+    const link = findElementByText(ui, "a", "View commit →");
     return text.includes("Ship the synchronized dashboard") &&
-      text.includes("Ada") && text.includes("View commit →");
+      !text.includes("More detail") && text.includes("Ada") &&
+      propValue(link, "href") ===
+        "https://github.com/example/widget/commit/abc123";
   });
   const assert_renders_empty_public_repository = assert(() =>
     textContent(renderGithubCommits([])).includes("No commits found")
