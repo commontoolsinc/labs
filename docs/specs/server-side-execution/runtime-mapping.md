@@ -279,7 +279,13 @@ the verb contract reads a handling's result back by receipt address
 (`tx.handlingReceiptLink`, `runner.ts:4767-4780`,
 `plainResultReceipts`) — events.md is silent on result readback for
 CLI/agent ingress; carry receipts as a value surface or re-spec the
-verb contract. Flag as a Phase 3 decision.
+verb contract. ~~Flag as a Phase 3 decision.~~ **(b) RULED 2026-08-29
+(owner: serving-side receipt/result write): receipts are carried as a
+value surface — the SERVING side writes every handling's receipt (the
+`{}` witness included) in the handler run's own wave, at the same
+cause-derived address, write-once by CAS (lost CAS = loud no-op); the
+readback contract is unchanged. Normative text: events.md §4 "Result
+carriage".**
 
 **N27 (lineage).** Client-side under the flag, lineage's job — drop
 descendants of a failed speculative commit — is absorbed by the

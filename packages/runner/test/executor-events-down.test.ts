@@ -302,6 +302,26 @@ const THROW_PATTERN = [
   ">(({ value }) => ({ value, explode: explode({ value }) }));",
 ].join("\n");
 
+/** Verbs with DECLARED results and no cell writes of their own — the
+ * serving-side receipt/result-write pins (owner-ruled 2026-08-29;
+ * events.md §4 "Result carriage"). `probe` returns a plain value derived
+ * from the event payload; `quiet` returns nothing (the `{}` existence
+ * witness). Both bind `{}` — no context cells — so the handlings'
+ * cause-derived receipt addresses depend on nothing but the pattern and
+ * the invocation id, and their only durable consequence is the receipt
+ * itself. */
+const DECLARED_RESULT_PATTERN = [
+  "import { handler, pattern, Stream, Writable } from 'commonfabric';",
+  "const probe = handler<{ n?: number }, Record<string, never>>(",
+  "  (ev) => ({ token: 'tok-' + (ev?.n ?? 0) }),",
+  ");",
+  "const quiet = handler<unknown, Record<string, never>>(() => {});",
+  "export default pattern<",
+  "  { value: Writable<number> },",
+  "  { value: number; probe: Stream<unknown>; quiet: Stream<unknown> }",
+  ">(({ value }) => ({ value, probe: probe({}), quiet: quiet({}) }));",
+].join("\n");
+
 /** A handler whose `$ctx` requires a plain-number `gate` the argument doc
  * does not hold at fire time: the served dispatch's argument read fails the
  * schema (`isValidArgument === false`, runner.ts's "-- not running" skip)
@@ -2351,6 +2371,280 @@ describe("Phase 3 events-down (serving side)", () => {
       id: argument.getAsNormalizedFullLink().id,
     });
     expect((doc?.value as { value?: number })?.value).toBe(1);
+    cancelDemand();
+  });
+
+  /** The serving-side receipt/result write (owner-ruled 2026-08-29;
+   * events.md §4 "Result carriage"): fire a result-declaring verb, then
+   * a `send` helper the three pins below share. The commit callback is
+   * the durable-ack coupling's — it settles only after the handling
+   * CONSEQUENCED — and hands back the echo's transaction, whose
+   * `handlingReceiptLink` is the cause-derived receipt address. */
+  const fireVerb = (
+    result: Cell<Record<string, unknown>>,
+    verb: string,
+    payload: unknown,
+    eventId: string,
+  ): {
+    ack: () => { status: string; tx: IExtendedStorageTransaction } | undefined;
+  } => {
+    let settled:
+      | { status: string; tx: IExtendedStorageTransaction }
+      | undefined;
+    (result.key(verb) as unknown as {
+      send(
+        value: unknown,
+        onCommit?: (tx: IExtendedStorageTransaction) => void,
+        options?: { eventId?: string; session?: string },
+      ): unknown;
+    }).send(payload, (tx) => {
+      settled = { status: tx.status().status, tx };
+    }, { eventId, session: "receipt-pin-session" });
+    return { ack: () => settled };
+  };
+
+  /** Every commit that ever wrote a doc, from the durable record: the
+   * per-doc `revision` rows joined to their commits. The receipt pins'
+   * single-writer evidence — who wrote the receipt, in which commit
+   * class, carrying which consequenceOf. */
+  const commitsWriting = (
+    engine: Engine.Engine,
+    docId: string,
+  ): Array<{ seq: number; class: string; consequenceOf: string | null }> =>
+    engine.database.prepare(
+      `SELECT DISTINCT r.commit_seq AS seq, c.class AS class,
+              c.consequence_of AS consequenceOf
+         FROM revision r JOIN "commit" c ON c.seq = r.commit_seq
+        WHERE r.id = :id ORDER BY r.commit_seq`,
+    ).all({ id: docId }) as Array<
+      { seq: number; class: string; consequenceOf: string | null }
+    >;
+
+  it("the ruled result carriage (owner, 2026-08-29): a served result-declaring handler WRITES its receipt — the declared value, in the handling's OWN consequence commit (mark and result atomic), by the serving side alone; the client's echo publishes the same cause-derived address and never writes (mutation: drop the serving write → no receipt doc; write outside the handler tx → consequenceOf linkage breaks; re-enable the client write → an authored commit appears)", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const { result } = await standUp(clientRuntime, DECLARED_RESULT_PATTERN, {
+      arg: "result-carriage-arg",
+      result: "result-carriage-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    const fired = fireVerb(result, "probe", { n: 7 }, "result-carriage-1");
+    await clientRuntime.idle();
+
+    await waitUntil(
+      () => sidecarIdsIn(engine).length === 1,
+      "the event append to land",
+    );
+    const sidecarId = sidecarIdsIn(engine)[0];
+    await waitUntil(
+      () => {
+        const value = Engine.read(engine, { id: sidecarId })?.value as
+          | StreamEventsDocValue
+          | undefined;
+        const entry = value?.entries?.[0];
+        return entry?.consequenced === true &&
+          value?.eventWatermark === entry?.seq;
+      },
+      "the handling to consequence",
+    );
+    // The durable id: the caller pair (id, session) scopes to a hashed
+    // `evt:caller:` id (event-identity.ts) — read it off the entry.
+    const durableId = (Engine.read(engine, { id: sidecarId })
+      ?.value as StreamEventsDocValue).entries![0].eventId;
+    // The durable ack settles non-error only after the consequence — so
+    // the receipt the address names is durable BEFORE any caller could
+    // dereference it (the readback-ordering half of the contract).
+    await waitUntil(() => fired.ack() !== undefined, "the durable ack");
+    expect(fired.ack()!.status).not.toBe("error");
+
+    // WS-D under ON: the echo's transaction publishes the handling's
+    // receipt address — the same cause-derived cell the serving side
+    // wrote. An unchanged caller (the CLI verb dispatch) needs no
+    // migration: address out of the callback, value by ordinary read.
+    const link = fired.ack()!.tx.handlingReceiptLink;
+    expect(link).toBeDefined();
+
+    // The serving side wrote the DECLARED value (plainResultReceipts is
+    // default-on for the serving runtime), durably, server-side.
+    const receiptDoc = Engine.read(engine, { id: link!.id });
+    expect(receiptDoc?.value).toEqual({ token: "tok-7" });
+
+    // One writer, exactly once, atomic with the handling: the receipt
+    // doc's WHOLE write history is one derived commit — the wave commit
+    // that consequences this event (mark + effects + result together).
+    // No authored commit ever touched it: the client never wrote.
+    const writers = commitsWriting(engine, link!.id);
+    expect(writers.length).toBe(1);
+    expect(writers[0].class).toBe("derived");
+    expect(writers[0].consequenceOf ?? "").toContain(durableId);
+    const carryingBatch = observedWaveCommits.find((batch) =>
+      batch.consequenceOf.includes(durableId)
+    );
+    expect(carryingBatch).toBeDefined();
+    expect(JSON.stringify(carryingBatch!.operations)).toContain(link!.id);
+    cancelDemand();
+  });
+
+  it("the ruled result carriage, value-less arm: a served handler that returns undefined STILL writes its receipt — the `{}` existence witness (owner: 'even if the value is undefined'), one derived commit, atomic with the mark", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const { result } = await standUp(clientRuntime, DECLARED_RESULT_PATTERN, {
+      arg: "valueless-receipt-arg",
+      result: "valueless-receipt-result",
+    });
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    host = newHost();
+    const fired = fireVerb(result, "quiet", {}, "valueless-receipt-1");
+    await clientRuntime.idle();
+
+    await waitUntil(
+      () => sidecarIdsIn(engine).length === 1,
+      "the event append to land",
+    );
+    const sidecarId = sidecarIdsIn(engine)[0];
+    await waitUntil(
+      () => {
+        const value = Engine.read(engine, { id: sidecarId })?.value as
+          | StreamEventsDocValue
+          | undefined;
+        const entry = value?.entries?.[0];
+        return entry?.consequenced === true &&
+          value?.eventWatermark === entry?.seq;
+      },
+      "the handling to consequence",
+    );
+    await waitUntil(() => fired.ack() !== undefined, "the durable ack");
+    expect(fired.ack()!.status).not.toBe("error");
+    const link = fired.ack()!.tx.handlingReceiptLink;
+    expect(link).toBeDefined();
+
+    // The cell EXISTS post-serve, holding exactly the empty record — the
+    // value-less witness consumers distinguish from "no receipt at all".
+    const receiptDoc = Engine.read(engine, { id: link!.id });
+    expect(receiptDoc?.value).toEqual({});
+    const writers = commitsWriting(engine, link!.id);
+    expect(writers.length).toBe(1);
+    expect(writers[0].class).toBe("derived");
+    cancelDemand();
+  });
+
+  it("the ruled result carriage, CAS-loss arm: a receipt that ALREADY exists when the serving run goes to write is a LOUD NO-OP — the standing value wins, no second write, and the wave still commits (mark + consequences land); the pre-created cell comes from the real OFF-arm client writer under the SAME invocation id, so the pin also proves the cross-arm address agreement (mutation: drop the existence check → the receipt is overwritten and a derived writer appears; make CAS-loss fail the wave → the entry never consequences)", async () => {
+    ({ manager: clientManager, runtime: clientRuntime } = openClient());
+    const engine = await server.engineForSpace(space);
+    const names = { arg: "cas-loss-arg", result: "cas-loss-result" };
+    const { result } = await standUp(
+      clientRuntime,
+      DECLARED_RESULT_PATTERN,
+      names,
+    );
+    const cancelDemand = result.sink(() => {});
+    await clientRuntime.idle();
+    await clientRuntime.storageManager.synced();
+
+    // The pre-created receipt, minted through the CLIENT-ERA writer: an
+    // explicit-OFF probe runtime (commitPreconditions on, the pre-flip
+    // client posture — a mixed-fleet OFF client against this ON server)
+    // dispatches the SAME invocation id locally and commits the receipt
+    // as an ordinary authored write. Explicit `false` does NOT un-claim
+    // the process-global serving flag while the harness's ON enablers
+    // are live (runtime.ts's enabler-count guard).
+    const probeManager = EmulatedStorageManager.connectTo(server, {
+      as: aliceSigner,
+    });
+    extraManagers.push(probeManager);
+    const probeRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: probeManager,
+      experimental: { serverExecution: false, commitPreconditions: true },
+    });
+    extraRuntimes.push(probeRuntime);
+    const { result: probeResult } = await standUp(
+      probeRuntime,
+      DECLARED_RESULT_PATTERN,
+      names,
+    );
+    const cancelProbeDemand = probeResult.sink(() => {});
+    await probeRuntime.idle();
+    const probeFired = fireVerb(
+      probeResult,
+      "probe",
+      { n: 99 },
+      "cas-loss-1",
+    );
+    await probeRuntime.idle();
+    await probeRuntime.storageManager.synced();
+    await waitUntil(() => probeFired.ack() !== undefined, "the OFF-arm ack");
+    expect(probeFired.ack()!.status).not.toBe("error");
+    const probeLink = probeFired.ack()!.tx.handlingReceiptLink;
+    expect(probeLink).toBeDefined();
+    await waitUntil(
+      () => Engine.read(engine, { id: probeLink!.id })?.value !== undefined,
+      "the pre-created receipt to land durably",
+    );
+    expect(Engine.read(engine, { id: probeLink!.id })?.value).toEqual({
+      token: "tok-99",
+    });
+    cancelProbeDemand();
+
+    // Now the ON client fires the SAME id; the serving run's write finds
+    // the cell taken and must lose the CAS loudly — and harmlessly.
+    host = newHost();
+    const fired = fireVerb(result, "probe", { n: 7 }, "cas-loss-1");
+    await clientRuntime.idle();
+    await waitUntil(
+      () => sidecarIdsIn(engine).length === 1,
+      "the event append to land",
+    );
+    const sidecarId = sidecarIdsIn(engine)[0];
+    await waitUntil(
+      () => {
+        const value = Engine.read(engine, { id: sidecarId })?.value as
+          | StreamEventsDocValue
+          | undefined;
+        const entry = value?.entries?.[0];
+        return entry?.consequenced === true &&
+          value?.eventWatermark === entry?.seq;
+      },
+      "the wave to commit despite the CAS loss (never an error that " +
+        "fails the wave)",
+    );
+    const durableId = (Engine.read(engine, { id: sidecarId })
+      ?.value as StreamEventsDocValue).entries![0].eventId;
+    await waitUntil(() => fired.ack() !== undefined, "the durable ack");
+    expect(fired.ack()!.status).not.toBe("error");
+
+    // Cross-arm address agreement: the ON echo published the SAME
+    // cause-derived address the OFF-arm writer used — the no-migration
+    // property, witnessed through the real machinery on both sides.
+    const link = fired.ack()!.tx.handlingReceiptLink;
+    expect(link).toBeDefined();
+    expect(link!.id).toBe(probeLink!.id);
+
+    // Single write: the standing value won — the served handler's value
+    // (tok-7) never landed. The whole write history stays the ONE
+    // authored commit; the serve added no derived writer, and the
+    // consequence wave carries no operation on the receipt doc.
+    expect(Engine.read(engine, { id: link!.id })?.value).toEqual({
+      token: "tok-99",
+    });
+    const writers = commitsWriting(engine, link!.id);
+    expect(writers.length).toBe(1);
+    expect(writers[0].class).toBe("authored");
+    const carryingBatch = observedWaveCommits.find((batch) =>
+      batch.consequenceOf.includes(durableId)
+    );
+    expect(carryingBatch).toBeDefined();
+    expect(JSON.stringify(carryingBatch!.operations)).not.toContain(link!.id);
+
+    // The LOUD half: the serving runner counted the skip.
+    expect(servingRuntime!.runner.servedReceiptCasLosses).toBe(1);
     cancelDemand();
   });
 

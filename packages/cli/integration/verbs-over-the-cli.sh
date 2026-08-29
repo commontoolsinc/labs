@@ -52,6 +52,20 @@ if [ -z "${CF_IDENTITY:-}" ]; then
   $CF id new >"$CF_IDENTITY" 2>/dev/null
 fi
 ARGS="--api-url=$API_URL --identity=$CF_IDENTITY --space=$SPACE"
+
+# The host's server-execution posture (same probe as integration.sh): a few
+# steps assert arm-specific mechanics — the OFF arm's receipt-precondition
+# `deduplicated` key, the client-env plainResultReceipts authority, and what
+# a same-id retry of a THROWN handling does — and each says which truth it
+# is asserting.
+server_execution_on() {
+  case "${EXPERIMENTAL_SERVER_EXECUTION:-}" in
+    true) return 0 ;;
+    false) return 1 ;;
+  esac
+  curl -fsS "$API_URL/api/health/stats" 2>/dev/null \
+    | jq -e '.servingLoop != null' > /dev/null 2>&1
+}
 echo "API_URL=$API_URL"
 echo "SPACE=$SPACE"
 
@@ -205,8 +219,18 @@ D=$($CF call --quiet --piece "$BOARD" $ARGS --invocation create-1 \
   createNote '{"title":"IMPOSTER"}' 2>/dev/null)
 check "First note" "$(echo "$D" | jq -r '.result.note["$NAME"] // empty')" \
   "the replay returns the first result, not the imposter's"
-check "true" "$(echo "$D" | jq -r '.deduplicated // false')" \
-  "the call reports itself deduplicated"
+if server_execution_on; then
+  # ON: no receipt precondition exists (events.md §4 subsumption) — the
+  # replay is skipped at the dedupe horizon and reads the ORIGINAL result
+  # back from the serving-side receipt (the ruled result carriage,
+  # 2026-08-29); the two checks around this one are the witness. The
+  # OFF-arm mechanism key must NOT be fabricated.
+  check "false" "$(echo "$D" | jq -r '.deduplicated // false')" \
+    "the replay does not claim receipt-level dedup under server execution"
+else
+  check "true" "$(echo "$D" | jq -r '.deduplicated // false')" \
+    "the call reports itself deduplicated"
+fi
 check "$BEFORE" "$($CF get --quiet --piece "$BOARD" $ARGS noteCount --step 2>/dev/null)" \
   "the replay created no note (count unchanged at $BEFORE)"
 
@@ -235,8 +259,18 @@ check "Flag-off note" "$(echo "$P" | jq -r '.result.note["$NAME"] // empty')" \
 Q=$(EXPERIMENTAL_PLAIN_RESULT_RECEIPTS=false $CF call --quiet \
   --piece "$BOARD" $ARGS --invocation label-flagoff \
   setLabel '{"label":"Written anyway"}' 2>/dev/null)
-check "null" "$(echo "$Q" | jq -r '.result // "null"')" \
-  "the plain record is absent with the option OFF"
+if server_execution_on; then
+  # ON: the deployed client ADOPTS the server's plainResultReceipts
+  # (runtime-presets.ts, authority "server" — "a client on the other value
+  # reads back a receipt shaped by a rule it does not share"), and the
+  # SERVING side wrote the receipt under the server's posture — so the
+  # client env cannot turn the plain record off; it arrives regardless.
+  check "Written anyway" "$(echo "$Q" | jq -r '.result.label // "null"')" \
+    "the plain record arrives despite the client env: the posture authority is the server's"
+else
+  check "null" "$(echo "$Q" | jq -r '.result // "null"')" \
+    "the plain record is absent with the option OFF"
+fi
 check "Written anyway" \
   "$($CF get --quiet --piece "$BOARD" $ARGS label --input 2>/dev/null | jq -r '.')" \
   "but the write landed regardless — an absent result is not a failed mutation"
@@ -247,15 +281,39 @@ V=$($CF call --quiet --piece "$BOARD" $ARGS --invocation touch-1 \
 check "settled" "$(echo "$V" | jq -r '.status')" "the value-less verb settled"
 check "{}" "$(echo "$V" | jq -c '.result // {}')" "its result is the empty witness"
 
-step "10. A refused call does not spend its invocation id"
+step "10. A thrown call and its invocation id"
 $CF call --quiet --piece "$BOARD" $ARGS --invocation reuse-1 \
   createNote '{"title":""}' >/dev/null 2>&1
 rc=$?
 check "1" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)" "an empty title exits nonzero"
+COUNT_AFTER_THROW=$($CF get --quiet --piece "$BOARD" $ARGS noteCount --step 2>/dev/null)
 C=$($CF call --quiet --piece "$BOARD" $ARGS --invocation reuse-1 \
   createNote '{"title":"Corrected"}' 2>/dev/null)
-check "Corrected" "$(echo "$C" | jq -r '.result.note["$NAME"] // empty')" \
-  "the SAME id then executes, because the refusal never consumed it"
+if server_execution_on; then
+  # ON: the throw happened SERVER-side and "the error IS the consequence"
+  # (events.md §5) — the errored handling durably CONSUMED the id, so a
+  # same-id retry never re-executes. Its mechanical shape is a race the
+  # spec allows either way: admission refuses the duplicate while the
+  # errored entry is still above the horizon, or admits it and the
+  # processing skip passes it (settled, no result — no receipt exists
+  # for an errored handling). Both agree on the semantic asserted here:
+  # nothing runs, nothing is created. The caller's correct move after an
+  # error is a FRESH id — asserted below. This is a real OFF→ON contract
+  # delta, recorded in the flip register (verification-coverage.md FLIP
+  # block).
+  check "" "$(echo "$C" | jq -r '.result.note["$NAME"] // empty')" \
+    "the same-id retry does not execute: the errored handling consumed the id"
+  check "$COUNT_AFTER_THROW" \
+    "$($CF get --quiet --piece "$BOARD" $ARGS noteCount --step 2>/dev/null)" \
+    "no note was created by the same-id retry"
+  FRESH=$($CF call --quiet --piece "$BOARD" $ARGS --invocation reuse-1-fresh \
+    createNote '{"title":"Corrected"}' 2>/dev/null)
+  check "Corrected" "$(echo "$FRESH" | jq -r '.result.note["$NAME"] // empty')" \
+    "a FRESH id executes the corrected call"
+else
+  check "Corrected" "$(echo "$C" | jq -r '.result.note["$NAME"] // empty')" \
+    "the SAME id then executes, because the refusal never consumed it"
+fi
 
 step "11. Reading a verb redirects to cf call"
 OUT=$($CF get --piece "$BOARD" $ARGS createNote 2>&1)

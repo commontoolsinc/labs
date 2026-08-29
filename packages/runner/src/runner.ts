@@ -1541,6 +1541,13 @@ export class Runner {
   private locallyCommittedHandlerResultStarts = new Set<
     `${MemorySpace}/${ScopeKey}/${URI}`
   >();
+  // DIAGNOSTIC counter (tests; the loud-no-op pin): served receipt
+  // writes skipped as write-once CAS losses — the handling's result
+  // cell already held a value when the serving run went to write it
+  // (handleJavaScriptHandlerResult's ruled serving-side write,
+  // events.md §4 "Result carriage"). Each skip also logs a warn line;
+  // this is the machine-readable half.
+  servedReceiptCasLosses = 0;
   // Results started in their own right rather than as part of an enclosing
   // pattern, which is what navigating to a nested result does. An enclosing
   // pattern releasing such a result leaves it running; only stopping it
@@ -6530,6 +6537,23 @@ export class Runner {
       // overlay anyway, and a serving run's create-only mark would ride
       // the WAVE commit as a precondition the watermark already covers.
       this.runtime.experimental.serverExecution !== true;
+    // The serving-side receipt/result write (owner-ruled 2026-08-29;
+    // events.md §4 "Result carriage"): N26's subsumption retired the
+    // receipt's EXACTLY-ONCE role, not its RESULT-CARRIAGE role. Under
+    // the flag the SERVING side writes the handling's receipt — every
+    // served handler completion writes its result cell, even when the
+    // declared value is undefined — in the handler run's own transaction,
+    // so the write seals into the run's wave with the entry's
+    // `consequenced` mark (events.md §4 mark/effects atomicity) and
+    // enters the space through the same carriage every served
+    // event-handler write rides. Only a run whose body actually ran
+    // writes (a skipped served dispatch is withdrawn whole — see
+    // `dispatchedHandlerNotRun`); the client's write stays disabled
+    // (`receiptsEnabled` above), so the serving run is the ONE writer.
+    const servedReceiptWrite =
+      this.runtime.experimental.serverExecution === true &&
+      waveRunContextOf(tx)?.kind === "event-handler" &&
+      tx.dispatchedHandlerNotRun === undefined;
     // Expose the handling's receipt address on the transaction, where the
     // sender's commit callback can read it (verb contract WS-D). Stashed
     // before the branches so BOTH outcomes carry it: a committed handling
@@ -6541,7 +6565,17 @@ export class Runner {
     // its address would hand the caller a witness that does not exist and
     // invite a readback against an unwritten cell. Absent beats fabricated —
     // the same fail-closed stance cfc/grants.ts takes when its gate is off.
-    if (receiptsEnabled) {
+    //
+    // Under EXPERIMENTAL_SERVER_EXECUTION the receipt IS being written —
+    // by the SERVING side (the ruled write above). The address is
+    // cause-derived, so the client's diverted ECHO of the same event mints
+    // the same address the serving run writes; publishing it on the echo's
+    // transaction is what hands an unchanged caller (the CLI verb
+    // dispatch, WS-D) a readable handle on the served outcome. The
+    // durable-ack coupling (cell.ts) settles that caller's callback only
+    // after the handling CONSEQUENCED — the serving wave, receipt
+    // included, committed before the address is ever dereferenced.
+    if (receiptsEnabled || this.runtime.experimental.serverExecution === true) {
       tx.handlingReceiptLink = receiptCell.getAsNormalizedFullLink();
     }
     if (!resultHasReactives && frame.reactives.size === 0) {
@@ -6578,6 +6612,51 @@ export class Runner {
         const shape = receiptShapeSchema(receiptValue);
         if (shape !== undefined) receipt.setMetaRaw("schema", shape);
         tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
+      } else if (servedReceiptWrite) {
+        // The ruled serving-side receipt write (owner, 2026-08-29): the
+        // value-less/plain shape is EXACTLY the client-era one — `{}` as
+        // the existence witness, the handler's plain return under
+        // `plainResultReceipts` — and the cell identity is the same
+        // cause-derived address, so the verb contract's readback
+        // (WS-C/D; `cf call`'s `.result`) needs no migration.
+        //
+        // Write-once is CAS, not a wire precondition: no markCreateOnly
+        // (N26 — a create-only mark must not ride a wave commit whose
+        // event the watermark already covers), and a receipt that
+        // ALREADY holds a value is a LOUD NO-OP. A lost CAS means a
+        // writer already landed this handling's receipt — a re-served
+        // replay converging on the same cause-derived id, or a
+        // pre-created cell — and first-writer-wins is the OFF arm's
+        // receipt-collision semantics: never a second write, never an
+        // error that fails the wave (the entry's consequenced mark and
+        // the handler's other consequences still commit; the read below
+        // rides the wave's basis for this doc, so a genuinely
+        // concurrent landing rebases the run and the re-run takes this
+        // same no-op arm).
+        const existing = receiptCell.getRaw({ meta: ignoreReadForScheduling });
+        if (existing !== undefined) {
+          this.servedReceiptCasLosses += 1;
+          logger.warn("served-receipt", () => [
+            "served receipt write skipped (write-once CAS loss): the " +
+            "handling's result cell already holds a value — a prior " +
+            "serve/replay or a pre-created cell landed it first, and " +
+            "the standing value wins",
+            {
+              receipt: receiptCell.getAsNormalizedFullLink().id,
+              eventId: waveRunContextOf(tx)?.eventId,
+            },
+          ]);
+        } else {
+          const receiptValue =
+            this.runtime.experimental.plainResultReceipts === true &&
+              result !== undefined
+              ? result
+              : {};
+          const receipt = receiptCell.withTx(tx);
+          receipt.set(receiptValue);
+          const shape = receiptShapeSchema(receiptValue);
+          if (shape !== undefined) receipt.setMetaRaw("schema", shape);
+        }
       }
       return result;
     }

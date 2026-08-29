@@ -249,6 +249,34 @@ ambient-state one.
   default) is SUBSUMED by `eventWatermark` under the flag; the two
   mechanisms MUST NOT be active for the same event
   (runtime-mapping.md N26).
+- **Result carriage (RULED 2026-08-29 — owner: "yes, Serving-side
+  receipt/result write, as that is indeed what i said before"):** the
+  subsumption above retires the receipt's EXACTLY-ONCE role only — its
+  RESULT-CARRIAGE role (verb contract WS-C/D readback:
+  `tx.handlingReceiptLink`, `plainResultReceipts`, `cf call`'s
+  `.result`/`.receipt`) is replaced by a SERVING-SIDE write. Every
+  served handler completion writes the handling's receipt/result cell —
+  even when the declared value is undefined, so the `{}` existence
+  witness stands — in the handler run's own transaction, so the write
+  seals into the run's wave with the entry's `consequenced` mark (§4's
+  mark/effects atomicity) and rides the same carriage as every other
+  served event-handler write. The cell identity stays the cause-derived
+  address the client-era write used (same event ⇒ same minted cell id),
+  so an unchanged consumer reads served results exactly as it read
+  client-written ones; a flag-ON client's diverted echo publishes that
+  same address on its transaction, and the durable-ack coupling settles
+  the sender's callback only after the handling consequenced — the
+  receipt is durable before the address is ever dereferenced.
+  Exactly-once for the write is the single serving writer plus the
+  store's CAS on the result cell ("all handlers write result cells
+  (even if the value is undefined), and the CAS for that is the
+  write-once guarantee" — the owner's model): a lost CAS means a writer
+  already landed this handling's receipt (a re-served replay converging
+  on the same cause-derived id, or a pre-created cell) and is a LOUD
+  NO-OP — first-writer-wins, the OFF arm's receipt-collision
+  semantics — never a second write, never an error that fails the wave.
+  No create-only mark rides the wave (the invariant above holds); the
+  client's own write stays disabled.
 - **The drain's own re-scan (stage C tuning, 2026-08-18):** the drain
   queues a pending entry into the serving scheduler AT MOST ONCE until
   the store has spoken for it — a re-drain skips an entry whose earlier
