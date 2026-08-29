@@ -13,7 +13,7 @@ import {
 
 type TestNode = Node<Record<string, never>>;
 
-describe("React Flow lifecycle", () => {
+describe("flow-lifecycle", () => {
   it("retains drag state and untouched node identity", () => {
     const dragged: TestNode = {
       id: "dragged",

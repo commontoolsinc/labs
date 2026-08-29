@@ -435,17 +435,14 @@ function MachineCanvas({
         token: 0,
       };
       void onPositionCommit(node.id, draft.position).then((committed) => {
+        if (committed === undefined) return;
         if (!flowLifecycle.settlePositionDraft(draftsRef, node.id, draft)) {
           return;
         }
-        const replacement = committed ?? authoritativeNodesRef.current.find(
-          (candidate) => candidate.id === node.id,
-        )?.position;
-        if (replacement === undefined) return;
         setNodes((current) =>
           current.map((candidate) =>
             candidate.id === node.id
-              ? { ...candidate, position: replacement }
+              ? { ...candidate, position: committed }
               : candidate
           )
         );
