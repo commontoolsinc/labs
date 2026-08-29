@@ -38,10 +38,14 @@ function loopback(s: MemoryV2Server.Server) {
   return MemoryV2Client.loopback(s);
 }
 class F implements SessionFactory {
-  constructor(private gs: () => MemoryV2Server.Server) {}
+  #gs: () => MemoryV2Server.Server;
+
+  constructor(gs: () => MemoryV2Server.Server) {
+    this.#gs = gs;
+  }
   async create(id: string, s?: Signer) {
     const client = await MemoryV2Client.connect({
-      transport: loopback(this.gs()),
+      transport: loopback(this.#gs()),
     });
     const session = await client.mount(
       id,

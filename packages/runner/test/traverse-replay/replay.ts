@@ -155,9 +155,13 @@ function buildLatencyReport(
  * the corpus, exactly as live storage does.
  */
 export class FixtureObjectManager implements ObjectStorageManager {
-  private attestations = new Map<string, IAttestation>();
+  #attestations = new Map<string, IAttestation>();
 
-  constructor(private docs: Record<string, FabricValue>) {}
+  #docs: Record<string, FabricValue>;
+
+  constructor(docs: Record<string, FabricValue>) {
+    this.#docs = docs;
+  }
 
   load(address: BaseMemoryAddress): IAttestation | null {
     if (hasDataUriScheme(address.id)) {
@@ -169,9 +173,9 @@ export class FixtureObjectManager implements ObjectStorageManager {
     const key = fixtureDocKey(
       address as BaseMemoryAddress & { space: string },
     );
-    const cached = this.attestations.get(key);
+    const cached = this.#attestations.get(key);
     if (cached !== undefined) return cached;
-    const value = this.docs[key];
+    const value = this.#docs[key];
     if (value === undefined) return null;
     const attestation: IAttestation = {
       address: { ...address, path: [] },
@@ -181,7 +185,7 @@ export class FixtureObjectManager implements ObjectStorageManager {
       // can never engage during replay even though they do in production.
       value: deepFreeze(value),
     };
-    this.attestations.set(key, attestation);
+    this.#attestations.set(key, attestation);
     return attestation;
   }
 }

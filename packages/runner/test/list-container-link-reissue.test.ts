@@ -64,10 +64,14 @@ const signer = await Identity.fromPassphrase("list container link reissue");
 const space = signer.did();
 
 class SharedSessionFactory implements SessionFactory {
-  constructor(private readonly getServer: () => MemoryV2Server.Server) {}
+  readonly #getServer: () => MemoryV2Server.Server;
+
+  constructor(getServer: () => MemoryV2Server.Server) {
+    this.#getServer = getServer;
+  }
   async create(spaceId: string, sgnr?: Signer) {
     const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.getServer()),
+      transport: MemoryV2Client.loopback(this.#getServer()),
     });
     const session = await client.mount(
       spaceId,

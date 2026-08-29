@@ -2495,7 +2495,11 @@ describe("stage D seal-into-wave", () => {
     class BootstrapLoopbackFactory implements SessionFactory {
       readonly supportsAclBootstrap = true;
       readonly principals: string[] = [];
-      constructor(private readonly server: MemoryV2Server.Server) {}
+      readonly #server: MemoryV2Server.Server;
+
+      constructor(server: MemoryV2Server.Server) {
+        this.#server = server;
+      }
       async create(
         targetSpace: MemorySpace,
         sessionSigner?: Signer,
@@ -2503,7 +2507,7 @@ describe("stage D seal-into-wave", () => {
       ) {
         this.principals.push(sessionSigner?.did() ?? "<anonymous>");
         const client = await MemoryV2Client.connect({
-          transport: MemoryV2Client.loopback(this.server),
+          transport: MemoryV2Client.loopback(this.#server),
         });
         const session = await client.mount(
           targetSpace,

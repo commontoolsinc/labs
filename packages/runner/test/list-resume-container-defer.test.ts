@@ -265,28 +265,47 @@ function rewritingLoopback(
 }
 
 class RewritingSessionFactory implements SessionFactory {
+  readonly #getServer: () => MemoryV2Server.Server;
+  readonly #redirectSends: boolean;
+  readonly #onWithheldCommitOp: (n: number) => void;
+  readonly #onWithheldUpsert: (n: number) => void;
+  readonly #onFrame?: (
+    direction: "send" | "receive",
+    payload: string,
+  ) => void;
+  readonly #holdReceive?: (payload: string) => boolean;
+  readonly #onHeldReceive?: (deliver: () => void) => void;
+
   constructor(
-    private readonly getServer: () => MemoryV2Server.Server,
-    private readonly redirectSends: boolean,
-    private readonly onWithheldCommitOp: (n: number) => void,
-    private readonly onWithheldUpsert: (n: number) => void,
-    private readonly onFrame?: (
+    getServer: () => MemoryV2Server.Server,
+    redirectSends: boolean,
+    onWithheldCommitOp: (n: number) => void,
+    onWithheldUpsert: (n: number) => void,
+    onFrame?: (
       direction: "send" | "receive",
       payload: string,
     ) => void,
-    private readonly holdReceive?: (payload: string) => boolean,
-    private readonly onHeldReceive?: (deliver: () => void) => void,
-  ) {}
+    holdReceive?: (payload: string) => boolean,
+    onHeldReceive?: (deliver: () => void) => void,
+  ) {
+    this.#getServer = getServer;
+    this.#redirectSends = redirectSends;
+    this.#onWithheldCommitOp = onWithheldCommitOp;
+    this.#onWithheldUpsert = onWithheldUpsert;
+    this.#onFrame = onFrame;
+    this.#holdReceive = holdReceive;
+    this.#onHeldReceive = onHeldReceive;
+  }
   async create(spaceId: string, sgnr?: Signer) {
     const client = await MemoryV2Client.connect({
       transport: rewritingLoopback(
-        this.getServer(),
-        this.redirectSends,
-        this.onWithheldCommitOp,
-        this.onWithheldUpsert,
-        this.onFrame,
-        this.holdReceive,
-        this.onHeldReceive,
+        this.#getServer(),
+        this.#redirectSends,
+        this.#onWithheldCommitOp,
+        this.#onWithheldUpsert,
+        this.#onFrame,
+        this.#holdReceive,
+        this.#onHeldReceive,
       ),
     });
     const session = await client.mount(
