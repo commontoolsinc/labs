@@ -133,6 +133,24 @@ describe("Impossible Machine interaction lifecycle", () => {
     expect(value).toBe(5);
   });
 
+  it("orders quiet actions without changing pending controls", async () => {
+    const pendingUpdates: boolean[] = [];
+    let actionError: Error | undefined;
+    const runner = createActionRunner({
+      setGlobalPending: (value) => pendingUpdates.push(value),
+      setActionError: (value) => actionError = value,
+      setBusyNodeCounts: () => {},
+    });
+
+    expect(await runner.runQuiet(() => Promise.resolve())).toBe(true);
+    expect(await runner.runQuiet(() => Promise.reject("quiet failure"))).toBe(
+      false,
+    );
+
+    expect(pendingUpdates).toEqual([]);
+    expect(actionError).toEqual(new Error("quiet failure"));
+  });
+
   it("retains the latest rapid selection request", async () => {
     const tracker = createSelectionRequestTracker("node-a");
     const writes: string[] = [];

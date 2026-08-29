@@ -7,6 +7,7 @@ import React from "npm:react@19.2.8";
 // deno-lint-ignore no-external-import
 import { createRoot } from "npm:react-dom@19.2.8/client";
 import {
+  applyNodeChanges,
   Background,
   Controls,
   type Edge,
@@ -35,6 +36,7 @@ import {
   type MachineParameters,
   type MachinePosition,
 } from "./contract.ts";
+import * as flowLifecycle from "./flow-lifecycle.ts";
 import * as model from "./model.ts";
 
 const fabric = connectFabric();
@@ -358,6 +360,118 @@ const NODE_TYPES = {
   actuator: ActuatorNode,
 };
 
+interface MachineCanvasProps {
+  /** Durable node data projected into React Flow's node model. */
+  authoritativeNodes: MachineFlowNode[];
+  /** Canonical durable edges rendered on the canvas. */
+  edges: Edge[];
+  /** Connects two nodes through the shared action queue. */
+  onConnect(connection: {
+    source: string | null;
+    target: string | null;
+  }): void;
+  /** Persists a user-local node selection. */
+  onNodeSelection(nodeId: string): void;
+  /** Persists a dropped position and returns the authoritative result. */
+  onPositionCommit(
+    nodeId: string,
+    position: MachinePosition,
+  ): Promise<MachinePosition | undefined>;
+}
+
+/** Owns pointer-lifetime state without rerendering the surrounding app. */
+function MachineCanvas({
+  authoritativeNodes,
+  edges,
+  onConnect,
+  onNodeSelection,
+  onPositionCommit,
+}: MachineCanvasProps) {
+  const [nodes, setNodes] = React.useState(authoritativeNodes);
+  const draftsRef = React.useRef<Record<string, MachinePosition>>({});
+
+  React.useLayoutEffect(() => {
+    setNodes((current) =>
+      flowLifecycle.reconcileCollaborativeNodes(
+        current,
+        authoritativeNodes,
+        draftsRef.current,
+      )
+    );
+  }, [authoritativeNodes]);
+
+  const handleNodeChanges = React.useCallback(
+    (changes: NodeChange<MachineFlowNode>[]) => {
+      setNodes((current) =>
+        flowLifecycle.applyCollaborativeNodeChanges(
+          changes,
+          current,
+          draftsRef,
+          applyNodeChanges,
+        )
+      );
+    },
+    [],
+  );
+
+  const handleNodeDragStop = React.useCallback(
+    (node: MachineFlowNode) => {
+      const position = draftsRef.current[node.id] ?? node.position;
+      void onPositionCommit(node.id, position).then((committed) => {
+        if (!flowLifecycle.settlePositionDraft(draftsRef, node.id, position)) {
+          return;
+        }
+        const replacement = committed ?? authoritativeNodes.find(
+          (candidate) => candidate.id === node.id,
+        )?.position;
+        if (replacement === undefined) return;
+        setNodes((current) =>
+          current.map((candidate) =>
+            candidate.id === node.id
+              ? { ...candidate, position: replacement }
+              : candidate
+          )
+        );
+      });
+    },
+    [authoritativeNodes, onPositionCommit],
+  );
+
+  return (
+    <ReactFlow<MachineFlowNode, Edge>
+      nodes={nodes}
+      edges={edges}
+      nodeTypes={NODE_TYPES}
+      onNodesChange={handleNodeChanges}
+      onNodeClick={(_event, node) => onNodeSelection(node.id)}
+      onNodeDragStop={(_event, node) => handleNodeDragStop(node)}
+      onConnect={onConnect}
+      nodesDraggable
+      nodesConnectable
+      elementsSelectable
+      fitView
+      fitViewOptions={{ padding: 0.1 }}
+      minZoom={0.35}
+      maxZoom={1.6}
+      defaultEdgeOptions={{ type: "smoothstep" }}
+      colorMode="dark"
+    >
+      <Background color="#26334a" gap={28} size={1.2} />
+      <Controls
+        showInteractive={false}
+        fitViewOptions={{ padding: 0.1 }}
+      />
+      <MiniMap<MachineFlowNode>
+        pannable
+        zoomable
+        nodeColor={(node) => KIND_COLORS[node.type ?? "sensor"]}
+        nodeStrokeColor="#07111f"
+        maskColor="rgba(5, 12, 24, 0.72)"
+      />
+    </ReactFlow>
+  );
+}
+
 function App() {
   const input = useCell<IframeInputData | undefined>("input");
   const state = useCell<IframeStateData | undefined>("state");
@@ -369,10 +483,6 @@ function App() {
   const [busyNodeCounts, setBusyNodeCounts] = React.useState<
     Readonly<Record<string, number>>
   >({});
-  const [draftPositions, setDraftPositions] = React.useState<
-    Record<string, MachinePosition>
-  >({});
-  const draftPositionsRef = React.useRef<Record<string, MachinePosition>>({});
   const [connectSource, setConnectSource] = React.useState("");
   const [connectTarget, setConnectTarget] = React.useState("");
   const bootstrapStarted = React.useRef(false);
@@ -423,6 +533,7 @@ function App() {
 
   const runAction = actionRunner.run;
   const runNodeAction = actionRunner.runNode;
+  const runQuietAction = actionRunner.runQuiet;
 
   const locateNodeCell = React.useCallback(async (nodeId: string) => {
     const nodesCell = stateCell.key("nodes");
@@ -452,19 +563,17 @@ function App() {
   );
 
   const persistPosition = React.useCallback(
-    (nodeId: string, position: MachinePosition) =>
-      runAction(async () => {
+    async (nodeId: string, position: MachinePosition) => {
+      const succeeded = await runQuietAction(async () => {
         const node = await locateNodeCell(nodeId);
         await node.key("position").set(position);
         await state.refresh();
-        model.settleCommittedPositionDraft(
-          draftPositionsRef,
-          setDraftPositions,
-          nodeId,
-          position,
-        );
-      }),
-    [locateNodeCell, runAction, state.refresh],
+      });
+      if (!succeeded) return undefined;
+      return stateCell.get()?.nodes.find((node) => node.id === nodeId)
+        ?.position ?? position;
+    },
+    [locateNodeCell, runQuietAction, state.refresh],
   );
 
   const appendNode = React.useCallback(
@@ -596,7 +705,7 @@ function App() {
   const flowNodes: MachineFlowNode[] = stateValue.nodes.map((node) => ({
     id: node.id,
     type: node.kind,
-    position: draftPositions[node.id] ?? node.position,
+    position: node.position,
     selected: outputValue.selectedNodeId === node.id,
     data: {
       node,
@@ -666,28 +775,6 @@ function App() {
     stateValue.nodes.filter((node) =>
       model.isActuatorFiring(node, signals.get(node.id) ?? 0)
     ).length;
-
-  const handleNodeChanges = (changes: NodeChange<MachineFlowNode>[]) => {
-    const positions = changes.filter(
-      (change): change is Extract<
-        NodeChange<MachineFlowNode>,
-        { type: "position" }
-      > => change.type === "position" && change.position !== undefined,
-    );
-    if (positions.length === 0) return;
-    Object.assign(
-      draftPositionsRef.current,
-      Object.fromEntries(
-        positions.map((change) => [change.id, change.position!]),
-      ),
-    );
-    setDraftPositions((current) => ({
-      ...current,
-      ...Object.fromEntries(
-        positions.map((change) => [change.id, change.position!]),
-      ),
-    }));
-  };
 
   return (
     <NodeActionContext.Provider value={{ updateParameter }}>
@@ -767,45 +854,21 @@ function App() {
 
         <section className="workspace">
           <div className="flow-shell" aria-label="Collaborative machine canvas">
-            <ReactFlow<MachineFlowNode, Edge>
-              nodes={flowNodes}
+            <MachineCanvas
+              authoritativeNodes={flowNodes}
               edges={flowEdges}
-              nodeTypes={NODE_TYPES}
-              onNodesChange={handleNodeChanges}
-              onNodeClick={(_event, node) =>
+              onNodeSelection={(nodeId) =>
                 void tracker.request(
-                  node.id,
-                  (nodeId) => updatePreference("selectedNodeId", () => nodeId),
+                  nodeId,
+                  (selectedNodeId) =>
+                    updatePreference(
+                      "selectedNodeId",
+                      () => selectedNodeId,
+                    ),
                 )}
-              onNodeDragStop={(_event, node) =>
-                void persistPosition(
-                  node.id,
-                  draftPositionsRef.current[node.id] ?? node.position,
-                )}
+              onPositionCommit={persistPosition}
               onConnect={(connection) => void appendEdge(connection)}
-              nodesDraggable
-              nodesConnectable
-              elementsSelectable
-              fitView
-              fitViewOptions={{ padding: 0.1 }}
-              minZoom={0.35}
-              maxZoom={1.6}
-              defaultEdgeOptions={{ type: "smoothstep" }}
-              colorMode="dark"
-            >
-              <Background color="#26334a" gap={28} size={1.2} />
-              <Controls
-                showInteractive={false}
-                fitViewOptions={{ padding: 0.1 }}
-              />
-              <MiniMap<MachineFlowNode>
-                pannable
-                zoomable
-                nodeColor={(node) => KIND_COLORS[node.type ?? "sensor"]}
-                nodeStrokeColor="#07111f"
-                maskColor="rgba(5, 12, 24, 0.72)"
-              />
-            </ReactFlow>
+            />
           </div>
 
           <aside className="inspector">

@@ -96,8 +96,12 @@ export interface ActionRunnerSetters {
 
 /** Serialized actions with node-local pending state for embedded controls. */
 export interface ActionRunner {
+  /** Runs a global action while reporting its pending state. */
   run(action: () => Promise<void>): Promise<boolean>;
+  /** Runs a node-local action while reporting that node's pending state. */
   runNode(nodeId: string, action: () => Promise<void>): Promise<boolean>;
+  /** Runs an ordered action without changing any pending indicator. */
+  runQuiet(action: () => Promise<void>): Promise<boolean>;
 }
 
 /** Queues writes while keeping unrelated canvas controls interactive. */
@@ -117,10 +121,11 @@ export function createActionRunner(setters: ActionRunnerSetters): ActionRunner {
   function enqueue(
     action: () => Promise<void>,
     nodeId?: string,
+    quiet = false,
   ): Promise<boolean> {
     if (nodeId !== undefined) updateNodeBusyCount(nodeId, 1);
     const next = tail.then(async () => {
-      if (nodeId === undefined) setters.setGlobalPending(true);
+      if (nodeId === undefined && !quiet) setters.setGlobalPending(true);
       try {
         await action();
         return true;
@@ -128,7 +133,7 @@ export function createActionRunner(setters: ActionRunnerSetters): ActionRunner {
         setters.setActionError(errorFrom(cause));
         return false;
       } finally {
-        if (nodeId === undefined) setters.setGlobalPending(false);
+        if (nodeId === undefined && !quiet) setters.setGlobalPending(false);
       }
     });
     tail = next.then(() => undefined);
@@ -140,6 +145,7 @@ export function createActionRunner(setters: ActionRunnerSetters): ActionRunner {
   return {
     run: (action) => enqueue(action),
     runNode: (nodeId, action) => enqueue(action, nodeId),
+    runQuiet: (action) => enqueue(action, undefined, true),
   };
 }
 
