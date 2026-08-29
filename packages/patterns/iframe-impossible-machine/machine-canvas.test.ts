@@ -33,8 +33,11 @@ interface CanvasProperties {
 function createHookHarness() {
   const states: unknown[] = [];
   const refs: Array<{ current: unknown }> = [];
+  const layoutEffectDependencies: Array<readonly unknown[] | undefined> = [];
   let stateIndex = 0;
   let refIndex = 0;
+  let layoutEffectIndex = 0;
+  let layoutEffectRuns = 0;
 
   const runtime: CanvasReactRuntime = {
     useState<T>(initial: T) {
@@ -52,7 +55,18 @@ function createHookHarness() {
       if (!(index in refs)) refs[index] = { current: initial };
       return refs[index] as { current: T };
     },
-    useLayoutEffect(effect) {
+    useLayoutEffect(effect, dependencies) {
+      const index = layoutEffectIndex++;
+      const previous = layoutEffectDependencies[index];
+      if (
+        previous !== undefined &&
+        previous.length === dependencies.length &&
+        dependencies.every((value, dependencyIndex) =>
+          Object.is(value, previous[dependencyIndex])
+        )
+      ) return;
+      layoutEffectDependencies[index] = [...dependencies];
+      layoutEffectRuns++;
       effect();
     },
     useCallback<T>(callback: T) {
@@ -71,7 +85,11 @@ function createHookHarness() {
     ): FakeElement {
       stateIndex = 0;
       refIndex = 0;
+      layoutEffectIndex = 0;
       return component(properties) as FakeElement;
+    },
+    layoutEffectRuns() {
+      return layoutEffectRuns;
     },
   };
 }
@@ -161,6 +179,7 @@ describe("machine canvas lifecycle", () => {
       position: { x: 8, y: 9 },
       dragging: true,
     }]);
+    expect(harness.layoutEffectRuns()).toBe(1);
     element = harness.render(Canvas, {
       authoritativeNodes: nodes,
       authoritativeSelection: "sensor",
@@ -179,6 +198,7 @@ describe("machine canvas lifecycle", () => {
       },
     });
     properties = canvasProperties(element);
+    expect(harness.layoutEffectRuns()).toBe(1);
     expect(properties.nodes[0].position).toEqual({ x: 8, y: 9 });
     expect(properties.nodes[0].dragging).toBe(true);
 
@@ -194,6 +214,7 @@ describe("machine canvas lifecycle", () => {
       onPositionCommit: (_nodeId, position) => Promise.resolve(position),
     });
 
+    expect(harness.layoutEffectRuns()).toBe(2);
     expect(commits).toEqual([{
       nodeId: "sensor",
       position: { x: 8, y: 9 },
