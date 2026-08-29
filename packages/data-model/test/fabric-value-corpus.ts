@@ -27,6 +27,22 @@ export class PlainClass {}
 export class ArraySubclass extends Array {}
 
 /**
+ * An `Error` subclass reached by the class lookup's `prototype instanceof
+ * Error` fallback rather than by an identity case.
+ */
+export class WeirdError extends RangeError {}
+
+/**
+ * Returns an `Error` whose prototype has been severed, so that it names no
+ * class and only the internal-slot test still sees it as an error.
+ */
+function severedError(): Error {
+  const error = new Error("severed");
+  Object.setPrototypeOf(error, null);
+  return error;
+}
+
+/**
  * One entry per dispatch arm, labeled. The labels reach test names, so they
  * read as noun phrases.
  */
@@ -66,6 +82,8 @@ export const LAYER_CORPUS: ReadonlyArray<[string, unknown]> = [
   ["a `Uint8Array`", new Uint8Array([1, 2, 3])],
   ["a `RegExp`", /abc/gi],
   ["an `Error`", new Error("boom")],
+  ["a custom `Error` subclass instance", new WeirdError("weird")],
+  ["an `Error` whose prototype was severed", severedError()],
   ["a `Map`", new Map()],
   ["a `Set`", new Set()],
 ];

@@ -9,6 +9,13 @@ import { VALUE_TAGS, type ValueTag } from "./VALUE_TAGS.ts";
  * would mean holding that class, and a concrete fabric class reaches the
  * codecs and, through them, the instance bases. Nothing here may import a
  * module that knows a fabric class, for that reason.
+ *
+ * Recognition is by constructor identity, which is a per-realm question:
+ * another realm's `Date` is a different `Date`, and is not this one. Values
+ * from another realm are outside what this is asked about, so no brand check
+ * stands behind the identity comparison. A cross-realm value that did arrive
+ * would come back `null` -- unrecognized rather than misidentified, which is
+ * the direction an unhandled case should fail in.
  */
 export function tagFromNativeBuiltinClass(
   constructorFn: { prototype: unknown },

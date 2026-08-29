@@ -762,8 +762,13 @@ describe("type-check", () => {
       expect(isValidFabricNativeObject(new WeakMap())).toBe(false);
     });
 
-    it("returns `false` for objects with `toJSON()`", () => {
+    it("returns `false` for a plain object carrying `toJSON()`", () => {
+      // `toJSON()` is not consulted, and carrying one decides nothing: what
+      // rejects this value is being a plain object. The `Date` below carries
+      // one too and is accepted, which is what holds the two apart.
       expect(isValidFabricNativeObject({ toJSON: () => "x" })).toBe(false);
+      expect(typeof Date.prototype.toJSON).toBe("function");
+      expect(isValidFabricNativeObject(new Date())).toBe(true);
     });
 
     it("returns `false` for a non-object", () => {
