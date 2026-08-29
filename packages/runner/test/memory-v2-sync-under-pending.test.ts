@@ -91,14 +91,17 @@ class HeldTransactTransport extends ScriptedSessionTransport {
   #held: HeldTransact | null = null;
   #transactSent = Promise.withResolvers<void>();
 
+  readonly #docs: Map<URI, SessionSyncUpsert["doc"]>;
+
   constructor(
-    private readonly docs: Map<URI, SessionSyncUpsert["doc"]>,
+    docs: Map<URI, SessionSyncUpsert["doc"]>,
   ) {
     super({
       name: "sync-under-pending",
       sessionId: "session:sync-under-pending",
       space,
     });
+    this.#docs = docs;
   }
 
   protected override ackServerSeq(): number {
@@ -130,7 +133,7 @@ class HeldTransactTransport extends ScriptedSessionTransport {
             serverSeq: roots.length,
             sync: fullSync(
               roots.length,
-              roots.map((id) => doc(id, 1, this.docs.get(id))),
+              roots.map((id) => doc(id, 1, this.#docs.get(id))),
             ),
           },
         });

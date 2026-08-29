@@ -6,6 +6,98 @@ import {
 } from "@astral/astral";
 
 /**
+ * Where a system browser lives, per platform, in preference order. Chrome
+ * before Chromium because it is the one a developer is more likely to have
+ * kept current, and the one CI runs. This project does not target Windows, so
+ * neither does this.
+ */
+const SYSTEM_BROWSERS: Readonly<Record<string, readonly string[]>> = Object
+  .freeze({
+    darwin: Object.freeze([
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    ]),
+    linux: Object.freeze([
+      "/usr/bin/google-chrome",
+      "/usr/bin/google-chrome-stable",
+      "/usr/bin/chromium",
+      "/usr/bin/chromium-browser",
+    ]),
+  });
+
+/**
+ * Helper for `astralBinaryPath()`, which reports the `ASTRAL_BIN_PATH`
+ * override, or `undefined` where it is unset or unreadable.
+ *
+ * The permission is asked exactly the way astral asks it, so that a caller
+ * which has not granted it gets the same answer from both rather than a throw
+ * from this one.
+ */
+function pathFromEnvironment(): string | undefined {
+  const permission = Deno.permissions.querySync({
+    name: "env",
+    variable: "ASTRAL_BIN_PATH",
+  });
+
+  return (permission.state === "granted")
+    ? (Deno.env.get("ASTRAL_BIN_PATH") || undefined)
+    : undefined;
+}
+
+/** Helper for `astralBinaryPath()`, which reports whether a path is a file. */
+function isExecutableFile(path: string): boolean {
+  try {
+    return Deno.statSync(path).isFile;
+  } catch {
+    // Absent, or unreadable under the permissions this process was given.
+    // Either way it is not a binary to hand a launch.
+    return false;
+  }
+}
+
+/**
+ * Returns the browser binary a **Chrome** astral launch should be given, or
+ * `undefined` to leave the choice to astral. The paths searched are Chrome's
+ * and Chromium's, so a caller launching anything else must not ask -- leaving
+ * `path` unset is what hands the whole question back to astral, including its
+ * own reading of `ASTRAL_BIN_PATH` for that product.
+ *
+ * This answers the same question astral's own `getBinary()` answers, and
+ * differs from it in one way: where astral falls straight through to
+ * downloading a browser, this looks for one already installed. Which browser
+ * astral downloads is a constant inside astral rather than anything this
+ * repository sets, and its latest release still names Chromium 125. CI never
+ * meets that constant, because the workflow points `ASTRAL_BIN_PATH` at the
+ * runner's own Chrome; a developer's machine meets it every time, so a local
+ * browser run and a CI browser run have been exercising engines years apart,
+ * the local one older.
+ *
+ * `ASTRAL_BIN_PATH` still wins outright, which is what keeps CI's
+ * configuration authoritative and leaves anyone a way to name a specific
+ * binary -- astral's downloaded one included, if a system browser ever
+ * misbehaves. `undefined` comes back when no system browser is installed, so
+ * astral's download stays the last resort rather than being taken away.
+ *
+ * @param candidates The paths to search, in preference order. Defaults to the
+ *   ones this platform installs a browser at, and is a parameter so that the
+ *   search can be asked about a list whose answers are known: on a machine
+ *   where the first default happens to exist, a search that skipped the
+ *   existence check entirely would return the same thing as one that made it.
+ */
+export function astralBinaryPath(
+  candidates: readonly string[] = SYSTEM_BROWSERS[Deno.build.os] ?? [],
+): string | undefined {
+  const fromEnvironment = pathFromEnvironment();
+  if (fromEnvironment !== undefined) return fromEnvironment;
+
+  for (const candidate of candidates) {
+    if (isExecutableFile(candidate)) return candidate;
+  }
+
+  return undefined;
+}
+
+/**
  * How `$`, `$$`, and `waitForSelector` resolve a selector.
  *
  * `native` hands the selector to the page's own `querySelector`, which stops at

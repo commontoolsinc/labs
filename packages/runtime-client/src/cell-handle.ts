@@ -230,6 +230,48 @@ export class CellHandle<T = unknown> {
     });
   }
 
+  /**
+   * Atomically stores `value` only if the cell has no backing value, then
+   * returns the value selected by that transaction. A readable schema fallback
+   * does not count as stored. Concurrent initializers converge on one winner
+   * instead of replacing it with a blind write.
+   */
+  async initialize(value: T): Promise<Readonly<T>> {
+    this.#requireSchema("initialize");
+    if (value === undefined) {
+      throw new TypeError("Cell initialize requires a defined value.");
+    }
+    const serialized = this.#serializeWrite(value);
+    const writeGeneration = ++this.#writeGeneration;
+    const updateGeneration = this.#updateGeneration;
+    const { current, authoritative } = await this.#enqueueOperation(
+      async (queue) => {
+        const authoritativeGeneration = queue.authoritativeGeneration;
+        const response = await this.#conn.request<RequestType.CellInitialize>({
+          type: RequestType.CellInitialize,
+          cell: this.ref(),
+          value: serialized,
+        });
+        const current = CellHandle.deserialize<T>(this, response.value) as T;
+        const authoritative = updateGeneration === this.#updateGeneration &&
+          authoritativeGeneration === queue.authoritativeGeneration;
+        if (authoritative) {
+          queue.value = current;
+          queue.hasValue = true;
+        }
+        return { current, authoritative };
+      },
+    );
+    if (
+      writeGeneration === this.#writeGeneration &&
+      updateGeneration === this.#updateGeneration &&
+      authoritative
+    ) {
+      this.#publishValue(current);
+    }
+    return current as Readonly<T>;
+  }
+
   #enqueueOperation<R>(
     operation: (queue: CellOperationQueue) => Promise<R>,
   ): Promise<R> {
@@ -363,7 +405,7 @@ export class CellHandle<T = unknown> {
    * Returns a new CellHandle with an extended path.
    */
   key<K extends keyof T>(valueKey: K): CellHandle<T[K]> {
-    const childRef = this._extendPath(String(valueKey));
+    const childRef = this.#extendPath(String(valueKey));
     const child = new CellHandle<T[K]>(this.#rt, childRef);
 
     // If we have a cached value, pre-populate the child's cache
@@ -652,7 +694,7 @@ export class CellHandle<T = unknown> {
   ): Promise<Row[]> {
     const serializedParams = params === undefined
       ? undefined
-      : CellHandle.serializeSqliteParams(params);
+      : CellHandle.#serializeSqliteParams(params);
     const response = await this.#enqueueOperation(() =>
       this.#conn.request<RequestType.SqliteQuery>({
         type: RequestType.SqliteQuery,
@@ -680,7 +722,7 @@ export class CellHandle<T = unknown> {
   ): Promise<void> {
     const serializedParams = params === undefined
       ? undefined
-      : CellHandle.serializeSqliteParams(params);
+      : CellHandle.#serializeSqliteParams(params);
     await this.#enqueueOperation(() =>
       this.#conn.request<RequestType.SqliteExec>({
         type: RequestType.SqliteExec,
@@ -712,7 +754,7 @@ export class CellHandle<T = unknown> {
     return newCell as CellHandle<U>;
   }
 
-  private _extendPath(key: string): CellRef {
+  #extendPath(key: string): CellRef {
     return {
       id: this.#ref.id,
       space: this.#ref.space,
@@ -725,17 +767,22 @@ export class CellHandle<T = unknown> {
     };
   }
 
-  toJSON(): SigilLink {
-    // Wrap in sigil link format so the runtime recognizes this as a link
-    // and dereferences it (e.g., when passed through event.detail.sourceCell).
-    //
-    // The ref-carried `cfcLabelView` is deliberately NOT serialized (inv-12
-    // Stage 0, like `toWireString`): toJSON output is exactly what
-    // JSON.stringify hands the VDOM event path when a handle lands in
-    // CustomEvent.detail, and that raw sigil link re-enters the worker
-    // without passing getCell/cellRefToSigilLink — a main-thread display
-    // copy must not ride back in as label state (codex/cubic review on the
-    // Stage 0 PR; the worker also strips inbound views defensively).
+  /**
+   * Returns the sigil link naming this cell.
+   *
+   * The link is what stands in for a cell wherever a cell itself has no
+   * representation, and this is how a caller that has already recognized the
+   * value as a handle asks for it -- by name, rather than by reaching for a
+   * serialization protocol that happens to yield one. `Cell` is arranged the
+   * same way, its `toSigilLinkOrNull()` answering the callers that have
+   * recognized a cell and its `toJSON()` answering the protocol.
+   *
+   * The ref-carried `cfcLabelView` is deliberately not included, as
+   * `toWireString()` omits it: what this produces re-enters the worker without
+   * passing `getCell()` or `cellRefToSigilLink()`, and a main-thread display
+   * copy must not ride back in as label state (inv-12 Stage 0).
+   */
+  toSigilLink(): SigilLink {
     return linkRefFrom<CfcCellLinkRefPayload>({
       id: this.#ref.id,
       space: this.#ref.space,
@@ -745,6 +792,16 @@ export class CellHandle<T = unknown> {
       ...(this.#ref.overwrite !== undefined &&
         { overwrite: this.#ref.overwrite }),
     });
+  }
+
+  /**
+   * Returns the same link under the JSON protocol's name, so a handle reads as
+   * the cell it names wherever a renderer honors that protocol -- which is what
+   * carries one through `JSON.stringify()`. A caller that has recognized the
+   * handle asks {@link toSigilLink} instead.
+   */
+  toJSON(): SigilLink {
+    return this.toSigilLink();
   }
 
   /**
@@ -866,11 +923,11 @@ export class CellHandle<T = unknown> {
     return value;
   }
 
-  private static serializeSqliteParams(
+  static #serializeSqliteParams(
     params: ReadonlyArray<ClientCellValue> | Record<string, ClientCellValue>,
   ): SqliteParams {
     const serialize = (value: ClientCellValue) =>
-      CellHandle.sqliteFabricValue(value);
+      CellHandle.#sqliteFabricValue(value);
     return Array.isArray(params)
       ? { kind: "positional", values: params.map(serialize) }
       : {
@@ -882,7 +939,7 @@ export class CellHandle<T = unknown> {
       };
   }
 
-  private static sqliteFabricValue(value: ClientCellValue): FabricValue {
+  static #sqliteFabricValue(value: ClientCellValue): FabricValue {
     if (isCellHandle(value)) return value.ref();
     if (value instanceof FabricBytes) return value;
     if (value instanceof FabricSpecialObject) {
@@ -892,13 +949,13 @@ export class CellHandle<T = unknown> {
       );
     }
     if (Array.isArray(value)) {
-      return value.map((member) => CellHandle.sqliteFabricValue(member));
+      return value.map((member) => CellHandle.#sqliteFabricValue(member));
     }
     if (isObjectOrArray(value)) {
       return Object.fromEntries(
         Object.entries(value).map(([key, member]) => [
           key,
-          CellHandle.sqliteFabricValue(member),
+          CellHandle.#sqliteFabricValue(member),
         ]),
       );
     }

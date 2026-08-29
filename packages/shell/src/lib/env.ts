@@ -1,4 +1,5 @@
 import { SERVER_EXECUTION_DEFAULT_ENABLED } from "@commonfabric/memory/v2/server-execution-default";
+import { parseFlagValue } from "@commonfabric/runner/experimental-posture";
 import { optionalPresenceUrl } from "./presence-url.ts";
 
 declare global {
@@ -10,6 +11,7 @@ declare global {
   var $EXPERIMENTAL_COMPUTED_CELL_IDS: string | undefined;
   var $EXPERIMENTAL_SERVER_EXECUTION: string | undefined;
   var $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS: string | undefined;
+  var $EXPERIMENTAL_READER_SCHEMA_PRECEDENCE: string | undefined;
 }
 
 const ENVIRONMENT_DEFINE = typeof $ENVIRONMENT === "string"
@@ -40,6 +42,11 @@ const EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS_DEFINE =
     ? $EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS
     : undefined;
 
+const EXPERIMENTAL_READER_SCHEMA_PRECEDENCE_DEFINE =
+  typeof $EXPERIMENTAL_READER_SCHEMA_PRECEDENCE === "string"
+    ? $EXPERIMENTAL_READER_SCHEMA_PRECEDENCE
+    : undefined;
+
 export const ENVIRONMENT: "development" | "production" =
   ENVIRONMENT_DEFINE === "production" ? ENVIRONMENT_DEFINE : "development";
 
@@ -54,10 +61,15 @@ export const PRESENCE_URL = optionalPresenceUrl(PRESENCE_URL_DEFINE);
 export const COMMIT_SHA: string | undefined = COMMIT_SHA_DEFINE;
 
 /**
- * Results in `true` (on), `false` (off), or `undefined` (default).
+ * The one canonical flag parse, shared with the server side's env mapping:
+ * exactly `"true"` / `"false"`; anything else — including a garbled define —
+ * is ignored with a warning rather than coerced, leaving the flag's default
+ * in force.
  */
 function flagValue(flag: string | undefined): boolean | undefined {
-  return (typeof flag === "string") ? (flag === "true") : undefined;
+  return typeof flag === "string"
+    ? parseFlagValue(flag, "shell experimental define")
+    : undefined;
 }
 
 /** Build-time experimental flags, injected via felt.config.ts defines. */
@@ -79,5 +91,14 @@ export const EXPERIMENTAL = {
   // a shell that emits inline schemas again).
   contentAddressedSchemas: flagValue(
     EXPERIMENTAL_CONTENT_ADDRESSED_SCHEMAS_DEFINE,
+  ),
+  // Reader precedence at link crossings. On by default in the runner; the
+  // define is the rollback override
+  // (`EXPERIMENTAL_READER_SCHEMA_PRECEDENCE=false` bakes a shell whose
+  // worker runs the strict combine, matching a server deployed with the
+  // same env — the flag is server-authoritative and both sides must
+  // resolve hops under one rule).
+  readerSchemaPrecedence: flagValue(
+    EXPERIMENTAL_READER_SCHEMA_PRECEDENCE_DEFINE,
   ),
 };

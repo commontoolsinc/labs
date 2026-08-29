@@ -40,17 +40,18 @@ export {
 } from "./value-clone.ts";
 
 export {
+  assertValidFabricValueLayer,
   isFabricContainerValue,
   isFabricObjectOrArray,
   isFabricPlainContainer,
   isFabricPlainObject,
+  isValidFabricNativeObject,
   isValidFabricPlainObject,
   isValidFabricValue,
   isValidFabricValueLayer,
 } from "./type-check.ts";
 
 export {
-  assertValidFabricValueLayer,
   fabricFromNativeValue,
   isValidFabricConvertibleValue,
   nativeFromFabricValue,

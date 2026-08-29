@@ -26,7 +26,7 @@ function formatFileSize(bytes: number): string {
 }
 
 export class Builder extends EventTarget {
-  private splitPassAuxiliaryOutputGenerations: Set<string>[] = [];
+  #splitPassAuxiliaryOutputGenerations: Set<string>[] = [];
 
   constructor(public manifest: ResolvedConfig) {
     super();
@@ -71,13 +71,13 @@ export class Builder extends EventTarget {
       // One esbuild service serves both passes; stop it once, after the last.
       try {
         if (plainEntries.length > 0) {
-          const metafile = await this.runPass(plainEntries, false);
+          const metafile = await this.#runPass(plainEntries, false);
           if (metafile) passMetafiles.push(metafile);
         }
         if (splitEntries.length > 0) {
-          const metafile = await this.runPass(splitEntries, true);
+          const metafile = await this.#runPass(splitEntries, true);
           if (metafile) {
-            await this.pruneStaleSplitOutputs(metafile, splitEntries);
+            await this.#pruneStaleSplitOutputs(metafile, splitEntries);
             passMetafiles.push(metafile);
           }
         }
@@ -96,7 +96,7 @@ export class Builder extends EventTarget {
 
       // Generate build manifest with content hashes of output files.
       // Used by the shell to cache-bust the worker bundle URL (?v=<hash>).
-      await this.writeBuildManifest();
+      await this.#writeBuildManifest();
 
       const buildTime = Math.round(performance.now() - startTime);
       console.log(`   ${dim(`Total build time: ${buildTime}ms`)}`);
@@ -119,7 +119,7 @@ export class Builder extends EventTarget {
    * The shared esbuild service is kept alive (`stop: false`); {@link build}
    * stops it once after the final pass.
    */
-  private async runPass(
+  async #runPass(
     entries: ResolvedEntryPoint[],
     splitting: boolean,
   ): Promise<esbuild.Metafile | undefined> {
@@ -167,7 +167,7 @@ export class Builder extends EventTarget {
   }
 
   /** Retain the current and previous split outputs, pruning anything older. */
-  private async pruneStaleSplitOutputs(
+  async #pruneStaleSplitOutputs(
     metafile: esbuild.Metafile,
     entries: ResolvedEntryPoint[],
   ): Promise<void> {
@@ -186,17 +186,17 @@ export class Builder extends EventTarget {
         .map(([outputPath]) => resolvePath(outputPath)),
     );
 
-    this.splitPassAuxiliaryOutputGenerations.push(nextOutputs);
+    this.#splitPassAuxiliaryOutputGenerations.push(nextOutputs);
     if (
-      this.splitPassAuxiliaryOutputGenerations.length <=
+      this.#splitPassAuxiliaryOutputGenerations.length <=
         RETAINED_SPLIT_OUTPUT_GENERATIONS
     ) {
       return;
     }
 
-    const staleOutputs = this.splitPassAuxiliaryOutputGenerations.shift()!;
+    const staleOutputs = this.#splitPassAuxiliaryOutputGenerations.shift()!;
     const retainedOutputs = new Set(
-      this.splitPassAuxiliaryOutputGenerations.flatMap((
+      this.#splitPassAuxiliaryOutputGenerations.flatMap((
         generation,
       ) => [...generation]),
     );
@@ -228,7 +228,7 @@ export class Builder extends EventTarget {
    * The manifest is used by the shell to cache-bust the worker bundle URL
    * (`?v=<hash>`), so a deploy always loads the fresh worker.
    */
-  private async writeBuildManifest(): Promise<void> {
+  async #writeBuildManifest(): Promise<void> {
     const manifest: Record<string, string> = {};
     for (const entry of this.manifest.entries) {
       // esbuild appends .js to entry.out; only .js outputs are hashed.

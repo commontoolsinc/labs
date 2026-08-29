@@ -49,10 +49,13 @@ frame.src = "<main id='root'></main>";
 
 A resource has a `kind`, optional schema and description, and only the
 operations the host supplies. A cell capability follows the runtime's Cell
-shape: `get()`, `pull()`, optional `set()` and `push()`, `sink()`, `key()`, and
-`resolve()`. The resource kinds are `cell`, `stream`, `sqlite`, and `service`.
-Named methods let an application expose a narrow service without expanding the
-cell protocol.
+shape: `get()`, `pull()`, optional `initialize()`, `set()`, and `push()`,
+`sink()`, `key()`, and `resolve()`. `initialize(defaultValue)` atomically stores
+the default only while the cell has no backing value and returns the value that
+won. A readable schema fallback does not count as stored, so calling
+`initialize()` after `pull()` safely materializes it before a child write. The
+resource kinds are `cell`, `stream`, `sqlite`, and `service`. Named methods let
+an application expose a narrow service without expanding the cell protocol.
 
 The higher-level `cf-iframe` component accepts the same `bridge` property. Its
 `context` convenience property turns top-level Fabric cells into cell resources,
@@ -90,6 +93,7 @@ console.log(manifest.resources);
 const count = fabric.cell<number>("count");
 console.log(count.get()); // Immediate cache sample; it may be stale.
 console.log(await count.pull()); // Fully updated after the host Cell.pull().
+await count.initialize(0); // Atomic first-use default; returns the winner.
 await count.set(1);
 
 const stop = count.sink((value) => {

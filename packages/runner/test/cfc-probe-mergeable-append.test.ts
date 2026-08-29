@@ -24,7 +24,7 @@ const stringListSchema = {
 // The same list shape with a schema-declared element label. Writes through this
 // schema record a schema write-policy input and mark the transaction
 // CFC-relevant, so the prepare pass runs and persists label metadata onto the
-// document's `["cfc"]` envelope — with no dial set.
+// document's `["cfc"]` envelope.
 const labeledListSchema = {
   type: "array",
   items: {
@@ -63,12 +63,14 @@ async function readDurable(
 // `storedMetadataFor`, and its result schema through `setupResultSchemaFor`.
 // Both must read the member surface they want — `["cfc"]` and `["schema"]` —
 // rather than the document root: a recursive root read depends on every path
-// in the document, so it enters the commit's confirmed conflict reads. The
-// read-set builder exempts only exact `["cfc"]` reads, the mergeable
-// operation's own reads, and reads below the operation's path. A root read
-// therefore survives on a document a mergeable operation targets, and two
-// concurrent appends — writes the mergeable machinery exists to let both land
-// — conflict, silently dropping one side's data.
+// in the document, so it enters the commit's confirmed conflict reads. Two
+// exemptions keep a member read out of that set. A runtime-internal read at
+// `["cfc"]` is dropped wherever it is made, and on a document a mergeable
+// operation targets the builder drops that operation's own reads together
+// with the reads below its path. Neither exemption reaches a read of the
+// root. A root read therefore survives on a document a mergeable operation
+// targets, and two concurrent appends — writes the mergeable machinery
+// exists to let both land — conflict, silently dropping one side's data.
 describe("CFC metadata probes under mergeable appends", () => {
   let server: MemoryV2Server.Server;
   let storage1: EmulatedStorageManager;
@@ -87,18 +89,17 @@ describe("CFC metadata probes under mergeable appends", () => {
     await server?.close();
   });
 
-  // deno-lint-ignore no-explicit-any
-  const runtimes = (options: Record<string, any> = {}) =>
+  const runtimes = () =>
     [
       new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: storage1,
-        ...options,
+        cfcFlowLabels: "persist",
       }),
       new Runtime({
         apiUrl: new URL(import.meta.url),
         storageManager: storage2,
-        ...options,
+        cfcFlowLabels: "persist",
       }),
     ] as const;
 
@@ -106,7 +107,7 @@ describe("CFC metadata probes under mergeable appends", () => {
   // list carries no labels at all, but the relevance probe still reads its
   // metadata on every commit.
   it("commits both of two concurrent appends while the flow-labels probe runs", async () => {
-    const [rt1, rt2] = runtimes({ cfcFlowLabels: "persist" });
+    const [rt1, rt2] = runtimes();
     try {
       // Seed the list with one element and get it durable on the server.
       const tx0 = rt1.edit();
@@ -148,11 +149,10 @@ describe("CFC metadata probes under mergeable appends", () => {
     }
   });
 
-  // The same loss with every dial left at its default: a write through a
-  // labeled schema marks the transaction CFC-relevant on its own, so the
-  // prepare pass runs and reads the document's stored metadata without any
-  // flow-labels setting.
-  it("commits both of two concurrent appends to a labeled list under default dials", async () => {
+  // The same loss on a list whose schema declares an element label: the write
+  // marks the transaction CFC-relevant on its own, and the prepare pass reads
+  // the document's stored metadata.
+  it("commits both of two concurrent appends to a labeled list", async () => {
     const [rt1, rt2] = runtimes();
     try {
       // Seed through the labeled schema; the prepare pass persists the derived
@@ -221,11 +221,16 @@ describe("CFC metadata probes under mergeable appends", () => {
     }
   });
 
-  // The link-label derivation reads the link source's `schema` meta. It must
-  // read that member rather than the source document's root: a link whose
-  // source is a collection another session appends to would otherwise take a
-  // whole-document dependency on it, and the link write would conflict on an
-  // append that says nothing about the schema it consulted.
+  // The link-label derivation reads the link source's `cfc` and `schema`
+  // meta. It must read those members rather than the source document's root:
+  // a link whose source is a collection another session appends to would
+  // otherwise take a whole-document dependency on it, and the link write
+  // would conflict on an append that says nothing about the metadata it
+  // consulted. With the flow-labels dial persisting, an append to the source
+  // rewrites that document's `["cfc"]` label map alongside the appended
+  // element, so the derivation's read of `["cfc"]` at the pre-append basis
+  // is stale — and the read-set builder drops it, because a runtime-internal
+  // read of CFC metadata is not a conflict precondition.
   it("commits a link write whose source a concurrent append targets", async () => {
     const [rt1, rt2] = runtimes();
     try {
@@ -261,8 +266,9 @@ describe("CFC metadata probes under mergeable appends", () => {
       await rt2.storageManager.synced();
 
       // Session 1, still at the pre-append basis, writes a link whose source
-      // is that list. Only the source's `schema` meta is consulted, so the
-      // concurrent append does not conflict this commit.
+      // is that list. Only the source's `cfc` and `schema` meta are
+      // consulted, neither of which describes the appended element, so the
+      // concurrent append must not conflict this commit.
       const txB = rt1.edit();
       const target = rt1.getCell(space, LINK_TARGET_CAUSE, undefined, txB);
       const targetId = target.getAsNormalizedFullLink().id;
@@ -293,7 +299,7 @@ describe("CFC metadata probes under mergeable appends", () => {
   // explicit read of the list is not, so the dedup-then-push shape still
   // conflicts and retries.
   it("returns a conflict error for a conditional push racing a concurrent append", async () => {
-    const [rt1, rt2] = runtimes({ cfcFlowLabels: "persist" });
+    const [rt1, rt2] = runtimes();
     try {
       const tx0 = rt1.edit();
       rt1.getCell<string[]>(space, CAUSE, stringListSchema, tx0).set(["seed"]);

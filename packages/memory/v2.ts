@@ -1074,7 +1074,8 @@ export type MemoryProtocolFlags = {
   operationCodecs?: readonly string[];
   /** Hash-keyed per-frame schema table. */
   syncSchemaTableV2: boolean;
-
+  /** The peer can exchange versioned binary gzip message envelopes. */
+  messageCompressionV1: boolean;
   /**
    * Server capability (CFC Phase 3.c): commit-folded `sqlite` writes to
    * rule-bearing tables are re-derived through the shared row-label evaluator
@@ -1124,6 +1125,22 @@ export type MemoryProtocolFlags = {
 
   /** The server can test one entity identifier without loading its value. */
   entityIdLookup: boolean;
+
+  /**
+   * The server diffs a reconnecting client's delivery against the client's
+   * DECLARED holdings — the `holdings` a resuming `session.open` and a
+   * re-establishing `session.watch.set` may carry (04-protocol.md §4.1.2,
+   * §4.3.5) — instead of against its own per-session delivery memory or
+   * from nothing. Inherent to the build, so a server of this version always
+   * advertises it. A client that sees it absent splits by consumer
+   * (04-protocol.md §4.1.1): a session with no holdings provider declares
+   * nothing and keeps the declaration-less paths (a resumed session diffed
+   * against the server's memory of it, a fresh one delivered in full),
+   * while a provider-bearing session connects initially but terminates at
+   * restore rather than silently rejoining those paths
+   * (`SpaceSession.restore`).
+   */
+  sessionHoldings: boolean;
 };
 
 /**
@@ -1135,12 +1152,14 @@ export type WireMemoryProtocolFlags = {
   applyOp?: boolean;
   operationCodecs?: readonly string[];
   syncSchemaTableV2?: boolean;
+  messageCompressionV1?: boolean;
   sqliteCommitRowLabelEval?: boolean;
   pendingReadStacks?: boolean;
   verdictCatchUpMarkers?: boolean;
   entityIdListing?: boolean;
   entityIdPagination?: boolean;
   entityIdLookup?: boolean;
+  sessionHoldings?: boolean;
 };
 
 export type HelloMessage = {
@@ -1192,6 +1211,29 @@ export type SessionDescriptor = {
   actingAs?: "space-owner";
 };
 
+/**
+ * One document a reconnecting client declares it HOLDS — the client's own
+ * statement of its replica, in exactly the terms the server's delivery
+ * diff compares (`sameSnapshot`: id, scope instance, seq, deletedness),
+ * so the server can rebuild the diff base from the client rather than
+ * from its own memory of the session. `scope` names the scope; the
+ * instance resolves from the session's identity as it does for every
+ * wire frame (protocol.md §1). `seq` is the server seq of the covering
+ * commit the client has confirmed for the document; `deleted` marks a
+ * known tombstone at that seq. `branch` names the branch the holding is of
+ * (absent = the default branch): the diff keys by branch, so a same-id
+ * document on another branch is a different holding and never stands in
+ * for this one. A document the client does not list is one it does not
+ * hold, whatever the server remembers delivering.
+ */
+export type SessionHolding = {
+  id: EntityId;
+  scope?: CellScope;
+  branch?: BranchName;
+  seq: number;
+  deleted?: true;
+};
+
 export type SessionOpenRequest = {
   type: "session.open";
   requestId: string;
@@ -1199,6 +1241,18 @@ export type SessionOpenRequest = {
   session: SessionDescriptor;
   invocation?: Record<string, unknown>;
   authorization?: FabricValue;
+
+  /**
+   * The client's declared holdings for this space (see
+   * {@link SessionHolding}), sent when RESUMING a session. A server that
+   * resumes the session replaces its per-session delivery memory with
+   * these before computing the catch-up frame, so the frame re-delivers
+   * whatever the client does not hold — a document the server remembers
+   * sending but the client failed to absorb, or lost with a replaced
+   * replica — and elides what it does. Outside the signed descriptor:
+   * it shapes only what this session is re-sent, never what it may read.
+   */
+  holdings?: SessionHolding[];
 };
 
 export type GraphQueryRoot = {
@@ -1580,6 +1634,15 @@ export type WatchSetRequest = {
   space: string;
   sessionId: SessionId;
   watches: WatchSpec[];
+
+  /**
+   * The client's declared holdings (see {@link SessionHolding}): when
+   * present, the response's `sync` is the DIFFERENCE between the new watch
+   * union and these, rather than the whole union — a client that lost its
+   * server session (an expired resume, a restarted server) re-establishes
+   * its watches without downloading again every document it still holds.
+   */
+  holdings?: SessionHolding[];
 };
 
 export type WatchAddRequest = {
@@ -1691,6 +1754,7 @@ const memoryLiveEnvironment = new NullLiveEnvironment(
 // Update that registry when adding or removing one.
 let commitPreconditionsEnabled = true;
 let syncSchemaTableEnabled = true;
+let messageCompressionEnabled = true;
 let ownWriteEchoEnabled = true;
 
 export {
@@ -1813,6 +1877,22 @@ export function resetSyncSchemaTableConfig(): void {
 }
 
 /**
+ * Ambient capability for binary gzip envelopes on memory WebSocket messages.
+ * Disabling it keeps both peers on ordinary text frames as a rollout backstop.
+ */
+export function setMessageCompressionConfig(enabled?: boolean): void {
+  messageCompressionEnabled = enabled ?? true;
+}
+
+export function getMessageCompressionConfig(): boolean {
+  return messageCompressionEnabled;
+}
+
+export function resetMessageCompressionConfig(): void {
+  messageCompressionEnabled = true;
+}
+
+/**
  * Ambient server behavior for own-write echo on sync frames (CT-1965): a
  * session's own accepted patch-produced heads ride the covering frame as full
  * post-apply documents, so promotion retires the pending overlay against
@@ -1838,6 +1918,7 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   commitPreconditions: getCommitPreconditionsConfig(),
   applyOp: true,
   operationCodecs: [CODEMIRROR_CHANGESET_CODEC],
+  messageCompressionV1: getMessageCompressionConfig(),
   // A build-inherent capability, not configuration: this build's engine always
   // evaluates row-label rules at commit (sqlite/commit-eval.ts), so it always
   // advertises the fact. Peers that see it absent (an older server) keep their
@@ -1856,6 +1937,9 @@ export const getMemoryProtocolFlags = (): MemoryProtocolFlags => ({
   entityIdListing: true,
   entityIdPagination: true,
   entityIdLookup: true,
+  // Build-inherent: this build's server takes a client's declared holdings
+  // as the delivery diff base wherever they are sent.
+  sessionHoldings: true,
   syncSchemaTableV2: getSyncSchemaTableConfig(),
 });
 
@@ -1921,6 +2005,14 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const messageCompressionV1 = value.messageCompressionV1;
+  if (
+    messageCompressionV1 !== undefined &&
+    typeof messageCompressionV1 !== "boolean"
+  ) {
+    return null;
+  }
+
   const sqliteCommitRowLabelEval = value.sqliteCommitRowLabelEval;
   if (
     sqliteCommitRowLabelEval !== undefined &&
@@ -1969,6 +2061,14 @@ export const parseMemoryProtocolFlags = (
     return null;
   }
 
+  const sessionHoldings = value.sessionHoldings;
+  if (
+    sessionHoldings !== undefined &&
+    typeof sessionHoldings !== "boolean"
+  ) {
+    return null;
+  }
+
   return {
     modernCellRep: modernCellRep === true,
     commitPreconditions: commitPreconditions === true,
@@ -1977,6 +2077,7 @@ export const parseMemoryProtocolFlags = (
       ? {}
       : { operationCodecs: [...operationCodecs].sort() as string[] }),
     syncSchemaTableV2: syncSchemaTableV2 === true,
+    messageCompressionV1: messageCompressionV1 === true,
     // Absent (an older peer) parses to false: the capability must be
     // POSITIVELY advertised for the runner to relax its write gate.
     sqliteCommitRowLabelEval: sqliteCommitRowLabelEval === true,
@@ -1990,6 +2091,10 @@ export const parseMemoryProtocolFlags = (
     entityIdListing: entityIdListing === true,
     entityIdPagination: entityIdPagination === true,
     entityIdLookup: entityIdLookup === true,
+    // Absent (an older server) parses to false: a provider-less session
+    // declares nothing and reconnects on the declaration-less paths; a
+    // provider-bearing one terminates at restore (see the flag's doc).
+    sessionHoldings: sessionHoldings === true,
   };
 };
 
@@ -2006,12 +2111,14 @@ export const wireMemoryProtocolFlags = (
     ? {}
     : { operationCodecs: flags.operationCodecs }),
   syncSchemaTableV2: flags.syncSchemaTableV2,
+  messageCompressionV1: flags.messageCompressionV1,
   sqliteCommitRowLabelEval: flags.sqliteCommitRowLabelEval,
   pendingReadStacks: flags.pendingReadStacks,
   verdictCatchUpMarkers: flags.verdictCatchUpMarkers,
   entityIdListing: flags.entityIdListing,
   entityIdPagination: flags.entityIdPagination,
   entityIdLookup: flags.entityIdLookup,
+  sessionHoldings: flags.sessionHoldings,
 });
 
 /**

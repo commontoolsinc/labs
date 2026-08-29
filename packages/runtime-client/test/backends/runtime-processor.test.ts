@@ -78,11 +78,15 @@ const cfcSigner = await Identity.fromPassphrase(
 const testSessionOpenAudience = "did:key:z6Mk-runtime-processor-test-audience";
 
 class SharedV2SessionFactory implements V2Storage.SessionFactory {
-  constructor(private readonly server: MemoryV2Server.Server) {}
+  readonly #server: MemoryV2Server.Server;
+
+  constructor(server: MemoryV2Server.Server) {
+    this.#server = server;
+  }
 
   async create(space: MemorySpace) {
     const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.server),
+      transport: MemoryV2Client.loopback(this.#server),
     });
     const session = await client.mount(
       space,
@@ -3460,6 +3464,452 @@ describe("runtime-processor", () => {
     });
   });
 
+  describe("direct cell initialization", () => {
+    it("rejects malformed initializers and surfaces transaction failures", async () => {
+      const failed = Object.assign(
+        Object.create(RuntimeProcessor.prototype),
+        {
+          runtime: {
+            editWithRetry: () =>
+              Promise.resolve({ error: new Error("initialize failed") }),
+          },
+        },
+      ) as RuntimeProcessor;
+      const ref = {
+        space: "did:key:test" as CellRef["space"],
+        id: "of:initialize-failure" as CellRef["id"],
+        scope: "space",
+        path: [],
+      } satisfies CellRef;
+
+      await expect(failed.handleCellInitialize({
+        type: RequestType.CellInitialize,
+        cell: ref,
+        value: undefined as never,
+      })).rejects.toThrow("Cell initialize requires a defined value");
+      await expect(failed.handleCellInitialize({
+        type: RequestType.CellInitialize,
+        cell: ref,
+        value: 1,
+      })).rejects.toThrow("initialize failed");
+    });
+
+    it("loads an existing scoped value before choosing an initializer", async () => {
+      const signer = await Identity.fromPassphrase(
+        `direct-scoped-cell-initialize-${crypto.randomUUID()}`,
+      );
+      const space = signer.did();
+      const server = new MemoryV2Server.Server({
+        authorizeSessionOpen(message) {
+          const principal = (message.authorization as { principal?: unknown })
+            ?.principal;
+          return typeof principal === "string" ? principal : undefined;
+        },
+        sessionOpenAuth: { audience: testSessionOpenAudience },
+      });
+      const managerOptions = {
+        as: signer,
+        memoryHost: new URL("memory://"),
+      };
+      const writerStorage = new SharedV2StorageManager(managerOptions, server);
+      const readerStorage = new SharedV2StorageManager(managerOptions, server);
+      const writerRuntime = new Runtime({
+        apiUrl: new URL("http://localhost/"),
+        storageManager: writerStorage,
+      });
+      const readerRuntime = new Runtime({
+        apiUrl: new URL("http://localhost/"),
+        storageManager: readerStorage,
+      });
+      try {
+        const cause = `direct-scoped-cell-initialize-${crypto.randomUUID()}`;
+        const schema = {
+          type: "object",
+          properties: { winner: { type: "string" } },
+          required: ["winner"],
+        } as const;
+        const writerCell = writerRuntime.getCell<{ winner: string }>(
+          space,
+          cause,
+          schema,
+          undefined,
+          "user",
+        );
+        await writerCell.sync();
+        const write = writerRuntime.edit();
+        writerCell.withTx(write).set({ winner: "stored" });
+        expect((await write.commit()).error).toBeUndefined();
+
+        const readerCell = readerRuntime.getCell<{ winner: string }>(
+          space,
+          cause,
+          schema,
+          undefined,
+          "user",
+        );
+        expect(readerCell.get()).toBeUndefined();
+        const processor = Object.assign(
+          Object.create(RuntimeProcessor.prototype),
+          { runtime: readerRuntime },
+        ) as RuntimeProcessor;
+
+        const selected = await processor.handleCellInitialize({
+          type: RequestType.CellInitialize,
+          cell: createCellRef(readerCell),
+          value: { winner: "default" },
+        });
+        await readerCell.pull();
+
+        expect(selected.value).toEqual({ winner: "stored" });
+        expect(readerCell.get()).toEqual({ winner: "stored" });
+      } finally {
+        await writerRuntime.dispose();
+        await readerRuntime.dispose();
+        await writerStorage.close();
+        await readerStorage.close();
+      }
+    });
+
+    it("converges concurrent initializers on one stored value", async () => {
+      const signer = await Identity.fromPassphrase(
+        `direct-cell-initialize-${crypto.randomUUID()}`,
+      );
+      const space = signer.did();
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("http://localhost/"),
+        storageManager,
+      });
+      try {
+        const cell = runtime.getCell<{ winner: string }>(
+          space,
+          `direct-cell-initialize-${crypto.randomUUID()}`,
+          {
+            type: "object",
+            properties: { winner: { type: "string" } },
+            required: ["winner"],
+          },
+        );
+        await cell.sync();
+        const processor = Object.assign(
+          Object.create(RuntimeProcessor.prototype),
+          { runtime },
+        ) as RuntimeProcessor;
+        const ref = createCellRef(cell);
+
+        const [first, second] = await Promise.all([
+          processor.handleCellInitialize({
+            type: RequestType.CellInitialize,
+            cell: ref,
+            value: { winner: "first" },
+          }),
+          processor.handleCellInitialize({
+            type: RequestType.CellInitialize,
+            cell: ref,
+            value: { winner: "second" },
+          }),
+        ]);
+        await cell.pull();
+
+        expect(first.value).toEqual(second.value);
+        expect([{ winner: "first" }, { winner: "second" }]).toContainEqual(
+          first.value,
+        );
+        expect(cell.get()).toEqual(first.value);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("materializes a schema default before a nested append", async () => {
+      const signer = await Identity.fromPassphrase(
+        `direct-default-cell-initialize-${crypto.randomUUID()}`,
+      );
+      const space = signer.did();
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("http://localhost/"),
+        storageManager,
+      });
+      try {
+        const initial = {
+          bars: [
+            { id: "alpha", value: 3 },
+            { id: "beta", value: 5 },
+          ],
+        };
+        const schema = {
+          type: "object",
+          properties: {
+            bars: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  value: { type: "number" },
+                },
+                required: ["id", "value"],
+              },
+            },
+          },
+          required: ["bars"],
+          default: initial,
+        } as const;
+        const processor = Object.assign(
+          Object.create(RuntimeProcessor.prototype),
+          { runtime },
+        ) as RuntimeProcessor;
+        for (const scope of ["user", "session"] as const) {
+          const cell = runtime.getCell<typeof initial>(
+            space,
+            `direct-default-cell-initialize-${scope}-${crypto.randomUUID()}`,
+            schema,
+            undefined,
+            scope,
+          );
+          await cell.sync();
+          expect(cell.get()).toEqual(initial);
+          expect(cell.asSchema(undefined).getRaw()).toBeUndefined();
+
+          await expect(processor.handleCellInitialize({
+            type: RequestType.CellInitialize,
+            cell: createCellRef(cell),
+            value: initial,
+          })).resolves.toEqual({ value: initial });
+          expect(cell.asSchema(undefined).getRaw()).not.toBeUndefined();
+
+          const append = runtime.edit();
+          cell.withTx(append).key("bars").push({ id: "gamma", value: 7 });
+          expect((await append.commit()).error).toBeUndefined();
+          expect(cell.get()).toEqual({
+            bars: [...initial.bars, { id: "gamma", value: 7 }],
+          });
+        }
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("materializes a write-redirect target before a nested append", async () => {
+      const signer = await Identity.fromPassphrase(
+        `direct-linked-default-initialize-${crypto.randomUUID()}`,
+      );
+      const space = signer.did();
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("http://localhost/"),
+        storageManager,
+      });
+      try {
+        const initial = {
+          bars: [
+            { id: "alpha", value: 3 },
+            { id: "beta", value: 5 },
+          ],
+        };
+        const schema = {
+          type: "object",
+          properties: {
+            bars: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  value: { type: "number" },
+                },
+                required: ["id", "value"],
+              },
+            },
+          },
+          required: ["bars"],
+          default: initial,
+        } as const;
+        const target = runtime.getCell<typeof initial>(
+          space,
+          `direct-linked-default-target-${crypto.randomUUID()}`,
+          schema,
+        );
+        const alias = runtime.getCell<typeof initial>(
+          space,
+          `direct-linked-default-alias-${crypto.randomUUID()}`,
+          schema,
+        );
+        await Promise.all([target.sync(), alias.sync()]);
+        const link = runtime.edit();
+        alias.withTx(link).setRawUntyped(
+          target.getAsWriteRedirectLink({ includeSchema: false }),
+        );
+        expect((await link.commit()).error).toBeUndefined();
+        expect(alias.get()).toEqual(initial);
+        expect(target.asSchema(undefined).getRaw()).toBeUndefined();
+
+        const processor = Object.assign(
+          Object.create(RuntimeProcessor.prototype),
+          { runtime },
+        ) as RuntimeProcessor;
+        await expect(processor.handleCellInitialize({
+          type: RequestType.CellInitialize,
+          cell: createCellRef(alias),
+          value: initial,
+        })).resolves.toEqual({ value: initial });
+        expect(target.asSchema(undefined).getRaw()).not.toBeUndefined();
+
+        const append = runtime.edit();
+        alias.withTx(append).key("bars").push({ id: "gamma", value: 7 });
+        expect((await append.commit()).error).toBeUndefined();
+        expect(alias.get()).toEqual({
+          bars: [...initial.bars, { id: "gamma", value: 7 }],
+        });
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("does not initialize through a scope-capped write redirect", async () => {
+      const signer = await Identity.fromPassphrase(
+        `direct-capped-initialize-${crypto.randomUUID()}`,
+      );
+      const space = signer.did();
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("http://localhost/"),
+        storageManager,
+      });
+      try {
+        const schema = {
+          type: "object",
+          properties: { n: { type: "number" } },
+          required: ["n"],
+          default: { n: 1 },
+          scope: "space",
+        } as const;
+        const processor = Object.assign(
+          Object.create(RuntimeProcessor.prototype),
+          { runtime },
+        ) as RuntimeProcessor;
+
+        for (const existing of [undefined, { n: 7 }] as const) {
+          const target = runtime.getCell<{ n: number }>(
+            space,
+            `direct-capped-target-${crypto.randomUUID()}`,
+            undefined,
+            undefined,
+            "session",
+          );
+          const alias = runtime.getCell<{ n: number }>(
+            space,
+            `direct-capped-alias-${crypto.randomUUID()}`,
+          );
+          await Promise.all([target.sync(), alias.sync()]);
+          const seed = runtime.edit();
+          if (existing !== undefined) target.withTx(seed).set(existing);
+          alias.withTx(seed).setRawUntyped(
+            target.getAsWriteRedirectLink({ includeSchema: false }),
+          );
+          expect((await seed.commit()).error).toBeUndefined();
+
+          const capped = alias.asSchema<{ n: number }>(schema);
+          await expect(processor.handleCellInitialize({
+            type: RequestType.CellInitialize,
+            cell: createCellRef(capped),
+            value: { n: 1 },
+          })).rejects.toThrow("Cannot write to read-only address");
+          expect(target.asSchema(undefined).getRaw()).toEqual(existing);
+        }
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("rejects backing values incompatible with the requested schema", async () => {
+      const signer = await Identity.fromPassphrase(
+        `direct-incompatible-initialize-${crypto.randomUUID()}`,
+      );
+      const space = signer.did();
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("http://localhost/"),
+        storageManager,
+      });
+      try {
+        const cause = `direct-incompatible-initialize-${crypto.randomUUID()}`;
+        const raw = runtime.getCell<number>(space, cause);
+        await raw.sync();
+        const seed = runtime.edit();
+        raw.withTx(seed).set(42);
+        expect((await seed.commit()).error).toBeUndefined();
+
+        const projected = raw.asSchema<{ n: number }>({
+          type: "object",
+          properties: { n: { type: "number" } },
+          required: ["n"],
+          default: { n: 1 },
+        });
+        const processor = Object.assign(
+          Object.create(RuntimeProcessor.prototype),
+          { runtime },
+        ) as RuntimeProcessor;
+
+        await expect(processor.handleCellInitialize({
+          type: RequestType.CellInitialize,
+          cell: createCellRef(projected),
+          value: { n: 1 },
+        })).rejects.toThrow("incompatible with its schema");
+        expect(raw.get()).toBe(42);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("returns nested initialized cells in the client-hydratable link form", async () => {
+      const signer = await Identity.fromPassphrase(
+        `direct-linked-cell-initialize-${crypto.randomUUID()}`,
+      );
+      const space = signer.did();
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("http://localhost/"),
+        storageManager,
+      });
+      try {
+        const target = runtime.getCell<{ linked: Cell<unknown> }>(
+          space,
+          `direct-linked-cell-initialize-${crypto.randomUUID()}`,
+        );
+        const linked = runtime.getCell(
+          space,
+          `direct-linked-initializer-${crypto.randomUUID()}`,
+        );
+        await target.sync();
+        const processor = Object.assign(
+          Object.create(RuntimeProcessor.prototype),
+          { runtime },
+        ) as RuntimeProcessor;
+        const linkedRef = createCellRef(linked);
+
+        const selected = await processor.handleRequest({
+          type: RequestType.CellInitialize,
+          cell: createCellRef(target),
+          value: { linked: linkedRef },
+        }) as { value: unknown };
+
+        expect(selected.value).toEqual({
+          linked: cellRefToSigilLink(linkedRef),
+        });
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+  });
+
   describe("runtime-client CellRef conversion", () => {
     // Inv-12 Stage 0 (SC-25 prerequisite): a cfcLabelView riding an inbound
     // CellRef is a main-thread display artifact — round-tripped through
@@ -4557,6 +5007,33 @@ describe("runtime-processor", () => {
           host: "http://refused.test/",
         })).toEqual({ value: false });
         expect(calls.length).toBe(2);
+      });
+    });
+
+    describe("setMemoryMessageCompression()", () => {
+      it("forwards the requested mode to storage", async () => {
+        const modes: boolean[] = [];
+        const processor = {
+          runtime: {
+            storageManager: {
+              setMessageCompressionEnabled: (enabled: boolean) => {
+                modes.push(enabled);
+                return Promise.resolve();
+              },
+            },
+          },
+          setMemoryMessageCompression:
+            RuntimeProcessor.prototype.setMemoryMessageCompression,
+        } as unknown as RuntimeProcessor;
+        await RuntimeProcessor.prototype.handleRequest.call(
+          processor,
+          {
+            type: RequestType.SetMemoryMessageCompression,
+            enabled: false,
+          },
+        );
+
+        expect(modes).toEqual([false]);
       });
     });
 

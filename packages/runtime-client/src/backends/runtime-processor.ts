@@ -114,6 +114,7 @@ import {
   type CellGetCfcLabelRequest,
   type CellGetRequest,
   type CellGetResponse,
+  type CellInitializeRequest,
   type CellPullRequest,
   type CellPushRequest,
   type CellResolveAsCellRequest,
@@ -190,6 +191,7 @@ import {
   type SetBreakpointsRequest,
   type SetLoggerEnabledRequest,
   type SetLoggerLevelRequest,
+  type SetMemoryMessageCompressionRequest,
   type SetSettleStatsEnabledRequest,
   type SetTelemetryEnabledRequest,
   type SettleStatsHistoryResponse,
@@ -348,6 +350,21 @@ function sqliteParamForRuntime(
     );
   }
   return value;
+}
+
+/** Converts a runtime cell value into the redacted client wire domain. */
+function cellValueForClient(value: unknown): FabricValue {
+  return redactSigilCfcLabelViewsForDisplay(
+    convertCellsToLinks(
+      value as Parameters<typeof convertCellsToLinks>[0],
+      {
+        includeSchema: true,
+        keepAsCell: KeepAsCell.All,
+        doNotConvertCellResults: true,
+        includeCfcLabelView: true,
+      },
+    ),
+  ) as FabricValue;
 }
 
 function sqliteParamsForRuntime(
@@ -619,6 +636,15 @@ type RuntimeOperationSession = {
 };
 
 export class RuntimeProcessor {
+  // These members stay TypeScript-private rather than becoming `#` names, which
+  // is the convention elsewhere. `test/backends/runtime-processor.test.ts`
+  // drives this class by calling methods off `RuntimeProcessor.prototype`
+  // against a stand-in receiver — in places a plain object literal holding just
+  // the one field a handler reads. A `#` name is scoped to real instances, so
+  // every such call would throw `Receiver must be an instance of class
+  // RuntimeProcessor`. Converting the class means rewriting that suite to build
+  // real instances.
+
   private runtime: Runtime;
   private cc: PiecesController;
   private spaces = new Map<DID, PiecesController>();
@@ -1076,14 +1102,7 @@ export class RuntimeProcessor {
     // `convertCellsToLinks()` preserves a `FabricPrimitive` by identity, and
     // the envelope's encoding carries one to the main thread with its class,
     // so what the response holds is what the cell held.
-    const converted = redactSigilCfcLabelViewsForDisplay(
-      convertCellsToLinks(value, {
-        includeSchema: true,
-        keepAsCell: KeepAsCell.All,
-        doNotConvertCellResults: true,
-        includeCfcLabelView: true,
-      }),
-    ) as FabricValue;
+    const converted = cellValueForClient(value);
     // The resolved cell's own schema-bearing ref, when asked for — for a meta
     // link read this addresses the linked cell itself, so the caller can
     // subscribe to it or consult its schema's declarations.
@@ -1117,6 +1136,44 @@ export class RuntimeProcessor {
       type: RequestType.CellGet,
       cell: request.cell,
     });
+  }
+
+  /** Atomically stores a default only while the target has no backing value. */
+  async handleCellInitialize(
+    request: CellInitializeRequest,
+  ): Promise<{ value: FabricValue }> {
+    if (request.value === undefined) {
+      throw new TypeError("Cell initialize requires a defined value.");
+    }
+    const initial = mapCellRefsToSigilLinks(request.value);
+    const result = await this.runtime.editWithRetry((tx) => {
+      const cell = getCell(this.runtime, request.cell).withTx(tx);
+      // Initialization materializes the same backing value a whole-cell write
+      // targets. A schema default is a readable fallback, not proof that the
+      // cell has been stored, and a write redirect is an address rather than
+      // backing data. Treating either as an existing value leaves a later
+      // child write with no durable parent and can replace the visible default.
+      // Follow a final write redirect only for this existence check, while
+      // retaining the view schema because its scope cap controls whether that
+      // redirect is reachable. Then return the normal projected value when
+      // storage already won.
+      const stored = cell.getRaw({
+        lastNode: "writeRedirect",
+      });
+      if (stored !== undefined) {
+        const projected = cell.get();
+        if (projected === undefined) {
+          throw new TypeError(
+            "Cell backing value is incompatible with its schema.",
+          );
+        }
+        return cellValueForClient(projected);
+      }
+      cell.set(initial);
+      return cellValueForClient(initial);
+    });
+    if (result.error) throw new Error(result.error.message);
+    return { value: result.ok };
   }
 
   // A `CellHandle.set` is a blind leaf overwrite (last-write-wins);
@@ -1838,13 +1895,16 @@ export class RuntimeProcessor {
   ): Promise<PageResponse> {
     const cc = this.getSpaceCtx(request.space);
     let program: Program | undefined;
-    let origin: string | undefined;
     if ("url" in request.source && request.source.url) {
       const sourceUrl = new URL(request.source.url);
       if (sourceUrl.protocol !== "http:" && sourceUrl.protocol !== "https:") {
         throw new Error("Piece source URL must use HTTP or HTTPS.");
       }
-      origin = sourceUrl.href;
+      // The URL is a place to read a program from once, not an origin. A piece
+      // follows what this deployment serves and what the fabric holds, so an
+      // arbitrary endpoint names nothing the lifecycle can resolve later, and
+      // recording one would leave the piece carrying an origin nothing follows.
+      // The piece is created detached, and its owner can name an origin after.
       program = await cc.runtime.harness.resolve(
         new HttpProgramResolver(sourceUrl),
       );
@@ -1871,7 +1931,6 @@ export class RuntimeProcessor {
 
     const piece = await cc.create<NameSchema>(program, {
       input: argument,
-      origin,
       start: request.run ?? true,
     }, request.cause);
     return {
@@ -2230,6 +2289,15 @@ export class RuntimeProcessor {
     this.runtime.scheduler.setEventPreflightTelemetryEnabled(request.enabled);
   }
 
+  /** Changes memory-message compression for every remote storage session. */
+  async setMemoryMessageCompression(
+    request: SetMemoryMessageCompressionRequest,
+  ): Promise<void> {
+    await this.runtime.storageManager.setMessageCompressionEnabled?.(
+      request.enabled,
+    );
+  }
+
   resetLoggerBaselines(_: any): void {
     resetAllCountBaselines();
     resetAllTimingBaselines();
@@ -2437,6 +2505,8 @@ export class RuntimeProcessor {
         return this.handleCellGet(request);
       case RequestType.CellPull:
         return await this.handleCellPull(request);
+      case RequestType.CellInitialize:
+        return await this.handleCellInitialize(request);
       case RequestType.CellSet:
         return this.handleCellSet(request);
       case RequestType.CellPush:
@@ -2541,6 +2611,8 @@ export class RuntimeProcessor {
         return this.setLoggerEnabled(request);
       case RequestType.SetTelemetryEnabled:
         return this.setTelemetryEnabled(request);
+      case RequestType.SetMemoryMessageCompression:
+        return await this.setMemoryMessageCompression(request);
       case RequestType.ResetLoggerBaselines:
         return this.resetLoggerBaselines(request);
       case RequestType.GetSettleStats:

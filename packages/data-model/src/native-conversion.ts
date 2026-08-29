@@ -9,20 +9,11 @@
  * `FabricValue` crosses by identity instead of being rebuilt, and a cycle is
  * detected rather than followed.
  *
- * The inbound work splits along one question -- does conversion produce a new
- * value? -- so that a caller can ask it without having to work the answer back
- * out of what it was handed. Minting a native object's fabric form is one
- * function, vetting a value that needs no minting is the other, and the
- * shallow conversion is the two asked in that order plus a frozenness
- * adjustment. What the vet accepts is decided by `isValidFabricValueLayer()`
- * in `type-check.ts`; what it lives here for is the reason it gives, which
- * turns on which native class a value is.
- *
  * Outbound, a wrapper is unwrapped to the native type it stands for, while a
- * `FabricInstance` with no native counterpart passes through untouched. The
- * full conversion in each direction takes the result's freeze state as an
- * argument; on the way out, a class defined to be always frozen comes back
- * frozen regardless of what was asked for.
+ * `FabricInstance` with no native counterpart passes through untouched. Both
+ * directions take the result's freeze state as an argument; on the way out, a
+ * class defined to be always frozen comes back frozen regardless of what was
+ * asked for.
  */
 
 import {
@@ -39,7 +30,6 @@ import {
 
 import {
   type FabricConvertibleValue,
-  type FabricNativeObject,
   FabricSpecialObject,
   type FabricValue,
   type FabricValueLayer,
@@ -49,15 +39,18 @@ import { FabricError } from "@/fabric-instances/FabricError.ts";
 import { FabricNativeWrapper } from "@/fabric-instances/FabricNativeWrapper.ts";
 import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
-import { backtickQuote } from "@commonfabric/utils/markdown";
-import { NATIVE_TAGS, tagFromNativeValue } from "./native-type-tags.ts";
-import { isValidFabricValueLayer } from "./type-check.ts";
+import { VALUE_TAGS } from "./VALUE_TAGS.ts";
+import { tagFromNativeValue } from "./native-type-tags.ts";
+import {
+  assertValidFabricValueLayer,
+  isValidFabricNativeObject,
+} from "./type-check.ts";
 import { cloneHelper } from "./value-clone.ts";
 import { isValidDeepFrozenFabricValue } from "./deep-freeze.ts";
 
 /**
- * Helper for `shallowFabricFromNativeObjectElseUndefined()`, which rejects
- * native objects with extra enumerable properties.
+ * Helper for `shallowFabricFromNativeValue()`, which rejects native objects
+ * with extra enumerable properties.
  */
 function rejectExtraProperties(value: object, typeName: string): void {
   if (Object.keys(value).length > 0) {
@@ -172,33 +165,6 @@ export function shallowCleanPlainObject(
   return result;
 }
 
-/**
- * Returns `true` if the value is a `FabricNativeObject`: one of the
- * "wild-west" native JS instances that the conversion layer wraps into a
- * `FabricNativeWrapper` subclass, a `FabricPrimitive`, or a `FabricInstance`.
- *
- * Arrays, plain objects, and system-defined `FabricPrimitive`s are recognized
- * by `tagFromNativeValue()` but are _not_ `FabricNativeObject`s -- they have
- * their own handling paths in the conversion layer.
- *
- * This function is a TypeScript type guard for `FabricNativeObject`.
- */
-export function isValidFabricNativeObject(
-  value: unknown,
-): value is FabricNativeObject {
-  switch (tagFromNativeValue(value)) {
-    case NATIVE_TAGS.Error:
-    case NATIVE_TAGS.Map:
-    case NATIVE_TAGS.Set:
-    case NATIVE_TAGS.Date:
-    case NATIVE_TAGS.Uint8Array:
-    case NATIVE_TAGS.RegExp:
-      return true;
-    default:
-      return false;
-  }
-}
-
 /** Map from Error subclass name to its constructor. */
 const ERROR_CLASS_BY_TYPE: ReadonlyMap<string, ErrorConstructor> = new Map([
   ["TypeError", TypeError],
@@ -216,109 +182,6 @@ const ERROR_CLASS_BY_TYPE: ReadonlyMap<string, ErrorConstructor> = new Map([
  */
 export function errorClassFromType(type: string): ErrorConstructor {
   return ERROR_CLASS_BY_TYPE.get(type) ?? Error;
-}
-
-/**
- * Throws unless the given value is usable as a `FabricValueLayer`, naming what
- * is wrong with it when it is not. This is `isValidFabricValueLayer()` asked so
- * that the answer carries a reason: that predicate decides the outcome and
- * this adds nothing to it, everything past the decision existing to say why it
- * went the way it did.
- *
- * A `FabricNativeObject` is refused with a reason of its own: a value
- * that conversion may yet turn into a `FabricValue` is in a different position
- * from one that has no fabric form at all, and the message it gets says so.
- * `shallowFabricFromNativeObjectElseUndefined()` is what does that converting,
- * and the two are meant to be asked in that order.
- *
- * @param value The value to check.
- */
-export function assertValidFabricValueLayer(
-  value: unknown,
-): asserts value is FabricValueLayer {
-  if (isValidFabricValueLayer(value)) {
-    return;
-  }
-
-  const tag = tagFromNativeValue(value);
-
-  // Past here the value is refused, and all that is left is to say why. Each
-  // arm below is reached only for a value the test above turned away, so the
-  // conditions it re-asks are the ones that distinguish two reasons rather
-  // than the ones that decided the outcome.
-  switch (tag) {
-    case NATIVE_TAGS.Array: {
-      // An array in this system is _inert_: a direct `Array` instance, which
-      // may only carry numeric index properties, each a data property. A named
-      // or symbol-keyed property has no fabric representation, and an
-      // accessor-backed index is live code rather than inert data -- as is the
-      // prototype of an `Array` subclass instance, which can make iteration
-      // yield differently than the indices say.
-      throw new Error(
-        "Not representable as a `FabricValue`: array that is not an inert " +
-          "array",
-      );
-    }
-
-    case NATIVE_TAGS.Object: {
-      // A reserved property name is a restriction of this implementation
-      // rather than of the model, so it says so rather than blaming
-      // inertness: such an object _is_ inert, and a runtime that does not
-      // route property assignment through a prototype chain reserves no names
-      // at all.
-      const unsafeKey = isInertPlainObject(value)
-        ? unsafeObjectKeyIn(value as object)
-        : undefined;
-      if (unsafeKey !== undefined) {
-        throw new Error(
-          "Not representable as a `FabricValue`: object with a property name " +
-            `this runtime reserves (\`${unsafeKey}\`)`,
-        );
-      }
-      // A plain object in this system is _inert_ for the same reasons an array
-      // is: `FabricPlainObject` is keyed by `string`, so a symbol key has no
-      // fabric representation, and neither does a non-enumerable string key;
-      // an accessor-backed property is live code rather than inert data.
-      throw new Error(
-        "Not representable as a `FabricValue`: object that is not an inert " +
-          "plain object",
-      );
-    }
-
-    case NATIVE_TAGS.Date:
-    case NATIVE_TAGS.Error:
-    case NATIVE_TAGS.Map:
-    case NATIVE_TAGS.RegExp:
-    case NATIVE_TAGS.Set:
-    case NATIVE_TAGS.Uint8Array: {
-      throw new Error(
-        `Not already a \`FabricValue\`: ${
-          backtickQuote((value as object).constructor?.name ?? typeof value)
-        } (a \`FabricNativeObject\`, so conversion is what decides it)`,
-      );
-    }
-
-    case NATIVE_TAGS.Primitive: {
-      // The two the predicate turns away: a function is live code, and a
-      // unique symbol has no portable representation.
-      if (typeof value === "function") {
-        throw new Error("Not representable as a `FabricValue`: function");
-      }
-      throw new Error(
-        "Not representable as a `FabricValue`: unique (uninterned) symbol",
-      );
-    }
-
-    default: {
-      // No recognized class at all -- an ordinary class instance, most
-      // commonly. Death before confusion!
-      throw new Error(
-        `Not representable as a \`FabricValue\`: ${
-          backtickQuote((value as object).constructor?.name ?? typeof value)
-        } (not a recognized fabric type)`,
-      );
-    }
-  }
 }
 
 /**
@@ -344,7 +207,7 @@ export function shallowFabricFromNativeObjectElseUndefined(
   value: unknown,
 ): FabricValueLayer | undefined {
   switch (tagFromNativeValue(value)) {
-    case NATIVE_TAGS.Error: {
+    case VALUE_TAGS.Error: {
       // Shallow conversion, so the native `Error` is wrapped without recursing
       // into its internals (`cause`, custom properties): the result is only a
       // _shallow_ `FabricError`, whose `.cause` may still be a raw `Error`. A
@@ -354,7 +217,7 @@ export function shallowFabricFromNativeObjectElseUndefined(
       return Object.freeze(FabricError.fromNativeError(value as Error));
     }
 
-    case NATIVE_TAGS.Date: {
+    case VALUE_TAGS.Date: {
       // A `Date` becomes a `FabricEpochNsec` (nanoseconds from the epoch).
       // Extra enumerable properties cause rejection ("death before
       // confusion").
@@ -363,12 +226,12 @@ export function shallowFabricFromNativeObjectElseUndefined(
       return new FabricEpochNsec(nsec);
     }
 
-    case NATIVE_TAGS.RegExp: {
+    case VALUE_TAGS.RegExp: {
       // `FabricRegExp` rejects extra enumerable properties of its own accord.
       return new FabricRegExp(value as RegExp);
     }
 
-    case NATIVE_TAGS.Uint8Array: {
+    case VALUE_TAGS.Uint8Array: {
       // A native `Uint8Array` becomes a `FabricBytes`.
       return new FabricBytes(value as Uint8Array);
     }

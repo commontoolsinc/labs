@@ -542,11 +542,17 @@ commits on that session.
 On reconnect:
 
 1. the client resumes the logical session and reports the highest canonical
-   `seenSeq` it has fully integrated, along with the latest `sessionToken`
+   `seenSeq` it has fully integrated, along with the latest `sessionToken` —
+   and, where both peers advertise `sessionHoldings`, the documents its
+   replica holds at their confirmed seqs (04-protocol.md section 4.1.2)
 2. the client replays retained unacknowledged commits for that session
 3. the server deduplicates by `(sessionId, localSeq)`
 4. the client re-establishes its watch set and receives session-scoped catch-up
-   sync for any changes newer than `seenSeq`
+   sync for whatever its declared holdings lack: a resumed session's catch-up
+   is diffed against the declaration, and a session the server no longer
+   holds is re-established with the declaration on the watch set, so a
+   reconnect never re-downloads what the client still holds and never elides
+   what it lost
 
 ## 3.8 Notification Ordering Guarantee
 

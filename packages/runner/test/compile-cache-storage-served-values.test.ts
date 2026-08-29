@@ -27,14 +27,14 @@ const runtimeVersion = resolvedRuntimeVersion;
 // module-byte-cache.test.ts): stores artifact references as handed over, the
 // way the shared integration singleton does.
 class FakeByteCache implements ModuleByteCache {
-  private readonly m = new Map<string, CompiledModuleArtifact>();
+  readonly #m = new Map<string, CompiledModuleArtifact>();
   getCompleteSet(
     rt: string,
     ids: readonly string[],
   ): Map<string, CompiledModuleArtifact> | undefined {
     const out = new Map<string, CompiledModuleArtifact>();
     for (const id of ids) {
-      const a = this.m.get(`${rt}\0${id}`);
+      const a = this.#m.get(`${rt}\0${id}`);
       if (a === undefined) return undefined;
       out.set(id, a);
     }
@@ -45,7 +45,7 @@ class FakeByteCache implements ModuleByteCache {
     mods: readonly ({ identity: string } & CompiledModuleArtifact)[],
   ): void {
     for (const x of mods) {
-      this.m.set(`${rt}\0${x.identity}`, {
+      this.#m.set(`${rt}\0${x.identity}`, {
         js: x.js,
         ...(x.sourceMap === undefined ? {} : { sourceMap: x.sourceMap }),
         ...(x.patternCoverageSpans === undefined

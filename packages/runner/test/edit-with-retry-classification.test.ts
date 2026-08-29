@@ -253,10 +253,13 @@ class CountingLoopbackSessionFactory implements SessionFactory {
   aclCommits = 0;
   #aclDocId: string;
 
+  readonly #server: MemoryV2Server.Server;
+
   constructor(
-    private readonly server: MemoryV2Server.Server,
+    server: MemoryV2Server.Server,
     space: MemorySpace,
   ) {
+    this.#server = server;
     this.#aclDocId = `of:${space}`;
   }
 
@@ -266,7 +269,7 @@ class CountingLoopbackSessionFactory implements SessionFactory {
     requested: MemoryV2Client.MountOptions = {},
   ) {
     const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.server),
+      transport: MemoryV2Client.loopback(this.#server),
     });
     const session = await client.mount(
       space,
@@ -388,8 +391,8 @@ Deno.test("a server ProtocolError reaches editWithRetry by name, once", async ()
 // session could land it. It fails on a fact about the RETRY PATH, not about the
 // error: nothing between two `editWithRetry` attempts remounts the session.
 // `SpaceReplica.sessionHandle()` memoizes the mount and clears it only in
-// `close()`/`closeNow()` (storage/v2.ts), and `SpaceSession.reopen()` runs only
-// from `restore()`, which only the client's transport `reconnect()` calls
+// `close()`/`closeNow()` (storage/v2.ts), and `SpaceSession.#reopen()` runs
+// only from `restore()`, which only the client's transport `reconnect()` calls
 // (memory/v2/client.ts). So every attempt re-sends over the very handle the
 // server just refused.
 //
@@ -408,7 +411,11 @@ class SessionErrorSessionFactory implements SessionFactory {
   commits = 0;
   #armed = false;
 
-  constructor(private readonly server: MemoryV2Server.Server) {}
+  readonly #server: MemoryV2Server.Server;
+
+  constructor(server: MemoryV2Server.Server) {
+    this.#server = server;
+  }
 
   arm(): void {
     this.#armed = true;
@@ -421,7 +428,7 @@ class SessionErrorSessionFactory implements SessionFactory {
   ) {
     this.sessions++;
     const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.server),
+      transport: MemoryV2Client.loopback(this.#server),
     });
     const session = await client.mount(
       space,

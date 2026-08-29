@@ -1,13 +1,29 @@
 ---
 name: pattern-iframe
-description: Build or generate a Common Fabric pattern whose primary UI is a self-contained `cf-iframe` guest. Use when an agent should turn an input-data shape and a small state/output contract into a working iframe-first pattern without learning the broader pattern framework, including React guests, PerSpace/PerUser/PerSession data, path-scoped Cell access, stable array-item handles, mergeable pushes, or bridged SQLite.
+description: Build or generate a Common Fabric pattern whose primary UI is a self-contained `cf-iframe` guest. Use when an agent should turn an input-data shape and a small state/output contract into a working iframe-first pattern without learning the broader pattern framework, including plain DOM, React, D3, Phaser 2D games, Babylon.js 3D scenes, PerSpace/PerUser/PerSession data, path-scoped Cell access, stable array-item handles, mergeable pushes, or bridged SQLite.
 ---
 
 # Iframe-first patterns
 
-Read `docs/common/ai/iframe-pattern-guide.md` in full. It is the self-contained
-authoring contract for this task; do not load the general pattern-development
-guides unless the requested behavior extends beyond its wrapper.
+Choose one self-contained authoring contract before writing code. Route by the
+primary rendering owner, in this order:
+
+- For a 3D game, world, simulation, or WebGL scene, read
+  `docs/common/ai/iframe-pattern-babylon-guide.md` in full.
+- For a primarily 2D HTML5 game, read
+  `docs/common/ai/iframe-pattern-phaser-guide.md` in full.
+- For a data visualization whose DOM or SVG is owned by D3, read
+  `docs/common/ai/iframe-pattern-d3-guide.md` in full.
+- For a React component tree, hooks, or an explicitly requested React guest,
+  read `docs/common/ai/iframe-pattern-react-guide.md` in full.
+- Otherwise read `docs/common/ai/iframe-pattern-guide.md` in full for a plain
+  DOM guest.
+
+For an explicit hybrid, choose the guide for the framework that owns the DOM or
+canvas lifecycle. Load a second guide only when the request genuinely combines
+two owners, such as React mounting and unmounting a D3-managed subtree. Do not
+load the general pattern-development guides unless the requested behavior
+extends beyond the generated wrapper.
 
 Keep the authored surface small:
 
@@ -23,11 +39,14 @@ Keep the authored surface small:
 Generate the wrapper with:
 
 ```bash
-deno run -A skills/pattern-iframe/scripts/write-wrapper.ts \
+deno run -A tools/write-iframe-wrapper.ts \
   --contract packages/patterns/<name>/contract.ts \
   --guest packages/patterns/<name>/guest.ts \
   --out packages/patterns/<name>/main.tsx
 ```
+
+Add `--react` when the authored guest is React TSX, as required by the React
+guide.
 
 Add `--html packages/patterns/<name>/guest.html` when the guest needs a custom
 document shell, and `--force` only when regenerating the named output. The HTML

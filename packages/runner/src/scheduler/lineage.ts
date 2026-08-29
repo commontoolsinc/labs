@@ -16,10 +16,19 @@ interface OriginRecord {
  * origin settles and its launches are flushed.
  */
 export class SpeculationLineage {
-  private byOrigin = new Map<IExtendedStorageTransaction, OriginRecord>();
+  #byOrigin = new Map<IExtendedStorageTransaction, OriginRecord>();
+
+  readonly #hooks: {
+    /** Drop and settle a not-yet-dispatched event from the queue. */
+    dropQueuedEvent: (event: QueuedEvent, reason: string) => void;
+
+    /** Wake the scheduler (parked cross-space events become ready). */
+    queueExecution: () => void;
+    onError: (error: unknown) => void;
+  };
 
   constructor(
-    private readonly hooks: {
+    hooks: {
       /** Drop and settle a not-yet-dispatched event from the queue. */
       dropQueuedEvent: (event: QueuedEvent, reason: string) => void;
 
@@ -27,10 +36,12 @@ export class SpeculationLineage {
       queueExecution: () => void;
       onError: (error: unknown) => void;
     },
-  ) {}
+  ) {
+    this.#hooks = hooks;
+  }
 
-  private recordFor(origin: IExtendedStorageTransaction): OriginRecord {
-    let record = this.byOrigin.get(origin);
+  #recordFor(origin: IExtendedStorageTransaction): OriginRecord {
+    let record = this.#byOrigin.get(origin);
     if (!record) {
       // A read-only transaction (cell.send() forwards its tx as the origin,
       // which in read contexts is runtime.readTx()) never commits: it is not
@@ -48,22 +59,22 @@ export class SpeculationLineage {
         events: new Set(),
         pieceStops: [],
       };
-      this.byOrigin.set(origin, record);
+      this.#byOrigin.set(origin, record);
       if (record.status !== "pending") return record;
 
       origin.addCommitCallback((_tx, result) => {
-        const settled = this.byOrigin.get(origin);
+        const settled = this.#byOrigin.get(origin);
         if (!settled) return;
         settled.status = result.error ? "failed" : "confirmed";
         if (result.error) {
           for (const event of settled.events) {
             try {
-              this.hooks.dropQueuedEvent(
+              this.#hooks.dropQueuedEvent(
                 event,
                 `Event dropped: speculative origin failed before ${event.id} dispatched`,
               );
             } catch (error) {
-              this.hooks.onError(error);
+              this.#hooks.onError(error);
             }
           }
           settled.events.clear();
@@ -71,11 +82,11 @@ export class SpeculationLineage {
             try {
               stop();
             } catch (error) {
-              this.hooks.onError(error);
+              this.#hooks.onError(error);
             }
           }
           settled.pieceStops.length = 0;
-          this.byOrigin.delete(origin);
+          this.#byOrigin.delete(origin);
         } else {
           // Success: compensation is moot, but the EVENTS must stay
           // registered — still-queued descendants (e.g. cross-space parked
@@ -84,38 +95,38 @@ export class SpeculationLineage {
           // delete the record and strand the rest.
           settled.pieceStops.length = 0;
           if (settled.events.size === 0) {
-            this.byOrigin.delete(origin);
+            this.#byOrigin.delete(origin);
           }
         }
-        this.hooks.queueExecution();
+        this.#hooks.queueExecution();
       });
     }
     return record;
   }
 
   recordEvent(origin: IExtendedStorageTransaction, event: QueuedEvent): void {
-    this.recordFor(origin).events.add(event);
+    this.#recordFor(origin).events.add(event);
   }
 
   recordPieceStop(origin: IExtendedStorageTransaction, stop: () => void): void {
-    this.recordFor(origin).pieceStops.push(stop);
+    this.#recordFor(origin).pieceStops.push(stop);
   }
 
   /** Called when an event is dispatched or dropped. */
   release(origin: IExtendedStorageTransaction, event: QueuedEvent): void {
-    const record = this.byOrigin.get(origin);
+    const record = this.#byOrigin.get(origin);
     if (!record) return;
     record.events.delete(event);
     if (
       record.status !== "pending" && record.events.size === 0 &&
       record.pieceStops.length === 0
     ) {
-      this.byOrigin.delete(origin);
+      this.#byOrigin.delete(origin);
     }
   }
 
   originStatus(origin: IExtendedStorageTransaction): OriginStatus {
-    return this.byOrigin.get(origin)?.status ??
+    return this.#byOrigin.get(origin)?.status ??
       // Unknown origin ⇒ no active lineage record remains. A still-queued
       // event with an already-failed origin creates a failed record and is
       // dropped before release; successful origins keep the record until

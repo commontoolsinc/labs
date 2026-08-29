@@ -173,11 +173,11 @@ export class PatternContextValidationTransformer
         ts.isFunctionExpression(node) ||
         ts.isFunctionDeclaration(node)
       ) {
-        this.validateFunctionCreation(node, context, checker);
+        this.#validateFunctionCreation(node, context, checker);
 
         // Check for reactive operations in standalone functions
         if (isStandaloneFunctionDefinition(node)) {
-          this.validateStandaloneFunction(node, context, checker);
+          this.#validateStandaloneFunction(node, context, checker);
         }
 
         if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
@@ -187,17 +187,17 @@ export class PatternContextValidationTransformer
             context,
           );
           if (boundarySemantics.establishesLocalReactiveAliasScope) {
-            this.validateLocalReactiveAliasUsage(node, context);
+            this.#validateLocalReactiveAliasUsage(node, context);
           }
 
-          this.validateCallbackSelfContainment(
+          this.#validateCallbackSelfContainment(
             node,
             boundarySemantics,
             context,
             checker,
           );
 
-          this.validateSupportedPatternStatements(node, context, checker);
+          this.#validateSupportedPatternStatements(node, context, checker);
         }
       }
 
@@ -207,7 +207,7 @@ export class PatternContextValidationTransformer
       // later, outside the reactive graph. Flag the class once and stop
       // descending so its members don't produce cascading diagnostics.
       if (ts.isClassExpression(node) || ts.isClassDeclaration(node)) {
-        if (this.validateClassCreation(node, context, checker)) {
+        if (this.#validateClassCreation(node, context, checker)) {
           return node;
         }
       }
@@ -220,7 +220,7 @@ export class PatternContextValidationTransformer
         ts.isGetAccessorDeclaration(node) ||
         ts.isSetAccessorDeclaration(node)
       ) {
-        this.validateObjectMemberCreation(node, context, checker);
+        this.#validateObjectMemberCreation(node, context, checker);
       }
 
       // Check for optional navigation in reactive context. Optional property /
@@ -262,10 +262,10 @@ export class PatternContextValidationTransformer
       // Check for .get() calls and lift/handler placement in reactive context
       if (ts.isCallExpression(node)) {
         // Check for lift/handler inside pattern
-        this.validateBuilderPlacement(node, context, checker);
+        this.#validateBuilderPlacement(node, context, checker);
 
         // patternTool's first argument must be a pattern() (CT-1655)
-        this.validatePatternToolFirstArgument(node, context, checker);
+        this.#validatePatternToolFirstArgument(node, context, checker);
 
         const unsupportedCallRoot = classifyUnsupportedExpressionSiteCallRoot(
           node,
@@ -298,8 +298,8 @@ export class PatternContextValidationTransformer
 
       // Check for property access used in computation (not just pass-through)
       // This applies to expressions in binary operators, conditionals, etc.
-      if (this.isComputationExpression(node)) {
-        this.validateComputationExpression(node, context, analyze);
+      if (this.#isComputationExpression(node)) {
+        this.#validateComputationExpression(node, context, analyze);
       }
 
       return ts.visitEachChild(node, visit, context.tsContext);
@@ -312,7 +312,7 @@ export class PatternContextValidationTransformer
    * Checks if this node is an expression that performs computation
    * (binary expression, unary expression, conditional, etc.)
    */
-  private isComputationExpression(node: ts.Node): boolean {
+  #isComputationExpression(node: ts.Node): boolean {
     return (
       ts.isBinaryExpression(node) ||
       ts.isPrefixUnaryExpression(node) ||
@@ -324,7 +324,7 @@ export class PatternContextValidationTransformer
   /**
    * Validates that a computation expression doesn't improperly use reactive values
    */
-  private validateComputationExpression(
+  #validateComputationExpression(
     node: ts.Node,
     context: TransformationContext,
     analyze: ReturnType<TransformationContext["getDataFlowAnalyzer"]>,
@@ -339,7 +339,7 @@ export class PatternContextValidationTransformer
       return;
     }
 
-    const problemAccess = this.findProblematicAccess(node);
+    const problemAccess = this.#findProblematicAccess(node);
     const accessText = problemAccess
       ? `'${getNodeText(problemAccess)}'`
       : "property access";
@@ -357,7 +357,7 @@ export class PatternContextValidationTransformer
   /**
    * Checks if a node is inside a JSX element
    */
-  private isInsideJsx(node: ts.Node): boolean {
+  #isInsideJsx(node: ts.Node): boolean {
     let current: ts.Node | undefined = node.parent;
     while (current) {
       if (
@@ -375,7 +375,7 @@ export class PatternContextValidationTransformer
   /**
    * Finds the first property access expression in the computation
    */
-  private findProblematicAccess(
+  #findProblematicAccess(
     node: ts.Node,
   ): ts.PropertyAccessExpression | undefined {
     let result: ts.PropertyAccessExpression | undefined;
@@ -393,7 +393,7 @@ export class PatternContextValidationTransformer
     return result;
   }
 
-  private validateLocalReactiveAliasUsage(
+  #validateLocalReactiveAliasUsage(
     func: ts.ArrowFunction | ts.FunctionExpression,
     context: TransformationContext,
   ): void {
@@ -446,7 +446,7 @@ export class PatternContextValidationTransformer
 
         if (
           ts.isIdentifier(node) &&
-          !this.isMemberAccessBase(node) &&
+          !this.#isMemberAccessBase(node) &&
           isOpaqueSourceExpression(
             node,
             EMPTY_OPAQUE_ROOTS,
@@ -503,7 +503,7 @@ export class PatternContextValidationTransformer
         checkExpression(node.condition);
       } else if (ts.isSwitchStatement(node)) {
         checkExpression(node.expression);
-      } else if (this.isComputationExpression(node)) {
+      } else if (this.#isComputationExpression(node)) {
         checkExpression(node as ts.Expression);
       }
 
@@ -513,7 +513,7 @@ export class PatternContextValidationTransformer
     visitBody(func.body);
   }
 
-  private isMemberAccessBase(node: ts.Identifier): boolean {
+  #isMemberAccessBase(node: ts.Identifier): boolean {
     const parent = node.parent;
     return !!parent &&
       (
@@ -536,7 +536,7 @@ export class PatternContextValidationTransformer
    * at validation time, which intentionally includes pattern-owned array method
    * callbacks while excluding compute-owned wrappers like computed()/lift().
    */
-  private validateSupportedPatternStatements(
+  #validateSupportedPatternStatements(
     func: ts.ArrowFunction | ts.FunctionExpression,
     context: TransformationContext,
     checker: ts.TypeChecker,
@@ -657,7 +657,7 @@ export class PatternContextValidationTransformer
    * Functions inside safe wrappers (computed, action, lift, handler)
    * and inside JSX expressions are allowed since they get transformed.
    */
-  private validateFunctionCreation(
+  #validateFunctionCreation(
     node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
     context: TransformationContext,
     checker: ts.TypeChecker,
@@ -680,12 +680,12 @@ export class PatternContextValidationTransformer
     // that data object, not an event handler or array-method callback. It is
     // rejected even inside JSX, where the expression-site lowering does not
     // descend into it either.
-    if (this.isObjectLiteralPropertyValueFunction(node)) {
-      this.reportObjectMember(node, "function-property", context);
+    if (this.#isObjectLiteralPropertyValueFunction(node)) {
+      this.#reportObjectMember(node, "function-property", context);
       return;
     }
 
-    if (this.isInsideJsx(node)) {
+    if (this.#isInsideJsx(node)) {
       if (boundarySemantics?.decision.kind === "supported") {
         return;
       }
@@ -726,7 +726,7 @@ export class PatternContextValidationTransformer
    * Returns true when the class was rejected, so the caller can stop descending
    * into its members and avoid cascading per-member diagnostics.
    */
-  private validateClassCreation(
+  #validateClassCreation(
     node: ts.ClassExpression | ts.ClassDeclaration,
     context: TransformationContext,
     checker: ts.TypeChecker,
@@ -767,7 +767,7 @@ export class PatternContextValidationTransformer
    * rather than written inline (`{ read: makeReader() }`, `{ read: someFn }`) is
    * not caught here.
    */
-  private validateObjectMemberCreation(
+  #validateObjectMemberCreation(
     node:
       | ts.MethodDeclaration
       | ts.GetAccessorDeclaration
@@ -779,10 +779,10 @@ export class PatternContextValidationTransformer
     if (isInsideSafeCallbackWrapper(node, checker, context)) return;
     if (!isInsideRestrictedContext(node, checker, context)) return;
 
-    this.reportObjectMember(node.name, this.objectMemberKind(node), context);
+    this.#reportObjectMember(node.name, this.#objectMemberKind(node), context);
   }
 
-  private objectMemberKind(
+  #objectMemberKind(
     node:
       | ts.MethodDeclaration
       | ts.GetAccessorDeclaration
@@ -793,7 +793,7 @@ export class PatternContextValidationTransformer
     return "method";
   }
 
-  private getStaticMemberName(name: ts.PropertyName): string | undefined {
+  #getStaticMemberName(name: ts.PropertyName): string | undefined {
     if (ts.isIdentifier(name) || ts.isPrivateIdentifier(name)) {
       return name.text;
     }
@@ -816,10 +816,10 @@ export class PatternContextValidationTransformer
    * The function may be wrapped in transparent expressions (parentheses, `as`,
    * `satisfies`, `!`, `<T>`) before the property assignment.
    */
-  private isObjectLiteralPropertyValueFunction(
+  #isObjectLiteralPropertyValueFunction(
     node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
   ): boolean {
-    return !!this.getObjectLiteralFunctionPropertyAssignment(node);
+    return !!this.#getObjectLiteralFunctionPropertyAssignment(node);
   }
 
   /**
@@ -828,7 +828,7 @@ export class PatternContextValidationTransformer
    * (possibly-wrapped) function is that property's value. A bare function
    * declaration is never a property value.
    */
-  private getObjectLiteralFunctionPropertyAssignment(
+  #getObjectLiteralFunctionPropertyAssignment(
     node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
   ): ts.PropertyAssignment | undefined {
     if (ts.isFunctionDeclaration(node)) return undefined;
@@ -849,7 +849,7 @@ export class PatternContextValidationTransformer
     return undefined;
   }
 
-  private reportObjectMember(
+  #reportObjectMember(
     reportNode: ts.Node,
     kind: ObjectMemberKind,
     context: TransformationContext,
@@ -866,7 +866,7 @@ export class PatternContextValidationTransformer
    * Validates that lift() and handler() are at module scope, not inside patterns.
    * These builders create reusable functions and should be defined outside the pattern body.
    */
-  private validateBuilderPlacement(
+  #validateBuilderPlacement(
     node: ts.CallExpression,
     context: TransformationContext,
     checker: ts.TypeChecker,
@@ -921,7 +921,7 @@ export class PatternContextValidationTransformer
    * both were removed in favor of an explicit, addressable pattern. Authors now
    * wrap the callback themselves: `patternTool(pattern(fn), extraParams?)`.
    */
-  private validatePatternToolFirstArgument(
+  #validatePatternToolFirstArgument(
     node: ts.CallExpression,
     context: TransformationContext,
     checker: ts.TypeChecker,
@@ -948,7 +948,7 @@ export class PatternContextValidationTransformer
     });
   }
 
-  private validateCallbackSelfContainment(
+  #validateCallbackSelfContainment(
     func: ts.ArrowFunction | ts.FunctionExpression,
     boundarySemantics: CallbackBoundarySemantics,
     context: TransformationContext,
@@ -984,17 +984,17 @@ export class PatternContextValidationTransformer
         return;
       }
 
-      if (ts.isIdentifier(node) && !this.shouldIgnoreReferenceSite(node)) {
-        const symbol = this.getReferenceSymbol(node, checker);
+      if (ts.isIdentifier(node) && !this.#shouldIgnoreReferenceSite(node)) {
+        const symbol = this.#getReferenceSymbol(node, checker);
         const declarations = (symbol?.getDeclarations() ?? []).filter((decl) =>
           !ts.isShorthandPropertyAssignment(decl)
         );
         if (
           declarations.length > 0 &&
           declarations.some((decl) =>
-            this.isEnclosingFunctionScopedDeclaration(decl, func)
+            this.#isEnclosingFunctionScopedDeclaration(decl, func)
           ) &&
-          this.isCallableReference(node, declarations, checker)
+          this.#isCallableReference(node, declarations, checker)
         ) {
           report(node);
         }
@@ -1034,7 +1034,7 @@ export class PatternContextValidationTransformer
    * see that it ends up as a patternTool argument. The workaround is to inline
    * the function into the patternTool() call.
    */
-  private validateStandaloneFunction(
+  #validateStandaloneFunction(
     func: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration,
     context: TransformationContext,
     checker: ts.TypeChecker,
@@ -1126,8 +1126,8 @@ export class PatternContextValidationTransformer
     }
   }
 
-  private shouldIgnoreReferenceSite(node: ts.Identifier): boolean {
-    if (!node.parent || this.isInsideTypeNode(node)) {
+  #shouldIgnoreReferenceSite(node: ts.Identifier): boolean {
+    if (!node.parent || this.#isInsideTypeNode(node)) {
       return true;
     }
 
@@ -1179,10 +1179,10 @@ export class PatternContextValidationTransformer
     return false;
   }
 
-  private isInsideTypeNode(node: ts.Node): boolean {
+  #isInsideTypeNode(node: ts.Node): boolean {
     let current: ts.Node | undefined = node.parent;
     while (current) {
-      if (this.isTypeNode(current)) {
+      if (this.#isTypeNode(current)) {
         return true;
       }
       if (ts.isExpression(current)) {
@@ -1193,12 +1193,12 @@ export class PatternContextValidationTransformer
     return false;
   }
 
-  private isTypeNode(node: ts.Node): boolean {
+  #isTypeNode(node: ts.Node): boolean {
     return node.kind >= ts.SyntaxKind.FirstTypeNode &&
       node.kind <= ts.SyntaxKind.LastTypeNode;
   }
 
-  private getReferenceSymbol(
+  #getReferenceSymbol(
     node: ts.Identifier,
     checker: ts.TypeChecker,
   ): ts.Symbol | undefined {
@@ -1212,7 +1212,7 @@ export class PatternContextValidationTransformer
       checker.getSymbolAtLocation(ts.getOriginalNode(node));
   }
 
-  private isEnclosingFunctionScopedDeclaration(
+  #isEnclosingFunctionScopedDeclaration(
     declaration: ts.Declaration,
     func: ts.FunctionLikeDeclaration,
   ): boolean {
@@ -1243,21 +1243,21 @@ export class PatternContextValidationTransformer
     return false;
   }
 
-  private isCallableReference(
+  #isCallableReference(
     node: ts.Identifier,
     declarations: readonly ts.Declaration[],
     checker: ts.TypeChecker,
   ): boolean {
     if (
-      declarations.some((declaration) => this.isSyntacticCallable(declaration))
+      declarations.some((declaration) => this.#isSyntacticCallable(declaration))
     ) {
       return true;
     }
 
     if (
-      !this.isCallableUseSite(node) &&
+      !this.#isCallableUseSite(node) &&
       !declarations.some((declaration) =>
-        this.shouldCheckInferredCallabilityForCapture(declaration)
+        this.#shouldCheckInferredCallabilityForCapture(declaration)
       )
     ) {
       return false;
@@ -1273,7 +1273,7 @@ export class PatternContextValidationTransformer
       type.getConstructSignatures().length > 0;
   }
 
-  private shouldCheckInferredCallabilityForCapture(
+  #shouldCheckInferredCallabilityForCapture(
     declaration: ts.Declaration,
   ): boolean {
     return (
@@ -1284,7 +1284,7 @@ export class PatternContextValidationTransformer
     );
   }
 
-  private isSyntacticCallable(declaration: ts.Declaration): boolean {
+  #isSyntacticCallable(declaration: ts.Declaration): boolean {
     if (
       ts.isFunctionDeclaration(declaration) ||
       ts.isFunctionExpression(declaration) ||
@@ -1306,27 +1306,27 @@ export class PatternContextValidationTransformer
         }
       }
       return !!declaration.type &&
-        this.isCallableTypeNode(declaration.type);
+        this.#isCallableTypeNode(declaration.type);
     }
 
     if (ts.isParameter(declaration)) {
-      return !!declaration.type && this.isCallableTypeNode(declaration.type);
+      return !!declaration.type && this.#isCallableTypeNode(declaration.type);
     }
 
     return false;
   }
 
-  private isCallableTypeNode(type: ts.TypeNode): boolean {
+  #isCallableTypeNode(type: ts.TypeNode): boolean {
     if (ts.isFunctionTypeNode(type) || ts.isConstructorTypeNode(type)) {
       return true;
     }
 
     if (ts.isParenthesizedTypeNode(type)) {
-      return this.isCallableTypeNode(type.type);
+      return this.#isCallableTypeNode(type.type);
     }
 
     if (ts.isUnionTypeNode(type) || ts.isIntersectionTypeNode(type)) {
-      return type.types.some((member) => this.isCallableTypeNode(member));
+      return type.types.some((member) => this.#isCallableTypeNode(member));
     }
 
     if (
@@ -1340,7 +1340,7 @@ export class PatternContextValidationTransformer
     return false;
   }
 
-  private isCallableUseSite(node: ts.Identifier): boolean {
+  #isCallableUseSite(node: ts.Identifier): boolean {
     const parent = node.parent;
     return !!parent &&
       (

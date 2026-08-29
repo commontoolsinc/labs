@@ -57,12 +57,15 @@ const getObjectValue = (
 // removes `removedId` in the same batch, simulating a watched doc deleted
 // upstream as the watch is established.
 class WatchAddRemoveTransport extends ScriptedSessionTransport {
-  constructor(private readonly removedId: URI) {
+  readonly #removedId: URI;
+
+  constructor(removedId: URI) {
     super({
       name: "watch-remove-coverage",
       sessionId: "session:watch-remove-coverage",
       space,
     });
+    this.#removedId = removedId;
   }
 
   protected override ackServerSeq(): number {
@@ -89,7 +92,7 @@ class WatchAddRemoveTransport extends ScriptedSessionTransport {
               upserts: roots.map((id, index) =>
                 doc(id, index + 1, { value: { label: id } })
               ),
-              removes: [{ branch: "", id: this.removedId }],
+              removes: [{ branch: "", id: this.#removedId }],
             } satisfies SessionSync,
           },
         });

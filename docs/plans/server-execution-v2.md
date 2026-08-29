@@ -38,7 +38,118 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
-**Delta 2026-08-28 (this PR, FINAL disposition): the lunch forever-park's
+**Delta 2026-08-28 (the ruled-3b-close PR): THE OWNER RULED THE 3B FORK
+— "go with (1) plus the (2-D) kick" — both mechanisms are LANDED
+red-first, and lunch-poll-vote's FILE entry is LIFTED: the ON-skip
+registry is EMPTY across ALL FOUR SUITES (the third lift; B1's
+list-EMPTY precondition met again).** (1) event-driven re-supply
+(pattern-manager.ts): a supply-class replication failure parks under the
+WANTED identity — the failing frame's own, the dependency's in a
+recursion frame — and `recordPersistedClosureSpaces` re-issues it on the
+next matching persist record (once per event, no timers, bounded; the
+failure line stays byte-identical and the park/re-issue/heal are loud);
+failure registration checks the map once so a record that landed inside
+the read window re-issues immediately (review-6502 F1-(b)); the one-shot
+contract now reads "…and on the next persist event", exactly the
+register's pre-drafted sentence. (2-D) serve-time kick (wish.ts): a
+cached sidecar pattern served for a space it did not compile into
+replicates its closure there at page-serve time, so the demanding
+space's supplier is REGISTERED before any create-profile click and the
+child replication's ticket await covers the lunch class by registration,
+with (1) as the structural backstop. Pins red-first at bare main
+d569f3722 (`pattern-replication-sibling-race.test.ts` steps 7–10 — heal,
+module-wake, registration-check, dependency-frame park; the
+executor-cross-space late-carriage pin — a parked §2b delegation rides
+the heal through the accept gate; the wish-sidecar-closure-kick pins);
+new mutations N1/N2/N3/N3b/N4 pairwise isolated; the existing kill
+matrix re-verified cell-for-cell, with K1's kill REBOUND to step 1's
+zero-failure-lines assertion (the heal masks its end-state by design —
+the F1 class recreated and closed before landing). The register's
+RULING block records the ruling, the landed mechanism, and what stays
+open (cross-replica never-records supplier — heals at the server's
+first matching persist; prior-session third-space closures; the
+recursive-(b) sliver). Lift evidence per the ruled local-plus-CI-probe
+bar: campaign R 8/8 quiet-and-loaded at the lift head (fresh store +
+posture probe per run, ensure-ON default, self-sourced sha-verified
+binary, LLM masked; structureLoadStuck 0, closure-replication-failed 0 —
+the heal machinery dormant locally, exactly the model), full runner
+suite green at the head, and THIS PR's own ON-lane board as the
+direct-CI unskip probe (PROBE 6) under the ruled SURFACE reading — a
+red at that surface restores the entry with the accumulated map and the
+honest classification. PROBE 6 VERDICT (run 33222653635 at 1a5f3e66e,
+settle-confirmed): GREEN AT THE SURFACE — all ten ON shards succeeded,
+shard 7 RUNNING lunch-poll-vote; the lift STANDS and B1's list-EMPTY
+precondition is MET (the register's PROBE 6 block carries the full
+reading, including the board's sole red — a packages/cli view test this
+diff cannot reach, second observation with the merge gate). The deltas
+below are the prior PRs' records.**
+
+**Delta 2026-08-28 (the geometry-3 close PR, FINAL disposition — PROBE 5
+red at the surface, GEOMETRY 3B CONFIRMED on its pre-declared signature;
+the entry is RESTORED and the owner fork is the live decision.** The
+close itself stands (geometry 3 fixed red-first, pinned, kept): probe 5 =
+this PR's own board, run 33198257149, ON shard 7 job 98941298566, the
+same external surface (`:271`, `#lp-join-button`, "Unknown profile
+#AykQuk", 11 co-residents green) — and the artifact discriminates it
+from every prior probe: ONE `closure-replication-failed` (same
+profile-home module Jlzs…, parent→profile, 18:16:15.616) with **ZERO
+`closure-replication-await-inflight` lines**, the once-await's
+announcement that prints whenever either compile registry is non-empty
+at a dry consult (pattern-manager logger defaults to level "info";
+verified) — so both registries were EMPTY: the supplier compile had NOT
+STARTED, the exact 3b property pre-declared in the register BEFORE the
+probe ran. Fallback counters 0; 80 `structure-load-stuck`
+18:16:50–18:20:50. A once-await structurally cannot see a compile that
+has not begun; the full close — event-driven re-supply on each persist
+record — TOUCHES THE ONE-SHOT CONTRACT and now sits with the owner (the
+register's 3b fork; alternatives include a deeper supply redesign such
+as compiling the home-env into the parent space before serving profile
+creation). The census returns to ONE patterns entry, its reason carrying
+the four-geometry map and probe 5's coordinates. The lift text below is
+this PR's superseded proposal, kept for the record.**
+
+**Delta 2026-08-28 (the geometry-3 close PR, original lift text —
+superseded above): the lunch forever-park's
+THIRD supplier geometry — the supplier COMPILE still mid-flight at
+child-replication time (probe 4's residue, run 33165960083) — is CLOSED
+red-first, and lunch-poll-vote's FILE entry is LIFTED: the ON-skip
+registry is EMPTY across ALL FOUR SUITES again.** The close (the #6484
+register's designed move, built with the independent review's three
+sharpenings): on a dry origin AND dry fallback map, the replication
+snapshots BOTH in-flight compile registries (`inProgressCompilations`
+AND `inProgressByIdentityLoads`; never `compileCacheWrites`, its own
+set), allSettles the snapshot once, re-observes a fresh
+`pendingCacheWriteBacks` snapshot (a settled load's recovery persist is
+fire-and-forget but registers there before the load resolves), and
+re-consults primary + fallbacks; still dry keeps the byte-identical
+one-shot throw. An EMPTY registry snapshot takes NO retry — nothing
+could have recorded, and the build's own mutation ladder caught the
+unconditional-retry draft re-rescuing the sibling race and masking the
+sibling-await pin (the F1 class): the short-circuit restored that kill.
+Pin: `pattern-replication-sibling-race.test.ts` step 5 (latch-gated
+mid-flight supplier compile, second-runtime construction, no sleeps),
+watched RED at pre-fix `bd9b1c10b` with the production error;
+once-await mutation reds it alone 5/5; the four existing kills
+re-verified. GEOMETRY 3b (a supplier compile not yet STARTED at consult
+time) is PRE-DECLARED residue in the register — signature:
+`closure-replication-failed` with NO `closure-replication-await-inflight`
+line, fallback counter 0, closure arriving shortly after; the full
+event-driven close (re-issue failed replications on each persist
+record) TOUCHES THE ONE-SHOT CONTRACT and is recorded as an OWNER-COURT
+fork, not built. Lift evidence per the ruled local-plus-CI-probe bar:
+campaign I 8/8 quiet-and-loaded at the fix head (fresh store + posture
+probe per run, ensure-ON default, self-sourced binary sha256
+`a483b13f70b8…` re-verified per run, LLM masked; `structureLoadStuck`
+0, `closure-replication-failed` 0, walls 18–19 s), full runner suite
+green at the head, and THIS PR's own ON-lane board as the direct-CI
+unskip probe under the ruled SURFACE reading — ON shard 7 RUNS
+lunch-poll-vote; the probed surface's verdict decides (red at the
+surface restores the entry with the 3b classification, per the arc's
+standing method). The flip PR's list-EMPTY precondition is met again;
+its bar remains a green ON lane. The delta below is #6484's record,
+kept as history.**
+
+**Delta 2026-08-28 (PR #6484, FINAL disposition): the lunch forever-park's
 WRITE PATH is mapped THREE GEOMETRIES DEEP on four direct-CI probe boards,
 the first two geometries FIXED red-first — and the entry is RESTORED: every
 probe went red at the probed surface, the fourth under the declared hard

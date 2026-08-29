@@ -1,9 +1,10 @@
 import { getLogger } from "@commonfabric/utils/logger";
-import { isObjectOrArray } from "@commonfabric/utils/types";
 import {
-  internSchema,
-  isNontrivialSchema,
-} from "@commonfabric/data-model-schema";
+  ensureExternalSchemaClosure,
+  markIfcBearingLinkCrossing,
+} from "./schema-ifc.ts";
+import { internSchema } from "@commonfabric/data-model-schema";
+import { isObjectOrArray } from "@commonfabric/utils/types";
 import { toCompactDebugString } from "@commonfabric/data-model/value-debug";
 import {
   linkPayloadAtProbe,
@@ -44,19 +45,27 @@ export type ResolvedFullLink = NormalizedFullLink & {
 };
 
 /**
- * Whether `schema` constrains nothing at all: absent, JSON Schema `true`, or
- * an empty object. Such a schema selects every value, so it says nothing the
+ * Whether `schema` constrains nothing at all: absent, or a TRUE schema in
+ * the canonical sense (`ContextualFlowControl.isTrueSchema`) — JSON Schema
+ * `true`, `{}`, or an object carrying only internal flags, `default`, or
+ * `$defs`. Such a schema selects every value, so it says nothing the
  * schema a resolution is already carrying does not, and a hop onto a link
- * bearing one keeps carrying rather than adopting it. `false` is not one of
- * these — it selects nothing, which is information.
+ * bearing one keeps carrying rather than adopting it. `false` is not one
+ * of these — it selects nothing, which is information.
  */
 const schemaConstrainsNothing = (schema: JSONSchema | undefined): boolean =>
-  schema === undefined || schema === true ||
-  (isObjectOrArray(schema) && !isNontrivialSchema(schema));
+  schema === undefined || ContextualFlowControl.isTrueSchema(schema);
 
 const MAX_PATH_RESOLUTION_LENGTH = 100;
 
 type LinkHop = {
+  /**
+   * The stored link's schema BEFORE any path narrowing (the ancestor-probe
+   * hop narrows by the remaining path), preserved for the crossing seam:
+   * narrowing can drop root-level `ifc` declarations, and the seam's
+   * subject is the link as stored.
+   */
+  storedSchema?: JSONSchema;
   link: NormalizedFullLink;
   source: NormalizedFullLink;
   kind: "value" | "write-redirect";
@@ -251,6 +260,20 @@ type LinkResolutionRecord = {
   readonly traces: readonly CfcDereferenceTrace[];
 
   /**
+   * The schema-bearing links this walk crossed, so a memoized resolution
+   * can replay the crossing seam's cfc-relevance marking for callers that
+   * opt in (`markIfcCrossings`). Pure data: whether a schema carries `ifc`
+   * is evaluated at mark time (the predicate is memoized), so a cold
+   * external closure neither bakes a stale verdict into this record nor
+   * costs the walk its memoizability.
+   */
+  readonly schemaHops: readonly {
+    id: string;
+    space: NormalizedFullLink["space"];
+    schema: JSONSchema;
+  }[];
+
+  /**
    * Hop targets in another space. Their sync kick is unreserved, so it fires on
    * every resolution and a memoized one has to fire it too. A same-space kick
    * is taken against a reservation and fires once whatever happens, so it is
@@ -386,7 +409,17 @@ export function resolveLink(
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   lastNode: LastNode = "value",
-  options: { preserveOverwrite?: boolean; onScopeBlocked?: () => void } = {},
+  options: {
+    preserveOverwrite?: boolean;
+    onScopeBlocked?: () => void;
+    /**
+     * Mark the transaction cfc-relevant for every crossed link whose
+     * stored schema carries `ifc` (the crossing seam,
+     * `markIfcBearingLinkCrossing`). Read entry points opt in; write-path
+     * resolutions leave relevance to the write-policy gate.
+     */
+    markIfcCrossings?: boolean;
+  } = {},
 ): ResolvedFullLink {
   return resolveLinkTracingDereferences(runtime, tx, link, lastNode, options)
     .link;
@@ -415,7 +448,17 @@ export function resolveLinkTracingDereferences(
   tx: IExtendedStorageTransaction,
   link: NormalizedFullLink,
   lastNode: LastNode = "value",
-  options: { preserveOverwrite?: boolean; onScopeBlocked?: () => void } = {},
+  options: {
+    preserveOverwrite?: boolean;
+    onScopeBlocked?: () => void;
+    /**
+     * Mark the transaction cfc-relevant for every crossed link whose
+     * stored schema carries `ifc` (the crossing seam,
+     * `markIfcBearingLinkCrossing`). Read entry points opt in; write-path
+     * resolutions leave relevance to the write-policy gate.
+     */
+    markIfcCrossings?: boolean;
+  } = {},
 ): {
   link: ResolvedFullLink;
   traces: readonly CfcDereferenceTrace[];
@@ -432,6 +475,11 @@ export function resolveLinkTracingDereferences(
   const cached = memo?.get(memoKey) as LinkResolutionRecord | undefined;
   if (cached !== undefined) {
     for (const trace of cached.traces) tx.recordCfcDereferenceTrace(trace);
+    if (options.markIfcCrossings === true) {
+      for (const hop of cached.schemaHops) {
+        markIfcBearingLinkCrossing(tx, hop.space, hop.schema, hop.id);
+      }
+    }
     for (const target of cached.crossSpaceTargets) {
       kickDocPull(runtime, target, false);
     }
@@ -446,6 +494,11 @@ export function resolveLinkTracingDereferences(
 
   const seen = new Set<string>();
   const traces: CfcDereferenceTrace[] = [];
+  const schemaHops: {
+    id: string;
+    space: NormalizedFullLink["space"];
+    schema: JSONSchema;
+  }[] = [];
   const crossSpaceTargets: NormalizedFullLink[] = [];
   // A resolution is memoized only when replaying `traces` and
   // `crossSpaceTargets` reproduces everything it left behind. A blocked follow
@@ -571,14 +624,26 @@ export function resolveLinkTracingDereferences(
         if (nextHop) {
           const remainingPath = link.path.slice(lastValid.length);
           let { schema, ...restLink } = nextHop.link;
+          const storedSchema = schema;
           if (schema !== undefined && remainingPath.length > 0) {
-            schema = ContextualFlowControl.getSchemaAtPath(
+            // The stored schema's external cid: refs must be registered
+            // before the narrowing walks them; the documents travel with
+            // the referring document, so they live in the referrer's
+            // space. A ref the closure cannot resolve names a corrupt or
+            // malformed declaration (the loader logs it): the declaration
+            // is ignored — narrowing it would throw on the dangling ref.
+            const closureComplete = ensureExternalSchemaClosure(
+              tx,
+              nextHop.source.space,
               schema,
-              remainingPath,
             );
+            schema = closureComplete
+              ? ContextualFlowControl.getSchemaAtPath(schema, remainingPath)
+              : undefined;
           }
           nextHop = {
             ...nextHop,
+            ...(storedSchema !== undefined && { storedSchema }),
             link: {
               ...restLink,
               path: [...nextHop.link.path, ...remainingPath],
@@ -633,6 +698,20 @@ export function resolveLinkTracingDereferences(
       }
       traces.push(recordDereferenceHop(tx, nextHop));
       followedHop = true;
+      // The crossing seam's data: schema-bearing hops are collected AS
+      // STORED and evaluated at mark time below (and on memo hits), for
+      // callers that opt in. The stored schema decides — an ancestor hop's
+      // narrowing can reduce the traveling schema to nothing while the
+      // declaration stands — and the SOURCE space names where the stored
+      // link (and so its schema's closure documents) lives.
+      const crossingSchema = nextHop.storedSchema ?? nextHop.link.schema;
+      if (crossingSchema !== undefined) {
+        schemaHops.push({
+          id: nextHop.link.id,
+          space: nextHop.source.space,
+          schema: crossingSchema,
+        });
+      }
       const nextLink = nextHop.link;
       const crossSpace = nextLink.space !== link.space;
       // The hop consumed `nextHop.depth` of our path and re-rooted the rest
@@ -653,9 +732,25 @@ export function resolveLinkTracingDereferences(
       if (
         schemaConstrainsNothing(nextLink.schema) && link.schema !== undefined
       ) {
+        // `default` still inherits from the last declaration even when the
+        // stored schema is otherwise unconstrained — a top-level `default`
+        // is trivially true, and narrowing can reduce a stored schema to
+        // one. A false carried schema stays false: the reader selected
+        // nothing, so no default stands in.
+        const storedDefault = isObjectOrArray(nextLink.schema)
+          ? nextLink.schema.default
+          : undefined;
+        const carriedSchema = storedDefault !== undefined &&
+            !ContextualFlowControl.isFalseSchema(link.schema)
+          ? internSchema(
+            isObjectOrArray(link.schema)
+              ? { ...link.schema, default: storedDefault }
+              : { default: storedDefault },
+          )
+          : link.schema;
         link = {
           ...nextLink,
-          schema: link.schema,
+          schema: carriedSchema,
           ...(carriedCaps !== undefined && { scopeCaps: carriedCaps }),
         };
       } else {
@@ -704,6 +799,16 @@ export function resolveLinkTracingDereferences(
     }
   }
 
+  // The crossing seam: every schema-bearing hop a content-reading
+  // resolution (the callers that opt in) crossed marks off its stored
+  // schema. Evaluation happens here at mark time, and the memoized record
+  // replays the same hops per call.
+  if (options.markIfcCrossings === true) {
+    for (const hop of schemaHops) {
+      markIfcBearingLinkCrossing(tx, hop.space, hop.schema, hop.id);
+    }
+  }
+
   const result = { ...link } satisfies NormalizedFullLink;
   // Clear the input's stale `pendingHopDoc` before deciding this walk's own
   // (Finding 2): a successful walk that followed no hop spreads the input's
@@ -739,6 +844,7 @@ export function resolveLinkTracingDereferences(
       {
         result: { ...result },
         traces,
+        schemaHops,
         crossSpaceTargets,
       } satisfies LinkResolutionRecord,
     );

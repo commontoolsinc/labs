@@ -33,8 +33,11 @@ class FakeTransport extends EventEmitter<RuntimeTransportEvents>
   readonly sent: Array<IPCClientMessage | IPCClientNotification> = [];
   disposeCalls = 0;
 
-  constructor(private holdTypes: RequestType[] = []) {
+  #holdTypes: RequestType[];
+
+  constructor(holdTypes: RequestType[] = []) {
     super();
+    this.#holdTypes = holdTypes;
   }
 
   send(original: IPCClientMessage | IPCClientNotification): void {
@@ -50,7 +53,7 @@ class FakeTransport extends EventEmitter<RuntimeTransportEvents>
     this.sent.push(message);
     // Notifications carry no msgId and get no reply.
     if (!("msgId" in message)) return;
-    if (this.holdTypes.includes(message.data.type)) return;
+    if (this.#holdTypes.includes(message.data.type)) return;
     // Acknowledge asynchronously, like a real worker round-trip.
     queueMicrotask(() => {
       this.emit("message", { msgId: message.msgId, data: undefined });
@@ -78,13 +81,16 @@ async function initializedConnection(
  */
 class ThrowingTransport extends EventEmitter<RuntimeTransportEvents>
   implements RuntimeTransport {
-  constructor(private readonly failOn: RequestType) {
+  readonly #failOn: RequestType;
+
+  constructor(failOn: RequestType) {
     super();
+    this.#failOn = failOn;
   }
 
   send(message: IPCClientMessage | IPCClientNotification): void {
     if (!("msgId" in message)) return;
-    if (message.data.type === this.failOn) {
+    if (message.data.type === this.#failOn) {
       throw new Error("no encoding for value");
     }
     // Everything else is acknowledged, so the connection can initialize.

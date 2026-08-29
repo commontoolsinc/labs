@@ -111,13 +111,13 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     super();
     this.#conn = conn;
     this.#principal = _options.identity?.did();
-    this.#conn.on("console", this._onConsole);
-    this.#conn.on("navigaterequest", this._onNavigateRequest);
-    this.#conn.on("error", this._onError);
-    this.#conn.on("telemetry", this._onTelemetry);
-    this.#conn.on("pendingwriteschange", this._onPendingWritesChange);
-    this.#conn.on("operationupdate", this._onOperationUpdate);
-    this.#conn.on("eventneedsattention", this._onEventNeedsAttention);
+    this.#conn.on("console", this.#onConsole);
+    this.#conn.on("navigaterequest", this.#onNavigateRequest);
+    this.#conn.on("error", this.#onError);
+    this.#conn.on("telemetry", this.#onTelemetry);
+    this.#conn.on("pendingwriteschange", this.#onPendingWritesChange);
+    this.#conn.on("operationupdate", this.#onOperationUpdate);
+    this.#conn.on("eventneedsattention", this.#onEventNeedsAttention);
   }
 
   /** Returns an opaque identity for the scoped document instance in `ref`. */
@@ -789,6 +789,14 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     });
   }
 
+  /** Changes memory WebSocket compression without reconnecting. */
+  async setMemoryMessageCompression(enabled: boolean): Promise<void> {
+    await this.#conn.request<RequestType.SetMemoryMessageCompression>({
+      type: RequestType.SetMemoryMessageCompression,
+      enabled,
+    });
+  }
+
   /**
    * Enable or disable forwarding of the worker runtime's console output to the
    * main thread for the running worker. Takes effect immediately, without a
@@ -973,38 +981,38 @@ export class RuntimeClient extends EventEmitter<RuntimeClientEvents> {
     return this.#conn;
   }
 
-  private _onConsole = (data: ConsoleMessage): void => {
+  #onConsole = (data: ConsoleMessage): void => {
     this.emit("console", data);
   };
 
-  private _onNavigateRequest = (data: NavigateRequestNotification): void => {
+  #onNavigateRequest = (data: NavigateRequestNotification): void => {
     this.emit("navigaterequest", {
       cell: new CellHandle(this, data.targetCellRef),
     });
   };
 
-  private _onError = (data: ErrorNotification): void => {
+  #onError = (data: ErrorNotification): void => {
     this.emit("error", data);
   };
 
-  private _onTelemetry = (data: TelemetryNotification): void => {
+  #onTelemetry = (data: TelemetryNotification): void => {
     this.emit("telemetry", data.marker);
   };
 
-  private _onPendingWritesChange = (
+  #onPendingWritesChange = (
     data: PendingWritesNotification,
   ): void => {
     this.#pendingWrites = data.pending;
     this.emit("pendingwriteschange", { pending: data.pending });
   };
 
-  private _onOperationUpdate = (data: OperationUpdateNotification): void => {
+  #onOperationUpdate = (data: OperationUpdateNotification): void => {
     this.#operationSubscriptions.get(data.subscriptionId)?.(
       data.field,
     );
   };
 
-  private _onEventNeedsAttention = (
+  #onEventNeedsAttention = (
     data: EventNeedsAttentionNotification,
   ): void => {
     const { type: _type, ...notice } = data;

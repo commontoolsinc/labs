@@ -1630,11 +1630,15 @@ class ReconnectableLoopbackTransport implements Transport {
   watchSetCount = 0;
   #receiver: (payload: string) => void = () => {};
   #closeReceiver: (error?: Error) => void = () => {};
-  #connection: ReturnType<Server["connect"]> | null = null;
+  #connectionCache: ReturnType<Server["connect"]> | null = null;
   #reconnected = defer<void>();
   #secondWatchSet = defer<void>();
 
-  constructor(private readonly server: Server) {}
+  readonly #server: Server;
+
+  constructor(server: Server) {
+    this.#server = server;
+  }
 
   /** Resolves when a second connection is opened (reconnect). */
   get reconnected(): Promise<void> {
@@ -1648,7 +1652,7 @@ class ReconnectableLoopbackTransport implements Transport {
 
   async send(payload: string): Promise<void> {
     const message = decodeMemoryBoundary(payload) as { type?: string };
-    await this.connection().receive(payload);
+    await this.#connection().receive(payload);
     if (message.type === "session.watch.set") {
       this.watchSetCount++;
       if (this.watchSetCount >= 2) {
@@ -1671,22 +1675,22 @@ class ReconnectableLoopbackTransport implements Transport {
   }
 
   disconnect(): void {
-    this.#connection?.close();
-    this.#connection = null;
+    this.#connectionCache?.close();
+    this.#connectionCache = null;
     this.#closeReceiver(new Error("disconnect"));
   }
 
-  private connection(): ReturnType<Server["connect"]> {
-    if (this.#connection === null) {
+  #connection(): ReturnType<Server["connect"]> {
+    if (this.#connectionCache === null) {
       this.connectionCount++;
       if (this.connectionCount >= 2) {
         this.#reconnected.resolve();
       }
-      this.#connection = this.server.connect((message) => {
+      this.#connectionCache = this.#server.connect((message) => {
         this.#receiver(encodeMemoryBoundary(message));
       });
     }
-    return this.#connection;
+    return this.#connectionCache;
   }
 }
 
@@ -1698,7 +1702,11 @@ class ScriptedReconnectTransport implements Transport {
   #connected = false;
   #dropped = new Set<number>();
 
-  constructor(private readonly dropOnFirstLocalSeqs: number[] = []) {}
+  readonly #dropOnFirstLocalSeqs: number[];
+
+  constructor(dropOnFirstLocalSeqs: number[] = []) {
+    this.#dropOnFirstLocalSeqs = dropOnFirstLocalSeqs;
+  }
 
   setReceiver(receiver: (payload: string) => void): void {
     this.#receiver = receiver;
@@ -1748,7 +1756,7 @@ class ScriptedReconnectTransport implements Transport {
         const localSeq = message.commit?.localSeq ?? -1;
         this.transactLocalSeqs.push(localSeq);
         if (
-          this.dropOnFirstLocalSeqs.includes(localSeq) &&
+          this.#dropOnFirstLocalSeqs.includes(localSeq) &&
           !this.#dropped.has(localSeq)
         ) {
           this.#dropped.add(localSeq);
@@ -3487,6 +3495,52 @@ Deno.test("memory v2 client stores the server's advertised flags (capability han
     assertEquals(legacy.serverFlags?.entityIdListing, false);
   } finally {
     await legacy.close();
+  }
+});
+
+Deno.test("memory v2 client keeps compression disabled when the server omits the capability", async () => {
+  let receiver = (_payload: string) => {};
+  let advertisedCompression: boolean | undefined;
+  const compressionStates: boolean[] = [];
+  const transport: Transport = {
+    supportsMessageCompression: true,
+    send(payload): Promise<void> {
+      const message = decodeMemoryBoundary(payload) as {
+        type?: string;
+        flags?: { messageCompressionV1?: boolean };
+      };
+      if (message.type === "hello") {
+        advertisedCompression = message.flags?.messageCompressionV1;
+        receiver(encodeMemoryBoundary({
+          type: "hello.ok",
+          protocol: MEMORY_PROTOCOL,
+          flags: {
+            modernCellRep: getMemoryProtocolFlags().modernCellRep,
+          },
+          sessionOpen: {
+            audience: TEST_SESSION_OPEN_AUDIENCE,
+            challenge: sessionOpenChallenge,
+          },
+        }));
+      }
+      return Promise.resolve();
+    },
+    async close() {},
+    setReceiver(next) {
+      receiver = next;
+    },
+    setCloseReceiver() {},
+    setMessageCompressionEnabled(enabled) {
+      compressionStates.push(enabled);
+    },
+  };
+
+  const client = await connect({ transport });
+  try {
+    assertEquals(advertisedCompression, true);
+    assertEquals(compressionStates, [false, false]);
+  } finally {
+    await client.close();
   }
 });
 

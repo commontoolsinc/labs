@@ -83,6 +83,12 @@ export const IFRAME_PATTERN = {
 } as const;
 ```
 
+Declare each default with its interface as the annotation, as above, rather
+than `as const`: the wrapper types every resource as
+`Default<IframeStateData, typeof DEFAULT_STATE>`, so a default that does not
+satisfy its interface is a type error at the contract, and an `as const`
+default makes array members `readonly`, which a mutable `Note[]` rejects.
+
 `name` is a TypeScript identifier used for the generated interfaces. The three
 available scopes are:
 
@@ -98,7 +104,8 @@ such as hover or an open tooltip in a Fabric Cell; keep that inside the guest.
 The generated wrapper owns `space`-scoped state and output inside the piece. It
 declares `user`- and `session`-scoped state or output as optional scoped pattern
 inputs, so the runtime resolves them for the active user or browser session.
-Callers normally omit those inputs and let their `Default` value materialize.
+Callers normally omit those inputs. Their `Default` supplies the readable
+schema fallback; the guest materializes each writable value after pulling it.
 This distinction stays in the wrapper; the guest always addresses the same
 `state` and `output` resources by name.
 
@@ -120,21 +127,33 @@ const output = fabric.cell<typeof DEFAULT_OUTPUT>("output");
 const root = document.querySelector<HTMLDivElement>("#root")!;
 const heading = document.createElement("h1");
 const add = document.createElement("button");
+const error = document.createElement("p");
 add.type = "button";
 add.textContent = "Add note";
-root.append(heading, add);
+error.role = "alert";
+root.append(heading, add, error);
 
 let hydrated = false;
 const render = () => {
   heading.textContent = input.get()?.heading ?? "Loading";
   add.disabled = !hydrated;
 };
+const showError = (cause: unknown) => {
+  error.textContent = cause instanceof Error ? cause.message : String(cause);
+};
 
 const stops = [input.sink(render), state.sink(render), output.sink(render)];
-void Promise.all([input.pull(), state.pull(), output.pull()]).then(() => {
-  hydrated = true;
-  render();
-});
+void (async () => {
+  try {
+    await Promise.all([input.pull(), state.pull(), output.pull()]);
+    await state.initialize(DEFAULT_STATE);
+    await output.initialize(DEFAULT_OUTPUT);
+    hydrated = true;
+    render();
+  } catch (cause) {
+    showError(cause);
+  }
+})();
 
 add.addEventListener("click", () => {
   const note = { id: crypto.randomUUID(), text: "New note" };
@@ -144,7 +163,7 @@ add.addEventListener("click", () => {
       noteCount: current.notes.length,
       selectedId: current.selectedId,
     });
-  });
+  }).catch(showError);
 });
 
 globalThis.addEventListener("pagehide", () => {
@@ -167,6 +186,9 @@ The Cell contract matches the rest of Common Fabric:
   for later values. Call `pull()` when the first render needs fresh data.
 - `key(nameOrIndex)` derives a path-specific handle. Its sink observes that path
   rather than the whole root value.
+- `initialize(defaultValue)` atomically stores a first-use default only while
+  the Cell has no backing value, then returns the value that won. A schema
+  fallback visible through `get()` does not count as stored.
 - `set(value)` replaces a value. `update(fn)` queues a read-modify-write against
   other operations on the same remote Cell in this guest; it is not a
   transaction across users, sessions, or resources.
@@ -191,9 +213,10 @@ after the joint `Promise.all(...)` resolves, then render from the complete set.
 
 A newly resolved `user`- or `session`-scoped input can also be `undefined` while
 its default is materializing. Pull before the first mutation. If a child write
-needs its parent object to exist, initialize only when the authoritative pull
-still reports absence, await that write, and then use the narrow child
-operation:
+needs its parent object to exist, call `initialize()` after the authoritative
+pull, await it, and then use the narrow child operation. Call it even when
+`get()` exposes the compiled schema fallback: initialization is idempotent and
+materializes that fallback before the child write.
 
 ```typescript
 // Shown at module scope.
@@ -204,17 +227,19 @@ const fabric = connectFabric();
 const state = fabric.cell<typeof DEFAULT_STATE>("state");
 
 async function addNote(text: string): Promise<void> {
-  const current = await state.pull();
-  if (current === undefined) await state.set(DEFAULT_STATE);
+  await state.pull();
+  await state.initialize(DEFAULT_STATE);
   await state.key("notes").push({ id: crypto.randomUUID(), text });
 }
 ```
 
 Do not initialize with `update((current) => current ?? DEFAULT_STATE)`: the
 updater starts from this guest's cache, which another session may have made
-stale. A strict default `set()` after `pull()` either materializes the missing
-parent or fails closed if another writer won. Use `update()` only when a local
-queue over an already materialized complete object is the intended boundary.
+stale. `initialize()` reads raw backing state and conditionally writes in one
+runtime transaction, so concurrent guests return the same winning value
+without replacing it. Use `set()` for intentional last-writer-wins replacement,
+and use `update()` only when a local queue over an already materialized complete
+object is the intended boundary.
 
 Keep editable DOM drafts separate from authoritative Cell samples. While a
 local write is pending, a sink rerender should preserve that draft. Once it
@@ -265,14 +290,12 @@ needs a new ID. Represent UI sentinels outside the user-data domain, such as
 
 ### React guests
 
-React belongs to the guest bundle, not the wrapper. Import the React instance
-chosen by the guest and pass that exact instance to
-`createFabricReact(React, fabric)` from
-`@commonfabric/iframe-sandbox/react`. Its `useCell(name)` hook uses
-`useSyncExternalStore`, returns `loading`, `ready`, or `error`, accepts a value or
-functional setter, and exposes `refresh()` as the explicit pull. The direct Cell
-API remains useful for fine-grained `key(...).sink(...)` subscriptions and
-stable resolved items.
+When the application should be a React component tree, use the parallel
+[`iframe-pattern-react-guide.md`](./iframe-pattern-react-guide.md) as the one
+self-contained authoring contract. It covers guest-owned React dependencies,
+TSX compilation, hook readiness, fine-grained direct Cell subscriptions,
+stable resolved items, SQLite query hooks, cleanup, and browser verification.
+Do not combine the two guest bootstraps.
 
 ## Optional SQLite
 
@@ -338,14 +361,20 @@ generated TypeScript bindings. They may use reserved words. When the exact name
 Run the checked-in helper from the repository root:
 
 ```bash
-deno run -A skills/pattern-iframe/scripts/write-wrapper.ts \
+deno run -A tools/write-iframe-wrapper.ts \
   --contract packages/patterns/quick-notes/contract.ts \
   --guest packages/patterns/quick-notes/guest.ts \
   --out packages/patterns/quick-notes/main.tsx
 ```
 
 The helper refuses to overwrite a file. Pass `--force` when regenerating the
-same `main.tsx` after changing the contract or guest.
+same `main.tsx` after changing the contract or guest. Regenerating with an
+unchanged contract and guest does not change the compiled schema. Whether a
+deployed piece accepts the result through `cf piece setsrc` depends on the
+schema it was deployed with: a piece whose schema carried no defaults (one
+deployed before the generator read imported defaults) is refused, since the
+defaults now present would change what its stored values mean; start a new
+piece for it.
 
 For a custom HTML shell, put `<!-- PATTERN_IFRAME_SCRIPT -->` exactly once where
 the bundled module should run, then add `--html .../guest.html`. Without it, the

@@ -58,18 +58,16 @@ import {
   type FabricValue,
 } from "@/interface.ts";
 import {
-  assertValidFabricValueLayer,
   fabricFromNativeValue,
   isValidFabricConvertibleValue,
-  isValidFabricNativeObject,
   nativeFromFabricValue,
   shallowCleanArray,
   shallowCleanPlainObject,
   shallowFabricFromNativeObjectElseUndefined,
   shallowFabricFromNativeValue,
 } from "@/native-conversion.ts";
-import { isValidFabricValueLayer } from "@/type-check.ts";
-import { LAYER_CORPUS, PlainClass } from "./fabric-value-corpus.ts";
+import { assertValidFabricValueLayer } from "@/type-check.ts";
+import { LAYER_CORPUS, WeirdError } from "./fabric-value-corpus.ts";
 
 /** A concrete fabric class, `toBeInstanceOf()` wanting a constructor. */
 type FabricClass = new (...args: never[]) => object;
@@ -350,44 +348,6 @@ describe("native-conversion", () => {
     });
   });
 
-  describe("isValidFabricNativeObject()", () => {
-    it("returns `true` for all convertible types", () => {
-      expect(isValidFabricNativeObject(new Error("e"))).toBe(true);
-      expect(isValidFabricNativeObject(new TypeError("e"))).toBe(true);
-      expect(isValidFabricNativeObject(new Map())).toBe(true);
-      expect(isValidFabricNativeObject(new Set())).toBe(true);
-      expect(isValidFabricNativeObject(new Date())).toBe(true);
-      expect(isValidFabricNativeObject(new Uint8Array())).toBe(true);
-    });
-
-    it("returns `true` for exotic `Error` subclass", () => {
-      class WeirdError extends RangeError {}
-      expect(isValidFabricNativeObject(new WeirdError("weird"))).toBe(true);
-    });
-
-    it("returns `true` for `RegExp`", () => {
-      expect(isValidFabricNativeObject(/abc/)).toBe(true);
-    });
-
-    it("returns `false` for non-convertible types", () => {
-      expect(isValidFabricNativeObject({})).toBe(false);
-      expect(isValidFabricNativeObject([])).toBe(false);
-      expect(isValidFabricNativeObject(new WeakMap())).toBe(false);
-    });
-
-    it("returns `false` for objects with `toJSON()`", () => {
-      expect(isValidFabricNativeObject({ toJSON: () => "x" })).toBe(false);
-    });
-
-    it("returns `false` for a non-object", () => {
-      expect(isValidFabricNativeObject(null)).toBe(false);
-      expect(isValidFabricNativeObject(undefined)).toBe(false);
-      expect(isValidFabricNativeObject(1)).toBe(false);
-      expect(isValidFabricNativeObject("a")).toBe(false);
-      expect(isValidFabricNativeObject(() => {})).toBe(false);
-    });
-  });
-
   describe("FabricInstance instanceof checks", () => {
     it("returns `false` for `null`", () => {
       expect((null as unknown) instanceof FabricInstance).toBe(false);
@@ -593,6 +553,16 @@ describe("native-conversion", () => {
       ["a `Uint8Array`", new Uint8Array([1, 2, 3]), FabricBytes],
       ["a `RegExp`", /abc/gi, FabricRegExp],
       ["an `Error`", new Error("boom"), FabricError],
+      [
+        "a custom `Error` subclass instance",
+        new WeirdError("weird"),
+        FabricError,
+      ],
+      [
+        "an `Error` whose prototype was severed",
+        Object.setPrototypeOf(new Error("severed"), null),
+        FabricError,
+      ],
     ];
 
     describe("given a `FabricNativeObject` with a fabric form", () => {
@@ -640,119 +610,6 @@ describe("native-conversion", () => {
         expect(() => assertValidFabricValueLayer(value)).toThrow(
           "a `FabricNativeObject`, so conversion is what decides it",
         );
-      }
-    });
-  });
-
-  describe("assertValidFabricValueLayer()", () => {
-    /** Whether the vet refuses the given value. */
-    function refuses(value: unknown): boolean {
-      try {
-        assertValidFabricValueLayer(value);
-        return false;
-      } catch {
-        return true;
-      }
-    }
-
-    describe("agrees with `isValidFabricValueLayer()`", () => {
-      // The vet decides nothing the predicate has not decided, bar one added
-      // condition the corpus deliberately holds none of (it has its own test
-      // below). That the corpus lands on both answers is asserted rather than
-      // assumed, agreement being free for one that has drifted to a side.
-      const accepted: string[] = [];
-      const refused: string[] = [];
-
-      for (const [label, value] of LAYER_CORPUS) {
-        (isValidFabricValueLayer(value) ? accepted : refused).push(label);
-        it(`treats ${label} the same way`, () => {
-          expect(refuses(value)).toBe(!isValidFabricValueLayer(value));
-        });
-      }
-
-      it("is checked against both answers", () => {
-        expect(accepted.length).toBeGreaterThan(0);
-        expect(refused.length).toBeGreaterThan(0);
-      });
-
-      // The accepting side is a `switch` with one `case` per primitive class
-      // and a throwing `default`, so a class the corpus never carries is a
-      // `case` no cross-check above reaches.
-      it("carries every registered primitive class", () => {
-        const carried = new Set(
-          LAYER_CORPUS.map(([, value]) =>
-            (value as object)?.constructor as unknown
-          ),
-        );
-        for (const cls of codecClasses()) {
-          expect([cls.name, carried.has(cls)]).toEqual([cls.name, true]);
-        }
-      });
-    });
-
-    describe("refusals", () => {
-      it("names an array that is not inert", () => {
-        expect(() => assertValidFabricValueLayer(Object.assign([1], { z: 1 })))
-          .toThrow(
-            "Not representable as a `FabricValue`: array that is not an " +
-              "inert array",
-          );
-      });
-
-      it("names an object that is not an inert plain object", () => {
-        expect(() =>
-          assertValidFabricValueLayer({ a: 1, [Symbol.for("k")]: 2 })
-        ).toThrow(
-          "Not representable as a `FabricValue`: object that is not an " +
-            "inert plain object",
-        );
-      });
-
-      it("names the property name this runtime reserves", () => {
-        expect(() => assertValidFabricValueLayer({ ["__proto__"]: 1 })).toThrow(
-          "Not representable as a `FabricValue`: object with a property " +
-            "name this runtime reserves (`__proto__`)",
-        );
-      });
-
-      it("names a function", () => {
-        expect(() => assertValidFabricValueLayer(() => {})).toThrow(
-          "Not representable as a `FabricValue`: function",
-        );
-      });
-
-      it("names a unique symbol", () => {
-        expect(() => assertValidFabricValueLayer(Symbol("nope"))).toThrow(
-          "Not representable as a `FabricValue`: unique (uninterned) symbol",
-        );
-      });
-
-      it("names a class instance as an unrecognized type", () => {
-        expect(() => assertValidFabricValueLayer(new PlainClass())).toThrow(
-          "Not representable as a `FabricValue`: `PlainClass` (not a " +
-            "recognized fabric type)",
-        );
-      });
-
-      // A `FabricNativeObject` is in a different position from a value with no
-      // fabric form at all: conversion is what settles it, and may settle it
-      // either way. A `Date` gets a fabric form; a `Map` gets refused there
-      // too, its form not being built. Both are told to go and ask.
-      for (
-        const [label, value] of [
-          ["a `Date`", new Date(0)],
-          ["a `Uint8Array`", new Uint8Array([1])],
-          ["a `RegExp`", /x/],
-          ["an `Error`", new Error("x")],
-          ["a `Map`", new Map()],
-          ["a `Set`", new Set()],
-        ] as ReadonlyArray<[string, unknown]>
-      ) {
-        it(`sends ${label} to the conversion`, () => {
-          expect(() => assertValidFabricValueLayer(value)).toThrow(
-            `(a \`FabricNativeObject\`, so conversion is what decides it)`,
-          );
-        });
       }
     });
   });

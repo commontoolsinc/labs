@@ -222,67 +222,47 @@ export const SERVER_EXECUTION_ON_SKIPS: Record<
     // recommendations, proceed". Under that surface reading this entry's bar
     // was fully met by the evidence above. Full chain: verification-coverage.md
     // OW45 (the PHASE 3 block and the LIFT block that follows it).
-    {
-      // RESTORED 2026-08-28 after THREE direct-CI unskip probes on the
-      // lift PR (#6484) — four across the arc, counting the pre-PR
-      // phase-3 board that opened it — the last one red at the surface
-      // with the declared hard stop honored. The park's WRITE PATH is now
-      // mapped three geometries deep, each caught by its probe's own
-      // artifact and the first two FIXED red-first on that PR (kept: the
-      // fixes are real —
-      // packages/runner/test/pattern-replication-sibling-race.test.ts):
-      // (1) the in-flight SIBLING replication supplying the parent space
-      // (sibling-await, `replicationsIntoSpace` tickets); (2) the parent
-      // space closure-less BY ORDER — `loadPatternByIdentity` serves
-      // patterns from the in-memory index with no per-space persist, so
-      // the CT-1687 child replication's origin read finds nothing
-      // (module-keyed fallback origins, `persistedClosureSpaces`); (3) —
-      // probe 4's residue, UNFIXED — the supplier COMPILE itself still
-      // mid-flight at child-replication time: no persist of the
-      // profile-home MODULE had completed anywhere server-side (both
-      // identity-home compiles started 5-18s earlier were still running;
-      // the earlier profile fetches are the harness process's), so the
-      // fallback map was correctly empty and the one-shot died. Every
-      // probe: ONE closure-replication-failed (parent -> profile), 80
-      // structure-load-stuck over 40 pattern-unloadable roots, the name
-      // placeholder, :271 at 300 s; fallback counter 0. The designed next
-      // move, recorded not landed: on a dry map, await the manager's
-      // in-flight compilations once (their E4 persists record before
-      // resolving), re-consult, then throw — event-driven, no timer, no
-      // deadlock (compiles never await replications). Local evidence at
-      // the fix heads: campaigns F/G/H 8/8 each (quiet+loaded, ensure-ON,
-      // self-sourced, posture-probed; structureLoadStuck 0), runner suite
-      // 1312/1312 — the park is CI-only in all 30 runs. Full chain:
-      // verification-coverage.md OW45's lunch ROOT-CAUSE/PROBE blocks.
-      file: "integration/lunch-poll-vote.test.ts",
-      phase: "phase-7",
-      reason: "OW45 arm B, the structure-load forever-park: the profile " +
-        "space's program closure has NO reliable server-side supplier " +
-        "when the create-profile event beats every persist of the " +
-        "profile-home module. Three supplier geometries mapped on PR " +
-        "#6484's three probe boards (runs 33160430927, 33164596936, " +
-        "33165960083; the arc's first probe, run 33138358110, ran " +
-        "pre-PR under phase 3): the in-flight sibling replication (FIXED, " +
-        "sibling-await), the by-ORDER closure-less parent (the in-memory " +
-        "index serves patterns with no per-space persist; FIXED, " +
-        "module-keyed fallback origins), and the still-mid-flight " +
-        "supplier compile (UNFIXED residue: the fallback map is " +
-        "correctly empty until a persist completes; the designed await " +
-        "of in-flight compilations is recorded in the register, not " +
-        "landed). Signature, identical in all four probes: one " +
-        "closure-replication-failed parent->profile, then 80 " +
-        "structure-load-stuck WARNs (40 roots, pattern-unloadable) on " +
-        "the profile space, 'Unknown profile #<id>' placeholder, " +
-        "lunch-poll-vote.test.ts:271 at the 300000ms bound; " +
-        "closure-replication-fallback-origin 0. Local 30/30 GREEN across " +
-        "campaigns F/G/H + smokes at the fix heads (fresh store + " +
-        "posture probe per run, ensure defaulting ON, toolshed " +
-        "self-sourced, LLM masked): the parent space's own sidecar " +
-        "compile always persists first locally — the park is a CI boot " +
-        "ORDER, not a race or a load artifact. Lifts on the in-flight " +
-        "compile await (or a deeper supply redesign) plus the ruled " +
-        "local-plus-CI-probe bar.",
-    },
+    // lunch-poll-vote's FILE entry LIFTED 2026-08-28 (the THIRD lift; the
+    // list is EMPTY again) — the entry's own stated lift condition met: the
+    // OWNER RULED the 3b fork 2026-08-28 ("go with (1) plus the (2-D)
+    // kick") and both mechanisms are LANDED red-first. (1) event-driven
+    // re-supply: a supply-class replication failure PARKS under the WANTED
+    // identity (the dependency's own in a recursion frame) and
+    // recordPersistedClosureSpaces re-issues it when a matching supply
+    // records — once per persist event, no timers, bounded; at failure
+    // registration the fallback map is checked once so a record that
+    // landed inside the read window re-issues immediately (review-6502
+    // F1-(b)); the failure line is byte-identical and the park/re-issue/
+    // heal are loud; genuine absence keeps the loud one-shot, now worded
+    // "…and on the next persist event". (2-D) serve-time kick: a cached
+    // sidecar pattern served for a space it did not compile into
+    // replicates its closure there at page-serve time, so the demanding
+    // space's supplier is REGISTERED before any create-profile click and
+    // the child replication's strictly-older-ticket await covers the
+    // lunch class by registration. Pins:
+    // pattern-replication-sibling-race.test.ts steps 7-10 (heal,
+    // module-wake, registration-time check, dependency-frame park) +
+    // executor-cross-space late-carriage + wish-sidecar-closure-kick, all
+    // watched RED at bare main d569f3722; new mutations N1/N2/N3/N3b/N4
+    // each independently isolated; the existing kill matrix re-verified
+    // cell-for-cell (K1's kill rebound to step 1's zero-failure-lines
+    // assertion — the heal would otherwise mask its END-STATE, the F1
+    // masking class recreated and closed at design time). Entry history
+    // (four geometries mapped on five probe boards; geometries 1-3
+    // closed by #6484/#6502) is in git history and
+    // verification-coverage.md OW45's lunch blocks — the RULING block
+    // records the ruling, the landed mechanism, and what stays open (the
+    // cross-replica never-records supplier — heals at the server's first
+    // matching persist; the prior-session third-space closure; the
+    // recursive-(b) sliver). Lift evidence per the ruled
+    // local-plus-CI-probe bar: campaign R 8/8 quiet-and-loaded at this
+    // head (fresh store + posture probe per run, ensure defaulting ON,
+    // toolshed self-sourced, sha re-verified per run, LLM masked;
+    // structureLoadStuck 0; closure-replication-failed 0 — the heal
+    // machinery dormant locally, exactly the model), and the lift PR's
+    // own ON-lane board as the direct-CI unskip probe (PROBE 6) under
+    // the ruled SURFACE reading — a red at that surface restores the
+    // entry with the accumulated map and the honest classification.
     // The sqlite identity pair's two FILE entries were LIFTED (OW53
     // CLOSED, 2026-08-22): the sqlite builtins consumed the RUNTIME's
     // ambient identity — the SERVICE, on a serving runtime — where the

@@ -191,6 +191,10 @@ export class XDeviceLinkView extends LitElement {
     super.disconnectedCallback();
   }
 
+  /**
+   * TypeScript-private rather than a `#` name: `test/device-link.test.ts`
+   * drives this member directly.
+   */
   private finish(accepted: boolean) {
     // Exactly one answer, ever: a double-tap must not dispatch twice.
     if (this.#answered) return;

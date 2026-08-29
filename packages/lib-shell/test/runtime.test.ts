@@ -25,7 +25,7 @@ class MockRuntimeClient {
   idleCalls = 0;
   syncedCalls = 0;
   slugByPageId = new Map<string, string | undefined>();
-  private handlers = new Map<
+  #handlers = new Map<
     keyof MockRuntimeClientEvents,
     Array<(...args: unknown[]) => void>
   >();
@@ -34,16 +34,16 @@ class MockRuntimeClient {
     event: K,
     handler: (...args: MockRuntimeClientEvents[K]) => void,
   ): void {
-    const handlers = this.handlers.get(event) ?? [];
+    const handlers = this.#handlers.get(event) ?? [];
     handlers.push(handler as (...args: unknown[]) => void);
-    this.handlers.set(event, handlers);
+    this.#handlers.set(event, handlers);
   }
 
   emit<K extends keyof MockRuntimeClientEvents>(
     event: K,
     ...args: MockRuntimeClientEvents[K]
   ): void {
-    for (const handler of this.handlers.get(event) ?? []) {
+    for (const handler of this.#handlers.get(event) ?? []) {
       handler(...args);
     }
   }

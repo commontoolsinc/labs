@@ -32,10 +32,16 @@ import type {
 class FakeSandboxRuntime implements SandboxRuntime {
   readonly shellRequests: SandboxShellRequest[] = [];
 
+  readonly #shellResults: SandboxCommandResult[];
+  readonly #shellError?: Error;
+
   constructor(
-    private readonly shellResults: SandboxCommandResult[] = [],
-    private readonly shellError?: Error,
-  ) {}
+    shellResults: SandboxCommandResult[] = [],
+    shellError?: Error,
+  ) {
+    this.#shellResults = shellResults;
+    this.#shellError = shellError;
+  }
 
   describe(): SandboxRuntimeDescription {
     return {
@@ -82,11 +88,11 @@ class FakeSandboxRuntime implements SandboxRuntime {
         exitCode: 0,
       });
     }
-    if (this.shellError) {
-      return Promise.reject(this.shellError);
+    if (this.#shellError) {
+      return Promise.reject(this.#shellError);
     }
     return Promise.resolve(
-      this.shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+      this.#shellResults.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
     );
   }
 }
@@ -94,18 +100,22 @@ class FakeSandboxRuntime implements SandboxRuntime {
 class FakeProcessRunner implements ProcessRunner {
   readonly calls: ProcessRunRequest[] = [];
 
+  readonly #results: ProcessRunResult[];
+
   constructor(
-    private readonly results: ProcessRunResult[] = [{
+    results: ProcessRunResult[] = [{
       stdout: "",
       stderr: "",
       exitCode: 0,
     }],
-  ) {}
+  ) {
+    this.#results = results;
+  }
 
   run(request: ProcessRunRequest): Promise<ProcessRunResult> {
     this.calls.push(request);
     return Promise.resolve(
-      this.results.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
+      this.#results.shift() ?? { stdout: "", stderr: "", exitCode: 0 },
     );
   }
 }

@@ -17,7 +17,11 @@ const DOC_CONFLICT_COMMENT =
   "Conflicting docs across intersection constituents; using first";
 
 export class IntersectionFormatter implements TypeFormatter {
-  constructor(private schemaGenerator: SchemaGenerator) {}
+  #schemaGenerator: SchemaGenerator;
+
+  constructor(schemaGenerator: SchemaGenerator) {
+    this.#schemaGenerator = schemaGenerator;
+  }
 
   supportsType(type: ts.Type, context: GenerationContext): boolean {
     // Don't handle cell types - they are intersection types but should be handled by CommonFabricFormatter
@@ -52,7 +56,7 @@ export class IntersectionFormatter implements TypeFormatter {
     // Brand-only parts are object types with no string-keyed properties and no
     // index signatures — they carry only symbol-keyed brand markers.
     const effectiveParts = parts.filter(
-      (p) => !this.isBrandOnlyOrEmpty(p, checker),
+      (p) => !this.#isBrandOnlyOrEmpty(p, checker),
     );
 
     // If all parts were brand markers / empty, fall back to the full set
@@ -61,10 +65,10 @@ export class IntersectionFormatter implements TypeFormatter {
 
     // If filtering reduced us to a single substantive part, delegate directly.
     if (partsToProcess.length === 1) {
-      return this.schemaGenerator.formatChildType(partsToProcess[0]!, context);
+      return this.#schemaGenerator.formatChildType(partsToProcess[0]!, context);
     }
 
-    const failureReason = this.validateIntersectionParts(
+    const failureReason = this.#validateIntersectionParts(
       partsToProcess,
       checker,
     );
@@ -76,8 +80,8 @@ export class IntersectionFormatter implements TypeFormatter {
       };
     }
 
-    const merged = this.mergeIntersectionParts(partsToProcess, context);
-    return this.applyIntersectionDocs(merged);
+    const merged = this.#mergeIntersectionParts(partsToProcess, context);
+    return this.#applyIntersectionDocs(merged);
   }
 
   /**
@@ -88,7 +92,7 @@ export class IntersectionFormatter implements TypeFormatter {
    *   - `{}` (empty object) — e.g. the second part of RequireDefaults<number[]>
    *   - `{ readonly [DEFAULT_MARKER]: T }` — the brand object inside Default<T,V>
    */
-  private isBrandOnlyOrEmpty(part: ts.Type, checker: ts.TypeChecker): boolean {
+  #isBrandOnlyOrEmpty(part: ts.Type, checker: ts.TypeChecker): boolean {
     if ((part.flags & ts.TypeFlags.Object) === 0) return false;
 
     try {
@@ -122,7 +126,7 @@ export class IntersectionFormatter implements TypeFormatter {
     return true;
   }
 
-  private validateIntersectionParts(
+  #validateIntersectionParts(
     parts: readonly ts.Type[],
     checker: ts.TypeChecker,
   ): string | null {
@@ -151,7 +155,7 @@ export class IntersectionFormatter implements TypeFormatter {
     return null;
   }
 
-  private mergeIntersectionParts(
+  #mergeIntersectionParts(
     parts: readonly ts.Type[],
     context: GenerationContext,
   ): {
@@ -176,8 +180,8 @@ export class IntersectionFormatter implements TypeFormatter {
         missingSources.push(docInfo.typeName);
       }
 
-      const schema = this.schemaGenerator.formatChildType(part, context);
-      const objSchema = this.resolveObjectSchema(schema, context);
+      const schema = this.#schemaGenerator.formatChildType(part, context);
+      const objSchema = this.#resolveObjectSchema(schema, context);
       if (!objSchema) continue;
 
       if (objSchema.properties) {
@@ -232,7 +236,7 @@ export class IntersectionFormatter implements TypeFormatter {
     return { schema: result, docTexts, documentedSources, missingSources };
   }
 
-  private isObjectSchema(
+  #isObjectSchema(
     schema: MutableJSONSchema,
   ): schema is MutableJSONSchemaObj & { type: "object" } {
     return (
@@ -242,11 +246,11 @@ export class IntersectionFormatter implements TypeFormatter {
     );
   }
 
-  private resolveObjectSchema(
+  #resolveObjectSchema(
     schema: MutableJSONSchema,
     context: GenerationContext,
   ): (MutableJSONSchemaObj & { type: "object" }) | undefined {
-    if (this.isObjectSchema(schema)) return schema;
+    if (this.#isObjectSchema(schema)) return schema;
     if (
       typeof schema === "object" &&
       schema !== null &&
@@ -257,13 +261,13 @@ export class IntersectionFormatter implements TypeFormatter {
       if (ref.startsWith(prefix)) {
         const name = ref.slice(prefix.length);
         const def = context.definitions[name];
-        if (def && this.isObjectSchema(def)) return def;
+        if (def && this.#isObjectSchema(def)) return def;
       }
     }
     return undefined;
   }
 
-  private applyIntersectionDocs(
+  #applyIntersectionDocs(
     data: {
       schema: MutableJSONSchemaObj;
       docTexts: string[];

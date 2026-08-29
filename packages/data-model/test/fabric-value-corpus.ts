@@ -1,12 +1,15 @@
 /**
- * The shared population the `FabricValue`-membership cross-checks run over.
+ * The shared population the value-dispatch cross-checks run over.
  *
- * `isValidFabricValueLayer()` and `assertValidFabricValueLayer()` answer one
- * question in two forms, and `shallowFabricFromNativeObjectElseUndefined()`
- * answers the neighboring one, so each is worth checking against the others
- * rather than only against a hand-picked case. This carries one entry per arm
- * of the dispatch those functions make, plus the shapes each arm accepts and
- * refuses; an entry dropped from here is an arm the cross-checks stop reaching.
+ * `tagFromNativeValue()` names what a value already is,
+ * `isValidFabricNativeObject()` decides a subset of that answer by a narrower
+ * route, `isValidFabricValueLayer()` decides membership,
+ * `assertValidFabricValueLayer()` answers that last question in the form that
+ * carries a reason, and `shallowFabricFromNativeObjectElseUndefined()` acts on
+ * the answer -- so each is worth checking against the others rather than only
+ * against a hand-picked case. This carries one entry per arm of the dispatch
+ * those functions make, plus the shapes each arm accepts and refuses; an entry
+ * dropped from here is an arm the cross-checks stop reaching.
  */
 
 import { FabricError } from "@/fabric-instances/FabricError.ts";
@@ -21,9 +24,44 @@ import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 export class PlainClass {}
 
 /**
+ * Returns a `PlainClass` instance carrying an own `constructor` property that
+ * names a different class, so that reading the class off the value and reading
+ * it off the prototype give different answers.
+ */
+function forgedConstructorInstance(): unknown {
+  const instance = new PlainClass();
+  Object.defineProperty(instance, "constructor", { value: Date });
+  return instance;
+}
+
+/**
  * An `Array` subclass, whose instances are live code rather than inert data.
  */
 export class ArraySubclass extends Array {}
+
+/**
+ * An `Error` subclass reached by the class lookup's `prototype instanceof
+ * Error` fallback rather than by an identity case.
+ */
+export class WeirdError extends RangeError {}
+
+/**
+ * Returns an array whose prototype has been re-pointed at `Date.prototype`, so
+ * that its class reads as `Date` and only the array rule still sees an array.
+ */
+function arrayWithDatePrototype(): unknown {
+  return Object.setPrototypeOf([1], Date.prototype);
+}
+
+/**
+ * Returns an `Error` whose prototype has been severed, so that it names no
+ * class and only the internal-slot test still sees it as an error.
+ */
+function severedError(): Error {
+  const error = new Error("severed");
+  Object.setPrototypeOf(error, null);
+  return error;
+}
 
 /**
  * One entry per dispatch arm, labeled. The labels reach test names, so they
@@ -43,10 +81,15 @@ export const LAYER_CORPUS: ReadonlyArray<[string, unknown]> = [
   ["an inert plain object", { a: 1 }],
   ["an array carrying a named property", Object.assign([1], { z: 1 })],
   ["an `Array` subclass instance", ArraySubclass.from([1, 2])],
+  [
+    "an array whose `prototype` is `Date.prototype`",
+    arrayWithDatePrototype(),
+  ],
   ["an object carrying a symbol key", { a: 1, [Symbol.for("k")]: 2 }],
   ["an object carrying a reserved property name", { ["__proto__"]: 1 }],
   ["a null-prototype object", Object.assign(Object.create(null), { a: 1 })],
   ["a class instance", new PlainClass()],
+  ["a class instance with a forged `constructor`", forgedConstructorInstance()],
   ["a `FabricBytes`", new FabricBytes(new Uint8Array([1]))],
   ["a `FabricEpochNsec`", new FabricEpochNsec(0n)],
   ["a `FabricEpochDay`", new FabricEpochDay(0n)],
@@ -65,6 +108,8 @@ export const LAYER_CORPUS: ReadonlyArray<[string, unknown]> = [
   ["a `Uint8Array`", new Uint8Array([1, 2, 3])],
   ["a `RegExp`", /abc/gi],
   ["an `Error`", new Error("boom")],
+  ["a custom `Error` subclass instance", new WeirdError("weird")],
+  ["an `Error` whose prototype was severed", severedError()],
   ["a `Map`", new Map()],
   ["a `Set`", new Set()],
 ];

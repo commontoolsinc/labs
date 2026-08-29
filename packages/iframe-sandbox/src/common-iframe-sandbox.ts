@@ -24,7 +24,7 @@ export class CommonIframeSandboxElement extends LitElement {
     this.#src = value;
     this.requestUpdate("src", previousValue);
     if (this.readyWindow && value !== previousValue) {
-      this.loadInnerDoc();
+      this.#loadInnerDoc();
     }
   }
 
@@ -38,7 +38,7 @@ export class CommonIframeSandboxElement extends LitElement {
     this.#bridge = value;
     this.requestUpdate("bridge", previousValue);
     if (this.readyWindow && value !== previousValue && this.src) {
-      this.loadInnerDoc();
+      this.#loadInnerDoc();
     }
   }
 
@@ -59,7 +59,16 @@ export class CommonIframeSandboxElement extends LitElement {
   #bridge: FabricBridge | undefined;
 
   /** The capability session belonging to the currently loaded guest. */
-  private guestHost: FabricBridgeHost | undefined;
+  #guestHost: FabricBridgeHost | undefined;
+
+  /**
+   * The frame this element renders, held so the guest can be reached through
+   * it. TypeScript-private rather than `#`, as `readyWindow` and
+   * `onOuterReady` also are, because `test/iframe.test.ts` reaches for all
+   * three: it asserts the outer-ready refusal where the refusal is made, and
+   * a frame reports itself ready exactly once, from a window nothing outside
+   * this element can speak for.
+   */
   private iframeRef: Ref<HTMLIFrameElement> = createRef();
 
   /**
@@ -93,9 +102,9 @@ export class CommonIframeSandboxElement extends LitElement {
       throw new Error(`common-iframe-sandbox: Already initialized.`);
     }
     this.readyWindow = source;
-    this.releaseGuest();
+    this.#releaseGuest();
     if (this.src) {
-      this.loadInnerDoc();
+      this.#loadInnerDoc();
     } else {
       this.loadState = "";
     }
@@ -106,8 +115,8 @@ export class CommonIframeSandboxElement extends LitElement {
    * other. Each document is its own realm, so each gets a port of its own, and
    * no earlier one is left open behind it.
    */
-  private openGuestPort() {
-    this.closeGuestPort();
+  #openGuestPort() {
+    this.#closeGuestPort();
 
     // The guest is the inner frame, which is a frame of the outer one. A
     // cross-origin frame is unreachable for anything but this: indexed access
@@ -119,7 +128,7 @@ export class CommonIframeSandboxElement extends LitElement {
     }
 
     const channel = new MessageChannel();
-    this.guestHost = new FabricBridgeHost(
+    this.#guestHost = new FabricBridgeHost(
       this.bridge ?? { resources: {} },
       channel.port1,
     );
@@ -131,13 +140,13 @@ export class CommonIframeSandboxElement extends LitElement {
    * afterwards reaches nothing, which is the point: the guest on the other end
    * of a closed port is one this element is done with.
    */
-  private closeGuestPort() {
-    this.guestHost?.disconnect();
-    this.guestHost = undefined;
+  #closeGuestPort() {
+    this.#guestHost?.disconnect();
+    this.#guestHost = undefined;
   }
 
   /** Handles a message from the outer frame. */
-  private onMessage = (event: MessageEvent) => {
+  #onMessage = (event: MessageEvent) => {
     if (event.source !== this.iframeRef.value?.contentWindow) {
       return;
     }
@@ -154,7 +163,7 @@ export class CommonIframeSandboxElement extends LitElement {
 
     switch (outerMessage.type) {
       case IPC.IPCGuestMessageType.Load: {
-        this.openGuestPort();
+        this.#openGuestPort();
         this.loadState = "loaded";
         this.dispatchEvent(new CustomEvent("load"));
         return;
@@ -172,7 +181,7 @@ export class CommonIframeSandboxElement extends LitElement {
         // had at it.
         const raised = outerMessage.data;
         if (IPC.isGuestAlarm(raised)) {
-          this.dispatchGuestError(raised.data);
+          this.#dispatchGuestError(raised.data);
         } else {
           console.error(
             "common-iframe-sandbox: Unreadable alarm from guest.",
@@ -192,7 +201,7 @@ export class CommonIframeSandboxElement extends LitElement {
    * Dispatches `common-iframe-error` for an error the guest raised, by either
    * of the routes one can arrive on.
    */
-  private dispatchGuestError(
+  #dispatchGuestError(
     { description, source, lineno, colno, stacktrace }: IPC.GuestError,
   ) {
     this.dispatchEvent(
@@ -219,8 +228,8 @@ export class CommonIframeSandboxElement extends LitElement {
    * element's, which is when one is asked to be replaced and when the frame
    * holding it has gone.
    */
-  private releaseGuest() {
-    this.closeGuestPort();
+  #releaseGuest() {
+    this.#closeGuestPort();
   }
 
   /**
@@ -230,35 +239,35 @@ export class CommonIframeSandboxElement extends LitElement {
    * the whole of what this end can promise about a document still running in a
    * frame it has asked to be rid of.
    */
-  private loadInnerDoc() {
+  #loadInnerDoc() {
     this.loadState = "loading";
-    this.releaseGuest();
-    this.toOuterFrame({
+    this.#releaseGuest();
+    this.#toOuterFrame({
       type: IPC.IPCHostMessageType.LoadDocument,
       data: this.src,
     });
   }
 
   /** Sends `message` to the outer frame. */
-  private toOuterFrame(message: IPC.IPCHostMessage) {
+  #toOuterFrame(message: IPC.IPCHostMessage) {
     this.iframeRef.value?.contentWindow?.postMessage(message, "*");
   }
 
   /** The outer frame's message listener, as `globalThis` holds it. */
-  private boundOnMessage = this.onMessage.bind(this);
+  #boundOnMessage = this.#onMessage.bind(this);
 
   /** @inheritDoc */
   override connectedCallback() {
     super.connectedCallback();
-    globalThis.addEventListener("message", this.boundOnMessage);
+    globalThis.addEventListener("message", this.#boundOnMessage);
   }
 
   /** @inheritDoc */
   override disconnectedCallback() {
     super.disconnectedCallback();
-    globalThis.removeEventListener("message", this.boundOnMessage);
+    globalThis.removeEventListener("message", this.#boundOnMessage);
     queueMicrotask(() => {
-      if (!this.isConnected) this.releaseGuest();
+      if (!this.isConnected) this.#releaseGuest();
     });
   }
 
