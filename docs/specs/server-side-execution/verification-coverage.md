@@ -3349,24 +3349,52 @@ findings; the OWNER RULING — the flip lands DARK):
     message (the dedupe-horizon skip works) but `deduplicated: true`
     cannot be reported — verb receipts are deliberately unwritten
     under ON — the script's ON arm asserts the behavioral witness
-    (same id, exit 0, exactly-one-message). (5) **STOP-AND-REPORT —
-    the verb DECLARED-RESULT surface is ABSENT under ON (CLI topology,
-    first ON exercise; owner-court).** Mechanism:
-    `runner.ts handleJavaScriptHandlerResult` disables the whole
+    (same id, exit 0, exactly-one-message). (5) **RULED 2026-08-29 —
+    owner: "yes, Serving-side receipt/result write, as that is indeed
+    what i said before" — LANDED (was STOP-AND-REPORT: the verb
+    DECLARED-RESULT surface was ABSENT under ON; CLI topology, first
+    ON exercise).** The gap's mechanism, as reported to owner court:
+    `runner.ts handleJavaScriptHandlerResult` disabled the whole
     receipt write under the flag (`receiptsEnabled = … &&
-    serverExecution !== true`), on events.md §4/N26's subsumption —
-    which subsumes only the EXACTLY-ONCE role; the receipt's
+    serverExecution !== true`) on events.md §4/N26's subsumption,
+    which subsumes only the EXACTLY-ONCE role — the receipt's
     RESULT-CARRIAGE role (plainResultReceipts, verb contract WS-C/D —
-    `cf call`'s `.result`/`.receipt`) has NO replacement sentence
-    anywhere in the spec, and no serving-side writer exists. A
-    `cf call` on a result-declaring verb returns `status: settled`
-    with no result under the flipped default
-    (integration.sh:908's umbrella-create assert is the exact
-    witness; the CLI lane will red there until this is designed —
-    deliberately NOT arm-gated away). The fix needs a ruling: a
-    serving-side receipt write (result-carriage without the
-    create-only precondition role, keeping N26's invariant), or a new
-    served result channel. (6) `topic-board-pivot-contract` 4≠3
+    `cf call`'s `.result`/`.receipt`) had no replacement sentence and
+    no serving-side writer. The ruling resolves the fork to a
+    SERVING-SIDE receipt/result write, on the owner's stated model:
+    "all handlers write result cells (even if the value is undefined),
+    and that CAS for that is the write-once guarantee." Landed
+    mechanism: the served handler run writes the receipt in its OWN
+    transaction (same wave as the entry's `consequenced` mark —
+    mark/effects atomic; §2b carriage as any served handler write) at
+    the same cause-derived address the client-era write used;
+    write-once by CAS with a lost CAS a LOUD no-op (never a second
+    write, never a wave failure — counter
+    `runner.servedReceiptCasLosses` + warn line); undefined-value
+    handlers write the `{}` witness; the flag-ON client's echo
+    publishes the address (`tx.handlingReceiptLink`) so the unchanged
+    CLI readback works — the durable-ack coupling already orders the
+    readback after the consequence. The client write stays disabled;
+    no create-only mark rides a wave. Spec: events.md §4 "Result
+    carriage" (the replacement sentence) + runtime-mapping.md N26(b)
+    re-tensed RULED. Pins (executor-events-down.test.ts, each
+    red-first at the pre-fix head and mutation-killed independently —
+    M1 drop-the-write kills the declared-value + `{}` pins, M2
+    skip-undefined kills the `{}` pin alone, M3 drop-the-CAS-check and
+    M4 CAS-loss-fails-the-wave each kill the CAS-loss pin alone):
+    declared value written by ONE derived commit whose
+    `consequence_of` names the event (revision-table single-writer
+    proof — the client never wrote); `{}` witness post-serve;
+    CAS-loss loud no-op with the standing value winning, the wave
+    still committing, and the OFF-arm probe's pre-created receipt
+    proving cross-arm address agreement. Witness red→green: CLI
+    three-topic fixture (integration.sh:908 umbrella declared-result
+    assert) RED at a5d5561dc vs a default-ON source toolshed, GREEN
+    with the fix on BOTH arms — including the dropped-response retry
+    and imposter replay now reading the ORIGINAL result back under ON
+    (their `deduplicated`-key asserts went arm-aware like flip-board
+    item (4); the D3 original-result assert_json_eq holds in both
+    arms). (6) `topic-board-pivot-contract` 4≠3
     crossref rows: intermittent ON-arm convergence transient (~2/22
     local only under load, 14 straight greens after; single CI
     observation; clean titles = duplicated ROW). NOT patched — the

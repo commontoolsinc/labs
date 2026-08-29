@@ -721,14 +721,16 @@ run_piece_call_retry() {
   fi
   echo "killed-after-dispatch: committed before kill = $COMMITTED_BEFORE_KILL"
   if server_execution_on; then
-    # ON: no receipt is written (events.md §4 subsumption), so there is no
-    # `deduplicated` key to assert either way; the dedupe-horizon skip's
-    # witness is the message count below — with the committed-before-kill
-    # value recorded above, "exactly one" is the strong assert in BOTH
-    # sub-cases (a retry that ignored --invocation would append a second
-    # message; an uncommitted first attempt retried cleanly leaves one).
+    # ON: no receipt PRECONDITION exists (events.md §4 subsumption — the
+    # SERVING side writes the receipt itself, the ruled result carriage,
+    # 2026-08-29), so there is no `deduplicated` key to assert either
+    # way; the dedupe-horizon skip's witness is the message count below —
+    # with the committed-before-kill value recorded above, "exactly one"
+    # is the strong assert in BOTH sub-cases (a retry that ignored
+    # --invocation would append a second message; an uncommitted first
+    # attempt retried cleanly leaves one).
     if echo "$RETRY_2" | jq -e '.deduplicated == true' > /dev/null; then
-      error "No receipt exists under server execution, so the retry cannot claim receipt-level dedup, got: $RETRY_2"
+      error "No receipt precondition exists under server execution, so the retry cannot claim receipt-level dedup, got: $RETRY_2"
     fi
   elif [ "$COMMITTED_BEFORE_KILL" = "1" ]; then
     echo "$RETRY_2" | jq -e '.deduplicated == true' > /dev/null ||
@@ -758,11 +760,12 @@ run_piece_call_retry() {
     error "A same-id retry should exit 0, got status $REPLAY_STATUS"
   fi
   if server_execution_on; then
-    # ON: receipt-level dedup reporting does not exist (no receipt is
-    # written); the behavioral witness is the count assert below plus the
-    # id echo here.
+    # ON: receipt-level dedup REPORTING does not exist (the receipt is
+    # written by the SERVING side, without the create-only precondition —
+    # the ruled result carriage, 2026-08-29); the behavioral witness is
+    # the count assert below plus the id echo here.
     if echo "$REPLAY" | jq -e '.deduplicated == true' > /dev/null; then
-      error "No receipt exists under server execution, so the replay cannot claim receipt-level dedup, got: $REPLAY"
+      error "No receipt precondition exists under server execution, so the replay cannot claim receipt-level dedup, got: $REPLAY"
     fi
   else
     echo "$REPLAY" | jq -e '.deduplicated == true' > /dev/null ||
@@ -984,10 +987,22 @@ run_three_topic_fixture() {
   if [ "$CHILD_B_STATUS" -ne 0 ]; then
     error "Retrying the dropped create under the same id should exit 0, got $CHILD_B_STATUS"
   fi
-  # The commit provably preceded the kill, so the retry MUST collide on the
-  # create-only receipt and settle as the ORIGINAL handling — every run.
-  echo "$CHILD_B_JSON" | jq -e '.deduplicated == true' > /dev/null ||
-    error "The dropped create had committed, so its retry must deduplicate, got: $CHILD_B_JSON"
+  # The commit provably preceded the kill, so the retry MUST settle as the
+  # ORIGINAL handling — every run. The mechanism is arm-specific: OFF, the
+  # retry collides on the create-only receipt and says so (`deduplicated`);
+  # ON, no receipt precondition exists (events.md §4's subsumption) — the
+  # duplicate is skipped at the dedupe horizon, and the retry's readback
+  # resolves the SAME cause-derived receipt the SERVING side wrote for the
+  # original handling (the ruled result carriage, 2026-08-29). The
+  # original-result readback below is the witness in both arms.
+  if server_execution_on; then
+    if echo "$CHILD_B_JSON" | jq -e '.deduplicated == true' > /dev/null; then
+      error "No receipt precondition exists under server execution, so the retry cannot claim receipt-level dedup, got: $CHILD_B_JSON"
+    fi
+  else
+    echo "$CHILD_B_JSON" | jq -e '.deduplicated == true' > /dev/null ||
+      error "The dropped create had committed, so its retry must deduplicate, got: $CHILD_B_JSON"
+  fi
   # The retry's Invocation JSON carries the settled handling's result — the
   # readback the caller acts on after losing a response.
   CHILD_B_ID=$(echo "$CHILD_B_JSON" | jq -re '.result.topic.id') ||
@@ -1007,8 +1022,20 @@ run_three_topic_fixture() {
   if [ "$REPLAY_STATUS" -ne 0 ]; then
     error "A same-id replay should exit 0, got $REPLAY_STATUS"
   fi
-  echo "$REPLAY_JSON" | jq -e '.deduplicated == true' > /dev/null ||
-    error "A same-id replay should deduplicate, got: $REPLAY_JSON"
+  # Same arm split as step 3: the `deduplicated` key is the OFF arm's
+  # receipt-precondition witness. The D3 semantic itself — the replay hands
+  # back the ORIGINAL result, nothing derived from the imposter payload —
+  # is the assert_json_eq below, and it holds in BOTH arms (ON: the
+  # readback address derives from the invocation id, so the replay reads
+  # the original handling's serving-side receipt).
+  if server_execution_on; then
+    if echo "$REPLAY_JSON" | jq -e '.deduplicated == true' > /dev/null; then
+      error "No receipt precondition exists under server execution, so the replay cannot claim receipt-level dedup, got: $REPLAY_JSON"
+    fi
+  else
+    echo "$REPLAY_JSON" | jq -e '.deduplicated == true' > /dev/null ||
+      error "A same-id replay should deduplicate, got: $REPLAY_JSON"
+  fi
   assert_json_eq \
     "$(echo "$REPLAY_JSON" | jq '.result')" \
     "$(echo "$CHILD_B_JSON" | jq '.result')" \
