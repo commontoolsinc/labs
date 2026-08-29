@@ -24,6 +24,17 @@ import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 export class PlainClass {}
 
 /**
+ * Returns a `PlainClass` instance carrying an own `constructor` property that
+ * names a different class, so that reading the class off the value and reading
+ * it off the prototype give different answers.
+ */
+function forgedConstructorInstance(): unknown {
+  const instance = new PlainClass();
+  Object.defineProperty(instance, "constructor", { value: Date });
+  return instance;
+}
+
+/**
  * An `Array` subclass, whose instances are live code rather than inert data.
  */
 export class ArraySubclass extends Array {}
@@ -78,6 +89,7 @@ export const LAYER_CORPUS: ReadonlyArray<[string, unknown]> = [
   ["an object carrying a reserved property name", { ["__proto__"]: 1 }],
   ["a null-prototype object", Object.assign(Object.create(null), { a: 1 })],
   ["a class instance", new PlainClass()],
+  ["a class instance with a forged `constructor`", forgedConstructorInstance()],
   ["a `FabricBytes`", new FabricBytes(new Uint8Array([1]))],
   ["a `FabricEpochNsec`", new FabricEpochNsec(0n)],
   ["a `FabricEpochDay`", new FabricEpochDay(0n)],

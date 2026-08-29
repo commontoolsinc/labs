@@ -104,18 +104,26 @@ export function isValidFabricValueLayer(
 }
 
 /**
- * Helper for `assertValidFabricValueLayer()`, which names the class of a value
- * it is refusing.
+ * Names the class of a value being refused, for a refusal message.
  *
  * The class is read from the prototype rather than from the value, for the
  * reason the dispatch reads it there: an own `constructor` property is
  * ordinary data, so a value could otherwise choose the name it is refused
- * under. A name that is not a string is treated as no name at all, since the
- * message is built from it and a diagnostic must not fail while reporting.
+ * under.
+ *
+ * Nothing here is allowed to throw, because every caller is already on its way
+ * to reporting a different problem and an error raised here would replace it.
+ * Two ways that can happen, both reachable: a `constructor` accessor on the
+ * prototype that throws, and a `name` that is not a string. Either is treated
+ * as no name at all.
  */
-function refusedClassNameOf(value: object): string {
-  const name = (constructorOfObject(value) as { name?: unknown } | undefined)
-    ?.name;
+export function refusedClassNameOf(value: object): string {
+  let name: unknown;
+  try {
+    name = (constructorOfObject(value) as { name?: unknown } | undefined)?.name;
+  } catch {
+    return typeof value;
+  }
   return (typeof name === "string" && name !== "") ? name : typeof value;
 }
 
