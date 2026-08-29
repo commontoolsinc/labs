@@ -146,11 +146,6 @@ function classNameOf(
   return (typeof name === "string" && name !== "") ? name : typeof value;
 }
 
-/** Names the class of a value being refused, for a refusal message. */
-export function refusedClassNameOf(value: object): string {
-  return classNameOf(constructorElseUndefined(value), value);
-}
-
 /**
  * Throws unless the value is usable as a `FabricValueLayer`, naming what is
  * wrong with it when it is not. This is `isValidFabricValueLayer()` asked so
