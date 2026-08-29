@@ -7,6 +7,7 @@ import {
   nodeControlBoundaryProps,
   settleCommittedPositionDraft,
   stopNodeControlPropagation,
+  updateLatestValue,
 } from "./interaction.ts";
 
 describe("Impossible Machine interaction lifecycle", () => {
@@ -60,6 +61,10 @@ describe("Impossible Machine interaction lifecycle", () => {
       order.push("global");
       return Promise.reject("visible failure");
     });
+    const laterAction = runner.run(() => {
+      order.push("later");
+      return Promise.resolve();
+    });
 
     await Promise.resolve();
     expect(globalPending).toBe(false);
@@ -69,12 +74,44 @@ describe("Impossible Machine interaction lifecycle", () => {
     releaseNode();
     expect(await nodeAction).toBe(true);
     expect(await globalAction).toBe(false);
+    expect(await laterAction).toBe(true);
 
-    expect(order).toEqual(["node:start", "node:end", "global"]);
+    expect(order).toEqual(["node:start", "node:end", "global", "later"]);
     expect(globalPending).toBe(false);
     expect(busyNodes).toEqual({});
     expect(actionError).toEqual(new Error("visible failure"));
     expect(errorFrom(new Error("same"))).toEqual(new Error("same"));
+  });
+
+  it("updates toolbar values from the latest queued state", async () => {
+    let value = 3;
+    let releaseNode!: () => void;
+    const nodeGate = new Promise<void>((resolve) => releaseNode = resolve);
+    const cell = {
+      pull: () => Promise.resolve(value),
+      set: (next: number) => {
+        value = next;
+        return Promise.resolve();
+      },
+    };
+    const runner = createActionRunner({
+      setGlobalPending: () => {},
+      setActionError: () => {},
+      setBusyNodeCounts: () => {},
+    });
+
+    const nodeAction = runner.runNode("gate", () => nodeGate);
+    const first = runner.run(() =>
+      updateLatestValue(cell, (current) => current + 1)
+    );
+    const second = runner.run(() =>
+      updateLatestValue(cell, (current) => current + 1)
+    );
+
+    releaseNode();
+    await Promise.all([nodeAction, first, second]);
+
+    expect(value).toBe(5);
   });
 
   it("retains the latest rapid selection request", async () => {
@@ -119,5 +156,20 @@ describe("Impossible Machine interaction lifecycle", () => {
       "node-c",
       "node-c",
     ]);
+
+    let releaseNodeD!: () => void;
+    const nodeDGate = new Promise<void>((resolve) => releaseNodeD = resolve);
+    const nodeD = tracker.request("node-d", (nodeId) => {
+      writes.push(nodeId);
+      return nodeDGate;
+    });
+    tracker.reconcile("node-external");
+    releaseNodeD();
+    await nodeD;
+    await tracker.request("node-external", (nodeId) => {
+      writes.push(nodeId);
+      return Promise.resolve();
+    });
+    expect(writes.at(-1)).toBe("node-d");
   });
 });

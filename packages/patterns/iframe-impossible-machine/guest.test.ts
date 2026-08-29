@@ -32,6 +32,7 @@ describe("Impossible Machine document shell", () => {
     expect(source).toContain(
       "<div {...interaction.nodeControlBoundaryProps()}>{children}</div>",
     );
+    expect(source).toContain("interaction.updateLatestValue(");
     expect(source).toContain("void tracker.request(");
     expect(source).toContain("const actionRunner = React.useRef(");
     expect(source).toContain("const runNodeAction = actionRunner.runNode");

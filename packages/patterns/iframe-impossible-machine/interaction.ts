@@ -59,6 +59,21 @@ export function errorFrom(cause: unknown): Error {
   return cause instanceof Error ? cause : new Error(String(cause));
 }
 
+/** The minimal cell surface needed for a queued read-modify-write. */
+export interface LatestValueCell<T> {
+  pull(): Promise<T>;
+  set(value: T): Promise<unknown>;
+}
+
+/** Applies an update to the authoritative value when its queue turn begins. */
+export async function updateLatestValue<T>(
+  cell: LatestValueCell<T>,
+  update: (current: T) => T,
+): Promise<void> {
+  const current = await cell.pull();
+  await cell.set(update(current));
+}
+
 /** State setters used by the serialized action runner. */
 export interface ActionRunnerSetters {
   setGlobalPending(value: boolean): void;
@@ -97,7 +112,6 @@ export function createActionRunner(setters: ActionRunnerSetters): ActionRunner {
     if (nodeId !== undefined) updateNodeBusyCount(nodeId, 1);
     const next = tail.then(async () => {
       if (nodeId === undefined) setters.setGlobalPending(true);
-      setters.setActionError(undefined);
       try {
         await action();
         return true;
@@ -137,11 +151,15 @@ export function createSelectionRequestTracker(
   let latestRequestedSequence = 0;
   let latestSuccessfulSelection = initialSelection;
   let latestSuccessfulSequence = 0;
+  let authoritativeSelection = initialSelection;
+  let authoritativeRequestSequence = 0;
   let requestSequence = 0;
   let pendingCount = 0;
 
   return {
     reconcile(selection) {
+      authoritativeSelection = selection;
+      authoritativeRequestSequence = requestSequence;
       if (pendingCount === 0) {
         latestRequestedSelection = selection;
         latestSuccessfulSelection = selection;
@@ -164,7 +182,15 @@ export function createSelectionRequestTracker(
         }
       } finally {
         pendingCount--;
-        if (!succeeded && sequence === latestRequestedSequence) {
+        if (
+          pendingCount === 0 &&
+          authoritativeRequestSequence >= latestSuccessfulSequence
+        ) {
+          latestRequestedSelection = authoritativeSelection;
+          latestSuccessfulSelection = authoritativeSelection;
+          latestRequestedSequence = authoritativeRequestSequence;
+          latestSuccessfulSequence = authoritativeRequestSequence;
+        } else if (!succeeded && sequence === latestRequestedSequence) {
           latestRequestedSelection = latestSuccessfulSelection;
           latestRequestedSequence = latestSuccessfulSequence;
         }

@@ -548,10 +548,10 @@ function App() {
   const updatePreference = React.useCallback(
     <K extends keyof IframeOutputData>(
       key: K,
-      value: IframeOutputData[K],
+      update: (current: IframeOutputData[K]) => IframeOutputData[K],
     ) =>
       runAction(async () => {
-        await outputCell.key(key).set(value);
+        await interaction.updateLatestValue(outputCell.key(key), update);
         await output.refresh();
       }),
     [output.refresh, runAction],
@@ -735,7 +735,7 @@ function App() {
               onClick={() =>
                 void updatePreference(
                   "simulationTick",
-                  Math.max(0, outputValue.simulationTick - 1),
+                  (current) => Math.max(0, current - 1),
                 )}
             >
               −
@@ -751,7 +751,7 @@ function App() {
               onClick={() =>
                 void updatePreference(
                   "simulationTick",
-                  outputValue.simulationTick + 1,
+                  (current) => current + 1,
                 )}
             >
               +
@@ -763,7 +763,7 @@ function App() {
               aria-pressed={outputValue.showSignals}
               disabled={pending}
               onClick={() =>
-                void updatePreference("showSignals", !outputValue.showSignals)}
+                void updatePreference("showSignals", (current) => !current)}
             >
               Signal glow
             </button>
@@ -780,7 +780,7 @@ function App() {
               onNodeClick={(_event, node) =>
                 void tracker.request(
                   node.id,
-                  (nodeId) => updatePreference("selectedNodeId", nodeId),
+                  (nodeId) => updatePreference("selectedNodeId", () => nodeId),
                 )}
               onNodeDragStop={(_event, node) =>
                 void persistPosition(
