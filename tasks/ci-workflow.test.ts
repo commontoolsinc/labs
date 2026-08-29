@@ -967,16 +967,16 @@ Deno.test("server-execution lane roles match the flipped default (testing.md §2
     );
   }
 
-  // The explicit arm is asserted at EACH site that SELECTS it — the step
-  // that starts the server, and the step that runs the test processes —
-  // never once over the whole job. A job-wide substring is satisfied by
-  // any single occurrence, including the posture probe's `::error::`
-  // prose, which selects nothing at all; both real sites could point at
-  // the ON arm with this pin still green. A lane that starts its server
-  // on one arm and runs its tests on the other is the P7 review's
-  // finding-7 MIXED posture, and the server-side probe below cannot see
-  // it: the probe reads the SERVER, so the test processes' arm is
-  // unexamined unless asserted here.
+  // Each step that SELECTS the arm carries its own assertion: the step
+  // that starts the toolshed, and the step that runs the test processes.
+  // A job-wide substring is satisfied by any single occurrence — the
+  // posture probe's `::error::` prose selects nothing and satisfies it —
+  // so the two selecting steps could disagree, and a lane that starts its
+  // server on one arm while running its tests on the other is a MIXED
+  // posture that every test still passes. The posture probe cannot stand
+  // in for this: it reads the SERVER, so the arm the test processes run
+  // under is unexamined unless asserted here. Comments are stripped on
+  // both, so a note naming an arm never counts as selecting it.
   for (
     const { jobId, runStep } of [
       {
@@ -997,7 +997,7 @@ Deno.test("server-execution lane roles match the flipped default (testing.md §2
       ]
     ) {
       assertStringIncludes(
-        stepBlock(job, stepName),
+        withoutComments(stepBlock(job, stepName)),
         "EXPERIMENTAL_SERVER_EXECUTION=false",
         `${jobId}: "${stepName}" must select the OFF arm explicitly`,
       );
