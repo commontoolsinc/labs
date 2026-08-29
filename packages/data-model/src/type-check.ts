@@ -336,6 +336,12 @@ export function isValidFabricNativeObject(
   const ctor = constructorOfObject(value);
   const tag = (ctor !== undefined) ? tagFromNativeBuiltinClass(ctor) : null;
 
+  // `Error.isError()` is called directly rather than through a guarded
+  // wrapper. It is the test that holds across realms, where `instanceof` does
+  // not, and the one environment here that used to lack the method -- SES
+  // lockdown, which rebuilds the `Error` constructor -- has it restored before
+  // any of this runs. A guarded fallback would be unreachable on every runtime
+  // this supports, and wrong on one old enough to need it.
   switch (tag ?? (Error.isError(value) ? VALUE_TAGS.Error : null)) {
     case VALUE_TAGS.Error:
     case VALUE_TAGS.Map:
