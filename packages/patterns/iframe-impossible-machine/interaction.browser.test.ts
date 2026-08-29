@@ -9,8 +9,8 @@ import { createRoot } from "npm:react-dom@19.2.8/client";
 import { expect } from "@std/expect";
 
 import {
-  NodeControlBoundary,
-  useLatestRequestedSelection,
+  createSelectionRequestTracker,
+  stopNodeControlPropagation,
 } from "./interaction.ts";
 
 function SelectionHarness(
@@ -18,21 +18,22 @@ function SelectionHarness(
     writeSelection: (nodeId: string) => Promise<unknown>;
   }>,
 ) {
-  const requestSelection = useLatestRequestedSelection(
-    "node-a",
-    writeSelection,
-  );
+  const tracker = React.useRef(createSelectionRequestTracker("node-a"));
   return React.createElement(
     React.Fragment,
     null,
     React.createElement(
       "button",
-      { onClick: () => void requestSelection("node-a") },
+      {
+        onClick: () => void tracker.current.request("node-a", writeSelection),
+      },
       "Select A",
     ),
     React.createElement(
       "button",
-      { onClick: () => void requestSelection("node-b") },
+      {
+        onClick: () => void tracker.current.request("node-b", writeSelection),
+      },
       "Select B",
     ),
   );
@@ -58,8 +59,11 @@ Deno.test("embedded controls do not select their React Flow node", async () => {
           "div",
           { onClick: () => nodeSelections++ },
           React.createElement(
-            NodeControlBoundary,
-            null,
+            "div",
+            {
+              className: "node-parameters nodrag nopan",
+              onClick: stopNodeControlPropagation,
+            },
             React.createElement(
               "select",
               { "aria-label": "Gate operator", defaultValue: "xor" },

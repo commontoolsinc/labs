@@ -50,7 +50,7 @@
     // not `test-import-map.json`: its `commonfabric` shim re-exports real
     // `data-model` helpers, whose internal `@/` graph the flat test import map
     // can't resolve. See test/source-coverage/pattern-source-coverage.test.ts.
-    "test": "deno test -A --import-map ./test-import-map.json --ignore='**/*.test.tsx' --ignore='integration' --ignore='google/core/integration' --ignore='auth' --ignore='test/source-coverage' . && deno test -A test/source-coverage/ && deno run --allow-env --allow-read --allow-write --allow-run --allow-net ../deno-web-test/cli.ts iframe-impossible-machine/interaction.browser.ts"
+    "test": "deno test -A --import-map ./test-import-map.json --ignore='**/*.test.tsx' --ignore='integration' --ignore='google/core/integration' --ignore='auth' --ignore='test/source-coverage' . && deno test -A test/source-coverage/ && deno run --allow-env --allow-read --allow-write --allow-run --allow-net ../deno-web-test/cli.ts iframe-impossible-machine/interaction.browser.test.ts"
   },
   // File discovery for the `test` task (lane 1). `include` keeps only
   // `.test.ts`, so pattern tests (`.test.tsx`, lane 2) are never collected;

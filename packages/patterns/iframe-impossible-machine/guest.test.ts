@@ -23,4 +23,17 @@ describe("Impossible Machine document shell", () => {
       /\.react-flow__viewport-portal[^}]*width:\s*100%;[^}]*height:\s*100%;/s,
     );
   });
+
+  it("mounts the tested control and selection lifecycle in each node", async () => {
+    const source = await Deno.readTextFile(
+      new URL("./guest.tsx", import.meta.url),
+    );
+
+    expect(source).toMatch(
+      /className="node-parameters nodrag nopan"\s+onClick={stopNodeControlPropagation}/,
+    );
+    expect(source).toContain(
+      "selectionRequestTracker.current.request(nodeId, writeSelection)",
+    );
+  });
 });

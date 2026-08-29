@@ -45,8 +45,8 @@ import {
   type SignalPresentation,
 } from "./model.ts";
 import {
-  NodeControlBoundary,
-  useLatestRequestedSelection,
+  createSelectionRequestTracker,
+  stopNodeControlPropagation,
 } from "./interaction.ts";
 
 const fabric = connectFabric();
@@ -222,7 +222,12 @@ function NodeFrame({
           {data.signal.label}
         </output>
       </header>
-      <NodeControlBoundary>{children}</NodeControlBoundary>
+      <div
+        className="node-parameters nodrag nopan"
+        onClick={stopNodeControlPropagation}
+      >
+        {children}
+      </div>
       {hasOutput && (
         <Handle
           id="output"
@@ -393,6 +398,9 @@ function App() {
   const [connectTarget, setConnectTarget] = React.useState("");
   const actionTail = React.useRef(Promise.resolve());
   const bootstrapStarted = React.useRef(false);
+  const selectionRequestTracker = React.useRef(
+    createSelectionRequestTracker(null),
+  );
 
   React.useEffect(() => {
     if (bootstrapStarted.current) return;
@@ -596,9 +604,14 @@ function App() {
     (nodeId: string) => updatePreference("selectedNodeId", nodeId),
     [updatePreference],
   );
-  const requestNodeSelection = useLatestRequestedSelection(
-    outputValue?.selectedNodeId ?? null,
-    writeSelection,
+  const authoritativeSelection = outputValue?.selectedNodeId ?? null;
+  React.useEffect(() => {
+    selectionRequestTracker.current.reconcile(authoritativeSelection);
+  }, [authoritativeSelection]);
+  const requestNodeSelection = React.useCallback(
+    (nodeId: string) =>
+      selectionRequestTracker.current.request(nodeId, writeSelection),
+    [writeSelection],
   );
   const ready = materialized && inputValue !== undefined &&
     stateValue !== undefined && outputValue !== undefined;

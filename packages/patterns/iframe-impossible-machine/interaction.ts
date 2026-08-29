@@ -1,7 +1,3 @@
-// @deno-types="npm:@types/react@19.2.18"
-// deno-lint-ignore no-external-import
-import React, { type ReactNode } from "npm:react@19.2.8";
-
 /** Keeps embedded controls out of React Flow's node-selection lifecycle. */
 export function stopNodeControlPropagation(
   event: Pick<Event, "stopPropagation">,
@@ -9,47 +5,40 @@ export function stopNodeControlPropagation(
   event.stopPropagation();
 }
 
-/** Owns the event and drag boundary around controls rendered inside a node. */
-export function NodeControlBoundary(
-  { children }: Readonly<{ children?: ReactNode }>,
-) {
-  return React.createElement(
-    "div",
-    {
-      className: "node-parameters nodrag nopan",
-      onClick: stopNodeControlPropagation,
-    },
-    children,
-  );
+/** Ordering state for PerUser node-selection writes. */
+export interface SelectionRequestTracker {
+  reconcile(authoritativeSelection: string | null): void;
+  request(
+    nodeId: string,
+    writeSelection: (nodeId: string) => Promise<unknown>,
+  ): Promise<void>;
 }
 
 /** Keeps rapid node selections ordered without repeating the latest request. */
-export function useLatestRequestedSelection(
-  authoritativeSelection: string | null,
-  writeSelection: (nodeId: string) => Promise<unknown>,
-): (nodeId: string) => Promise<void> {
-  const authoritativeRef = React.useRef(authoritativeSelection);
-  const latestRequestedRef = React.useRef(authoritativeSelection);
-  const pendingCountRef = React.useRef(0);
-  authoritativeRef.current = authoritativeSelection;
+export function createSelectionRequestTracker(
+  initialSelection: string | null,
+): SelectionRequestTracker {
+  let authoritativeSelection = initialSelection;
+  let latestRequestedSelection = initialSelection;
+  let pendingCount = 0;
 
-  React.useEffect(() => {
-    if (pendingCountRef.current === 0) {
-      latestRequestedRef.current = authoritativeSelection;
-    }
-  }, [authoritativeSelection]);
-
-  return React.useCallback(async (nodeId: string) => {
-    if (latestRequestedRef.current === nodeId) return;
-    latestRequestedRef.current = nodeId;
-    pendingCountRef.current++;
-    try {
-      await writeSelection(nodeId);
-    } finally {
-      pendingCountRef.current--;
-      if (pendingCountRef.current === 0) {
-        latestRequestedRef.current = authoritativeRef.current;
+  return {
+    reconcile(selection) {
+      authoritativeSelection = selection;
+      if (pendingCount === 0) latestRequestedSelection = selection;
+    },
+    async request(nodeId, writeSelection) {
+      if (latestRequestedSelection === nodeId) return;
+      latestRequestedSelection = nodeId;
+      pendingCount++;
+      try {
+        await writeSelection(nodeId);
+      } finally {
+        pendingCount--;
+        if (pendingCount === 0) {
+          latestRequestedSelection = authoritativeSelection;
+        }
       }
-    }
-  }, [writeSelection]);
+    },
+  };
 }
