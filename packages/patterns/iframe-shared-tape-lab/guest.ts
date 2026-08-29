@@ -17,6 +17,7 @@ import {
   formatTime,
   normalizeDurationSeconds,
   planDurationTransition,
+  playbackPositionAt,
   writeAnnotationEdits,
 } from "./model.ts";
 
@@ -617,13 +618,11 @@ function playbackDuration(): number {
 }
 
 function playbackPosition(): number {
-  const elapsed =
-    activeSource && audioContext && playbackStartedAt !== undefined
-      ? audioContext.currentTime - playbackStartedAt
-      : 0;
-  return Math.min(
+  return playbackPositionAt(
     playbackDuration(),
-    Math.max(0, playbackOffsetSeconds + elapsed),
+    playbackOffsetSeconds,
+    activeSource ? playbackStartedAt : undefined,
+    audioContext?.currentTime ?? 0,
   );
 }
 
@@ -737,7 +736,7 @@ async function rebuildAudioBuffer(
 
 async function synchronizeRequestedDurations(): Promise<void> {
   durationReady = false;
-  const transitionPositionSeconds = playbackOffsetSeconds;
+  const transitionPositionSeconds = playbackPosition();
   const resumeIntent = activeSource !== undefined && !audio.paused;
   resumeAfterDurationSync = resumeIntent;
   stopPlaybackSource();

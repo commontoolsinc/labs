@@ -79,6 +79,19 @@ export interface DurationTransitionPlan {
   resumePlayback: boolean;
 }
 
+/** Samples the live playback head from its source offset and audio clock. */
+export function playbackPositionAt(
+  durationSeconds: number,
+  offsetSeconds: number,
+  startedAtSeconds: number | undefined,
+  currentTimeSeconds: number,
+): number {
+  const elapsed = startedAtSeconds === undefined
+    ? 0
+    : Math.max(0, currentTimeSeconds - startedAtSeconds);
+  return clamp(offsetSeconds + elapsed, 0, durationSeconds);
+}
+
 /** Clamps local playback when a reactive recording duration changes. */
 export function planDurationTransition(
   durationSeconds: number,

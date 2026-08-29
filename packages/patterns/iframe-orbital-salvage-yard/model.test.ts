@@ -74,7 +74,7 @@ describe("model", () => {
   describe("transform field writes", () => {
     it("composes claim-backed position and rotation edits by stable transform ID", async () => {
       let durable: ModuleTransform | undefined;
-      let activeTransformId = "";
+      let released = false;
       const transform = mockTransform(
         () => durable,
         (value) => durable = value,
@@ -84,9 +84,9 @@ describe("model", () => {
         position: [0, 1.2, 5],
         rotationQuarterTurns: 3,
       };
-      const active = {
-        set(value: string) {
-          activeTransformId = value;
+      const release = {
+        set(value: boolean) {
+          released = value;
           return Promise.resolve();
         },
       };
@@ -94,18 +94,20 @@ describe("model", () => {
         writeModuleTransformField(
           transformId,
           transform,
-          active,
+          undefined,
           effective,
           "position",
           [1, 1.2, 5],
+          release,
         ),
         writeModuleTransformField(
           transformId,
           transform,
-          active,
+          undefined,
           effective,
           "rotationQuarterTurns",
           0,
+          release,
         ),
       ]);
 
@@ -113,7 +115,7 @@ describe("model", () => {
         position: [1, 1.2, 5],
         rotationQuarterTurns: 0,
       });
-      expect(activeTransformId).toBe(transformId);
+      expect(released).toBe(true);
     });
 
     it("releases only the observed claim ID without clearing a replacement", () => {
@@ -128,14 +130,35 @@ describe("model", () => {
         ...observed,
         id: "claim-b",
       };
-      const transformIds = {
-        mover: moduleTransformId("mover", observed.id),
-      };
+      const releases: Record<string, boolean> = { [observed.id]: true };
 
-      expect(activeSnapClaims({ mover: observed }, transformIds)).toEqual({});
-      expect(activeSnapClaims({ mover: replacement }, transformIds)).toEqual({
+      expect(activeSnapClaims({ mover: observed }, releases)).toEqual({});
+      expect(activeSnapClaims({ mover: replacement }, releases)).toEqual({
         mover: replacement,
       });
+      releases[replacement.id] = true;
+      expect(activeSnapClaims({ mover: replacement }, releases)).toEqual({});
+
+      const module = createSalvageModule("cargo", "mover");
+      const releasedTransform: ModuleTransform = {
+        position: [9, 1.2, 4],
+        rotationQuarterTurns: 2,
+      };
+      expect(
+        applyModuleTransforms(
+          [module],
+          {
+            [moduleTransformId("mover", observed.id)]: {
+              position: [1, 1.2, 1],
+              rotationQuarterTurns: 0,
+            },
+            [moduleTransformId("mover", replacement.id)]: releasedTransform,
+          },
+          { mover: moduleTransformId("mover", observed.id) },
+          { mover: replacement },
+          releases,
+        )[0].transform,
+      ).toEqual(releasedTransform);
     });
 
     it("projects a stored transform over its stable module manifest entry", () => {
@@ -266,21 +289,13 @@ describe("model", () => {
         },
       };
 
-      const firstWins = {
-        [snapTargetKey("anchor", "east-lock")]: "claim-a",
-      };
-      const secondWins = {
-        [snapTargetKey("anchor", "east-lock")]: "claim-b",
-      };
       const forward = resolveSnapClaims(
         [anchor, first, second],
         claims,
-        firstWins,
       );
       const reversed = resolveSnapClaims(
         [second, first, anchor],
         claims,
-        firstWins,
       );
 
       expect(
@@ -307,18 +322,6 @@ describe("model", () => {
           `${connection.second.moduleId}:${connection.second.id}`,
         ]),
       ).toContain("anchor:east-lock");
-      const switched = resolveSnapClaims(
-        [anchor, first, second],
-        claims,
-        secondWins,
-      );
-      expect(
-        switched.find((module) => module.id === first.id)?.transform.position,
-      ).toEqual([8, 1.2, 0]);
-      expect(
-        switched.find((module) => module.id === second.id)?.transform.position,
-      ).toEqual([5, 1.2, 0]);
-      expect(findConnections(switched)).toHaveLength(1);
     });
 
     it("derives an acyclic chain from each target's effective transform", () => {
@@ -345,10 +348,7 @@ describe("model", () => {
         },
       };
 
-      const resolved = resolveSnapClaims([second, first, anchor], claims, {
-        [snapTargetKey("anchor", "north-lock")]: "claim-a",
-        [snapTargetKey("mover-a", "starboard-lock")]: "claim-b",
-      });
+      const resolved = resolveSnapClaims([second, first, anchor], claims);
 
       expect(resolved.find(({ id }) => id === first.id)?.transform.position)
         .toEqual([0, 1.2, 5]);
@@ -380,20 +380,7 @@ describe("model", () => {
         [second.id]: claimFromSnap("claim-b", secondSnap),
       };
 
-      const resolved = resolveSnapClaims([first, second], claims, {
-        [
-          snapTargetKey(
-            firstSnap.targetModuleId,
-            firstSnap.targetConnectorId,
-          )
-        ]: "claim-a",
-        [
-          snapTargetKey(
-            secondSnap.targetModuleId,
-            secondSnap.targetConnectorId,
-          )
-        ]: "claim-b",
-      });
+      const resolved = resolveSnapClaims([first, second], claims);
 
       expect(resolved.map(({ transform }) => transform)).toEqual([
         first.transform,

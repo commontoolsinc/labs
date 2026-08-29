@@ -11,6 +11,7 @@ import {
   formatTime,
   normalizeDurationSeconds,
   planDurationTransition,
+  playbackPositionAt,
   WAV_SAMPLE_RATE,
   type WritableAnnotationFields,
   writeAnnotationEdits,
@@ -188,6 +189,18 @@ describe("model", () => {
       expect(planDurationTransition(120, originalPosition, true)).toEqual({
         durationSeconds: 120,
         positionSeconds: 90,
+        resumePlayback: true,
+      });
+    });
+  });
+
+  describe("playbackPositionAt()", () => {
+    it("captures elapsed playback before a coalesced duration rebuild", () => {
+      const position = playbackPositionAt(120, 12, 7, 37);
+      expect(position).toBe(42);
+      expect(planDurationTransition(100, position, true)).toEqual({
+        durationSeconds: 100,
+        positionSeconds: 42,
         resumePlayback: true,
       });
     });

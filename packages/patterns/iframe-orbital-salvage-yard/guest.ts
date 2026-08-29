@@ -47,7 +47,6 @@ import {
   pointerWasCancelled,
   resolveSnapClaims,
   setBookmark,
-  snapTargetKey,
   writeModuleTransformField,
 } from "./model.ts";
 
@@ -75,7 +74,7 @@ const modulesCell = stateWrite.key("modules");
 const moduleTransformsCell = stateWrite.key("moduleTransforms");
 const moduleTransformIdsCell = stateWrite.key("moduleTransformIds");
 const snapClaimsCell = stateWrite.key("snapClaims");
-const snapTargetsCell = stateWrite.key("snapTargets");
+const releasedSnapClaimsCell = stateWrite.key("releasedSnapClaims");
 
 const canvas = required<HTMLCanvasElement>("#scene");
 const heading = required<HTMLHeadingElement>("h1");
@@ -231,12 +230,13 @@ function effectiveModules(
       value.modules,
       value.moduleTransforms,
       value.moduleTransformIds,
+      value.snapClaims ?? {},
+      value.releasedSnapClaims ?? {},
     ),
     activeSnapClaims(
       value.snapClaims ?? {},
-      value.moduleTransformIds ?? {},
+      value.releasedSnapClaims ?? {},
     ),
-    value.snapTargets ?? {},
   );
 }
 
@@ -621,10 +621,11 @@ async function writeTransformField<
   await writeModuleTransformField(
     transformId,
     moduleTransformsCell.key(transformId),
-    moduleTransformIdsCell.key(module.id),
+    claim ? undefined : moduleTransformIdsCell.key(module.id),
     module.transform,
     key,
     value,
+    claim ? releasedSnapClaimsCell.key(claim.id) : undefined,
   );
 }
 
@@ -690,9 +691,6 @@ async function snapSelected(): Promise<void> {
     rotationQuarterTurns: result.transform.rotationQuarterTurns,
   };
   await snapClaimsCell.key(moduleId).set(claim);
-  await snapTargetsCell.key(
-    snapTargetKey(claim.targetModuleId, claim.targetConnectorId),
-  ).set(claim.id);
 }
 
 async function addModule(kind: ModuleKind): Promise<void> {

@@ -90,9 +90,15 @@ export function applyModuleTransforms(
   modules: readonly StationModule[],
   transforms: Readonly<Record<string, ModuleTransform>>,
   transformIds: Readonly<Record<string, string>>,
+  claims: Readonly<Record<string, ModuleSnapClaim | null>> = {},
+  releasedClaims: Readonly<Record<string, boolean>> = {},
 ): StationModule[] {
   return modules.map((module) => {
-    const transform = transforms[transformIds[module.id]];
+    const claim = claims[module.id];
+    const transformId = claim && releasedClaims[claim.id] === true
+      ? moduleTransformId(module.id, claim.id)
+      : transformIds[module.id];
+    const transform = transforms[transformId];
     return transform ? { ...module, transform } : module;
   });
 }
@@ -100,12 +106,11 @@ export function applyModuleTransforms(
 /** Omits only claims whose exact ID was released into a manual transform. */
 export function activeSnapClaims(
   claims: Readonly<Record<string, ModuleSnapClaim | null>>,
-  transformIds: Readonly<Record<string, string>>,
+  releasedClaims: Readonly<Record<string, boolean>>,
 ): Record<string, ModuleSnapClaim | null> {
   return Object.fromEntries(
-    Object.entries(claims).filter(([moduleId, claim]) =>
-      claim === null ||
-      transformIds[moduleId] !== moduleTransformId(moduleId, claim.id)
+    Object.entries(claims).filter(([, claim]) =>
+      claim === null || releasedClaims[claim.id] !== true
     ),
   );
 }
@@ -116,14 +121,16 @@ export async function writeModuleTransformField<
 >(
   transformId: string,
   transform: WritableModuleTransform,
-  activeTransformId: WritableValue<string>,
+  activeTransformId: WritableValue<string> | undefined,
   current: ModuleTransform,
   key: Key,
   value: ModuleTransform[Key],
+  releasedClaim: WritableValue<boolean> | undefined,
 ): Promise<void> {
   await transform.initialize(current);
   await transform.key(key).set(value);
-  await activeTransformId.set(transformId);
+  await activeTransformId?.set(transformId);
+  await releasedClaim?.set(true);
 }
 
 /** Surfaces graphics bootstrap failures before preserving the thrown cause. */
@@ -199,10 +206,9 @@ export function setBookmark(
 export function resolveSnapClaims(
   modules: readonly StationModule[],
   claims: Readonly<Record<string, ModuleSnapClaim | null>>,
-  targets: Readonly<Record<string, string | null>>,
 ): StationModule[] {
   const modulesById = new Map(modules.map((module) => [module.id, module]));
-  const validClaims = Object.entries(claims).flatMap(([moduleId, claim]) => {
+  const candidates = Object.entries(claims).flatMap(([moduleId, claim]) => {
     const moving = modulesById.get(moduleId);
     const target = claim && modulesById.get(claim.targetModuleId);
     if (
@@ -212,11 +218,32 @@ export function resolveSnapClaims(
       ) ||
       !target.connectors.some((connector) =>
         connector.id === claim.targetConnectorId
-      ) ||
-      targets[snapTargetKey(claim.targetModuleId, claim.targetConnectorId)] !==
-        claim.id
+      )
     ) return [];
     return [{ moduleId, claim }];
+  });
+  candidates.sort((left, right) => {
+    const leftTarget = connectorIdentityKey(
+      left.claim.targetModuleId,
+      left.claim.targetConnectorId,
+    );
+    const rightTarget = connectorIdentityKey(
+      right.claim.targetModuleId,
+      right.claim.targetConnectorId,
+    );
+    return leftTarget.localeCompare(rightTarget) ||
+      left.moduleId.localeCompare(right.moduleId) ||
+      left.claim.id.localeCompare(right.claim.id);
+  });
+  const claimedTargets = new Set<string>();
+  const validClaims = candidates.filter(({ claim }) => {
+    const target = connectorIdentityKey(
+      claim.targetModuleId,
+      claim.targetConnectorId,
+    );
+    if (claimedTargets.has(target)) return false;
+    claimedTargets.add(target);
+    return true;
   });
   const pending = new Map(
     validClaims.map(({ moduleId, claim }) => [moduleId, claim]),
@@ -229,19 +256,6 @@ export function resolveSnapClaims(
   const effectiveTransforms = new Map(
     modules.map((module) => [module.id, module.transform]),
   );
-  validClaims.sort((left, right) => {
-    const leftTarget = connectorIdentityKey(
-      left.claim.targetModuleId,
-      left.claim.targetConnectorId,
-    );
-    const rightTarget = connectorIdentityKey(
-      right.claim.targetModuleId,
-      right.claim.targetConnectorId,
-    );
-    return leftTarget.localeCompare(rightTarget) ||
-      left.moduleId.localeCompare(right.moduleId);
-  });
-
   let madeProgress = true;
   while (madeProgress) {
     madeProgress = false;

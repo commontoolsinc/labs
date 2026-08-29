@@ -49,6 +49,7 @@ export interface IframeStateData {
   moduleTransformIds: Record<string, string>;
   snapClaims: Record<string, ModuleSnapClaim | null>;
   snapTargets: Record<string, string | null>;
+  releasedSnapClaims?: Record<string, boolean>;
 }
 
 export interface IframeOutputData {
@@ -149,6 +150,7 @@ export const DEFAULT_STATE: IframeStateData = {
   moduleTransformIds: {},
   snapClaims: {},
   snapTargets: {},
+  releasedSnapClaims: {},
   modules: [
     {
       id: "module-junction-nine",
