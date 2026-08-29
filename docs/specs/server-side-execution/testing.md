@@ -41,71 +41,71 @@ not-yet-implemented phases via explicit skip lists per phase, never via
 silent filtering. (v1's terminal failure mode: the flags-on branch never
 went through CI at all.)
 
-*Phase 7 FLIPPED (the flip PR, 2026-08-28, after the plan's ordered
-gates: `SERVER_EXECUTION_DEFAULT_ENABLED = true`; landed FLIP-READY DARK
-2026-08-16 by owner ruling, roles inverted until the flip). The arms
-since the flip: the DEFAULT lanes (flag unset = the first-party default,
-ON) ARE the ON arm in the FULL posture — the toolshed serves, the test
-processes RESOLVE the posture env-else-default (the runner integration
-tests that talk to the lane's toolshed; the runtime-client worker host —
-never a bare/ambient client, the mixed posture the Phase-7 review found,
-which under default-ON a raw env read would resurrect), and the
-default-built browser shell's define fallback is the same constant. TWO
-files on the default pattern lane deliberately read the RAW env instead,
-and are exceptions rather than drift:
+*Phase 7 flipped 2026-08-28 (the flip PR) and was ROLLED BACK by the
+flip-OFF lever: `SERVER_EXECUTION_DEFAULT_ENABLED = false` again, with
+every mechanism the flip built KEPT. The arms since the rollback: the
+DEFAULT lanes (flag unset = the first-party default, OFF) are the
+regression guard for the pre-v2 behavior — a posture PROBE before each
+suite pins server-not-serving (`/api/health/stats` carries no
+`servingLoop`) and shell define UNSET (`/api/meta`'s
+`shellServerExecutionDefine` null), so a silent flip of the default
+cannot move the REQUIRED lanes onto ON. The explicit
+`EXPERIMENTAL_SERVER_EXECUTION=true` lanes are the ON arm in the FULL
+posture — the toolshed serves, the test processes RESOLVE the posture
+env-else-default (the runner integration tests that talk to the lane's
+toolshed; the runtime-client worker host — never a bare/ambient client,
+the mixed posture the Phase-7 review found), and the binary's baked
+browser shell is ON-built (`build-toolshed-on`, the define `"true"`) —
+VERIFIED by the same probe (`shellServerExecutionDefine === "true"`,
+`servingLoop` present) before the suite runs. TWO files on the pattern
+lanes read the RAW env rather than resolving it, and that is CORRECT
+whenever the ON arm is the explicit one:
 `packages/patterns/integration/topic-board-child-contract.test.ts` and
 `packages/patterns/integration/convergence-storm.test.ts` key their
-ON-arm STEP-skip guard (`onArmStepSkip`) off it. Neither takes a RUNTIME
-posture from that read — the runtimes there adopt the lane toolshed's
-published posture (and the storm harness resolves env-else-default) — so
-the raw key decides only whether a listed step is skipped. With the
-skip registry EMPTY the guards are inert everywhere; the raw key leaves
-them undefined on the default (ON) lane, so a future entry for either
-file fails LOUD there (the step runs and reds, never a silent skip),
-which is the trigger to convert the key. Each file's own comment carries
-this. A posture PROBE before each suite pins serving-loop PRESENT
-(`/api/health/stats.servingLoop`) and shell define UNSET (`/api/meta`'s
-`shellServerExecutionDefine` null), so a silent un-flip of the default
-cannot move the REQUIRED lanes off ON. The explicit
-`EXPERIMENTAL_SERVER_EXECUTION=false` lanes are the OFF regression
-guard — the rollback lever kept honest through the soak — on an
-OFF-built binary (`build-toolshed-off`, the define `"false"`), VERIFIED
-by the same probe (`shellServerExecutionDefine === "false"`,
-`servingLoop` absent) before the suite runs; they retire with the OFF
-path in the post-soak removal PR. Skips only via
+ON-arm STEP-skip guard (`onArmStepSkip`) off it, and the explicit
+`true` reaches them directly. Neither takes a RUNTIME posture from that
+read — the runtimes there adopt the lane toolshed's published posture
+(and the storm harness resolves env-else-default). The raw key becomes
+an exception, not a match, whenever the default is the ON arm; the
+registry being EMPTY is what makes it inert either way. Each file's own
+comment carries this. Skips only via
 `tasks/server-execution-on-skips.ts` (file entries; STEP entries for a
 one-file suite, guarded in-file and bound to the register), printed
-loudly, riding the DEFAULT lanes (the ON arm — the OFF guard never
-skips), EMPTY at the flip (its stated precondition) — and, since
-2026-08-16, actually EFFECTIVE: `deno test --ignore` binds only to
-files deno discovers itself, so the package `integration` tasks hand
-deno a quoted glob and the pattern shards filter their file list
-through the script (`--filter`); until then every listed skip ran. The
-deployed-topology binaries the presets flip carry their own gates since
-the flip PR (its recorded obligation; P7 review finding 8): the
-`deployed-topology-gate` job runs the real `bg-piece-service` binary
-and cf-harness's fabric-session factory against the default (ON)
-toolshed, posture-asserted; the CLI lanes are `cf`'s gate (it adopts
-the server's published posture; the lane probes the server half); and
+loudly, riding the explicit-`true` lanes (the ON arm — the OFF default
+never skips), EMPTY — which is what lets the lane roles swap in either
+direction without a coverage hole — and, since 2026-08-16, actually
+EFFECTIVE: `deno test --ignore` binds only to files deno discovers
+itself, so the package `integration` tasks hand deno a quoted glob and
+the pattern shards filter their file list through the script
+(`--filter`); until then every listed skip ran. The deployed-topology
+binaries the presets flip carry their own gates, built by the flip PR
+(its recorded obligation; P7 review finding 8) and KEPT by the
+rollback: the `deployed-topology-gate` job runs the real
+`bg-piece-service` binary and cf-harness's fabric-session factory
+against the DEFAULT toolshed, posture-asserted — those two gates FOLLOW
+the default, so while rolled back they assert OFF and no lane exercises
+those two topologies under ON; the CLI lanes are `cf`'s gate (it adopts
+the server's published posture; the lane probes the server half AND
+refuses a client/server disagreement, which is posture-neutral); and
 `PiecesController` hosts ride the default package/pattern lanes
 (sx2-scale's controllers, the pieces-controller helper). Single-process
 suites (the unit suites, `cf test`, the runner integration files that
 serve toolshed's `app.ts` in-process — the serving loop starts in the
 binary's `index.ts`, not in `app.ts`) are not arms of this contract:
 they have no serving host and run the derive-and-commit model (the
-ambient baseline, OFF) by construction (EXPERIMENTAL_OPTIONS.md) — the
+ambient baseline, OFF) by construction (EXPERIMENTAL_OPTIONS.md) — a
 flip does not reach them.*
 
 Test-record identity follows the [test-run record
-contract](../test-records.md). The current default arm (ON since the flip)
-leaves the shipping action's `variant` input unset, continuing the existing
-unmarked history. The explicit OFF package and pattern jobs set it to
-`server-execution-off`, so the regression guard keeps its own history; the
-pre-flip explicit-ON arm's `server-execution` marker retired with the flip
-(its history stays queryable under that variant). Any additional
-non-default arm uses its own stable variant. The workflow tests assert both
-that non-default arms carry their exact marker and that the default arm
-remains unmarked.
+contract](../test-records.md). The current default arm (OFF again since the
+rollback) leaves the shipping action's `variant` input unset, continuing the
+existing unmarked history. The explicit ON package and pattern jobs set it to
+`server-execution`, rejoining the series their pre-flip runs shipped under
+rather than starting a third one. The flip-era explicit-OFF jobs'
+`server-execution-off` marker is retired; that history stays queryable under
+it. Any additional non-default arm uses its own stable variant. The workflow
+tests assert both that non-default arms carry their exact marker and that the
+default arm remains unmarked.
 
 ## 3. The watermark replaces polling
 

@@ -19,16 +19,17 @@ A test's identity has three required parts: **kind** (`unit`, `browser`,
 (the owning workspace member, or `repo`), and **name** (whatever the test's
 own runner reports — a bdd describe chain, a pattern file path, a task name,
 a script step). An optional **variant** separates the same test running
-in a non-default configuration. The default configuration is unmarked. Since
-the server-execution flip (2026-08-28) the default deployed-topology lanes
-run the ON posture unmarked — continuing the history of the previously
-unmarked default jobs — and the surviving explicit OFF regression-guard jobs
-use `server-execution-off`. The pre-flip explicit-ON jobs'
-`server-execution` marker is retired; their history stays queryable under
-it. The single-process default jobs (the unit suites, `cf test`, the
-no-server pattern-unit lane) never read that default and stay ambient-OFF,
-so they are unmarked for the older reason: the flip does not reach them
-(`docs/specs/test-records.md`). One record is one JSON line; one uploaded
+in a non-default configuration. The default configuration is unmarked. The
+server-execution flip (2026-08-28) was ROLLED BACK, so the default
+deployed-topology lanes run the OFF posture unmarked — continuing the
+unmarked default history unbroken across both flips — and the explicit ON
+jobs use `server-execution`, rejoining the series their pre-flip runs
+shipped under. The flip-era explicit-OFF jobs' `server-execution-off`
+marker is retired; that history stays queryable under it. The
+single-process default jobs (the unit suites, `cf test`, the no-server
+pattern-unit lane) never read that default and stay ambient-OFF, so they
+are unmarked for a different reason: no flip reaches them in either
+direction (`docs/specs/test-records.md`). One record is one JSON line; one uploaded
 object is a run's
 context line followed by its record lines. The schema, the line codecs, and
 their validators live in `packages/test-support/src/records/`.

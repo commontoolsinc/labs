@@ -26,19 +26,19 @@ A test's identity has three required parts, scoped within a repository:
   piece-values`), or a task-plus-item pair (`cfcheck <file>`,
   `pattern-compat <key>`, `pattern-vintage <testKey> <tier> <stamp>`).
 - **variant**, when present — a stable name for a non-default configuration
-  that runs the same test. The default configuration has no variant. Since
-  the server-execution flip (2026-08-28) the default DEPLOYED-TOPOLOGY
-  lanes — the ones that run a test process against a serving toolshed —
-  run the ON posture unmarked, continuing the history of the previously
-  unmarked default jobs; the surviving explicit OFF regression-guard jobs
-  use `server-execution-off` so their history remains separate. The
-  pre-flip explicit-ON jobs' `server-execution` marker is retired; their
-  history stays queryable under it. The claim is deliberately narrow: the
-  single-process default jobs (the unit suites, `cf test`, the no-server
-  pattern-unit lane — the `patternTest` / `unitTest` presets) never read
-  the first-party default and stay ambient-OFF by construction, so they
-  are unmarked because the flip does not reach them, not because they run
-  ON.
+  that runs the same test. The default configuration has no variant. The
+  server-execution flip (2026-08-28) was ROLLED BACK, so the default
+  DEPLOYED-TOPOLOGY lanes — the ones that run a test process against a
+  toolshed — run the OFF posture unmarked, continuing the unmarked default
+  history unbroken across both flips; the explicit ON jobs use
+  `server-execution`, rejoining the series their pre-flip runs shipped
+  under. The flip-era explicit-OFF jobs' `server-execution-off` marker is
+  retired; that history stays queryable under it. The single-process
+  default jobs (the unit suites, `cf test`, the no-server pattern-unit
+  lane — the `patternTest` / `unitTest` presets) never read the
+  first-party default and stay ambient-OFF by construction, so they are
+  unmarked for a different reason: no flip reaches them in either
+  direction.
 
 Identity survives moving a test between files, splitting or renaming test
 files, reformatting, editing bodies, and resharding — shard and slice
