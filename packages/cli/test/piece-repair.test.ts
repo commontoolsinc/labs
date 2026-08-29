@@ -299,24 +299,33 @@ describe("piece-repair", () => {
       expect(said).not.toContain("this run counts its rows only in the report");
     });
 
-    it("hands the engine a row reporter, which is what the guard counts", async () => {
+    it("counts the rows the engine reports, and names them if it is abandoned", async () => {
       // The guard can only name where an abandoned run reached if something
-      // told it which rows settled. Without this the command would be back to
-      // saying the count is unknown, which is the weaker of the two lines it
-      // can print and the one this wiring exists to stop.
-      let request: RepairRunRequest | undefined;
+      // told it which rows settled. Driving the callback the command hands
+      // over — rather than only asserting that one exists — is what proves a
+      // row travels all the way to the line the operator reads.
       const process = guardHarness();
-      await captureStdout(() =>
-        repairFromCommand({ ...OPTIONS, path: "topics" }, {
+      const abandoned = repairFromCommand(
+        { ...OPTIONS, path: "topics", apply: true },
+        {
           runRepair: (_config, req) => {
-            request = req;
-            return Promise.resolve(REPORT);
+            req.onRow?.({ piece: "of:fid1:alpha", verdict: "repaired" });
+            req.onRow?.({ piece: "of:fid1:bravo", verdict: "conforms" });
+            return new Promise<RepairReport>(() => {});
           },
+          render: () => {},
           printHint: () => {},
           guard: process.deps,
-        })
+        },
       );
-      expect(typeof request?.onRow).toBe("function");
+      await Promise.resolve();
+      expect(process.endProcess()).toBe(1);
+      const said = process.errors.join("\n");
+      expect(said).toContain("2 rows settled");
+      expect(said).toContain("repaired: 1");
+      expect(said).toContain("conforms: 1");
+      expect(said).not.toContain("No row settled");
+      expect(abandoned).toBeInstanceOf(Promise);
     });
 
     it("says nothing at process end once the run has reported", async () => {
