@@ -10,7 +10,6 @@ export {
   errorFrom,
   findAppendOnlyItem,
   nodeControlBoundaryProps,
-  settleCommittedPositionDraft,
   stopNodeControlPropagation,
   updateLatestValue,
 } from "./interaction.ts";

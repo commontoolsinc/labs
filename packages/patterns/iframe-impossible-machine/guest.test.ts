@@ -28,19 +28,26 @@ describe("Impossible Machine document shell", () => {
     const source = await Deno.readTextFile(
       new URL("./guest.tsx", import.meta.url),
     );
+    const canvasSource = await Deno.readTextFile(
+      new URL("./machine-canvas/guest.ts", import.meta.url),
+    );
 
     expect(source).toContain(
       "<div {...model.nodeControlBoundaryProps()}>{children}</div>",
     );
     expect(source).toContain("await model.updateLatestValue(");
-    expect(source).toContain("void tracker.request(");
+    expect(source).toContain("tracker.request(");
+    expect(source).toContain(
+      "authoritativeSelection={outputValue.selectedNodeId}",
+    );
+    expect(canvasSource).toContain("selectionDraftRef.current?.confirmed");
     expect(source).toContain("const actionRunner = React.useRef(");
     expect(source).toContain("const runNodeAction = actionRunner.runNode");
     expect(source).toContain("const located = model.findAppendOnlyItem(");
     expect(source).not.toContain("nodesCell.key(index).resolve()");
-    expect(source).toContain("nodesDraggable");
-    expect(source).toContain("nodesConnectable");
-    expect(source).toContain("elementsSelectable");
-    expect(source).not.toContain("nodesDraggable={!pending}");
+    expect(canvasSource).toContain("nodesDraggable: true");
+    expect(canvasSource).toContain("nodesConnectable: true");
+    expect(canvasSource).toContain("elementsSelectable: true");
+    expect(canvasSource).not.toContain("nodesDraggable: !pending");
   });
 });

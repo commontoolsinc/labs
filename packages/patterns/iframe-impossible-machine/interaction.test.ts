@@ -6,7 +6,6 @@ import {
   errorFrom,
   findAppendOnlyItem,
   nodeControlBoundaryProps,
-  settleCommittedPositionDraft,
   stopNodeControlPropagation,
   updateLatestValue,
 } from "./model.ts";
@@ -39,23 +38,6 @@ describe("Impossible Machine interaction lifecycle", () => {
       className: "node-parameters nodrag nopan",
       onClick: stopNodeControlPropagation,
     });
-  });
-
-  it("clears only the position draft acknowledged by a write", () => {
-    const newer = { x: 24, y: 18 };
-    const ref = { current: { gate: newer } };
-    let rendered: Record<string, typeof newer> = { gate: newer };
-    const setRendered = (
-      update: (current: typeof rendered) => typeof rendered,
-    ) => rendered = update(rendered);
-
-    settleCommittedPositionDraft(ref, setRendered, "gate", { x: 12, y: 9 });
-    expect(ref.current).toEqual({ gate: newer });
-    expect(rendered).toEqual({ gate: newer });
-
-    settleCommittedPositionDraft(ref, setRendered, "gate", newer);
-    expect(ref.current).toEqual({});
-    expect(rendered).toEqual({});
   });
 
   it("orders actions while keeping node pending state local", async () => {
@@ -133,6 +115,24 @@ describe("Impossible Machine interaction lifecycle", () => {
     expect(value).toBe(5);
   });
 
+  it("orders quiet actions without changing pending controls", async () => {
+    const pendingUpdates: boolean[] = [];
+    let actionError: Error | undefined;
+    const runner = createActionRunner({
+      setGlobalPending: (value) => pendingUpdates.push(value),
+      setActionError: (value) => actionError = value,
+      setBusyNodeCounts: () => {},
+    });
+
+    expect(await runner.runQuiet(() => Promise.resolve())).toBe(true);
+    expect(await runner.runQuiet(() => Promise.reject("quiet failure"))).toBe(
+      false,
+    );
+
+    expect(pendingUpdates).toEqual([]);
+    expect(actionError).toEqual(new Error("quiet failure"));
+  });
+
   it("retains the latest rapid selection request", async () => {
     const tracker = createSelectionRequestTracker("node-a");
     const writes: string[] = [];
@@ -160,10 +160,12 @@ describe("Impossible Machine interaction lifecycle", () => {
     await tracker.request("node-b", writeSelection);
     expect(writes).toEqual(["node-b", "node-a", "node-b"]);
 
-    await tracker.request("node-c", (nodeId) => {
-      writes.push(nodeId);
-      return Promise.resolve(false);
-    });
+    expect(
+      await tracker.request("node-c", (nodeId) => {
+        writes.push(nodeId);
+        return Promise.resolve(false);
+      }),
+    ).toBe(false);
     await tracker.request("node-c", (nodeId) => {
       writes.push(nodeId);
       return Promise.resolve(true);
@@ -190,5 +192,54 @@ describe("Impossible Machine interaction lifecycle", () => {
       return Promise.resolve();
     });
     expect(writes.at(-1)).toBe("node-d");
+  });
+
+  it("shares the result of a duplicate pending selection", async () => {
+    const tracker = createSelectionRequestTracker("node-a");
+    let release!: (succeeded: boolean) => void;
+    const gate = new Promise<boolean>((resolve) => release = resolve);
+    let writes = 0;
+
+    const first = tracker.request("node-b", () => {
+      writes++;
+      return gate;
+    });
+    const duplicate = tracker.request("node-b", () => {
+      writes++;
+      return Promise.resolve(true);
+    });
+    let duplicateSettled = false;
+    void duplicate.then(() => duplicateSettled = true);
+
+    await Promise.resolve();
+    expect(writes).toBe(1);
+    expect(duplicateSettled).toBe(false);
+
+    release(false);
+    expect(await first).toBe(false);
+    expect(await duplicate).toBe(false);
+  });
+
+  it("does not reuse a failed result after restoring an older selection", async () => {
+    const tracker = createSelectionRequestTracker("node-a");
+    let releaseOlder!: () => void;
+    const olderGate = new Promise<void>((resolve) => releaseOlder = resolve);
+    let restoredWrites = 0;
+
+    const older = tracker.request("node-b", () => olderGate);
+    expect(await tracker.request("node-c", () => Promise.resolve(false))).toBe(
+      false,
+    );
+
+    expect(
+      await tracker.request("node-a", () => {
+        restoredWrites++;
+        return Promise.resolve(true);
+      }),
+    ).toBe(true);
+    expect(restoredWrites).toBe(0);
+
+    releaseOlder();
+    expect(await older).toBe(true);
   });
 });

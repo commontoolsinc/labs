@@ -7,6 +7,7 @@ import React from "npm:react@19.2.8";
 // deno-lint-ignore no-external-import
 import { createRoot } from "npm:react-dom@19.2.8/client";
 import {
+  applyNodeChanges,
   Background,
   Controls,
   type Edge,
@@ -35,6 +36,11 @@ import {
   type MachineParameters,
   type MachinePosition,
 } from "./contract.ts";
+import {
+  type CanvasReactRuntime,
+  createMachineCanvas,
+  type MachineCanvasProps,
+} from "./machine-canvas/guest.ts";
 import * as model from "./model.ts";
 
 const fabric = connectFabric();
@@ -358,6 +364,25 @@ const NODE_TYPES = {
   actuator: ActuatorNode,
 };
 
+const MachineCanvas = createMachineCanvas<MachineFlowNode>(
+  React as unknown as CanvasReactRuntime,
+  {
+    ReactFlow,
+    Background,
+    Controls,
+    MiniMap,
+    applyNodeChanges: (changes, nodes) =>
+      applyNodeChanges(
+        changes as NodeChange<MachineFlowNode>[],
+        nodes,
+      ),
+  },
+  NODE_TYPES,
+  KIND_COLORS,
+) as React.ComponentType<
+  MachineCanvasProps<MachineFlowNode>
+>;
+
 function App() {
   const input = useCell<IframeInputData | undefined>("input");
   const state = useCell<IframeStateData | undefined>("state");
@@ -369,10 +394,6 @@ function App() {
   const [busyNodeCounts, setBusyNodeCounts] = React.useState<
     Readonly<Record<string, number>>
   >({});
-  const [draftPositions, setDraftPositions] = React.useState<
-    Record<string, MachinePosition>
-  >({});
-  const draftPositionsRef = React.useRef<Record<string, MachinePosition>>({});
   const [connectSource, setConnectSource] = React.useState("");
   const [connectTarget, setConnectTarget] = React.useState("");
   const bootstrapStarted = React.useRef(false);
@@ -423,6 +444,7 @@ function App() {
 
   const runAction = actionRunner.run;
   const runNodeAction = actionRunner.runNode;
+  const runQuietAction = actionRunner.runQuiet;
 
   const locateNodeCell = React.useCallback(async (nodeId: string) => {
     const nodesCell = stateCell.key("nodes");
@@ -452,19 +474,17 @@ function App() {
   );
 
   const persistPosition = React.useCallback(
-    (nodeId: string, position: MachinePosition) =>
-      runAction(async () => {
+    async (nodeId: string, position: MachinePosition) => {
+      const succeeded = await runQuietAction(async () => {
         const node = await locateNodeCell(nodeId);
         await node.key("position").set(position);
         await state.refresh();
-        model.settleCommittedPositionDraft(
-          draftPositionsRef,
-          setDraftPositions,
-          nodeId,
-          position,
-        );
-      }),
-    [locateNodeCell, runAction, state.refresh],
+      });
+      if (!succeeded) return undefined;
+      return stateCell.get()?.nodes.find((node) => node.id === nodeId)
+        ?.position ?? position;
+    },
+    [locateNodeCell, runQuietAction, state.refresh],
   );
 
   const appendNode = React.useCallback(
@@ -596,7 +616,7 @@ function App() {
   const flowNodes: MachineFlowNode[] = stateValue.nodes.map((node) => ({
     id: node.id,
     type: node.kind,
-    position: draftPositions[node.id] ?? node.position,
+    position: node.position,
     selected: outputValue.selectedNodeId === node.id,
     data: {
       node,
@@ -666,28 +686,6 @@ function App() {
     stateValue.nodes.filter((node) =>
       model.isActuatorFiring(node, signals.get(node.id) ?? 0)
     ).length;
-
-  const handleNodeChanges = (changes: NodeChange<MachineFlowNode>[]) => {
-    const positions = changes.filter(
-      (change): change is Extract<
-        NodeChange<MachineFlowNode>,
-        { type: "position" }
-      > => change.type === "position" && change.position !== undefined,
-    );
-    if (positions.length === 0) return;
-    Object.assign(
-      draftPositionsRef.current,
-      Object.fromEntries(
-        positions.map((change) => [change.id, change.position!]),
-      ),
-    );
-    setDraftPositions((current) => ({
-      ...current,
-      ...Object.fromEntries(
-        positions.map((change) => [change.id, change.position!]),
-      ),
-    }));
-  };
 
   return (
     <NodeActionContext.Provider value={{ updateParameter }}>
@@ -767,45 +765,22 @@ function App() {
 
         <section className="workspace">
           <div className="flow-shell" aria-label="Collaborative machine canvas">
-            <ReactFlow<MachineFlowNode, Edge>
-              nodes={flowNodes}
+            <MachineCanvas
+              authoritativeNodes={flowNodes}
+              authoritativeSelection={outputValue.selectedNodeId}
               edges={flowEdges}
-              nodeTypes={NODE_TYPES}
-              onNodesChange={handleNodeChanges}
-              onNodeClick={(_event, node) =>
-                void tracker.request(
-                  node.id,
-                  (nodeId) => updatePreference("selectedNodeId", () => nodeId),
+              onNodeSelection={(nodeId) =>
+                tracker.request(
+                  nodeId,
+                  (selectedNodeId) =>
+                    updatePreference(
+                      "selectedNodeId",
+                      () => selectedNodeId,
+                    ),
                 )}
-              onNodeDragStop={(_event, node) =>
-                void persistPosition(
-                  node.id,
-                  draftPositionsRef.current[node.id] ?? node.position,
-                )}
+              onPositionCommit={persistPosition}
               onConnect={(connection) => void appendEdge(connection)}
-              nodesDraggable
-              nodesConnectable
-              elementsSelectable
-              fitView
-              fitViewOptions={{ padding: 0.1 }}
-              minZoom={0.35}
-              maxZoom={1.6}
-              defaultEdgeOptions={{ type: "smoothstep" }}
-              colorMode="dark"
-            >
-              <Background color="#26334a" gap={28} size={1.2} />
-              <Controls
-                showInteractive={false}
-                fitViewOptions={{ padding: 0.1 }}
-              />
-              <MiniMap<MachineFlowNode>
-                pannable
-                zoomable
-                nodeColor={(node) => KIND_COLORS[node.type ?? "sensor"]}
-                nodeStrokeColor="#07111f"
-                maskColor="rgba(5, 12, 24, 0.72)"
-              />
-            </ReactFlow>
+            />
           </div>
 
           <aside className="inspector">
