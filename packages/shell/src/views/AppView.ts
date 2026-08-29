@@ -106,13 +106,12 @@ export class XAppView extends BaseView {
       try {
         await prepareNamedSpace(app, rt, space);
         // The space home renders the root, so there it has to run. A
-        // piece-focused view reads exactly one thing from it — the `fabUI`
-        // sub-page BodyView renders — and reading an export does not need
-        // the root running. Starting it materializes everything the root's
-        // result reaches, which on a space whose root reaches a large piece
-        // is the dominant cost of opening any piece in that space.
-        const start = isViewingDefaultPatternView(app.view);
-        return await rt.getSpaceRootPattern(space, { start });
+        // piece-focused view reads NOTHING from it — so it is not fetched
+        // at all, and none of what the root's result reaches is demanded.
+        // On a space whose root reaches a large piece, that demand is the
+        // dominant cost of opening any piece in the space.
+        if (!isViewingDefaultPatternView(app.view)) return;
+        return await rt.getSpaceRootPattern(space);
       } catch (err) {
         if (!rt.signal.aborted) {
           console.error("[AppView] Failed to load space root pattern:", err);

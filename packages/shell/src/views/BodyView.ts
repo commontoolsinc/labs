@@ -158,29 +158,21 @@ export class XBodyView extends BaseView {
   accessor embedded = false;
 
   #subPages = new Task(this, {
-    task: async ([activePattern, spaceRootPattern, embedded]) => {
+    task: async ([activePattern, embedded]) => {
       if (embedded) {
         return {
           sidebarUI: undefined,
-          fabUI: undefined,
         };
       }
-      const [sidebarUI, fabUI] = await Promise.all([
-        getSubPageCell(
-          activePattern?.cell() as CellHandle<SubPages> | undefined,
-          "sidebarUI",
-        ),
-        getSubPageCell(
-          spaceRootPattern?.cell() as CellHandle<SubPages> | undefined,
-          "fabUI",
-        ),
-      ]);
+      const sidebarUI = await getSubPageCell(
+        activePattern?.cell() as CellHandle<SubPages> | undefined,
+        "sidebarUI",
+      );
       return {
         sidebarUI,
-        fabUI,
       };
     },
-    args: () => [this.activePattern, this.spaceRootPattern, this.embedded],
+    args: () => [this.activePattern, this.embedded],
   });
 
   override render() {
@@ -216,7 +208,6 @@ export class XBodyView extends BaseView {
     const sidebar = this.embedded
       ? undefined
       : this.#subPages?.value?.sidebarUI;
-    const fab = this.embedded ? undefined : this.#subPages?.value?.fabUI;
     const runtimeError = this.runtimeError
       ? html`
         <cf-alert class="runtime-error" status="error">
@@ -243,10 +234,6 @@ export class XBodyView extends BaseView {
           ${mainContent} ${sidebar
             ? html`
               <cf-render slot="sidebar" .cell="${sidebar}"></cf-render>
-            `
-            : null} ${fab
-            ? html`
-              <cf-render slot="fab" .cell="${fab}"></cf-render>
             `
             : null}
         </x-omni-layout>
