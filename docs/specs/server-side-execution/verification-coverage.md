@@ -3243,7 +3243,8 @@ findings; the OWNER RULING — the flip lands DARK):
   OW28 → the honest benchmark → the flip PR (which also flips the
   absolute pin, the CI lane roles and their posture probes, and
   EXPERIMENTAL_OPTIONS.md; and MUST land with the ON skip list EMPTY).
-  **THE FLIP PR (2026-08-28, base 4e02f75c4 — every ordered gate met: the
+  **THE FLIP PR (#6535, 2026-08-28, base 4e02f75c4 — every ordered gate
+  met: the
   ON-skip registry EMPTY across all four suites (#6528, the
   ruled-3b-close lift), OW31's ruled posture BUILT, OW45–OW53 CLOSED,
   OW38(ii) RULED met ("topics numbers are fine"). The owner merges it

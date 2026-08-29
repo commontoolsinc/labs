@@ -38,8 +38,9 @@ The arc's coordination state is carried HERE, on the branch, not in any
 agent's memory (owner directive 2026-08-18). This block is LIVE: update
 it in the PR that moves the state.
 
-**Delta 2026-08-28 (the FLIP PR — OPEN, the owner merges it personally;
-the soak starts at ITS merge): `SERVER_EXECUTION_DEFAULT_ENABLED` →
+**Delta 2026-08-28 (the FLIP PR —
+[#6535](https://github.com/commontoolsinc/labs/pull/6535), OPEN, the
+owner merges it personally; the soak starts at ITS merge): `SERVER_EXECUTION_DEFAULT_ENABLED` →
 `true`, with every ordered gate met on main at the base (4e02f75c4): the
 ON-skip registry EMPTY across all four suites (the ruled-3b-close lift,
 #6528), OW31's ruled posture BUILT, OW45–OW53 CLOSED, and the OW38(ii)
@@ -2076,10 +2077,11 @@ Tasks:
       via posture adoption; `PiecesController` hosts on the default
       package/pattern lanes)*;
       then (6) the flip PR, and the soak starts at ITS merge — **IN
-      PROGRESS 2026-08-28: the flip PR is OPEN (the coordination-state
-      delta above carries its number and contents; the owner reads and
-      merges it personally — the soak starts at that merge, and the OFF
-      path stays the rollback lever through it)**. OW31 (the
+      PROGRESS 2026-08-28: the flip PR is
+      [#6535](https://github.com/commontoolsinc/labs/pull/6535), OPEN
+      (the coordination-state delta above carries its contents; the
+      owner reads and merges it personally — the soak starts at that
+      merge, and the OFF path stays the rollback lever through it)**. OW31 (the
       service-principal write-authority posture) was RULED 2026-08-18 —
       the serving identity never writes users' home spaces; genesis
       under the space's own keys, owner := the acting user — and its
