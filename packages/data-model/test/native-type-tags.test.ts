@@ -28,6 +28,12 @@ import {
 } from "@/native-type-tags.ts";
 import { isValidFabricNativeObject } from "@/type-check.ts";
 import { tagFromNativeBuiltinClass } from "@/tagFromNativeBuiltinClass.ts";
+import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
+import { FabricEpochDay } from "@/fabric-primitives/FabricEpochDay.ts";
+import { FabricEpochNsec } from "@/fabric-primitives/FabricEpochNsec.ts";
+import { FabricHash } from "@/fabric-primitives/FabricHash.ts";
+import { FabricKeyPair } from "@/fabric-primitives/FabricKeyPair.ts";
+import { FabricRegExp } from "@/fabric-primitives/FabricRegExp.ts";
 import { LAYER_CORPUS } from "./fabric-value-corpus.ts";
 
 describe("native-type-tags", () => {
@@ -315,9 +321,19 @@ describe("native-type-tags", () => {
 
   describe("the builtin lookup and the full class lookup", () => {
     // `tagFromNativeClass()` asks `tagFromNativeBuiltinClass()` first and its
-    // own switch second, on the stated grounds that a class is in one list or
-    // the other and never both. Were a class in both, the order would silently
-    // decide its tag, so the corpus is walked to hold that apart.
+    // own switch second, which is only sound because no class is answered by
+    // both. Were one in both, the delegation order would silently decide its
+    // tag -- and the builtin lookup's own fallback, which claims any `Error`
+    // subclass, would reach a fabric class that happened to be one.
+    const fabricClasses = [
+      FabricBytes,
+      FabricEpochDay,
+      FabricEpochNsec,
+      FabricHash,
+      FabricKeyPair,
+      FabricRegExp,
+    ];
+
     const constructors = LAYER_CORPUS
       .filter(([, value]) => (value !== null) && (typeof value === "object"))
       .map(([label, value]) =>
@@ -325,32 +341,31 @@ describe("native-type-tags", () => {
       )
       .filter(([, ctor]) => typeof ctor === "function");
 
-    for (const [label, ctor] of constructors) {
-      it(`gives ${label} one tag, from one of the two`, () => {
-        const builtin = tagFromNativeBuiltinClass(ctor);
-        const full = tagFromNativeClass(ctor);
-        if (builtin !== null) {
-          // A builtin passes through the delegation unchanged.
-          expect(full).toBe(builtin);
-        } else {
-          // Anything else is the fabric switch's to answer, or nobody's.
-          expect(builtin).toBe(null);
-        }
+    // Partitioned here rather than inside a test, so that each assertion below
+    // is unconditional: a test that only asserts on one side of an `if` skips
+    // the case it was written for.
+    const builtinBacked = constructors
+      .filter(([, ctor]) => tagFromNativeBuiltinClass(ctor) !== null);
+
+    for (const [label, ctor] of builtinBacked) {
+      it(`passes ${label} through the delegation unchanged`, () => {
+        expect(tagFromNativeClass(ctor)).toBe(tagFromNativeBuiltinClass(ctor));
       });
     }
 
-    // Both arms have to be populated, or the loop above proves nothing about
-    // the split it is checking.
+    for (const cls of fabricClasses) {
+      it(`leaves \`${cls.name}\` to the fabric switch`, () => {
+        // The disjointness the delegation rests on, asserted against the
+        // fabric classes by name rather than against whatever the builtin
+        // lookup happens to decline.
+        expect(tagFromNativeBuiltinClass(cls)).toBe(null);
+        expect(tagFromNativeClass(cls)).not.toBe(null);
+      });
+    }
+
     it("reaches classes on both sides of the split", () => {
-      const builtins = constructors
-        .filter(([, ctor]) => tagFromNativeBuiltinClass(ctor) !== null);
-      const fabrics = constructors
-        .filter(([, ctor]) =>
-          (tagFromNativeBuiltinClass(ctor) === null) &&
-          (tagFromNativeClass(ctor) !== null)
-        );
-      expect(builtins.length).toBeGreaterThan(0);
-      expect(fabrics.length).toBeGreaterThan(0);
+      expect(builtinBacked.length).toBeGreaterThan(0);
+      expect(fabricClasses.length).toBeGreaterThan(0);
     });
   });
 });
