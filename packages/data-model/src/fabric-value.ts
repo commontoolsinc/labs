@@ -40,10 +40,12 @@ export {
 } from "./value-clone.ts";
 
 export {
+  assertValidFabricValueLayer,
   isFabricContainerValue,
   isFabricObjectOrArray,
   isFabricPlainContainer,
   isFabricPlainObject,
+  isValidFabricNativeObject,
   isValidFabricPlainObject,
   isValidFabricValue,
   isValidFabricValueLayer,
