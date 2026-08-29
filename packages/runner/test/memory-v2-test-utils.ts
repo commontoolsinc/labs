@@ -145,8 +145,19 @@ export abstract class ScriptedSessionTransport
   #sessionOpenCount = 0;
   #helloCount = 0;
 
+  readonly #script: {
+    /** Challenge-id prefix; keep unique per transport class. */
+    name: string;
+
+    /** sessionId confirmed on session.open and stamped on effect frames. */
+    sessionId: string;
+
+    /** The space effect frames (emitSync) are addressed to. */
+    space: MemorySpace;
+  };
+
   constructor(
-    private readonly script: {
+    script: {
       /** Challenge-id prefix; keep unique per transport class. */
       name: string;
 
@@ -156,7 +167,9 @@ export abstract class ScriptedSessionTransport
       /** The space effect frames (emitSync) are addressed to. */
       space: MemorySpace;
     },
-  ) {}
+  ) {
+    this.#script = script;
+  }
 
   setReceiver(receiver: (payload: string) => void): void {
     this.#receiver = receiver;
@@ -210,7 +223,7 @@ export abstract class ScriptedSessionTransport
       case "hello":
         this.onHello(++this.#helloCount);
         this.#sessionOpen = testSessionOpenAuthMetadata(
-          `${this.script.name}-hello-${this.#helloCount}`,
+          `${this.#script.name}-hello-${this.#helloCount}`,
         );
         this.respond({
           type: "hello.ok",
@@ -226,13 +239,13 @@ export abstract class ScriptedSessionTransport
           this.#sessionOpen.challenge.value,
         );
         this.#sessionOpen = testSessionOpenAuthMetadata(
-          `${this.script.name}-open-${++this.#sessionOpenCount}`,
+          `${this.#script.name}-open-${++this.#sessionOpenCount}`,
         );
         this.respond({
           type: "response",
           requestId: message.requestId!,
           ok: {
-            sessionId: message.session?.sessionId ?? this.script.sessionId,
+            sessionId: message.session?.sessionId ?? this.#script.sessionId,
             serverSeq: this.openServerSeq(),
             sessionOpen: this.#sessionOpen,
           },
@@ -279,8 +292,8 @@ export abstract class ScriptedSessionTransport
   emitSync(sync: SessionSync): void {
     this.respond({
       type: "session/effect",
-      space: this.script.space,
-      sessionId: this.script.sessionId,
+      space: this.#script.space,
+      sessionId: this.#script.sessionId,
       effect: sync,
     });
   }
@@ -290,8 +303,8 @@ export abstract class ScriptedSessionTransport
   emitRevoked(reason: "taken-over" | "unauthorized" = "taken-over"): void {
     this.respond({
       type: "session/revoked",
-      space: this.script.space,
-      sessionId: this.script.sessionId,
+      space: this.#script.space,
+      sessionId: this.#script.sessionId,
       reason,
     });
   }
@@ -301,14 +314,18 @@ export class SingleSessionFactory implements SessionFactory {
   client: MemoryV2Client.Client | null = null;
   session: MemoryV2Client.SpaceSession | null = null;
 
-  constructor(private readonly transport: MemoryV2Client.Transport) {}
+  readonly #transport: MemoryV2Client.Transport;
+
+  constructor(transport: MemoryV2Client.Transport) {
+    this.#transport = transport;
+  }
 
   async create(space: MemorySpace) {
     if (this.client !== null) {
       throw new Error(`Session already created for ${space}`);
     }
     const client = await MemoryV2Client.connect({
-      transport: this.transport,
+      transport: this.#transport,
     });
     const session = await client.mount(space, {}, testSessionOpenAuthFactory);
     this.client = client;

@@ -203,14 +203,14 @@ class ScriptedServerModel {
   }
 
   seed(id: URI, value: RootValue): DocState {
-    return this.applyRootCommit({
+    return this.#applyRootCommit({
       label: "seed",
       operations: [{ op: value === undefined ? "delete" : "set", id, value }],
     }).states.get(id)!;
   }
 
   injectRemote(remote: RemoteCommit): void {
-    this.applyRootCommit(remote);
+    this.#applyRootCommit(remote);
   }
 
   transact(
@@ -230,7 +230,7 @@ class ScriptedServerModel {
 
     const scripted = this.scripted.get(commit.localSeq) ?? { kind: "accept" };
     if (scripted.remoteInterleave) {
-      this.applyRootCommit(scripted.remoteInterleave);
+      this.#applyRootCommit(scripted.remoteInterleave);
     }
 
     // A scripted retryAfterSeq marks whichever ConflictError this commit
@@ -243,9 +243,9 @@ class ScriptedServerModel {
     const readError =
       scripted.kind === "accept" && scripted.skipReadValidation === true
         ? null
-        : this.validateReads(commit);
+        : this.#validateReads(commit);
     if (readError) {
-      return this.reject(
+      return this.#reject(
         commit,
         retryAfterSeq === undefined
           ? readError
@@ -259,7 +259,7 @@ class ScriptedServerModel {
       scripted.kind === "dropThenReplayReject";
 
     if (shouldReject) {
-      const rejected = this.reject(commit, {
+      const rejected = this.#reject(commit, {
         name: "ConflictError",
         message: scripted.message ?? "synthetic conflict",
         ...(retryAfterSeq !== undefined ? { retryAfterSeq } : {}),
@@ -271,7 +271,7 @@ class ScriptedServerModel {
       return rejected;
     }
 
-    const applied = this.accept(commit);
+    const applied = this.#accept(commit);
     if (shouldDrop && !this.dropped.has(commit.localSeq)) {
       this.dropped.add(commit.localSeq);
       return { type: "drop" };
@@ -279,7 +279,7 @@ class ScriptedServerModel {
     return applied;
   }
 
-  private validateReads(
+  #validateReads(
     commit: ClientCommit,
   ): RejectionError | null {
     for (const read of commit.reads.pending) {
@@ -344,7 +344,7 @@ class ScriptedServerModel {
     return null;
   }
 
-  private reject(
+  #reject(
     commit: ClientCommit,
     error: RejectionError,
   ) {
@@ -356,7 +356,7 @@ class ScriptedServerModel {
     return { type: "reject" as const, error };
   }
 
-  private accept(commit: ClientCommit) {
+  #accept(commit: ClientCommit) {
     const touched = commit.operations.flatMap((operation) =>
       touchedWritesForOperation(operation)
     );
@@ -398,7 +398,7 @@ class ScriptedServerModel {
     return { type: "accept" as const, applied };
   }
 
-  private applyRootCommit(
+  #applyRootCommit(
     remote: RemoteCommit,
   ): { states: Map<URI, DocState> } {
     const seq = ++this.serverSeq;

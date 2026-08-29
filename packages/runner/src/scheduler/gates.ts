@@ -22,19 +22,29 @@ interface DebouncedComputationContext {
 }
 
 export class SchedulerGates {
-  private readonly stagedGates = new WeakMap<Action, SchedulerGateState>();
-  private wakeTimer: ReturnType<typeof setTimeout> | null = null;
-  private wakeAt: number | null = null;
+  readonly #stagedGates = new WeakMap<Action, SchedulerGateState>();
+  #wakeTimer: ReturnType<typeof setTimeout> | null = null;
+  #wakeAt: number | null = null;
+
+  readonly #state: {
+    readonly nodes: NodeRegistry;
+    readonly actionStats: ReadonlyMap<string, ActionStats>;
+    readonly getActionId: (action: Action) => string;
+    readonly isDisposed: () => boolean;
+    readonly queueExecution: () => void;
+  };
 
   constructor(
-    private readonly state: {
+    state: {
       readonly nodes: NodeRegistry;
       readonly actionStats: ReadonlyMap<string, ActionStats>;
       readonly getActionId: (action: Action) => string;
       readonly isDisposed: () => boolean;
       readonly queueExecution: () => void;
     },
-  ) {}
+  ) {
+    this.#state = state;
+  }
 
   /**
    * Hold a just-registered action's initial run until `notBefore` (used for
@@ -44,28 +54,28 @@ export class SchedulerGates {
    * is released early via releaseInitialRunHold when the space sync completes.
    */
   holdInitialRun(action: Action, notBefore: number): void {
-    const gate = this.mutableGate(action);
+    const gate = this.#mutableGate(action);
     gate.backoffUntil = Math.max(gate.backoffUntil ?? 0, notBefore);
     this.scheduleWake(notBefore);
   }
 
   releaseInitialRunHold(action: Action): void {
-    const record = this.state.nodes.get(action);
+    const record = this.#state.nodes.get(action);
     if (!record?.gate?.backoffUntil) return;
     record.gate.backoffUntil = 0;
     this.recomputeWakeAfterClear();
   }
 
   adopt(action: Action): void {
-    const record = this.state.nodes.get(action);
-    const staged = this.stagedGates.get(action);
+    const record = this.#state.nodes.get(action);
+    const staged = this.#stagedGates.get(action);
     if (!record || !staged) return;
     record.gate = { ...record.gate, ...staged };
-    this.stagedGates.delete(action);
+    this.#stagedGates.delete(action);
   }
 
   setDebounce(action: Action, ms: number): void {
-    const gate = this.mutableGate(action);
+    const gate = this.#mutableGate(action);
     if (ms <= 0) {
       delete gate.debounceMs;
       this.clearComputationDebounceState(action);
@@ -98,7 +108,7 @@ export class SchedulerGates {
   }
 
   setNoDebounce(action: Action, optOut: boolean): void {
-    const gate = this.mutableGate(action);
+    const gate = this.#mutableGate(action);
     if (optOut) {
       gate.noAutoDebounce = true;
     } else {
@@ -135,11 +145,11 @@ export class SchedulerGates {
     | undefined {
     if (!context.canAutomaticallyDebounce(action)) return undefined;
 
-    const gate = this.mutableGate(action);
+    const gate = this.#mutableGate(action);
     if (gate.debounceMs !== undefined) return undefined;
 
-    const actionId = this.state.getActionId(action);
-    const stats = this.state.actionStats.get(actionId);
+    const actionId = this.#state.getActionId(action);
+    const stats = this.#state.actionStats.get(actionId);
     if (!stats) return undefined;
     if (stats.runCount < AUTO_DEBOUNCE_MIN_RUNS) return undefined;
     if (stats.averageTime < AUTO_DEBOUNCE_THRESHOLD_MS) return undefined;
@@ -156,7 +166,7 @@ export class SchedulerGates {
   markActionHasRun(action: Action): void {
     const gate = this.gate(action);
     if (gate) delete gate.debounceReadyAt;
-    this.armThrottleFromStats(action);
+    this.#armThrottleFromStats(action);
   }
 
   onInvalidated(
@@ -164,10 +174,12 @@ export class SchedulerGates {
     now = performance.now(),
     context?: DebouncedComputationContext,
   ): void {
-    if (!context || !this.shouldDebouncePullComputation(node.action, context)) {
+    if (
+      !context || !this.#shouldDebouncePullComputation(node.action, context)
+    ) {
       return;
     }
-    this.armComputationDebounce(node.action, context, now);
+    this.#armComputationDebounce(node.action, context, now);
   }
 
   onRunCompleted(
@@ -184,7 +196,7 @@ export class SchedulerGates {
       thresholdMs: number;
     }
     | undefined {
-    this.armThrottleFromStats(node.action);
+    this.#armThrottleFromStats(node.action);
     return this.maybeAutoDebounce(node.action, context);
   }
 
@@ -212,7 +224,7 @@ export class SchedulerGates {
       readonly isInvalid: (action: Action) => boolean;
     },
   ): number | undefined {
-    if (!this.shouldDebouncePullComputation(action, context)) {
+    if (!this.#shouldDebouncePullComputation(action, context)) {
       return undefined;
     }
     if (!context.isInvalid(action)) return undefined;
@@ -250,19 +262,19 @@ export class SchedulerGates {
 
     this.cancelDebounceTimer(action);
 
-    const gate = this.mutableGate(action);
+    const gate = this.#mutableGate(action);
     const readyAt = performance.now() + debounceMs;
     gate.debounceReadyAt = readyAt;
     this.scheduleWake(readyAt);
 
     context.logDebounce(
-      `[DEBOUNCE] Action ${this.state.getActionId(action)} ` +
+      `[DEBOUNCE] Action ${this.#state.getActionId(action)} ` +
         `debounced for ${debounceMs}ms`,
     );
   }
 
   setThrottle(action: Action, ms: number): void {
-    const gate = this.mutableGate(action);
+    const gate = this.#mutableGate(action);
     const previousReadyAt = gate.throttleReadyAt;
     if (ms <= 0) {
       delete gate.throttleMs;
@@ -270,7 +282,7 @@ export class SchedulerGates {
       this.recomputeWakeAfterClear();
     } else {
       gate.throttleMs = ms;
-      this.armThrottleFromStats(action);
+      this.#armThrottleFromStats(action);
       if (
         previousReadyAt !== undefined &&
         (gate.throttleReadyAt ?? 0) < previousReadyAt
@@ -293,7 +305,7 @@ export class SchedulerGates {
   }
 
   isThrottled(action: Action, now = performance.now()): boolean {
-    const record = this.state.nodes.get(action);
+    const record = this.#state.nodes.get(action);
     if (!record) return false;
     return (record.gate.throttleReadyAt ?? 0) > now;
   }
@@ -314,7 +326,7 @@ export class SchedulerGates {
     action: Action,
     now = performance.now(),
   ): number | undefined {
-    const record = this.state.nodes.get(action);
+    const record = this.#state.nodes.get(action);
     if (!record) return undefined;
     const eligibleAt = this.eligibleAt(record);
     return eligibleAt > now ? eligibleAt : undefined;
@@ -339,32 +351,34 @@ export class SchedulerGates {
   }
 
   scheduleWake(at: number): void {
-    if (this.state.isDisposed()) return;
-    if (this.wakeAt !== null && this.wakeAt <= at && this.wakeTimer !== null) {
+    if (this.#state.isDisposed()) return;
+    if (
+      this.#wakeAt !== null && this.#wakeAt <= at && this.#wakeTimer !== null
+    ) {
       return;
     }
 
     this.cancelWake();
 
     const delay = Math.max(0, at - performance.now());
-    this.wakeAt = at;
-    this.wakeTimer = setTimeout(() => {
-      this.wakeTimer = null;
-      this.wakeAt = null;
-      this.state.queueExecution();
+    this.#wakeAt = at;
+    this.#wakeTimer = setTimeout(() => {
+      this.#wakeTimer = null;
+      this.#wakeAt = null;
+      this.#state.queueExecution();
     }, delay);
   }
 
   cancelWake(): void {
-    if (this.wakeTimer !== null) {
-      clearTimeout(this.wakeTimer);
-      this.wakeTimer = null;
+    if (this.#wakeTimer !== null) {
+      clearTimeout(this.#wakeTimer);
+      this.#wakeTimer = null;
     }
-    this.wakeAt = null;
+    this.#wakeAt = null;
   }
 
   hasWakeTimer(): boolean {
-    return this.wakeTimer !== null;
+    return this.#wakeTimer !== null;
   }
 
   /**
@@ -378,9 +392,9 @@ export class SchedulerGates {
    * idle() can resolve promptly).
    */
   recomputeWakeAfterClear(): void {
-    if (this.state.isDisposed()) return;
+    if (this.#state.isDisposed()) return;
     this.cancelWake();
-    this.state.queueExecution();
+    this.#state.queueExecution();
   }
 
   clearBackoff(node: SchedulerNode): boolean {
@@ -391,7 +405,7 @@ export class SchedulerGates {
     return clearedDeadline;
   }
 
-  private armComputationDebounce(
+  #armComputationDebounce(
     action: Action,
     context: DebouncedComputationContext,
     now: number,
@@ -401,18 +415,18 @@ export class SchedulerGates {
 
     this.cancelDebounceTimer(action);
 
-    const gate = this.mutableGate(action);
+    const gate = this.#mutableGate(action);
     const readyAt = now + debounceMs;
     gate.debounceReadyAt = readyAt;
     this.scheduleWake(readyAt);
 
     context.logDebounce(
-      `[DEBOUNCE] Computation ${this.state.getActionId(action)} ` +
+      `[DEBOUNCE] Computation ${this.#state.getActionId(action)} ` +
         `trailing flush scheduled for ${debounceMs}ms`,
     );
   }
 
-  private shouldDebouncePullComputation(
+  #shouldDebouncePullComputation(
     action: Action,
     context: {
       readonly computations: ReadonlySet<Action>;
@@ -422,7 +436,7 @@ export class SchedulerGates {
   ): boolean {
     const gate = this.gate(action);
     const debounceMs = gate?.debounceMs;
-    const hasRun = this.state.nodes.get(action)?.status !== "never-ran";
+    const hasRun = this.#state.nodes.get(action)?.status !== "never-ran";
     return context.computations.has(action) &&
       !context.effects.has(action) &&
       (hasRun || context.shouldDebounceFirstRun?.(action) === true) &&
@@ -430,7 +444,7 @@ export class SchedulerGates {
       debounceMs > 0;
   }
 
-  private armThrottleFromStats(action: Action): void {
+  #armThrottleFromStats(action: Action): void {
     const gate = this.gate(action);
     const throttleMs = gate?.throttleMs;
     if (!gate || !throttleMs || throttleMs <= 0) {
@@ -438,7 +452,7 @@ export class SchedulerGates {
       return;
     }
 
-    const stats = this.state.actionStats.get(this.state.getActionId(action));
+    const stats = this.#state.actionStats.get(this.#state.getActionId(action));
     if (!stats) {
       delete gate.throttleReadyAt;
       return;
@@ -447,17 +461,17 @@ export class SchedulerGates {
   }
 
   private gate(action: Action): SchedulerGateState | undefined {
-    return this.state.nodes.get(action)?.gate ?? this.stagedGates.get(action);
+    return this.#state.nodes.get(action)?.gate ?? this.#stagedGates.get(action);
   }
 
-  private mutableGate(action: Action): SchedulerGateState {
-    const record = this.state.nodes.get(action);
+  #mutableGate(action: Action): SchedulerGateState {
+    const record = this.#state.nodes.get(action);
     if (record) return record.gate;
 
-    let gate = this.stagedGates.get(action);
+    let gate = this.#stagedGates.get(action);
     if (!gate) {
       gate = { backoffStreak: 0, convergenceHoldPasses: 0 };
-      this.stagedGates.set(action, gate);
+      this.#stagedGates.set(action, gate);
     }
     return gate;
   }

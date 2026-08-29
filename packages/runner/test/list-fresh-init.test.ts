@@ -36,9 +36,13 @@ function lb(s: MemoryV2Server.Server) {
   return MemoryV2Client.loopback(s);
 }
 class F implements SessionFactory {
-  constructor(private gs: () => MemoryV2Server.Server) {}
+  #gs: () => MemoryV2Server.Server;
+
+  constructor(gs: () => MemoryV2Server.Server) {
+    this.#gs = gs;
+  }
   async create(spaceId: string, sgnr?: Signer) {
-    const client = await MemoryV2Client.connect({ transport: lb(this.gs()) });
+    const client = await MemoryV2Client.connect({ transport: lb(this.#gs()) });
     const session = await client.mount(
       spaceId,
       {},

@@ -55,10 +55,16 @@ class SabotagedReconnectTransport implements MemoryV2Client.Transport {
   #dropResponses = false;
   #dropped = new Set<number>();
 
+  readonly #server: MemoryV2Server.Server;
+  readonly #dropOnFirstLocalSeqs: number[];
+
   constructor(
-    private readonly server: MemoryV2Server.Server,
-    private readonly dropOnFirstLocalSeqs: number[] = [],
-  ) {}
+    server: MemoryV2Server.Server,
+    dropOnFirstLocalSeqs: number[] = [],
+  ) {
+    this.#server = server;
+    this.#dropOnFirstLocalSeqs = dropOnFirstLocalSeqs;
+  }
 
   setReceiver(receiver: (payload: string) => void): void {
     this.#receiver = receiver;
@@ -78,7 +84,7 @@ class SabotagedReconnectTransport implements MemoryV2Client.Transport {
     if (
       message.type === "transact" &&
       typeof localSeq === "number" &&
-      this.dropOnFirstLocalSeqs.includes(localSeq) &&
+      this.#dropOnFirstLocalSeqs.includes(localSeq) &&
       !this.#dropped.has(localSeq)
     ) {
       this.#dropped.add(localSeq);
@@ -111,7 +117,7 @@ class SabotagedReconnectTransport implements MemoryV2Client.Transport {
     if (this.#connection === null) {
       this.connectionCount++;
       this.onConnectionCount?.(this.connectionCount);
-      this.#connection = this.server.connect((message) => {
+      this.#connection = this.#server.connect((message) => {
         if (!this.#dropResponses) {
           this.#receiver(encodeMemoryBoundary(message));
         }

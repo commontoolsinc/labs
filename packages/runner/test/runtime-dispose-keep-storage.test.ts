@@ -54,10 +54,14 @@ const SCHEMA = {
 } as const;
 
 class LoopbackSessionFactory implements SessionFactory {
-  constructor(private readonly server: MemoryV2Server.Server) {}
+  readonly #server: MemoryV2Server.Server;
+
+  constructor(server: MemoryV2Server.Server) {
+    this.#server = server;
+  }
   async create(id: string, signer?: Signer) {
     const client = await MemoryV2Client.connect({
-      transport: MemoryV2Client.loopback(this.server),
+      transport: MemoryV2Client.loopback(this.#server),
     });
     const session = await client.mount(
       id as MemorySpace,
