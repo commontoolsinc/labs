@@ -156,9 +156,6 @@
           "authorId": {
             "type": "string"
           },
-          "endSeconds": {
-            "type": "number"
-          },
           "id": {
             "type": "string"
           },
@@ -171,14 +168,25 @@
           "note": {
             "type": "string"
           },
-          "startSeconds": {
-            "type": "number"
+          "range": {
+            "properties": {
+              "endSeconds": {
+                "type": "number"
+              },
+              "startSeconds": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "startSeconds",
+              "endSeconds"
+            ],
+            "type": "object"
           }
         },
         "required": [
           "id",
-          "startSeconds",
-          "endSeconds",
+          "range",
           "label",
           "note",
           "authorId",

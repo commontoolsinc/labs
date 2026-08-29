@@ -5,11 +5,29 @@ export type SignalBandFilter = SignalBand | "all";
 export const FIELD_WIDTH = 120;
 export const FIELD_HEIGHT = 75;
 
+export function clampTimeCursor(
+  timeCursor: number,
+  timeStart: number,
+  timeEnd: number,
+): number {
+  const low = Math.min(timeStart, timeEnd);
+  const high = Math.max(timeStart, timeEnd);
+  return Math.min(high, Math.max(low, timeCursor));
+}
+
 export function capturedAction<Value, Result>(
   value: Value,
   action: (value: Value) => Promise<Result>,
 ): () => Promise<Result> {
   return () => action(value);
+}
+
+/** Clears a submitted field only when it has not been edited since capture. */
+export function canClearSubmittedDraft(
+  submittedGeneration: number,
+  currentGeneration: number,
+): boolean {
+  return submittedGeneration === currentGeneration;
 }
 
 export function visibleObservations(

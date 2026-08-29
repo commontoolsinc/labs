@@ -10,6 +10,7 @@ import {
   actionDisposition,
   advanceFire,
   describeTile,
+  initializeRenderer,
   normalizedBoardDimensions,
   normalizedMaximumTurns,
   reduceSimulation,
@@ -26,6 +27,20 @@ const input: IframeInputData = {
 };
 
 describe("simulation", () => {
+  describe("initializeRenderer()", () => {
+    it("surfaces and preserves a renderer bootstrap failure", () => {
+      const failure = new Error("WebGL unavailable");
+      const seen: unknown[] = [];
+
+      expect(() =>
+        initializeRenderer(() => {
+          throw failure;
+        }, (cause) => seen.push(cause))
+      ).toThrow(failure);
+      expect(seen).toEqual([failure]);
+    });
+  });
+
   describe("reduceSimulation()", () => {
     it("returns the same seeded board for the same semantic action log", () => {
       const initial = reduceSimulation(input, []);

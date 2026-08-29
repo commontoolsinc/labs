@@ -26,7 +26,7 @@ export interface ModuleSnapClaim {
   movingConnectorId: string;
   targetModuleId: string;
   targetConnectorId: string;
-  transform: ModuleTransform;
+  rotationQuarterTurns: number;
 }
 
 export interface StationModule {

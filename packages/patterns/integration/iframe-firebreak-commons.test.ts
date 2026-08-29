@@ -44,6 +44,26 @@ interface GuestSummary {
   hasCanvas: boolean;
 }
 
+function guestSummaryReader(condition = "true"): string {
+  return `() => {
+    const app = document.querySelector('#firebreak-app');
+    const selected = document.querySelector('[data-tool][aria-pressed="true"]');
+    const actions = [...document.querySelectorAll('#action-log li[data-action-id]')];
+    const summary = {
+      ready: app?.getAttribute('data-ready') === 'true',
+      turn: app?.getAttribute('data-turn') ?? '',
+      status: app?.getAttribute('data-status') ?? '',
+      crewName: document.querySelector('#crew-name')?.value ?? '',
+      crewColor: app?.getAttribute('data-crew-color') ?? '',
+      selectedTool: selected?.getAttribute('data-tool') ?? '',
+      actionCount: actions.length,
+      actionText: actions.map((item) => item.textContent ?? '').join(' '),
+      hasCanvas: document.querySelector('#game canvas') !== null,
+    };
+    return (${condition}) ? summary : false;
+  }`;
+}
+
 class GuestDomDriver {
   readonly #socket: WebSocket;
   readonly #sessionId: string;
@@ -300,22 +320,7 @@ class GuestDomDriver {
   }
 
   summary(): Promise<GuestSummary> {
-    return this.evaluate<GuestSummary>(`(() => {
-      const app = document.querySelector('#firebreak-app');
-      const selected = document.querySelector('[data-tool][aria-pressed="true"]');
-      const actions = [...document.querySelectorAll('#action-log li[data-action-id]')];
-      return {
-        ready: app?.getAttribute('data-ready') === 'true',
-        turn: app?.getAttribute('data-turn') ?? '',
-        status: app?.getAttribute('data-status') ?? '',
-        crewName: document.querySelector('#crew-name')?.value ?? '',
-        crewColor: app?.getAttribute('data-crew-color') ?? '',
-        selectedTool: selected?.getAttribute('data-tool') ?? '',
-        actionCount: actions.length,
-        actionText: actions.map((item) => item.textContent ?? '').join(' '),
-        hasCanvas: document.querySelector('#game canvas') !== null,
-      };
-    })()`);
+    return this.evaluate<GuestSummary>(`(${guestSummaryReader()})()`);
   }
 
   close(): void {
@@ -335,73 +340,27 @@ async function waitForGuestFrame(page: Page): Promise<void> {
 }
 
 function readySummary(driver: GuestDomDriver): Promise<GuestSummary> {
-  return driver.waitFor<GuestSummary>(`() => {
-    const app = document.querySelector('#firebreak-app');
-    if (app?.getAttribute('data-ready') !== 'true') return false;
-    const selected = document.querySelector('[data-tool][aria-pressed="true"]');
-    const actions = [...document.querySelectorAll('#action-log li[data-action-id]')];
-    return {
-      ready: true,
-      turn: app.getAttribute('data-turn') ?? '',
-      status: app.getAttribute('data-status') ?? '',
-      crewName: document.querySelector('#crew-name')?.value ?? '',
-      crewColor: app.getAttribute('data-crew-color') ?? '',
-      selectedTool: selected?.getAttribute('data-tool') ?? '',
-      actionCount: actions.length,
-      actionText: actions.map((item) => item.textContent ?? '').join(' '),
-      hasCanvas: document.querySelector('#game canvas') !== null,
-    };
-  }`);
+  return driver.waitFor<GuestSummary>(guestSummaryReader("summary.ready"));
 }
 
 function waitForActionCount(
   driver: GuestDomDriver,
   count: number,
 ): Promise<GuestSummary> {
-  return driver.waitFor<GuestSummary>(`() => {
-    const app = document.querySelector('#firebreak-app');
-    const actions = [...document.querySelectorAll('#action-log li[data-action-id]')];
-    if (app?.getAttribute('data-ready') !== 'true' || actions.length < ${count}) {
-      return false;
-    }
-    const selected = document.querySelector('[data-tool][aria-pressed="true"]');
-    return {
-      ready: true,
-      turn: app.getAttribute('data-turn') ?? '',
-      status: app.getAttribute('data-status') ?? '',
-      crewName: document.querySelector('#crew-name')?.value ?? '',
-      crewColor: app.getAttribute('data-crew-color') ?? '',
-      selectedTool: selected?.getAttribute('data-tool') ?? '',
-      actionCount: actions.length,
-      actionText: actions.map((item) => item.textContent ?? '').join(' '),
-      hasCanvas: document.querySelector('#game canvas') !== null,
-    };
-  }`);
+  return driver.waitFor<GuestSummary>(
+    guestSummaryReader(`summary.ready && summary.actionCount >= ${count}`),
+  );
 }
 
 function waitForTurn(
   driver: GuestDomDriver,
   turn: number,
 ): Promise<GuestSummary> {
-  return driver.waitFor<GuestSummary>(`() => {
-    const app = document.querySelector('#firebreak-app');
-    if (app?.getAttribute('data-turn') !== ${JSON.stringify(String(turn))}) {
-      return false;
-    }
-    const selected = document.querySelector('[data-tool][aria-pressed="true"]');
-    const actions = [...document.querySelectorAll('#action-log li[data-action-id]')];
-    return {
-      ready: app.getAttribute('data-ready') === 'true',
-      turn: app.getAttribute('data-turn') ?? '',
-      status: app.getAttribute('data-status') ?? '',
-      crewName: document.querySelector('#crew-name')?.value ?? '',
-      crewColor: app.getAttribute('data-crew-color') ?? '',
-      selectedTool: selected?.getAttribute('data-tool') ?? '',
-      actionCount: actions.length,
-      actionText: actions.map((item) => item.textContent ?? '').join(' '),
-      hasCanvas: document.querySelector('#game canvas') !== null,
-    };
-  }`);
+  return driver.waitFor<GuestSummary>(
+    guestSummaryReader(
+      `summary.ready && summary.turn === ${JSON.stringify(String(turn))}`,
+    ),
+  );
 }
 
 describe("iframe Firebreak Commons", () => {

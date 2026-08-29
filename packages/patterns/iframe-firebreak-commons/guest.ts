@@ -17,6 +17,7 @@ import {
   actionDisposition,
   canonicalActions,
   describeTile,
+  initializeRenderer,
   normalizedBoardDimensions,
   normalizedMaximumTurns,
   reduceSimulation,
@@ -508,22 +509,31 @@ class FirebreakScene extends Phaser.Scene {
   }
 }
 
-const game = new Phaser.Game({
-  type: Phaser.AUTO,
-  parent: gameElement,
-  width: DEFAULT_INPUT.columns * TILE_SIZE,
-  height: DEFAULT_INPUT.rows * TILE_SIZE,
-  backgroundColor: "#101812",
-  scene: FirebreakScene,
-  scale: {
-    mode: Phaser.Scale.FIT,
-    autoCenter: Phaser.Scale.CENTER_BOTH,
+const game = initializeRenderer(
+  () =>
+    new Phaser.Game({
+      type: Phaser.AUTO,
+      parent: gameElement,
+      width: DEFAULT_INPUT.columns * TILE_SIZE,
+      height: DEFAULT_INPUT.rows * TILE_SIZE,
+      backgroundColor: "#101812",
+      scene: FirebreakScene,
+      scale: {
+        mode: Phaser.Scale.FIT,
+        autoCenter: Phaser.Scale.CENTER_BOTH,
+      },
+      render: {
+        antialias: true,
+        pixelArt: false,
+      },
+    }),
+  (cause) => {
+    showError(cause);
+    syncStatus.textContent = "The wildfire map could not start.";
+    abort.abort();
+    fabric.disconnect();
   },
-  render: {
-    antialias: true,
-    pixelArt: false,
-  },
-});
+);
 
 toolButtons.forEach((button) => {
   button.addEventListener("click", () => {

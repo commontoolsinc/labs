@@ -79,7 +79,9 @@ export function dedupeMachineEdges(
       unique.set(id, { id, source: edge.source, target: edge.target });
     }
   }
-  return [...unique.values()];
+  return [...unique.values()].sort((left, right) =>
+    left.id < right.id ? -1 : left.id > right.id ? 1 : 0
+  );
 }
 
 function outgoingNodes(
@@ -136,15 +138,39 @@ export function createsFeedbackCycle(
   return canReach(outgoingNodes(edges), target, source);
 }
 
+export interface CanonicalMachineEdges {
+  edges: MachineEdge[];
+  suppressed: MachineEdge[];
+}
+
+/**
+ * Selects one deterministic acyclic graph from independently appended wires.
+ * Conflicting wires remain visible to the caller so the stored conflict can be
+ * removed instead of silently disabling the machine.
+ */
+export function canonicalizeMachineEdges(
+  edges: readonly MachineEdge[],
+): CanonicalMachineEdges {
+  const canonical: MachineEdge[] = [];
+  const suppressed: MachineEdge[] = [];
+  for (const edge of dedupeMachineEdges(edges)) {
+    if (createsFeedbackCycle(canonical, edge.source, edge.target)) {
+      suppressed.push(edge);
+    } else {
+      canonical.push(edge);
+    }
+  }
+  return { edges: canonical, suppressed };
+}
+
 /** Evaluates the machine at one logical tick without storing derived state. */
 export function evaluateSignals(
   state: IframeStateData,
   tick: number,
 ): Map<string, number> {
   const nodes = new Map(state.nodes.map((node) => [node.id, node]));
-  const feedbackNodeIds = findFeedbackNodeIds(state.edges);
   const incoming = new Map<string, MachineEdge[]>();
-  for (const edge of dedupeMachineEdges(state.edges)) {
+  for (const edge of canonicalizeMachineEdges(state.edges).edges) {
     const edges = incoming.get(edge.target) ?? [];
     edges.push(edge);
     incoming.set(edge.target, edges);
@@ -156,7 +182,6 @@ export function evaluateSignals(
     atTick: number,
   ): number => {
     if (atTick < 0) return 0;
-    if (feedbackNodeIds.has(nodeId)) return 0;
     const memoKey = `${nodeId}@${atTick}`;
     const known = memo.get(memoKey);
     if (known !== undefined) return known;

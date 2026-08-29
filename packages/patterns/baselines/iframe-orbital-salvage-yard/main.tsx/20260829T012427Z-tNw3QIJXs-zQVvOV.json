@@ -181,14 +181,14 @@
           "movingConnectorId": {
             "type": "string"
           },
+          "rotationQuarterTurns": {
+            "type": "number"
+          },
           "targetConnectorId": {
             "type": "string"
           },
           "targetModuleId": {
             "type": "string"
-          },
-          "transform": {
-            "$ref": "#/$defs/ModuleTransform"
           }
         },
         "required": [
@@ -196,7 +196,7 @@
           "movingConnectorId",
           "targetModuleId",
           "targetConnectorId",
-          "transform"
+          "rotationQuarterTurns"
         ],
         "type": "object"
       },

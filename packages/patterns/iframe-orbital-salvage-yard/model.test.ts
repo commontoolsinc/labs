@@ -7,13 +7,17 @@ import {
   dragDisposition,
   initializeGraphics,
   isBookmarked,
+  markPointerCancelled,
   ownsDrag,
+  pointerWasCancelled,
   resolveSnapClaims,
   setBookmark,
   type WritableBookmarkMap,
+  writeModulePosition,
+  writeModuleRotation,
 } from "./model.ts";
-import type { ModuleSnapClaim } from "./contract.ts";
-import { findConnections } from "./geometry.ts";
+import type { ModuleSnapClaim, ModuleTransform } from "./contract.ts";
+import { findBestSnap, findConnections } from "./geometry.ts";
 
 const firstId = "123e4567-e89b-12d3-a456-426614174000";
 const secondId = "123e4567-e89b-12d3-a456-426614174001";
@@ -40,6 +44,53 @@ describe("model", () => {
       expect(dragDisposition({ pointerId: 17, moved: true }, 17, false)).toBe(
         "commit",
       );
+    });
+
+    it("restores when capture observes cancellation before Babylon emits pointer-up", () => {
+      const cancelledPointers = new Set<number>();
+      const active = { pointerId: 17, moved: true };
+
+      markPointerCancelled(cancelledPointers, 17);
+
+      expect(pointerWasCancelled(cancelledPointers, 17)).toBe(true);
+      expect(
+        dragDisposition(
+          active,
+          17,
+          pointerWasCancelled(cancelledPointers, 17),
+        ),
+      ).toBe("restore");
+    });
+  });
+
+  describe("transform field writes", () => {
+    it("composes a position and rotation written from stale snapshots", async () => {
+      const durable: ModuleTransform = {
+        position: [0, 1.2, 0],
+        rotationQuarterTurns: 0,
+      };
+      const stalePositionSnapshot = { ...durable };
+      const staleRotationSnapshot = { ...durable };
+
+      await Promise.all([
+        writeModulePosition({
+          set(value) {
+            durable.position = value;
+            return Promise.resolve();
+          },
+        }, [stalePositionSnapshot.position[0] + 5, 1.2, 0]),
+        writeModuleRotation({
+          set(value) {
+            durable.rotationQuarterTurns = value;
+            return Promise.resolve();
+          },
+        }, staleRotationSnapshot.rotationQuarterTurns + 1),
+      ]);
+
+      expect(durable).toEqual({
+        position: [5, 1.2, 0],
+        rotationQuarterTurns: 1,
+      });
     });
   });
 
@@ -131,14 +182,14 @@ describe("model", () => {
           movingConnectorId: "port-lock",
           targetModuleId: anchor.id,
           targetConnectorId: "east-lock",
-          transform: { position: [5, 1.2, 0], rotationQuarterTurns: 0 },
+          rotationQuarterTurns: 0,
         },
         [second.id]: {
           id: "claim-b",
           movingConnectorId: "port-lock",
           targetModuleId: anchor.id,
           targetConnectorId: "east-lock",
-          transform: { position: [5, 1.2, 0], rotationQuarterTurns: 0 },
+          rotationQuarterTurns: 0,
         },
       };
 
@@ -192,5 +243,93 @@ describe("model", () => {
       ).toEqual([5, 1.2, 0]);
       expect(findConnections(switched)).toHaveLength(1);
     });
+
+    it("derives an acyclic chain from each target's effective transform", () => {
+      const anchor = createSalvageModule("hub", "anchor");
+      anchor.transform.position = [0, 1.2, 0];
+      const first = createSalvageModule("cargo", "mover-a");
+      first.transform.position = [8, 1.2, 0];
+      const second = createSalvageModule("cargo", "mover-b");
+      second.transform.position = [14, 1.2, 0];
+      const claims: Record<string, ModuleSnapClaim> = {
+        [first.id]: {
+          id: "claim-a",
+          movingConnectorId: "port-lock",
+          targetModuleId: anchor.id,
+          targetConnectorId: "north-lock",
+          rotationQuarterTurns: 0,
+        },
+        [second.id]: {
+          id: "claim-b",
+          movingConnectorId: "port-lock",
+          targetModuleId: first.id,
+          targetConnectorId: "starboard-lock",
+          rotationQuarterTurns: 0,
+        },
+      };
+
+      const resolved = resolveSnapClaims([second, first, anchor], claims, {
+        "anchor::north-lock": "claim-a",
+        "mover-a::starboard-lock": "claim-b",
+      });
+
+      expect(resolved.find(({ id }) => id === first.id)?.transform.position)
+        .toEqual([0, 1.2, 5]);
+      expect(
+        resolved.find(({ id }) => id === first.id)?.transform
+          .rotationQuarterTurns,
+      ).toBe(3);
+      expect(resolved.find(({ id }) => id === second.id)?.transform.position)
+        .toEqual([0, 1.2, 10.2]);
+      expect(
+        resolved.find(({ id }) => id === second.id)?.transform
+          .rotationQuarterTurns,
+      ).toBe(3);
+      expect(findConnections(resolved).map(({ id }) => id)).toEqual([
+        "anchor:north-lock--mover-a:port-lock",
+        "mover-a:starboard-lock--mover-b:port-lock",
+      ]);
+    });
+
+    it("leaves reciprocal moving-target claims unapplied", () => {
+      const first = createSalvageModule("cargo", "mover-a");
+      first.transform.position = [5.5, 1.2, 0];
+      const second = createSalvageModule("cargo", "mover-b");
+      second.transform.position = [11, 1.2, 0];
+      const firstSnap = findBestSnap(first, [second], 1)!;
+      const secondSnap = findBestSnap(second, [first], 1)!;
+      const claims: Record<string, ModuleSnapClaim> = {
+        [first.id]: claimFromSnap("claim-a", firstSnap),
+        [second.id]: claimFromSnap("claim-b", secondSnap),
+      };
+
+      const resolved = resolveSnapClaims([first, second], claims, {
+        [
+          `${firstSnap.targetModuleId}::${firstSnap.targetConnectorId}`
+        ]: "claim-a",
+        [
+          `${secondSnap.targetModuleId}::${secondSnap.targetConnectorId}`
+        ]: "claim-b",
+      });
+
+      expect(resolved.map(({ transform }) => transform)).toEqual([
+        first.transform,
+        second.transform,
+      ]);
+      expect(findConnections(resolved)).toEqual([]);
+    });
   });
 });
+
+function claimFromSnap(
+  id: string,
+  snap: NonNullable<ReturnType<typeof findBestSnap>>,
+): ModuleSnapClaim {
+  return {
+    id,
+    movingConnectorId: snap.movingConnectorId,
+    targetModuleId: snap.targetModuleId,
+    targetConnectorId: snap.targetConnectorId,
+    rotationQuarterTurns: snap.transform.rotationQuarterTurns,
+  };
+}

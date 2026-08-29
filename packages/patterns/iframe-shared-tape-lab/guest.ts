@@ -15,6 +15,7 @@ import {
   cueSpecs,
   formatTime,
   normalizeDurationSeconds,
+  planDurationTransition,
   writeAnnotationEdits,
 } from "./model.ts";
 
@@ -40,6 +41,13 @@ let activeSource: AudioBufferSourceNode | undefined;
 let playbackOffsetSeconds = 0;
 let playbackStartedAt: number | undefined;
 let animationFrame: number | undefined;
+let loadedDurationSeconds: number | undefined;
+let requestedDurationSeconds: number | undefined;
+let durationSync: Promise<void> | undefined;
+let durationReady = false;
+let resumeAfterDurationSync = false;
+let failedDurationSeconds: number | undefined;
+let durationErrorMessage: string | undefined;
 let activeCueIds = new Set<string>();
 let dialogMode:
   | { kind: "new" }
@@ -253,11 +261,48 @@ const textTrack = audio.addTextTrack("metadata", "Shared annotations", "en");
 textTrack.mode = "hidden";
 
 function showError(cause: unknown): void {
+  durationErrorMessage = undefined;
   error.textContent = cause instanceof Error ? cause.message : String(cause);
 }
 
 function clearError(): void {
+  durationErrorMessage = undefined;
   error.textContent = "";
+}
+
+function showDurationError(cause: unknown): void {
+  const detail = cause instanceof Error ? cause.message : String(cause);
+  durationErrorMessage = `Could not update the recording duration. ${detail}`;
+  error.textContent = durationErrorMessage;
+}
+
+function clearDurationError(): void {
+  if (error.textContent === durationErrorMessage) error.textContent = "";
+  durationErrorMessage = undefined;
+}
+
+function durationControlsReady(): boolean {
+  return hydrated && durationReady && !disposed;
+}
+
+function currentRequestedDuration(): number {
+  return normalizeDurationSeconds(
+    input.get()?.durationSeconds ?? DEFAULT_INPUT.durationSeconds,
+  );
+}
+
+function applyDurationControlState(): void {
+  const ready = durationControlsReady();
+  audio.controls = ready;
+  scrubber.disabled = !ready;
+  addButton.disabled = !ready;
+  saveButton.disabled = dialogSaving || !ready;
+  if (audioBuffer) {
+    const duration = audioBuffer.duration;
+    scrubber.max = String(duration);
+    startInput.max = String(duration);
+    endInput.max = String(duration);
+  }
 }
 
 function syncCues(annotations: readonly TapeAnnotation[]): void {
@@ -281,7 +326,8 @@ function updateActiveCueIds(): void {
   activeCueIds = new Set(
     hydrated
       ? (state.get()?.annotations ?? []).filter((annotation) =>
-        annotation.startSeconds <= playhead && annotation.endSeconds >= playhead
+        annotation.range.startSeconds <= playhead &&
+        annotation.range.endSeconds >= playhead
       ).map((annotation) => annotation.id)
       : [],
   );
@@ -323,12 +369,12 @@ function render(): void {
     label.textContent = annotation.label;
     const range = document.createElement("button");
     range.type = "button";
-    range.textContent = `${formatTime(annotation.startSeconds)}–${
-      formatTime(annotation.endSeconds)
+    range.textContent = `${formatTime(annotation.range.startSeconds)}–${
+      formatTime(annotation.range.endSeconds)
     }`;
-    range.disabled = !hydrated;
+    range.disabled = !durationControlsReady();
     range.addEventListener("click", () => {
-      void seekPlayback(annotation.startSeconds).catch(showError);
+      void seekPlayback(annotation.range.startSeconds).catch(showError);
       void output.key("selectedAnnotationId").set(annotation.id).catch(
         showError,
       );
@@ -409,6 +455,7 @@ function render(): void {
     editButton.type = "button";
     editButton.textContent = "Edit annotation";
     editButton.dataset.testid = `edit-${annotation.id}`;
+    editButton.disabled = !durationControlsReady();
     editButton.addEventListener("click", () => openEditor(annotation), {
       signal,
     });
@@ -457,27 +504,26 @@ function setDialogSaving(saving: boolean): void {
   noteInput.disabled = saving;
   confidenceInput.disabled = saving || dialogMode.kind === "edit";
   cancelButton.disabled = saving;
-  saveButton.disabled = saving || !hydrated;
+  saveButton.disabled = saving || !durationControlsReady();
 }
 
 function openEditor(annotation?: TapeAnnotation): void {
-  if (dialogSaving) return;
+  if (dialogSaving || !durationControlsReady()) return;
   clearError();
   if (annotation) {
     dialogMode = {
       kind: "edit",
       id: annotation.id,
       baseline: {
-        startSeconds: annotation.startSeconds,
-        endSeconds: annotation.endSeconds,
+        range: { ...annotation.range },
         label: annotation.label,
         note: annotation.note,
       },
     };
     dialogTitle.textContent = "Edit shared annotation";
     saveButton.textContent = "Save changes";
-    startInput.value = annotation.startSeconds.toFixed(1);
-    endInput.value = annotation.endSeconds.toFixed(1);
+    startInput.value = annotation.range.startSeconds.toFixed(1);
+    endInput.value = annotation.range.endSeconds.toFixed(1);
     labelInput.value = annotation.label;
     noteInput.value = annotation.note;
     confidenceInput.value = String(
@@ -489,9 +535,7 @@ function openEditor(annotation?: TapeAnnotation): void {
     dialogMode = { kind: "new" };
     dialogTitle.textContent = "Mark the shared tape";
     saveButton.textContent = "Save annotation";
-    const duration = normalizeDurationSeconds(
-      input.get()?.durationSeconds ?? DEFAULT_INPUT.durationSeconds,
-    );
+    const duration = playbackDuration();
     const start = Math.min(
       playbackPosition(),
       Math.max(0, duration - 0.2),
@@ -511,11 +555,11 @@ function openEditor(annotation?: TapeAnnotation): void {
 }
 
 async function saveAnnotation(): Promise<void> {
-  if (!hydrated) return;
+  if (!durationControlsReady()) {
+    throw new Error("The recording duration is still updating.");
+  }
   clearError();
-  const duration = normalizeDurationSeconds(
-    input.get()?.durationSeconds ?? DEFAULT_INPUT.durationSeconds,
-  );
+  const duration = playbackDuration();
   const startSeconds = Number(startInput.value);
   const endSeconds = Number(endInput.value);
   const label = labelInput.value.trim();
@@ -536,8 +580,7 @@ async function saveAnnotation(): Promise<void> {
   if (mode.kind === "new") {
     const annotation: TapeAnnotation = {
       id: crypto.randomUUID(),
-      startSeconds,
-      endSeconds,
+      range: { startSeconds, endSeconds },
       label,
       note,
       authorId: reviewerId,
@@ -553,8 +596,7 @@ async function saveAnnotation(): Promise<void> {
     }
     const resolved = await annotationsCell.key(index).resolve();
     const next = {
-      startSeconds,
-      endSeconds,
+      range: { startSeconds, endSeconds },
       label,
       note,
     };
@@ -624,7 +666,10 @@ function updatePlaybackFrame(): void {
 }
 
 async function startPlayback(): Promise<void> {
-  if (!audioContext || !audioBuffer || !mediaDestination || activeSource) {
+  if (
+    !durationControlsReady() || !audioContext || !audioBuffer ||
+    !mediaDestination || activeSource
+  ) {
     return;
   }
   if (playbackOffsetSeconds >= audioBuffer.duration) {
@@ -654,6 +699,7 @@ async function startPlayback(): Promise<void> {
 }
 
 async function seekPlayback(seconds: number): Promise<void> {
+  if (!durationControlsReady()) return;
   const wasPlaying = activeSource !== undefined && !audio.paused;
   stopPlaybackSource();
   playbackOffsetSeconds = Math.min(
@@ -662,6 +708,113 @@ async function seekPlayback(seconds: number): Promise<void> {
   );
   updateTimecode();
   if (wasPlaying) await startPlayback();
+}
+
+async function rebuildAudioBuffer(durationSeconds: number): Promise<void> {
+  if (!audioContext) throw new Error("The audio engine is not available.");
+  const buffer = await audioContext.decodeAudioData(
+    buildSyntheticWav(durationSeconds),
+  );
+  if (disposed) return;
+
+  const plan = planDurationTransition(
+    buffer.duration,
+    playbackOffsetSeconds,
+    resumeAfterDurationSync,
+  );
+  audioBuffer = buffer;
+  loadedDurationSeconds = durationSeconds;
+  playbackOffsetSeconds = plan.positionSeconds;
+  resumeAfterDurationSync = plan.resumePlayback;
+  applyDurationControlState();
+  updateTimecode();
+}
+
+async function synchronizeRequestedDurations(): Promise<void> {
+  durationReady = false;
+  resumeAfterDurationSync = activeSource !== undefined && !audio.paused;
+  stopPlaybackSource();
+  status.textContent = "Updating recording duration…";
+  status.dataset.ready = "false";
+  applyDurationControlState();
+  renderSafely();
+
+  let failure: unknown;
+  while (requestedDurationSeconds !== undefined && !disposed) {
+    const duration = requestedDurationSeconds;
+    requestedDurationSeconds = undefined;
+    if (duration === loadedDurationSeconds) {
+      failure = undefined;
+      failedDurationSeconds = undefined;
+      continue;
+    }
+    try {
+      await rebuildAudioBuffer(duration);
+      failure = undefined;
+      failedDurationSeconds = undefined;
+    } catch (cause) {
+      failure = cause;
+      failedDurationSeconds = duration;
+    }
+  }
+  if (disposed) return;
+
+  const currentDuration = currentRequestedDuration();
+  durationReady = failure === undefined &&
+    loadedDurationSeconds === currentDuration;
+  applyDurationControlState();
+  renderSafely();
+  updateTimecode();
+
+  if (!durationReady) {
+    if (!audio.paused) audio.pause();
+    showDurationError(failure);
+    status.textContent = "Recording duration update failed";
+    status.dataset.ready = "false";
+    return;
+  }
+
+  clearDurationError();
+  status.textContent = "Shared tape ready";
+  status.dataset.ready = "true";
+  if (resumeAfterDurationSync && !audio.paused) {
+    await startPlayback();
+  } else if (!audio.paused) {
+    audio.pause();
+  }
+}
+
+function requestDurationSync(): void {
+  if (!hydrated || disposed) return;
+  const duration = currentRequestedDuration();
+  if (
+    duration === loadedDurationSeconds && durationReady &&
+    durationSync === undefined
+  ) {
+    return;
+  }
+  if (
+    duration === failedDurationSeconds && durationSync === undefined
+  ) {
+    return;
+  }
+  if (duration !== failedDurationSeconds) failedDurationSeconds = undefined;
+  requestedDurationSeconds = duration;
+  if (durationSync) return;
+
+  durationSync = synchronizeRequestedDurations().catch((cause) => {
+    durationReady = false;
+    applyDurationControlState();
+    renderSafely();
+    showDurationError(cause);
+    status.textContent = "Recording duration update failed";
+    status.dataset.ready = "false";
+  }).finally(() => {
+    durationSync = undefined;
+    if (requestedDurationSeconds !== undefined && !disposed) {
+      requestDurationSync();
+    }
+  });
 }
 
 function waitForMediaReady(): Promise<void> {
@@ -706,8 +859,13 @@ function teardown(): void {
   fabric.disconnect();
 }
 
+function handleInputUpdate(): void {
+  renderSafely();
+  requestDurationSync();
+}
+
 const stops = [
-  input.sink(renderSafely),
+  input.sink(handleInputUpdate),
   state.sink(renderSafely),
   output.sink(renderSafely),
 ];
@@ -773,15 +931,13 @@ void (async () => {
     audioBuffer = await audioContext.decodeAudioData(
       buildSyntheticWav(duration),
     );
+    loadedDurationSeconds = duration;
     mediaDestination = audioContext.createMediaStreamDestination();
     audio.srcObject = mediaDestination.stream;
     await waitForMediaReady();
-    audio.controls = true;
-    scrubber.max = String(audioBuffer.duration);
-    scrubber.disabled = false;
     hydrated = true;
-    addButton.disabled = false;
-    saveButton.disabled = false;
+    durationReady = true;
+    applyDurationControlState();
     status.textContent = "Shared tape ready";
     status.dataset.ready = "true";
     updateTimecode();

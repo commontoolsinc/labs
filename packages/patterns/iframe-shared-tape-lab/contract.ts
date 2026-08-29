@@ -1,7 +1,9 @@
 export interface TapeAnnotation {
   id: string;
-  startSeconds: number;
-  endSeconds: number;
+  range: {
+    startSeconds: number;
+    endSeconds: number;
+  };
   label: string;
   note: string;
   authorId: string;
@@ -41,8 +43,7 @@ export const DEFAULT_STATE: IframeStateData = {
   annotations: [
     {
       id: "seed-frog-cluster",
-      startSeconds: 3.2,
-      endSeconds: 5.8,
+      range: { startSeconds: 3.2, endSeconds: 5.8 },
       label: "Frog cluster",
       note: "Three short calls above the low water tone.",
       authorId: "field-guide",
@@ -50,8 +51,7 @@ export const DEFAULT_STATE: IframeStateData = {
     },
     {
       id: "seed-wing-rustle",
-      startSeconds: 10.4,
-      endSeconds: 12.1,
+      range: { startSeconds: 10.4, endSeconds: 12.1 },
       label: "Wing rustle",
       note: "A dry flutter crosses the right side of the sound field.",
       authorId: "field-guide",

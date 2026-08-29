@@ -36,10 +36,9 @@ import {
   type MachinePosition,
 } from "./contract.ts";
 import {
+  canonicalizeMachineEdges,
   createsFeedbackCycle,
-  dedupeMachineEdges,
   evaluateSignals,
-  findFeedbackNodeIds,
   isActuatorFiring,
   machineNodePresentation,
   presentSignal,
@@ -382,6 +381,7 @@ function App() {
   const [draftPositions, setDraftPositions] = React.useState<
     Record<string, MachinePosition>
   >({});
+  const draftPositionsRef = React.useRef<Record<string, MachinePosition>>({});
   const [connectSource, setConnectSource] = React.useState("");
   const [connectTarget, setConnectTarget] = React.useState("");
   const actionTail = React.useRef(Promise.resolve());
@@ -472,6 +472,7 @@ function App() {
         const node = await resolveNode(nodeId);
         await node.key("position").set(position);
         await state.refresh();
+        delete draftPositionsRef.current[nodeId];
         setDraftPositions((current) => {
           const next = { ...current };
           delete next[nodeId];
@@ -513,7 +514,13 @@ function App() {
         ) {
           throw new Error("Those modules are already connected.");
         }
-        if (createsFeedbackCycle(edges, source, target)) {
+        if (
+          createsFeedbackCycle(
+            canonicalizeMachineEdges(edges).edges,
+            source,
+            target,
+          )
+        ) {
           throw new Error(
             "Feedback loops are not supported. Choose a downstream module.",
           );
@@ -569,11 +576,11 @@ function App() {
     );
   }
 
+  const canonicalEdges = canonicalizeMachineEdges(stateValue.edges);
   const machineState: IframeStateData = {
     ...stateValue,
-    edges: dedupeMachineEdges(stateValue.edges),
+    edges: canonicalEdges.edges,
   };
-  const feedbackNodeIds = findFeedbackNodeIds(machineState.edges);
   const signals = evaluateSignals(machineState, outputValue.simulationTick);
   const flowNodes: MachineFlowNode[] = stateValue.nodes.map((node) => ({
     id: node.id,
@@ -637,6 +644,12 @@ function App() {
       > => change.type === "position" && change.position !== undefined,
     );
     if (positions.length === 0) return;
+    Object.assign(
+      draftPositionsRef.current,
+      Object.fromEntries(
+        positions.map((change) => [change.id, change.position!]),
+      ),
+    );
     setDraftPositions((current) => ({
       ...current,
       ...Object.fromEntries(
@@ -731,7 +744,10 @@ function App() {
               onNodeClick={(_event, node) =>
                 void updatePreference("selectedNodeId", node.id)}
               onNodeDragStop={(_event, node) =>
-                void persistPosition(node.id, node.position)}
+                void persistPosition(
+                  node.id,
+                  draftPositionsRef.current[node.id] ?? node.position,
+                )}
               onConnect={(connection) => void appendEdge(connection)}
               nodesDraggable={!pending}
               nodesConnectable={!pending}
@@ -837,7 +853,10 @@ function App() {
                 <i className="pulse" /> Low &lt; 50%
               </p>
               <p>Delay modules read an earlier tick.</p>
-              <p>Feedback loops are rejected; concurrent loops stay at 0%.</p>
+              <p>
+                Feedback loops are rejected. Concurrent conflicts are suppressed
+                deterministically without replacing the shared wire log.
+              </p>
             </div>
           </aside>
         </section>
@@ -846,10 +865,13 @@ function App() {
           <span id="machine-status">
             {pending ? "Committing to Fabric…" : "All controls are live"}
           </span>
-          {feedbackNodeIds.size > 0 && (
+          {canonicalEdges.suppressed.length > 0 && (
             <span className="action-error" role="status">
-              Feedback loop detected · {feedbackNodeIds.size}{" "}
-              cyclic modules held at 0%
+              {canonicalEdges.suppressed.length} concurrent feedback{" "}
+              {canonicalEdges
+                  .suppressed.length === 1
+                ? "wire is"
+                : "wires are"} suppressed by stable wire identity
             </span>
           )}
           {actionError && (

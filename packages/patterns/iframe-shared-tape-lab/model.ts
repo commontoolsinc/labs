@@ -7,10 +7,7 @@ export interface CueSpec {
   text: string;
 }
 
-export type AnnotationEdits = Pick<
-  TapeAnnotation,
-  "startSeconds" | "endSeconds" | "label" | "note"
->;
+export type AnnotationEdits = Pick<TapeAnnotation, "range" | "label" | "note">;
 
 type AnnotationEditKey = keyof AnnotationEdits;
 
@@ -21,8 +18,7 @@ export interface WritableAnnotationFields {
 }
 
 const ANNOTATION_EDIT_KEYS: readonly AnnotationEditKey[] = [
-  "startSeconds",
-  "endSeconds",
+  "range",
   "label",
   "note",
 ];
@@ -33,13 +29,16 @@ export function changedAnnotationEdits(
   next: AnnotationEdits,
 ): Partial<AnnotationEdits> {
   return Object.fromEntries(
-    ANNOTATION_EDIT_KEYS.filter((key) => baseline[key] !== next[key]).map(
-      (key) => [key, next[key]],
-    ),
+    ANNOTATION_EDIT_KEYS.filter((key) =>
+      key === "range"
+        ? baseline.range.startSeconds !== next.range.startSeconds ||
+          baseline.range.endSeconds !== next.range.endSeconds
+        : baseline[key] !== next[key]
+    ).map((key) => [key, next[key]]),
   );
 }
 
-/** Writes edited fields at independent paths so unrelated changes compose. */
+/** Writes the coupled time range atomically while unrelated text edits compose. */
 export async function writeAnnotationEdits(
   cell: WritableAnnotationFields,
   edits: Partial<AnnotationEdits>,
@@ -64,6 +63,29 @@ export function normalizeDurationSeconds(seconds: number): number {
   );
 }
 
+export interface DurationTransitionPlan {
+  durationSeconds: number;
+  positionSeconds: number;
+  resumePlayback: boolean;
+}
+
+/** Clamps local playback when a reactive recording duration changes. */
+export function planDurationTransition(
+  durationSeconds: number,
+  positionSeconds: number,
+  wasPlaying: boolean,
+): DurationTransitionPlan {
+  const duration = normalizeDurationSeconds(durationSeconds);
+  const position = Number.isFinite(positionSeconds)
+    ? clamp(positionSeconds, 0, duration)
+    : 0;
+  return {
+    durationSeconds: duration,
+    positionSeconds: position,
+    resumePlayback: wasPlaying && position < duration,
+  };
+}
+
 export function formatTime(seconds: number): string {
   const safe = Number.isFinite(seconds) ? Math.max(0, seconds) : 0;
   const totalTenths = Math.round(safe * 10);
@@ -79,8 +101,8 @@ export function cueSpecs(
 ): CueSpec[] {
   return annotations.map((annotation) => ({
     id: annotation.id,
-    startSeconds: annotation.startSeconds,
-    endSeconds: annotation.endSeconds,
+    startSeconds: annotation.range.startSeconds,
+    endSeconds: annotation.range.endSeconds,
     text: annotation.label,
   }));
 }

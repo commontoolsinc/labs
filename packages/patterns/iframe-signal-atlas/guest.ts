@@ -29,7 +29,9 @@ import {
   type SignalRoute,
 } from "./contract.ts";
 import {
+  canClearSubmittedDraft,
   capturedAction,
+  clampTimeCursor,
   FIELD_HEIGHT,
   FIELD_WIDTH,
   propagationValues,
@@ -174,6 +176,41 @@ let actionQueue: Promise<void> = Promise.resolve();
 let databaseRefresh: Promise<void> = Promise.resolve();
 let timeDraft: number | undefined;
 
+type DraftTextControl = HTMLInputElement | HTMLTextAreaElement;
+const draftGenerations = new WeakMap<DraftTextControl, number>();
+
+function trackDraft(control: DraftTextControl): void {
+  draftGenerations.set(control, 0);
+  control.addEventListener("input", () => {
+    draftGenerations.set(control, (draftGenerations.get(control) ?? 0) + 1);
+  });
+}
+
+function captureDraftGeneration(control: DraftTextControl): number {
+  return draftGenerations.get(control) ?? 0;
+}
+
+function clearSubmittedDraft(
+  control: DraftTextControl,
+  submittedGeneration: number,
+): void {
+  if (
+    canClearSubmittedDraft(
+      submittedGeneration,
+      captureDraftGeneration(control),
+    )
+  ) {
+    control.value = "";
+  }
+}
+
+[
+  observationLabel,
+  bookmarkNote,
+  hypothesisTitle,
+  hypothesisNarrative,
+].forEach(trackDraft);
+
 const zoomBehavior = zoom<SVGSVGElement, unknown>()
   .scaleExtent([0.75, 5])
   .on("zoom", (event: D3ZoomEvent<SVGSVGElement, unknown>) => {
@@ -276,9 +313,18 @@ function render(): void {
   controls.forEach((control) => control.disabled = !hydrated);
   addBookmarkButton.disabled = !hydrated ||
     outputValue.selectedObservationId === null;
-  timeInput.min = String(inputValue.timeStart);
-  timeInput.max = String(inputValue.timeEnd);
-  const displayedTime = timeDraft ?? outputValue.timeCursor;
+  timeInput.min = String(Math.min(inputValue.timeStart, inputValue.timeEnd));
+  timeInput.max = String(Math.max(inputValue.timeStart, inputValue.timeEnd));
+  const effectiveTime = clampTimeCursor(
+    outputValue.timeCursor,
+    inputValue.timeStart,
+    inputValue.timeEnd,
+  );
+  const displayedTime = clampTimeCursor(
+    timeDraft ?? effectiveTime,
+    inputValue.timeStart,
+    inputValue.timeEnd,
+  );
   timeInput.value = String(displayedTime);
   timeValue.textContent = `T+${displayedTime}`;
   bandSelect.value = outputValue.band;
@@ -288,12 +334,12 @@ function render(): void {
 
   const visible = visibleObservations(
     stateValue.observations,
-    outputValue.timeCursor,
+    effectiveTime,
     outputValue.band,
   );
   const timeVisible = visibleObservations(
     stateValue.observations,
-    outputValue.timeCursor,
+    effectiveTime,
     "all",
   );
   const timeVisibleById = new Map(
@@ -302,7 +348,7 @@ function render(): void {
   const routes = visibleRoutes(
     stateValue.routes,
     stateValue.observations,
-    outputValue.timeCursor,
+    effectiveTime,
     outputValue.band,
   );
   observationCount.textContent = String(stateValue.observations.length);
@@ -336,7 +382,7 @@ function render(): void {
     .thresholds([0.08, 0.16, 0.28, 0.42, 0.58, 0.72])(
       propagationValues(
         visible,
-        outputValue.timeCursor,
+        effectiveTime,
         FIELD_WIDTH,
         FIELD_HEIGHT,
       ),
@@ -376,7 +422,7 @@ function render(): void {
     .attr("stroke", (route: SignalRoute) => BAND_COLORS[route.band])
     .attr("stroke-opacity", (route: SignalRoute) => {
       const progress = clamp(
-        (outputValue.timeCursor - route.departedAt) / route.duration,
+        (effectiveTime - route.departedAt) / route.duration,
         0,
         1,
       );
@@ -514,7 +560,7 @@ async function addObservation(options: {
     label,
     x: clamp(52 + Math.cos(angle) * radius, 8, FIELD_WIDTH - 8),
     y: clamp(38 + Math.sin(angle) * radius, 8, FIELD_HEIGHT - 8),
-    observedAt: clamp(
+    observedAt: clampTimeCursor(
       Math.round(options.observedAt),
       inputValue.timeStart,
       inputValue.timeEnd,
@@ -545,7 +591,11 @@ async function addRoute(options: {
     id: `route-${crypto.randomUUID()}`,
     fromObservationId: from.id,
     toObservationId: to.id,
-    departedAt: options.departedAt,
+    departedAt: clampTimeCursor(
+      options.departedAt,
+      inputValue.timeStart,
+      inputValue.timeEnd,
+    ),
     duration: Math.max(
       6,
       Math.round(Math.hypot(to.x - from.x, to.y - from.y) / 2),
@@ -557,9 +607,14 @@ async function addRoute(options: {
 }
 
 function recentRouteDraft(): Parameters<typeof addRoute>[0] {
+  const effectiveTime = clampTimeCursor(
+    timeDraft ?? outputValue.timeCursor,
+    inputValue.timeStart,
+    inputValue.timeEnd,
+  );
   const recent = recentVisibleObservations(
     stateValue.observations,
-    timeDraft ?? outputValue.timeCursor,
+    effectiveTime,
     outputValue.band,
   );
   if (recent.length < 2) {
@@ -569,7 +624,7 @@ function recentRouteDraft(): Parameters<typeof addRoute>[0] {
     fromObservationId: recent[0].id,
     toObservationId: recent[1].id,
     band: recent[1].band,
-    departedAt: timeDraft ?? outputValue.timeCursor,
+    departedAt: effectiveTime,
   };
 }
 
@@ -586,7 +641,11 @@ async function selectObservation(id: string | null): Promise<void> {
 async function setTimeCursor(value: number): Promise<void> {
   if (!Number.isFinite(value)) throw new Error("Time cursor must be a number.");
   await outputWrite.key("timeCursor").set(
-    clamp(Math.round(value), inputValue.timeStart, inputValue.timeEnd),
+    clampTimeCursor(
+      Math.round(value),
+      inputValue.timeStart,
+      inputValue.timeEnd,
+    ),
   );
 }
 
@@ -726,12 +785,11 @@ addObservationButton.addEventListener("click", () => {
     band: observationBand.value as SignalBand,
     strength: Number(observationStrength.value),
     observedAt: timeDraft ?? outputValue.timeCursor,
+    labelGeneration: captureDraftGeneration(observationLabel),
   };
   void enqueueAction(capturedAction(draft, async (captured) => {
     await addObservation(captured);
-    if (observationLabel.value === captured.label) {
-      observationLabel.value = "";
-    }
+    clearSubmittedDraft(observationLabel, captured.labelGeneration);
   })).catch(showError);
 });
 connectRecentButton.addEventListener("click", () => {
@@ -758,28 +816,52 @@ addBookmarkButton.addEventListener("click", () => {
     showError(new Error("Choose a visible observation first."));
     return;
   }
-  const draft = { observationId: selectedId, note: bookmarkNote.value };
+  const draft = {
+    observationId: selectedId,
+    note: bookmarkNote.value,
+    noteGeneration: captureDraftGeneration(bookmarkNote),
+  };
   void enqueueAction(capturedAction(draft, async (captured) => {
     await addBookmark(captured.observationId, captured.note);
-    if (bookmarkNote.value === captured.note) bookmarkNote.value = "";
+    clearSubmittedDraft(bookmarkNote, captured.noteGeneration);
   })).catch(showError);
 });
 addHypothesisButton.addEventListener("click", () => {
   const draft = {
     title: hypothesisTitle.value,
     narrative: hypothesisNarrative.value,
+    titleGeneration: captureDraftGeneration(hypothesisTitle),
+    narrativeGeneration: captureDraftGeneration(hypothesisNarrative),
   };
   void enqueueAction(capturedAction(draft, async (captured) => {
     await addHypothesis(captured.title, captured.narrative);
-    if (hypothesisTitle.value === captured.title) hypothesisTitle.value = "";
-    if (hypothesisNarrative.value === captured.narrative) {
-      hypothesisNarrative.value = "";
-    }
+    clearSubmittedDraft(hypothesisTitle, captured.titleGeneration);
+    clearSubmittedDraft(hypothesisNarrative, captured.narrativeGeneration);
   })).catch(showError);
 });
 
 const cancelInput = input.sink((value) => {
   inputValue = value ?? DEFAULT_INPUT;
+  if (timeDraft !== undefined) {
+    timeDraft = clampTimeCursor(
+      timeDraft,
+      inputValue.timeStart,
+      inputValue.timeEnd,
+    );
+  }
+  const clamped = clampTimeCursor(
+    outputValue.timeCursor,
+    inputValue.timeStart,
+    inputValue.timeEnd,
+  );
+  if (hydrated && clamped !== outputValue.timeCursor) {
+    void enqueueAction(
+      capturedAction(
+        clamped,
+        (captured) => outputWrite.key("timeCursor").set(captured),
+      ),
+    ).catch(showError);
+  }
   render();
 });
 const cancelState = state.sink((value) => {
@@ -815,6 +897,15 @@ try {
   inputValue = input.get() ?? DEFAULT_INPUT;
   stateValue = state.get() ?? DEFAULT_STATE;
   outputValue = output.get() ?? DEFAULT_OUTPUT;
+  const clampedTimeCursor = clampTimeCursor(
+    outputValue.timeCursor,
+    inputValue.timeStart,
+    inputValue.timeEnd,
+  );
+  if (clampedTimeCursor !== outputValue.timeCursor) {
+    await outputWrite.key("timeCursor").set(clampedTimeCursor);
+    outputValue = { ...outputValue, timeCursor: clampedTimeCursor };
+  }
   await refreshPersonalAtlas();
   hydrated = true;
   restoreViewport();

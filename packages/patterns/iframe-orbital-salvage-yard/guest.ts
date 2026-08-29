@@ -42,10 +42,14 @@ import {
   dragDisposition,
   initializeGraphics,
   isBookmarked,
+  markPointerCancelled,
   ownsDrag,
+  pointerWasCancelled,
   resolveSnapClaims,
   setBookmark,
   snapTargetKey,
+  writeModulePosition,
+  writeModuleRotation,
 } from "./model.ts";
 
 type ModuleVisual = {
@@ -59,7 +63,6 @@ type DragState = {
   moduleId: string;
   pointerId: number;
   position: Vector3Tuple;
-  rotationQuarterTurns: number;
   resolved: Promise<RemoteCell<StationModule>>;
   moved: boolean;
 };
@@ -189,6 +192,7 @@ let pendingAction: string | undefined;
 let selectedModuleId: string | null = null;
 let selectionAwaitingModuleId: string | undefined;
 let drag: DragState | undefined;
+const cancelledPointers = new Set<number>();
 let disposed = false;
 let actionTail = Promise.resolve();
 const abort = new AbortController();
@@ -619,14 +623,11 @@ async function moveSelected(delta: Vector3Tuple): Promise<void> {
   const module = selectedModule();
   if (!module) throw new Error("That salvage module is no longer available.");
   const [x, y, z] = module.transform.position;
-  await resolved.key("transform").set({
-    position: [
-      roundHalf(x + delta[0]),
-      Math.max(0.6, roundHalf(y + delta[1])),
-      roundHalf(z + delta[2]),
-    ],
-    rotationQuarterTurns: module.transform.rotationQuarterTurns,
-  });
+  await writeModulePosition(resolved.key("transform").key("position"), [
+    roundHalf(x + delta[0]),
+    Math.max(0.6, roundHalf(y + delta[1])),
+    roundHalf(z + delta[2]),
+  ]);
   await snapClaimsCell.key(moduleId).set(null);
 }
 
@@ -637,12 +638,12 @@ async function rotateSelected(delta: number): Promise<void> {
   await resolved.pull();
   const module = selectedModule();
   if (!module) throw new Error("That salvage module is no longer available.");
-  await resolved.key("transform").set({
-    position: [...module.transform.position],
-    rotationQuarterTurns: normalizeQuarterTurns(
+  await writeModuleRotation(
+    resolved.key("transform").key("rotationQuarterTurns"),
+    normalizeQuarterTurns(
       module.transform.rotationQuarterTurns + delta,
     ),
-  });
+  );
   await snapClaimsCell.key(moduleId).set(null);
 }
 
@@ -673,7 +674,7 @@ async function snapSelected(): Promise<void> {
     movingConnectorId: result.movingConnectorId,
     targetModuleId: result.targetModuleId,
     targetConnectorId: result.targetConnectorId,
-    transform: result.transform,
+    rotationQuarterTurns: result.transform.rotationQuarterTurns,
   };
   await snapClaimsCell.key(moduleId).set(claim);
   await snapTargetsCell.key(
@@ -722,11 +723,11 @@ function beginDrag(moduleId: string, pointerId: number): void {
   camera.detachControl();
   canvas.setPointerCapture(pointerId);
   canvas.style.cursor = "grabbing";
+  cancelledPointers.delete(pointerId);
   drag = {
     moduleId,
     pointerId,
     position: [...module.transform.position],
-    rotationQuarterTurns: module.transform.rotationQuarterTurns,
     resolved: resolveModule(moduleId),
     moved: false,
   };
@@ -771,10 +772,10 @@ function endDrag(pointerId: number, cancelled: boolean): void {
   }
   void runAction("drag position", async () => {
     const resolved = await completed.resolved;
-    await resolved.key("transform").set({
-      position: completed.position,
-      rotationQuarterTurns: completed.rotationQuarterTurns,
-    });
+    await writeModulePosition(
+      resolved.key("transform").key("position"),
+      completed.position,
+    );
     await snapClaimsCell.key(completed.moduleId).set(null);
   });
 }
@@ -791,7 +792,10 @@ const pointerObserver = scene.onPointerObservable.add((pointerInfo) => {
   } else if (pointerInfo.type === PointerEventTypes.POINTERMOVE) {
     updateDrag(event.pointerId);
   } else if (pointerInfo.type === PointerEventTypes.POINTERUP) {
-    endDrag(event.pointerId, false);
+    endDrag(
+      event.pointerId,
+      pointerWasCancelled(cancelledPointers, event.pointerId),
+    );
   }
 });
 
@@ -856,11 +860,15 @@ accentInput.addEventListener("change", () => {
   );
 }, { signal });
 resetCameraButton.addEventListener("click", resetCamera, { signal });
+globalThis.addEventListener("pointercancel", (event) => {
+  markPointerCancelled(cancelledPointers, event.pointerId);
+}, { capture: true, signal });
 globalThis.addEventListener("pointerup", (event) => {
   endDrag(event.pointerId, false);
 }, { signal });
 globalThis.addEventListener("pointercancel", (event) => {
   endDrag(event.pointerId, true);
+  cancelledPointers.delete(event.pointerId);
 }, { signal });
 globalThis.addEventListener("resize", () => engine.resize(), { signal });
 canvas.addEventListener("webglcontextlost", (event) => {

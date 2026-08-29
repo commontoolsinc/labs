@@ -5,7 +5,12 @@ import {
   type StationModule,
   type Vector3Tuple,
 } from "./contract.ts";
-import { findConnections } from "./geometry.ts";
+import {
+  findConnections,
+  normalizeQuarterTurns,
+  rotateVectorY,
+  worldConnectors,
+} from "./geometry.ts";
 
 export interface WritableBookmarkMap {
   key(moduleId: string): {
@@ -16,6 +21,10 @@ export interface WritableBookmarkMap {
 export interface PointerDragOwner {
   pointerId: number;
   moved?: boolean;
+}
+
+export interface WritableValue<T> {
+  set(value: T): Promise<void>;
 }
 
 export type DragDisposition = "ignore" | "restore" | "commit";
@@ -41,6 +50,38 @@ export function dragDisposition(
 ): DragDisposition {
   if (!ownsDrag(active, pointerId)) return "ignore";
   return cancelled || !active.moved ? "restore" : "commit";
+}
+
+/** Records cancellation before a renderer can translate it into pointer-up. */
+export function markPointerCancelled(
+  cancelledPointers: Set<number>,
+  pointerId: number,
+): void {
+  cancelledPointers.add(pointerId);
+}
+
+/** Reports whether a renderer's pointer-up originated from cancellation. */
+export function pointerWasCancelled(
+  cancelledPointers: ReadonlySet<number>,
+  pointerId: number,
+): boolean {
+  return cancelledPointers.has(pointerId);
+}
+
+/** Writes only the position field so a concurrent rotation can compose. */
+export function writeModulePosition(
+  position: WritableValue<Vector3Tuple>,
+  value: Vector3Tuple,
+): Promise<void> {
+  return position.set(value);
+}
+
+/** Writes only the rotation field so a concurrent position can compose. */
+export function writeModuleRotation(
+  rotation: WritableValue<number>,
+  value: number,
+): Promise<void> {
+  return rotation.set(value);
 }
 
 /** Surfaces graphics bootstrap failures before preserving the thrown cause. */
@@ -112,10 +153,7 @@ export function setBookmark(
   return bookmarks.key(moduleId).set(value);
 }
 
-/**
- * Resolves concurrent snap intents through a connector-shaped conflict domain.
- * A target lock has one deterministic winner, independent of array order.
- */
+/** Resolves snap intents in dependency order through connector-shaped locks. */
 export function resolveSnapClaims(
   modules: readonly StationModule[],
   claims: Readonly<Record<string, ModuleSnapClaim | null>>,
@@ -138,15 +176,17 @@ export function resolveSnapClaims(
     ) return [];
     return [{ moduleId, claim }];
   });
-  const claimantIds = new Set(validClaims.map(({ moduleId }) => moduleId));
-  const occupied = new Set(
-    findConnections(modules.filter((module) => !claimantIds.has(module.id)))
-      .flatMap((connection) => [
-        connectorKey(connection.first.moduleId, connection.first.id),
-        connectorKey(connection.second.moduleId, connection.second.id),
-      ]),
+  const pending = new Map(
+    validClaims.map(({ moduleId, claim }) => [moduleId, claim]),
   );
-  const winners = new Map<string, ModuleSnapClaim>();
+  const resolved = new Map(
+    modules
+      .filter((module) => !pending.has(module.id))
+      .map((module) => [module.id, module]),
+  );
+  const effectiveTransforms = new Map(
+    modules.map((module) => [module.id, module.transform]),
+  );
   validClaims.sort((left, right) => {
     const leftTarget = connectorKey(
       left.claim.targetModuleId,
@@ -159,23 +199,54 @@ export function resolveSnapClaims(
     return leftTarget.localeCompare(rightTarget) ||
       left.moduleId.localeCompare(right.moduleId);
   });
-  for (const { moduleId, claim } of validClaims) {
-    const targetKey = connectorKey(
-      claim.targetModuleId,
-      claim.targetConnectorId,
-    );
-    if (occupied.has(targetKey)) continue;
-    occupied.add(targetKey);
-    winners.set(moduleId, claim);
+
+  let madeProgress = true;
+  while (madeProgress) {
+    madeProgress = false;
+    for (const { moduleId, claim } of validClaims) {
+      if (!pending.has(moduleId) || !resolved.has(claim.targetModuleId)) {
+        continue;
+      }
+      const occupied = occupiedConnectorKeys([...resolved.values()]);
+      if (
+        occupied.has(
+          connectorKey(claim.targetModuleId, claim.targetConnectorId),
+        )
+      ) {
+        pending.delete(moduleId);
+        resolved.set(moduleId, modulesById.get(moduleId)!);
+        madeProgress = true;
+        continue;
+      }
+      const moving = modulesById.get(moduleId)!;
+      const target = resolved.get(claim.targetModuleId)!;
+      const transform = deriveSnapTransform(moving, target, claim);
+      pending.delete(moduleId);
+      if (!transform) {
+        resolved.set(moduleId, moving);
+        madeProgress = true;
+        continue;
+      }
+      const snapped = { ...moving, transform };
+      if (!realizesClaim(snapped, target, claim)) {
+        resolved.set(moduleId, moving);
+        madeProgress = true;
+        continue;
+      }
+      effectiveTransforms.set(moduleId, transform);
+      resolved.set(moduleId, snapped);
+      madeProgress = true;
+    }
   }
+
   return modules.map((module) => {
-    const winner = winners.get(module.id);
-    if (!winner) return module;
+    const transform = effectiveTransforms.get(module.id)!;
+    if (transform === module.transform) return module;
     return {
       ...module,
       transform: {
-        position: [...winner.transform.position],
-        rotationQuarterTurns: winner.transform.rotationQuarterTurns,
+        position: [...transform.position],
+        rotationQuarterTurns: transform.rotationQuarterTurns,
       },
     };
   });
@@ -191,6 +262,80 @@ export function snapTargetKey(
 
 function connectorKey(moduleId: string, connectorId: string): string {
   return `${moduleId}\u0000${connectorId}`;
+}
+
+function occupiedConnectorKeys(modules: readonly StationModule[]): Set<string> {
+  return new Set(
+    findConnections(modules).flatMap((connection) => [
+      connectorKey(connection.first.moduleId, connection.first.id),
+      connectorKey(connection.second.moduleId, connection.second.id),
+    ]),
+  );
+}
+
+function deriveSnapTransform(
+  moving: StationModule,
+  target: StationModule,
+  claim: ModuleSnapClaim,
+): StationModule["transform"] | undefined {
+  const movingConnector = moving.connectors.find((connector) =>
+    connector.id === claim.movingConnectorId
+  );
+  const targetConnector = worldConnectors(target).find((connector) =>
+    connector.id === claim.targetConnectorId
+  );
+  if (!movingConnector || !targetConnector) return undefined;
+
+  const rotationQuarterTurns = [0, 1, 2, 3]
+    .filter((rotation) =>
+      dot(
+        rotateVectorY(movingConnector.normal, rotation),
+        targetConnector.worldNormal,
+      ) < -0.99
+    )
+    .sort((left, right) =>
+      quarterTurnDistance(left, claim.rotationQuarterTurns) -
+        quarterTurnDistance(right, claim.rotationQuarterTurns) || left - right
+    )[0];
+  if (rotationQuarterTurns === undefined) return undefined;
+  const offset = rotateVectorY(movingConnector.offset, rotationQuarterTurns);
+  return {
+    position: [
+      targetConnector.position[0] - offset[0],
+      targetConnector.position[1] - offset[1],
+      targetConnector.position[2] - offset[2],
+    ],
+    rotationQuarterTurns,
+  };
+}
+
+function realizesClaim(
+  moving: StationModule,
+  target: StationModule,
+  claim: ModuleSnapClaim,
+): boolean {
+  return findConnections([moving, target]).some((connection) => {
+    const endpoints = [connection.first, connection.second];
+    return endpoints.some((connector) =>
+      connector.moduleId === moving.id &&
+      connector.id === claim.movingConnectorId
+    ) && endpoints.some((connector) =>
+      connector.moduleId === target.id &&
+      connector.id === claim.targetConnectorId
+    );
+  });
+}
+
+function quarterTurnDistance(first: number, second: number): number {
+  return Math.min(
+    normalizeQuarterTurns(first - second),
+    normalizeQuarterTurns(second - first),
+  );
+}
+
+function dot(first: Vector3Tuple, second: Vector3Tuple): number {
+  return first[0] * second[0] + first[1] * second[1] +
+    first[2] * second[2];
 }
 
 function stableModuleCode(id: string): string {

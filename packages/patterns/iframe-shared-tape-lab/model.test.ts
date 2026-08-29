@@ -9,6 +9,7 @@ import {
   cueSpecs,
   formatTime,
   normalizeDurationSeconds,
+  planDurationTransition,
   WAV_SAMPLE_RATE,
   type WritableAnnotationFields,
   writeAnnotationEdits,
@@ -16,8 +17,7 @@ import {
 
 const annotation: TapeAnnotation = {
   id: "annotation-stable-id",
-  startSeconds: 3.2,
-  endSeconds: 5.8,
+  range: { startSeconds: 3.2, endSeconds: 5.8 },
   label: "Frog cluster",
   note: "Three short calls.",
   authorId: "reviewer-a",
@@ -28,8 +28,7 @@ describe("model", () => {
   describe("annotation edits", () => {
     it("composes disjoint edits from the same stale editor snapshot", async () => {
       const stored = {
-        startSeconds: annotation.startSeconds,
-        endSeconds: annotation.endSeconds,
+        range: { ...annotation.range },
         label: annotation.label,
         note: annotation.note,
       };
@@ -64,6 +63,50 @@ describe("model", () => {
 
       expect(stored.label).toBe("Updated label");
       expect(stored.note).toBe("Updated note");
+    });
+
+    it("keeps a concurrently edited time range internally valid", async () => {
+      const stored = {
+        range: { startSeconds: 3, endSeconds: 7 },
+        label: annotation.label,
+        note: annotation.note,
+      };
+      const baseline = structuredClone(stored);
+      const cell: WritableAnnotationFields = {
+        key(key) {
+          return {
+            set(value) {
+              Object.assign(stored, { [key]: structuredClone(value) });
+              return Promise.resolve();
+            },
+          };
+        },
+      };
+
+      await Promise.all([
+        writeAnnotationEdits(
+          cell,
+          changedAnnotationEdits(baseline, {
+            ...baseline,
+            range: { startSeconds: 6, endSeconds: 7 },
+          }),
+        ),
+        writeAnnotationEdits(
+          cell,
+          changedAnnotationEdits(baseline, {
+            ...baseline,
+            range: { startSeconds: 3, endSeconds: 5 },
+          }),
+        ),
+      ]);
+
+      expect(stored.range.endSeconds).toBeGreaterThan(
+        stored.range.startSeconds,
+      );
+      expect([
+        { startSeconds: 6, endSeconds: 7 },
+        { startSeconds: 3, endSeconds: 5 },
+      ]).toContainEqual(stored.range);
     });
   });
 
@@ -102,6 +145,24 @@ describe("model", () => {
         normalizeDurationSeconds(Number.POSITIVE_INFINITY),
         normalizeDurationSeconds(1_000_000),
       ]).toEqual([1, 18, 120]);
+    });
+  });
+
+  describe("planDurationTransition()", () => {
+    it("keeps playback moving when an extended tape still contains the playhead", () => {
+      expect(planDurationTransition(24, 8.5, true)).toEqual({
+        durationSeconds: 24,
+        positionSeconds: 8.5,
+        resumePlayback: true,
+      });
+    });
+
+    it("clamps and stops playback when a shorter tape ends before the playhead", () => {
+      expect(planDurationTransition(4, 8.5, true)).toEqual({
+        durationSeconds: 4,
+        positionSeconds: 4,
+        resumePlayback: false,
+      });
     });
   });
 

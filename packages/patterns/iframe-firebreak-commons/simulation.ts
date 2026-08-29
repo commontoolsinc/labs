@@ -1,5 +1,18 @@
 import type { IframeInputData, SimulationAction } from "./contract.ts";
 
+/** Surfaces a renderer bootstrap failure before preserving the thrown cause. */
+export function initializeRenderer<T>(
+  create: () => T,
+  onFailure: (cause: unknown) => void,
+): T {
+  try {
+    return create();
+  } catch (cause) {
+    onFailure(cause);
+    throw cause;
+  }
+}
+
 export type Terrain = "water" | "grass" | "forest" | "settlement";
 
 export type FireIntensity = 0 | 1 | 2 | 3;

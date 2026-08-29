@@ -8,6 +8,7 @@ import type {
   MachineParameters,
 } from "./contract.ts";
 import {
+  canonicalizeMachineEdges,
   createsFeedbackCycle,
   dedupeMachineEdges,
   evaluateSignals,
@@ -134,7 +135,7 @@ describe("evaluateSignals()", () => {
     expect(evaluateSignals(state, 0).get("actuator")).toBe(1);
   });
 
-  it("makes feedback loops inert independently of node order", () => {
+  it("evaluates the same canonical acyclic graph independently of wire order", () => {
     const state: IframeStateData = {
       nodes: [
         node("first", "transformer", { offset: 0.2 }),
@@ -154,8 +155,8 @@ describe("evaluateSignals()", () => {
 
     expect(forward).toEqual(
       new Map([
-        ["first", 0],
-        ["second", 0],
+        ["first", 0.2],
+        ["second", 0.5],
       ]),
     );
     expect(Object.fromEntries(reversed)).toEqual(Object.fromEntries(forward));
@@ -164,6 +165,43 @@ describe("evaluateSignals()", () => {
     );
     expect(createsFeedbackCycle(state.edges.slice(0, 1), "second", "first"))
       .toBe(true);
+  });
+
+  it("canonicalizes stale concurrent additions into one stable acyclic graph", () => {
+    const base = {
+      id: machineEdgeId("A", "B"),
+      source: "A",
+      target: "B",
+    };
+    const firstClient = {
+      id: machineEdgeId("B", "C"),
+      source: "B",
+      target: "C",
+    };
+    const secondClient = {
+      id: machineEdgeId("C", "A"),
+      source: "C",
+      target: "A",
+    };
+
+    expect(createsFeedbackCycle([base], "B", "C")).toBe(false);
+    expect(createsFeedbackCycle([base], "C", "A")).toBe(false);
+
+    const forward = canonicalizeMachineEdges([
+      base,
+      firstClient,
+      secondClient,
+    ]);
+    const reversed = canonicalizeMachineEdges([
+      secondClient,
+      firstClient,
+      base,
+    ]);
+
+    expect(forward).toEqual(reversed);
+    expect(forward.edges).toEqual([base, firstClient]);
+    expect(forward.suppressed).toEqual([secondClient]);
+    expect(findFeedbackNodeIds(forward.edges)).toEqual(new Set());
   });
 
   it("hides signal presentation without changing actuator semantics", () => {

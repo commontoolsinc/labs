@@ -7,7 +7,9 @@ import {
   type SignalRoute,
 } from "./contract.ts";
 import {
+  canClearSubmittedDraft,
   capturedAction,
+  clampTimeCursor,
   FIELD_HEIGHT,
   FIELD_WIDTH,
   propagationValues,
@@ -48,6 +50,15 @@ const observations: SignalObservation[] = [
 ];
 
 describe("model", () => {
+  describe("clampTimeCursor()", () => {
+    it("keeps a live time cursor within a changed input window", () => {
+      expect(clampTimeCursor(80, 0, 40)).toBe(40);
+      expect(clampTimeCursor(-5, 10, 40)).toBe(10);
+      expect(clampTimeCursor(25, 10, 40)).toBe(25);
+      expect(clampTimeCursor(25, 40, 10)).toBe(25);
+    });
+  });
+
   describe("capturedAction()", () => {
     it("keeps every event-time draft value when a queued action runs later", async () => {
       let controlValue = { label: "Alpha", band: "pulse", time: 14 };
@@ -62,6 +73,25 @@ describe("model", () => {
 
       expect(controlValue.label).toBe("Beta");
       expect(received).toEqual([{ label: "Alpha", band: "pulse", time: 14 }]);
+    });
+  });
+
+  describe("canClearSubmittedDraft()", () => {
+    it("preserves a later equal-valued edit while an earlier write is pending", () => {
+      let value = "Alpha";
+      let generation = 4;
+      const submitted = { value, generation };
+      value = "Beta";
+      generation++;
+      value = "Alpha";
+      generation++;
+
+      expect(value).toBe(submitted.value);
+      expect(
+        canClearSubmittedDraft(submitted.generation, generation),
+      ).toBe(false);
+      expect(canClearSubmittedDraft(submitted.generation, submitted.generation))
+        .toBe(true);
     });
   });
 
