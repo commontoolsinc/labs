@@ -363,6 +363,16 @@ function waitForTurn(
   );
 }
 
+function waitForEnabledButton(
+  driver: GuestDomDriver,
+  selector: string,
+): Promise<boolean> {
+  return driver.waitFor<boolean>(`() => {
+    const control = document.querySelector(${JSON.stringify(selector)});
+    return control instanceof HTMLButtonElement && !control.disabled;
+  }`);
+}
+
 describe("iframe Firebreak Commons", () => {
   const aliceShell = new ShellIntegration();
   const bobShell = new ShellIntegration();
@@ -484,6 +494,7 @@ describe("iframe Firebreak Commons", () => {
       }
 
       await alice.setValue("#crew-name", "Unsaved lookout");
+      await waitForEnabledButton(bob, "#advance");
       await bob.click("#advance");
       const advanced = await Promise.all([
         waitForTurn(alice, 2),
