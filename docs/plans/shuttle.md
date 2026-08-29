@@ -142,11 +142,14 @@ The live-view half exists to make reactivity visible.
     the pair (position, scope): both stick across navigation, both render
     in the prompt, and `pwd` prints both. `cd` is the door to both —
     `cd board@session` moves both, `cd @session` scope alone, `cd @space`
-    back to the base (all verified in the canonical grammar) — there is no
-    separate scope verb, and an explicit suffix on an operand overrides
-    the ambient scope for that operand. A suffix names only the reading
-    identity's own overlays; standing in another identity's overlay is a
-    canonical-grammar extension, out of v1.
+    back to the base — there is no separate scope verb, and an explicit
+    suffix on an operand overrides the ambient scope for that operand. All
+    three scope words are canonical, and a suffix on a reference is
+    verified against the canonical parser; a scope-only `@scope` is
+    shuttle navigation syntax that only `cd` and `where` accept, alongside
+    `..` and `-`. A suffix names the base scope or the reading identity's own
+    overlays, never another identity's; standing in another identity's
+    overlay is a canonical-grammar extension, out of v1.
 21. **The native tool set v0** is `jq`, `grep`, `wc`, `head`, `tail`,
     `sort`, `uniq`, `cut` — grown by ruling. `cat` is deliberately absent:
     `get` prints, `< file:…` feeds, and concatenation waits for a demand.
@@ -220,7 +223,7 @@ several) stay reachable later.
 | Canonical + alias reference grammar | `packages/cli/lib/llm-friendly-ref.ts` (doc comment), runner's `parseLLMFriendlyLink` | The address syntax; shuttle consumes it and must not fork it |
 | Target option surface | `targetOptions` in `packages/cli/commands/piece.ts` | The enumeration of exactly what a place must supply |
 | Live-state completion | `packages/cli/lib/completion/providers.ts` (`cellPathCandidates`, `childKeys`, verb candidates with doc comments) | The `ls` primitive and tab completion, already written against live state |
-| Pager/TUI substrate | `packages/cli/lib/view/` — `pager.ts` is the only module touching the TTY; `keys.ts`, `ansi.ts`, `render.ts`; `session.ts` holds state as pure logic | The full-screen half: raw mode, frames, key decoding, testable without a terminal; already follows references and edits buffers |
+| Pager/TUI substrate | `packages/cli/lib/view/` — `pager.ts` is the only module doing raw-mode full-screen TTY handling; `mod.ts` and `loadinput.ts` touch stdio for the one-shot path (capability probes, plain-output writes, piped input); `keys.ts`, `ansi.ts`, `render.ts`, `session.ts` hold state and decoding as pure logic | The full-screen half: raw mode, frames, key decoding, testable without a terminal; already follows references and edits buffers |
 | FUSE mount | `packages/fuse` | The same addressing as a POSIX filesystem; prior art for layout (arrays as numeric directories, handlers as executables, links as symlinks). Shuttle is its interactive, live sibling, not a replacement |
 | Offline inspector | `packages/state-inspector`, `cf inspect` | The forensic counterpart (snapshots, scopes, history); its HTML explorer is prior art for tree-plus-detail browsing |
 | Entry-point resolution | `cf wish` | Headless resolution of `#favorites`-style targets — the mounts of decision 5 |

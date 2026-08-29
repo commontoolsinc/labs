@@ -12,8 +12,9 @@ disciplines it leans on are in
   `q` returns to the prompt exactly where it was. Moving is always an
   explicit act (a `cd` from inside the view's command line).
 - **Views are pure logic plus injected terminal deps**, the architecture
-  `packages/cli/lib/view` already proves out: one module touches the TTY,
-  state and key handling are pure and testable without a terminal.
+  `packages/cli/lib/view` already proves out: raw-mode terminal handling
+  sits in one module, and state and key handling are pure and testable
+  without a terminal.
 - **Everything live obeys the settle discipline**: one repaint per quiet
   runtime (guard plus `idle()`), never a timer. Sinks are canceled on view
   exit.
@@ -35,7 +36,7 @@ inserts and removals are reflected live and marked briefly. Entering a row
 drills in place; leaving restores the parent's scroll and selection.
 
 ```text
-┌ ~estuary/board/topics ────────────── ● live ┐
+┌ estuary/board/topics ─────────────── ● live ┐
 │ %1  verb contracts        replies 14        │
 │ %2  migration rehearsal   replies  3        │
 │▸%3  co-presence rollout   replies  8    +   │
@@ -68,7 +69,11 @@ prompt (decision 17), so "look, leave, act" needs no retyping.
 `pager.ts` (raw mode, frame rendering, restore-on-every-exit), `keys.ts`,
 and `ansi.ts` are the terminal layer to build on; `session.ts` is the
 pattern to follow rather than import — shuttle views hold different state.
-The export entries for these modules land with B3.
+`pager.ts` is where the raw-mode coupling lives, and it is the piece
+shuttle wants; `mod.ts` and `loadinput.ts` own the rest of `cf view`'s
+stdio — probing whether stdout and stdin are terminals, writing plain
+output, reading a piped document — which is one-shot-command concern a
+shell drives for itself. The export entries for these modules land with B3.
 
 One adaptation to verify early in B3: `cf view` pages a static document,
 so its frame loop may be key-driven only. Shuttle views repaint on two

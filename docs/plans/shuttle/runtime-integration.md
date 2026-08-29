@@ -9,10 +9,14 @@ today, the discipline a long-lived process must add, and the seam work in
 ## The connection
 
 One persistent `PiecesController` serves a place. `PiecesController.initialize`
-(`packages/piece/src/ops/pieces-controller.ts`) is the lean constructor;
-`loadPieces` (`packages/cli/lib/piece.ts`) is the CLI's wrapper, adding a
-version check, an experimental-options fetch, and a health check per call —
-preamble a shell pays once, not per verb.
+(`packages/piece/src/ops/pieces-controller.ts`) is the lean constructor: it
+opens the session and its storage manager, builds the `remoteClient` runtime
+over the deployment's experimental options, health-checks the server before
+reading any of the space, and settles the space session. `loadPieces`
+(`packages/cli/lib/piece.ts`) wraps that same sequence for the CLI, adding a
+version check against the server's git sha, embedded-space validation, and the
+error-log, navigate, and JSON-console wiring a one-shot verb wants. A shell
+pays the sequence once at connect; `cf` pays it per invocation.
 
 The connection pushes. The `remoteClient` runtime preset opens a persistent
 `WebSocketTransport` (`packages/runner/src/storage/v2-remote-session.ts`), so
@@ -29,8 +33,11 @@ Two existing long-lived holders show the lifecycle discipline:
 - `packages/fuse`: `CellBridge` takes an injectable `PiecesLoader` plus a
   separate `reconnectPiecesLoader` for recovery.
 
-Skipping `loadPieces`'s per-call preamble also skips its health check, so
-shuttle owns its own liveness story; the cf-harness policy is the leaner fit.
+`initialize` health-checks the server before it returns, so the first
+connection is proven live on the way up. What a long-lived process gives up is
+the repetition: `loadPieces` re-proves liveness on every verb, and a shell
+asks once. Liveness after that first connection is shuttle's to own, and the
+cf-harness reconnect-on-failure policy is the leaner fit.
 
 ## Watch mechanics
 

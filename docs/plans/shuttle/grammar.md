@@ -98,25 +98,39 @@ ground truth offline). Scope is a way of seeing every place, not a
 location, so the cwd is a **pair**: position and scope. Both stick while
 you navigate, both render in the prompt, and `pwd` prints both.
 
-`cd` is the door to both dimensions, applying whatever components a
-reference carries: `cd board@session` moves position and scope in one
-step, and `cd @session` moves scope alone, exactly as `cd topics/3` moves
-position alone. There is no separate scope verb; the general door is
+`cd` is the door to both dimensions, applying whatever components its
+operand carries: `cd board@session` is a full reference and moves position
+and scope in one step, `cd topics/3` moves position alone, and `cd @session`
+moves scope alone. There is no separate scope verb; the general door is
 `where scope …`, like any other ambient dimension. The active scope fills
 the omitted `@scope` of every reference as the place fills omitted
 position levels, and an explicit suffix on an operand overrides it for
 that operand alone.
 
-The canonical grammar bounds what a suffix can say (verified against
-`parseScopedIdSegment` in `packages/runner/src/link-types.ts`):
+A scope-only `@scope` is shuttle **navigation syntax**, not a reference. It
+sits with `..` and `-`: spellings that `cd` and `where` accept to move the
+cwd, and that the canonical grammar does not parse. `parseScopedIdSegment`
+(`packages/runner/src/link-types.ts`) requires an id in front of the
+suffix and throws without one, so `@session` alone addresses nothing. The
+no-growth rule holds because the spelling never leaves those two verbs: an
+operand and a full reference always carry an id, no link endpoint can hold
+a scope-only suffix, and nothing serializes one. Setting the ambient scope
+is all `cd @session` does, and ordinary references pick it up from there.
 
-- The suffix is a bare `CellScope` word — `@space`, `@user`, `@session` —
-  and identity components are never spelled in a reference. `@session`
+The canonical grammar bounds what a suffix on a reference can say
+(verified against `parseScopedIdSegment` in
+`packages/runner/src/link-types.ts`):
+
+- The suffix is a `CellScope` word — `@space`, `@user`, `@session` — with
+  no identity component; those are never spelled in a reference. `@session`
   and `@user` therefore mean the **reading identity's own** overlays,
   composed with the caller's identity at resolution.
-- `@space` is accepted and explicit: the parser returns `scope: "space"`,
-  distinct from an omitted suffix — so `cd @space` returns to the base
-  overlay inside today's grammar.
+- `@space` is a canonical scope value, not shuttle's addition:
+  `CELL_SCOPE_VALUES` holds it beside `user` and `session`, the parser's
+  rejection text names all three, and `piece1@space/path` parses to
+  `scope: "space"` distinct from an omitted suffix
+  (`packages/cli/test/piece.test.ts`). The base is therefore nameable, and
+  `cd @space` sets the ambient scope back to it.
 - The serializer never emits `@space` (the base renders as a bare id), so
   the prompt and `pwd` render the scope dimension themselves rather than
   round-tripping through the reference serializer.
