@@ -1042,7 +1042,7 @@ Tests (`packages/runner/test/fabric-ref-resolution.test.ts`): build, in an
 in-process runtime: a fake piece cell carrying `meta("pattern")` /
 `meta("patternIdentity")` (use the real setters — `setPatternCell` in
 `packages/runner/src/result-utils.ts` writes `meta("pattern")`, and
-`Runner.applySetupState` writes `meta("patternIdentity")` — and mirror them);
+`Runner.#applySetupState` writes `meta("patternIdentity")` — and mirror them);
 slug → piece; slug → plain data cell (error + chain); missing slug; `of:`
 directly to a piece cell. Add a direct `pattern:` subpath test that proves the scope
 guard runs before the otherwise-terminal identity is returned. Add a CLI

@@ -571,7 +571,7 @@ export class ContextualFlowControl {
       emptyTag !== undefined && missingTag !== undefined &&
       isObjectOrArray(schema) && isDeepFrozen(schema);
     if (!cacheable) {
-      return ContextualFlowControl.schemaAtPathInternal(
+      return ContextualFlowControl.#schemaAtPathInternal(
         schema,
         path,
         defs,
@@ -592,7 +592,7 @@ export class ContextualFlowControl {
       // instance: downstream identity-keyed caches (standardization, value
       // hashing) hit instead of re-walking a fresh anyOf rebuild every time.
       const missesBefore = externalResolutionMissCount();
-      result = internSchema(ContextualFlowControl.schemaAtPathInternal(
+      result = internSchema(ContextualFlowControl.#schemaAtPathInternal(
         schema,
         path,
         defs,
@@ -613,7 +613,7 @@ export class ContextualFlowControl {
     return result;
   }
 
-  private static schemaAtPathInternal(
+  static #schemaAtPathInternal(
     schema: JSONSchema,
     path: readonly string[],
     defs: Record<string, JSONSchema> | undefined,
@@ -658,7 +658,7 @@ export class ContextualFlowControl {
           const entryDefs = isObjectOrArray(entry) && entry.$defs !== undefined
             ? entry.$defs as Record<string, JSONSchema>
             : defs;
-          const optSchema = ContextualFlowControl.schemaAtPathInternal(
+          const optSchema = ContextualFlowControl.#schemaAtPathInternal(
             entry,
             path.slice(index),
             entryDefs,

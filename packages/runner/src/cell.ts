@@ -888,42 +888,47 @@ interface CauseContainer {
 export class CellImpl<T extends FabricValue>
   implements ICell<T>, IStreamable<T> {
   // Stream-specific fields
-  private listeners = new Set<
+  #listeners = new Set<
     (event: AnyCellWrapping<T>) => Cancel | undefined
   >();
-  private cleanup: Cancel | undefined;
+  #cleanup: Cancel | undefined;
 
   // Each cell has its own link (space, path, schema)
-  private _link: NormalizedLink;
+  #_link: NormalizedLink;
 
   // Shared container for entity ID and cause - siblings share the same instance
-  private _causeContainer: CauseContainer;
+  #causeContainer: CauseContainer;
 
-  private _frame: Frame | undefined;
+  #frame: Frame | undefined;
 
-  private _kind: CellKind;
+  #kind: CellKind;
 
   // Self-reference for pattern SELF symbol support
-  private _selfRef?: Reactive<any>;
-  private viewRefHashCache?: {
+  #selfRef?: Reactive<any>;
+  #viewRefHashCache?: {
     link: NormalizedFullLink;
     cfcLabelView: CfcLabelView | undefined;
     hash: string;
   };
 
+  #synced: boolean;
+  #cfcLabelView?: CfcLabelView;
+
   constructor(
     public readonly runtime: Runtime,
     public readonly tx: IExtendedStorageTransaction | undefined,
     link?: NormalizedLink,
-    private synced: boolean = false,
+    synced: boolean = false,
     causeContainer?: CauseContainer,
     kind?: CellKind,
-    private _cfcLabelView?: CfcLabelView,
+    _cfcLabelView?: CfcLabelView,
   ) {
-    this._frame = getTopFrame();
+    this.#synced = synced;
+    this.#cfcLabelView = _cfcLabelView;
+    this.#frame = getTopFrame();
 
     // Store this cell's own link
-    this._link = {
+    this.#_link = {
       ...(link ?? { path: [] }),
       scope: isCellScope(link?.scope) ? link.scope : normalizeCellScope(
         undefined,
@@ -932,37 +937,37 @@ export class CellImpl<T extends FabricValue>
 
     // Use provided container or create one
     // If link has an id, extract it to the container
-    this._causeContainer = causeContainer ?? {
+    this.#causeContainer = causeContainer ?? {
       cell: this as unknown as OpaqueCell<unknown>,
-      id: this._link.id,
-      space: this._link.space,
+      id: this.#_link.id,
+      space: this.#_link.space,
       cause: undefined,
     };
 
-    this._kind = kind ?? "cell";
-    this._cfcLabelView = cloneCfcLabelView(_cfcLabelView);
+    this.#kind = kind ?? "cell";
+    this.#cfcLabelView = cloneCfcLabelView(_cfcLabelView);
   }
 
   isReadableCell(): boolean {
-    return this._kind === "cell" || this._kind === "readonly";
+    return this.#kind === "cell" || this.#kind === "readonly";
   }
 
   [cfcLabelViewSymbol](): CfcLabelView | undefined {
-    return cloneCfcLabelView(this._cfcLabelView);
+    return cloneCfcLabelView(this.#cfcLabelView);
   }
 
   /**
    * Get the full link for this cell, ensuring it has id and space.
    * This will attempt to create a full link if one doesn't exist and we're in a valid context.
    */
-  private get link(): NormalizedFullLink {
+  get #link(): NormalizedFullLink {
     // Check if we have a full entity ID and space
-    if (!this.hasFullLink()) {
+    if (!this.#hasFullLink()) {
       // Try to ensure we have a full link
-      this.ensureLink();
+      this.#ensureLink();
 
       // If still no full link after ensureLink, throw
-      if (!this.hasFullLink()) {
+      if (!this.#hasFullLink()) {
         throw new Error(
           "Cell link creation failed - no cause or context\n" +
             "help: use .for(uniqueId) to set explicit identity, or create cells within handler/pattern contexts",
@@ -971,33 +976,33 @@ export class CellImpl<T extends FabricValue>
     }
 
     // Combine causeContainer id with link's space/path/schema
-    return this._link as NormalizedFullLink;
+    return this.#_link as NormalizedFullLink;
   }
 
-  private get viewRef(): CellViewRef {
+  get #viewRef(): CellViewRef {
     return {
-      link: this.link,
-      cfcLabelView: this._cfcLabelView,
+      link: this.#link,
+      cfcLabelView: this.#cfcLabelView,
     };
   }
 
-  private viewRefHash(): string {
-    const link = this.link;
-    const cfcLabelView = this._cfcLabelView;
-    const cached = this.viewRefHashCache;
+  #viewRefHash(): string {
+    const link = this.#link;
+    const cfcLabelView = this.#cfcLabelView;
+    const cached = this.#viewRefHashCache;
     if (cached?.link === link && cached.cfcLabelView === cfcLabelView) {
       return cached.hash;
     }
     const hash = hashStringOf({ link, cfcLabelView } satisfies CellViewRef);
-    this.viewRefHashCache = { link, cfcLabelView, hash };
+    this.#viewRefHashCache = { link, cfcLabelView, hash };
     return hash;
   }
 
   /**
    * Check if this cell has a full link (with id and space)
    */
-  private hasFullLink(): boolean {
-    return this._link.id !== undefined && this._link.space !== undefined;
+  #hasFullLink(): boolean {
+    return this.#_link.id !== undefined && this.#_link.space !== undefined;
   }
 
   /**
@@ -1013,7 +1018,7 @@ export class CellImpl<T extends FabricValue>
    */
   for(cause: unknown, allowIfSet?: boolean): Cell<T> {
     // If cause or id already exists, either fail or silently ignore based on allowIfSet
-    if (this._causeContainer.id || this._causeContainer.cause) {
+    if (this.#causeContainer.id || this.#causeContainer.cause) {
       if (allowIfSet) {
         // Treat as suggestion - silently ignore
         return this as unknown as Cell<T>;
@@ -1031,7 +1036,7 @@ export class CellImpl<T extends FabricValue>
     assertNoReservedCauseKeys(cause);
 
     // Store the cause in the shared container - all siblings will see this
-    this._causeContainer.cause = cause;
+    this.#causeContainer.cause = cause;
 
     return this as unknown as Cell<T>;
   }
@@ -1043,14 +1048,14 @@ export class CellImpl<T extends FabricValue>
    * already been linked.
    */
   setUnlinkedSpace(space: MemorySpace): void {
-    if (this._causeContainer.id || this._link.id) {
+    if (this.#causeContainer.id || this.#_link.id) {
       throw new Error(
         "Cannot set space: cell already has a link.",
       );
     }
-    this._causeContainer.space = space;
-    this._link = { ...this._link, space };
-    for (const node of cellNodes.get(this._causeContainer.cell) ?? []) {
+    this.#causeContainer.space = space;
+    this.#_link = { ...this.#_link, space };
+    for (const node of cellNodes.get(this.#causeContainer.cell) ?? []) {
       (node.module as Module).targetSpace = space;
     }
   }
@@ -1066,14 +1071,14 @@ export class CellImpl<T extends FabricValue>
    *
    * @throws Error if not in a handler context and no cause was provided
    */
-  private ensureLink(): void {
+  #ensureLink(): void {
     // If we already have a full link (id and space) in the container, just copy
     // it over to our link.
-    if (this._causeContainer.id && this._causeContainer.space) {
-      this._link = {
-        ...this._link,
-        id: this._causeContainer.id,
-        space: this._causeContainer.space,
+    if (this.#causeContainer.id && this.#causeContainer.space) {
+      this.#_link = {
+        ...this.#_link,
+        id: this.#causeContainer.id,
+        space: this.#causeContainer.space,
       };
       return;
     }
@@ -1081,15 +1086,15 @@ export class CellImpl<T extends FabricValue>
     // Otherwise, let's attempt to derive the id:
 
     // We must be in a frame context to derive the id.
-    if (!this._frame) {
+    if (!this.#frame) {
       throw new Error(
         "Cannot create cell link - no frame context\n" +
           "help: create cells inside pattern/handler/lift, or use .for(cause) for explicit identity",
       );
     }
 
-    const space = this._link.space ?? this._causeContainer.space ??
-      this._frame?.space;
+    const space = this.#_link.space ?? this.#causeContainer.space ??
+      this.#frame?.space;
 
     // We need a space to create a link
     if (!space) {
@@ -1101,9 +1106,9 @@ export class CellImpl<T extends FabricValue>
 
     // Used passed in cause (via .for()), for events fall back to per-frame
     // counter.
-    const cause = this._causeContainer.cause ??
-      (this._frame.inHandler
-        ? { count: this._frame.generatedIdCounter++ }
+    const cause = this.#causeContainer.cause ??
+      (this.#frame.inHandler
+        ? { count: this.#frame.generatedIdCounter++ }
         : undefined);
 
     if (!cause) {
@@ -1114,36 +1119,36 @@ export class CellImpl<T extends FabricValue>
     }
 
     // Create an entity ID from the cause, including the frame's
-    const id = toURI(createRef({ frame: cause }, this._frame.cause));
+    const id = toURI(createRef({ frame: cause }, this.#frame.cause));
 
     // Populate the id in the shared causeContainer
     // All siblings will see this update
-    this._causeContainer.id = id;
-    this._causeContainer.space = space;
+    this.#causeContainer.id = id;
+    this.#causeContainer.space = space;
 
     // Update this cell's link
-    this._link = { ...this._link, id, space };
+    this.#_link = { ...this.#_link, id, space };
   }
 
   get space(): MemorySpace {
-    return this._link.space ?? this._causeContainer.space ??
-      this._frame?.space!;
+    return this.#_link.space ?? this.#causeContainer.space ??
+      this.#frame?.space!;
   }
 
   get path(): readonly PropertyKey[] {
-    return this._link.path;
+    return this.#_link.path;
   }
 
   get schema(): JSONSchema | undefined {
-    if (this._link.schema !== undefined) return this._link.schema;
+    if (this.#_link.schema !== undefined) return this.#_link.schema;
 
     // If no schema is defined, resolve link and get schema from there (which is
     // what .get() would do).
-    if (this.hasFullLink()) {
+    if (this.#hasFullLink()) {
       const resolvedLink = resolveLink(
         this.runtime,
         this.runtime.readTx(this.tx),
-        this.link,
+        this.#link,
         "writeRedirect",
       );
       return resolvedLink.schema;
@@ -1154,16 +1159,21 @@ export class CellImpl<T extends FabricValue>
 
   /**
    * Check if this cell contains a stream value
+   *
+   * TypeScript-private rather than a `#` name: the module-level `isStream()`
+   * reads this member off `(value as any)`, and an optional call on a `#`
+   * name yields undefined rather than throwing, so every stream would
+   * quietly stop being recognized as one.
    */
   private isStream(resolvedToValueLink?: NormalizedFullLink): boolean {
-    if (this._kind === "stream") return true;
+    if (this.#kind === "stream") return true;
 
     const tx = this.runtime.readTx(this.tx);
 
     if (!resolvedToValueLink) {
       // A content read: the terminal-value read below is what decides, so
       // the resolution's crossings mark like any other read's.
-      resolvedToValueLink = resolveLink(this.runtime, tx, this.link, "value", {
+      resolvedToValueLink = resolveLink(this.runtime, tx, this.#link, "value", {
         markIfcCrossings: true,
       });
     }
@@ -1186,7 +1196,7 @@ export class CellImpl<T extends FabricValue>
   }
 
   get(options?: { traverseCells?: boolean }): Readonly<StripDefaultBrand<T>> {
-    if (!this.synced) this.sync(); // No await, just kicking this off
+    if (!this.#synced) this.sync(); // No await, just kicking this off
 
     // Per-transaction read cache: within one ready transaction, repeatedly
     // reading the same cell with no intervening write recomputes an identical
@@ -1206,8 +1216,8 @@ export class CellImpl<T extends FabricValue>
       // invalidation is load-bearing: bypass the cache so a post-prepare read
       // still goes through readOrThrow() and invalidates the prepared digest.
       tx.getCfcState().prepare.status !== "prepared";
-    const variant = `${options?.traverseCells ?? false}|${this.synced}`;
-    const cacheKey = cacheable ? this.viewRefHash() : undefined;
+    const variant = `${options?.traverseCells ?? false}|${this.#synced}`;
+    const cacheKey = cacheable ? this.#viewRefHash() : undefined;
     if (cacheable) {
       const cached = tx.getCachedReadResult!(cacheKey!, variant);
       if (cached !== undefined) {
@@ -1219,23 +1229,23 @@ export class CellImpl<T extends FabricValue>
     const value = validateAndTransform(
       this.runtime,
       this.tx,
-      this.viewRef,
+      this.#viewRef,
       [],
-      { ...options, synced: this.synced },
+      { ...options, synced: this.#synced },
     );
     const elapsed = logger.timeEnd("cell", "get")!;
     if (elapsed > 50) {
       logger.warn(
         `get >${Math.floor(elapsed - (elapsed % 10))}ms`,
         `get() took ${Math.floor(elapsed)}ms`,
-        this.link,
+        this.#link,
       );
     }
     if (cacheable) {
-      // Re-read this._link: validateAndTransform (via viewRef -> link) may have
-      // run ensureLink() and replaced it with the completed link object, which
+      // Re-read `#_link`: validateAndTransform (via viewRef -> link) may have
+      // run `#ensureLink()` and replaced it with the completed link object, which
       // is the identity subsequent get()s will hash.
-      tx.setCachedReadResult!(this.viewRefHash(), variant, value);
+      tx.setCachedReadResult!(this.#viewRefHash(), variant, value);
     }
     return value;
   }
@@ -1249,7 +1259,7 @@ export class CellImpl<T extends FabricValue>
    * to trigger re-execution of the current reactive context.
    */
   sample(): Readonly<StripDefaultBrand<T>> {
-    if (!this.synced) this.sync(); // No await, just kicking this off
+    if (!this.#synced) this.sync(); // No await, just kicking this off
 
     // Wrap the transaction to make all reads non-reactive. Child cells created
     // during validateAndTransform will use the original transaction (via
@@ -1257,7 +1267,7 @@ export class CellImpl<T extends FabricValue>
     const readTx = this.runtime.readTx(this.tx);
     const nonReactiveTx = createNonReactiveTransaction(readTx);
 
-    return validateAndTransform(this.runtime, nonReactiveTx, this.viewRef);
+    return validateAndTransform(this.runtime, nonReactiveTx, this.#viewRef);
   }
 
   /**
@@ -1287,7 +1297,7 @@ export class CellImpl<T extends FabricValue>
    *          dependencies have been computed.
    */
   pull(): Promise<Readonly<T>> {
-    if (!this.synced) {
+    if (!this.#synced) {
       // Register the kicked first sync in the settled pool the convergence
       // loop below drains. sync() resolves once the doc is confirmed —
       // arrived or absent — and an UNREGISTERED kick is exactly the race
@@ -1306,14 +1316,14 @@ export class CellImpl<T extends FabricValue>
     // Check if we need to traverse the result to register all dependencies.
     // This is needed when there's no schema or when the schema is TrueSchema ("any"),
     // because without schema constraints we need to read all nested values.
-    const schema = this._link.schema;
+    const schema = this.#_link.schema;
     const needsTraversal = schema === undefined ||
       ContextualFlowControl.isTrueSchema(schema);
 
     return new Promise((resolve) => {
       const action: Action = (tx) => {
         // Read the value inside the effect - this ensures dependencies are pulled
-        const value = validateAndTransform(this.runtime, tx, this.viewRef);
+        const value = validateAndTransform(this.runtime, tx, this.#viewRef);
 
         // If no schema or TrueSchema, traverse the result to register all
         // nested values as read dependencies.
@@ -1373,7 +1383,7 @@ export class CellImpl<T extends FabricValue>
         // holding a long-lived open transaction has snapshots in it from
         // before the computations this pull just drove, so reading through it
         // would hand back exactly the stale values pull() exists to avoid.
-        resolve(validateAndTransform(this.runtime, undefined, this.viewRef));
+        resolve(validateAndTransform(this.runtime, undefined, this.#viewRef));
       });
     });
   }
@@ -1401,7 +1411,7 @@ export class CellImpl<T extends FabricValue>
     }
     // `"sqlite"` is a type-level kind (the public `SqliteDb` type restricts who
     // can call `.exec`); at runtime we validate the actual handle value rather
-    // than `_kind`, since handler-input materialization doesn't always stamp the
+    // than `#kind`, since handler-input materialization doesn't always stamp the
     // kind onto the delivered cell. Read the handle with `getRaw()` (NOT `get()`):
     // the delivered cell's schema is the `SqliteDatabase` shape (no declared
     // properties), so `get()` would shape the handle down to `{}` and drop the
@@ -1558,7 +1568,7 @@ export class CellImpl<T extends FabricValue>
     const resolvedToValueLink = resolveLink(
       this.runtime,
       this.runtime.readTx(this.tx),
-      this.link,
+      this.#link,
       "value",
       { markIfcCrossings: true },
     );
@@ -1964,10 +1974,10 @@ export class CellImpl<T extends FabricValue>
             }
             destination.stageOutboundAppend(this.tx, row);
           }
-          this.cleanup?.();
+          this.#cleanup?.();
           const [cancel, addCancel] = useCancelGroup();
-          this.cleanup = cancel;
-          this.listeners.forEach((callback) => addCancel(callback(event)));
+          this.#cleanup = cancel;
+          this.#listeners.forEach((callback) => addCancel(callback(event)));
           return this as unknown as Cell<T>;
         }
       }
@@ -2025,11 +2035,11 @@ export class CellImpl<T extends FabricValue>
         },
       );
 
-      this.cleanup?.();
+      this.#cleanup?.();
       const [cancel, addCancel] = useCancelGroup();
-      this.cleanup = cancel;
+      this.#cleanup = cancel;
 
-      this.listeners.forEach((callback) => addCancel(callback(event)));
+      this.#listeners.forEach((callback) => addCancel(callback(event)));
     } else {
       // Regular cell behavior
       if (!this.tx) {
@@ -2041,7 +2051,7 @@ export class CellImpl<T extends FabricValue>
 
       // No await for the sync, just kicking this off, so we have the data to
       // retry on conflict.
-      if (!this.synced) this.sync();
+      if (!this.#synced) this.sync();
 
       recordRelevantSchemaWritePolicyInput(
         this.tx,
@@ -2052,7 +2062,7 @@ export class CellImpl<T extends FabricValue>
       const writeLink = resolveLink(
         this.runtime,
         this.tx,
-        this.link,
+        this.#link,
         "writeRedirect",
       );
 
@@ -2064,9 +2074,9 @@ export class CellImpl<T extends FabricValue>
         this.tx,
         writeLink,
         newValue,
-        this._frame?.cause,
+        this.#frame?.cause,
         undefined,
-        frameAnchorIds(this._frame),
+        frameAnchorIds(this.#frame),
       );
 
       // A whole-value set reshapes what a mergeable op intent (an earlier push /
@@ -2166,7 +2176,7 @@ export class CellImpl<T extends FabricValue>
 
     // No await for the sync, just kicking this off, so we have the data to
     // retry on conflict.
-    if (!this.synced) this.sync();
+    if (!this.#synced) this.sync();
 
     // Get current value, following aliases and references
     // The read half of this read-modify-write is a content read: labeled
@@ -2174,7 +2184,7 @@ export class CellImpl<T extends FabricValue>
     const resolvedLink = resolveLink(
       this.runtime,
       this.tx,
-      this.link,
+      this.#link,
       "value",
       {
         markIfcCrossings: true,
@@ -2236,7 +2246,7 @@ export class CellImpl<T extends FabricValue>
 
     // No await for the sync, just kicking this off, so we have the data to
     // retry on conflict.
-    if (!this.synced) this.sync();
+    if (!this.#synced) this.sync();
 
     // Follow aliases and references, since we want to get to an assumed
     // existing array.
@@ -2245,7 +2255,7 @@ export class CellImpl<T extends FabricValue>
     const resolvedLink = resolveLink(
       this.runtime,
       this.tx,
-      this.link,
+      this.#link,
       "value",
       {
         markIfcCrossings: true,
@@ -2261,7 +2271,7 @@ export class CellImpl<T extends FabricValue>
     let currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
-    const cause = this._frame?.cause;
+    const cause = this.#frame?.cause;
 
     if (!Array.isArray(currentValue)) {
       if (currentValue !== undefined) {
@@ -2290,7 +2300,7 @@ export class CellImpl<T extends FabricValue>
           ? processDefaultValue(
             this.runtime,
             this.tx,
-            this.link,
+            this.#link,
             resolvedSchema.default,
           )
           : [];
@@ -2321,7 +2331,7 @@ export class CellImpl<T extends FabricValue>
       combined,
       cause,
       undefined,
-      frameAnchorIds(this._frame),
+      frameAnchorIds(this.#frame),
     );
 
     // Record the append intent so the commit emits a tail-relative, mergeable
@@ -2341,14 +2351,14 @@ export class CellImpl<T extends FabricValue>
           "help: use in handlers only, ensure cell is typed as array",
       );
     }
-    if (!this.synced) this.sync();
+    if (!this.#synced) this.sync();
 
     // The read half of this read-modify-write is a content read: labeled
     // crossings mark (the write half's policy input is recorded separately).
     const resolvedLink = resolveLink(
       this.runtime,
       this.tx,
-      this.link,
+      this.#link,
       "value",
       {
         markIfcCrossings: true,
@@ -2362,7 +2372,7 @@ export class CellImpl<T extends FabricValue>
     let currentValue = this.tx.readValueOrThrow(resolvedLink, {
       meta: mergeableOpRead,
     });
-    const cause = this._frame?.cause;
+    const cause = this.#frame?.cause;
 
     if (!Array.isArray(currentValue)) {
       if (currentValue !== undefined) {
@@ -2381,7 +2391,7 @@ export class CellImpl<T extends FabricValue>
           ? processDefaultValue(
             this.runtime,
             this.tx,
-            this.link,
+            this.#link,
             resolvedSchema.default,
           )
           : [];
@@ -2409,7 +2419,7 @@ export class CellImpl<T extends FabricValue>
     // normalize it runs only under a frame, and a raw comparison also tolerates
     // annotation-carrying values (e.g. `get()` results) that the strict
     // conversion rejects.
-    const normalizeForComparison = this._frame !== undefined;
+    const normalizeForComparison = this.#frame !== undefined;
     const alreadyPresent = (candidate: FabricValue) => {
       if (isCell(candidate)) {
         return existing.some((element) =>
@@ -2453,7 +2463,7 @@ export class CellImpl<T extends FabricValue>
       [...existing, ...toAdd],
       cause,
       undefined,
-      frameAnchorIds(this._frame),
+      frameAnchorIds(this.#frame),
     );
     this.tx.recordMergeableOp?.(resolvedLink, {
       op: "add-unique",
@@ -2474,14 +2484,14 @@ export class CellImpl<T extends FabricValue>
           "help: a zero or non-finite increment is not a meaningful change",
       );
     }
-    if (!this.synced) this.sync();
+    if (!this.#synced) this.sync();
 
     // The read half of this read-modify-write is a content read: labeled
     // crossings mark (the write half's policy input is recorded separately).
     const resolvedLink = resolveLink(
       this.runtime,
       this.tx,
-      this.link,
+      this.#link,
       "value",
       {
         markIfcCrossings: true,
@@ -2501,7 +2511,7 @@ export class CellImpl<T extends FabricValue>
           "help: use in handlers only, ensure cell is typed as number",
       );
     }
-    const cause = this._frame?.cause;
+    const cause = this.#frame?.cause;
     const next = (typeof currentValue === "number" ? currentValue : 0) + by;
     diffAndUpdate(this.runtime, this.tx, resolvedLink, next, cause);
 
@@ -2525,14 +2535,14 @@ export class CellImpl<T extends FabricValue>
           "help: use in handlers only, ensure cell is typed as array",
       );
     }
-    if (!this.synced) this.sync();
+    if (!this.#synced) this.sync();
 
     // The read half of this read-modify-write is a content read: labeled
     // crossings mark (the write half's policy input is recorded separately).
     const resolvedLink = resolveLink(
       this.runtime,
       this.tx,
-      this.link,
+      this.#link,
       "value",
       {
         markIfcCrossings: true,
@@ -2582,7 +2592,7 @@ export class CellImpl<T extends FabricValue>
       this.tx,
       resolvedLink,
       filtered,
-      this._frame?.cause,
+      this.#frame?.cause,
     );
     for (const element of removed) {
       this.tx.recordMergeableOp?.(resolvedLink, {
@@ -2600,7 +2610,7 @@ export class CellImpl<T extends FabricValue>
   // addUnique / removeByValue, without ever reading the whole array.
   elementById(idKey: string, schema?: JSONSchema): Cell<any> {
     const tx = this.runtime.readTx(this.tx);
-    const resolvedLink = resolveLink(this.runtime, tx, this.link, "value", {
+    const resolvedLink = resolveLink(this.runtime, tx, this.#link, "value", {
       markIfcCrossings: true,
     });
     const entityId = createRef(
@@ -2721,7 +2731,7 @@ export class CellImpl<T extends FabricValue>
    * cell.key("user", "profile", "name")   // Cell<string>
    */
   key(...keys: PropertyKey[]): Cell<any> {
-    let currentLink = this._link;
+    let currentLink = this.#_link;
     let childSchema: JSONSchema | undefined;
     const childPath = keys.map((key) => key.toString());
 
@@ -2788,7 +2798,7 @@ export class CellImpl<T extends FabricValue>
     }
 
     // Determine the kind based on schema flags
-    let kind: CellKind = this._kind;
+    let kind: CellKind = this.#kind;
     if (isObjectOrArray(childSchema)) {
       const asCellValues = ContextualFlowControl.getAsCellValues(childSchema);
       // we can override the kind of cell we use for a key
@@ -2805,10 +2815,10 @@ export class CellImpl<T extends FabricValue>
       this.runtime,
       this.tx,
       currentLink,
-      this.synced,
-      this._causeContainer,
+      this.#synced,
+      this.#causeContainer,
       kind,
-      rebaseCfcLabelView(this._cfcLabelView, childPath),
+      rebaseCfcLabelView(this.#cfcLabelView, childPath),
     ) as unknown as Cell<any>;
   }
 
@@ -2823,7 +2833,7 @@ export class CellImpl<T extends FabricValue>
     // Create a new link with the modified schema, interned so downstream
     // identity-keyed schema caches hit (see `internCellLinkSchema`).
     const siblingLink: NormalizedLink = {
-      ...this._link,
+      ...this.#_link,
       schema: internCellLinkSchema(schema),
     };
 
@@ -2832,9 +2842,9 @@ export class CellImpl<T extends FabricValue>
       this.tx,
       siblingLink,
       false, // Reset synced flag, since schema is changing
-      this._causeContainer, // Share the causeContainer with siblings
-      this._kind,
-      this._cfcLabelView,
+      this.#causeContainer, // Share the causeContainer with siblings
+      this.#kind,
+      this.#cfcLabelView,
     ) as unknown as Cell<any>;
   }
 
@@ -2850,25 +2860,25 @@ export class CellImpl<T extends FabricValue>
    * @returns Cell with schema from links
    */
   asSchemaFromLinks<T = unknown>(): Cell<T> {
-    if (!this.synced) this.sync(); // Auto-sync like .get() - matches framework pattern
+    if (!this.#synced) this.sync(); // Auto-sync like .get() - matches framework pattern
 
     const { schema } = resolveLink(
       this.runtime,
       this.runtime.readTx(this.tx),
-      this.link,
+      this.#link,
     );
 
     return new CellImpl(
       this.runtime,
       this.tx,
       {
-        ...this._link,
+        ...this.#_link,
         ...(schema !== undefined && { schema }),
       },
       false, // Reset synced flag, since schema is changing
-      this._causeContainer, // Share the causeContainer with siblings
-      this._kind,
-      this._cfcLabelView,
+      this.#causeContainer, // Share the causeContainer with siblings
+      this.#kind,
+      this.#cfcLabelView,
     ) as unknown as Cell<T>;
   }
 
@@ -2878,11 +2888,11 @@ export class CellImpl<T extends FabricValue>
     return new CellImpl(
       this.runtime,
       newTx,
-      this._link, // Use the same link
-      this.synced,
-      this._causeContainer, // Share the causeContainer with siblings
-      this._kind,
-      this._cfcLabelView,
+      this.#_link, // Use the same link
+      this.#synced,
+      this.#causeContainer, // Share the causeContainer with siblings
+      this.#kind,
+      this.#cfcLabelView,
     ) as unknown as Cell<T>;
   }
 
@@ -2896,16 +2906,16 @@ export class CellImpl<T extends FabricValue>
     // Check if this is a stream
     if (this.isStream()) {
       // Stream behavior: add listener
-      this.listeners.add(
+      this.#listeners.add(
         callback as (event: AnyCellWrapping<T>) => Cancel | undefined,
       );
       return () =>
-        this.listeners.delete(
+        this.#listeners.delete(
           callback as (event: AnyCellWrapping<T>) => Cancel | undefined,
         );
     } else {
       // Regular cell behavior: subscribe to changes
-      if (!this.synced) {
+      if (!this.#synced) {
         // sink() returns synchronously and immediately publishes the replica's
         // current value, but the first backing-doc load remains part of the
         // runtime's convergence work. A pull begun after this call sees the
@@ -2918,7 +2928,7 @@ export class CellImpl<T extends FabricValue>
       return subscribeToReferencedDocs(
         callback,
         this.runtime,
-        this.viewRef,
+        this.#viewRef,
         options,
       );
     }
@@ -2942,8 +2952,8 @@ export class CellImpl<T extends FabricValue>
    * still race the deferred sync.
    */
   sync(): Promise<Cell<T>> {
-    this.synced = true;
-    logger.info("sync", this.link);
+    this.#synced = true;
+    logger.info("sync", this.#link);
     // The runner's explicit-instance read (server-execution v2 stage A —
     // OW17's tx→replica seam): a cell read inside a SERVED per-instance
     // run — its transaction carries the demand-supplied identity — loads
@@ -2964,7 +2974,7 @@ export class CellImpl<T extends FabricValue>
     callback: (value: FabricValue) => Cancel | undefined | void,
     options: SinkOptions = {},
   ): Cancel {
-    if (!this.synced) {
+    if (!this.#synced) {
       this.runtime.storageManager.trackUntilSettled(
         this.sync().catch(() => {}),
       );
@@ -2981,7 +2991,7 @@ export class CellImpl<T extends FabricValue>
     };
 
     return sinkHelper(sink, this.runtime, {
-      ...this.link,
+      ...this.#link,
       path: [String(metaField)],
     }, options);
   }
@@ -2992,7 +3002,7 @@ export class CellImpl<T extends FabricValue>
     let link: NormalizedFullLink = resolveLink(
       this.runtime,
       readTx,
-      this.link,
+      this.#link,
       "value",
       { markIfcCrossings: true },
     );
@@ -3006,9 +3016,9 @@ export class CellImpl<T extends FabricValue>
       this.runtime,
       link,
       this.tx,
-      this.synced,
+      this.#synced,
       undefined,
-      mergeCfcLabelViews([this._cfcLabelView, dereferenceView]),
+      mergeCfcLabelViews([this.#cfcLabelView, dereferenceView]),
     );
   }
 
@@ -3016,25 +3026,25 @@ export class CellImpl<T extends FabricValue>
     path?: Readonly<Path>,
     tx?: IExtendedStorageTransaction,
   ): CellResult<DeepKeyLookup<T, Path>> {
-    if (!this.synced) this.sync(); // No await, just kicking this off
+    if (!this.#synced) this.sync(); // No await, just kicking this off
     const subPath = path || [];
     return createQueryResultProxy(
       this.runtime,
       tx ?? this.tx ?? this.runtime.edit(),
       {
-        ...this.link,
+        ...this.#link,
         path: [...this.path, ...subPath.map((p) => p.toString())] as string[],
       },
       0,
       rebaseCfcLabelView(
-        this._cfcLabelView,
+        this.#cfcLabelView,
         subPath.map((p) => p.toString()),
       ),
     );
   }
 
   getAsNormalizedFullLink(): NormalizedFullLink {
-    return this.link;
+    return this.#link;
   }
 
   getAsLink(
@@ -3045,7 +3055,7 @@ export class CellImpl<T extends FabricValue>
       keepAsCell?: KeepAsCell;
     },
   ): SigilLink {
-    return createSigilLinkFromParsedLink(this.link, {
+    return createSigilLinkFromParsedLink(this.#link, {
       ...options,
       overwrite: "this",
     });
@@ -3059,7 +3069,7 @@ export class CellImpl<T extends FabricValue>
       keepAsCell?: KeepAsCell;
     },
   ): SigilWriteRedirectLink {
-    return createSigilLinkFromParsedLink(this.link, {
+    return createSigilLinkFromParsedLink(this.#link, {
       ...options,
       overwrite: "redirect",
     }) as SigilWriteRedirectLink;
@@ -3093,14 +3103,14 @@ export class CellImpl<T extends FabricValue>
     options?: RawCellReadOptions & { frozen?: boolean },
   ): FabricValue {
     const { frozen = true, lastNode = "top", ...readOptions } = options ?? {};
-    if (!this.synced) this.sync(); // No await, just kicking this off
+    if (!this.#synced) this.sync(); // No await, just kicking this off
     const tx = this.runtime.readTx(this.tx);
     // Resolve all links ON THE WAY to the target, but don't resolve the final
     // link.
     const value = tx.readValueOrThrow(
       // A raw read still resolves links on the way to the target, and those
       // crossings are content reads: the seam marks labeled hops.
-      resolveLink(this.runtime, tx, this.link, lastNode, {
+      resolveLink(this.runtime, tx, this.#link, lastNode, {
         markIfcCrossings: true,
       }),
       readOptions,
@@ -3124,7 +3134,7 @@ export class CellImpl<T extends FabricValue>
 
     // No await for the sync, just kicking this off, so we have the data to
     // retry on conflict.
-    if (!this.synced) this.sync();
+    if (!this.#synced) this.sync();
 
     const inlined = findAndInlineDataUriLinks(value);
 
@@ -3137,7 +3147,7 @@ export class CellImpl<T extends FabricValue>
     // `internalVerifierRead` (it must not taint the transaction's CFC labels
     // with this cell's own value).
     if (onlyIfDifferent) {
-      const current = this.tx.readValueOrThrow(this.link, {
+      const current = this.tx.readValueOrThrow(this.#link, {
         meta: { ...ignoreReadForScheduling, ...internalVerifierRead },
       });
       if (valueEqual(current, inlined)) return;
@@ -3148,18 +3158,18 @@ export class CellImpl<T extends FabricValue>
     // attempted-target coverage unless a caller establishes it separately.
     recordRelevantSchemaWritePolicyInput(
       this.tx,
-      this.link,
-      this.link.schema ?? this.schema,
+      this.#link,
+      this.#link.schema ?? this.schema,
       schemaRole,
     );
-    this.tx.writeValueOrThrow(this.link, inlined);
+    this.tx.writeValueOrThrow(this.#link, inlined);
 
     // Every whole-value write poisons the mergeable ops it covers — one rule,
     // rather than a list of write paths that happen to remember. Today's callers
     // are internal machinery writing links into result cells, where no op is
     // ever recorded, so this is inert; it is here so the rule stays true if that
     // changes.
-    this.tx.poisonMergeableOp?.(this.link);
+    this.tx.poisonMergeableOp?.(this.#link);
   }
 
   applyCfcSchemaToExistingValue(): void {
@@ -3168,12 +3178,12 @@ export class CellImpl<T extends FabricValue>
         "Transaction required for applyCfcSchemaToExistingValue",
       );
     }
-    if (!this.synced) this.sync();
+    if (!this.#synced) this.sync();
 
     const writeLink = resolveLink(
       this.runtime,
       this.tx,
-      this.link,
+      this.#link,
       "writeRedirect",
     );
     const value = this.tx.readValueOrThrow(writeLink, {
@@ -3195,7 +3205,7 @@ export class CellImpl<T extends FabricValue>
     };
     const linkObj = this.getMetaRaw("argument", metaReadOptions);
     if (linkObj === undefined) return undefined;
-    const link = parseLink(linkObj, this._link);
+    const link = parseLink(linkObj, this.#_link);
     if (link === undefined) return undefined;
     return this.runtime.getCellFromLink(link).asSchema<U>(schema);
   }
@@ -3204,12 +3214,12 @@ export class CellImpl<T extends FabricValue>
     metaField: MetaField,
     options?: IReadOptions,
   ): FabricValue | undefined {
-    if (!this.synced) this.sync(); // No await, just kicking this off
+    if (!this.#synced) this.sync(); // No await, just kicking this off
     const metaAddr = {
-      space: this.link.space,
-      id: this.link.id,
+      space: this.#link.space,
+      id: this.#link.id,
       path: [metaField],
-      ...(this.link.scope !== undefined && { scope: this.link.scope }),
+      ...(this.#link.scope !== undefined && { scope: this.#link.scope }),
     };
     return this.runtime.readTx(this.tx).readOrThrow(metaAddr, options);
   }
@@ -3218,12 +3228,12 @@ export class CellImpl<T extends FabricValue>
     if (!this.tx) throw new Error("Transaction required for setMetaRaw");
     // No await for the sync, just kicking this off, so we have the data to
     // retry on conflict.
-    if (!this.synced) this.sync();
+    if (!this.#synced) this.sync();
     const metaAddr = {
-      space: this.link.space,
-      id: this.link.id,
+      space: this.#link.space,
+      id: this.#link.id,
       path: [metaField],
-      ...(this.link.scope !== undefined && { scope: this.link.scope }),
+      ...(this.#link.scope !== undefined && { scope: this.#link.scope }),
     };
     this.tx.writeOrThrow(metaAddr, value);
   }
@@ -3233,13 +3243,13 @@ export class CellImpl<T extends FabricValue>
    * Prefer using .asSchema() instead.
    */
   setSchema(newSchema: JSONSchema): void {
-    if (this._causeContainer.cause || this._causeContainer.id) {
+    if (this.#causeContainer.cause || this.#causeContainer.id) {
       throw new Error(
         "Cannot setSchema: cell already has a cause or link. Use .asSchema() instead.",
       );
     }
     // Since we don't have a cause yet, we can modify the link's schema
-    this._link = { ...this._link, schema: newSchema };
+    this.#_link = { ...this.#_link, schema: newSchema };
   }
 
   /**
@@ -3251,7 +3261,7 @@ export class CellImpl<T extends FabricValue>
     // For cells created during pattern construction, we need to track which nodes
     // they're connected to. Since Cell doesn't have a nodes set like Reactive's store,
     // we'll store this in a WeakMap keyed by the cell instance.
-    const top = this._causeContainer.cell;
+    const top = this.#causeContainer.cell;
     if (!cellNodes.has(top)) {
       cellNodes.set(top, new Set());
     }
@@ -3273,24 +3283,24 @@ export class CellImpl<T extends FabricValue>
     name?: unknown;
     external?: unknown;
   } {
-    if (!this._frame) {
+    if (!this.#frame) {
       throw new Error("Cannot export cell: no frame context.");
     }
     return {
-      cell: this._causeContainer.cell,
+      cell: this.#causeContainer.cell,
       path: this.path,
       schema: this.schema,
-      scope: isCellScope(this._link.scope) ? this._link.scope : undefined,
-      nodes: cellNodes.get(this._causeContainer.cell) ?? new Set(),
-      frame: this._frame,
+      scope: isCellScope(this.#_link.scope) ? this.#_link.scope : undefined,
+      nodes: cellNodes.get(this.#causeContainer.cell) ?? new Set(),
+      frame: this.#frame,
       // Cast needed: stream sentinel marker isn't actually of type T
-      value: this._kind === "stream"
+      value: this.#kind === "stream"
         ? { $stream: true } as unknown as T
         : undefined,
-      name: this._causeContainer.cause,
-      external: this._link.id
+      name: this.#causeContainer.cause,
+      external: this.#_link.id
         ? this.getAsWriteRedirectLink({
-          baseSpace: this._frame.space,
+          baseSpace: this.#frame.space,
           includeSchema: true,
         })
         : undefined,
@@ -3302,7 +3312,7 @@ export class CellImpl<T extends FabricValue>
    * This allows patterns to access their own output via the SELF symbol.
    */
   setSelfRef(selfRef: Reactive<any>): void {
-    this._selfRef = selfRef;
+    this.#selfRef = selfRef;
   }
 
   /**
@@ -3319,7 +3329,7 @@ export class CellImpl<T extends FabricValue>
     // `query`/`exec` are SqliteDb-only methods whose names are also common data
     // fields (e.g. wish's `query`). Only forward them as methods on a
     // `"sqlite"`-kind cell; otherwise treat `.query`/`.exec` as data navigation.
-    const cellKind = this._kind;
+    const cellKind = this.#kind;
     const proxy = new Proxy(boundTarget ?? this, {
       get(target, prop) {
         if (prop === Symbol.iterator) {
@@ -3345,7 +3355,7 @@ export class CellImpl<T extends FabricValue>
           return true;
         } else if (prop === SELF) {
           // Return the self-reference if set (for pattern SELF symbol support)
-          return (self as unknown as CellImpl<T>)._selfRef;
+          return (self as unknown as CellImpl<T>).#selfRef;
         } else if (typeof prop === "string" || typeof prop === "number") {
           // Recursive property access - wrap the child cell
           const nestedCell = self.key(prop) as Cell<T>;
@@ -3380,7 +3390,7 @@ export class CellImpl<T extends FabricValue>
    * this DB handle as the `db` input (sugar over the `sqliteQuery` factory,
    * mirroring how `.map` threads `this` as `list`). The `<Row>` result schema is
    * injected by the transformer (method-call lowering), not set here. Like
-   * `.map`, this is a build-time node constructor with no `_kind` guard: at
+   * `.map`, this is a build-time node constructor with no `#kind` guard: at
    * pattern-build time `this` is an opaque builder ref (the `"sqlite"` kind only
    * materializes at runtime via the asCell schema), and the public `SqliteDb`
    * type already restricts who can call it. A wrong handle fails at runtime in
@@ -3589,12 +3599,12 @@ export class CellImpl<T extends FabricValue>
 
   toSigilLinkOrNull(): SigilLink | null {
     // Return null when no link exists (cell hasn't been created yet)
-    if (!this.hasFullLink()) {
+    if (!this.#hasFullLink()) {
       return null;
     }
 
     // Use sigil link format which includes space for cross-space references
-    return createSigilLinkFromParsedLink(this.link);
+    return createSigilLinkFromParsedLink(this.#link);
   }
 
   toEncodableForm(): SigilLink | null {
@@ -3625,15 +3635,15 @@ export class CellImpl<T extends FabricValue>
   }
 
   get cellLink(): SigilLink {
-    return createSigilLinkFromParsedLink(this.link);
+    return createSigilLinkFromParsedLink(this.#link);
   }
 
   get entityId(): EntityRef {
-    return entityRefFromString(fromURI(this.link.id));
+    return entityRefFromString(fromURI(this.#link.id));
   }
 
   get sourceURI(): URI {
-    return this.link.id;
+    return this.#link.id;
   }
 
   get copyTrap(): boolean {

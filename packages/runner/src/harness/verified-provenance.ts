@@ -5,7 +5,7 @@ import { VERIFIED_BINDING_METADATA_FIELD } from "@commonfabric/utils/sandbox-con
  *
  * An entry exists ONLY for a function object recorded through the single
  * runner-owned registration channel: post-evaluation module indexing
- * (`Engine.recordModuleProvenance`, gated by `isTrustedBuilderArtifact` and
+ * (`Engine.#recordModuleProvenance`, gated by `isTrustedBuilderArtifact` and
  * the defining-module guard), which records the implementation function of an
  * exported / `__cfReg`-registered builder artifact with the module's content
  * identity and the artifact's export/`__cfReg` symbol. There is NO in-action

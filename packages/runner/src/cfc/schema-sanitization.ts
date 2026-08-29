@@ -1500,7 +1500,7 @@ export function localRefTarget(
  * would reject payloads the verb would have accepted.
  *
  * This is honest only for a payload that is PRESENT (measured 2026-07-30,
- * recorded on #5147): `SchemaObjectTraverser.traverseObjectWithSchema` (runner
+ * recorded on #5147): `SchemaObjectTraverser.#traverseObjectWithSchema` (runner
  * `traverse.ts`) fills each missing defaulted property of a present object
  * before checking `required`, while a wholly absent event bypasses the object
  * branch entirely — the handler sees `undefined` and no default is ever

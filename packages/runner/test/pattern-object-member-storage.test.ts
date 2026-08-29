@@ -21,7 +21,7 @@
 // member kinds behave DIFFERENTLY:
 //
 //   * METHOD member (`read() { ... }`) -> THROW. The member is a live function
-//     on the materialized result object. When `Runner.updateResultProjection`
+//     on the materialized result object. When `Runner.#updateResultProjection`
 //     converts the result with `fabricFromNativeValue(result)`, the function
 //     reaches `shallowFabricFromNativeValue` and throws
 //       "Not representable as a `FabricValue`: function"

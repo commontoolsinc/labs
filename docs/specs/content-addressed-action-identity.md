@@ -10,7 +10,7 @@ Phases 0–2 shipped: #3997 (ordinal-free `implementationRef` + legacy-alias
 shim), #4006 (A: `unsafe_parentPattern` deleted), #4008 (B: derived-copy side
 tables, `unsafe_originalPattern` deleted), #4009 (C: `$implRef` dual-write +
 CFC provenance), #4013 (D: pattern-scoped registries deleted, provenance
-recording in `Engine.recordModuleProvenance`).
+recording in `Engine.#recordModuleProvenance`).
 
 Phase 3 shipped in two PRs:
 
@@ -613,7 +613,7 @@ canary test compiling+resolving with `$implRef` stripped.
    eviction insurance for new data, so E1 ships the replacement: a strong,
    session-lifetime, per-engine content-addressed implementation index
    (`ExecutableRegistry.verifiedImplementationsByEntryRef`, populated by
-   `Engine.recordModuleProvenance`, surfaced as
+   `Engine.#recordModuleProvenance`, surfaced as
    `Engine.getVerifiedImplementation`, consulted by `resolveByImplRef` after
    the bounded artifact index misses). Chosen over refcount pinning (piece
    lifecycle is fuzzy; high complexity) and a WeakRef shadow (fails exactly in
