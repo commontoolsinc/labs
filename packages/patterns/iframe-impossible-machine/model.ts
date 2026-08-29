@@ -68,7 +68,7 @@ export function isActuatorFiring(node: MachineNode, signal: number): boolean {
   return node.kind === "actuator" && signal >= node.parameters.threshold;
 }
 
-/** Canonicalizes legacy and concurrent duplicate wires by logical endpoints. */
+/** Canonicalizes duplicates while preserving the durable wire-log order. */
 export function dedupeMachineEdges(
   edges: readonly MachineEdge[],
 ): MachineEdge[] {
@@ -79,9 +79,7 @@ export function dedupeMachineEdges(
       unique.set(id, { id, source: edge.source, target: edge.target });
     }
   }
-  return [...unique.values()].sort((left, right) =>
-    left.id < right.id ? -1 : left.id > right.id ? 1 : 0
-  );
+  return [...unique.values()];
 }
 
 function outgoingNodes(
@@ -150,10 +148,12 @@ export interface CanonicalMachineEdges {
  */
 export function canonicalizeMachineEdges(
   edges: readonly MachineEdge[],
+  disabledEdges: Readonly<Record<string, boolean>> = {},
 ): CanonicalMachineEdges {
   const canonical: MachineEdge[] = [];
   const suppressed: MachineEdge[] = [];
   for (const edge of dedupeMachineEdges(edges)) {
+    if (disabledEdges[edge.id] === true) continue;
     if (createsFeedbackCycle(canonical, edge.source, edge.target)) {
       suppressed.push(edge);
     } else {
@@ -170,7 +170,12 @@ export function evaluateSignals(
 ): Map<string, number> {
   const nodes = new Map(state.nodes.map((node) => [node.id, node]));
   const incoming = new Map<string, MachineEdge[]>();
-  for (const edge of canonicalizeMachineEdges(state.edges).edges) {
+  for (
+    const edge of canonicalizeMachineEdges(
+      state.edges,
+      state.disabledEdges,
+    ).edges
+  ) {
     const edges = incoming.get(edge.target) ?? [];
     edges.push(edge);
     incoming.set(edge.target, edges);

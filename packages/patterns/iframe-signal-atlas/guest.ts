@@ -36,6 +36,7 @@ import {
   FIELD_WIDTH,
   propagationValues,
   recentVisibleObservations,
+  reconcileTimeCursor,
   routePoints,
   visibleObservations,
   visibleRoutes,
@@ -175,41 +176,42 @@ let localTransform: ZoomTransform = zoomIdentity;
 let actionQueue: Promise<void> = Promise.resolve();
 let databaseRefresh: Promise<void> = Promise.resolve();
 let timeDraft: number | undefined;
+let timeDraftGeneration = 0;
 
-type DraftTextControl = HTMLInputElement | HTMLTextAreaElement;
-const draftGenerations = new WeakMap<DraftTextControl, number>();
+type DraftControl = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
+type DraftForm = { generation: number };
 
-function trackDraft(control: DraftTextControl): void {
-  draftGenerations.set(control, 0);
-  control.addEventListener("input", () => {
-    draftGenerations.set(control, (draftGenerations.get(control) ?? 0) + 1);
-  });
-}
-
-function captureDraftGeneration(control: DraftTextControl): number {
-  return draftGenerations.get(control) ?? 0;
+function trackDraftForm(controls: readonly DraftControl[]): DraftForm {
+  const form = { generation: 0 };
+  for (const control of controls) {
+    control.addEventListener(
+      control instanceof HTMLSelectElement ? "change" : "input",
+      () => form.generation++,
+    );
+  }
+  return form;
 }
 
 function clearSubmittedDraft(
-  control: DraftTextControl,
+  controls: readonly (HTMLInputElement | HTMLTextAreaElement)[],
+  form: DraftForm,
   submittedGeneration: number,
 ): void {
-  if (
-    canClearSubmittedDraft(
-      submittedGeneration,
-      captureDraftGeneration(control),
-    )
-  ) {
-    control.value = "";
+  if (canClearSubmittedDraft(submittedGeneration, form.generation)) {
+    for (const control of controls) control.value = "";
   }
 }
 
-[
+const observationDraftForm = trackDraftForm([
   observationLabel,
-  bookmarkNote,
+  observationBand,
+  observationStrength,
+]);
+const bookmarkDraftForm = trackDraftForm([bookmarkNote]);
+const hypothesisDraftForm = trackDraftForm([
   hypothesisTitle,
   hypothesisNarrative,
-].forEach(trackDraft);
+]);
 
 const zoomBehavior = zoom<SVGSVGElement, unknown>()
   .scaleExtent([0.75, 5])
@@ -606,26 +608,26 @@ async function addRoute(options: {
   return route.id;
 }
 
-function recentRouteDraft(): Parameters<typeof addRoute>[0] {
-  const effectiveTime = clampTimeCursor(
-    timeDraft ?? outputValue.timeCursor,
-    inputValue.timeStart,
-    inputValue.timeEnd,
-  );
+async function connectRecent(criteria: {
+  timeCursor: number;
+  band: SignalBand | "all";
+}): Promise<string> {
+  await state.pull();
+  stateValue = state.get() ?? DEFAULT_STATE;
   const recent = recentVisibleObservations(
     stateValue.observations,
-    effectiveTime,
-    outputValue.band,
+    criteria.timeCursor,
+    criteria.band,
   );
   if (recent.length < 2) {
     throw new Error("At least two observations must be visible to connect.");
   }
-  return {
+  return await addRoute({
     fromObservationId: recent[0].id,
     toObservationId: recent[1].id,
     band: recent[1].band,
-    departedAt: effectiveTime,
-  };
+    departedAt: criteria.timeCursor,
+  });
 }
 
 async function selectObservation(id: string | null): Promise<void> {
@@ -731,19 +733,25 @@ async function refreshPersonalAtlas(): Promise<void> {
 }
 
 timeInput.addEventListener("input", () => {
+  timeDraftGeneration++;
   timeDraft = Number(timeInput.value);
   timeValue.textContent = `T+${timeDraft}`;
 });
 timeInput.addEventListener("change", () => {
   const capturedTime = Number(timeInput.value);
+  const capturedGeneration = timeDraftGeneration;
   timeDraft = capturedTime;
   void enqueueAction(capturedAction(capturedTime, setTimeCursor)).then(
     () => {
-      if (Object.is(timeDraft, capturedTime)) timeDraft = undefined;
+      if (
+        canClearSubmittedDraft(capturedGeneration, timeDraftGeneration)
+      ) timeDraft = undefined;
       render();
     },
     (cause) => {
-      if (Object.is(timeDraft, capturedTime)) timeDraft = undefined;
+      if (
+        canClearSubmittedDraft(capturedGeneration, timeDraftGeneration)
+      ) timeDraft = undefined;
       showError(cause);
       render();
     },
@@ -785,21 +793,27 @@ addObservationButton.addEventListener("click", () => {
     band: observationBand.value as SignalBand,
     strength: Number(observationStrength.value),
     observedAt: timeDraft ?? outputValue.timeCursor,
-    labelGeneration: captureDraftGeneration(observationLabel),
+    generation: observationDraftForm.generation,
   };
   void enqueueAction(capturedAction(draft, async (captured) => {
     await addObservation(captured);
-    clearSubmittedDraft(observationLabel, captured.labelGeneration);
+    clearSubmittedDraft(
+      [observationLabel],
+      observationDraftForm,
+      captured.generation,
+    );
   })).catch(showError);
 });
 connectRecentButton.addEventListener("click", () => {
-  try {
-    void enqueueAction(capturedAction(recentRouteDraft(), addRoute)).catch(
-      showError,
-    );
-  } catch (cause) {
-    showError(cause);
-  }
+  const criteria = {
+    timeCursor: clampTimeCursor(
+      timeDraft ?? Number(timeInput.value),
+      inputValue.timeStart,
+      inputValue.timeEnd,
+    ),
+    band: bandSelect.value as SignalBand | "all",
+  };
+  void enqueueAction(capturedAction(criteria, connectRecent)).catch(showError);
 });
 saveViewButton.addEventListener("click", () => {
   const viewport = {
@@ -819,48 +833,52 @@ addBookmarkButton.addEventListener("click", () => {
   const draft = {
     observationId: selectedId,
     note: bookmarkNote.value,
-    noteGeneration: captureDraftGeneration(bookmarkNote),
+    generation: bookmarkDraftForm.generation,
   };
   void enqueueAction(capturedAction(draft, async (captured) => {
     await addBookmark(captured.observationId, captured.note);
-    clearSubmittedDraft(bookmarkNote, captured.noteGeneration);
+    clearSubmittedDraft([bookmarkNote], bookmarkDraftForm, captured.generation);
   })).catch(showError);
 });
 addHypothesisButton.addEventListener("click", () => {
   const draft = {
     title: hypothesisTitle.value,
     narrative: hypothesisNarrative.value,
-    titleGeneration: captureDraftGeneration(hypothesisTitle),
-    narrativeGeneration: captureDraftGeneration(hypothesisNarrative),
+    generation: hypothesisDraftForm.generation,
   };
   void enqueueAction(capturedAction(draft, async (captured) => {
     await addHypothesis(captured.title, captured.narrative);
-    clearSubmittedDraft(hypothesisTitle, captured.titleGeneration);
-    clearSubmittedDraft(hypothesisNarrative, captured.narrativeGeneration);
+    clearSubmittedDraft(
+      [hypothesisTitle, hypothesisNarrative],
+      hypothesisDraftForm,
+      captured.generation,
+    );
   })).catch(showError);
 });
 
 const cancelInput = input.sink((value) => {
   inputValue = value ?? DEFAULT_INPUT;
   if (timeDraft !== undefined) {
+    timeDraftGeneration++;
     timeDraft = clampTimeCursor(
       timeDraft,
       inputValue.timeStart,
       inputValue.timeEnd,
     );
   }
-  const clamped = clampTimeCursor(
-    outputValue.timeCursor,
-    inputValue.timeStart,
-    inputValue.timeEnd,
-  );
-  if (hydrated && clamped !== outputValue.timeCursor) {
-    void enqueueAction(
-      capturedAction(
-        clamped,
-        (captured) => outputWrite.key("timeCursor").set(captured),
-      ),
-    ).catch(showError);
+  if (hydrated) {
+    void enqueueAction(async () => {
+      await reconcileTimeCursor(
+        async () => {
+          await output.pull();
+          outputValue = output.get() ?? DEFAULT_OUTPUT;
+          return outputValue.timeCursor;
+        },
+        (value) => outputWrite.key("timeCursor").set(value),
+        inputValue.timeStart,
+        inputValue.timeEnd,
+      );
+    }).catch(showError);
   }
   render();
 });

@@ -45,6 +45,8 @@ export interface IframeInputData {
 
 export interface IframeStateData {
   modules: StationModule[];
+  moduleTransforms: Record<string, ModuleTransform>;
+  moduleTransformIds: Record<string, string>;
   snapClaims: Record<string, ModuleSnapClaim | null>;
   snapTargets: Record<string, string | null>;
 }
@@ -143,6 +145,8 @@ export const DEFAULT_INPUT: IframeInputData = {
 };
 
 export const DEFAULT_STATE: IframeStateData = {
+  moduleTransforms: {},
+  moduleTransformIds: {},
   snapClaims: {},
   snapTargets: {},
   modules: [

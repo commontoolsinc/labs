@@ -12,8 +12,8 @@ export type AnnotationEdits = Pick<TapeAnnotation, "range" | "label" | "note">;
 type AnnotationEditKey = keyof AnnotationEdits;
 
 export interface WritableAnnotationFields {
-  key(key: AnnotationEditKey): {
-    set(value: AnnotationEdits[AnnotationEditKey]): Promise<void>;
+  key<Key extends AnnotationEditKey>(key: Key): {
+    set(value: AnnotationEdits[Key]): Promise<void>;
   };
 }
 
@@ -61,6 +61,16 @@ export function normalizeDurationSeconds(seconds: number): number {
     MAX_DURATION_SECONDS,
     Math.max(MIN_DURATION_SECONDS, seconds),
   );
+}
+
+/** Remembers the latest duration until hydration can synchronize its buffer. */
+export function durationRequestTarget(
+  currentDurationSeconds: number,
+  loadedDurationSeconds: number | undefined,
+  ready: boolean,
+): number | undefined {
+  const current = normalizeDurationSeconds(currentDurationSeconds);
+  return ready && current === loadedDurationSeconds ? undefined : current;
 }
 
 export interface DurationTransitionPlan {

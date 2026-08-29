@@ -13,10 +13,7 @@ import { CreateSphere } from "npm:@babylonjs/core@9.23.0/Meshes/Builders/sphereB
 import type { AbstractMesh } from "npm:@babylonjs/core@9.23.0/Meshes/abstractMesh.js";
 import { TransformNode } from "npm:@babylonjs/core@9.23.0/Meshes/transformNode.js";
 import { Scene } from "npm:@babylonjs/core@9.23.0/scene.js";
-import {
-  connectFabric,
-  type RemoteCell,
-} from "@commonfabric/iframe-sandbox/guest";
+import { connectFabric } from "@commonfabric/iframe-sandbox/guest";
 
 import {
   DEFAULT_INPUT,
@@ -37,19 +34,20 @@ import {
   normalizeQuarterTurns,
 } from "./geometry.ts";
 import {
+  applyModuleTransforms,
   canBeginDrag,
   createSalvageModule,
   dragDisposition,
   initializeGraphics,
   isBookmarked,
   markPointerCancelled,
+  moduleTransformId,
   ownsDrag,
   pointerWasCancelled,
   resolveSnapClaims,
   setBookmark,
   snapTargetKey,
-  writeModulePosition,
-  writeModuleRotation,
+  writeModuleTransformField,
 } from "./model.ts";
 
 type ModuleVisual = {
@@ -63,7 +61,6 @@ type DragState = {
   moduleId: string;
   pointerId: number;
   position: Vector3Tuple;
-  resolved: Promise<RemoteCell<StationModule>>;
   moved: boolean;
 };
 
@@ -74,6 +71,8 @@ const output = fabric.cell<IframeOutputData | undefined>("output");
 const stateWrite = fabric.cell<IframeStateData>("state");
 const outputWrite = fabric.cell<IframeOutputData>("output");
 const modulesCell = stateWrite.key("modules");
+const moduleTransformsCell = stateWrite.key("moduleTransforms");
+const moduleTransformIdsCell = stateWrite.key("moduleTransformIds");
 const snapClaimsCell = stateWrite.key("snapClaims");
 const snapTargetsCell = stateWrite.key("snapTargets");
 
@@ -227,7 +226,11 @@ function effectiveModules(
   value: Readonly<IframeStateData> = stateValue,
 ): StationModule[] {
   return resolveSnapClaims(
-    value.modules,
+    applyModuleTransforms(
+      value.modules,
+      value.moduleTransforms,
+      value.moduleTransformIds,
+    ),
     value.snapClaims ?? {},
     value.snapTargets ?? {},
   );
@@ -599,52 +602,65 @@ function runAction(label: string, action: () => Promise<void>): Promise<void> {
   return next;
 }
 
-async function resolveModule(
-  moduleId: string,
-): Promise<RemoteCell<StationModule>> {
-  const modules = await modulesCell.pull();
-  const index = modules.findIndex((module) => module.id === moduleId);
-  if (index < 0) throw new Error("That salvage module is no longer available.");
-  const resolved = await modulesCell.key(index).resolve();
-  const current = await resolved.pull();
-  if (current.id !== moduleId) {
-    throw new Error(
-      "The salvage manifest changed while the module was selected.",
-    );
-  }
-  return resolved;
+async function writeTransformField<
+  Key extends keyof StationModule["transform"],
+>(
+  latestState: IframeStateData,
+  module: StationModule,
+  key: Key,
+  value: StationModule["transform"][Key],
+): Promise<void> {
+  const claim = latestState.snapClaims[module.id];
+  const transformId = claim
+    ? moduleTransformId(module.id, claim.id)
+    : latestState.moduleTransformIds[module.id] ?? moduleTransformId(module.id);
+  await writeModuleTransformField(
+    transformId,
+    moduleTransformsCell.key(transformId),
+    moduleTransformIdsCell.key(module.id),
+    module.transform,
+    key,
+    value,
+    claim ? snapClaimsCell.key(module.id) : undefined,
+  );
 }
 
 async function moveSelected(delta: Vector3Tuple): Promise<void> {
   const moduleId = selectedModuleId;
   if (!moduleId) return;
-  const resolved = await resolveModule(moduleId);
-  await resolved.pull();
-  const module = selectedModule();
+  await state.pull();
+  const latestState = state.get() ?? DEFAULT_STATE;
+  const module = effectiveModules(latestState).find(({ id }) =>
+    id === moduleId
+  );
   if (!module) throw new Error("That salvage module is no longer available.");
   const [x, y, z] = module.transform.position;
-  await writeModulePosition(resolved.key("transform").key("position"), [
+  const position: Vector3Tuple = [
     roundHalf(x + delta[0]),
     Math.max(0.6, roundHalf(y + delta[1])),
     roundHalf(z + delta[2]),
-  ]);
-  await snapClaimsCell.key(moduleId).set(null);
+  ];
+  await writeTransformField(latestState, module, "position", position);
 }
 
 async function rotateSelected(delta: number): Promise<void> {
   const moduleId = selectedModuleId;
   if (!moduleId) return;
-  const resolved = await resolveModule(moduleId);
-  await resolved.pull();
-  const module = selectedModule();
-  if (!module) throw new Error("That salvage module is no longer available.");
-  await writeModuleRotation(
-    resolved.key("transform").key("rotationQuarterTurns"),
-    normalizeQuarterTurns(
-      module.transform.rotationQuarterTurns + delta,
-    ),
+  await state.pull();
+  const latestState = state.get() ?? DEFAULT_STATE;
+  const module = effectiveModules(latestState).find(({ id }) =>
+    id === moduleId
   );
-  await snapClaimsCell.key(moduleId).set(null);
+  if (!module) throw new Error("That salvage module is no longer available.");
+  const rotationQuarterTurns = normalizeQuarterTurns(
+    module.transform.rotationQuarterTurns + delta,
+  );
+  await writeTransformField(
+    latestState,
+    module,
+    "rotationQuarterTurns",
+    rotationQuarterTurns,
+  );
 }
 
 async function snapSelected(): Promise<void> {
@@ -655,14 +671,8 @@ async function snapSelected(): Promise<void> {
   const modules = effectiveModules(latestState);
   const moving = modules.find((module) => module.id === moduleId);
   if (!moving) throw new Error("That salvage module is no longer available.");
-  const index = modules.findIndex((module) => module.id === moduleId);
-  const resolved = await modulesCell.key(index).resolve();
-  const current = await resolved.pull();
-  if (current.id !== moduleId) {
-    throw new Error("The salvage manifest changed before snapping.");
-  }
   const result = findBestSnap(
-    current,
+    moving,
     modules.filter((module) => module.id !== moduleId),
     4.5,
   );
@@ -728,7 +738,6 @@ function beginDrag(moduleId: string, pointerId: number): void {
     moduleId,
     pointerId,
     position: [...module.transform.position],
-    resolved: resolveModule(moduleId),
     moved: false,
   };
 }
@@ -767,16 +776,23 @@ function endDrag(pointerId: number, cancelled: boolean): void {
   camera.attachControl(canvas, true);
   if (disposition === "restore") {
     renderAuthoritativeState();
-    void completed.resolved.catch(showError);
     return;
   }
   void runAction("drag position", async () => {
-    const resolved = await completed.resolved;
-    await writeModulePosition(
-      resolved.key("transform").key("position"),
+    await state.pull();
+    const latestState = state.get() ?? DEFAULT_STATE;
+    const module = effectiveModules(latestState).find(({ id }) =>
+      id === completed.moduleId
+    );
+    if (!module) {
+      throw new Error("That salvage module is no longer available.");
+    }
+    await writeTransformField(
+      latestState,
+      module,
+      "position",
       completed.position,
     );
-    await snapClaimsCell.key(completed.moduleId).set(null);
   });
 }
 

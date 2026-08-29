@@ -14,6 +14,7 @@ import {
   FIELD_WIDTH,
   propagationValues,
   recentVisibleObservations,
+  reconcileTimeCursor,
   routePoints,
   visibleObservations,
   visibleRoutes,
@@ -74,6 +75,23 @@ describe("model", () => {
       expect(controlValue.label).toBe("Beta");
       expect(received).toEqual([{ label: "Alpha", band: "pulse", time: 14 }]);
     });
+
+    it("combines event-time controls with shared state read at execution", async () => {
+      let shared = observations.slice(0, 1);
+      const action = capturedAction(
+        { timeCursor: 21, band: "pulse" as const },
+        ({ timeCursor, band }) =>
+          Promise.resolve(
+            recentVisibleObservations(shared, timeCursor, band).map(({ id }) =>
+              id
+            ),
+          ),
+      );
+
+      shared = observations;
+
+      expect(await action()).toEqual(["early-pulse", "future-pulse"]);
+    });
   });
 
   describe("canClearSubmittedDraft()", () => {
@@ -92,6 +110,53 @@ describe("model", () => {
       ).toBe(false);
       expect(canClearSubmittedDraft(submitted.generation, submitted.generation))
         .toBe(true);
+    });
+
+    it("preserves a form when a different field changes while saving", () => {
+      let formGeneration = 8;
+      const submittedGeneration = formGeneration;
+
+      formGeneration++;
+
+      expect(canClearSubmittedDraft(submittedGeneration, formGeneration))
+        .toBe(false);
+    });
+  });
+
+  describe("reconcileTimeCursor()", () => {
+    it("keeps an earlier queued user write that fits the new window", async () => {
+      let stored = 72;
+      const userWrite = Promise.resolve().then(() => {
+        stored = 30;
+      });
+
+      await userWrite;
+      await reconcileTimeCursor(
+        () => Promise.resolve(stored),
+        (value) => {
+          stored = value;
+          return Promise.resolve();
+        },
+        0,
+        40,
+      );
+
+      expect(stored).toBe(30);
+    });
+
+    it("clamps the latest queued user write only when it exceeds the window", async () => {
+      let stored = 72;
+      await reconcileTimeCursor(
+        () => Promise.resolve(stored),
+        (value) => {
+          stored = value;
+          return Promise.resolve();
+        },
+        0,
+        40,
+      );
+
+      expect(stored).toBe(40);
     });
   });
 

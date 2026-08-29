@@ -197,6 +197,7 @@
       line-height: 1.55;
     }
     .wire-builder,
+    .wire-conflicts,
     .legend {
       display: grid;
       gap: 9px;
@@ -212,10 +213,17 @@
       font-size: 11px;
     }
     .wire-builder select,
-    .wire-builder button {
+    .wire-builder button,
+    .wire-conflicts button {
       width: 100%;
       min-height: 34px;
       padding: 6px 8px;
+    }
+    .wire-conflicts {
+      border-color: rgba(255, 107, 138, 0.5);
+    }
+    .wire-conflicts button {
+      color: #ffd3da;
     }
     .pulse {
       display: inline-block;

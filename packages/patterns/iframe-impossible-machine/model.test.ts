@@ -65,6 +65,7 @@ describe("evaluateSignals()", () => {
         node("delay", "delay", { delaySteps: 2 }),
       ],
       edges: [{ id: "wire", source: "sensor", target: "delay" }],
+      disabledEdges: {},
     };
 
     expect(evaluateSignals(state, 1).get("delay")).toBe(0);
@@ -82,6 +83,7 @@ describe("evaluateSignals()", () => {
         { id: "high-gate", source: "high", target: "gate" },
         { id: "low-gate", source: "low", target: "gate" },
       ],
+      disabledEdges: {},
     };
 
     expect(evaluateSignals(base, 0).get("gate")).toBe(1);
@@ -107,6 +109,7 @@ describe("evaluateSignals()", () => {
         { id: "second-gate", source: "second", target: "gate" },
         { id: "third-gate", source: "third", target: "gate" },
       ],
+      disabledEdges: {},
     };
 
     expect(evaluateSignals(state, 0).get("gate")).toBe(1);
@@ -129,6 +132,7 @@ describe("evaluateSignals()", () => {
           target: "actuator",
         },
       ],
+      disabledEdges: {},
     };
 
     expect(evaluateSignals(state, 0).get("transformer")).toBe(1);
@@ -145,6 +149,7 @@ describe("evaluateSignals()", () => {
         { id: "first-second", source: "first", target: "second" },
         { id: "second-first", source: "second", target: "first" },
       ],
+      disabledEdges: {},
     };
 
     const forward = evaluateSignals(state, 0);
@@ -167,41 +172,51 @@ describe("evaluateSignals()", () => {
       .toBe(true);
   });
 
-  it("canonicalizes stale concurrent additions into one stable acyclic graph", () => {
+  it("preserves an established wire when concurrent additions close a cycle", () => {
     const base = {
-      id: machineEdgeId("A", "B"),
-      source: "A",
-      target: "B",
-    };
-    const firstClient = {
-      id: machineEdgeId("B", "C"),
-      source: "B",
-      target: "C",
-    };
-    const secondClient = {
       id: machineEdgeId("C", "A"),
       source: "C",
       target: "A",
     };
+    const firstClient = {
+      id: machineEdgeId("A", "B"),
+      source: "A",
+      target: "B",
+    };
+    const secondClient = {
+      id: machineEdgeId("B", "C"),
+      source: "B",
+      target: "C",
+    };
 
+    expect(createsFeedbackCycle([base], "A", "B")).toBe(false);
     expect(createsFeedbackCycle([base], "B", "C")).toBe(false);
-    expect(createsFeedbackCycle([base], "C", "A")).toBe(false);
 
-    const forward = canonicalizeMachineEdges([
+    const canonical = canonicalizeMachineEdges([
       base,
       firstClient,
       secondClient,
     ]);
-    const reversed = canonicalizeMachineEdges([
-      secondClient,
-      firstClient,
-      base,
-    ]);
 
-    expect(forward).toEqual(reversed);
-    expect(forward.edges).toEqual([base, firstClient]);
-    expect(forward.suppressed).toEqual([secondClient]);
-    expect(findFeedbackNodeIds(forward.edges)).toEqual(new Set());
+    expect(canonical.edges).toEqual([base, firstClient]);
+    expect(canonical.suppressed).toEqual([secondClient]);
+    expect(findFeedbackNodeIds(canonical.edges)).toEqual(new Set());
+  });
+
+  it("lets an operator disable a conflicting wire without replacing the log", () => {
+    const first = {
+      id: machineEdgeId("A", "B"),
+      source: "A",
+      target: "B",
+    };
+    const second = {
+      id: machineEdgeId("B", "A"),
+      source: "B",
+      target: "A",
+    };
+
+    expect(canonicalizeMachineEdges([first, second], { [first.id]: true }))
+      .toEqual({ edges: [second], suppressed: [] });
   });
 
   it("hides signal presentation without changing actuator semantics", () => {
@@ -226,6 +241,7 @@ describe("evaluateSignals()", () => {
         { id: "client-a", source: "source", target: "gate" },
         { id: "client-b", source: "source", target: "gate" },
       ],
+      disabledEdges: {},
     };
 
     expect(evaluateSignals(state, 0).get("gate")).toBe(1);

@@ -7,6 +7,7 @@ import {
   changedAnnotationEdits,
   confidenceFor,
   cueSpecs,
+  durationRequestTarget,
   formatTime,
   normalizeDurationSeconds,
   planDurationTransition,
@@ -145,6 +146,18 @@ describe("model", () => {
         normalizeDurationSeconds(Number.POSITIVE_INFINITY),
         normalizeDurationSeconds(1_000_000),
       ]).toEqual([1, 18, 120]);
+    });
+  });
+
+  describe("durationRequestTarget()", () => {
+    it("retains a duration update that arrives before hydration finishes", () => {
+      let requested = durationRequestTarget(18, undefined, false);
+
+      requested = durationRequestTarget(24, 18, false);
+
+      expect(requested).toBe(24);
+      expect(durationRequestTarget(requested!, 18, true)).toBe(24);
+      expect(durationRequestTarget(requested!, 24, true)).toBeUndefined();
     });
   });
 

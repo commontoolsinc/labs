@@ -22,6 +22,19 @@ export function capturedAction<Value, Result>(
   return () => action(value);
 }
 
+/** Clamps the latest stored cursor after earlier queued writes have settled. */
+export async function reconcileTimeCursor(
+  readCurrent: () => Promise<number>,
+  writeCurrent: (value: number) => Promise<void>,
+  timeStart: number,
+  timeEnd: number,
+): Promise<number> {
+  const current = await readCurrent();
+  const clamped = clampTimeCursor(current, timeStart, timeEnd);
+  if (clamped !== current) await writeCurrent(clamped);
+  return clamped;
+}
+
 /** Clears a submitted field only when it has not been edited since capture. */
 export function canClearSubmittedDraft(
   submittedGeneration: number,

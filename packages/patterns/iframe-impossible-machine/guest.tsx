@@ -508,15 +508,22 @@ function App() {
         if (!source || !target || source === target) {
           throw new Error("Choose two different modules to connect.");
         }
-        const edges = await stateCell.key("edges").pull();
+        const latest = await stateCell.pull();
+        const edges = latest.edges;
+        const edgeId = machineEdgeId(source, target);
         if (
           edges.some((edge) => edge.source === source && edge.target === target)
         ) {
+          if (latest.disabledEdges[edgeId] === true) {
+            await stateCell.key("disabledEdges").key(edgeId).set(false);
+            await state.refresh();
+            return;
+          }
           throw new Error("Those modules are already connected.");
         }
         if (
           createsFeedbackCycle(
-            canonicalizeMachineEdges(edges).edges,
+            canonicalizeMachineEdges(edges, latest.disabledEdges).edges,
             source,
             target,
           )
@@ -526,10 +533,19 @@ function App() {
           );
         }
         await stateCell.key("edges").push({
-          id: machineEdgeId(source, target),
+          id: edgeId,
           source,
           target,
         });
+        await state.refresh();
+      }),
+    [runAction, state.refresh],
+  );
+
+  const disableEdge = React.useCallback(
+    (edgeId: string) =>
+      runAction(async () => {
+        await stateCell.key("disabledEdges").key(edgeId).set(true);
         await state.refresh();
       }),
     [runAction, state.refresh],
@@ -576,7 +592,10 @@ function App() {
     );
   }
 
-  const canonicalEdges = canonicalizeMachineEdges(stateValue.edges);
+  const canonicalEdges = canonicalizeMachineEdges(
+    stateValue.edges,
+    stateValue.disabledEdges,
+  );
   const machineState: IframeStateData = {
     ...stateValue,
     edges: canonicalEdges.edges,
@@ -621,12 +640,32 @@ function App() {
       label: outputValue.showSignals ? signal.label : undefined,
       labelStyle: { fill: "#c7d3e6", fontWeight: 700, fontSize: 10 },
       labelBgStyle: { fill: "#111827", fillOpacity: 0.88 },
-      labelBgPadding: [4, 2],
+      labelBgPadding: [4, 2] as [number, number],
       labelBgBorderRadius: 4,
       selectable: false,
       deletable: false,
     };
-  });
+  }).concat(canonicalEdges.suppressed.map((edge) => ({
+    ...edge,
+    type: "smoothstep",
+    animated: false,
+    markerEnd: {
+      type: MarkerType.ArrowClosed,
+      color: "#ff8f9f",
+    },
+    style: {
+      stroke: "#ff8f9f",
+      strokeDasharray: "7 5",
+      strokeWidth: 2,
+    },
+    label: "Feedback conflict",
+    labelStyle: { fill: "#ffd3da", fontWeight: 700, fontSize: 10 },
+    labelBgStyle: { fill: "#37151d", fillOpacity: 0.92 },
+    labelBgPadding: [4, 2] as [number, number],
+    labelBgBorderRadius: 4,
+    selectable: false,
+    deletable: false,
+  })));
 
   const selected = stateValue.nodes.find(
     (node) => node.id === outputValue.selectedNodeId,
@@ -844,6 +883,27 @@ function App() {
               </button>
             </div>
 
+            {canonicalEdges.suppressed.length > 0 && (
+              <div className="wire-conflicts">
+                <h3>Feedback conflicts</h3>
+                <p>
+                  These dashed wires arrived concurrently with an established
+                  route. Remove one to clear the shared conflict.
+                </p>
+                {canonicalEdges.suppressed.map((edge) => (
+                  <button
+                    type="button"
+                    key={edge.id}
+                    data-remove-wire={edge.id}
+                    disabled={pending}
+                    onClick={() => void disableEdge(edge.id)}
+                  >
+                    Remove {edge.source} → {edge.target}
+                  </button>
+                ))}
+              </div>
+            )}
+
             <div className="legend">
               <h3>Signal legend</h3>
               <p>
@@ -854,8 +914,8 @@ function App() {
               </p>
               <p>Delay modules read an earlier tick.</p>
               <p>
-                Feedback loops are rejected. Concurrent conflicts are suppressed
-                deterministically without replacing the shared wire log.
+                Feedback loops are rejected. Established wires retain priority,
+                and concurrent conflicts remain visible until removed.
               </p>
             </div>
           </aside>
@@ -871,7 +931,7 @@ function App() {
               {canonicalEdges
                   .suppressed.length === 1
                 ? "wire is"
-                : "wires are"} suppressed by stable wire identity
+                : "wires are"} awaiting conflict resolution
             </span>
           )}
           {actionError && (

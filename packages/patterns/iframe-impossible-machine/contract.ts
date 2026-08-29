@@ -49,6 +49,7 @@ export interface IframeInputData {
 export interface IframeStateData {
   nodes: MachineNode[];
   edges: MachineEdge[];
+  disabledEdges: Record<string, boolean>;
 }
 
 export interface IframeOutputData {
@@ -169,6 +170,7 @@ export const DEFAULT_STATE: IframeStateData = {
       target: "actuator-teacup",
     },
   ],
+  disabledEdges: {},
 };
 
 export const DEFAULT_OUTPUT: IframeOutputData = {

@@ -109,8 +109,8 @@ export function findBestSnap(
 ): SnapResult | undefined {
   const occupiedConnectors = new Set(
     findConnections(otherModules).flatMap((connection) => [
-      connectorKey(connection.first.moduleId, connection.first.id),
-      connectorKey(connection.second.moduleId, connection.second.id),
+      connectorIdentityKey(connection.first.moduleId, connection.first.id),
+      connectorIdentityKey(connection.second.moduleId, connection.second.id),
     ]),
   );
   let best: (SnapResult & { score: number }) | undefined;
@@ -128,7 +128,7 @@ export function findBestSnap(
       for (const targetConnector of worldConnectors(target)) {
         if (
           occupiedConnectors.has(
-            connectorKey(target.id, targetConnector.id),
+            connectorIdentityKey(target.id, targetConnector.id),
           )
         ) continue;
         for (const movingConnector of movingConnectors) {
@@ -178,8 +178,12 @@ export function findBestSnap(
   return snap;
 }
 
-function connectorKey(moduleId: string, connectorId: string): string {
-  return `${moduleId}\u0000${connectorId}`;
+/** Returns an injective key for one module connector identity. */
+export function connectorIdentityKey(
+  moduleId: string,
+  connectorId: string,
+): string {
+  return JSON.stringify([moduleId, connectorId]);
 }
 
 function add(first: Vector3Tuple, second: Vector3Tuple): Vector3Tuple {

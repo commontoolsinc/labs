@@ -2,10 +2,12 @@ import {
   moduleConnectors,
   type ModuleKind,
   type ModuleSnapClaim,
+  type ModuleTransform,
   type StationModule,
   type Vector3Tuple,
 } from "./contract.ts";
 import {
+  connectorIdentityKey,
   findConnections,
   normalizeQuarterTurns,
   rotateVectorY,
@@ -25,6 +27,13 @@ export interface PointerDragOwner {
 
 export interface WritableValue<T> {
   set(value: T): Promise<void>;
+}
+
+export interface WritableModuleTransform {
+  initialize(value: ModuleTransform): Promise<ModuleTransform>;
+  key<Key extends keyof ModuleTransform>(key: Key): WritableValue<
+    ModuleTransform[Key]
+  >;
 }
 
 export type DragDisposition = "ignore" | "restore" | "commit";
@@ -68,20 +77,42 @@ export function pointerWasCancelled(
   return cancelledPointers.has(pointerId);
 }
 
-/** Writes only the position field so a concurrent rotation can compose. */
-export function writeModulePosition(
-  position: WritableValue<Vector3Tuple>,
-  value: Vector3Tuple,
-): Promise<void> {
-  return position.set(value);
+/** Returns the stable transform record used after a snap claim is released. */
+export function moduleTransformId(
+  moduleId: string,
+  claimId?: string,
+): string {
+  return JSON.stringify([moduleId, claimId ?? null]);
 }
 
-/** Writes only the rotation field so a concurrent position can compose. */
-export function writeModuleRotation(
-  rotation: WritableValue<number>,
-  value: number,
+/** Projects stable-ID transform records over the append-only module manifest. */
+export function applyModuleTransforms(
+  modules: readonly StationModule[],
+  transforms: Readonly<Record<string, ModuleTransform>>,
+  transformIds: Readonly<Record<string, string>>,
+): StationModule[] {
+  return modules.map((module) => {
+    const transform = transforms[transformIds[module.id]];
+    return transform ? { ...module, transform } : module;
+  });
+}
+
+/** Materializes one transform record, edits one field, then releases a snap. */
+export async function writeModuleTransformField<
+  Key extends keyof ModuleTransform,
+>(
+  transformId: string,
+  transform: WritableModuleTransform,
+  activeTransformId: WritableValue<string>,
+  current: ModuleTransform,
+  key: Key,
+  value: ModuleTransform[Key],
+  claim?: WritableValue<ModuleSnapClaim | null>,
 ): Promise<void> {
-  return rotation.set(value);
+  await transform.initialize(current);
+  await transform.key(key).set(value);
+  await activeTransformId.set(transformId);
+  await claim?.set(null);
 }
 
 /** Surfaces graphics bootstrap failures before preserving the thrown cause. */
@@ -188,11 +219,11 @@ export function resolveSnapClaims(
     modules.map((module) => [module.id, module.transform]),
   );
   validClaims.sort((left, right) => {
-    const leftTarget = connectorKey(
+    const leftTarget = connectorIdentityKey(
       left.claim.targetModuleId,
       left.claim.targetConnectorId,
     );
-    const rightTarget = connectorKey(
+    const rightTarget = connectorIdentityKey(
       right.claim.targetModuleId,
       right.claim.targetConnectorId,
     );
@@ -210,7 +241,7 @@ export function resolveSnapClaims(
       const occupied = occupiedConnectorKeys([...resolved.values()]);
       if (
         occupied.has(
-          connectorKey(claim.targetModuleId, claim.targetConnectorId),
+          connectorIdentityKey(claim.targetModuleId, claim.targetConnectorId),
         )
       ) {
         pending.delete(moduleId);
@@ -257,18 +288,14 @@ export function snapTargetKey(
   moduleId: string,
   connectorId: string,
 ): string {
-  return `${moduleId}::${connectorId}`;
-}
-
-function connectorKey(moduleId: string, connectorId: string): string {
-  return `${moduleId}\u0000${connectorId}`;
+  return connectorIdentityKey(moduleId, connectorId);
 }
 
 function occupiedConnectorKeys(modules: readonly StationModule[]): Set<string> {
   return new Set(
     findConnections(modules).flatMap((connection) => [
-      connectorKey(connection.first.moduleId, connection.first.id),
-      connectorKey(connection.second.moduleId, connection.second.id),
+      connectorIdentityKey(connection.first.moduleId, connection.first.id),
+      connectorIdentityKey(connection.second.moduleId, connection.second.id),
     ]),
   );
 }

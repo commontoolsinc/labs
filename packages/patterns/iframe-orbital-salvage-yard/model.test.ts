@@ -2,22 +2,29 @@ import { expect } from "@std/expect";
 import { describe, it } from "@std/testing/bdd";
 
 import {
+  applyModuleTransforms,
   canBeginDrag,
   createSalvageModule,
   dragDisposition,
   initializeGraphics,
   isBookmarked,
   markPointerCancelled,
+  moduleTransformId,
   ownsDrag,
   pointerWasCancelled,
   resolveSnapClaims,
   setBookmark,
+  snapTargetKey,
   type WritableBookmarkMap,
-  writeModulePosition,
-  writeModuleRotation,
+  type WritableModuleTransform,
+  writeModuleTransformField,
 } from "./model.ts";
 import type { ModuleSnapClaim, ModuleTransform } from "./contract.ts";
-import { findBestSnap, findConnections } from "./geometry.ts";
+import {
+  connectorIdentityKey,
+  findBestSnap,
+  findConnections,
+} from "./geometry.ts";
 
 const firstId = "123e4567-e89b-12d3-a456-426614174000";
 const secondId = "123e4567-e89b-12d3-a456-426614174001";
@@ -64,33 +71,93 @@ describe("model", () => {
   });
 
   describe("transform field writes", () => {
-    it("composes a position and rotation written from stale snapshots", async () => {
-      const durable: ModuleTransform = {
-        position: [0, 1.2, 0],
-        rotationQuarterTurns: 0,
+    it("composes claim-backed position and rotation edits by stable transform ID", async () => {
+      let durable: ModuleTransform | undefined;
+      let claim: ModuleSnapClaim | null = {
+        id: "claim-a",
+        movingConnectorId: "port-lock",
+        targetModuleId: "anchor",
+        targetConnectorId: "north-lock",
+        rotationQuarterTurns: 3,
       };
-      const stalePositionSnapshot = { ...durable };
-      const staleRotationSnapshot = { ...durable };
+      let activeTransformId = "";
+      const transform = mockTransform(
+        () => durable,
+        (value) => durable = value,
+      );
+      const transformId = moduleTransformId("mover", "claim-a");
+      const effective: ModuleTransform = {
+        position: [0, 1.2, 5],
+        rotationQuarterTurns: 3,
+      };
+      const active = {
+        set(value: string) {
+          activeTransformId = value;
+          return Promise.resolve();
+        },
+      };
+      const snap = {
+        set(value: ModuleSnapClaim | null) {
+          claim = value;
+          return Promise.resolve();
+        },
+      };
 
       await Promise.all([
-        writeModulePosition({
-          set(value) {
-            durable.position = value;
-            return Promise.resolve();
-          },
-        }, [stalePositionSnapshot.position[0] + 5, 1.2, 0]),
-        writeModuleRotation({
-          set(value) {
-            durable.rotationQuarterTurns = value;
-            return Promise.resolve();
-          },
-        }, staleRotationSnapshot.rotationQuarterTurns + 1),
+        writeModuleTransformField(
+          transformId,
+          transform,
+          active,
+          effective,
+          "position",
+          [1, 1.2, 5],
+          snap,
+        ),
+        writeModuleTransformField(
+          transformId,
+          transform,
+          active,
+          effective,
+          "rotationQuarterTurns",
+          0,
+          snap,
+        ),
       ]);
 
       expect(durable).toEqual({
-        position: [5, 1.2, 0],
-        rotationQuarterTurns: 1,
+        position: [1, 1.2, 5],
+        rotationQuarterTurns: 0,
       });
+      expect(activeTransformId).toBe(transformId);
+      expect(claim).toBeNull();
+    });
+
+    it("projects a stored transform over its stable module manifest entry", () => {
+      const module = createSalvageModule("cargo", "mover");
+      const transformId = moduleTransformId(module.id);
+      const transform: ModuleTransform = {
+        position: [4, 1.2, 7],
+        rotationQuarterTurns: 2,
+      };
+
+      expect(
+        applyModuleTransforms(
+          [module],
+          { [transformId]: transform },
+          { [module.id]: transformId },
+        )[0].transform,
+      ).toEqual(transform);
+    });
+  });
+
+  describe("connectorIdentityKey()", () => {
+    it("distinguishes delimiter-like module and connector IDs", () => {
+      expect(connectorIdentityKey("a", "b\u0000c")).not.toBe(
+        connectorIdentityKey("a\u0000b", "c"),
+      );
+      expect(snapTargetKey("a", "b::c")).not.toBe(
+        snapTargetKey("a::b", "c"),
+      );
     });
   });
 
@@ -193,8 +260,12 @@ describe("model", () => {
         },
       };
 
-      const firstWins = { "anchor::east-lock": "claim-a" };
-      const secondWins = { "anchor::east-lock": "claim-b" };
+      const firstWins = {
+        [snapTargetKey("anchor", "east-lock")]: "claim-a",
+      };
+      const secondWins = {
+        [snapTargetKey("anchor", "east-lock")]: "claim-b",
+      };
       const forward = resolveSnapClaims(
         [anchor, first, second],
         claims,
@@ -269,8 +340,8 @@ describe("model", () => {
       };
 
       const resolved = resolveSnapClaims([second, first, anchor], claims, {
-        "anchor::north-lock": "claim-a",
-        "mover-a::starboard-lock": "claim-b",
+        [snapTargetKey("anchor", "north-lock")]: "claim-a",
+        [snapTargetKey("mover-a", "starboard-lock")]: "claim-b",
       });
 
       expect(resolved.find(({ id }) => id === first.id)?.transform.position)
@@ -305,10 +376,16 @@ describe("model", () => {
 
       const resolved = resolveSnapClaims([first, second], claims, {
         [
-          `${firstSnap.targetModuleId}::${firstSnap.targetConnectorId}`
+          snapTargetKey(
+            firstSnap.targetModuleId,
+            firstSnap.targetConnectorId,
+          )
         ]: "claim-a",
         [
-          `${secondSnap.targetModuleId}::${secondSnap.targetConnectorId}`
+          snapTargetKey(
+            secondSnap.targetModuleId,
+            secondSnap.targetConnectorId,
+          )
         ]: "claim-b",
       });
 
@@ -331,5 +408,27 @@ function claimFromSnap(
     targetModuleId: snap.targetModuleId,
     targetConnectorId: snap.targetConnectorId,
     rotationQuarterTurns: snap.transform.rotationQuarterTurns,
+  };
+}
+
+function mockTransform(
+  read: () => ModuleTransform | undefined,
+  write: (value: ModuleTransform) => void,
+): WritableModuleTransform {
+  return {
+    initialize(value) {
+      if (!read()) write(structuredClone(value));
+      return Promise.resolve(read()!);
+    },
+    key<Key extends keyof ModuleTransform>(key: Key) {
+      return {
+        set(value: ModuleTransform[Key]) {
+          const current = read();
+          if (!current) throw new Error("Transform was not initialized.");
+          write({ ...current, [key]: structuredClone(value) });
+          return Promise.resolve();
+        },
+      };
+    },
   };
 }

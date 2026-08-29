@@ -13,6 +13,7 @@ import {
   changedAnnotationEdits,
   confidenceFor,
   cueSpecs,
+  durationRequestTarget,
   formatTime,
   normalizeDurationSeconds,
   planDurationTransition,
@@ -785,12 +786,19 @@ async function synchronizeRequestedDurations(): Promise<void> {
 }
 
 function requestDurationSync(): void {
-  if (!hydrated || disposed) return;
+  if (disposed) return;
   const duration = currentRequestedDuration();
-  if (
-    duration === loadedDurationSeconds && durationReady &&
-    durationSync === undefined
-  ) {
+  const target = durationRequestTarget(
+    duration,
+    loadedDurationSeconds,
+    hydrated && durationReady,
+  );
+  if (!hydrated) {
+    requestedDurationSeconds = target;
+    return;
+  }
+  if (target === undefined && durationSync === undefined) {
+    requestedDurationSeconds = undefined;
     return;
   }
   if (
@@ -799,7 +807,7 @@ function requestDurationSync(): void {
     return;
   }
   if (duration !== failedDurationSeconds) failedDurationSeconds = undefined;
-  requestedDurationSeconds = duration;
+  requestedDurationSeconds = target;
   if (durationSync) return;
 
   durationSync = synchronizeRequestedDurations().catch((cause) => {
@@ -937,6 +945,9 @@ void (async () => {
     await waitForMediaReady();
     hydrated = true;
     durationReady = true;
+    requestDurationSync();
+    await durationSync;
+    if (!durationReady) return;
     applyDurationControlState();
     status.textContent = "Shared tape ready";
     status.dataset.ready = "true";
