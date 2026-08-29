@@ -14,7 +14,7 @@ import {
   type CommitResponse,
   formatDate,
   renderGithubCommits,
-} from "./commit-list.tsx";
+} from "./tools/commit-list.tsx";
 
 /** The connector's derived status for an open pull request. */
 export type PullRequestStatus =

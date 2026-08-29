@@ -4,7 +4,7 @@ import {
   propValue,
   textContent,
 } from "../../../patterns/test/vnode-helpers.ts";
-import { renderGithubCommits } from "./commit-list.tsx";
+import { renderGithubCommits } from "./tools/commit-list.tsx";
 import GithubActivity, {
   type GithubHostHealth,
   type GithubPullRequestFields,
