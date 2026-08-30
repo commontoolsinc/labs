@@ -618,11 +618,13 @@ Deno.bench("Cell withTx - transaction switching (100x)", async () => {
   await cleanup(runtime, storageManager, tx);
 });
 
+//
+// Benchmark: Query result proxy operations
+//
+
 Deno.bench(
   "Cell getAsQueryResult - proxy creation schemaless (100x)",
   async () => {
-    // Benchmark: Query result proxy operations
-
     const { runtime, storageManager, tx } = setup();
 
     const cell = runtime.getCell<{
@@ -649,9 +651,11 @@ Deno.bench(
   },
 );
 
-Deno.bench("Cell get - complex object with asCell schema (100x)", async () => {
-  // Schema-based get operations for complex objects
+//
+// Schema-based get operations for complex objects
+//
 
+Deno.bench("Cell get - complex object with asCell schema (100x)", async () => {
   const { runtime, storageManager, tx } = setup();
 
   const schema = {
@@ -1044,9 +1048,11 @@ Deno.bench("Cell complex - nested cell references (100x)", async () => {
   await cleanup(runtime, storageManager, tx);
 });
 
-Deno.bench("Cell schema - complex validation (100x)", async () => {
-  // Benchmark: Schema validation
+//
+// Benchmark: Schema validation
+//
 
+Deno.bench("Cell schema - complex validation (100x)", async () => {
   const { runtime, storageManager } = setup();
 
   const complexSchema = {
@@ -1164,9 +1170,11 @@ Deno.bench("Cell large - deeply nested object (100x navigation)", async () => {
   await cleanup(runtime, storageManager, tx);
 });
 
-Deno.bench("Cell concurrent - multiple cells (100x)", async (b) => {
-  // Benchmark: Concurrent operations
+//
+// Benchmark: Concurrent operations
+//
 
+Deno.bench("Cell concurrent - multiple cells (100x)", async (b) => {
   const { runtime, storageManager, tx } = setup();
 
   // Create multiple cells
@@ -1190,9 +1198,11 @@ Deno.bench("Cell concurrent - multiple cells (100x)", async (b) => {
   await cleanup(runtime, storageManager, tx);
 });
 
-Deno.bench("Cell equals - comparison operations (100x)", async (b) => {
-  // Benchmark: Cell equals comparison
+//
+// Benchmark: Cell equals comparison
+//
 
+Deno.bench("Cell equals - comparison operations (100x)", async (b) => {
   const { runtime, storageManager, tx } = setup();
 
   const cell1 = runtime.getCell<number>(space, "bench-equals-1", undefined, tx);
@@ -1219,13 +1229,15 @@ Deno.bench("Cell equals - comparison operations (100x)", async (b) => {
   await cleanup(runtime, storageManager, tx);
 });
 
+//
+// Benchmark: Complex linked document graph (MentionablePiece pattern) This
+// tests .get() performance on a medium-complexity object spread across many
+// documents
+//
+
 Deno.bench(
   "Cell complex - MentionablePiece graph (10 top-level, 20 linked each, 100x get)",
   async () => {
-    // Benchmark: Complex linked document graph (MentionablePiece pattern) This
-    // tests .get() performance on a medium-complexity object spread across many
-    // documents
-
     const { runtime, storageManager, tx } = setup();
 
     // Schema for MentionablePiece with self-referential mentioned/backlinks
