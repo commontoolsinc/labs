@@ -508,12 +508,12 @@ describe("check-command-docs", () => {
   });
 
   describe("as the task runs it", () => {
-    it("exits 0 reporting the commands it walked", async () => {
-      // Calling main() above would still pass if the entry point never ran it,
-      // or if the permissions the task declares were too narrow to walk the
-      // tree. This is the promise the CI job makes: the command exits 0, having
-      // done the work.
+    // Calling main() above would still pass if the entry point never ran it,
+    // or if the permissions the task declares were too narrow to walk the
+    // tree. This is the promise the CI job makes: the command exits 0, having
+    // done the work.
 
+    it("exits 0 reporting the commands it walked", async () => {
       const { code, out } = await runAsProgram();
       expect(code).toBe(0);
       expect(out).toContain("Command documentation OK");

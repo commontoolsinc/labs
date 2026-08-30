@@ -31,11 +31,10 @@ describe("topics-rehearsal-lib", () => {
       );
     });
 
+    // A migration that retires a whole top-level field leaves no surviving
+    // record for a key to be missing from, so absence is reported about the
+    // compared value itself.
     it("names the whole value when a retired scalar reads back absent", () => {
-      // A migration that retires a whole top-level field leaves no surviving
-      // record for a key to be missing from, so absence is reported about the
-      // compared value itself.
-
       expect(retiredKeys("a legacy display name", undefined)).toEqual([
         WHOLE_VALUE,
       ]);
@@ -51,11 +50,10 @@ describe("topics-rehearsal-lib", () => {
       expect(retiredKeys(undefined, undefined)).toEqual([]);
     });
 
+    // The distinction the whole approach rests on: a field the schema still
+    // declares reads back present even when its value was lost, so genuine
+    // loss is a difference rather than a gap and must not be forgiven.
     it("does not name a key that is present but changed", () => {
-      // The distinction the whole approach rests on: a field the schema still
-      // declares reads back present even when its value was lost, so genuine
-      // loss is a difference rather than a gap and must not be forgiven.
-
       expect(retiredKeys({ body: "kept" }, { body: "" })).toEqual([]);
     });
 
@@ -118,10 +116,10 @@ describe("topics-rehearsal-lib", () => {
   });
 
   describe("isAbsentPathError", () => {
-    it("recognizes the runtime's missing-property failure through cf", () => {
-      // The restore forgives an absent field as retired, so only a read that
-      // landed and reported the path missing may present as absent.
+    // The restore forgives an absent field as retired, so only a read that
+    // landed and reported the path missing may present as absent.
 
+    it("recognizes the runtime's missing-property failure through cf", () => {
       const error = new Error(
         "cf get -q --input authorName exited 1\nCannot access path " +
           '"authorName" - property "authorName" not found. ' +
