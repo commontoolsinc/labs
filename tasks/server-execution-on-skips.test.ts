@@ -449,6 +449,9 @@ Deno.test("main --filter: prints the surviving files on stdout, the report + DRO
   }
 });
 
+//
+// What `--ignore` binds to
+//
 // The mechanism's BINDING, pinned by spawning deno on both shapes (Phase 7
 // fixer, 2026-08-16): `deno test --ignore=<file>` filters only the modules
 // deno DISCOVERS — a glob it expands itself — and silently ignores nothing
@@ -456,6 +459,8 @@ Deno.test("main --filter: prints the surviving files on stdout, the report + DRO
 // the pattern shards' file list). Until this pin, every ON-arm skip since
 // Phase 4 rode a shell-expanded glob and never took effect. If deno's
 // semantics ever change, these two tests say which shape moved.
+//
+
 async function collectedTestFiles(args: string[], cwd: string) {
   const command = new Deno.Command(Deno.execPath(), {
     args: ["test", "--no-lock", "--no-check", ...args],

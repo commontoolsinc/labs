@@ -1276,17 +1276,15 @@ Deno.test("memory v2 engine conflicts are scoped by declared scope", async () =>
   }
 });
 
-//
-// CT-1824 contract: a stale-read ConflictError must name the conflicted
-// entity BOTH structurally (of/seq/conflictSeq — read in-process by
-// editWithRetry's pull) AND in the message with this exact shape — server
-// Error fields do not survive serialization to the browser, so the runner
-// client re-derives `of` by parsing the message (runner storage/v2.ts
-// toRejectedError). Changing either surface breaks conflict recovery for
-// blind writes.
-//
-
 Deno.test("memory v2 engine: stale-read ConflictError carries the conflicted entity structurally and in the message", async () => {
+  // CT-1824 contract: a stale-read ConflictError must name the conflicted
+  // entity BOTH structurally (of/seq/conflictSeq — read in-process by
+  // editWithRetry's pull) AND in the message with this exact shape — server
+  // Error fields do not survive serialization to the browser, so the runner
+  // client re-derives `of` by parsing the message (runner storage/v2.ts
+  // toRejectedError). Changing either surface breaks conflict recovery for
+  // blind writes.
+
   const { engine, path } = await createEngine();
   const sessionId = "session:alice";
   const principal = "did:key:alice";
