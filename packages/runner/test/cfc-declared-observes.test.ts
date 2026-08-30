@@ -62,10 +62,11 @@ describe("CFC declared observation classes (C5)", () => {
 
   const uri = (id: string) => id as `${string}:${string}`;
 
-  // The sqlite seam, unit level: a null-origin projection declares the
-  // whole-schema confidentiality union as a VALUE-class label; a resolved
-  // column passes its authored ifc through verbatim.
   it('labelResultSchema declares null-origin columns as observes:"value"', () => {
+    // The sqlite seam, unit level: a null-origin projection declares the
+    // whole-schema confidentiality union as a VALUE-class label; a resolved
+    // column passes its authored ifc through verbatim.
+
     const tables = {
       emails: {
         properties: {
@@ -102,11 +103,12 @@ describe("CFC declared observation classes (C5)", () => {
     expect(props.body.ifc.confidentiality).toEqual(["mail-secret"]);
   });
 
-  // The minting walk honors an authored ifc.observes: the declared entry
-  // carries the class, and the C1 reader consumes it per class — a
-  // nonRecursive (count/length-shaped) read of the doc does not inherit a
-  // value-class declared label, while a value read does.
   it("authored ifc.observes mints a classed declared entry consumed per class", async () => {
+    // The minting walk honors an authored ifc.observes: the declared entry
+    // carries the class, and the C1 reader consumes it per class — a
+    // nonRecursive (count/length-shaped) read of the doc does not inherit a
+    // value-class declared label, while a value read does.
+
     const rt = makeRuntime();
     const guarded = internSchema(
       {
@@ -180,11 +182,12 @@ describe("CFC declared observation classes (C5)", () => {
     ).toContainEqual("content-secret");
   });
 
-  // A declared observes:"shape" label must neither suppress the runtime's
-  // frozen existence stamp (different component: declared = policy,
-  // derived = measurement — review on the freeze follow-up) nor be
-  // captured by the freeze carry out of its declared-policy discipline.
   it("declared shape labels coexist with the frozen existence stamp", async () => {
+    // A declared observes:"shape" label must neither suppress the runtime's
+    // frozen existence stamp (different component: declared = policy,
+    // derived = measurement — review on the freeze follow-up) nor be
+    // captured by the freeze carry out of its declared-policy discipline.
+
     const rt = makeRuntime();
     const secretId = await (async () => {
       const seed = rt.edit();
@@ -245,9 +248,10 @@ describe("CFC declared observation classes (C5)", () => {
     expect(frozen!.label.confidentiality).toContainEqual("secret");
   });
 
-  // A bogus observes value must not narrow anything: the entry mints
-  // covering (over-taint, fail-safe) and every read class consumes it.
   it("an invalid ifc.observes value mints a covering entry", async () => {
+    // A bogus observes value must not narrow anything: the entry mints
+    // covering (over-taint, fail-safe) and every read class consumes it.
+
     const rt = makeRuntime();
     const guarded = internSchema(
       {

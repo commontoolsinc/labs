@@ -70,23 +70,25 @@ describe("commonfabric `FabricSpecialObject` classes", () => {
   >;
 
   describe("runtime bindings", () => {
-    // This is what stops the per-class checks below from passing vacuously.
-    // Each of them is driven by the derived list and looks its expectation up
-    // in the table, so a name that appears in only one of the two would
-    // compare `undefined` against `undefined` and assert nothing. Requiring
-    // the two to match exactly also catches a derivation that matched fewer
-    // classes than it should have, which a mere non-empty check would not.
     it("derives exactly the classes this test knows how to check", () => {
+      // This is what stops the per-class checks below from passing vacuously.
+      // Each of them is driven by the derived list and looks its expectation up
+      // in the table, so a name that appears in only one of the two would
+      // compare `undefined` against `undefined` and assert nothing. Requiring
+      // the two to match exactly also catches a derivation that matched fewer
+      // classes than it should have, which a mere non-empty check would not.
+
       expect([...declaredClasses].sort()).toEqual(
         Object.keys(expectedBindings).sort(),
       );
     });
 
     for (const name of declaredClasses) {
-      // Presence, not constructibility: `FabricSpecialObject` is abstract, and
-      // exists at runtime so that `instanceof` works rather than so that it can
-      // be `new`-ed. Constructibility is checked per-class below.
       it(`exposes \`${name}\` as a runtime value on the pattern surface`, () => {
+        // Presence, not constructibility: `FabricSpecialObject` is abstract,
+        // and exists at runtime so that `instanceof` works rather than so that
+        // it can be `new`-ed. Constructibility is checked per-class below.
+
         expect(typeof commonfabric[name]).toBe("function");
       });
 
@@ -122,6 +124,7 @@ describe("commonfabric `FabricSpecialObject` classes", () => {
   describe("FabricRegExp", () => {
     // Both declared constructor overloads, since the pattern-visible
     // declaration offers both and only one of them is the obvious one.
+
     it("constructs an instance from a native `RegExp`", () => {
       const BoundFabricRegExp = commonfabric
         .FabricRegExp as typeof FabricRegExp;
@@ -182,10 +185,11 @@ describe("commonfabric `FabricSpecialObject` classes", () => {
       expect(instance.message).toBe("nope");
     });
 
-    // Unlike the other exposed classes, this one is mutable until frozen, so
-    // pattern code can reach its extras bag. Pinned because exposing writable
-    // members is a choice rather than a side effect of exposing the class.
     it("allows extras to be set and read back", () => {
+      // Unlike the other exposed classes, this one is mutable until frozen, so
+      // pattern code can reach its extras bag. Pinned because exposing writable
+      // members is a choice rather than a side effect of exposing the class.
+
       const BoundFabricError = commonfabric.FabricError as typeof FabricError;
       const instance = new BoundFabricError({
         type: "Error",
@@ -202,16 +206,18 @@ describe("commonfabric `FabricSpecialObject` classes", () => {
     });
   });
 
-  // What a pattern actually receives is not `createBuilder().commonfabric` but
-  // that object after `freezeSandboxValue()`, which -- unlike `deepFreeze` --
-  // recurses into functions and freezes each exposed constructor's
-  // `.prototype`. A class that behaves on the unfrozen surface could fail here
-  // and nowhere else, so the delivered surface gets its own checks.
-  //
-  // Deliberately coarser than the per-class checks above: freezing is one
-  // operation over the whole surface, so a failure would take every class at
-  // once and per-name diagnostics would add nothing.
   describe("the frozen sandbox surface", () => {
+    // What a pattern actually receives is not `createBuilder().commonfabric`
+    // but that object after `freezeSandboxValue()`, which -- unlike
+    // `deepFreeze` -- recurses into functions and freezes each exposed
+    // constructor's `.prototype`. A class that behaves on the unfrozen surface
+    // could fail here and nowhere else, so the delivered surface gets its own
+    // checks.
+    //
+    // Deliberately coarser than the per-class checks above: freezing is one
+    // operation over the whole surface, so a failure would take every class at
+    // once and per-name diagnostics would add nothing.
+
     const sandboxCommonfabric = getRuntimeModuleExports()
       .runtimeExports["commonfabric"] as unknown as Record<string, unknown>;
 

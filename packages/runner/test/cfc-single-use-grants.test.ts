@@ -73,7 +73,10 @@ const baseInput = {
 };
 
 describe("CFC single-use grants (§2.2 single-use releases)", () => {
+  //
   // Item 1: the `singleUse` field.
+  //
+
   describe("singleUse field (writer validation)", () => {
     it("accepts singleUse: true and stores it in the value", () => {
       const prepared = prepareCfcGrantWrite(
@@ -161,7 +164,10 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
     });
   });
 
+  //
   // Item 2: the consumption receipt identity.
+  //
+
   describe("consumption receipt derivation", () => {
     const grantId = cfcGrantDocId(identity);
 
@@ -361,9 +367,13 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
       (write) => write.address.id === receiptId,
     );
 
-  // Consuming vs observing context (the seam decision): single-use grants
-  // resolve ONLY in consuming contexts; everywhere else they are
-  // unsatisfiable, fail closed.
+  //
+  // Consuming vs observing context (the seam decision)
+  //
+  // Single-use grants resolve ONLY in consuming contexts; everywhere else they
+  // are unsatisfiable, fail closed.
+  //
+
   describe("consumption context (resolver + evaluator threading)", () => {
     const singleUseRule: ExchangeRule = {
       id: "single-use-share",
@@ -682,7 +692,10 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
     });
   });
 
+  //
   // Claim staging arms.
+  //
+
   describe("claim staging (flushCfcGrantConsumptionClaims)", () => {
     it("no claims → no writes, no reasons", async () => {
       await withRuntime({}, (runtime) => {
@@ -818,7 +831,12 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
     });
   });
 
-  // The core: consumption semantics at the sink egress gate, end to end.
+  //
+  // The core
+  //
+  // Consumption semantics at the sink egress gate, end to end.
+  //
+
   describe("single-use release at the sink egress gate", () => {
     it("releases once, committing the receipt atomically; the second evaluation fails closed", async () => {
       await withRuntime({}, async (runtime) => {
@@ -1254,8 +1272,13 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
     });
   });
 
-  // Digest binding (item 3): receipt consulted-state rides consultedGrants
-  // with the grants' own canonicalization + invalidation discipline.
+  //
+  // Digest binding (item 3)
+  //
+  // Receipt consulted-state rides consultedGrants with the grants' own
+  // canonicalization + invalidation discipline.
+  //
+
   describe("digest binding of the receipt state", () => {
     it("a receipt appearing between evaluations invalidates the prepared digest", async () => {
       await withRuntime({}, (runtime) => {

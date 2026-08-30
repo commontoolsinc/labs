@@ -59,19 +59,20 @@ async function readDurable(
   }
 }
 
-// The CFC prepare pass reads a document's stored label metadata through
-// `storedMetadataFor`, and its result schema through `setupResultSchemaFor`.
-// Both must read the member surface they want — `["cfc"]` and `["schema"]` —
-// rather than the document root: a recursive root read depends on every path
-// in the document, so it enters the commit's confirmed conflict reads. Two
-// exemptions keep a member read out of that set. A runtime-internal read at
-// `["cfc"]` is dropped wherever it is made, and on a document a mergeable
-// operation targets the builder drops that operation's own reads together
-// with the reads below its path. Neither exemption reaches a read of the
-// root. A root read therefore survives on a document a mergeable operation
-// targets, and two concurrent appends — writes the mergeable machinery
-// exists to let both land — conflict, silently dropping one side's data.
 describe("CFC metadata probes under mergeable appends", () => {
+  // The CFC prepare pass reads a document's stored label metadata through
+  // `storedMetadataFor`, and its result schema through `setupResultSchemaFor`.
+  // Both must read the member surface they want — `["cfc"]` and `["schema"]` —
+  // rather than the document root: a recursive root read depends on every path
+  // in the document, so it enters the commit's confirmed conflict reads. Two
+  // exemptions keep a member read out of that set. A runtime-internal read at
+  // `["cfc"]` is dropped wherever it is made, and on a document a mergeable
+  // operation targets the builder drops that operation's own reads together
+  // with the reads below its path. Neither exemption reaches a read of the
+  // root. A root read therefore survives on a document a mergeable operation
+  // targets, and two concurrent appends — writes the mergeable machinery
+  // exists to let both land — conflict, silently dropping one side's data.
+
   let server: MemoryV2Server.Server;
   let storage1: EmulatedStorageManager;
   let storage2: EmulatedStorageManager;
@@ -103,10 +104,11 @@ describe("CFC metadata probes under mergeable appends", () => {
       }),
     ] as const;
 
-  // The shape that reaches every document once the flow dial defaults on: the
-  // list carries no labels at all, but the relevance probe still reads its
-  // metadata on every commit.
   it("commits both of two concurrent appends while the flow-labels probe runs", async () => {
+    // The shape that reaches every document once the flow dial defaults on: the
+    // list carries no labels at all, but the relevance probe still reads its
+    // metadata on every commit.
+
     const [rt1, rt2] = runtimes();
     try {
       // Seed the list with one element and get it durable on the server.
@@ -149,10 +151,11 @@ describe("CFC metadata probes under mergeable appends", () => {
     }
   });
 
-  // The same loss on a list whose schema declares an element label: the write
-  // marks the transaction CFC-relevant on its own, and the prepare pass reads
-  // the document's stored metadata.
   it("commits both of two concurrent appends to a labeled list", async () => {
+    // The same loss on a list whose schema declares an element label: the write
+    // marks the transaction CFC-relevant on its own, and the prepare pass reads
+    // the document's stored metadata.
+
     const [rt1, rt2] = runtimes();
     try {
       // Seed through the labeled schema; the prepare pass persists the derived
@@ -221,17 +224,18 @@ describe("CFC metadata probes under mergeable appends", () => {
     }
   });
 
-  // The link-label derivation reads the link source's `cfc` and `schema`
-  // meta. It must read those members rather than the source document's root:
-  // a link whose source is a collection another session appends to would
-  // otherwise take a whole-document dependency on it, and the link write
-  // would conflict on an append that says nothing about the metadata it
-  // consulted. With the flow-labels dial persisting, an append to the source
-  // rewrites that document's `["cfc"]` label map alongside the appended
-  // element, so the derivation's read of `["cfc"]` at the pre-append basis
-  // is stale — and the read-set builder drops it, because a runtime-internal
-  // read of CFC metadata is not a conflict precondition.
   it("commits a link write whose source a concurrent append targets", async () => {
+    // The link-label derivation reads the link source's `cfc` and `schema`
+    // meta. It must read those members rather than the source document's root:
+    // a link whose source is a collection another session appends to would
+    // otherwise take a whole-document dependency on it, and the link write
+    // would conflict on an append that says nothing about the metadata it
+    // consulted. With the flow-labels dial persisting, an append to the source
+    // rewrites that document's `["cfc"]` label map alongside the appended
+    // element, so the derivation's read of `["cfc"]` at the pre-append basis
+    // is stale — and the read-set builder drops it, because a runtime-internal
+    // read of CFC metadata is not a conflict precondition.
+
     const [rt1, rt2] = runtimes();
     try {
       // Seed the labeled source list. Its persisted metadata is what makes
@@ -295,10 +299,11 @@ describe("CFC metadata probes under mergeable appends", () => {
     }
   });
 
-  // The opposite direction: the surface read is exempt, but a handler's own
-  // explicit read of the list is not, so the dedup-then-push shape still
-  // conflicts and retries.
   it("returns a conflict error for a conditional push racing a concurrent append", async () => {
+    // The opposite direction: the surface read is exempt, but a handler's own
+    // explicit read of the list is not, so the dedup-then-push shape still
+    // conflicts and retries.
+
     const [rt1, rt2] = runtimes();
     try {
       const tx0 = rt1.edit();

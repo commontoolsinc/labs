@@ -11,13 +11,14 @@ const INJECTION_SAFE_ATOM = {
   type: "https://commonfabric.org/cfc/atom/InjectionSafe",
 };
 
-// Regression guard for runtime-evidence atoms on the link-write path (audit S4
-// review follow-up). The integrity mint gate originally covered only
-// schema-derived labels; an author could persist a forged InjectionSafe through
-// a link's carried label view (or embedded link schema) and later satisfy an
-// InjectionSafe requiredIntegrity gate. Author-influenced link labels must be
-// gated too; only the runtime-minted LinkReference survives.
 describe("CFC link-write integrity gate", () => {
+  // Regression guard for runtime-evidence atoms on the link-write path (audit
+  // S4 review follow-up). The integrity mint gate originally covered only
+  // schema-derived labels; an author could persist a forged InjectionSafe
+  // through a link's carried label view (or embedded link schema) and later
+  // satisfy an InjectionSafe requiredIntegrity gate. Author-influenced link
+  // labels must be gated too; only the runtime-minted LinkReference survives.
+
   it("filters a forged InjectionSafe carried on a link's label view", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({

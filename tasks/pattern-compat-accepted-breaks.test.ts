@@ -49,10 +49,11 @@ describe("pattern-compat-accepted-breaks", () => {
       }
     });
 
-    // The run indexes entries into one map keyed by pattern and baseline, so a
-    // pair named twice keeps only the later entry's paths and silently drops
-    // the earlier one's.
     it("names each pattern and baseline pair once", () => {
+      // The run indexes entries into one map keyed by pattern and baseline, so
+      // a pair named twice keeps only the later entry's paths and silently
+      // drops the earlier one's.
+
       const seen = new Set<string>();
       const repeated: string[] = [];
       for (const accepted of ACCEPTED_CONTRACT_BREAKS) {
@@ -65,10 +66,11 @@ describe("pattern-compat-accepted-breaks", () => {
       expect(repeated).toEqual([]);
     });
 
-    // A finding is forgiven only when every path it blames is one the entry
-    // named, and the proof spells a path as its role followed by the schema
-    // pointer. A path under any other name forgives nothing.
     it("spells every path as an argument or result path", () => {
+      // A finding is forgiven only when every path it blames is one the entry
+      // named, and the proof spells a path as its role followed by the schema
+      // pointer. A path under any other name forgives nothing.
+
       for (const accepted of ACCEPTED_CONTRACT_BREAKS) {
         expect(accepted.paths.length).toBeGreaterThan(0);
         for (const path of accepted.paths) {

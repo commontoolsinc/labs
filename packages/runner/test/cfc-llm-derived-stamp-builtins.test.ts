@@ -82,10 +82,11 @@ function childDocIntegrity(
 }
 
 describe("CFC LlmDerived stamping — result-field stamp mechanism", () => {
-  // The builtins write model output through LLM_DERIVED_RESULT_STAMP_SCHEMA.
-  // Prove the gate keys the stamp on the write's authoring identity at the
-  // result field-path: a builtin write stamps, a pattern write is stripped.
   it("stamps a builtin write to the result field; strips a pattern write", async () => {
+    // The builtins write model output through LLM_DERIVED_RESULT_STAMP_SCHEMA.
+    // Prove the gate keys the stamp on the write's authoring identity at the
+    // result field-path: a builtin write stamps, a pattern write is stripped.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),

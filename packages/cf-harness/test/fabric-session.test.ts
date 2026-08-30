@@ -64,11 +64,12 @@ describe("fabric-session", () => {
       expect(calls).toBe(1);
     });
 
-    // Only a HEALTHY session is cached: a rejected construction clears the
-    // cache so a later tool call retries the factory instead of replaying a
-    // terminal failure for the rest of the run. This deliberately supersedes
-    // the earlier behavior of caching the rejection forever.
     it("invokes a synchronously-throwing factory again after its rejection settles, and a later attempt can succeed", async () => {
+      // Only a HEALTHY session is cached: a rejected construction clears the
+      // cache so a later tool call retries the factory instead of replaying a
+      // terminal failure for the rest of the run. This deliberately supersedes
+      // the earlier behavior of caching the rejection forever.
+
       let calls = 0;
       const session = {} as HarnessFabricSession;
       const cached = cacheHarnessFabricSessionFactory(() => {

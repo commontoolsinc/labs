@@ -112,7 +112,10 @@ const aliceShareFact = (audience: CfcAtom = userBob) => ({
 });
 
 describe("CFC grant records (§8.12.7 route 2a)", () => {
+  //
   // Build-order item 1: the `policyState` guard kind.
+  //
+
   describe("policyState guard validation (boot, fail closed)", () => {
     const withGuard = (policyState: unknown): CfcPolicyRecordInput[] => [{
       id: "p",
@@ -332,7 +335,10 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
+  //
   // Build-order item 2: grant records + reserved-path storage discipline.
+  //
+
   describe("grant document addressing", () => {
     const identity = {
       space: ALICE,
@@ -693,13 +699,14 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
       });
     });
 
-    // Under a non-rejecting mode the forged write reaches storage, so the
-    // flow stage must still measure it. The reserved namespaces are held out
-    // of value-write targeting because the runtime persists policy state
-    // through them; a document some transaction forged is not that, and the
-    // label it carries is what ties a later read of the stash back to what
-    // the forging transaction observed.
     it("labels an unprivileged write to a grant document under observe", async () => {
+      // Under a non-rejecting mode the forged write reaches storage, so the
+      // flow stage must still measure it. The reserved namespaces are held out
+      // of value-write targeting because the runtime persists policy state
+      // through them; a document some transaction forged is not that, and the
+      // label it carries is what ties a later read of the stash back to what
+      // the forging transaction observed.
+
       await withRuntime(
         { enforcement: "observe", flowLabels: "persist" },
         async (runtime, storageManager) => {
@@ -771,7 +778,10 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
+  //
   // Resolution wired into the egress gate (build-order items 1+3).
+  //
+
   describe("grant resolution at the sink egress gate", () => {
     it("a live grant releases the owner clause to the audience (enforce)", async () => {
       await withRuntime({}, async (runtime) => {
@@ -955,7 +965,10 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
-  // Build-order item 3: read non-taint + digest binding.
+  //
+  // Build-order item 3: read non-taint
+  //
+
   describe("read non-taint (internalVerifierRead discipline)", () => {
     it("grant lookups never enter the consumed read set", async () => {
       await withRuntime({}, async (runtime) => {
@@ -981,9 +994,14 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
-  // Arm-level coverage: every reachable validation / fail-closed branch is
-  // pinned directly (the repo standard — defensive arms reachable from the
-  // runner side get tests, not just the happy path).
+  //
+  // Arm-level coverage
+  //
+  // Every reachable validation / fail-closed branch is pinned directly (the
+  // repo standard — defensive arms reachable from the runner side get tests,
+  // not just the happy path).
+  //
+
   describe("writer validation arms (prepareCfcGrantWrite)", () => {
     const base: CfcGrantWriteInput = {
       kind: "ShareGrant",
@@ -1474,6 +1492,10 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
       });
     });
   });
+
+  //
+  // Build-order item 3: digest binding
+  //
 
   describe("digest binding of consulted grants", () => {
     const base: PreparedDigestInput = {

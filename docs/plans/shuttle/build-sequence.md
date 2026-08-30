@@ -1,0 +1,153 @@
+# Shuttle — build sequence
+
+Satellite of [`README.md`](README.md): the order of construction,
+as small landable pull requests. Stage A is seam work inside `packages/cli`
+— each PR stands on its own merits there, shuttle or no shuttle, because a
+seam that lets a sibling inject a connection is the same seam that lets a
+unit test run the action body (the documented rationale of the
+`*FromCommand` family). Stage B is the shuttle package itself, in vertical
+slices. A-PRs go first in line because they gate everything and review
+latency is the scarce resource; B milestones start as soon as their named
+prerequisites land.
+
+## Stage A — seams in `packages/cli`
+
+**A1 — export entries.** `@commonfabric/cli` exports only `.` → `mod.ts`,
+whose import runs CLI startup. Add workspace-internal export entries for
+the modules a sibling calls: `./lib/piece`, `./commands/piece`,
+`./lib/wish`, `./lib/piece-render`. The completion listing is not a plain
+entry: `cellPathCandidates` and `childKeys` in
+`lib/completion/providers.ts` are module-private and open a fresh runtime
+through the default `getCellValue` path, so A1 factors the listing logic
+behind an injectable connection and exports that, beside the
+already-public `keysOf`. The providers are designed to fail silently and
+empty — right for tab completion, wrong for `ls` — so the factored
+listing surfaces its errors, and completion keeps swallowing them at its
+own call site. Keep the
+list to what shuttle names — an export entry is a contract, and the short
+list is the record of which internals have a second caller. (The view
+substrate's entries wait for B3, which is when they earn their place on
+that record.)
+
+**A2 — connection injection for the write path.** Three shapes of work,
+not one. `stepPiece` is already done — it gained the
+`PieceResolutionDeps` seam with its write receipt (#6556), and its unit
+test is the template. `callPieceHandler` and `getPieceView` are
+forwarding gaps: each delegates to an already-injectable function
+(`resolvePieceCallable`, `inspectPiece`) without passing deps through, so
+the fix is a threaded parameter. The genuine conversions — the functions
+that call `loadPieces(config)` directly — are `setCellValue` first (a v1
+verb), then `removePiece`, `renderPiece`, and the `lib/acl.ts` loaders.
+Each change carries the unit test the seam makes possible; that is the
+PR's standalone value. Re-verify this inventory against the tree when A2
+starts: it churned three times during the design, once against its own
+prerequisite landing (#6556).
+
+**A3 — extract `callFromCommand`.** `buildCallCommand`'s action is inline
+and bound to Cliffy's `this` (`getLiteralArgs`); its constituents are
+already exported. The extraction makes the literal-args array a parameter
+and gives `call` the same named-export shape as its siblings. Independent
+value: an inline action body is uncoverable and everything registered
+after it sits in coverage shadow, so extraction retires debt in the
+package where coverage debt is a standing cost.
+
+**A4 — exit and output seams audit.** Every seam shuttle calls must accept
+an exit override (`exitWithDataError` / `exitPieceCallFailure` call
+`Deno.exit(1)` by default — a data error must not kill the shell) and
+route output through the `render`/`hint` deps rather than stray
+`console.error`. One audit PR that threads what is missing, with the test
+that proves a data error surfaces as a value.
+
+**A5 — module-global state.** `quietMode` is a file-level `let`;
+`setLLMUrl` is written by both `loadPieces` and
+`PiecesController.initialize`. Either scope them per connection, or land a
+recorded limit: one connection per process for shuttle v1, revisited when
+multiple places arrive. The cheap honest move is the recorded limit; the
+PR is whichever the review rules.
+
+## Stage B — the shuttle package
+
+**B0 — scaffold** (after A1). `packages/shuttle` with its path in the root
+`deno.jsonc` workspace array and its own `tasks.test` entry — the two
+edits a new package needs, the second one load-bearing. Dependencies
+follow `docs/development/DEPENDENCIES.md`. No behavior; the package
+compiles and its empty test task runs.
+
+**B1 — walking skeleton** (after A1; A2 for nothing yet). The place value
+and its owner module — the whole pair, position *and* scope, because scope
+is half of what a place is (decision 20): `cd @user` and `cd @space` move
+it, the prompt renders it, and `pwd` prints both halves. The prompt, a
+readline loop, and `cd` / `ls` / `pwd` / `get` over one held
+`PiecesController`, with `cd -` for the previous place and `#name` wish
+targets navigable within the connected space (`cd #favorites`, and the
+`wish` verb, over the `./lib/wish` export entry A1 adds; a home-anchored
+target from elsewhere is refused with the reason — decision 5). Slug and
+name resolution rides the machinery `--piece` already uses
+(`resolveStoredPieceAddress`, `listSpaceSlugs`), so no CLI-surface arc
+step gates B1. `where` lands here as the printing
+surface for the ambient record; later milestones add their dimensions to it
+as they add the dimensions themselves. Facets `slugs/` and `pieces/` only.
+
+Liveness, in two halves. The held controller is memoized cf-harness-style,
+which covers the construction that never succeeds — the case that cache
+actually addresses. Recovery of an *established* connection needs nothing
+from shuttle: the memory client reconnects and re-arms its watches by
+itself ([`runtime-integration.md`](runtime-integration.md)), so B1 proves
+that rather than rebuilding it — a test that drops the transport under a
+standing watch and shows the subscription still delivering afterwards. What
+B1 does build is the observation seam, reporting live, reconnecting, and
+permanently failed, because no such surface exists today and both the
+prompt and the view markers consume it. No retry loop in shuttle on either
+half.
+
+**B2 — writes, calls, handles** (after A2, A3, and A4 — a failed call or
+write must surface as a value, never reach `Deno.exit`). `set` with
+inline values,
+`edit` over `$EDITOR`, and `link` — the one spelling that writes a
+reference instead of copying a value (decision 14), and the only write of
+the three that has no `cf` equivalent to lean on. `call` through
+`callFromCommand`, with `verbs` and `describe` beside it, since listing a
+piece's callables is what makes `call` usable without leaving the shell.
+Numbered handles from listings land here, and `more` with them: `more`
+continues a listing *and its handle numbering* (decision 24), so it needs
+the handle table, not merely a page cursor. Handles are structured at mint
+— each row's kind, plus receiver and verb name for a callable row — which
+is what `call %n` resolves against (decision 27). The invocation session is
+minted once at startup and passed explicitly. The step-10 call section
+is shuttle's own line grammar, parsed locally and fed to the
+schema-derived flag machinery `cf` already exports (`pieceCallRawArgs`,
+`pieceCallInvocation`), so no arc step gates it either. Reaching-in-warms
+lands here, since `set` is what makes stale computed state visible.
+
+**B3 — watch and views** (after A4; view-substrate export entries added
+here). `Cell.sink` with the guard-plus-`idle()` settling discipline; the
+value, list, and structured piece-overview views on the `cf view` pager
+substrate; session watches (`watch`, `watches`, `unwatch`) with prompt
+event lines. Governed by [`views.md`](views.md); it opens with the two
+experiments and the raw-document-subscription proving test from issue
+[#6534](https://github.com/commontoolsinc/labs/issues/6534), falling back
+to the capped deep sink if the seam disappoints.
+
+**B4 — externals and escapes.** `>` and `<` to and from `file:` externals
+under the scheme-absolute rule; the external working location
+(`xcd`/`xpwd`, the `x:` base); the `!` escape family — line-initial `!`,
+`|!` in a pipeline (bare `|` reserved, its error naming `|!`), and `!cf`
+with place-derived flags injected. With the external location, `where`
+reaches its v1 surface: every dimension printed, the light ones settable
+(decision 22).
+
+B4 closes v1. The deferred set — the pinned strip, cold-browse mode, the
+native tool set, heavyweight `where` edits, the `fuse/` facet,
+fabric-to-fabric redirection, `https:` read ends, and `search` — is
+designed and preserved in [`futures.md`](futures.md), each returning as
+its own slice when scheduled.
+
+## Working rules
+
+- Every stage-A PR carries the unit tests its seam enables; a seam PR
+  without tests is the shape the `FromCommand` rationale exists to
+  prevent.
+- `packages/cli` coverage gates apply to stage A; the extraction PRs are
+  coverage-positive by construction, which is the order's second reason.
+- Shuttle stays out of `deno task check`'s path list until B1 gives it
+  real code, and registers there in the same PR that does.

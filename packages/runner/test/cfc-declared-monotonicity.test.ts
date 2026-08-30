@@ -223,9 +223,10 @@ const rewriteStoredEntries = async (
 };
 
 describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
-  // Characterization: what the re-mint does TODAY, with no gate dial.
-  // These pin the `off`/`observe` byte-compat contract.
   describe("current behavior (characterization — the off/observe contract)", () => {
+    // Characterization: what the re-mint does TODAY, with no gate dial.
+    // These pin the `off`/`observe` byte-compat contract.
+
     it("(a) a schema dropping a confidentiality clause is rejected by the schema merge", async () => {
       const storageManager = StorageManager.emulate({ as: signer });
       const runtime = makeRuntime({ storageManager });
@@ -466,8 +467,9 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
     });
   });
 
-  // The dial: cfcDeclaredMonotonicity, mirroring cfcWriteFloor exactly.
   describe("the cfcDeclaredMonotonicity dial", () => {
+    // The dial: cfcDeclaredMonotonicity, mirroring cfcWriteFloor exactly.
+
     it("the enforce pin cannot be weakened mid-transaction", async () => {
       const storageManager = StorageManager.emulate({ as: signer });
       const runtime = makeRuntime({
@@ -524,10 +526,11 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
     });
   });
 
-  // The exception seam: the per-tx privileged widening exemption
-  // (§8.12.7 route 2b; design doc §4). Setter discipline only here —
-  // the gate-facing semantics are in the enforce block below.
   describe("the widening-exemption seam (setter discipline)", () => {
+    // The exception seam: the per-tx privileged widening exemption
+    // (§8.12.7 route 2b; design doc §4). Setter discipline only here —
+    // the gate-facing semantics are in the enforce block below.
+
     const EXEMPTION = () => ({
       space: signer.did(),
       id: "of:some-doc",
@@ -755,8 +758,9 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
     }
   };
 
-  // The gate under enforce: §8.12.1 weakenings fail closed.
   describe("enforce: non-monotone declared re-mints fail closed", () => {
+    // The gate under enforce: §8.12.1 weakenings fail closed.
+
     it("a dropped confidentiality clause rejects, naming doc, path and direction", async () => {
       const result = await seededRemintScenario({
         storageManager: StorageManager.emulate({ as: signer }),
@@ -989,8 +993,9 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
     });
   });
 
-  // The gate under enforce: §8.12.1 tightenings pass.
   describe("enforce: monotone tightenings pass", () => {
+    // The gate under enforce: §8.12.1 tightenings pass.
+
     it("an added clause passes and persists", async () => {
       const storageManager = StorageManager.emulate({ as: signer });
       const runtime = makeRuntime({
@@ -1249,8 +1254,9 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
     });
   });
 
-  // §8.12.8 component scoping: only declared↔declared is ever compared.
   describe("component scoping (§8.12.8)", () => {
+    // §8.12.8 component scoping: only declared↔declared is ever compared.
+
     it("legacy (origin-less) stored entries are not gated", async () => {
       // A seeded LEGACY entry whose integrity the fresh declared mint does
       // not cover: were the gate to compare against it, [X] ⊄ [Y] would
@@ -1291,8 +1297,9 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
     });
   });
 
-  // off/observe: byte-compat with the characterization block.
   describe("off/observe byte-compat", () => {
+    // off/observe: byte-compat with the characterization block.
+
     it("off: the seeded weakening persists exactly as characterized, no diagnostic", async () => {
       const result = await seededRemintScenario({
         storageManager: StorageManager.emulate({ as: signer }),
@@ -1414,8 +1421,9 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
     });
   });
 
-  // The exemption seam consumed by the gate (§8.12.7 route 2b semantics).
   describe("enforce: the widening exemption", () => {
+    // The exemption seam consumed by the gate (§8.12.7 route 2b semantics).
+
     const withExemption = (
       clauseDigest: string,
       path: string[] = ["out"],
@@ -1596,10 +1604,11 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
     });
   });
 
-  // Reason dedup on degenerate duplicate entries (direct unit call: the
-  // walk mints one declared entry per path and dedups atoms, so the
-  // duplicate arms are reachable only through the exported function).
   describe("violation-reason dedup (unit)", () => {
+    // Reason dedup on degenerate duplicate entries (direct unit call: the
+    // walk mints one declared entry per path and dedups atoms, so the
+    // duplicate arms are reachable only through the exported function).
+
     it("reports each violated clause and added atom once across duplicate entries", () => {
       const violations = collectDeclaredMonotonicityViolations({
         space: signer.did(),
@@ -1638,9 +1647,10 @@ describe("CFC declared-component monotonicity (WP5, §8.12.1/§8.12.8)", () => {
     });
   });
 
-  // Non-taint: the gate's stored-entry reads ride the internal-verifier
-  // meta and must not enter the consumed set.
   describe("non-taint", () => {
+    // Non-taint: the gate's stored-entry reads ride the internal-verifier
+    // meta and must not enter the consumed set.
+
     it("the observe-mode gate adds nothing to the prepared consumed set", async () => {
       const consumedReadsFor = async (
         dial: CfcDeclaredMonotonicityMode,

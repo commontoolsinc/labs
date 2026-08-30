@@ -63,14 +63,15 @@ describe("shell login tests", () => {
     assert(result.afterKeyStore.hasRegister);
   });
 
-  // The shell publishes `globalThis.app` at the end of its bootstrap, after
-  // the key store opens and Navigation is installed, so a driver that
-  // navigates or reloads and logs in straight away can arrive before the app
-  // is published. The property installed below is that window with the timing
-  // taken out of it: the first read of `globalThis.app` answers `undefined`,
-  // and every read after it answers the root element. Logging in through that
-  // property means waiting for the boundary rather than reading through it.
   it("logs in while the app is still unpublished", async () => {
+    // The shell publishes `globalThis.app` at the end of its bootstrap, after
+    // the key store opens and Navigation is installed, so a driver that
+    // navigates or reloads and logs in straight away can arrive before the app
+    // is published. The property installed below is that window with the timing
+    // taken out of it: the first read of `globalThis.app` answers `undefined`,
+    // and every read after it answers the root element. Logging in through that
+    // property means waiting for the boundary rather than reading through it.
+
     const identity = await Identity.generate({ implementation: "noble" });
     const page = shell.page();
 

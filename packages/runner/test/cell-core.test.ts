@@ -1209,12 +1209,13 @@ describe("Cell raw methods: frozen-or-not", () => {
   });
 });
 
-// Result-meta round-trip across commit + fresh-tx reload. These tests assert
-// end-to-end correctness of the standard result meta link round-trip: the
-// round-trip preserves the result-link object, and a raw `tx.read` of
-// `path: ["result"]` returns it as an object link record (with own-property
-// `"/"`), never as a string.
 describe(`Cell result-meta round-trip`, () => {
+  // Result-meta round-trip across commit + fresh-tx reload. These tests assert
+  // end-to-end correctness of the standard result meta link round-trip: the
+  // round-trip preserves the result-link object, and a raw `tx.read` of
+  // `path: ["result"]` returns it as an object link record (with own-property
+  // `"/"`), never as a string.
+
   let runtime: Runtime;
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let tx: IExtendedStorageTransaction;
