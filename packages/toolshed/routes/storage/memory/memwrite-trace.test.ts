@@ -83,10 +83,15 @@ describe("memwrite-trace", () => {
       expect(vhashOf(a)).toBe(vhashOf(b));
     });
 
+    //
+    // Why the canonical hash, not a JSON round-trip
+    //
     // The reason for using the canonical `FabricValue` hash over a JSON
     // round-trip: a JSON-derived hash collapses values that the runtime treats
     // as distinct, so the trace would report a false "same value" and hide a
     // real divergence.
+    //
+
     it("distinguishes values a JSON round-trip would collapse (undefined fields)", () => {
       // `JSON.stringify` drops `undefined`-valued keys, so both would serialize
       // to `{}`; the canonical hash keys on the present `a` field.
