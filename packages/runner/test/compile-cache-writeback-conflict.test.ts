@@ -305,18 +305,18 @@ describe("editWithRetry conflict catch-up", () => {
 });
 
 describe("editWithRetry sequential conflict discovery", () => {
-  it("pulls each named doc and converges one doc per round", async () => {
-    // The browser cold-boot shape of CT-1824 (live-traced on the rig): the
-    // write-back's derived docs are discovered ONE per attempt — the engine
-    // rejects on the first stale read, the retry pulls exactly that doc, and
-    // only then does the next attempt's diff reach the following one.
-    // editWithRetry must (a) pull the doc each conflict names so each round
-    // makes progress, and (b) survive a pull or catch-up failure without giving
-    // up the round (the retry's commit is the definitive outcome). Convergence
-    // takes one round per pre-existing derived doc, which is why
-    // writeBackCompileCache passes a budget sized to its write set instead of
-    // DEFAULT_MAX_RETRIES.
+  // The browser cold-boot shape of CT-1824 (live-traced on the rig): the
+  // write-back's derived docs are discovered ONE per attempt — the engine
+  // rejects on the first stale read, the retry pulls exactly that doc, and
+  // only then does the next attempt's diff reach the following one.
+  // editWithRetry must (a) pull the doc each conflict names so each round
+  // makes progress, and (b) survive a pull or catch-up failure without giving
+  // up the round (the retry's commit is the definitive outcome). Convergence
+  // takes one round per pre-existing derived doc, which is why
+  // writeBackCompileCache passes a budget sized to its write set instead of
+  // DEFAULT_MAX_RETRIES.
 
+  it("pulls each named doc and converges one doc per round", async () => {
     const server = newSharedServer();
     const sm = EmulatedStorageManager.connectTo(server, { as: signer });
     const runtime = new Runtime({

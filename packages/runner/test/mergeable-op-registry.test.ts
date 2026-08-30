@@ -92,11 +92,12 @@ describe("mergeable op createsKey stamping", () => {
 });
 
 describe("mergeable tail-op build guards", () => {
+  // The tail op builder (append / add-unique) bails in several guarded cases,
+  // abandoning the intent so the commit carries the plain diff instead. Some
+  // are reachable only through sequences the poison fallback short-circuits
+  // before build, so they are covered directly here.
+
   it("a tail op with no working array abandons the intent", () => {
-    // The tail op builder (append / add-unique) bails in several guarded cases,
-    // abandoning the intent so the commit carries the plain diff instead. Some
-    // are reachable only through sequences the poison fallback short-circuits
-    // before build, so they are covered directly here.
     // The op path holds no array at commit — the value is absent, or was
     // overwritten with a non-array — so there is nothing to slice a tail from.
 

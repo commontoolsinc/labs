@@ -123,17 +123,17 @@ describe("HoistRegistrationSink stays untouched on a rejected registration", () 
 });
 
 describe("transformer __cfReg emit round-trips through the verifier", () => {
-  it("approves the exact multiline shorthand shape the transformer emits", () => {
-    // CT-1623 follow-up: lock the CONTRACT between the transformer's emitted
-    // `__cfReg({ … })` shape and the verifier's static approval check. The
-    // transformer and the verifier hold two independent definitions of "a valid
-    // registration call"; if they drift, a real registration silently routes to
-    // the rejecting registrar (fail-closed, but a confusing breakage). These
-    // pin the exact shapes the transformer emits (builder-call-hoisting.ts: a
-    // trailing call whose argument is a multiline shorthand object of
-    // previously-declared top-level bindings) as APPROVED, and assert the
-    // tamper shapes the verifier is meant to refuse are not.
+  // CT-1623 follow-up: lock the CONTRACT between the transformer's emitted
+  // `__cfReg({ … })` shape and the verifier's static approval check. The
+  // transformer and the verifier hold two independent definitions of "a valid
+  // registration call"; if they drift, a real registration silently routes to
+  // the rejecting registrar (fail-closed, but a confusing breakage). These
+  // pin the exact shapes the transformer emits (builder-call-hoisting.ts: a
+  // trailing call whose argument is a multiline shorthand object of
+  // previously-declared top-level bindings) as APPROVED, and assert the
+  // tamper shapes the verifier is meant to refuse are not.
 
+  it("approves the exact multiline shorthand shape the transformer emits", () => {
     // Mirrors builder-call-hoisting.ts: `factory.createObjectLiteralExpression(
     // …, /* multiline */ true)` over shorthand assignments — one entry per line.
     const body = `${IMPORT}
