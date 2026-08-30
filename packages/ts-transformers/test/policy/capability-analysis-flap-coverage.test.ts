@@ -150,15 +150,13 @@ Deno.test(
   },
 );
 
+// Branch: `updateLocalCollectionBinding` deletes the tracked map-value binding
+// when two `.set()` calls store non-equal sources so their merge is undefined
+// (capability-analysis.ts ~1977-1979). Contrast with a single `.set()`, where
+// the binding survives and a later `.get(k).name` resolves through it.
 Deno.test(
   "a single map .set() lets a later .get().member resolve through the value binding",
   () => {
-    // Branch: `updateLocalCollectionBinding` deletes the tracked map-value
-    // binding when two `.set()` calls store non-equal sources so their merge is
-    // undefined (capability-analysis.ts ~1977-1979). Contrast with a single
-    // `.set()`, where the binding survives and a later `.get(k).name` resolves
-    // through it.
-
     const input = getPaths(
       analyzeNoChecker(
         `const fn = (input) => {
