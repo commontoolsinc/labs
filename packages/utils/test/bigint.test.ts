@@ -224,10 +224,6 @@ const referenceFixtures: readonly Fixture[] = [
   ),
 ];
 
-//
-// Tests to validate reference encoder
-//
-
 describe("`referenceEncode()` (test oracle)", () => {
   it("encodes all reference fixtures as expected", () => {
     // A small set of explicit byte-level assertions that pin `referenceEncode`
