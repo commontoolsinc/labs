@@ -8,7 +8,11 @@
   "tasks": {
     // --no-check: this package is type-checked by `deno task check` (tasks/check.sh).
     "test": "deno test --no-check --allow-env --allow-read --allow-ffi test/",
-    "integration": "LOG_LEVEL=warn deno test -A $INTEGRATION_TEST_FLAGS \"./integration/*.test.ts\""
+    "integration": "LOG_LEVEL=warn deno test -A $INTEGRATION_TEST_FLAGS \"./integration/*.test.ts\"",
+    // --allow-read so that a benchmark may start a `Worker`, which reads the
+    // worker's module from disk. The crossing benchmark measures a real
+    // `postMessage()`, that being the boundary the connection is.
+    "bench": "deno bench --allow-read --no-check bench/"
   },
   "exports": {
     ".": "./src/mod.ts",
