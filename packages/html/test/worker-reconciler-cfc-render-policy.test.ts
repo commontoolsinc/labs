@@ -2846,11 +2846,12 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
-    // The mounted root cell is an egress like any descendant cell: its own
-    // label must pass the root policy before its resolved content renders.
     await t.step(
       "default ceiling gates a labeled cell mounted as the root",
       async () => {
+        // The mounted root cell is an egress like any descendant cell: its own
+        // label must pass the root policy before its resolved content renders.
+
         const blocked = createOpsCollector();
         const blockedReconciler = new WorkerReconciler({
           onOps: blocked.onOps,
@@ -2913,15 +2914,16 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
-    // Epic H3a: the shell's initial ceiling profile (spec §8.10.6, mirrors
-    // lib-shell's defaultRenderConfidentialityCeiling) uses the acting user's
-    // DID *string* as the exact-match identity atom. Pin that the string form
-    // gates correctly: the same ceiling admits the acting user's own content
-    // and fail-closes an identity atom it omits (another user's). Exchange
-    // resolution (PersonalSpace/HasRole forms) is H3b.
     await t.step(
       "acting-user DID-string ceiling admits own content, blocks another user's",
       async () => {
+        // Epic H3a: the shell's initial ceiling profile (spec §8.10.6, mirrors
+        // lib-shell's defaultRenderConfidentialityCeiling) uses the acting
+        // user's DID *string* as the exact-match identity atom. Pin that the
+        // string form gates correctly: the same ceiling admits the acting
+        // user's own content and fail-closes an identity atom it omits (another
+        // user's). Exchange resolution (PersonalSpace/HasRole forms) is H3b.
+
         const otherUserDid = "did:key:z6MkOtherUserOutsideCeiling";
         const seedTx = runtime.edit();
         const seedUserScoped = (id: string, value: string, atom: string) => {
@@ -3000,13 +3002,15 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
-    // Epic H3b: the render gate resolves §15.2 principal shapes through the
-    // runner-side exchange evaluator (spec §8.10.6) before the fit check. The
-    // reconciler consumes the resolved label; a display-class BoundaryContext
-    // and the acting user's HasRole membership facts drive resolution.
     await t.step(
       "H3b resolver admits User/Space-via-HasRole and blocks the unresolvable",
       async () => {
+        // Epic H3b: the render gate resolves §15.2 principal shapes through the
+        // runner-side exchange evaluator (spec §8.10.6) before the fit check.
+        // The reconciler consumes the resolved label; a display-class
+        // BoundaryContext and the acting user's HasRole membership facts drive
+        // resolution.
+
         const seedTx = runtime.edit();
         const seedLabeled = (id: string, value: string, atom: CfcAtom) => {
           const cell = runtime.getCell<string>(
@@ -3099,13 +3103,15 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
-    // With the resolver active, the clause-aware fit still routes each
-    // still-offending clause through the same per-clause admission as the H3a
-    // path: the read-failure marker stays ungrantable (audit item 22), an
-    // allow-listed caveat kind renders, and an author-declassified atom renders.
     await t.step(
       "resolved-path fit honors marker / caveat-kind / declassification",
       async () => {
+        // With the resolver active, the clause-aware fit still routes each
+        // still-offending clause through the same per-clause admission as the
+        // H3a path: the read-failure marker stays ungrantable (audit item 22),
+        // an allow-listed caveat kind renders, and an author-declassified atom
+        // renders.
+
         const resolver = createRenderConfidentialityResolver({
           actingPrincipal: signer.did(),
           memberSpaces: [signer.did()],
@@ -3266,13 +3272,14 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
-    // Audit item 22 (ungrantable marker): "cfc:label-read-failed" means
-    // "the label could not be read", so it must never fit a render policy —
-    // even one that names the exported marker string — in either the
-    // ceiling or the declassification direction.
     await t.step(
       "neither ceiling nor declassification admits the read-failure marker",
       async () => {
+        // Audit item 22 (ungrantable marker): "cfc:label-read-failed" means
+        // "the label could not be read", so it must never fit a render policy —
+        // even one that names the exported marker string — in either the
+        // ceiling or the declassification direction.
+
         const seedTx = runtime.edit();
         const markerCellSeed = runtime.getCell<string>(
           signer.did(),
@@ -3359,12 +3366,13 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
-    // The ceiling crosses the postMessage seam unvalidated; a malformed
-    // shape must fail CLOSED (empty ceiling — public-only rendering), never
-    // crash the mount and never fail open to unbounded.
     await t.step(
       "a malformed ceiling fails closed instead of crashing the mount",
       async () => {
+        // The ceiling crosses the postMessage seam unvalidated; a malformed
+        // shape must fail CLOSED (empty ceiling — public-only rendering), never
+        // crash the mount and never fail open to unbounded.
+
         const collector = createOpsCollector();
         const reconciler = new WorkerReconciler({
           onOps: collector.onOps,
@@ -3389,15 +3397,17 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
-    // §4.9.3 Stage 2 (reactive upgrade): a cell labeled Space(X) where X's ACL
-    // has not yet synced fails closed (Stage 1); when the membership provider
-    // later reports X grants the acting user READ and fires its subscription,
-    // the cell re-renders and admits — WITHOUT a new value on the cell. Proves
-    // the reconciler wires the provider's ACL-change subscription into the
-    // cell's cancel group and re-evaluates the render gate on change.
     await t.step(
       "reactively re-renders a Space(X) cell once its ACL grants READ",
       async () => {
+        // §4.9.3 Stage 2 (reactive upgrade): a cell labeled Space(X) where X's
+        // ACL has not yet synced fails closed (Stage 1); when the membership
+        // provider later reports X grants the acting user READ and fires its
+        // subscription, the cell re-renders and admits — WITHOUT a new value on
+        // the cell. Proves the reconciler wires the provider's ACL-change
+        // subscription into the cell's cancel group and re-evaluates the render
+        // gate on change.
+
         const teamSpace = "did:key:z6MkTeamSpaceStage4Reactive";
         const seedTx = runtime.edit();
         const teamCell = runtime.getCell<string>(
@@ -3549,11 +3559,12 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
-    // The root-mounted cell is an egress too (codex P2): a Space(X) cell
-    // mounted AS the root gets the same reactive upgrade as a descendant.
     await t.step(
       "reactively re-renders a root-mounted Space(X) cell once its ACL grants READ",
       async () => {
+        // The root-mounted cell is an egress too (codex P2): a Space(X) cell
+        // mounted AS the root gets the same reactive upgrade as a descendant.
+
         const teamSpace = "did:key:z6MkTeamSpaceStage4Root";
         const seedTx = runtime.edit();
         const teamCell = runtime.getCell<string>(

@@ -2325,12 +2325,13 @@ describe("runtime-processor", () => {
       expect("source" in atom).toBe(false);
     });
 
-    // Inv-12 Stage 0, step 3: the display redaction applied to the top-level
-    // cfcLabel at the three IPC response sites also covers the cfcLabelView
-    // copies riding sigil links INSIDE response values (attached by
-    // convertCellsToLinks includeCfcLabelView). Safe now that the worker
-    // neither persists nor re-imports inbound views (steps 1–2).
     it("redacts Caveat.source in sigil label views inside handleCellGet values", () => {
+      // Inv-12 Stage 0, step 3: the display redaction applied to the top-level
+      // cfcLabel at the three IPC response sites also covers the cfcLabelView
+      // copies riding sigil links INSIDE response values (attached by
+      // convertCellsToLinks includeCfcLabelView). Safe now that the worker
+      // neither persists nor re-imports inbound views (steps 1–2).
+
       const ref: CellRef = {
         id: "of:cfc-value-view-cell" as CellRef["id"],
         space: "did:key:test" as CellRef["space"],
@@ -3911,14 +3912,15 @@ describe("runtime-processor", () => {
   });
 
   describe("runtime-client CellRef conversion", () => {
-    // Inv-12 Stage 0 (SC-25 prerequisite): a cfcLabelView riding an inbound
-    // CellRef is a main-thread display artifact — round-tripped through
-    // CellHandle.deserialize and back — and must not re-enter the worker as
-    // label state. Forwarding it onto the written sigil link previously fed
-    // recordLinkWritePolicyInput, whose entries prepareBoundaryCommit
-    // persisted as link-origin labels; the worker now re-derives those from
-    // its own stored source metadata instead.
     it("does not forward an inbound label view into worker sigil links", () => {
+      // Inv-12 Stage 0 (SC-25 prerequisite): a cfcLabelView riding an inbound
+      // CellRef is a main-thread display artifact — round-tripped through
+      // CellHandle.deserialize and back — and must not re-enter the worker as
+      // label state. Forwarding it onto the written sigil link previously fed
+      // recordLinkWritePolicyInput, whose entries prepareBoundaryCommit
+      // persisted as link-origin labels; the worker now re-derives those from
+      // its own stored source metadata instead.
+
       const cfcLabelView: CfcLabelView = {
         version: 1,
         entries: [{
@@ -3973,11 +3975,12 @@ describe("runtime-processor", () => {
       expect(seen).toEqual([undefined]);
     });
 
-    // Raw sigil links inside inbound values (hand-crafted JSON, or a
-    // CellHandle serialized into CustomEvent.detail via toJSON) bypass the
-    // CellRef path — the value walker must drop their label views too
-    // (codex/cubic review on the Stage 0 PR).
     it("strips label views from raw sigil links in inbound values", () => {
+      // Raw sigil links inside inbound values (hand-crafted JSON, or a
+      // CellHandle serialized into CustomEvent.detail via toJSON) bypass the
+      // CellRef path — the value walker must drop their label views too
+      // (codex/cubic review on the Stage 0 PR).
+
       const linkWithView = {
         "/": {
           "link@1": {
@@ -4151,12 +4154,13 @@ describe("runtime-processor", () => {
   });
 
   describe("RuntimeProcessor VDom event label-view ingress", () => {
-    // CustomEvent.detail is JSON.stringify'd on the main thread (invoking
-    // CellHandle.toJSON) and re-enters the worker here, bypassing
-    // getCell/cellRefToSigilLink — a handler writing event.detail.sourceCell
-    // would persist the ref's view through the sigil-link write path. The
-    // worker strips inbound views at this ingress too (codex/cubic review).
     it("strips label views from sigil links in inbound VDOM events", () => {
+      // CustomEvent.detail is JSON.stringify'd on the main thread (invoking
+      // CellHandle.toJSON) and re-enters the worker here, bypassing
+      // getCell/cellRefToSigilLink — a handler writing event.detail.sourceCell
+      // would persist the ref's view through the sigil-link write path. The
+      // worker strips inbound views at this ingress too (codex/cubic review).
+
       const dispatched: unknown[] = [];
       const processor = {
         vdomMounts: new Map([[
@@ -4764,10 +4768,11 @@ describe("runtime-processor", () => {
     });
   });
 
-  // Federation PR2: one worker serves page operations for many spaces.
-  // getSpaceCtx resolves the per-space PiecesController, lazily for
-  // foreign spaces, over the shared runtime/storage.
   describe("RuntimeProcessor per-space piece contexts", () => {
+    // Federation PR2: one worker serves page operations for many spaces.
+    // getSpaceCtx resolves the per-space PiecesController, lazily for
+    // foreign spaces, over the shared runtime/storage.
+
     const getSpaceCtx = (RuntimeProcessor.prototype as any).getSpaceCtx;
 
     function makeProcessorState() {
@@ -5056,10 +5061,11 @@ describe("runtime-processor", () => {
     });
   });
 
-  // S16 phase D: the host's render confidentiality ceiling must reach every
-  // mount's reconciler — a ceiling configured at initialization that never
-  // arrives at the egress surface is silently unbounded rendering.
   describe("RuntimeProcessor vdom mount render policy", () => {
+    // S16 phase D: the host's render confidentiality ceiling must reach every
+    // mount's reconciler — a ceiling configured at initialization that never
+    // arrives at the egress surface is silently unbounded rendering.
+
     const handleVDomMount = (RuntimeProcessor.prototype as any).handleVDomMount;
     const handleVDomUnmount =
       (RuntimeProcessor.prototype as any).handleVDomUnmount;
@@ -5154,12 +5160,13 @@ describe("runtime-processor", () => {
     });
   });
 
-  // handleVDomEvent forwards a main-thread DOM event to the owning mount's
-  // reconciler. The reconciler's dispatchEvent returns false when no handler is
-  // registered for the handlerId, meaning the event was dropped. The processor
-  // surfaces that drop as a console.warn carrying the mountId and handlerId so a
-  // silently-dropped click is traceable.
   describe("RuntimeProcessor handleVDomEvent dropped-event warning", () => {
+    // handleVDomEvent forwards a main-thread DOM event to the owning mount's
+    // reconciler. The reconciler's dispatchEvent returns false when no handler
+    // is registered for the handlerId, meaning the event was dropped. The
+    // processor surfaces that drop as a console.warn carrying the mountId and
+    // handlerId so a silently-dropped click is traceable.
+
     const handleVDomEvent = (RuntimeProcessor.prototype as any).handleVDomEvent;
 
     function makeState(dispatchResult: boolean, calls: unknown[][]) {

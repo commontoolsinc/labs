@@ -7751,17 +7751,18 @@ describe("piece cold-replica slot read (two replicas, one server)", () => {
     }
   });
 
-  // The narrow read reaches a path below an asCell slot with a plain `key()`
-  // chain, letting link resolution follow the handle mid-path rather than
-  // dereferencing it by hand. This pins the two properties that choice has to
-  // keep: the terminal handle still applies the scoped-link relaxation (so a
-  // scoped child voids only itself, not its whole object), and a path THROUGH
-  // the handle still lands on the right document.
-  // #5231 moved the asCell scope cap into the runner's own projection, which
-  // let the narrow read drop its resolveAsCell() routing. That routing was the
-  // only thing keeping a capped handle capped here, so pin the behavior at
-  // this layer rather than trusting the runner test to stand in for it.
   it("keeps a capped asCell handle capped through the narrow read", async () => {
+    // The narrow read reaches a path below an asCell slot with a plain `key()`
+    // chain, letting link resolution follow the handle mid-path rather than
+    // dereferencing it by hand. This pins the two properties that choice has to
+    // keep: the terminal handle still applies the scoped-link relaxation (so a
+    // scoped child voids only itself, not its whole object), and a path THROUGH
+    // the handle still lands on the right document. #5231 moved the asCell
+    // scope cap into the runner's own projection, which let the narrow read
+    // drop its resolveAsCell() routing. That routing was the only thing keeping
+    // a capped handle capped here, so pin the behavior at this layer rather
+    // than trusting the runner test to stand in for it.
+
     const tx = writerRuntime.edit();
     const target = writerRuntime.getCell(
       writerPieces.getSpace(),

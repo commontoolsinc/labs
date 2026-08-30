@@ -217,9 +217,10 @@ describe("seed-pattern-index", () => {
       expect(parseArguments(["-h"]).help).toBe(true);
     });
 
-    // A dropped flag would seed more than the caller asked for, against a
-    // shared corpus, so an argument the parser cannot place stops the run.
     it("refuses an argument it cannot place", () => {
+      // A dropped flag would seed more than the caller asked for, against a
+      // shared corpus, so an argument the parser cannot place stops the run.
+
       expect(() => parseArguments(["counter"])).toThrow(SeedUsageError);
     });
 
@@ -361,9 +362,11 @@ describe("seed-pattern-index", () => {
       expect(r.published).toEqual(["id-for-counter.tsx"]);
     });
 
-    // Re-running must not create duplicates: the index answers `created:false`
-    // for an identity it already holds, and that records no further event.
     it("records no event for an atom the index already holds", async () => {
+      // Re-running must not create duplicates: the index answers
+      // `created:false` for an identity it already holds, and that records no
+      // further event.
+
       const r = recorder({
         publish: (request) =>
           Promise.resolve({ patternId: request.patternId, created: false }),
@@ -377,9 +380,10 @@ describe("seed-pattern-index", () => {
       expect(r.lines.at(-1)).toContain("0 published, 6 already held");
     });
 
-    // An entry under a keyless identity could never be loaded by anything
-    // else, so the run stops rather than seeding one.
     it("publishes nothing when an atom compiles to no durable identity", async () => {
+      // An entry under a keyless identity could never be loaded by anything
+      // else, so the run stops rather than seeding one.
+
       const r = recorder({
         compile: () =>
           Promise.resolve({
@@ -418,9 +422,10 @@ describe("seed-pattern-index", () => {
       expect(durableEntryIdentity(undefined)).toBeUndefined();
     });
 
-    // An entry published under a keyless identity could never be loaded by
-    // any other runtime, so it must not reach the index at all.
     it("refuses a keyless identity", () => {
+      // An entry published under a keyless identity could never be loaded by
+      // any other runtime, so it must not reach the index at all.
+
       expect(durableEntryIdentity("keyless:abc123")).toBeUndefined();
     });
   });
@@ -633,11 +638,12 @@ describe("seed-pattern-index", () => {
   describe("the formatting guard", () => {
     const directory = join(REPO_ROOT, SEED_DIRECTORY);
 
-    // An entry identity is a hash of the source bytes, so publishing
-    // unformatted source mints an id the repository cannot reproduce: the next
-    // `deno fmt` changes the bytes and the same atom seeds again under a second
-    // id. One atom, two entries, competing in search.
     it("publishes nothing when an atom is not formatted, and names it", async () => {
+      // An entry identity is a hash of the source bytes, so publishing
+      // unformatted source mints an id the repository cannot reproduce: the
+      // next `deno fmt` changes the bytes and the same atom seeds again under a
+      // second id. One atom, two entries, competing in search.
+
       const published: string[] = [];
       const errors: string[] = [];
       const compiled: string[] = [];
@@ -699,21 +705,23 @@ describe("seed-pattern-index", () => {
       expect(published).toEqual(["id"]);
     });
 
-    // The guard is only as good as the check behind it, so the real one is
-    // exercised against the atoms as committed.
     it("finds the committed atoms already formatted", async () => {
+      // The guard is only as good as the check behind it, so the real one is
+      // exercised against the atoms as committed.
+
       const paths = await seedSourcePaths(directory);
       expect(await denoFmtCheck(paths)).toEqual([]);
     });
 
-    // Deliberately mixes a formatted file in with the unformatted one, and
-    // asserts BOTH that the offender is named and that the innocent file is
-    // not. Given a single path those two claims coincide with "blame
-    // everything I was given", which is what `denoFmtCheck` falls back to when
-    // it cannot read deno's answer — so a one-file version of this test passes
-    // against a parse that never worked, and passed against a fixture that did
-    // not exist at all.
     it("names only the unformatted file among several", async () => {
+      // Deliberately mixes a formatted file in with the unformatted one, and
+      // asserts BOTH that the offender is named and that the innocent file is
+      // not. Given a single path those two claims coincide with "blame
+      // everything I was given", which is what `denoFmtCheck` falls back to
+      // when it cannot read deno's answer — so a one-file version of this test
+      // passes against a parse that never worked, and passed against a fixture
+      // that did not exist at all.
+
       // Written outside the repository so the repo's own formatting gates
       // cannot rewrite the thing under test.
       const directory = await Deno.makeTempDir();
@@ -734,10 +742,11 @@ describe("seed-pattern-index", () => {
       }
     });
 
-    // The fallback itself: a non-zero exit deno named no file for is still a
-    // refusal to publish, because seeding on an unreadable answer is the
-    // silence this guard exists to prevent.
     it("refuses everything it was given when deno names no file", async () => {
+      // The fallback itself: a non-zero exit deno named no file for is still a
+      // refusal to publish, because seeding on an unreadable answer is the
+      // silence this guard exists to prevent.
+
       const directory = await Deno.makeTempDir();
       await Deno.remove(directory, { recursive: true });
       const absent = join(directory, "gone.ts");
@@ -827,10 +836,11 @@ describe("seed-pattern-index", () => {
       indexBaseUrl: "https://index.example",
     };
 
-    // Which setting reaches the fabric and which reaches the index are both
-    // strings, so wiring one to the other compiles and fails only in the
-    // deployment. This is the assertion that catches it.
     it("wires the fabric settings to the session and the index URL to the client", async () => {
+      // Which setting reaches the fabric and which reaches the index are both
+      // strings, so wiring one to the other compiles and fails only in the
+      // deployment. This is the assertion that catches it.
+
       let sessionArgs: unknown;
       let clientArgs: unknown[] = [];
       const deps = await fabricSeedDeps(
@@ -863,9 +873,10 @@ describe("seed-pattern-index", () => {
       expect(deps.checkFormatting).toBe(denoFmtCheck);
     });
 
-    // Exercises the constructions it performs by default rather than the
-    // stand-ins, and fails on the keyfile before reaching any network.
     it("fails when the identity keyfile is absent", async () => {
+      // Exercises the constructions it performs by default rather than the
+      // stand-ins, and fails on the keyfile before reaching any network.
+
       await expect(
         fabricSeedDeps(
           { ...settings, identityKeyPath: "/keys/definitely-absent.pkcs8" },
@@ -878,16 +889,17 @@ describe("seed-pattern-index", () => {
   });
 
   describe("as a program", () => {
-    // The one path that runs the file as a script rather than importing it.
-    // `--help` neither connects to a fabric nor writes anything, so this is a
-    // smoke test of the entry point itself: it parses, prints, and exits 0.
-    //
-    // Runs through the isolated-lock helper, which points the child at a copy
-    // of `deno.lock` so resolving dependencies cannot rewrite the real one,
-    // and which spawns `Deno.execPath()` rather than whichever `deno` is on
-    // PATH — a different Deno reads transpiled sources from its own part of
-    // the cache, and reports coverage with every file missing.
     it("prints usage and exits zero", async () => {
+      // The one path that runs the file as a script rather than importing it.
+      // `--help` neither connects to a fabric nor writes anything, so this is a
+      // smoke test of the entry point itself: it parses, prints, and exits 0.
+      //
+      // Runs through the isolated-lock helper, which points the child at a copy
+      // of `deno.lock` so resolving dependencies cannot rewrite the real one,
+      // and which spawns `Deno.execPath()` rather than whichever `deno` is on
+      // PATH — a different Deno reads transpiled sources from its own part of
+      // the cache, and reports coverage with every file missing.
+
       const output = await runDenoCommandWithTemporaryLock({
         root: REPO_ROOT,
         args: (lock) => [
@@ -933,9 +945,10 @@ describe("seed-pattern-index", () => {
       expect(request.program.main).toBe("/primitives/counter.tsx");
     });
 
-    // The seed sets no discoverability field: an omitted one is discoverable,
-    // and these atoms are the curated tier.
     it("sets no field that would withhold an atom from discovery", () => {
+      // The seed sets no discoverability field: an omitted one is discoverable,
+      // and these atoms are the curated tier.
+
       expect("nonDiscoverable" in publishRequestFor(entry)).toBe(false);
     });
 

@@ -71,10 +71,11 @@ Deno.test("keying - generateKey", async (t) => {
     assertEquals(generateKey(true), generateKey(true));
   });
 
-  // Members a child can differ by, each of which must key it apart: two
-  // children keying alike are reconciled as one, and the second one's content
-  // never reaches the DOM. Each of these is a value `WorkerProps` admits.
   await t.step("keys members that differ only in fabric terms", () => {
+    // Members a child can differ by, each of which must key it apart: two
+    // children keying alike are reconciled as one, and the second one's content
+    // never reaches the DOM. Each of these is a value `WorkerProps` admits.
+
     const key = (props: Record<string, unknown>) =>
       generateKey({ type: "vnode", name: "div", props });
 

@@ -137,22 +137,23 @@ Deno.test("main: empty lists print the report on stderr and nothing on stdout", 
   assertMatch(err[0], /shell: no skips — full suite runs/);
 });
 
-// The patterns list is EMPTY again — lunch-poll-vote's FILE entry, the
-// LAST entry in any suite, lifted 2026-08-28 (the THIRD lift) on the
-// owner-ruled 3b close: the owner ruled "go with (1) plus the (2-D)
-// kick", and both mechanisms are landed red-first — (1) event-driven
-// re-supply (a supply-class replication failure parks under the WANTED
-// identity and the matching persist RECORD re-issues it; the
-// registration-time map check covers a record that landed inside the
-// read window) and (2-D) the sidecar serve-time closure kick (the
-// demanding space's supplier registered at page-serve time, covered by
-// the ticket await). Campaign R 8/8 quiet-and-loaded at the lift head,
-// and the lift PR's own ON-lane board is the direct-CI unskip probe
-// (PROBE 6). What stays open is recorded in the register's RULING block
-// (cross-replica never-records supplier; prior-session third-space
-// closure; the recursive-(b) sliver). Evidence chain:
-// verification-coverage.md OW45's lunch blocks.
 Deno.test("main: the patterns list is EMPTY after the ruled 3b close and the flip bar's list-EMPTY precondition is met", async () => {
+  // The patterns list is EMPTY again — lunch-poll-vote's FILE entry, the
+  // LAST entry in any suite, lifted 2026-08-28 (the THIRD lift) on the
+  // owner-ruled 3b close: the owner ruled "go with (1) plus the (2-D)
+  // kick", and both mechanisms are landed red-first — (1) event-driven
+  // re-supply (a supply-class replication failure parks under the WANTED
+  // identity and the matching persist RECORD re-issues it; the
+  // registration-time map check covers a record that landed inside the
+  // read window) and (2-D) the sidecar serve-time closure kick (the
+  // demanding space's supplier registered at page-serve time, covered by
+  // the ticket await). Campaign R 8/8 quiet-and-loaded at the lift head,
+  // and the lift PR's own ON-lane board is the direct-CI unskip probe
+  // (PROBE 6). What stays open is recorded in the register's RULING block
+  // (cross-replica never-records supplier; prior-session third-space
+  // closure; the recursive-(b) sliver). Evidence chain:
+  // verification-coverage.md OW45's lunch blocks.
+
   const { out, err, io } = captureIo();
   assertEquals(await main(["patterns"], io), 0);
   // No entries: no --ignore flag on stdout…
@@ -292,13 +293,14 @@ Deno.test("validation binds a step entry: the file must name the step and call t
   ]);
 });
 
-// The runner list emptied with the arrival-witness lift (RULED 2026-08-22,
-// candidate (B) of the OW33 fork memo); the LAST list anywhere emptied
-// (a third time) with the lunch-poll-vote ruled-3b-close lift
-// (2026-08-28). This pin holds the whole-registry EMPTY state: any new
-// entry in ANY suite reddens it, so a skip is a deliberate change,
-// never a leftover.
 Deno.test("main: the runner list is EMPTY and NO suite carries any entry — the ON-skip registry is EMPTY after the ruled 3b close", async () => {
+  // The runner list emptied with the arrival-witness lift (RULED 2026-08-22,
+  // candidate (B) of the OW33 fork memo); the LAST list anywhere emptied
+  // (a third time) with the lunch-poll-vote ruled-3b-close lift
+  // (2026-08-28). This pin holds the whole-registry EMPTY state: any new
+  // entry in ANY suite reddens it, so a skip is a deliberate change,
+  // never a leftover.
+
   const { out, err, io } = captureIo();
   assertEquals(await main(["runner"], io), 0);
   // No entries: no --ignore flag on stdout…

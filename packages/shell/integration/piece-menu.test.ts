@@ -526,10 +526,11 @@ describe("piece context menu", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  // The menu and its panels are cf-piece-menu's, mounted on document.body by
-  // cf-render. Driving them through a real right-click is what proves the
-  // announcement, the portalled overlay, and the worker read all line up.
   it("shows a piece's source, origin, and space access rights", async () => {
+    // The menu and its panels are cf-piece-menu's, mounted on document.body by
+    // cf-render. Driving them through a real right-click is what proves the
+    // announcement, the portalled overlay, and the worker read all line up.
+
     const page = shell.page();
     const { identity } = await writeTempIdentity({ implementation: "noble" });
 
