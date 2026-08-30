@@ -1226,6 +1226,13 @@ describe("stage G outbox + sqlite discharge", () => {
       : { sqliteScopeKeys: options.scopeKeys }),
   });
 
+  //
+  // Discharging a sqlite op through the attachment hook
+  //
+  // What the decision above leads to: a folded op applied atomically where the
+  // hook exists, and a loud refusal where it does not.
+  //
+
   it("applies a folded sqlite op in a HOME wave batch atomically via the server's attachment hook (the stage-D bound discharged)", async () => {
     const lease = liveLease();
     const sink = newSink({
