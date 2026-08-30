@@ -14,19 +14,19 @@ import {
   publishExperimentalPosture,
 } from "@/lib/experimental-posture.ts";
 
-// The Phase-6 env knobs (serving-loop.md §5) are the production
-// multi-tenancy bound: a runaway fan-out must degrade only its own space,
-// so the outstanding-effect cap is ON by default and only the LITERAL `0`
-// opts out. The property worth pinning is that a typo cannot disable it:
-// garbage must fall back to the default (loudly), never read as the
-// opt-out (the Phase-6 independent review's F4 — the pre-fix parser
-// mapped "abc"/"-1" to `undefined` = unbounded, indistinguishable from
-// the explicit `0`).
-
 const envOf = (values: Record<string, string | undefined>) => (name: string) =>
   values[name];
 
 describe("serverExecutionPolicyFromEnv", () => {
+  // The Phase-6 env knobs (serving-loop.md §5) are the production
+  // multi-tenancy bound: a runaway fan-out must degrade only its own space,
+  // so the outstanding-effect cap is ON by default and only the LITERAL `0`
+  // opts out. The property worth pinning is that a typo cannot disable it:
+  // garbage must fall back to the default (loudly), never read as the
+  // opt-out (the Phase-6 independent review's F4 — the pre-fix parser
+  // mapped "abc"/"-1" to `undefined` = unbounded, indistinguishable from
+  // the explicit `0`).
+
   it("defaults the outstanding cap ON when the knob is unset or empty", () => {
     const warnings: string[] = [];
     expect(serverExecutionPolicyFromEnv(envOf({}), (m) => warnings.push(m)))

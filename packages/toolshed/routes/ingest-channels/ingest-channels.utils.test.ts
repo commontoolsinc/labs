@@ -29,11 +29,11 @@ import {
   saveRegistration,
 } from "@/routes/ingest/ingest.utils.ts";
 
-/** Narrow a ControlResult to its success body, failing loudly otherwise. */
 // Shaped like a real derived channel id: ids are validated before they become
 // a cell cause in the operator's service space.
 const WELL_FORMED_ID = "ing_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
+/** Narrow a ControlResult to its success body, failing loudly otherwise. */
 const ok = <T>(result: ControlResult<T>): T => {
   assert(
     result.status === 200,
@@ -220,6 +220,7 @@ describe("ingest-channels control plane", () => {
     // `did:web:commonfabric.org#oauth2` and `#plaid` are the token-less
     // integration audiences; the segment charset is what keeps a minted
     // audience out of that namespace.
+
     const res = await mint(alice, "req-c", {
       installId: "did:web:commonfabric.org#oauth2",
     });
@@ -831,6 +832,7 @@ describe("ingest-channels control plane", () => {
     it("a malformed space DID shares the ownership denial, not its own error", async () => {
       // A distinguishable shape error would be a free probe for whether a
       // space exists, so it must answer exactly like "not an owner".
+
       const res = await processMint(deps, alice.did(), {
         space: "not-a-did",
         installId: "phone-1",
@@ -1451,6 +1453,7 @@ describe("ingest-channels control plane", () => {
       // Bob owns the space and grants Alice OWNER; Alice mints; the grant is
       // then removed. Alice's token keeps working, so Bob has to be able to
       // discover and revoke it.
+
       const shared = await sharedSpace();
       const minted = await processMint(deps, alice.did(), {
         space: shared,
@@ -1588,6 +1591,7 @@ describe("ingest-channels control plane", () => {
   it("clamps an absurd ttlDays instead of throwing a RangeError", async () => {
     // `new Date(now + 1e15 * 86_400_000).toISOString()` throws RangeError, and
     // that line sits outside the try — it would escape as an uncaught 500.
+
     const res = await mint(alice, "req-ttl", { ttlDays: 1e15 });
     expect(res.status).toBe(200);
     expect(Date.parse(ok(res).expiresAt ?? "")).toBeGreaterThan(Date.now());
@@ -1602,7 +1606,8 @@ describe("ingest-channels control plane", () => {
         requestId: "shared-id",
       })).status,
     ).toBe(200);
-    // Same requestId, different caller, different installId -> must not collide.
+    // Same requestId, different caller, different installId -> must not
+    // collide.
     const other = await processMint(deps, mallory.did(), {
       space: shared,
       installId: "phone-2",

@@ -1,3 +1,10 @@
+/**
+ * Per-request metadata reaches spans only when it is passed as runtime context
+ * and named in `includeRuntimeContext`. Nothing throws when that wiring is
+ * wrong: the spans are still exported, just without the attributes. These
+ * tests assert the attributes are present.
+ */
+
 import { assert, assertEquals } from "@std/assert";
 import { registerTelemetry, streamText } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
@@ -12,11 +19,6 @@ import {
   metadataAttributeValue,
   runtimeContextFromMetadata,
 } from "@/lib/ai-telemetry.ts";
-
-// Per-request metadata reaches spans only when it is passed as runtime context
-// and named in `includeRuntimeContext`. Nothing throws when that wiring is
-// wrong: the spans are still exported, just without the attributes. These tests
-// assert the attributes are present.
 
 function mockModel() {
   return new MockLanguageModelV4({

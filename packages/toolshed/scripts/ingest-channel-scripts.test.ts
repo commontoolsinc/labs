@@ -31,10 +31,11 @@ import {
 } from "./retire-ingest-channels.ts";
 
 describe("ingest channel operator scripts", () => {
-  // The two operator scripts behind the retirement procedure. They are the only
-  // tooling that makes a trust-condition cutover answerable, so the selection
-  // logic — what gets retired, what is skipped, what the audit reports — is
-  // worth pinning even though the entrypoints themselves are thin.
+  // The operator scripts behind the retirement procedure — audit, retire, and
+  // the break-glass provision path. They are the only tooling that makes a
+  // trust-condition cutover answerable, so the selection logic — what gets
+  // retired, what is skipped, what the audit reports — is worth pinning even
+  // though the entrypoints themselves are thin.
 
   let signer: Identity;
   let serviceSpace: string;
@@ -103,9 +104,8 @@ describe("ingest channel operator scripts", () => {
   });
 
   describe("recovering a channel the index never learned about", () => {
-    // Until this change the audit-index write was best-effort and its failure
-    // swallowed, so a channel can exist that the index never learned about. An
-    // audit that walks only the index cannot find it — repairing an index by
+    // A channel can exist that the audit index never learned about. An audit
+    // that walks only the index cannot find it — repairing an index by
     // enumerating that same index only ever confirms what is already there —
     // and the affected space's owner cannot see or revoke it.
 
