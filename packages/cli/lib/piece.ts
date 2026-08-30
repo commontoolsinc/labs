@@ -4456,12 +4456,19 @@ export async function callPieceHandler<T = any>(
   );
 }
 
-export async function stepPiece(config: PieceConfig): Promise<void> {
+export async function stepPiece(
+  config: PieceConfig,
+  deps: PieceResolutionDeps = {},
+): Promise<void> {
   const pieces = await timeCliPhase(
     "stepPiece.loadPieces",
-    () => loadPieces(config),
+    () => (deps.loadPieces ?? loadPieces)(config),
   );
-  const resolvedConfig = await resolvePieceConfigWithPieces(config, pieces);
+  const resolvedConfig = await resolvePieceConfigWithPieces(
+    config,
+    pieces,
+    deps.resolvePieceAddress,
+  );
   const piece = await timeCliPhase(
     "stepPiece.getPiece",
     () =>
@@ -4474,6 +4481,9 @@ export async function stepPiece(config: PieceConfig): Promise<void> {
   );
   await timeCliPhase("stepPiece.pull", () => piece.getCell().pull());
   await timeCliPhase("stepPiece.synced", () => pieces.synced());
+  // A step exists to run the pattern and commit what recomputation
+  // produced, so the synced state above is the write the receipt follows.
+  noteWroteTo(config.space);
   await timeCliPhase(
     "stepPiece.stop",
     () => pieces.stopPiece(resolvedConfig.piece),
