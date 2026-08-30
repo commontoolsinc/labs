@@ -45,6 +45,7 @@ describe("mergeable op createsKey stamping", () => {
   // build stamps `createsKey` so the conflict matcher invalidates a shape
   // reader of the parent (see docs/specs/memory-v2/08-conflict-granularity.md
   // and the engine-side conflict test in packages/memory).
+
   it("stamps createsKey when a tail op materializes an absent array", () => {
     expect(
       buildMergeableIntent(

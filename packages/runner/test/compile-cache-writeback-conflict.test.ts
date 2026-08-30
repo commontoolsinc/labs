@@ -18,7 +18,7 @@ describe("compile-cache write-back after a runtime-version bump", () => {
     // CT-1824 regression: a runtime-version bump sends loads through the
     // cold-load recovery path (recompile + write-back). The write-back
     // re-writes version-independent source docs whose cell-layer-derived
-    // documents (link/ import-edge cells) already exist from the original
+    // documents (link/import-edge cells) already exist from the original
     // compile — documents a cold replica has never read. The commit then
     // carries stale seq-0 reads and fails with a ConflictError; before the fix,
     // editWithRetry re-ran immediately against the same stale replica, so every
