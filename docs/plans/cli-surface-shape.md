@@ -44,7 +44,7 @@ itself part of the problem.
 | --- | --- |
 | **Authoring** — work on source files, never touching a live space | `check`, `test`, `view` (pager), `init`, `deps update` |
 | **Identity and access** — who you are, and who may do what | `id` (new/did/derive/from-mnemonic), `acl` (ls/set/remove) |
-| **Live data** — reading and writing running state | `piece get`/`set`/`call`/`apply`/`link`/`step`/`verbs`/`inspect`/`get-label`/`set-label`, `wish` |
+| **Live data** — reading and writing running state | `get`/`set`/`call`, `piece apply`/`link`/`step`/`verbs`/`inspect`/`get-label`/`set-label`, `wish` |
 | **Piece lifecycle** — deploying and managing running programs | `piece new`/`setsrc`/`getsrc`/`rm`/`ls`/`search`/`map`/`set-slug`/`recreate-root`/`set-home` |
 | **Rendering** — turning things into something to look at | `piece view` (terminal), `piece render` (HTML), `view` (source pager) |
 | **Storage forensics** — reading the database directly, mostly offline (`inspect pull` fetches from a remote) | `inspect` (22 subcommands), `space` (clone/verify/reset/fingerprint) |
@@ -66,7 +66,6 @@ nothing else.
 | Surface | What the name says | What it actually is |
 | --- | --- | --- |
 | `--piece` | a piece | any cell address — the function that fetches a piece's result returns the piece unchanged, and the read path checks nothing piece-specific |
-| `piece get` | reading a piece | reading a cell at a path |
 | `--input` | a mode you switch on | an address — it follows a link stored in the document to reach the arguments cell |
 | `--schema` | one input format | two — a full schema, and a concise path shorthand that is not a schema |
 | `--url` | a transport address | a target reference — host, space and piece in one token, and the only spelling that takes a space by name |

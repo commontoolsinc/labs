@@ -41,10 +41,7 @@ describe("JSON command contracts", () => {
         "--pattern-json",
       ]),
     ).toBe(true);
-    expect(reservesStdoutForCommandOutput(["get", "path"]))
-      .toBe(true);
-    // The top-level spellings reserve stdout exactly as their piece
-    // counterparts: get and call do, set does not.
+    // Which data commands reserve stdout: get and call do, set does not.
     expect(reservesStdoutForCommandOutput(["get", "path"])).toBe(true);
     expect(reservesStdoutForCommandOutput(["call", "search"])).toBe(true);
     expect(reservesStdoutForCommandOutput(["set", "path"])).toBe(false);

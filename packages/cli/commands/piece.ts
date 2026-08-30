@@ -1533,10 +1533,8 @@ export function withNoSectionMarker<
 }
 
 /**
- * The one definition of `get`, mounted under `cf piece` and, through
- * {@link pieceDataCommand}, at top level as `cf get`. `spelling` is only
- * how the command names itself in its own help — and, since 6a, whether
- * its action carries the deprecation notice.
+ * The definition of `get`, mounted at top level as `cf get`. `spelling` is
+ * only how the command names itself in its own help.
  */
 // deno-lint-ignore no-explicit-any
 function buildGetCommand(spelling: string): Command<any> {
