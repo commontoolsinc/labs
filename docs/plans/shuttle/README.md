@@ -279,8 +279,14 @@ Shuttle rides the addressing decisions of
   piece, path, scope — as shuttle's ground. The serializable ambient
   record stays the shared seam for any further convergence.
 - Step 9 (space by name, piece by slug, positionally) is what `cd` and the
-  prompt want — names, not hashes. Shuttle should consume that work, not
-  duplicate it.
+  prompt want — names, not hashes — and it now lands paired with step 11,
+  under the recorded prior question of whether the reference grammar is
+  the right home for naming at all, or stands in for a resolution layer
+  that does not exist. Shuttle consumes that work rather than duplicating
+  it, and bears on the question from the consumer side: `cd`, completion,
+  and the prompt are exactly a naming-and-resolution layer exercised
+  against live state, so building them produces the evidence the question
+  needs.
 - The duplicated nouns that plan records (two `inspect`s, two `view`s) are
   words shuttle must not add a third meaning to.
 
