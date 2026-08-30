@@ -170,6 +170,7 @@ async function cleanup(
 // pass one. Instead it runs the same scenario once more, untimed and with the
 // callback, and reports what came back. The reports are per bench name, once.
 //
+
 type Account = (tx: IExtendedStorageTransaction) => void;
 
 const reported = new Set<string>();
@@ -214,6 +215,7 @@ function updateLine({ docs, bytes }: WriteAccount): string {
 //
 // 1. WRITE: one flat array in ONE doc, via a single Cell.set()
 //
+
 async function writeOneDoc(
   N: number,
   b?: Deno.BenchContext,
@@ -241,6 +243,7 @@ async function writeOneDoc(
 //
 // 2. WRITE: one doc PER ITEM (parent array holds cell links)
 //
+
 async function writePerItem(
   N: number,
   b?: Deno.BenchContext,
@@ -310,6 +313,7 @@ for (const N of SIZES) {
 //
 // 3. READ: one whole-array get() in a fresh tx, then repeated reads in one tx
 //
+
 for (const N of SIZES) {
   Deno.bench({
     name: `flat list read - fresh-tx schemaless get() (${N} items)`,
