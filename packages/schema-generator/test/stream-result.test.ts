@@ -3,14 +3,13 @@ import { describe, it } from "@std/testing/bdd";
 import { SchemaGenerator } from "../src/schema-generator.ts";
 import { asObjectSchema, getTypeFromCode } from "./utils.ts";
 
-/**
- * A verb's declared result rides a second type parameter on `Stream`
- * (verb contract WS-C/C1). Schema generation must keep recognizing the
- * property as a stream when that parameter is present — the marker and the
- * event schema both come off the same type check, so if two type arguments
- * confused it, a returning verb would stop being a verb.
- */
 describe("Stream with a declared result", () => {
+  // A verb's declared result rides a second type parameter on `Stream` (verb
+  // contract WS-C/C1). Schema generation must keep recognizing the property as
+  // a stream when that parameter is present — the marker and the event schema
+  // both come off the same type check, so if two type arguments confused it, a
+  // returning verb would stop being a verb.
+
   async function schemaFor(code: string) {
     const { type, checker, typeNode } = await getTypeFromCode(
       code,

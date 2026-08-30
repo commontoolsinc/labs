@@ -66,7 +66,11 @@ function referenceEncode(value: bigint): Uint8Array {
 }
 
 //
-// Fixtures, both main and reference
+// Fixtures, and the check that pins the oracle
+//
+// Both fixture sets — the main ones the per-function loops consume, and the
+// hand-written reference bytes — and then the block that pins
+// `referenceEncode()` against those bytes.
 //
 
 interface Fixture {
