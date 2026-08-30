@@ -4984,6 +4984,7 @@ Deno.test("memory v2 stacked commits: a dependant stranded by a dropped optimist
     await harness.close();
   }
 });
+
 //
 // CT-1872 Class 1a pins (ported from #4608, expectations rewritten for the
 // ops-replay contract): a pending patch layer renders by REPLAYING ITS OPS

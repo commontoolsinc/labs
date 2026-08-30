@@ -613,6 +613,7 @@ describe("cf piece call on a piece that points back at its container", () => {
       },
     );
   });
+
   //
   // Miscellaneous cases
   //
