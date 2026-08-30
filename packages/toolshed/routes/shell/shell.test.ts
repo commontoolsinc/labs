@@ -31,11 +31,9 @@ let versionedStaticApp: ReturnType<typeof createApp>;
 // on a fully composed app, used to assert middleware applies to a 200 document.
 let composedApp: ReturnType<typeof createApp>;
 
+// Global hooks must be registered before any global describe() below, so the
+// fixture setup for the static-router suites lives here at the top of the file.
 beforeAll(async () => {
-  // Global hooks must be registered before any global describe() below, so the
-  // fixture setup for the static-router suites lives here at the top of the
-  // file.
-
   tempDir = await Deno.makeTempDir();
   await Deno.writeTextFile(path.join(tempDir, "index.html"), INDEX_HTML);
   await Deno.writeTextFile(path.join(tempDir, "app.js"), APP_JS);
