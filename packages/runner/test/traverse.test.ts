@@ -544,12 +544,11 @@ describe("SchemaObjectTraverser array traversal", () => {
     expect(error).toBeDefined();
   });
 
+  // CT-1562 / B3: companion to the test above. Same `items: false` constraint
+  // but without `prefixItems` — i.e., "this array allows no items at all,
+  // only `[]` matches." The traverser currently accepts populated arrays
+  // through this schema, returning them unchanged. RED until B3 is fixed.
   it("rejects populated array when items is false and no prefixItems (B3)", () => {
-    // CT-1562 / B3: companion to the test above. Same `items: false` constraint
-    // but without `prefixItems` — i.e., "this array allows no items at all,
-    // only `[]` matches." The traverser currently accepts populated arrays
-    // through this schema, returning them unchanged. RED until B3 is fixed.
-
     const store = new Map<string, Revision<State>>();
     const type = "application/json" as const;
     const docUri = "of:doc-items-false-no-prefix" as URI;
