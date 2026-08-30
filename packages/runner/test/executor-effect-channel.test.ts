@@ -385,6 +385,7 @@ describe("Phase 4 client-effect channel", () => {
     // nonce and the next wave retires the entry, so the state hops 1–4
     // name is one an enacting client races to clear. Hops 5–6 are the
     // client half's own test.
+
     ({ manager: clientManager, runtime: clientRuntime } = openClient(
       aliceSigner,
     ));
