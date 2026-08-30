@@ -781,13 +781,14 @@ describe("replacement source-map ranges", () => {
     );
   });
 
-  // The cases above pin the sites this file knows about by name. This one is
-  // the drift gate: it makes the same guarantee over every fixture, so a NEW
-  // stage that rebuilds a JSX node without carrying its range fails here
-  // instead of waiting for someone to notice a wrong debug position. The
-  // fixtures declared above are included because the corpus reaches no
-  // UI-helper element, which would otherwise leave that family ungated.
   it("recovers an authored position for every synthesized JSX node in the corpus", async () => {
+    // The cases above pin the sites this file knows about by name. This one is
+    // the drift gate: it makes the same guarantee over every fixture, so a NEW
+    // stage that rebuilds a JSX node without carrying its range fails here
+    // instead of waiting for someone to notice a wrong debug position. The
+    // fixtures declared above are included because the corpus reaches no
+    // UI-helper element, which would otherwise leave that family ungated.
+
     const fixturePaths = await collectFixturePaths();
     expect(fixturePaths.length, "fixture corpus is non-empty").toBeGreaterThan(
       100,
