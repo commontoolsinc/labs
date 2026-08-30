@@ -28,13 +28,17 @@ import { executePieceCallable } from "../lib/piece.ts";
  * whose recursion is spelled with `$ref`/`$defs` that no hand-written schema
  * would predict.
  *
- * Four verbs, for the answers a readback can give:
+ * Five verbs, for the answers a readback can give:
  *
  * - `addChild` returns the new item, and its declared result re-enters itself.
  * - `addChildSelf` returns the CONTAINER, so the circle closes through a
  *   collection rather than through a single field.
  * - `addChildLoose` returns the same container behind `unknown`, which
  *   declares a shape that bounds nothing.
+ * - `addChildRow` returns the new item behind a COMPACT declaration — two
+ *   scalars, re-entering nowhere — which is the shape a verb takes when its
+ *   author means the result to be a row rather than the whole piece. Its
+ *   circle is at no position that declaration names.
  * - `addChildren` returns an ARRAY of items, which is the one root a
  *   `--filter` can be applied to and so the only way to reach a filtered
  *   readback of a value that closes a circle.
@@ -54,6 +58,8 @@ const PROGRAM = {
       "interface AddChildResult { item: ItemOutput; }",
       "interface ContainerResult { container: ItemOutput; }",
       "interface LooseResult { container: unknown; }",
+      "interface ItemRow { title: string; status: string; }",
+      "interface RowResult { row: ItemRow; }",
       "interface FinishEvent { note: string; }",
       "interface FinishResult { status: string; note: string; }",
       "",
@@ -62,6 +68,7 @@ const PROGRAM = {
       "  addChild: Stream<AddChildEvent, AddChildResult>;",
       "  addChildSelf: Stream<AddChildEvent, ContainerResult>;",
       "  addChildLoose: Stream<AddChildEvent, LooseResult>;",
+      "  addChildRow: Stream<AddChildEvent, RowResult>;",
       "  finish: Stream<FinishEvent, FinishResult>;",
       "  [NAME]: string;",
       "  title: string;",
@@ -97,6 +104,11 @@ const PROGRAM = {
       "      children.push(Item({ title: event.title, parent: self }));",
       "      return { container: self as unknown };",
       "    });",
+      "    const addChildRow = action<AddChildEvent, RowResult>((event) => {",
+      "      const item = Item({ title: event.title, parent: self });",
+      "      children.push(item);",
+      "      return { row: item };",
+      "    });",
       "    const finish = action<FinishEvent, FinishResult>((event) => {",
       "      status.set('done');",
       "      return { status: 'done', note: event.note };",
@@ -111,6 +123,7 @@ const PROGRAM = {
       "      addChild,",
       "      addChildSelf,",
       "      addChildLoose,",
+      "      addChildRow,",
       "      finish,",
       "    };",
       "  },",
@@ -290,6 +303,106 @@ describe("cf piece call on a piece that points back at its container", () => {
       expect(ids.length).toBe(2);
       expect(new Set(ids).size).toBe(2);
       expect(ids.every((id: string) => id.startsWith("of:"))).toBe(true);
+    });
+  });
+
+  it("renders a compact declaration's shape where the circle is past it", async () => {
+    await withTracker("cyclic-compact-declaration", async ({ call, root }) => {
+      const result = await call("addChildRow", ["--title", "Filed"]) as any;
+
+      // `RowResult` declares two scalars over a value that is a whole piece,
+      // so the circle is at `row.parent.children[0]` — a position the
+      // declaration does not name and its recursion cannot reach, because it
+      // has none. The declaration read as the shape it states is what bounds
+      // this: the row comes back, and nothing the row does not declare comes
+      // back beside it.
+      expect(() => JSON.stringify(result)).not.toThrow();
+      expect(result).toEqual({ row: { title: "Filed", status: "open" } });
+      // No address anywhere, and that is the distinction from the recursion
+      // bound rather than a detail: nothing here re-enters, so there is no
+      // position for a `$link` to stand in for.
+      expect(JSON.stringify(result)).not.toContain("$link");
+      // And the write landed. A bound is a rendering, so the handling it
+      // renders is the same one either way.
+      expect(childTitles(root)).toEqual(["Filed"]);
+    });
+  });
+
+  it("leaves a caller's own shape in charge over a compact declaration", async () => {
+    await withTracker("cyclic-compact-selection", async ({ call }) => {
+      const result = await call("addChildRow", ["--title", "Named"], {
+        selection: { projection: parseSelectProjection("row.title") },
+      }) as any;
+
+      // The caller narrowed past the circle, so their shape renders on its own
+      // and no bound engages. An implementation that applied the declaration
+      // to every result would hand back `status` here, which the caller did
+      // not name.
+      expect(result).toEqual({ row: { title: "Named" } });
+    });
+  });
+
+  // The pair below is the other half of "a caller's own shape wins": a
+  // selection that asks for an ADDRESS at one position and keeps the circle at
+  // another. The address is the caller's whole answer where they asked for it,
+  // and a bound that closed the object over the declared fields instead would
+  // answer `{}` there — contents where an address was asked for, which reads
+  // as a successful answer to a question nobody asked. Both bounds reach that
+  // position, so both halves are here.
+  it("keeps an address the caller asked for while the shape bounds the rest", async () => {
+    await withTracker("cyclic-compact-marked", async ({ call }) => {
+      const result = await call("addChildRow", ["--title", "Marked"], {
+        selection: {
+          projection: parseSelectProjection("row@,row.parent"),
+        },
+      }) as any;
+
+      // `row.parent` is the container, which files the row under `children`,
+      // so the caller's own shape still closes a circle and the compact
+      // declaration is what bounds it. `row@` is the address of the row, and
+      // it survives that bound.
+      expect(() => JSON.stringify(result)).not.toThrow();
+      expect(typeof result.row.$link).toBe("string");
+      // The row is a piece of its own, so the deepest link the walk crossed is
+      // that piece's document and there is no path below it.
+      const row = parseLLMFriendlyLink(result.row.$link);
+      expect(row.id?.startsWith("of:")).toBe(true);
+      expect(row.path).toEqual([]);
+      // `parent` is where the circle was, and the declaration does not name
+      // it, so the bound removes it. Nothing the caller did not name comes
+      // back in its place.
+      expect(Object.keys(result.row)).toEqual(["$link"]);
+    });
+  });
+
+  it("keeps an address the caller asked for while the recursion bounds the rest", async () => {
+    await withTracker("cyclic-container-marked", async ({ call }) => {
+      await call("addChildSelf", ["--title", "First"]);
+      const result = await call("addChildSelf", ["--title", "Second"], {
+        selection: {
+          projection: parseSelectProjection("container@,container.children"),
+        },
+      }) as any;
+
+      // `container.children` holds the pieces that point back at the
+      // container, so the caller's shape keeps the circle and the declared
+      // recursion cuts it: each child renders its own address. The
+      // container's own address is the caller's, and stands beside them.
+      expect(() => JSON.stringify(result)).not.toThrow();
+      expect(typeof result.container.$link).toBe("string");
+      expect(parseLLMFriendlyLink(result.container.$link).id?.startsWith("of:"))
+        .toBe(true);
+      expect(
+        result.container.children.map((child: any) =>
+          parseLLMFriendlyLink(child.$link).id?.startsWith("of:")
+        ),
+      ).toEqual([true, true]);
+      // And no position the caller did not name: `title` is declared, was not
+      // selected, and does not come back.
+      expect(Object.keys(result.container).sort()).toEqual([
+        "$link",
+        "children",
+      ]);
     });
   });
 
