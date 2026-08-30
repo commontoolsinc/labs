@@ -2773,6 +2773,13 @@ Deno.test("memory v2 stacked commits: a REJECTED own write that was shadowing fo
   }
 });
 
+//
+// The verdict, and when a parked accept applies
+//
+// A parked accept waits for its covering marker. These pin the verdict round
+// trip and the occasions that apply a parked accept without one.
+//
+
 Deno.test("memory v2 stacked commits: rejection round trip — verdict, repair frame, regenerate against the repaired base (CT-1927)", async () => {
   const harness = await markerHarness();
   try {
@@ -3095,6 +3102,13 @@ class PreStackTransport extends ScriptedModelTransport {
   }
 }
 
+//
+// An older server
+//
+// A peer advertising fewer capabilities than the current one, and the holds the
+// client takes on its behalf.
+//
+
 Deno.test("memory v2 stacked commits: a server without pendingReadStacks receives scalar top-of-stack reads", async () => {
   const harness = await createHarness({
     transport: (model) => new PreStackTransport(model),
@@ -3234,6 +3248,14 @@ Deno.test("memory v2 stacked commits: old-server hold releases once every omitte
     await harness.close();
   }
 });
+
+//
+// Cascading a dropped dependency
+//
+// A dropped write dooms what depends on it. These pin how far the cascade
+// reaches, what each victim reports, and what a late verdict may no longer
+// change.
+//
 
 Deno.test("memory v2 stacked commits: dropped dependency locally rejects the in-flight dependant before its server verdict", async () => {
   const harness = await createHarness();
@@ -3711,6 +3733,13 @@ type AdmissionReplica = {
   noteCaughtUpLocalSeq(localSeq: number | undefined): void;
 };
 
+//
+// Read repair, and commits minted against it
+//
+// A rejection whose repair has not yet landed, and what happens to a commit
+// that reads the base while the repair is in flight.
+//
+
 Deno.test("memory v2 stacked commits: preempt-mode admission rejects a floored commit without sending", async () => {
   setConflictAdmissionMode("preempt");
   const harness = await createHarness();
@@ -4146,6 +4175,13 @@ Deno.test("memory v2 stacked commits: a commit sitting on two rejected layers wa
   }
 });
 
+//
+// Materializing pending state, and invalidating it
+//
+// The cache over a stack of pending writes: what it reuses as the stack is
+// confirmed, and what it must drop when a write below it goes away.
+//
+
 Deno.test("memory v2 stacked commits: repeated pending reads reuse the latest materialized state", async () => {
   const harness = await createHarness();
   try {
@@ -4497,6 +4533,13 @@ Deno.test("memory v2 stacked commits: dropping an earlier pending write invalida
   }
 });
 
+//
+// Pending visibility
+//
+// What a pending overlay shows a reader before it is confirmed, and the patches
+// it declines to apply over a branch their ops cannot reach.
+//
+
 Deno.test("memory v2 stacked commits: pending visibility preserves `FabricValue`s", async () => {
   const harness = await createHarness();
   let commitPromise: Promise<any> | undefined;
@@ -4765,6 +4808,10 @@ Deno.test("memory v2 stacked commits: pending visibility skips a patch over an a
   }
 });
 
+//
+// Miscellaneous cases
+//
+
 Deno.test("memory v2 stacked commits: C1->C2->C3 where C2 fails and C3 error is pending-dependency, not stale-read", async () => {
   const harness = await createHarness();
   try {
@@ -4937,6 +4984,7 @@ Deno.test("memory v2 stacked commits: a dependant stranded by a dropped optimist
     await harness.close();
   }
 });
+
 //
 // CT-1872 Class 1a pins (ported from #4608, expectations rewritten for the
 // ops-replay contract): a pending patch layer renders by REPLAYING ITS OPS
