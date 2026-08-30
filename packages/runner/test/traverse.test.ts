@@ -544,11 +544,12 @@ describe("SchemaObjectTraverser array traversal", () => {
     expect(error).toBeDefined();
   });
 
-  // CT-1562 / B3: companion to the test above. Same `items: false` constraint
-  // but without `prefixItems` — i.e., "this array allows no items at all,
-  // only `[]` matches." The traverser currently accepts populated arrays
-  // through this schema, returning them unchanged. RED until B3 is fixed.
   it("rejects populated array when items is false and no prefixItems (B3)", () => {
+    // CT-1562 / B3: companion to the test above. Same `items: false` constraint
+    // but without `prefixItems` — i.e., "this array allows no items at all,
+    // only `[]` matches." The traverser currently accepts populated arrays
+    // through this schema, returning them unchanged. RED until B3 is fixed.
+
     const store = new Map<string, Revision<State>>();
     const type = "application/json" as const;
     const docUri = "of:doc-items-false-no-prefix" as URI;
@@ -2066,11 +2067,12 @@ describe("canBranchMatch", () => {
     ).toBe(true);
   });
 
-  // CT-1562 / B1: `items: false` on an array schema means "no items allowed"
-  // (only the empty array `[]` matches). canBranchMatch currently checks
-  // `type === "array"` but ignores `items: false`, so populated arrays falsely
-  // pass the fast-reject check. These tests RED until B1 is fixed.
   it("accepts empty array against items: false (only empty arrays match)", () => {
+    // CT-1562 / B1: `items: false` on an array schema means "no items allowed"
+    // (only the empty array `[]` matches). canBranchMatch currently checks
+    // `type === "array"` but ignores `items: false`, so populated arrays
+    // falsely pass the fast-reject check. These tests RED until B1 is fixed.
+
     expect(canBranchMatch({ type: "array", items: false }, [])).toBe(true);
   });
 });
@@ -2805,11 +2807,12 @@ describe("link schema path narrowing", () => {
     });
   }
 
-  // The link describes more of its target than the reader asked for. The
-  // reader's schema takes precedence at the hop (`combineSchemaForLink`), so
-  // the link's extra `required` entry must not void the reader's narrower
-  // view of a target that satisfies everything the reader itself demanded.
   it("returns a linked object missing a field required only by the link schema", () => {
+    // The link describes more of its target than the reader asked for. The
+    // reader's schema takes precedence at the hop (`combineSchemaForLink`), so
+    // the link's extra `required` entry must not void the reader's narrower
+    // view of a target that satisfies everything the reader itself demanded.
+
     const store = new Map<string, Revision<State>>();
     const rootUri = "of:link-schema-required-union-root" as URI;
     const targetUri = "of:link-schema-required-union-target" as URI;
@@ -2856,12 +2859,13 @@ describe("link schema path narrowing", () => {
     expect(ok).toEqual({ item: { a: "present" } });
   });
 
-  // The reader's schema keeps the unselected key out of the combined
-  // schema's `properties`, so the traversal treats it like any other key the
-  // reader did not ask for: the query system carries the raw value through
-  // without descending, and the link under it is neither followed nor
-  // tracked for the subscription.
   it("does not traverse a link-schema property the reader did not select", () => {
+    // The reader's schema keeps the unselected key out of the combined
+    // schema's `properties`, so the traversal treats it like any other key the
+    // reader did not ask for: the query system carries the raw value through
+    // without descending, and the link under it is neither followed nor
+    // tracked for the subscription.
+
     const store = new Map<string, Revision<State>>();
     const rootUri = "of:link-schema-projection-root" as URI;
     const targetUri = "of:link-schema-projection-target" as URI;
@@ -2918,19 +2922,20 @@ describe("link schema path narrowing", () => {
     );
   });
 
-  // A graph can contain records of one recursive type: for example, every
-  // User has a friends Cell whose elements are links to other Users. Each
-  // link legitimately carries the full User schema, including its required
-  // friends property. A query for "me and my direct friends" must therefore
-  // override that nested friends edge with an opaque boundary; otherwise the
-  // schema carried by each friend link makes traversal continue to friends of
-  // friends (and then onward through the recursive graph).
-  //
-  // The boundary should retain the direct friend's raw friends pointer in the
-  // query result, but must not load or subscribe to the pointer's target. The
-  // non-opaque control at the end proves that the deeper documents are
-  // reachable and are excluded specifically because of the boundary.
   it("limits a recursive friends query to one hop with an opaque boundary", () => {
+    // A graph can contain records of one recursive type: for example, every
+    // User has a friends Cell whose elements are links to other Users. Each
+    // link legitimately carries the full User schema, including its required
+    // friends property. A query for "me and my direct friends" must therefore
+    // override that nested friends edge with an opaque boundary; otherwise the
+    // schema carried by each friend link makes traversal continue to friends of
+    // friends (and then onward through the recursive graph).
+    //
+    // The boundary should retain the direct friend's raw friends pointer in the
+    // query result, but must not load or subscribe to the pointer's target. The
+    // non-opaque control at the end proves that the deeper documents are
+    // reachable and are excluded specifically because of the boundary.
+
     const {
       store,
       rootUri,
@@ -3041,13 +3046,14 @@ describe("link schema path narrowing", () => {
     ).toBe(true);
   });
 
-  // This parent schema corresponds to the projected type
-  // `{ id: string; friends?: never }`. The stored link still carries a full
-  // User schema with an optional friends list. Combining the two for the
-  // link hop should keep `friends: false` without making it required.
-  // Traversal can then omit that property while retaining the direct friend
-  // record itself.
   it("omits an optional nested friends property narrowed to false", () => {
+    // This parent schema corresponds to the projected type
+    // `{ id: string; friends?: never }`. The stored link still carries a full
+    // User schema with an optional friends list. Combining the two for the
+    // link hop should keep `friends: false` without making it required.
+    // Traversal can then omit that property while retaining the direct friend
+    // record itself.
+
     const {
       store,
       rootUri,
@@ -4281,6 +4287,7 @@ describe("canBranchMatch NaN and Infinity type handling", () => {
   // NaN and the infinities are first-class stored numbers, so getJsonType
   // types them as "number": a "number" branch accepts them and a
   // non-number branch rejects them, exactly like any other number.
+
   it("does not reject NaN against a {type: 'number'} branch", () => {
     expect(canBranchMatch({ type: "number" }, NaN)).toBe(true);
   });
@@ -4315,6 +4322,7 @@ describe("MapSet size and totalValues", () => {
   // Both getters exist only to fill in the slow-traverse report, so nothing
   // else in the runtime reads them. Covering them here keeps them off the
   // machine-speed-dependent path that report used to sit on.
+
   it("counts keys and values in the reference-equality mode", () => {
     const mapSet = new MapSet<string, string>();
     expect(mapSet.size).toBe(0);

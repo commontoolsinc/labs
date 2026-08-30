@@ -163,11 +163,12 @@ describe("stored-link-schema-precedence", () => {
     });
   });
 
-  // Read within the array, the reader's item schema takes precedence over
-  // the stored one (`combineSchemaForLink`): a property the reader did not
-  // select stays out of the read, and the stored schema's `required` for
-  // that property cannot void the row.
   describe("a stored schema that describes more than the reader selects", () => {
+    // Read within the array, the reader's item schema takes precedence over
+    // the stored one (`combineSchemaForLink`): a property the reader did not
+    // select stays out of the read, and the stored schema's `required` for
+    // that property cannot void the row.
+
     const wideStoredSchema = {
       type: "object",
       properties: {
@@ -201,11 +202,12 @@ describe("stored-link-schema-precedence", () => {
       });
     });
 
-    // An asCell reader crossing the link gets a handle whose schema keeps
-    // reader precedence: the stored schema's extra requirement must not
-    // ride the handle and void a read of a target that satisfies
-    // everything the reader itself demanded.
     it("hands an asCell reader a handle that reads a row missing a stored-required field", () => {
+      // An asCell reader crossing the link gets a handle whose schema keeps
+      // reader precedence: the stored schema's extra requirement must not
+      // ride the handle and void a read of a target that satisfies
+      // everything the reader itself demanded.
+
       const row = runtime.getCell(space, `row-${seq}-handle`, undefined, tx);
       row.setRaw({ title: "cruller" });
       const holder = runtime.getCell<Holder>(
@@ -229,12 +231,13 @@ describe("stored-link-schema-precedence", () => {
       expect(projectionOf(handle.get())).toEqual({ title: "cruller" });
     });
 
-    // A stored schema can be NOTHING BUT a default — a top-level `default`
-    // is otherwise a true schema, and narrowing can reduce a stored schema
-    // to one. The resolution carry must not treat that as saying nothing:
-    // the default is the nearest declaration and stands in for the absent
-    // value.
     it("inherits a default-only stored schema's default across the crossing", () => {
+      // A stored schema can be NOTHING BUT a default — a top-level `default`
+      // is otherwise a true schema, and narrowing can reduce a stored schema
+      // to one. The resolution carry must not treat that as saying nothing:
+      // the default is the nearest declaration and stands in for the absent
+      // value.
+
       const target = runtime.getCell(space, `row-${seq}-seed`, undefined, tx);
       // Deliberately never written: the stored default is all a read has.
       const holder = runtime.getCell<Holder>(
@@ -340,10 +343,11 @@ describe("stored-link-schema-precedence", () => {
       expect(glaze).toEqual("seed");
     });
 
-    // `default` crosses the precedence line: narrowed to the read path, the
-    // stored schema's default is inherited onto the reader's schema and
-    // stands in for the absent value.
     it("inherits the stored schema's default for an absent selected field", () => {
+      // `default` crosses the precedence line: narrowed to the read path, the
+      // stored schema's default is inherited onto the reader's schema and
+      // stands in for the absent value.
+
       const defaultedStoredSchema = {
         type: "object",
         properties: {

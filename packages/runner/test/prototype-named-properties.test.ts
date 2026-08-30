@@ -283,12 +283,13 @@ describe("path helpers and prototype-named segments", () => {
     expect(setValueAtPath(target, ["toString"], "stored")).toBe(false);
   });
 
-  // Narrowing the read to own properties must not cost the OWN properties a
-  // primitive genuinely has. `Object.hasOwn` coerces with `ToObject`, so it
-  // keeps a string's `length` and indices while still refusing its prototype
-  // methods — callers reconstructing write details walk over primitive
-  // subtrees and would otherwise see a valid value as absent.
   it("getValueAtPath keeps own properties of primitives", () => {
+    // Narrowing the read to own properties must not cost the OWN properties a
+    // primitive genuinely has. `Object.hasOwn` coerces with `ToObject`, so it
+    // keeps a string's `length` and indices while still refusing its prototype
+    // methods — callers reconstructing write details walk over primitive
+    // subtrees and would otherwise see a valid value as absent.
+
     expect(getValueAtPath("abc", ["length"])).toBe(3);
     expect(getValueAtPath("abc", ["0"])).toBe("a");
     expect(getValueAtPath({ a: "xy" }, ["a", "length"])).toBe(2);

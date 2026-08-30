@@ -28,14 +28,15 @@ describe("transactional setup ownership", () => {
     await storageManager.close();
   });
 
-  // Two runs of one computation overlap: the first materializes the child and
-  // then aborts, while the second commits in between. Only the first run
-  // materializes anything — the second finds the pattern unchanged and writes no
-  // child setup at all — so the aborting run is the one that installed the
-  // registration and the memo, and it is the one that has to take them back. The
-  // requirement is that the child comes back and stays reactive, not that any
-  // particular bookkeeping survives the abort untouched.
   it("keeps a shared child reactive when a newer setup commits first", async () => {
+    // Two runs of one computation overlap: the first materializes the child and
+    // then aborts, while the second commits in between. Only the first run
+    // materializes anything — the second finds the pattern unchanged and writes
+    // no child setup at all — so the aborting run is the one that installed the
+    // registration and the memo, and it is the one that has to take them back.
+    // The requirement is that the child comes back and stays reactive, not that
+    // any particular bookkeeping survives the abort untouched.
+
     type RegistrationKey = Parameters<typeof runtime.runner.cancels.has>[0];
     const internals = runtime.runner as unknown as {
       resultPatternCache: Map<RegistrationKey, string>;

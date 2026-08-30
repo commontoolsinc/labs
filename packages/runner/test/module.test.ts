@@ -165,13 +165,14 @@ describe("module", () => {
       expect(isReactive(holds)).toBe(true);
     });
 
-    // The assert-diagnostics transformer normally rewrites an `assert` body
-    // and lowers the call to a lift, so this implementation is what runs when
-    // a source opts out of the transform. It still has to produce the record
-    // `assert` declares it returns — a body handing back a bare boolean would
-    // have the declared type and the value disagree. It records no operands,
-    // having no rewritten body to record them from.
     it("produces the record it declares, carrying the result in `ok`", async () => {
+      // The assert-diagnostics transformer normally rewrites an `assert` body
+      // and lowers the call to a lift, so this implementation is what runs when
+      // a source opts out of the transform. It still has to produce the record
+      // `assert` declares it returns — a body handing back a bare boolean would
+      // have the declared type and the value disagree. It records no operands,
+      // having no rewritten body to record them from.
+
       const testPattern = trustPattern(
         runtime,
         pattern(() => {
@@ -198,6 +199,7 @@ describe("module", () => {
     // What the rewritten body calls for each operand. It has to hand the value
     // back untouched, or wrapping an operand would change what the assertion
     // computes.
+
     it("returns the value it was given", () => {
       const parts: AssertRawPart[] = [];
       expect(assertCapture(parts, "a + b", 3)).toBe(3);
@@ -234,6 +236,7 @@ describe("module", () => {
     // The record's `parts` runs through this. On the passing path it renders
     // nothing — that is what keeps a passing assertion from paying to render
     // operands it will never report.
+
     it("renders nothing for a passing assertion", () => {
       const parts: AssertRawPart[] = [
         { src: "a + b", value: 3 },

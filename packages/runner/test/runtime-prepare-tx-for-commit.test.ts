@@ -54,11 +54,12 @@ describe("Runtime.prepareTxForCommit()", () => {
     }
   });
 
-  // At `persist` the probe runs for every prepared transaction, so a plain
-  // unlabeled write is enough to reach the metadata read. An aborted
-  // transaction keeps its journal, so the probe finds that write and goes on
-  // to read the document's stored metadata.
   it("leaves an aborted transaction unprepared when its write is unlabeled and the flow dial is `persist`", () => {
+    // At `persist` the probe runs for every prepared transaction, so a plain
+    // unlabeled write is enough to reach the metadata read. An aborted
+    // transaction keeps its journal, so the probe finds that write and goes on
+    // to read the document's stored metadata.
+
     const runtime = makeRuntime("persist");
     const tx = runtime.edit();
     const cell = runtime.getCell<{ note: string }>(
@@ -76,10 +77,12 @@ describe("Runtime.prepareTxForCommit()", () => {
     expect(tx.getCfcState().prepare.status).toBe("unprepared");
   });
 
-  // The flow dial defaults to `off`, which skips the probe. A labeled write
-  // marks the transaction relevant on its own, so prepare reaches `prepareCfc`
-  // instead, which also reads and writes through the transaction.
   it("leaves an aborted transaction unprepared when it is already CFC-relevant and the flow dial is at its default", () => {
+    // The flow dial defaults to `off`, which skips the probe. A labeled write
+    // marks the transaction relevant on its own, so prepare reaches
+    // `prepareCfc` instead, which also reads and writes through the
+    // transaction.
+
     const runtime = makeRuntime();
     const tx = runtime.edit();
     const cell = runtime.getCell(
@@ -97,9 +100,11 @@ describe("Runtime.prepareTxForCommit()", () => {
     expect(tx.getCfcState().prepare.status).toBe("unprepared");
   });
 
-  // A committed transaction releases its journal, so the probe finds no writes
-  // to check and reaches no read. This pins the contract rather than a throw.
   it("returns without throwing when the transaction has already committed", async () => {
+    // A committed transaction releases its journal, so the probe finds no
+    // writes to check and reaches no read. This pins the contract rather than a
+    // throw.
+
     const runtime = makeRuntime("persist");
     const tx = runtime.edit();
     const cell = runtime.getCell<{ note: string }>(
@@ -115,12 +120,13 @@ describe("Runtime.prepareTxForCommit()", () => {
     expect(() => runtime.prepareTxForCommit(tx)).not.toThrow();
   });
 
-  // The guard at a caller rather than at the chokepoint. `editWithRetry`
-  // prepares outside the block that turns a throwing action into a result, so
-  // a throw out of prepare escapes it synchronously and defeats the `Result`
-  // it promises. The abort cases in the `editWithRetry` suite abort without
-  // reading or writing first, which leaves the probe nothing to walk.
   it("returns the abort as `editWithRetry`'s result when the action read before aborting", async () => {
+    // The guard at a caller rather than at the chokepoint. `editWithRetry`
+    // prepares outside the block that turns a throwing action into a result, so
+    // a throw out of prepare escapes it synchronously and defeats the `Result`
+    // it promises. The abort cases in the `editWithRetry` suite abort without
+    // reading or writing first, which leaves the probe nothing to walk.
+
     const runtime = makeRuntime("persist");
     const seed = runtime.edit();
     const cell = runtime.getCell<{ note: string }>(

@@ -98,10 +98,11 @@ describe("query-result-proxy transaction lifetime", () => {
       expect(() => middle.leaf).toThrow("Transaction is complete");
     });
 
-    // An array method and an iterator hand back work that runs after the trap
-    // returned, so the instant has to travel with them rather than with the
-    // property access that produced them.
     describe("over an array", () => {
+      // An array method and an iterator hand back work that runs after the trap
+      // returned, so the instant has to travel with them rather than with the
+      // property access that produced them.
+
       const seedList = async (cause: string) => {
         const tx = runtime.edit();
         const cell = runtime.getCell<number[]>(space, cause, undefined, tx);

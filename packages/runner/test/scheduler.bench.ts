@@ -55,12 +55,13 @@ async function cleanup(
   await storageManager.close();
 }
 
-// Benchmark: Many independent computations writing to same entity
-// This tests the writersByEntity index lookup
 Deno.bench(
   "Scheduler - 100 computations, shared entity reads",
   { group: "dependency-lookup" },
   async () => {
+    // Benchmark: Many independent computations writing to same entity
+    // This tests the writersByEntity index lookup
+
     const { runtime, storageManager, tx } = setup();
 
     // Create a shared source cell that many computations read from
@@ -115,12 +116,13 @@ Deno.bench(
   },
 );
 
-// Benchmark: Deep dependency chain (A -> B -> C -> D -> ...)
-// Tests markDirty propagation with early termination
 Deno.bench(
   "Scheduler - deep chain (50 levels)",
   { group: "dirty-propagation" },
   async () => {
+    // Benchmark: Deep dependency chain (A -> B -> C -> D -> ...)
+    // Tests markDirty propagation with early termination
+
     const { runtime, storageManager, tx } = setup();
 
     // deno-lint-ignore no-explicit-any
@@ -172,12 +174,13 @@ Deno.bench(
   },
 );
 
-// Benchmark: Wide dependency graph (1 source -> 100 outputs)
-// Tests updateDependents with many readers of same entity
 Deno.bench(
   "Scheduler - wide graph (1 source, 100 readers)",
   { group: "dependency-lookup" },
   async () => {
+    // Benchmark: Wide dependency graph (1 source -> 100 outputs)
+    // Tests updateDependents with many readers of same entity
+
     const { runtime, storageManager, tx } = setup();
 
     const source = runtime.getCell<number>(
@@ -234,12 +237,13 @@ Deno.bench(
   },
 );
 
-// Benchmark: Subscribe/unsubscribe cycle
-// Tests the overhead of index maintenance
 Deno.bench(
   "Scheduler - subscribe/unsubscribe cycle (100x)",
   { group: "subscription" },
   async () => {
+    // Benchmark: Subscribe/unsubscribe cycle
+    // Tests the overhead of index maintenance
+
     const { runtime, storageManager, tx } = setup();
 
     const source = runtime.getCell<number>(
@@ -279,12 +283,13 @@ Deno.bench(
   },
 );
 
-// Benchmark: Many entities, sparse dependencies
-// Tests that we don't iterate all actions when looking up writers
 Deno.bench(
   "Scheduler - 100 entities, sparse deps",
   { group: "dependency-lookup" },
   async () => {
+    // Benchmark: Many entities, sparse dependencies
+    // Tests that we don't iterate all actions when looking up writers
+
     const { runtime, storageManager, tx } = setup();
 
     // deno-lint-ignore no-explicit-any
@@ -334,12 +339,13 @@ Deno.bench(
   },
 );
 
-// Benchmark: Diamond dependency pattern
-// A -> B, A -> C, B -> D, C -> D
 Deno.bench(
   "Scheduler - diamond pattern (10 diamonds)",
   { group: "dirty-propagation" },
   async () => {
+    // Benchmark: Diamond dependency pattern
+    // A -> B, A -> C, B -> D, C -> D
+
     const { runtime, storageManager, tx } = setup();
 
     const actions: Action[] = [];
@@ -436,12 +442,13 @@ Deno.bench(
   },
 );
 
-// Benchmark: repeated dirty propagation over already-marked nodes.
-// Tests that markDirty stops at already-marked nodes.
 Deno.bench(
   "Scheduler - repeated dirty marking",
   { group: "dirty-propagation" },
   async () => {
+    // Benchmark: repeated dirty propagation over already-marked nodes.
+    // Tests that markDirty stops at already-marked nodes.
+
     const { runtime, storageManager, tx } = setup();
 
     // deno-lint-ignore no-explicit-any
@@ -499,12 +506,13 @@ Deno.bench(
   },
 );
 
-// Benchmark: Pull-mode resubscribe cycle
-// Tests the unsubscribe/resubscribe that happens during pull()
 Deno.bench(
   "Scheduler - pull with resubscribe (50 pulls)",
   { group: "subscription" },
   async () => {
+    // Benchmark: Pull-mode resubscribe cycle
+    // Tests the unsubscribe/resubscribe that happens during pull()
+
     const { runtime, storageManager, tx } = setup();
 
     // Enable pull mode for this test
@@ -553,21 +561,23 @@ Deno.bench(
 // MICRO-BENCHMARKS: Isolated operations to measure overhead
 //
 
-// Benchmark: Just setup/teardown overhead
 Deno.bench(
   "Overhead - setup/teardown only",
   { group: "overhead" },
   async () => {
+    // Benchmark: Just setup/teardown overhead
+
     const { runtime, storageManager, tx } = setup();
     await cleanup(runtime, storageManager, tx);
   },
 );
 
-// Benchmark: Cell creation overhead
 Deno.bench(
   "Overhead - create 100 cells (getCell + set)",
   { group: "overhead" },
   async () => {
+    // Benchmark: Cell creation overhead
+
     const { runtime, storageManager, tx } = setup();
 
     for (let i = 0; i < 100; i++) {
@@ -584,11 +594,12 @@ Deno.bench(
   },
 );
 
-// Benchmark: Just getCell without set
 Deno.bench(
   "Overhead - 100x getCell only (no set)",
   { group: "overhead" },
   async () => {
+    // Benchmark: Just getCell without set
+
     const { runtime, storageManager, tx } = setup();
 
     for (let i = 0; i < 100; i++) {
@@ -604,11 +615,12 @@ Deno.bench(
   },
 );
 
-// Benchmark: set on pre-created cells
 Deno.bench(
   "Overhead - 100x set on existing cells",
   { group: "overhead" },
   async () => {
+    // Benchmark: set on pre-created cells
+
     const { runtime, storageManager, tx } = setup();
 
     // Pre-create cells
@@ -629,22 +641,24 @@ Deno.bench(
   },
 );
 
-// Benchmark: runtime.idle() overhead with no work
 Deno.bench(
   "Overhead - runtime.idle() empty",
   { group: "overhead" },
   async () => {
+    // Benchmark: runtime.idle() overhead with no work
+
     const { runtime, storageManager, tx } = setup();
     await runtime.idle();
     await cleanup(runtime, storageManager, tx);
   },
 );
 
-// Benchmark: commit after writes (triggers scheduler storage subscriptions)
 Deno.bench(
   "Overhead - commit after 100 sets",
   { group: "overhead" },
   async () => {
+    // Benchmark: commit after writes (triggers scheduler storage subscriptions)
+
     const { runtime, storageManager, tx } = setup();
 
     // Create and set 100 cells
@@ -672,11 +686,12 @@ Deno.bench(
   },
 );
 
-// Benchmark: just commit with no writes
 Deno.bench(
   "Overhead - empty commit",
   { group: "overhead" },
   async () => {
+    // Benchmark: just commit with no writes
+
     const { runtime, storageManager, tx } = setup();
     await tx.commit();
     await runtime.dispose();
@@ -684,11 +699,12 @@ Deno.bench(
   },
 );
 
-// Benchmark: raw transaction writes (bypass Cell layer)
 Deno.bench(
   "Overhead - 100 raw tx.write + commit",
   { group: "overhead" },
   async () => {
+    // Benchmark: raw transaction writes (bypass Cell layer)
+
     const { runtime, storageManager, tx } = setup();
 
     // Write directly to transaction, bypassing Cell
@@ -731,11 +747,12 @@ function generateAddresses(
   return addresses;
 }
 
-// Benchmark: sortAndCompactPaths
 Deno.bench(
   "Utility - sortAndCompactPaths (100 paths)",
   { group: "utilities" },
   () => {
+    // Benchmark: sortAndCompactPaths
+
     const addresses = generateAddresses(100, 10);
     sortAndCompactPaths(addresses);
   },
@@ -750,11 +767,12 @@ Deno.bench(
   },
 );
 
-// Benchmark: addressesToPathByEntity
 Deno.bench(
   "Utility - addressesToPathByEntity (100 paths)",
   { group: "utilities" },
   () => {
+    // Benchmark: addressesToPathByEntity
+
     const addresses = generateAddresses(100, 10);
     addressesToPathByEntity(addresses, TEST_IDENTITY);
   },
@@ -773,11 +791,12 @@ Deno.bench(
 // MICRO-BENCHMARKS: Scheduler operations in isolation
 //
 
-// Benchmark: Just subscribe without any cell operations
 Deno.bench(
   "Scheduler - bare subscribe (100x)",
   { group: "scheduler-ops" },
   async () => {
+    // Benchmark: Just subscribe without any cell operations
+
     const { runtime, storageManager, tx } = setup();
 
     const actions: Action[] = [];
@@ -809,11 +828,12 @@ Deno.bench(
   },
 );
 
-// Benchmark: Subscribe with shared reads (tests writersByEntity)
 Deno.bench(
   "Scheduler - subscribe 100 actions reading same entity",
   { group: "scheduler-ops" },
   async () => {
+    // Benchmark: Subscribe with shared reads (tests writersByEntity)
+
     const { runtime, storageManager, tx } = setup();
 
     const actions: Action[] = [];
@@ -850,11 +870,12 @@ Deno.bench(
   },
 );
 
-// Benchmark: resubscribe cycle (simulates what happens during pull)
 Deno.bench(
   "Scheduler - resubscribe cycle (100x)",
   { group: "scheduler-ops" },
   async () => {
+    // Benchmark: resubscribe cycle (simulates what happens during pull)
+
     const { runtime, storageManager, tx } = setup();
 
     const action: Action = () => {};

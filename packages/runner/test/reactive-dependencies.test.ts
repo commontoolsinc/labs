@@ -1975,14 +1975,15 @@ describe("determineTriggeredActions", () => {
       expect(result).toEqual([action]);
     });
 
-    // A non-recursive read compares an opaque leaf by value, and a class whose
-    // comparison is an unimplemented stub cannot answer. The failure is
-    // deliberately left to propagate rather than being caught and turned into
-    // "changed": a stub announcing itself loudly is worth more than a quiet
-    // answer derived from an unfinished class, and swallowing it would let
-    // that class shape behavior here. `FabricMap` stands in for any value
-    // whose comparison is unavailable.
     it("propagates the failure from a value it cannot compare", () => {
+      // A non-recursive read compares an opaque leaf by value, and a class
+      // whose comparison is an unimplemented stub cannot answer. The failure is
+      // deliberately left to propagate rather than being caught and turned into
+      // "changed": a stub announcing itself loudly is worth more than a quiet
+      // answer derived from an unfinished class, and swallowing it would let
+      // that class shape behavior here. `FabricMap` stands in for any value
+      // whose comparison is unavailable.
+
       const action = createAction("nonRecursiveUncomparableLeaf");
       const dependencies = new Map<Action, SortedAndCompactPaths>([
         [action, [["value", "a"]]],
@@ -2068,8 +2069,9 @@ describe("determineTriggeredActions", () => {
   });
 });
 
-// Benchmarks
 Deno.bench("sortAndCompactPaths - small dataset", () => {
+  // Benchmarks
+
   const addresses = createAddresses([
     ["user", "name"],
     ["user"],

@@ -50,10 +50,11 @@ describe("toURI", () => {
     expect(toURI({ "/": tagged })).toBe(`of:${tagged}`);
   });
 
-  // Per the modern-cell-rep invariant, every stored/wire content-id hash is a
-  // `FabricHash`, so a bare `{ "/": … }` is never a content-id ref in modern
-  // mode — it is not recognized, and so is rejected rather than mishandled.
   it('rejects a `{ "/": … }` object in modern mode', () => {
+    // Per the modern-cell-rep invariant, every stored/wire content-id hash is a
+    // `FabricHash`, so a bare `{ "/": … }` is never a content-id ref in modern
+    // mode — it is not recognized, and so is rejected rather than mishandled.
+
     setModernCellRepConfig(true);
     expect(() => toURI({ "/": tagged })).toThrow();
   });
@@ -106,9 +107,10 @@ describe("toURI with an entity kind (computed: scheme)", () => {
     expect(toURI(`computed:${tagged}`)).toBe(`computed:${tagged}`);
   });
 
-  // `kind` is a minting-time argument; a schemed string is an already-minted
-  // identity — never re-scheme it, even when the scheme matches.
   it("throws on kind + already-schemed string", () => {
+    // `kind` is a minting-time argument; a schemed string is an already-minted
+    // identity — never re-scheme it, even when the scheme matches.
+
     expect(() => toURI(`of:${tagged}`, "computed")).toThrow(
       /already-schemed/,
     );
@@ -137,12 +139,13 @@ describe("fromURI", () => {
     expect(() => fromURI(`future:${tagged}`)).toThrow(/Invalid URI/);
   });
 
-  // The scheme is part of the identity: stripping it loses the kind, so a
-  // bare-hash round-trip through toURI renames a computed: id to its of:
-  // sibling. Documented one-way — never rebuild a computed URI from its
-  // bare hash (the salted preimage keeps the BYTES distinct, but the
-  // resulting URI names the wrong-scheme entity).
   it("is one-way for computed: ids (bare hash re-mints as of:)", () => {
+    // The scheme is part of the identity: stripping it loses the kind, so a
+    // bare-hash round-trip through toURI renames a computed: id to its of:
+    // sibling. Documented one-way — never rebuild a computed URI from its
+    // bare hash (the salted preimage keeps the BYTES distinct, but the
+    // resulting URI names the wrong-scheme entity).
+
     const bare = fromURI(`computed:${tagged}`);
     expect(toURI(FabricHash.fromString(bare))).toBe(`of:${tagged}`);
   });
