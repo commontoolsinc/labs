@@ -245,9 +245,9 @@ Three nearby shapes are not this one:
   run that should not become a block takes a
   [section marker](code-comment-style.md#section-markers) instead, and then the
   region needs closing — a second marker after the run — or a reader cannot
-  see where it ends. Where the comment's clauses name the cases one by one,
-  splitting it is simpler than either: each half becomes its own case's
-  comment.
+  see where it ends. And where what you have to say names the cases one at a
+  time, say each part in the case it belongs to rather than all of it in one
+  place.
 - A comment describing the **file** rather than any block in it is a file
   header. It goes at the top of the file as a doc comment, per
   [File headers](code-comment-style.md#file-headers), and not above the
@@ -257,22 +257,27 @@ Three nearby shapes are not this one:
   length or subject matter. A marker covering a single block is not marking a
   region. Where it says something about that block, it becomes a block comment
   in the form above. Where it only restates the block's own description, it is
-  deleted — the disposition for any comment that says no more than the
-  description above it.
+  deleted. A comment that would say no more than the description above it is
+  not worth writing.
 
-### Where these run out
+### The shape to aim for
 
-A comment above a block delimits: it ends the reach of whatever comment heads
-the run before it. Move one inside its block and the comment above it quietly
-covers more than it used to. So where a file is organized by a series of region
-labels, the series carries weight no single label does, and a series that reads
-one way throughout is worth more than each of its members being separately
-right.
+A reader should be able to tell what a comment covers from where it sits, and
+there are only four places it can sit. Inside a block, it is about that block.
+At the top of a group, it is about the group. Framed as a section marker, it is
+about the region running to the next marker or to the end of the block. Beside
+a hook or a body-less callback, it is about the statement it touches. Write
+each comment into the place that matches its reach and a reader never has to
+guess.
 
-That is the shape of every hard case here, and the reason none of this is
-checked mechanically: the exceptions keep coming, and a gate would only make
-them expensive. Take all of it as guidance. Where following it would leave a
-file reading worse, the file wins.
+Give a file one way of showing its regions and keep to it. Where a file marks
+regions, a marker ends the one before it, so a series of them reads as a series
+and a lone label in another form leaves the region above it looking wider than
+it is.
+
+None of this is checked mechanically, on purpose: the cases that do not fit
+keep arriving, and a gate would only make them expensive. It is guidance. A
+file that reads better than the guidance is the better file.
 
 ## Assertions
 
