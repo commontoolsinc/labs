@@ -342,13 +342,18 @@ describe("cf piece call on a piece that points back at its container", () => {
     });
   });
 
+  //
+  // The other half of "a caller's own shape wins"
+  //
   // The pair below is the other half of "a caller's own shape wins": a
   // selection that asks for an ADDRESS at one position and keeps the circle at
   // another. The address is the caller's whole answer where they asked for it,
   // and a bound that closed the object over the declared fields instead would
-  // answer `{}` there — contents where an address was asked for, which reads
-  // as a successful answer to a question nobody asked. Both bounds reach that
+  // answer `{}` there — contents where an address was asked for, which reads as
+  // a successful answer to a question nobody asked. Both bounds reach that
   // position, so both halves are here.
+  //
+
   it("keeps an address the caller asked for while the shape bounds the rest", async () => {
     await withTracker("cyclic-compact-marked", async ({ call }) => {
       const result = await call("addChildRow", ["--title", "Marked"], {
@@ -406,6 +411,9 @@ describe("cf piece call on a piece that points back at its container", () => {
     });
   });
 
+  //
+  // `item.title` against `item`: narrowing past the circle, or naming it whole
+  //
   // The pair below is one contrast, and it is the whole point of both halves:
   // `item.title` narrows PAST the position where the declared type re-enters,
   // so the value it produces holds no circle and nothing derived touches it;
@@ -414,6 +422,8 @@ describe("cf piece call on a piece that points back at its container", () => {
   // are a selection, and only one of them leaves a readback with nothing to do
   // — a suite holding either alone tests half of that and reads like it tests
   // all of it.
+  //
+
   it("leaves a caller's own selection in charge of the shape", async () => {
     await withTracker("cyclic-explicit-selection", async ({ call }) => {
       const result = await call("addChild", ["--title", "Selected"], {
@@ -457,6 +467,157 @@ describe("cf piece call on a piece that points back at its container", () => {
       expect(Object.hasOwn(result.item, "addChild")).toBe(false);
     });
   });
+
+  //
+  // The `--filter` pair
+  //
+  // The `--filter` pair, and the same contrast: a predicate hands back the
+  // elements themselves, so it can only keep a circle, never narrow past one.
+  // What decides between the two is the projection written beside it.
+  //
+
+  it("returns the elements a `--filter` keeps where the projection beside it renders", async () => {
+    await withTracker("cyclic-filter-renders", async ({ call }) => {
+      const result = await call("addChildren", ["--title", "Kept"], {
+        selection: {
+          filter: parseSelectionFilter('.title == "Kept"'),
+          projection: parseSelectProjection("title"),
+        },
+      }) as any;
+
+      // The projection beside the predicate narrows past the circle, so the
+      // surviving element renders and nothing is derived. An implementation
+      // that refused every cyclic-verb `--filter` outright would fail here.
+      expect(result).toEqual([{ title: "Kept" }]);
+    });
+  });
+
+  it("refuses a `--filter` that keeps the circle, naming the committed write", async () => {
+    await withTracker(
+      "cyclic-filter-retains",
+      async ({ call, patternLoads, root }) => {
+        const error = await call("addChildren", ["--title", "Filtered"], {
+          selection: { filter: parseSelectionFilter('.title == "Filtered"') },
+        }).then(() => undefined, (thrown: unknown) => thrown);
+
+        // Without the projection above, the predicate's survivor is the item
+        // itself, circle and all. Nothing can bound it: the bound is written in
+        // addresses, and the selection step refuses an address beside a
+        // `--filter` because a filtered array's elements no longer say which
+        // positions they came from. So the answer here is a refusal rather than
+        // a bound — and a legible one, rather than the `JSON.stringify` throw
+        // an unrenderable result reaches the terminal as, which says nothing
+        // about the write.
+        expect(error).toBeInstanceOf(CyclicResultError);
+        const message = (error as Error).message;
+        expect(message).toContain('closes a circle at "/0/parent/children/0"');
+        expect(message).toContain(
+          "This call's --filter is answered with the elements themselves",
+        );
+        expect(message).toContain("COMMITTED");
+        // Neither of the other two wordings: the declaration is never consulted
+        // here, so a refusal claiming it bounds nothing would be a false
+        // statement about the verb.
+        expect(message).not.toContain("declares no result");
+        expect(message).not.toContain("leaves the closing position");
+        // And no compiled pattern was loaded to reach that declaration with. A
+        // derivation that cannot be applied is not worth a pattern load, which
+        // is why the `--filter` is decided before the declaration is reached
+        // for.
+        expect(patternLoads()).toBe(0);
+        // The handling landed, which is what the refusal says and what makes it
+        // a rendering failure rather than a failed call.
+        expect(childTitles(root)).toEqual(["Filtered"]);
+      },
+    );
+  });
+
+  //
+  // Refusals, and what they cost
+  //
+  // What the command does when the result will not render, and that it
+  // does not pay to produce what it will not use.
+  //
+
+  it("refuses legibly, naming the committed write, where the declaration bounds nothing", async () => {
+    await withTracker("cyclic-undeclared", async ({ call, root }) => {
+      const error = await call("addChildLoose", ["--title", "Unbounded"])
+        .then(() => undefined, (thrown: unknown) => thrown);
+
+      expect(error).toBeInstanceOf(CyclicResultError);
+      const message = (error as Error).message;
+      // Where the circle closes, so a caller can see which field to bound.
+      expect(message).toContain(
+        'closes a circle at "/container/children/0/parent"',
+      );
+      // The property worth not losing: an unrenderable result is not a failed
+      // mutation, and the message says so rather than leaving a stack trace to
+      // read as "the call failed".
+      expect(message).toContain("COMMITTED");
+      expect(message).toContain("cf get --piece of:");
+      expect(message).toContain("declared result leaves the closing position");
+
+      // And the write did land.
+      expect(childTitles(root)).toEqual(["Unbounded"]);
+    });
+  });
+
+  it("refuses a verb it can match no declaration to without consulting a pattern", async () => {
+    await withTracker(
+      "cyclic-no-declaration",
+      async ({ call, patternLoads, root }) => {
+        // `fileUnder` is the piece's own `addChild`, reached on the input cell.
+        // The dispatch and the circle are identical; what differs is that this
+        // resolution carries no declared result to bound the readback with.
+        const error = await call("fileUnder", ["--title", "Undeclared"])
+          .then(() => undefined, (thrown: unknown) => thrown);
+
+        expect(error).toBeInstanceOf(CyclicResultError);
+        const message = (error as Error).message;
+        expect(message).toContain(
+          "This verb declares no result for `cf` to bound the readback with.",
+        );
+        // Nothing bounds the readback, so the position named is where the walk
+        // itself closes: the returned item, reached again from inside its own
+        // container. With a declaration in hand the cut lands at `parent` and
+        // the walk never gets this far.
+        expect(message).toContain(
+          'closes a circle at "/item/parent/children/0"',
+        );
+        expect(message).toContain("COMMITTED");
+        expect(message).toContain("cf get --piece of:");
+        expect(message).not.toContain("leaves the closing position");
+        // No pattern was loaded to look for a declaration, because this
+        // resolution attaches no thunk to reach one through.
+        expect(patternLoads()).toBe(0);
+        // And the handling landed. The refusal is a rendering failure over a
+        // write that committed, which is why it is a throw and not an
+        // invocation whose `result` is quietly omitted — an omitted `result`
+        // reports a verb that returned nothing.
+        expect(childTitles(root)).toEqual(["Undeclared"]);
+      },
+    );
+  });
+
+  it("pays for the declared result only where the result will not render", async () => {
+    await withTracker(
+      "cyclic-pattern-load-cost",
+      async ({ call, patternLoads }) => {
+        await call("finish", ["--note", "Shipped"]);
+        // A result that renders is written out exactly as it was read: nothing
+        // is derived, so no compiled pattern is loaded to derive it from.
+        expect(patternLoads()).toBe(0);
+
+        await call("addChild", ["--title", "Bounded"]);
+        expect(patternLoads()).toBe(1);
+      },
+    );
+  });
+  //
+  // Miscellaneous cases
+  //
+  // Cases that belong to none of the pairs above.
+  //
 
   it("returns that position alone for a `--select` naming the closing position", async () => {
     await withTracker("cyclic-selection-names-cut", async ({ call }) => {
@@ -532,139 +693,5 @@ describe("cf piece call on a piece that points back at its container", () => {
       expect(parseLLMFriendlyLink(result.item.parent.$link).path)
         .toEqual(["parent"]);
     });
-  });
-
-  // The `--filter` pair, and the same contrast: a predicate hands back the
-  // elements themselves, so it can only keep a circle, never narrow past one.
-  // What decides between the two is the projection written beside it.
-  it("returns the elements a `--filter` keeps where the projection beside it renders", async () => {
-    await withTracker("cyclic-filter-renders", async ({ call }) => {
-      const result = await call("addChildren", ["--title", "Kept"], {
-        selection: {
-          filter: parseSelectionFilter('.title == "Kept"'),
-          projection: parseSelectProjection("title"),
-        },
-      }) as any;
-
-      // The projection beside the predicate narrows past the circle, so the
-      // surviving element renders and nothing is derived. An implementation
-      // that refused every cyclic-verb `--filter` outright would fail here.
-      expect(result).toEqual([{ title: "Kept" }]);
-    });
-  });
-
-  it("refuses a `--filter` that keeps the circle, naming the committed write", async () => {
-    await withTracker(
-      "cyclic-filter-retains",
-      async ({ call, patternLoads, root }) => {
-        const error = await call("addChildren", ["--title", "Filtered"], {
-          selection: { filter: parseSelectionFilter('.title == "Filtered"') },
-        }).then(() => undefined, (thrown: unknown) => thrown);
-
-        // Without the projection above, the predicate's survivor is the item
-        // itself, circle and all. Nothing can bound it: the bound is written in
-        // addresses, and the selection step refuses an address beside a
-        // `--filter` because a filtered array's elements no longer say which
-        // positions they came from. So the answer here is a refusal rather than
-        // a bound — and a legible one, rather than the `JSON.stringify` throw
-        // an unrenderable result reaches the terminal as, which says nothing
-        // about the write.
-        expect(error).toBeInstanceOf(CyclicResultError);
-        const message = (error as Error).message;
-        expect(message).toContain('closes a circle at "/0/parent/children/0"');
-        expect(message).toContain(
-          "This call's --filter is answered with the elements themselves",
-        );
-        expect(message).toContain("COMMITTED");
-        // Neither of the other two wordings: the declaration is never consulted
-        // here, so a refusal claiming it bounds nothing would be a false
-        // statement about the verb.
-        expect(message).not.toContain("declares no result");
-        expect(message).not.toContain("leaves the closing position");
-        // And no compiled pattern was loaded to reach that declaration with. A
-        // derivation that cannot be applied is not worth a pattern load, which
-        // is why the `--filter` is decided before the declaration is reached
-        // for.
-        expect(patternLoads()).toBe(0);
-        // The handling landed, which is what the refusal says and what makes it
-        // a rendering failure rather than a failed call.
-        expect(childTitles(root)).toEqual(["Filtered"]);
-      },
-    );
-  });
-
-  it("refuses legibly, naming the committed write, where the declaration bounds nothing", async () => {
-    await withTracker("cyclic-undeclared", async ({ call, root }) => {
-      const error = await call("addChildLoose", ["--title", "Unbounded"])
-        .then(() => undefined, (thrown: unknown) => thrown);
-
-      expect(error).toBeInstanceOf(CyclicResultError);
-      const message = (error as Error).message;
-      // Where the circle closes, so a caller can see which field to bound.
-      expect(message).toContain(
-        'closes a circle at "/container/children/0/parent"',
-      );
-      // The property worth not losing: an unrenderable result is not a failed
-      // mutation, and the message says so rather than leaving a stack trace to
-      // read as "the call failed".
-      expect(message).toContain("COMMITTED");
-      expect(message).toContain("cf get --piece of:");
-      expect(message).toContain("declared result leaves the closing position");
-
-      // And the write did land.
-      expect(childTitles(root)).toEqual(["Unbounded"]);
-    });
-  });
-
-  it("refuses a verb it can match no declaration to without consulting a pattern", async () => {
-    await withTracker(
-      "cyclic-no-declaration",
-      async ({ call, patternLoads, root }) => {
-        // `fileUnder` is the piece's own `addChild`, reached on the input cell.
-        // The dispatch and the circle are identical; what differs is that this
-        // resolution carries no declared result to bound the readback with.
-        const error = await call("fileUnder", ["--title", "Undeclared"])
-          .then(() => undefined, (thrown: unknown) => thrown);
-
-        expect(error).toBeInstanceOf(CyclicResultError);
-        const message = (error as Error).message;
-        expect(message).toContain(
-          "This verb declares no result for `cf` to bound the readback with.",
-        );
-        // Nothing bounds the readback, so the position named is where the walk
-        // itself closes: the returned item, reached again from inside its own
-        // container. With a declaration in hand the cut lands at `parent` and
-        // the walk never gets this far.
-        expect(message).toContain(
-          'closes a circle at "/item/parent/children/0"',
-        );
-        expect(message).toContain("COMMITTED");
-        expect(message).toContain("cf get --piece of:");
-        expect(message).not.toContain("leaves the closing position");
-        // No pattern was loaded to look for a declaration, because this
-        // resolution attaches no thunk to reach one through.
-        expect(patternLoads()).toBe(0);
-        // And the handling landed. The refusal is a rendering failure over a
-        // write that committed, which is why it is a throw and not an
-        // invocation whose `result` is quietly omitted — an omitted `result`
-        // reports a verb that returned nothing.
-        expect(childTitles(root)).toEqual(["Undeclared"]);
-      },
-    );
-  });
-
-  it("pays for the declared result only where the result will not render", async () => {
-    await withTracker(
-      "cyclic-pattern-load-cost",
-      async ({ call, patternLoads }) => {
-        await call("finish", ["--note", "Shipped"]);
-        // A result that renders is written out exactly as it was read: nothing
-        // is derived, so no compiled pattern is loaded to derive it from.
-        expect(patternLoads()).toBe(0);
-
-        await call("addChild", ["--title", "Bounded"]);
-        expect(patternLoads()).toBe(1);
-      },
-    );
   });
 });

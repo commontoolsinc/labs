@@ -1471,20 +1471,19 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
-    // Nested authorship text-integrity boundaries. These assert the INTENDED
-    // composed semantics and are EXPECTED TO FAIL on current main until the
-    // childRenderPolicyForNode composition fix lands.
-    // (tracking: CT-1796 / branch
-    // gideon/ct-1796-nested-cf-cfc-authorship-text-integrity-boundaries-dont)
     //
-    // A text-integrity boundary must compose monotonically: nesting can only
+    // Nested authorship text-integrity boundaries (CT-1796)
+    //
+    // A text-integrity boundary composes monotonically: nesting can only
     // tighten the requirement (requiredIntegrity composes as the union of all
     // enclosing boundaries; allowLiteralText composes as parent && inner, so an
     // inner boundary can never relax an enclosing one), and an enclosing
-    // boundary's textIntegrityState="ok" must mean every node it transitively
-    // encloses met its bar. Neither holds on main today: childRenderPolicyForNode
-    // REPLACES parentPolicy.textIntegrity at an inner boundary, and a block is
-    // attributed to (and refreshed for) only the nearest boundary.
+    // boundary's textIntegrityState="ok" means every node it transitively
+    // encloses met its bar. These pin that composition, and that a block is
+    // attributed to and refreshed for every enclosing boundary rather than the
+    // nearest.
+    //
+
     await t.step(
       "nested text integrity propagates a block to every enclosing boundary",
       async () => {
@@ -1811,6 +1810,10 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         }
       },
     );
+
+    //
+    // Strict text integrity
+    //
 
     await t.step(
       "strict text integrity allows matching visible content props",
@@ -2724,6 +2727,13 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       children: [child as never],
     });
 
+    //
+    // The default ceiling
+    //
+    // What the configured ceiling admits and blocks on its own, and how an
+    // authored boundary narrows it.
+    //
+
     await t.step(
       "default ceiling blocks unlisted atoms with no authored boundary",
       async () => {
@@ -2845,6 +2855,13 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         }
       },
     );
+
+    //
+    // A ceiling over a labeled cell
+    //
+    // The same ceiling reached through a labeled cell rather than a plain atom,
+    // including one mounted as the root.
+    //
 
     await t.step(
       "default ceiling gates a labeled cell mounted as the root",
@@ -3396,6 +3413,13 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
         }
       },
     );
+
+    //
+    // Resolving a ceiling, and re-rendering when access changes
+    //
+    // A ceiling resolved against a real principal or ACL rather than a literal
+    // list, and what happens when the answer changes after the mount.
+    //
 
     await t.step(
       "reactively re-renders a Space(X) cell once its ACL grants READ",

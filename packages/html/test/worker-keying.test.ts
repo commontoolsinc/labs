@@ -91,7 +91,10 @@ Deno.test("keying - generateKey", async (t) => {
     assertNotEquals(key({ n: 1n }), key({ n: 1 }));
   });
 
-  // The two things a render node may hold that are not `FabricValue`s.
+  //
+  // The two things a render node may hold that are not `FabricValue`s
+  //
+
   await t.step("keys an event handler without falling back", () => {
     const key = (props: Record<string, unknown>) =>
       generateKey({ type: "vnode", name: "div", props });
@@ -114,6 +117,13 @@ Deno.test("keying - generateKey", async (t) => {
     assertEquals(typeof generateKey({ n: new Map() }), "string");
     assertEquals(generateKey({ n: new Map() }), generateKey({ n: new Map() }));
   });
+
+  //
+  // A hole and a cycle
+  //
+  // Neither is a value the keyer can hash: one is a gap where an element
+  // would be, the other a structure that would not terminate if followed.
+  //
 
   await t.step("keys a hole apart from an undefined element", () => {
     const hole = [1, , 3];
