@@ -92,7 +92,11 @@ Deno.test("keying - generateKey", async (t) => {
   });
 
   //
-  // The two things a render node may hold that are not `FabricValue`s
+  // Beyond `FabricValue`
+  //
+  // An event handler — one of the two things a render node holds that is not
+  // a `FabricValue` — and the coarse key that comes back for a node the keyer
+  // cannot hash.
   //
 
   await t.step("keys an event handler without falling back", () => {
