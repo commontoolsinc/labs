@@ -747,10 +747,6 @@ function generateAddresses(
   return addresses;
 }
 
-//
-// Benchmark: sortAndCompactPaths
-//
-
 Deno.bench(
   "Utility - sortAndCompactPaths (100 paths)",
   { group: "utilities" },
@@ -768,10 +764,6 @@ Deno.bench(
     sortAndCompactPaths(addresses);
   },
 );
-
-//
-// Benchmark: addressesToPathByEntity
-//
 
 Deno.bench(
   "Utility - addressesToPathByEntity (100 paths)",
