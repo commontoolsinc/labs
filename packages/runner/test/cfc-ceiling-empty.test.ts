@@ -8,13 +8,15 @@ import { cfcObservationFitsCeiling } from "../src/cfc/observation.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-ceiling-empty");
 
-// Regression guard for empty-ceiling semantics (audit minor / W0.7).
-//
-// A declared but empty maxConfidentiality means "public only" — no confidential
-// atom is permitted. It was conflated with undefined ("no ceiling"), so an empty
-// ceiling let confidential data through. undefined stays no-ceiling; public data
-// (no confidentiality atoms) still fits any ceiling, including the empty one.
 describe("cfcObservationFitsCeiling empty ceiling", () => {
+  // Regression guard for empty-ceiling semantics (audit minor / W0.7).
+  //
+  // A declared but empty maxConfidentiality means "public only" — no
+  // confidential atom is permitted. It was conflated with undefined ("no
+  // ceiling"), so an empty ceiling let confidential data through. undefined
+  // stays no-ceiling; public data (no confidentiality atoms) still fits any
+  // ceiling, including the empty one.
+
   it("treats undefined ceiling as no ceiling", () => {
     expect(cfcObservationFitsCeiling(["secret"], undefined)).toBe(true);
   });
