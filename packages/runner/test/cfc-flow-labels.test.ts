@@ -149,13 +149,14 @@ describe("CFC flow labels (default transition)", () => {
     }
   });
 
-  // Runtime-internal surfaces (`["cfc"]`, `["source"]`) are document-root
-  // siblings of `value`; user fields of the same names live under
-  // `["value", ...]` and canonicalize to identical logical paths. The
-  // surface exclusions must therefore key on the RAW storage path — keying
-  // on the canonical path lets `value.source` writes/reads dodge flow-label
-  // propagation entirely (#4011 Codex P1).
   it("does not exempt user value fields named like runtime surfaces", async () => {
+    // Runtime-internal surfaces (`["cfc"]`, `["source"]`) are document-root
+    // siblings of `value`; user fields of the same names live under
+    // `["value", ...]` and canonicalize to identical logical paths. The
+    // surface exclusions must therefore key on the RAW storage path — keying
+    // on the canonical path lets `value.source` writes/reads dodge flow-label
+    // propagation entirely (#4011 Codex P1).
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -271,11 +272,12 @@ describe("CFC flow labels (default transition)", () => {
     }
   });
 
-  // Derived labels are per-value, not a ratchet: overwriting a flow-labeled
-  // path from a transaction that read nothing labeled replaces the derived
-  // component, so the label tracks the current value (the old, tainted value
-  // is gone; reads of it journaled its label at read time).
   it("untainted overwrite replaces the value channel and grows the existence channel", async () => {
+    // Derived labels are per-value, not a ratchet: overwriting a flow-labeled
+    // path from a transaction that read nothing labeled replaces the derived
+    // component, so the label tracks the current value (the old, tainted value
+    // is gone; reads of it journaled its label at read time).
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -468,16 +470,17 @@ describe("CFC flow labels (default transition)", () => {
     }
   });
 
-  // SC-11's equality is over the CANONICAL form (§4.1.3 c14n; spec-changes
-  // SC-11): the prepare-side skip must elide the envelope write even when the
-  // stored form differs BYTE-wise from the rebuild — top-level entry order
-  // and OR-clause alternative order are serialization freedom, not label
-  // changes. The storage layer's raw deep-equal write elision is
-  // order-sensitive and cannot catch these, so this pins the prepare.ts skip
-  // itself: a stored-form permutation (a raw seed, an older writer, a peer
-  // whose view merge ordered alternatives differently) must not be rewritten
-  // by every re-derivation.
   it("SC-11: skips the envelope write for a canonically-equal but byte-different stored form", async () => {
+    // SC-11's equality is over the CANONICAL form (§4.1.3 c14n; spec-changes
+    // SC-11): the prepare-side skip must elide the envelope write even when the
+    // stored form differs BYTE-wise from the rebuild — top-level entry order
+    // and OR-clause alternative order are serialization freedom, not label
+    // changes. The storage layer's raw deep-equal write elision is
+    // order-sensitive and cannot catch these, so this pins the prepare.ts skip
+    // itself: a stored-form permutation (a raw seed, an older writer, a peer
+    // whose view merge ordered alternatives differently) must not be rewritten
+    // by every re-derivation.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -646,11 +649,12 @@ describe("CFC flow labels (default transition)", () => {
     }
   });
 
-  // H1 observe-mode contract (enforcement-matrix rollout constraint 1:
-  // measure under `observe` before a host flips to `persist`): the join IS
-  // derived and surfaced as a diagnostic, and NOTHING persists — no ["cfc"]
-  // write in the transaction, no envelope on the stored target at all.
   it("observe mode derives the join as a diagnostic and persists nothing", async () => {
+    // H1 observe-mode contract (enforcement-matrix rollout constraint 1:
+    // measure under `observe` before a host flips to `persist`): the join IS
+    // derived and surfaced as a diagnostic, and NOTHING persists — no ["cfc"]
+    // write in the transaction, no envelope on the stored target at all.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -738,10 +742,11 @@ describe("CFC flow labels (default transition)", () => {
     }
   });
 
-  // A2: trigger reads (§8.9.2). The decision to run was influenced by the
-  // triggering change even when the run never reads the changed value, so
-  // its labels join the derivation.
   it("joins trigger-read labels into the derived component", async () => {
+    // A2: trigger reads (§8.9.2). The decision to run was influenced by the
+    // triggering change even when the run never reads the changed value, so
+    // its labels join the derivation.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -811,10 +816,11 @@ describe("CFC flow labels (default transition)", () => {
     }
   });
 
-  // A2 end-to-end through the scheduler: run 1 subscribes to the labeled
-  // doc; the rerun triggered by its change takes a branch that never
-  // re-reads it, yet the rerun's write is tainted via the recorded trigger.
   it("taints rerun writes with the triggering change's labels", async () => {
+    // A2 end-to-end through the scheduler: run 1 subscribes to the labeled
+    // doc; the rerun triggered by its change takes a branch that never
+    // re-reads it, yet the rerun's write is tainted via the recorded trigger.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -910,11 +916,12 @@ describe("CFC flow labels (default transition)", () => {
     }
   });
 
-  // A2 + retry: the triggered rerun aborts with RetryImmediately, so its
-  // consumed trigger reads must be restored for the retry run — otherwise
-  // the retry's writes are under-tainted (the run still exists only because
-  // the labeled dep changed).
   it("keeps trigger-read labels across a RetryImmediately rerun", async () => {
+    // A2 + retry: the triggered rerun aborts with RetryImmediately, so its
+    // consumed trigger reads must be restored for the retry run — otherwise
+    // the retry's writes are under-tainted (the run still exists only because
+    // the labeled dep changed).
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
