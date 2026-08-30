@@ -298,9 +298,11 @@ export function assertValidFabricValueLayer(
  * *convertible* to fabric form).
  *
  * This is the admission test the encoding path's input contract is written
- * against: a value this accepts encodes, and one it does not gets whatever
- * best-effort handling costs correct input nothing. See
- * `BaseCodecEngine.encode()`.
+ * against: a value this accepts is one that path takes, and one it does not
+ * gets whatever best-effort handling costs correct input nothing. What an
+ * accepted value encodes to is `BaseCodecEngine.encode()`'s to say -- given
+ * one, a format writes its serialized form or throws for a reason it names,
+ * a cycle among them.
  */
 export function isValidFabricValue(value: unknown): value is FabricValue {
   // Fast leaf paths first, so a function or a primitive returns without
