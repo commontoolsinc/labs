@@ -120,9 +120,12 @@ invisible, the prompt renders the whole ambient record — place and scope
    this decision: the connection and watch mechanics that exist, the
    lifecycle discipline a long-lived process adds, and the prerequisite seam
    work in `packages/cli`.
-10. **Run state: entering warms.** `cd` into a piece (or `watch`) starts the
-    pattern in-process and reads inside it are live; pieces merely listed
-    stay cold — which is v1's whole run-state story. A cold-browse mode is
+10. **Run state: reaching in warms.** `cd` into a piece, `watch` on
+    anything inside it, or any read aimed into it — `get topics/3/title`
+    from outside warms `topics/3` exactly as `cd` would — starts the
+    pattern in-process, so every read shuttle serves is live and v1 has no
+    unlabeled stored-state path; pieces merely listed stay cold — which is
+    v1's whole run-state story. A cold-browse mode is
     designed and deferred past v1 ([`futures.md`](futures.md)).
 11. **A space root lists facets, never pieces directly** — `slugs/` and
     `pieces/` in v1; the `fuse/` facet (the FUSE layout mirrored,

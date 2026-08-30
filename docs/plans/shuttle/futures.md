@@ -62,7 +62,7 @@ decisions point here where they defer.
 - **Cold-browse mode.** Walking around with no computation: reads serve
   stored state, labeled as such, with the mode unmistakable in the prompt
   and every view, toggled as a `where` mode dimension. It insures against
-  a warming cost not yet observed; warm-on-enter already leaves merely
+  a warming cost not yet observed; reaching-in-warms already leaves merely
   listed pieces cold, which is v1's whole run-state story.
 - **The native tool set.** Published names that work bare in a pipeline
   and are guaranteed wherever shuttle runs — a native tool may start as a

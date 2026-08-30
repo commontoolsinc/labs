@@ -19,7 +19,7 @@ disciplines it leans on are in
   runtime (guard plus `idle()`), never a timer. A view's own sinks are
   canceled on exit; a watch's sink belongs to the watch, which outlives
   the view (see "Watches are session objects").
-- **Views are live because entering warms** (the run-state rule). The
+- **Views are live because reaching in warms** (the run-state rule). The
   deferred cold-browse mode ([`futures.md`](futures.md)) will reach into
   views when it lands — banner, labeled stored values, no sinks.
 

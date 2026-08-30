@@ -18,6 +18,14 @@ version check against the server's git sha, embedded-space validation, and the
 error-log, navigate, and JSON-console wiring a one-shot verb wants. A shell
 pays the sequence once at connect; `cf` pays it per invocation.
 
+The ambient record maps onto the config shapes those functions already
+take: `SpaceConfig` (`apiUrl`, `space`, `identity`, …) and `PieceConfig`
+(adding `piece`, `pieceScope`, `piecePath`, `pieceInput`) in
+`packages/cli/lib/piece.ts`. `cf` builds them from flags through
+`parseSpaceOptions`, `parsePieceOptions`, and `readTargetPositionals`
+(`packages/cli/commands/piece.ts`); shuttle constructs them from the
+ambient record directly and skips the flag parsing.
+
 The connection pushes. The `remoteClient` runtime preset opens a persistent
 `WebSocketTransport` (`packages/runner/src/storage/v2-remote-session.ts`), so
 a write landing on the server from anywhere reaches this process's cells and
@@ -60,6 +68,10 @@ An established connection heals below shuttle, in the memory client
   `#consumeOwedSessionRemount` records that a transport drop is already
   healed by the client's own `reconnect()`/`restore()` and must be left
   alone.
+
+One near-miss worth pinning: `Provider.#syncRequests` and `#replaySync`
+(`packages/runner/src/storage/v2.ts`) look like this replay but fire only
+on route replacement — the reconnect replay is `SpaceSession`'s, above.
 
 Two gaps around it. **Initial** construction is not retried —
 `SpaceReplica.sessionHandle()` clears its memo on failure and re-attempts

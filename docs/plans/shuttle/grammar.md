@@ -126,9 +126,11 @@ document holds open — the abstraction allows it; nothing requires it.
 
 ## Run state
 
-Entering warms: `cd` into a piece (or `watch` on anything inside it) starts
-the pattern in this process, and reads inside it are live from then on.
-Pieces merely listed from outside stay cold.
+Reaching in warms: `cd` into a piece, `watch` on anything inside it, or
+any read aimed into it — `get topics/3/title` from the space root warms
+`topics/3` exactly as `cd` would — starts the pattern in this process, and
+reads are live from then on. A piece is cold only while it is merely
+listed, so there is no unlabeled stored-state read path.
 
 That is v1's whole run-state story. A **cold-browse mode** — walking with
 no computation, stored reads labeled — is designed and deferred past v1

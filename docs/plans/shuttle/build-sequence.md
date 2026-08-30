@@ -20,7 +20,10 @@ entry: `cellPathCandidates` and `childKeys` in
 `lib/completion/providers.ts` are module-private and open a fresh runtime
 through the default `getCellValue` path, so A1 factors the listing logic
 behind an injectable connection and exports that, beside the
-already-public `keysOf`. Keep the
+already-public `keysOf`. The providers are designed to fail silently and
+empty — right for tab completion, wrong for `ls` — so the factored
+listing surfaces its errors, and completion keeps swallowing them at its
+own call site. Keep the
 list to what shuttle names — an export entry is a contract, and the short
 list is the record of which internals have a second caller. (The view
 substrate's entries wait for B3, which is when they earn their place on
@@ -36,7 +39,9 @@ the fix is a threaded parameter. The genuine conversions — the functions
 that call `loadPieces(config)` directly — are `setCellValue` first (a v1
 verb), then `removePiece`, `renderPiece`, and the `lib/acl.ts` loaders.
 Each change carries the unit test the seam makes possible; that is the
-PR's standalone value.
+PR's standalone value. Re-verify this inventory against the tree when A2
+starts: it churned three times during the design, once against its own
+prerequisite landing (#6556).
 
 **A3 — extract `callFromCommand`.** `buildCallCommand`'s action is inline
 and bound to Cliffy's `this` (`getLiteralArgs`); its constituents are
@@ -111,7 +116,7 @@ is what `call %n` resolves against (decision 27). The invocation session is
 minted once at startup and passed explicitly. The step-10 call section
 is shuttle's own line grammar, parsed locally and fed to the
 schema-derived flag machinery `cf` already exports (`pieceCallRawArgs`,
-`pieceCallInvocation`), so no arc step gates it either. Warm-on-enter
+`pieceCallInvocation`), so no arc step gates it either. Reaching-in-warms
 lands here, since `set` is what makes stale computed state visible.
 
 **B3 — watch and views** (after A4; view-substrate export entries added
