@@ -2638,10 +2638,10 @@ describe("cell-handle", () => {
     //
     // Three methods that serialize
     //
-    // Three methods serialize, and each used to refuse a `FabricSpecialObject`
-    // through a different caller contract. All three carry one now, and pinning
-    // all three is what keeps a later refactor from carrying it on only the
-    // path `set()` takes.
+    // Each write path serializes through its own caller contract, so a
+    // refactor can carry a value on one and drop it on another. `push()` and
+    // `send()` are pinned carrying a `FabricSpecialObject`; `set()` is pinned
+    // on the non-object `FabricValue` arm.
     //
 
     it("carries one through `push()`", () => {
