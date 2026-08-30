@@ -19,15 +19,16 @@ type StoredEntry = {
   observes?: string;
 };
 
-// An array-diff shrink truncates slots by writing `length` alone; without an
-// explicit delete write per truncated slot, the removed slots' per-slot link
-// entries survive in the labelMap. Any later read/diff of such a slot (e.g. a
-// list growing back) consumes the stale entry as a followRef observation
-// (SC-8) and re-imports the departed member's taint into the reader's flow
-// join — the echo behind the #4525 probe's A3 step. The diff layer now emits
-// the same explicit slot deletes the direct `length`-write path always has,
-// and the flow-clear drops the stale entries like any other covered write.
 describe("CFC: array shrink clears truncated slots' link labels", () => {
+  // An array-diff shrink truncates slots by writing `length` alone; without an
+  // explicit delete write per truncated slot, the removed slots' per-slot link
+  // entries survive in the labelMap. Any later read/diff of such a slot (e.g. a
+  // list growing back) consumes the stale entry as a followRef observation
+  // (SC-8) and re-imports the departed member's taint into the reader's flow
+  // join — the echo behind the #4525 probe's A3 step. The diff layer now emits
+  // the same explicit slot deletes the direct `length`-write path always has,
+  // and the flow-clear drops the stale entries like any other covered write.
+
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 
