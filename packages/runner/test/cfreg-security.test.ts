@@ -1,8 +1,9 @@
 /**
  * Defense-in-depth on the real registrar (run-once / closed-window /
- * transactional) lives in cfreg-builder-identity.test.ts; here we only assert
- * the rejecting variant, the trust gate, and the approval signal — the pieces
- * the verifier-gating relies on.
+ * transactional) lives in cfreg-builder-identity.test.ts. What verifier-gating
+ * relies on is pinned here: the rejecting variant, the trust gate, and the
+ * approval signal, alongside the transformer↔verifier round trip and
+ * re-registration under one identity.
  */
 
 import { describe, it } from "@std/testing/bdd";
