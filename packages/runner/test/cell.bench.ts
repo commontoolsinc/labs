@@ -1337,12 +1337,9 @@ Deno.bench(
   },
 );
 
-//
 // Benchmark: Notebook/Notes pattern - tests History.claim() optimization impact
-//
 // These benchmarks measure repeated .get() calls on a notebook with linked notes
 // The claim optimization removes O(n²) overhead during reads
-//
 
 const noteSchema: JSONSchema = {
   type: "object",

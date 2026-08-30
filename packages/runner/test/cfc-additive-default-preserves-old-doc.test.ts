@@ -73,9 +73,14 @@ const compileHomePattern = async (
 };
 
 describe("CFC additive-required default preserves old documents", () => {
-  // Tight pin on the guard itself: a generated output does not need a default,
-  // while an unclassified document field still does. This isolates the
-  // role-aware schema-merge rule from the full home compile.
+  //
+  // Tight pin on the guard itself
+  //
+  // A generated output does not need a default, while an unclassified document
+  // field still does. This isolates the role-aware schema-merge rule from the
+  // full home compile.
+  //
+
   it("exempts an additive-required generated output from the default requirement", () => {
     const stored: JSONSchema = {
       type: "object",
@@ -120,6 +125,10 @@ describe("CFC additive-required default preserves old documents", () => {
       /required field title needs a default/,
     );
   });
+
+  //
+  // The same rule through a real compile
+  //
 
   it("materializes the real home pattern over a pre-favorites root under enforcement", async () => {
     // Faithful end-to-end: run the real home pattern's setup over a realistic

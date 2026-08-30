@@ -208,11 +208,16 @@ describe("Cell Static Methods", () => {
       });
     });
 
+    //
+    // The static-data walk over special objects
+    //
     // The static-data validation walk descends anything `typeof === "object"`,
     // which admits a `FabricSpecialObject`. Such a value survives it because it
     // has zero enumerable own properties: `Object.keys()` is empty, the descent
     // ends there, and the walk only ever reads -- it never rebuilds. Nothing
     // guards that, so these pin it.
+    //
+
     it("should accept a `FabricBytes` in static data", () => {
       withinHandlerContext(runtime, space, tx, () => {
         const bytes = new FabricBytes(new Uint8Array([1, 2, 3]));
@@ -274,6 +279,10 @@ describe("Cell Static Methods", () => {
         expect(() => Cell.of({ a: shared, b: shared })).not.toThrow();
       });
     });
+
+    //
+    // Ordinary values
+    //
 
     it("should create a cell with undefined value", () => {
       withinHandlerContext(runtime, space, tx, () => {
