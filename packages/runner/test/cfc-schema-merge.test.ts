@@ -689,13 +689,12 @@ describe("mergeCfcSchemaEnvelopes", () => {
       .toThrow(/divergent oneOf branches/);
   });
 
+  // RULING 5 (CFC owner, 2026-08-21; verification-coverage.md OW49): a
+  // SINGLE ifc-carrying branch whose every sibling is syntactically
+  // type-disjoint is the union's policy carrier and MERGES — the wish
+  // builtin's optional-result shape. Everything the ruling's constraints
+  // name stays refused, pinned one by one below.
   it("admits a single ifc-carrying branch with type-disjoint siblings (RULING 5)", () => {
-    // RULING 5 (CFC owner, 2026-08-21; verification-coverage.md OW49): a
-    // SINGLE ifc-carrying branch whose every sibling is syntactically
-    // type-disjoint is the union's policy carrier and MERGES — the wish
-    // builtin's optional-result shape. Everything the ruling's constraints
-    // name stays refused, pinned one by one below.
-
     const optionalIfcView = {
       type: "object",
       properties: {

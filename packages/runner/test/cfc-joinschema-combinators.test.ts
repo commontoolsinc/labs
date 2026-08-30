@@ -65,11 +65,10 @@ describe("ContextualFlowControl.lubSchema combinator descent", () => {
     } as JSONSchema)).toEqual(["el", "ref"]);
   });
 
+  // A plain `not` over-taints conservatively, but a nested `not` (not-of-not)
+  // re-selects values that DO match the inner subschema — descending `not` is
+  // needed for soundness, not just conservatism.
   it("unions confidentiality under not (conservative over-taint)", () => {
-    // A plain `not` over-taints conservatively, but a nested `not` (not-of-not)
-    // re-selects values that DO match the inner subschema — descending `not` is
-    // needed for soundness, not just conservatism.
-
     expect(atomsOf({
       type: "string",
       not: { ifc: { confidentiality: ["n"] } },

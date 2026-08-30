@@ -332,9 +332,8 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
+  // Build-order item 2: grant records + reserved-path storage discipline.
   describe("grant document addressing", () => {
-    // Build-order item 2: grant records + reserved-path storage discipline.
-
     const identity = {
       space: ALICE,
       kind: "ShareGrant",
@@ -985,11 +984,10 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
+  // Arm-level coverage: every reachable validation / fail-closed branch is
+  // pinned directly (the repo standard — defensive arms reachable from the
+  // runner side get tests, not just the happy path).
   describe("writer validation arms (prepareCfcGrantWrite)", () => {
-    // Arm-level coverage: every reachable validation / fail-closed branch is
-    // pinned directly (the repo standard — defensive arms reachable from the
-    // runner side get tests, not just the happy path).
-
     const base: CfcGrantWriteInput = {
       kind: "ShareGrant",
       owner: ALICE,
