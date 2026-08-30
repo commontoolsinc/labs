@@ -530,9 +530,9 @@ describe("cf-code-editor cursor stability", () => {
     assertEquals(cursorAfterEcho, expectedText.length);
   });
 
-  // ==========================================================================
+  //
   // NEGATIVE TESTS: Verify cursor DOES move when it should
-  // ==========================================================================
+  //
 
   it("should apply external update and move cursor after editor blur", async () => {
     // This is a NEGATIVE test: cursor SHOULD move when user is not actively editing
@@ -582,9 +582,9 @@ describe("cf-code-editor cursor stability", () => {
     await waitForEditorContent(page, "External update");
   });
 
-  // ==========================================================================
+  //
   // STRESS TESTS: Edge cases and rapid operations
-  // ==========================================================================
+  //
 
   it("should handle multiple rapid external updates correctly", async () => {
     // Stress test: rapid Cell updates should all apply correctly
@@ -762,9 +762,9 @@ describe("cf-code-editor cursor stability", () => {
     );
   });
 
-  // ==========================================================================
+  //
   // ADVERSARIAL TESTS: Race conditions, timing attacks, edge cases
-  // ==========================================================================
+  //
 
   it("ADVERSARIAL: Cell update at exact debounce boundary should not corrupt state", async () => {
     // This tests the race condition where a Cell update arrives exactly
@@ -1387,6 +1387,9 @@ describe("cf-code-editor backlink title sync", () => {
     if (cc) await cc.dispose();
   });
 
+  //
+  // How the remote rename is delivered
+  //
   // The linked piece's real title is not synced to the editor's runtime in
   // these tests: the editor's mentionable projection carries only NAME, so a
   // cross-document linked piece's title only reaches the editor inside the full
@@ -1394,6 +1397,7 @@ describe("cf-code-editor backlink title sync", () => {
   // editor's own _handleExternalTitleChange with a stand-in piece cell whose
   // title and NAME are the renamed values, exactly what a real title
   // subscription would call.
+  //
 
   it("preserves a remote title change over a pending local edit", async () => {
     const page = shell.page();

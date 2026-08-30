@@ -802,10 +802,14 @@ describe("CFC browser helpers", () => {
     );
   });
 
+  //
+  // Co-resident marks
+  //
   // Every mark predicate adds its token to the marks already on the element, so
   // a target another click has spoken for keeps that claim. The grouped test
   // above exercises that for the by-selector predicate; these two cover the
   // indexed and trusted-action ones.
+  //
 
   it("keeps a co-resident mark when tagging an indexed target", async () => {
     await page.evaluate((clickTargetAttr: string) => {
@@ -910,12 +914,16 @@ describe("CFC browser helpers", () => {
     assertEquals(result.marks, ["held-by-another-click"]);
   });
 
+  //
+  // Click helpers that reach a control
+  //
   // The three tests below cover the click helpers that reach their control by
   // index, by `data-ui-action`, and by button text. Each drives a control that
   // is in the DOM from the start but receives its click handler only when the
   // view settles — the ordinary case of a vdom batch that has not yet crossed
   // to the main thread. A helper that marks its control without settling around
   // it clicks an element with nothing bound, and `clickedAtSettle` stays zero.
+  //
 
   it("settles the view before clicking an indexed control", async () => {
     await page.evaluate(() => {
@@ -1082,6 +1090,14 @@ describe("CFC browser helpers", () => {
     );
     assertEquals(result.settleCalls, 2);
   });
+
+  //
+  // Filling and typing
+  //
+  // The helpers that put text into a control rather than click one: the same
+  // settle discipline as the click helpers, and what happens when a commit
+  // replaces the control they were typing into.
+  //
 
   it("settles the view before pressing Enter in a submit input", async () => {
     await page.evaluate(() => {
@@ -1479,6 +1495,13 @@ describe("CFC browser helpers", () => {
     }
   });
 
+  //
+  // A target that moves under the aim
+  //
+  // The control is found, then its box or its surface changes before the click
+  // lands.
+  //
+
   it("waits for a marked target's shifting box to settle before clicking", async () => {
     await page.evaluate((clickTargetAttr: string) => {
       const host = document.createElement("div");
@@ -1805,6 +1828,13 @@ describe("CFC browser helpers", () => {
       "the click did not reach the control after the press and release split",
     );
   });
+
+  //
+  // Where the click actually landed
+  //
+  // A click can reach the DOM and still not reach the control the caller aimed
+  // at. These report where it went.
+  //
 
   it("leaves the page's own clicks to the page while a click is in flight", async () => {
     // Components raise clicks of their own — a label forwarding to its control,
@@ -2196,6 +2226,13 @@ describe("CFC browser helpers", () => {
     }
   });
 
+  //
+  // A control the page does not fully render
+  //
+  // A page that is not rendering at all, a control only partly inside the
+  // viewport, one the edge cuts off, and one with no part inside it.
+  //
+
   it("clicks a control on a page that is not being rendered", async () => {
     // A page sharing a browser with a fronted page is hidden, and a hidden page
     // produces no animation frames. A settle that waits for a frame there waits
@@ -2491,6 +2528,13 @@ describe("CFC browser helpers", () => {
       await narrow.close();
     }
   });
+
+  //
+  // The click-to-own-render echo
+  //
+  // Not about where a control sits, but about what the sender observes coming
+  // back from its own click — including through a shadow root.
+  //
 
   it("samples the sender's click-to-own-render echo, shadow roots included", async () => {
     const echoPage = await browser.newPage();
