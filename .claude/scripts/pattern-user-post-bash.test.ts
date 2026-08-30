@@ -346,17 +346,13 @@ describe("pattern-user-post-bash", () => {
       ).toContain("Run 'cf piece step'");
     });
 
-    it("gives the same guidance whether or not a data command names piece", () => {
-      // `set` is the only data command carrying guidance, so it is the only
-      // one whose two spellings can be compared for anything. Asserting the
-      // text as well as the equality keeps the comparison from holding
-      // because both sides are empty.
-      const nested = suggestionForPatternUserCommand(
-        "cf piece set --piece ID title",
-      );
-      expect(nested).toContain("Run 'cf piece step'");
+    it("guides a data write, which is spelled without piece", () => {
+      // `set` is the only data command carrying guidance here, and `cf set` is
+      // now its only spelling. The verb is located by what precedes it rather
+      // than by a fixed index, which is what lets it be found with no `piece`
+      // segment ahead of it.
       expect(suggestionForPatternUserCommand("cf set --piece ID title"))
-        .toBe(nested);
+        .toContain("Run 'cf piece step'");
     });
 
     it("still ignores a bare cf whose next word carries no guidance", () => {

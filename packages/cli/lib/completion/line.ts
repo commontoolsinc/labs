@@ -196,7 +196,7 @@ function realSubcommands(command: AnyCommand): AnyCommand[] {
 /**
  * Whether the command ends its own option parsing at the first positional.
  *
- * `cf piece call` and `cf exec` are `stopEarly()`, so every word after the
+ * `cf call` and `cf exec` are `stopEarly()`, so every word after the
  * callable name belongs to the callable's schema-derived parser and the CLI's
  * own flags are refused there. Cliffy stores the property with no accessor, so
  * it is read off the field: keeping the question where the command declares it

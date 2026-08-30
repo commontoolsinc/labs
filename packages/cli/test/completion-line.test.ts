@@ -169,10 +169,10 @@ Deno.test("resolve: a pre-parse global does not disturb later resolution", () =>
 });
 
 Deno.test("resolve: a stopEarly command offers no option slot past its callable", () => {
-  // `piece call` ends option parsing at the callable name, so every later word
+  // `cf call` ends option parsing at the callable name, so every later word
   // belongs to the callable's own parser. Offering `--invocation` there names a
   // flag the command refuses.
-  const line = resolve("cf piece call --piece x addItem --");
+  const line = resolve("cf call --piece x addItem --");
   assert(line.slot?.kind === "argument");
   assertEquals(line.slot.argument.name, "tail");
 });
@@ -180,28 +180,28 @@ Deno.test("resolve: a stopEarly command offers no option slot past its callable"
 Deno.test("resolve: a flag past that boundary does not shift the positional index", () => {
   // Read as an option, `--title x` would consume two words and put the cursor
   // at the wrong tail position.
-  const line = resolve("cf piece call --piece x addItem --title x ");
+  const line = resolve("cf call --piece x addItem --title x ");
   assert(line.slot?.kind === "argument");
   assertEquals(line.slot.index, 3);
   assertEquals(line.options.get("piece"), "x");
 });
 
 Deno.test("resolve: the boundary does not reach a command that parses to the end", () => {
-  // `piece get` is not stopEarly(), so its own flags stay reachable after the
+  // `cf get` is not stopEarly(), so its own flags stay reachable after the
   // path argument.
-  const line = resolve("cf piece get --piece x items --");
+  const line = resolve("cf get --piece x items --");
   assertEquals(line.slot?.kind, "option-name");
 });
 
 Deno.test("resolve: `--` after the callable name still opens the passthrough slot", () => {
-  const line = resolve("cf piece call --piece x addItem -- --title ");
+  const line = resolve("cf call --piece x addItem -- --title ");
   assertEquals(line.slot?.kind, "passthrough");
 });
 
 Deno.test("resolve: a positional canonical address names the target, not the argument", () => {
   // The command reads the address out before the rest, so the callable is
   // still the argument that follows it.
-  const line = resolve("cf piece call -s team /of:fid1:abc ");
+  const line = resolve("cf call -s team /of:fid1:abc ");
   assertEquals(line.address, "/of:fid1:abc");
   assert(line.slot?.kind === "argument");
   assertEquals(line.slot.argument.name, "callable");
@@ -324,10 +324,8 @@ Deno.test("declaredSlots skips the help Cliffy propagates to every command", () 
     slots.positionals.some((slot) => slot.key.endsWith("help:command")),
   );
   assertEquals(
-    slots.positionals.filter((slot) => slot.where === "piece call").map((s) =>
-      s.key
-    ),
-    ["piece call:callable", "piece call:tail"],
+    slots.positionals.filter((slot) => slot.where === "call").map((s) => s.key),
+    ["call:callable", "call:tail"],
   );
 });
 
