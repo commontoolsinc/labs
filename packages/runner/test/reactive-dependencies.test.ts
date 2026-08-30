@@ -2069,7 +2069,10 @@ describe("determineTriggeredActions", () => {
   });
 });
 
+//
 // Benchmarks
+//
+
 Deno.bench("sortAndCompactPaths - small dataset", () => {
   const addresses = createAddresses([
     ["user", "name"],
