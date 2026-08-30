@@ -27,7 +27,8 @@ const GOLDEN_ID = "of:fid1:d7_RmD4fNpTUheithVm0Q1Vha0Rn32c06qA_hOHE8x8";
 
 // Golden channel id — rotate-in-place is a security property, so pin the exact
 // derivation: a drift means "rotation" mints a NEW registration and leaves the
-// old token live. A failure = coordinate a change, never just update the literal.
+// old token live. A failure = coordinate a change, never just update the
+// literal.
 const GOLDEN_CHANNEL_ID = "ing_jMjaGfRO0Kg0BUegs9mzwImZ-CKcmlVw-wDbmV41_bs";
 
 describe("ingest journal sink", () => {
@@ -131,6 +132,7 @@ describe("ingest journal sink", () => {
   it("a never-written partition cell reads back ABSENT (undefined), not []", async () => {
     // The load-bearing tri-state invariant: absent (never captured) must be
     // distinguishable from empty. The schema must not inject a [] default.
+
     const cell = journalCell(runtime, reg(), "1999-01-01");
     await cell.sync();
     expect(cell.get()).toBeUndefined();
@@ -158,6 +160,7 @@ describe("ingest journal sink", () => {
     // space and mints there. CAVEAT: emulate has NO ACL layer, so this does NOT
     // prove a production memory server AUTHORIZES the cross-space commit — that
     // is the deploy-time probe (MEMORY_ACL_MODE), not a unit test.
+
     const other = await Identity.fromPassphrase("some-other-user");
     const otherSpace = other.did();
     const r = reg({ space: otherSpace, installId: "install-2" });
@@ -229,12 +232,19 @@ describe("ingest journal sink", () => {
     // loom READS by recomputing this exact id from the cause string. If the
     // `FabricHash` format changes, this literal breaks CI loudly instead of
     // silently orphaning loom's reader.
+
     const cell = journalCell(runtime, reg(), "2026-07-01");
     await cell.sync();
     expect(cell.getAsNormalizedFullLink().id).toBe(GOLDEN_ID);
   });
 
-  // processIngest: the full auth + validation contract
+  //
+  // processIngest: the auth and validation contract
+  //
+  // Over the two helpers below. The claim on a request id that its writes
+  // rest on is pinned in its own block within this region.
+  //
+
   const savedReg = async (
     overrides: Partial<IngestRegistration> = {},
   ): Promise<{ r: IngestRegistration; secret: string }> => {
@@ -429,10 +439,11 @@ describe("ingest journal sink", () => {
     expect(res.status).toBe(400);
   });
 
-  // The one deliberate departure from blanket 401 equalization. It is reachable
-  // ONLY with a correct token, so it leaks nothing to a guesser — and it is what
-  // lets a beacon that was offline across a rotation know to re-pair instead of
-  // dropping its buffer or retrying a "broken server" forever.
+  // The one deliberate departure from blanket 401 equalization. It is
+  // reachable ONLY with a correct token, so it leaks nothing to a guesser —
+  // and it is what lets a beacon that was offline across a rotation know to
+  // re-pair instead of dropping its buffer or retrying a "broken server"
+  // forever.
   const REPAIR_BODY = { partition: "2026-07-01", records: [{ x: 1 }] };
 
   it("processIngest: VALID token + disabled -> 403 re-pair, no write", async () => {
@@ -603,6 +614,10 @@ describe("ingest journal sink", () => {
     await cell.sync();
     expect(cell.get()).toBeUndefined();
   });
+
+  //
+  // Registration and last-seen bookkeeping
+  //
 
   it("saveRegistration indexes ids exactly once", async () => {
     await saveRegistration(runtime, space, reg({ id: "ing_i1" }));

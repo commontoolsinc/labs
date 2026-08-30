@@ -17,14 +17,14 @@ import {
   isValidSpaceDid,
 } from "@/lib/space-authority.ts";
 
-// The narrow entitlement predicate. Cheap, exhaustive, and the place the
-// wildcard attack is pinned — see the "*" cases.
-
 // Shaped like real ed25519 did:keys, and valid base58btc (no 0, O, I or l).
 const ALICE = "did:key:z6MkaaaabbbbccccddddeeeeffffgggghhhhAAAA";
 const MALLORY = "did:key:z6MkmmmmnnnnppppqqqqrrrrssssttttuuuuBBBB";
 
 describe("isExplicitSpaceOwner", () => {
+  // The narrow entitlement predicate. Cheap, exhaustive, and the place the
+  // wildcard attack is pinned — see the "*" cases.
+
   it("admits an explicit concrete OWNER grant", () => {
     expect(isExplicitSpaceOwner({ [ALICE]: "OWNER" }, ALICE)).toBe(true);
   });
@@ -106,18 +106,14 @@ describe("isValidSpaceDid", () => {
   });
 });
 
-//
-// Against a REAL memory-v2 server with ACL enforcement on.
-//
-// This is the fixture the existing ingest suite lacks: ingest.utils.test.ts uses
-// StorageManager.emulate, whose server is constructed with no `acl` option at
-// all, so `#aclMode()` returns "off" and no authorization is exercised. Without
-// the harness below, the central security property of this feature — "refused
-// when naming a space you don't control" — is not testable, and a regression
-// would pass CI silently.
-//
-
 describe("authorizeSpaceOwner against real ACL enforcement", () => {
+  // This is the fixture the existing ingest suite lacks: ingest.utils.test.ts
+  // uses StorageManager.emulate, whose server is constructed with no `acl`
+  // option at all, so `#aclMode()` returns "off" and no authorization is
+  // exercised. Without the harness below, the central security property of
+  // this feature — "refused when naming a space you don't control" — is not
+  // testable, and a regression would pass CI silently.
+
   let server: MemoryV2Server.Server;
   let factory: LoopbackSessionFactory;
   let operator: Identity;
