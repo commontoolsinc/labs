@@ -326,8 +326,9 @@ const resolveBranch = (
 /**
  * Narrow a union against the value in front of it.
  *
- * `canBranchMatch` is a shallow prefilter — type plus required-key presence,
- * no descent — so this stays a decision about the container already read. One
+ * `canBranchMatch` is a shallow prefilter — type, required-key presence and
+ * an array's tuple closure, no descent — so this stays a decision about the
+ * container already read. One
  * surviving branch narrows to it; several merge the way an eager read merges
  * them; none is a mismatch.
  */

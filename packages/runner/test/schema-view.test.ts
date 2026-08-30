@@ -348,6 +348,24 @@ describe("schema-view", () => {
       }
     });
 
+    it("returns undefined when the root array outruns its tuple closure", async () => {
+      const read = await seeded(
+        "root-closed-tuple",
+        ["a"],
+        { type: "array", items: false } as const,
+      );
+
+      const lazy = read(true);
+      const eager = read(false);
+      try {
+        expect(lazy.get()).toBeUndefined();
+        expect(eager.get()).toBeUndefined();
+      } finally {
+        await lazy.tx.commit();
+        await eager.tx.commit();
+      }
+    });
+
     it("throws when the reader touches a nested missing required property", async () => {
       const read = await seeded(
         "nested-required",
