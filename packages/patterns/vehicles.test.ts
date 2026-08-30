@@ -12,9 +12,9 @@ import {
   type Vehicle,
 } from "./vehicles.ts";
 
-// ============================================================
+//
 // normalizePlateId
-// ============================================================
+//
 
 Deno.test("normalizePlateId: uppercases and strips non-alphanumerics", () => {
   assertEquals(normalizePlateId("7abc-123!"), "7ABC123");
@@ -32,9 +32,9 @@ Deno.test("normalizePlateId: empty string → empty string", () => {
   assertEquals(normalizePlateId(""), "");
 });
 
-// ============================================================
+//
 // modelsForMake
-// ============================================================
+//
 
 Deno.test("modelsForMake: returns models for a known make", () => {
   const models = modelsForMake("Honda");
@@ -50,9 +50,9 @@ Deno.test("modelsForMake: returns empty array for empty string", () => {
   assertEquals(modelsForMake(""), []);
 });
 
-// ============================================================
+//
 // formatVehicle
-// ============================================================
+//
 
 Deno.test("formatVehicle: full vehicle", () => {
   const v: Vehicle = {
@@ -87,9 +87,9 @@ Deno.test("formatVehicle: no plateState", () => {
   assertEquals(formatVehicle(v), "XYZ");
 });
 
-// ============================================================
+//
 // normalizeVehicle
-// ============================================================
+//
 
 Deno.test("normalizeVehicle: normalizes plate and defaults state", () => {
   const result = normalizeVehicle({
@@ -215,9 +215,9 @@ Deno.test("normalizeVehicle: invalid color dropped", () => {
   assertEquals(result.color, "");
 });
 
-// ============================================================
+//
 // normalizeVehicles
-// ============================================================
+//
 
 Deno.test("normalizeVehicles: drops blank-plate entries", () => {
   const result = normalizeVehicles([
