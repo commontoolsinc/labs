@@ -3733,6 +3733,13 @@ type AdmissionReplica = {
   noteCaughtUpLocalSeq(localSeq: number | undefined): void;
 };
 
+//
+// Read repair, and commits minted against it
+//
+// A rejection whose repair has not yet landed, and what happens to a commit
+// that reads the base while the repair is in flight.
+//
+
 Deno.test("memory v2 stacked commits: preempt-mode admission rejects a floored commit without sending", async () => {
   setConflictAdmissionMode("preempt");
   const harness = await createHarness();
@@ -3763,13 +3770,6 @@ Deno.test("memory v2 stacked commits: preempt-mode admission rejects a floored c
     await harness.close();
   }
 });
-
-//
-// Read repair, and commits minted against it
-//
-// A rejection whose repair has not yet landed, and what happens to a commit
-// that reads the base while the repair is in flight.
-//
 
 Deno.test("memory v2 stacked commits: conflict rejection delivered before the winning update holds the revert until read repair", async () => {
   const harness = await createHarness();

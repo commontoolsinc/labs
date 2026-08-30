@@ -3412,7 +3412,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     //
-    // Resolving a ceiling, and re-rendering when access changes
+    // Re-rendering when access changes
     //
     // A ceiling resolved against a real principal or ACL rather than a literal
     // list, and what happens when the answer changes after the mount.

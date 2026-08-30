@@ -533,7 +533,7 @@ describe("cf piece call on a piece that points back at its container", () => {
   });
 
   //
-  // Refusals, and what they cost
+  // When the result will not render, and what that costs
   //
   // What the command does when the result will not render, and that it
   // does not pay to produce what it will not use.
