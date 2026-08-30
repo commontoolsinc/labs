@@ -34,21 +34,23 @@ describe("isExplicitSpaceOwner", () => {
     expect(isExplicitSpaceOwner({ [ALICE]: "READ" }, ALICE)).toBe(false);
   });
 
-  // THE load-bearing case. The genesis default for a named space is
-  // `{ owner: "OWNER", "*": "WRITE" }`, so every authenticated principal holds
-  // WRITE. A proof-of-write ceremony (the rejected Option A) would admit
-  // Mallory here; the OWNER predicate must not.
   it("refuses a principal covered only by the `*: WRITE` genesis default", () => {
+    // THE load-bearing case. The genesis default for a named space is `{ owner:
+    // "OWNER", "*": "WRITE" }`, so every authenticated principal holds WRITE. A
+    // proof-of-write ceremony (the rejected Option A) would admit Mallory here;
+    // the OWNER predicate must not.
+
     const acl = { [ALICE]: "OWNER", "*": "WRITE" } as const;
     expect(isExplicitSpaceOwner(acl, ALICE)).toBe(true);
     expect(isExplicitSpaceOwner(acl, MALLORY)).toBe(false);
   });
 
-  // spaceReaderRole resolves `acl[principal] ?? acl["*"]`, so it would return
-  // "owner" for Mallory here. That is why this seam does NOT reuse it: a
-  // permissive oracle is right for the render fit and wrong for minting write
-  // authority. Reachable in production via `cf acl set ANYONE OWNER`.
   it("refuses a principal covered only by a wildcard OWNER grant", () => {
+    // spaceReaderRole resolves `acl[principal] ?? acl["*"]`, so it would return
+    // "owner" for Mallory here. That is why this seam does NOT reuse it: a
+    // permissive oracle is right for the render fit and wrong for minting write
+    // authority. Reachable in production via `cf acl set ANYONE OWNER`.
+
     const acl = { [ALICE]: "OWNER", "*": "OWNER" } as const;
     expect(isExplicitSpaceOwner(acl, MALLORY)).toBe(false);
   });
@@ -73,10 +75,11 @@ describe("isExplicitSpaceOwner", () => {
 });
 
 describe("hostsSpaceInStore", () => {
-  // A non-NotFound stat error (here ENOTDIR: a path segment that is a file)
-  // must read as "not hosted" rather than escaping as an uncaught 500 from
-  // every control-plane call.
   it("treats an unreadable store as not hosting the space", () => {
+    // A non-NotFound stat error (here ENOTDIR: a path segment that is a file)
+    // must read as "not hosted" rather than escaping as an uncaught 500 from
+    // every control-plane call.
+
     const hosts = hostsSpaceInStore(new URL("file:///dev/null/not-a-dir/"));
     expect(hosts(ALICE)).toBe(false);
   });
@@ -87,9 +90,11 @@ describe("isValidSpaceDid", () => {
     expect(isValidSpaceDid(ALICE)).toBe(true);
   });
 
-  // Each of these reaches four consumers that must agree: the hosted-space
-  // lookup, the ACL key, the `\n`-joined channel id, and the `.sqlite` filename.
   it("rejects newlines, whitespace, and non-did:key forms", () => {
+    // Each of these reaches four consumers that must agree: the hosted-space
+    // lookup, the ACL key, the `\n`-joined channel id, and the `.sqlite`
+    // filename.
+
     expect(isValidSpaceDid(`${ALICE}\nprod`)).toBe(false);
     expect(isValidSpaceDid(`${ALICE} `)).toBe(false);
     expect(isValidSpaceDid(` ${ALICE}`)).toBe(false);
@@ -199,10 +204,12 @@ describe("authorizeSpaceOwner against real ACL enforcement", () => {
     expect(result.kind).toBe("not-owner");
   });
 
-  // The operator is granted WRITE deliberately: without it the operator cannot
-  // read the ACL at all and this passes via `operator-denied`, which would be
-  // false confidence — it would prove nothing about the caller's capability.
   it("refuses a caller holding only READ", async () => {
+    // The operator is granted WRITE deliberately: without it the operator
+    // cannot read the ACL at all and this passes via `operator-denied`, which
+    // would be false confidence — it would prove nothing about the caller's
+    // capability.
+
     await genesisAcl(factory, spaceIdentity, {
       [alice.did()]: "OWNER",
       [mallory.did()]: "READ",
@@ -214,10 +221,11 @@ describe("authorizeSpaceOwner against real ACL enforcement", () => {
     expect(result.kind).toBe("not-owner");
   });
 
-  // Fail loudly at create, not silently at ingest: with an owner-only ACL the
-  // operator has no grant, so a channel minted here would accept POSTs and
-  // commit nothing. The caller has proven ownership, so the detail is theirs.
   it("refuses with an actionable error when the operator cannot write", async () => {
+    // Fail loudly at create, not silently at ingest: with an owner-only ACL the
+    // operator has no grant, so a channel minted here would accept POSTs and
+    // commit nothing. The caller has proven ownership, so the detail is theirs.
+
     await genesisAcl(factory, spaceIdentity, {
       [alice.did()]: "OWNER",
       [operator.did()]: "READ",
@@ -239,11 +247,13 @@ describe("authorizeSpaceOwner against real ACL enforcement", () => {
     expect(result.ok).toBe(true);
   });
 
-  // The memory server short-circuits authorization entirely when the deployment
-  // is not enforcing, so predicting a denial from the ACL would refuse work the
-  // server would happily accept — which breaks local dev outright and would
-  // silently disable minting if ops rolled back to `observe`.
   it("skips the operator-write prediction when the deployment does not enforce", async () => {
+    // The memory server short-circuits authorization entirely when the
+    // deployment is not enforcing, so predicting a denial from the ACL would
+    // refuse work the server would happily accept — which breaks local dev
+    // outright and would silently disable minting if ops rolled back to
+    // `observe`.
+
     // Operator holds no grant, so under enforce it cannot write.
     await genesisAcl(factory, spaceIdentity, { [alice.did()]: "OWNER" });
     const enforced = await authorizeSpaceOwner(deps(), space, alice.did());

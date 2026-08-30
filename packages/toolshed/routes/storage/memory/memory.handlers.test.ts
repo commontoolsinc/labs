@@ -92,11 +92,12 @@ const runHelloThroughPipeline = async (
 };
 
 describe("memory.handlers", () => {
-  // The toolshed `memoryServer` is a module-level singleton constructed when
-  // memory.ts is imported. Deno isolates each test file's module graph, so
-  // this instance is owned by this file alone. Closing it releases its
-  // resources.
   afterAll(async () => {
+    // The toolshed `memoryServer` is a module-level singleton constructed when
+    // memory.ts is imported. Deno isolates each test file's module graph, so
+    // this instance is owned by this file alone. Closing it releases its
+    // resources.
+
     await memoryServer.close();
   });
 

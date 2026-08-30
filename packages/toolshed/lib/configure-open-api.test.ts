@@ -15,6 +15,7 @@ Deno.test("openapi reference", async (t) => {
   // `@/app.ts` is the app the server serves: `configureOpenAPI` plus every
   // router. The document is generated per request from the schemas of the
   // routes mounted on it.
+
   await t.step("GET /doc serves the OpenAPI document", async () => {
     const response = await app.request("/doc");
     assertEquals(response.status, 200);
@@ -24,10 +25,11 @@ Deno.test("openapi reference", async (t) => {
     assertEquals(json.info.title, "Toolshed API");
   });
 
-  // Generation walks the schemas of the mounted routes, so these four paths,
-  // from four separate routers, stand as evidence that the walk reached real
-  // route schemas and not an empty app.
   await t.step("the document covers the mounted routes", async () => {
+    // Generation walks the schemas of the mounted routes, so these four paths,
+    // from four separate routers, stand as evidence that the walk reached real
+    // route schemas and not an empty app.
+
     const doc = await (await app.request("/doc")).json();
 
     for (
@@ -42,13 +44,15 @@ Deno.test("openapi reference", async (t) => {
     }
   });
 
-  // `buildProviderRouters` mounts an OAuth2 provider only when that provider's
-  // credentials are set, and the test environment sets none, so the app above
-  // carries no provider paths. A deployment that configures them generates a
-  // document from these schemas too. Registering the route definitions against
-  // a throwaway router puts them through the generator here, without the
-  // credentials — and the network calls — that mounting them for real needs.
   await t.step("the OAuth2 provider route schemas serialize", async () => {
+    // `buildProviderRouters` mounts an OAuth2 provider only when that
+    // provider's credentials are set, and the test environment sets none, so
+    // the app above carries no provider paths. A deployment that configures
+    // them generates a document from these schemas too. Registering the route
+    // definitions against a throwaway router puts them through the generator
+    // here, without the credentials — and the network calls — that mounting
+    // them for real needs.
+
     const probe = createRouter();
     configureOpenAPI(probe);
 
@@ -68,10 +72,12 @@ Deno.test("openapi reference", async (t) => {
     }
   });
 
-  // `POST /api/ai/llm` answers with JSON or with a stream depending on the
-  // request's `stream` flag. The streamed body is UTF-8 text carrying one JSON
-  // event per line, which the document states as a string with a description.
   await t.step("the streamed LLM response is described", async () => {
+    // `POST /api/ai/llm` answers with JSON or with a stream depending on the
+    // request's `stream` flag. The streamed body is UTF-8 text carrying one
+    // JSON event per line, which the document states as a string with a
+    // description.
+
     const doc = await (await app.request("/doc")).json();
     const content = doc.paths["/api/ai/llm"].post.responses["200"].content;
 
@@ -88,11 +94,13 @@ Deno.test("openapi reference", async (t) => {
     );
   });
 
-  // The non-streaming branch answers with the reply message written straight to
-  // the response body, which the handler produces with `c.json(result.message)`:
-  // an object carrying a `role` and its `content`. The document describes that
-  // message, not a `{type, body}` envelope wrapped around it.
   await t.step("the JSON LLM response is the bare message", async () => {
+    // The non-streaming branch answers with the reply message written straight
+    // to the response body, which the handler produces with
+    // `c.json(result.message)`: an object carrying a `role` and its `content`.
+    // The document describes that message, not a `{type, body}` envelope
+    // wrapped around it.
+
     const doc = await (await app.request("/doc")).json();
     const schema = doc.paths["/api/ai/llm"].post.responses["200"]
       .content["application/json"].schema;
@@ -113,15 +121,16 @@ Deno.test("openapi reference", async (t) => {
     );
   });
 
-  // A route that declares its query parameters through the top-level `query`
-  // key instead of `request.query` slips that key past `createRoute`, which
-  // copies it verbatim into the Operation Object and serializes the zod schema's
-  // internals under it. Correctly declared query parameters land in the
-  // Operation's `parameters` array instead. These two routes carry
-  // query parameters and stand for that whole class.
   await t.step(
     "query parameters are documented under `parameters`",
     async () => {
+      // A route that declares its query parameters through the top-level
+      // `query` key instead of `request.query` slips that key past
+      // `createRoute`, which copies it verbatim into the Operation Object and
+      // serializes the zod schema's internals under it. Correctly declared
+      // query parameters land in the Operation's `parameters` array instead.
+      // These two routes carry query parameters and stand for that whole class.
+
       const doc = await (await app.request("/doc")).json();
 
       for (
@@ -151,12 +160,14 @@ Deno.test("openapi reference", async (t) => {
     },
   );
 
-  // A zod schema handed to a place the generator does not recognize is copied
-  // into the document verbatim, and serializing it dumps the library's internal
-  // fields — `def`/`_def` (the schema definition), `_zod` and `~standard` (the
-  // instance handles), `_cached` — into the output. None of those are OpenAPI
-  // keys, so finding one anywhere in the document marks a leaked schema.
   await t.step("the document carries no raw zod internals", async () => {
+    // A zod schema handed to a place the generator does not recognize is copied
+    // into the document verbatim, and serializing it dumps the library's
+    // internal fields — `def`/`_def` (the schema definition), `_zod` and
+    // `~standard` (the instance handles), `_cached` — into the output. None of
+    // those are OpenAPI keys, so finding one anywhere in the document marks a
+    // leaked schema.
+
     const doc = await (await app.request("/doc")).json();
 
     const forbidden = new Set(["def", "_def", "_zod", "~standard", "_cached"]);
@@ -180,13 +191,15 @@ Deno.test("openapi reference", async (t) => {
     );
   });
 
-  // Scalar renders the configuration it is handed into the page without
-  // validating it, serializing an unknown key as readily as a known one. The
-  // document URL is read back out of the page and fetched, so the two routes
-  // are checked against each other rather than against a repeated literal.
   await t.step(
     "GET /reference points at a document the app serves",
     async () => {
+      // Scalar renders the configuration it is handed into the page without
+      // validating it, serializing an unknown key as readily as a known one.
+      // The document URL is read back out of the page and fetched, so the two
+      // routes are checked against each other rather than against a repeated
+      // literal.
+
       const response = await app.request("/reference");
       assertEquals(response.status, 200);
 

@@ -31,9 +31,11 @@ let versionedStaticApp: ReturnType<typeof createApp>;
 // on a fully composed app, used to assert middleware applies to a 200 document.
 let composedApp: ReturnType<typeof createApp>;
 
-// Global hooks must be registered before any global describe() below, so the
-// fixture setup for the static-router suites lives here at the top of the file.
 beforeAll(async () => {
+  // Global hooks must be registered before any global describe() below, so the
+  // fixture setup for the static-router suites lives here at the top of the
+  // file.
+
   tempDir = await Deno.makeTempDir();
   await Deno.writeTextFile(path.join(tempDir, "index.html"), INDEX_HTML);
   await Deno.writeTextFile(path.join(tempDir, "app.js"), APP_JS);
@@ -64,15 +66,16 @@ afterAll(async () => {
   await Deno.remove(sentinelPath);
 });
 
-// The shell document must stay NON-cross-origin-isolated so that untrusted
-// patterns are never handed SharedArrayBuffer / Atomics or a high-resolution
-// clock. A page is cross-origin isolated only when it is served with BOTH
-// `Cross-Origin-Opener-Policy: same-origin` AND a require-corp/credentialless
-// `Cross-Origin-Embedder-Policy`. These tests fail loudly if a future change
-// flips the served document to that isolating combination.
-//
-// See docs/specs/sandboxing/cross-origin-isolation.md.
 describe("Shell cross-origin isolation posture", () => {
+  // The shell document must stay NON-cross-origin-isolated so that untrusted
+  // patterns are never handed SharedArrayBuffer / Atomics or a high-resolution
+  // clock. A page is cross-origin isolated only when it is served with BOTH
+  // `Cross-Origin-Opener-Policy: same-origin` AND a require-corp/credentialless
+  // `Cross-Origin-Embedder-Policy`. These tests fail loudly if a future change
+  // flips the served document to that isolating combination.
+  //
+  // See docs/specs/sandboxing/cross-origin-isolation.md.
+
   it("does not serve the isolating COOP+COEP header combination", async () => {
     const response = await app.request("/");
     // Drain the body so the response does not leak into the test runner.

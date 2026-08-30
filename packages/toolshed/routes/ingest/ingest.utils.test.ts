@@ -350,12 +350,13 @@ describe("ingest journal sink", () => {
     expect(res.status).toBe(413);
   });
 
-  // A link sigil is a non-null, non-array object, so it satisfies the entire
-  // record contract — and the runtime interprets it on WRITE, storing a live
-  // reference instead of the text. That would make journal entries mutable
-  // after the fact and leave the ExternalIngest mark attesting to a digest of
-  // the sigil rather than to anything a reader resolves through it.
   it("processIngest: a link sigil anywhere in a record -> 400, nothing written", async () => {
+    // A link sigil is a non-null, non-array object, so it satisfies the entire
+    // record contract — and the runtime interprets it on WRITE, storing a live
+    // reference instead of the text. That would make journal entries mutable
+    // after the fact and leave the ExternalIngest mark attesting to a digest of
+    // the sigil rather than to anything a reader resolves through it.
+
     const { secret } = await savedReg({ id: "ing_sigil" });
     const link = {
       "/": {
@@ -472,17 +473,20 @@ describe("ingest journal sink", () => {
     expect(cell.get()).toBeUndefined();
   });
 
-  // A corrupted expiry must not silently become "no expiry": Date.parse yields
-  // NaN and every NaN comparison is false, so the naive check fails OPEN.
   it("processIngest: VALID token + unparseable expiresAt -> 403 (fails closed)", async () => {
+    // A corrupted expiry must not silently become "no expiry": Date.parse
+    // yields NaN and every NaN comparison is false, so the naive check fails
+    // OPEN.
+
     const { secret, r } = await savedReg({ id: "ing_nan" });
     await saveRegistration(runtime, space, { ...r, expiresAt: "not-a-date" });
     expect((await call("ing_nan", secret, REPAIR_BODY)).status).toBe(403);
   });
 
-  // A request id is consumed by the transaction that writes the registration,
-  // so it is spent only by a write that actually landed.
   describe("request claims", () => {
+    // A request id is consumed by the transaction that writes the registration,
+    // so it is spent only by a write that actually landed.
+
     // A fixed clock: `peekMintRequest` defaults to real time, so a claim
     // written at this instant would otherwise read as long expired and the
     // assertions would pass for the wrong reason.
@@ -529,10 +533,12 @@ describe("ingest journal sink", () => {
         .toBe("ing_a");
     });
 
-    // The point of doing this inside the transaction: a write that loses its
-    // precondition must not consume the id, or the idempotency key becomes the
-    // one thing that does not survive the failure it exists to make retryable.
     it("does not consume the id when the write is refused", async () => {
+      // The point of doing this inside the transaction: a write that loses its
+      // precondition must not consume the id, or the idempotency key becomes
+      // the one thing that does not survive the failure it exists to make
+      // retryable.
+
       await saveRegistration(runtime, space, reg({ id: "ing_x", revision: 1 }));
 
       // Precondition says "must not exist", but it does — so this loses.
@@ -567,9 +573,10 @@ describe("ingest journal sink", () => {
     expect((await call("ing_live", secret, REPAIR_BODY)).status).toBe(200);
   });
 
-  // The equalization that MUST survive: a guesser probing a disabled channel
-  // still cannot distinguish it from an unknown one.
   it("processIngest: WRONG token + disabled -> still an equalized 401", async () => {
+    // The equalization that MUST survive: a guesser probing a disabled channel
+    // still cannot distinguish it from an unknown one.
+
     const { r } = await savedReg({ id: "ing_dis2" });
     await saveRegistration(runtime, space, { ...r, enabled: false });
 
