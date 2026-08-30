@@ -263,12 +263,13 @@ Three nearby shapes are not this one:
 ### The shape to aim for
 
 A reader should be able to tell what a comment covers from where it sits, and
-there are only four places it can sit. Inside a block, it is about that block.
-At the top of a group, it is about the group. Framed as a section marker, it is
-about the region running to the next marker or to the end of the block. Beside
-a hook or a body-less callback, it is about the statement it touches. Write
-each comment into the place that matches its reach and a reader never has to
-guess.
+each place carries one reach. First thing inside a callback, it covers that
+block — the single case, or the whole group, whichever the callback opens.
+Framed as a section marker, it covers the region running to the next marker or
+to the end of the block. Beside a hook or a body-less callback, it covers the
+statement it touches. At the top of the file, as a doc comment, it covers the
+file. Write each comment into the place that matches its reach and a reader
+never has to guess.
 
 Give a file one way of showing its regions and keep to it. Where a file marks
 regions, a marker ends the one before it, so a series of them reads as a series
