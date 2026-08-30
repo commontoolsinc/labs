@@ -125,6 +125,7 @@ import {
 import {
   getDirectTransactionMergeableOpAddresses,
   getDirectTransactionReadActivities,
+  getTransactionWriteAttempts,
 } from "./transaction-inspection.ts";
 import {
   getBlindStructuralTarget,
@@ -2333,6 +2334,13 @@ class Provider implements IStorageProvider, IOperationStorageCapability {
     ) as Promise<
       Result<Unit, Error>
     >;
+  }
+
+  /** See {@link SpaceReplica.loadUnexaminedAbsences}. */
+  loadUnexaminedAbsences(
+    source: IStorageTransaction | undefined,
+  ): number | Promise<number> {
+    return this.replica.loadUnexaminedAbsences(source);
   }
 
   async #replaySync(
@@ -5699,6 +5707,99 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
       this.#rejectedPendingLayers.delete(localSeq);
       dropped.resolve();
     }
+  }
+
+  /**
+   * Load the documents a transaction read as absent without the replica ever
+   * having examined them, and report how many turned out to exist.
+   *
+   * A read of a document the replica never synced resolves as absent, and
+   * {@link buildReads} exports that as `seq: 0` — the claim that no such
+   * document exists. The engine rejects the commit as `stale confirmed read`
+   * whenever one does, and the rejection is right: the reading run followed
+   * a link into a document it did not hold, so its traversal is sound only
+   * if that document really is absent. `Runtime.editWithRetry` calls this
+   * between running its action and committing, and a non-zero return is its
+   * signal to discard the attempt and re-run against the now-local
+   * documents — the same convergence the engine's rejection would force,
+   * without the round trip, the catch-up gate, or the wasted upload.
+   *
+   * Session-scoped reads are excluded: a session instance is keyed by this
+   * connection's own fresh session id, so no server-side revision can exist
+   * under it and its absence claims can never conflict. Space- and
+   * user-scoped instances persist across sessions and stay covered.
+   *
+   * The instance key matches {@link buildReads}, which builds the read set
+   * against the replica's own instances.
+   */
+  loadUnexaminedAbsences(
+    source: IStorageTransaction | undefined,
+  ): number | Promise<number> {
+    if (source === undefined) return 0;
+    const reads = getDirectTransactionReadActivities(source);
+    if (!reads) return 0;
+    // Documents this transaction writes are its own creations in flight:
+    // reading one as absent and then writing it is what creating a document
+    // IS, and the paired absence claim is what the engine validates the
+    // create against. Only reads with no such write are absences the
+    // transaction merely relied on.
+    const ownWrites = new Set<string>();
+    for (const write of getTransactionWriteAttempts(source) ?? []) {
+      if (write.space !== this.#space) continue;
+      ownWrites.add(docKey(write.id, this.instanceKey(write.scope)));
+    }
+    const unexamined = new Map<string, WatchAddress>();
+    for (const read of reads) {
+      if (
+        read.space !== this.#space ||
+        (read.type ?? DOCUMENT_MIME) !== DOCUMENT_MIME ||
+        hasDataUriScheme(read.id) ||
+        // Content-addressed reads carry no commit-time concurrency
+        // precondition at all, so `buildReads` drops them before any seq is
+        // exported.
+        read.id.startsWith("cid:") ||
+        normalizeCellScope(read.scope) === "session"
+      ) {
+        continue;
+      }
+      const key = docKey(read.id, this.instanceKey(read.scope));
+      if (ownWrites.has(key)) continue;
+      if (this.#docs.has(key) || unexamined.has(key)) continue;
+      unexamined.set(key, {
+        id: read.id,
+        type: DOCUMENT_MIME as MIME,
+        scope: normalizeCellScope(read.scope),
+      });
+    }
+    // Synchronous zero: with nothing to examine there is nothing to await,
+    // and callers whose commit path is synchronous today stay synchronous —
+    // the commit-gated runner start among them.
+    if (unexamined.size === 0) return 0;
+    return (async () => {
+      try {
+        // `schema: false` asks for the document and follows nothing: what a
+        // basis needs is the document's own version, not the closure a
+        // schema-guided read would reach.
+        await this.pull(
+          [...unexamined.values()].map((
+            address,
+          ): [WatchAddress, SchemaPathSelector] => [
+            address,
+            { path: [], schema: false },
+          ]),
+        );
+        let present = 0;
+        for (const key of unexamined.keys()) {
+          if ((this.#docs.get(key)?.confirmed.seq ?? 0) > 0) present += 1;
+        }
+        return present;
+      } catch {
+        // Best-effort, like the retry gate it front-runs: an unexamined
+        // absence is what this path exported before, and the commit's own
+        // verdict still decides.
+        return 0;
+      }
+    })();
   }
 
   private buildReads(

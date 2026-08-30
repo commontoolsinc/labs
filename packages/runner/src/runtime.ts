@@ -38,6 +38,7 @@ import { deepEqual } from "@commonfabric/utils/deep-equal";
 import { isDeno } from "@commonfabric/utils/env";
 import { PatternEnvironment, setPatternEnvironment } from "./builder/env.ts";
 import { popFrame, pushFrame } from "./builder/pattern.ts";
+import { getDirectTransactionReadActivities } from "./storage/transaction-inspection.ts";
 import type {
   ChangeGroup,
   CommitError,
@@ -2485,26 +2486,94 @@ export class Runtime {
         },
       });
     }
-    this.prepareTxForCommit(tx);
-    return tx.commit().then(async ({ error }) => {
-      if (error) {
-        if (maxRetries > 0 && isRetryableCommitRejection(error)) {
-          await this.awaitCommitRetryReadiness(error);
-          return this.editWithRetry<T>(fn, maxRetries - 1);
-        } else {
-          return { error };
+    const commitPrepared = (): Promise<
+      { ok: T; error?: undefined } | { ok?: undefined; error: CommitError }
+    > => {
+      this.prepareTxForCommit(tx);
+      return tx.commit().then(async ({ error }) => {
+        if (error) {
+          if (maxRetries > 0 && isRetryableCommitRejection(error)) {
+            await this.awaitCommitRetryReadiness(error);
+            return this.editWithRetry<T>(fn, maxRetries - 1);
+          } else {
+            return { error };
+          }
         }
+        return { ok: result };
+      }).catch((error) => {
+        return {
+          error: {
+            name: "StorageTransactionAborted" as const,
+            message: `editWithRetry commit rejected: ${error}`,
+            reason: error,
+          },
+        };
+      });
+    };
+
+    // Absence reconciliation, before the read set is exported: a read of a
+    // document this client never synced resolves as absent and would commit
+    // as a `seq: 0` confirmed read — the claim that no such document exists.
+    // Where one does exist, the engine's rejection of that claim is correct
+    // and `fn` re-runs here anyway, after a server round trip, the
+    // conflict's catch-up gate, and a rebuilt commit — once per LAYER of
+    // cold documents, since each re-run can follow the arrived layer's links
+    // into the next. Loading the whole cohort up front and re-running
+    // locally is the same convergence, minus the wire: each round consumes a
+    // retry from the same budget a rejection would.
+    //
+    // Two gates on the load. Budget: loading the documents without re-running
+    // would let the commit export their REAL seqs under a traversal that read
+    // them as absent — an accepted commit derived from an absence that was
+    // never there — so with no budget to re-run, the honest move is the
+    // unexamined claim itself, judged by the server as before. Synchrony: a
+    // transaction with nothing to examine commits on the same synchronous
+    // path as ever, which the commit-gated runner start depends on.
+    const reconciliation = maxRetries > 0
+      ? this.#loadUnexaminedAbsences(tx)
+      : 0;
+    if (typeof reconciliation === "number") return commitPrepared();
+    return reconciliation.then((present) => {
+      if (present > 0) {
+        tx.abort(
+          `editWithRetry re-run: ${present} document(s) read as absent ` +
+            "are present; the action re-runs against them",
+        );
+        return this.editWithRetry<T>(fn, maxRetries - 1);
       }
-      return { ok: result };
-    }).catch((error) => {
-      return {
-        error: {
-          name: "StorageTransactionAborted" as const,
-          message: `editWithRetry commit rejected: ${error}`,
-          reason: error,
-        },
-      };
+      return commitPrepared();
     });
+  }
+
+  /**
+   * Load every document `tx` read as absent that no involved replica has
+   * examined, resolving with how many exist after all — the signal that the
+   * transaction's reads ran against documents it did not hold. One call per
+   * space the transaction read from, each answered by that space's provider
+   * ({@link IStorageProvider.loadUnexaminedAbsences}); a provider without
+   * the capability contributes zero and keeps the server-judged path.
+   */
+  #loadUnexaminedAbsences(
+    tx: IExtendedStorageTransaction,
+  ): number | Promise<number> {
+    const reads = getDirectTransactionReadActivities(tx.tx);
+    if (!reads) return 0;
+    const spaces = new Set<MemorySpace>();
+    for (const read of reads) spaces.add(read.space);
+    // A synchronous answer is always zero — anything unexamined needs a
+    // pull — so a round with no cold reads never leaves the synchronous
+    // path, and only the spaces that owe a pull contribute a promise.
+    const pending: Promise<number>[] = [];
+    for (const space of spaces) {
+      const provider = this.storageManager.open(space);
+      if (provider.loadUnexaminedAbsences === undefined) continue;
+      const answer = provider.loadUnexaminedAbsences(tx.tx);
+      if (typeof answer !== "number") pending.push(answer);
+    }
+    if (pending.length === 0) return 0;
+    return Promise.all(pending).then((counts) =>
+      counts.reduce((total, count) => total + count, 0)
+    );
   }
 
   /**
