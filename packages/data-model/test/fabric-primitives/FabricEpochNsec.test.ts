@@ -25,6 +25,7 @@ import { FabricInstance, FabricPrimitive } from "@/interface.ts";
 describe("FabricEpochNsec", () => {
   // Pure type-identity / supertype checks: cross-cutting carve-out per the
   // rule (don't fit a single member, aren't construction mechanics).
+
   it("is an instance of `FabricPrimitive`", () => {
     expect(new FabricEpochNsec(0n) instanceof FabricPrimitive).toBe(
       true,
@@ -178,9 +179,10 @@ describe("FabricEpochNsec", () => {
     });
   });
 
-  // Exercises the free `shallowFabricFromNativeValue()` rather than a member
-  // of the class, so it lives directly under the class `describe()`.
   describe("`shallowFabricFromNativeValue()` integration", () => {
+    // Exercises the free `shallowFabricFromNativeValue()` rather than a member
+    // of the class, so it lives directly under the class `describe()`.
+
     it("passes through unchanged even with `freeze=false`", () => {
       const nsec = new FabricEpochNsec(123n);
       // freeze=false should still return the same instance (not a copy).

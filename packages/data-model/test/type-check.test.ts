@@ -663,11 +663,12 @@ describe("type-check", () => {
     });
 
     describe("given a non-container `FabricValue`", () => {
-      // The whole of the difference from `isFabricObjectOrArray()`, which
-      // accepts these: a `FabricPrimitive` self-freezes at construction and
-      // exposes no `FabricValue` for a walk to descend into, whatever it holds
-      // privately.
       it("returns `false` for a `FabricPrimitive`", () => {
+        // The whole of the difference from `isFabricObjectOrArray()`, which
+        // accepts these: a `FabricPrimitive` self-freezes at construction and
+        // exposes no `FabricValue` for a walk to descend into, whatever it
+        // holds privately.
+
         expect(isFabricContainerValue(new FabricBytes(new Uint8Array([1]))))
           .toBe(false);
         expect(isFabricContainerValue(new FabricEpochNsec(1n))).toBe(false);
@@ -810,9 +811,10 @@ describe("type-check", () => {
       });
     }
 
-    // Agreement is free for a predicate that has drifted to one side, so that
-    // the corpus lands on both answers is asserted rather than assumed.
     it("is checked against both answers", () => {
+      // Agreement is free for a predicate that has drifted to one side, so that
+      // the corpus lands on both answers is asserted rather than assumed.
+
       const answers = LAYER_CORPUS.map(([, value]) =>
         isValidFabricNativeObject(value)
       );
@@ -871,9 +873,10 @@ describe("type-check", () => {
         expect(refused.length).toBeGreaterThan(0);
       });
 
-      // The predicate's accepting side is a chain of shape tests, so a class
-      // the corpus never carries is a branch no cross-check above reaches.
       it("carries every registered primitive class", () => {
+        // The predicate's accepting side is a chain of shape tests, so a class
+        // the corpus never carries is a branch no cross-check above reaches.
+
         const carried = new Set(
           LAYER_CORPUS.map(([, value]) =>
             (value as object)?.constructor as unknown

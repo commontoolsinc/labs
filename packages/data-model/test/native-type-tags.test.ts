@@ -203,6 +203,7 @@ describe("native-type-tags", () => {
       // classifier that consulted it would let one assignment --
       // `Array.prototype.toJSON`, an own key on a record -- redirect values
       // wholesale.
+
       it("returns `Object` tag for a plain object carrying `toJSON()`", () => {
         expect(tagFromNativeValue({ toJSON: () => "converted" })).toBe(
           VALUE_TAGS.Object,

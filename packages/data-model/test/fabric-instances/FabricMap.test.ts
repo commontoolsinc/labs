@@ -30,6 +30,7 @@ import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 describe("FabricMap", () => {
   // Pure type-identity / supertype checks: cross-cutting carve-out per the
   // rule (they don't fit a single member, aren't construction mechanics).
+
   it("implements `FabricInstance`", () => {
     const sm = new FabricMap(new Map());
     expect(sm instanceof FabricInstance).toBe(true);
@@ -77,9 +78,10 @@ describe("FabricMap", () => {
       });
     });
 
-    // The protocol methods are unimplemented stubs that throw, which these
-    // cases pin at both entry points: dispatch and direct invocation.
     describe("[DEEP_FREEZE]", () => {
+      // The protocol methods are unimplemented stubs that throw, which these
+      // cases pin at both entry points: dispatch and direct invocation.
+
       describe("via dispatch", () => {
         it("throws not-yet-implemented", () => {
           const fm = new FabricMap(
@@ -131,10 +133,11 @@ describe("FabricMap", () => {
   });
 
   describe("static members", () => {
-    // Nominal coverage: the codec exists and reports its wire tag and claims
-    // its instances, but `encode()` / `decode()` are throwing stubs until
-    // `Map` support is implemented.
     describe("[CODEC]", () => {
+      // Nominal coverage: the codec exists and reports its wire tag and claims
+      // its instances, but `encode()` / `decode()` are throwing stubs until
+      // `Map` support is implemented.
+
       const codec = FabricMap[CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Map;
       const env = NULL_LIVE_ENVIRONMENT;

@@ -35,9 +35,10 @@ import { VALUE_TAGS } from "@/VALUE_TAGS.ts";
 import { hashOf } from "@/value-hash.ts";
 
 describe("FabricRegExp", () => {
-  // Pure type-identity / supertype check: cross-cutting carve-out per the
-  // rule (doesn't fit a single member, isn't construction mechanics).
   it("extends `FabricPrimitive` (not `FabricInstance`)", () => {
+    // Pure type-identity / supertype check: cross-cutting carve-out per the
+    // rule (doesn't fit a single member, isn't construction mechanics).
+
     const re = new FabricRegExp(/abc/gi);
     expect(re instanceof FabricPrimitive).toBe(true);
     expect(re instanceof FabricInstance).toBe(false);
@@ -283,10 +284,11 @@ describe("FabricRegExp", () => {
     });
   });
 
-  // The following exercise free functions' handling of `FabricRegExp` /
-  // `RegExp` rather than members of the class itself, so they live directly
-  // under the class `describe()` (the cross-cutting carve-out).
   describe("round-trip via `jsonFromFabricValue()` / `fabricFromJsonValue()`", () => {
+    // The following exercise free functions' handling of `FabricRegExp` /
+    // `RegExp` rather than members of the class itself, so they live directly
+    // under the class `describe()` (the cross-cutting carve-out).
+
     it("round-trips a `FabricRegExp`", () => {
       const original = new FabricRegExp(/hello\s+world/gim);
       const restored = fabricFromJsonValue(

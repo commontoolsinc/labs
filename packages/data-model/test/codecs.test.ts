@@ -132,6 +132,7 @@ describe("codecs", () => {
     // by a codec in the registry, and that codec refuses this instance's
     // state. Asserted through the engine rather than the codec, because the
     // contract the spec states is the engine's.
+
     it(
       "throws through the engine, where the format has no form for it",
       async () => {

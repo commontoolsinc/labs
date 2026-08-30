@@ -497,11 +497,12 @@ describe("FabricKeyPair", () => {
   });
 
   describe("as a `FabricValue`", () => {
-    // An instance in either state has to pass the vetting boundary. The
-    // realm encoding does not vet what it passes through, so a value that
-    // fails here can still cross and still work, right up until something
-    // checks it.
     it("returns `true` from `isValidFabricValue()` in either state", async () => {
+      // An instance in either state has to pass the vetting boundary. The
+      // realm encoding does not vet what it passes through, so a value that
+      // fails here can still cross and still work, right up until something
+      // checks it.
+
       expect(isValidFabricValue(materialPair())).toBe(true);
       expect(isValidFabricValue(new FabricKeyPair(await generatePair())))
         .toBe(true);

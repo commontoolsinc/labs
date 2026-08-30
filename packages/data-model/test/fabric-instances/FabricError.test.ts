@@ -43,6 +43,7 @@ describe("FabricError", () => {
   // Pure type-identity / supertype checks: they don't fit a single member and
   // aren't about construction mechanics, so they live directly under the class
   // `describe()` (the rule's cross-cutting carve-out).
+
   it("implements `FabricInstance`", () => {
     const se = FabricError.fromNativeError(new Error("test"));
     expect(se instanceof FabricInstance).toBe(true);
@@ -69,6 +70,7 @@ describe("FabricError", () => {
     // decides which class a value comes back as. An own `constructor` property
     // is ordinary data, and reading it there would let a value pick that class
     // for itself.
+
     it("ignores an own `constructor` naming another class", () => {
       const error = new Error("boom");
       Object.defineProperty(error, "constructor", {
@@ -407,10 +409,11 @@ describe("FabricError", () => {
         expect(fe.extraSize).toBe(1);
       });
 
-      // The constructor filters its `extras` input independently of the codec,
-      // which filters again on the way in. Both layers matter: extras carry
-      // whatever the wire supplied, and the constructor is public.
       it("drops unsafe and reserved keys supplied to the constructor", () => {
+        // The constructor filters its `extras` input independently of the
+        // codec, which filters again on the way in. Both layers matter: extras
+        // carry whatever the wire supplied, and the constructor is public.
+
         const fe = new FabricError({
           type: "Error",
           name: "Error",
@@ -555,11 +558,12 @@ describe("FabricError", () => {
       });
     });
 
-    // `FabricError` inherits the `deepClone()` template from
-    // `BaseFabricInstance` and supplies only its `[DEEP_CLONE_CORE]` (a codec
-    // round-trip). These cases pin the template contract for this concrete
-    // implementor.
     describe("deepClone()", () => {
+      // `FabricError` inherits the `deepClone()` template from
+      // `BaseFabricInstance` and supplies only its `[DEEP_CLONE_CORE]` (a codec
+      // round-trip). These cases pin the template contract for this concrete
+      // implementor.
+
       it("returns a deep-frozen clone with equal state", () => {
         const fe = FabricError.fromNativeError(
           new Error("boom", { cause: { detail: 1 } }),
@@ -602,13 +606,14 @@ describe("FabricError", () => {
         expect(fe.message).toBe("outer");
       });
 
-      // KNOWN GAP (pre-existing): the clone core round-trips through
-      // `[CODEC]`, whose `encode()` passes `cause` (and extras) through by
-      // reference, so an *unfrozen* deep clone still shares its nested
-      // `cause` with the original -- contrary to the `deepClone(false)`
-      // contract on `FabricInstance`. Pinned to record the actual behavior,
-      // not to bless it.
       it("returns a mutable clone that currently SHARES the nested `cause` reference (known gap)", () => {
+        // KNOWN GAP (pre-existing): the clone core round-trips through
+        // `[CODEC]`, whose `encode()` passes `cause` (and extras) through by
+        // reference, so an *unfrozen* deep clone still shares its nested
+        // `cause` with the original -- contrary to the `deepClone(false)`
+        // contract on `FabricInstance`. Pinned to record the actual behavior,
+        // not to bless it.
+
         const cause = { detail: 1 };
         const fe = FabricError.fromNativeError(new Error("outer", { cause }));
         const clone = fe.deepClone(false) as FabricError;
@@ -666,9 +671,10 @@ describe("FabricError", () => {
         });
       });
 
-      // Decoding hand-built state (not via `encode()`): exercises name/type
-      // handling and back-compat that the round-trip tests don't.
       describe("canDecode()", () => {
+        // Decoding hand-built state (not via `encode()`): exercises name/type
+        // handling and back-compat that the round-trip tests don't.
+
         it("returns `true` for a record", () => {
           expect(codec.canDecode({ type: "Error", message: "boop" }))
             .toBe(true);
@@ -685,10 +691,12 @@ describe("FabricError", () => {
       });
 
       describe("decode()", () => {
-        // `JSON.parse` creates an own `__proto__` property where an object
-        // literal instead invokes the setter, so parsed wire state is the one
-        // place a prototype-sensitive key genuinely arrives as decodable input.
         it("drops a `__proto__` key arriving from parsed wire state", () => {
+          // `JSON.parse` creates an own `__proto__` property where an object
+          // literal instead invokes the setter, so parsed wire state is the one
+          // place a prototype-sensitive key genuinely arrives as decodable
+          // input.
+
           const state = JSON.parse(
             '{"type":"Error","message":"x","__proto__":"bad","code":7}',
           );

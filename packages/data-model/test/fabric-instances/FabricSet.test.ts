@@ -27,9 +27,10 @@ import { deepFreeze, isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "./fixtures.ts";
 
 describe("FabricSet", () => {
-  // Pure type-identity / supertype check: cross-cutting carve-out per the
-  // rule (doesn't fit a single member, isn't construction mechanics).
   it("implements `FabricInstance`", () => {
+    // Pure type-identity / supertype check: cross-cutting carve-out per the
+    // rule (doesn't fit a single member, isn't construction mechanics).
+
     const ss = new FabricSet(new Set());
     expect(ss instanceof FabricInstance).toBe(true);
   });
@@ -115,10 +116,11 @@ describe("FabricSet", () => {
   });
 
   describe("static members", () => {
-    // Nominal coverage: the codec exists and reports its wire tag and claims
-    // its instances, but `encode()` / `decode()` are throwing stubs until
-    // `Set` support is implemented.
     describe("[CODEC]", () => {
+      // Nominal coverage: the codec exists and reports its wire tag and claims
+      // its instances, but `encode()` / `decode()` are throwing stubs until
+      // `Set` support is implemented.
+
       const codec = FabricSet[CODEC];
       const expectedTag = CODEC_TYPE_TAGS.Set;
       const env = NULL_LIVE_ENVIRONMENT;
