@@ -328,9 +328,8 @@ const resolveBranch = (
  *
  * `canBranchMatch` is a shallow prefilter — type, required-key presence and
  * an array's tuple closure, no descent — so this stays a decision about the
- * container already read. One
- * surviving branch narrows to it; several merge the way an eager read merges
- * them; none is a mismatch.
+ * container already read. One surviving branch narrows to it; several merge
+ * the way an eager read merges them; none is a mismatch.
  */
 const narrowForValue = (
   schema: JSONSchema | undefined,
