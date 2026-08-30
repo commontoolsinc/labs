@@ -1106,9 +1106,14 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
     }
   });
 
-  // Companion negative-memo coverage: only failures explicitly classified
-  // after source verification may suppress later attempts. Every transient
-  // boundary is exercised by making the missing state arrive in-session.
+  //
+  // Companion negative-memo coverage
+  //
+  // Only failures explicitly classified after source verification may suppress
+  // later attempts. Every transient boundary is exercised by making the missing
+  // state arrive in-session.
+  //
+
   it("T8a: a deterministic compile failure is memoized", async () => {
     const rt = newRuntime();
     const nonEnvelope = "// leading comment\n" + injectCfHelpers(
