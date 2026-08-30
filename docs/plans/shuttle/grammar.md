@@ -74,11 +74,10 @@ too large for a flat root. The starting facet set:
 
 - `slugs/` — the slug index: named pieces, the primary human view.
 - `pieces/` — pieces by id.
-- `fuse/` — the FUSE layout mirrored as-is (`packages/fuse`'s tree:
-  `pieces/<slug>/result/…`, entities, exploded JSON). Shuttle leverages that
-  package's naming and hydration work rather than reinventing it, and the
-  mirror keeps the two tools mutually legible. Where shuttle has a clearly
-  better presentation it lives in shuttle's own facets, outside `fuse/`.
+
+A `fuse/` facet mirroring the FUSE layout is designed and deferred past v1
+([`futures.md`](futures.md)); shuttle leverages `packages/fuse`'s naming
+and hydration work regardless of when that facet lands.
 
 Facet names are reserved segments at the space root only; inside a piece,
 every segment is data — always. A piece's callables need no reserved name:
@@ -98,7 +97,8 @@ minus chrome, `--limit` overriding — plus a status line
 uninvited, so piped output stays clean by construction. `more` continues
 the same listing and its numbering (`%39`…`%76`); backward at the prompt
 is scrollback's job, and real two-way navigation is `browse`'s.
-`search <query>` works at any place, over what stands below it.
+A `search <query>` verb at any place is designed and deferred past v1
+([`futures.md`](futures.md)); pipes over `ls` cover the interim.
 
 Listings number their rows, and numbered handles are references: `%1`,
 `%2`, … stay valid until the next new listing resets them (`more`
@@ -126,10 +126,9 @@ Entering warms: `cd` into a piece (or `watch` on anything inside it) starts
 the pattern in this process, and reads inside it are live from then on.
 Pieces merely listed from outside stay cold.
 
-A **cold-browse mode** turns warming off: walking around triggers no
-computation, reads serve stored state, and the mode is unmistakably visible
-in the prompt and in every view (stored values labeled as such). Toggling is
-`where mode cold` and `where mode warm` (the ambient-context section below).
+That is v1's whole run-state story. A **cold-browse mode** — walking with
+no computation, stored reads labeled — is designed and deferred past v1
+([`futures.md`](futures.md)).
 
 ## Scope is the cwd's second dimension
 
@@ -185,12 +184,15 @@ The canonical grammar bounds what a suffix on a reference can say
 ## The ambient context and `where`
 
 Everything ambient is one record: the connection (api endpoint, identity),
-the cwd pair (position, scope), the external working location, the browse
-mode, and the invocation session. `where` prints the whole record, and
-`where <dimension> <value>` sets any dimension — the heavyweight ones
-(`where api …`, `where identity …`) rebuild the connection and say so.
-`cd`/`pwd` and `xcd`/`xpwd` are conveniences over the hottest dimensions,
-not separate mechanisms, and launch flags merely seed the initial record.
+the cwd pair (position, scope), the external working location, and the
+invocation session. `where` prints the whole record, and
+`where <dimension> <value>` sets the light dimensions — scope, the
+external location. The heavyweight dimensions are fixed at launch in v1
+and restarting is the switch; editing them live (`where api …`,
+`where identity …`, rebuilding the connection) is designed and deferred
+([`futures.md`](futures.md)). `cd`/`pwd` and `xcd`/`xpwd` are conveniences
+over the hottest dimensions, not separate mechanisms, and launch flags
+merely seed the initial record.
 
 ## Prompt
 
@@ -261,17 +263,18 @@ in separate slots keeps that visible on every line.
 The ambient data plane is the fabric: redirection targets fabric paths, and
 anything outside the fabric is named by an explicit scheme.
 
-- `get topics/3 > drafts/copy` — reads one place, writes the value to
-  another. Fabric-to-fabric, a value copy (`link` is how one makes a
-  reference instead).
+- Fabric-to-fabric redirection — `get topics/3 > drafts/copy` as a value
+  copy, `link` remaining the reference-writer — is designed and deferred
+  past v1 ([`futures.md`](futures.md)); the plane rules below are settled
+  v1 grammar either way.
 - `file:` names a local file, the only spelling that touches disk — and a
   scheme is legal only on an absolute complete path:
   `get topics --json > file:/tmp/topics.json` is fine, `file:out.json` is
   refused (`file:~/…` counts as absolute).
 - `file:` is one member of an open scheme family: a schemed operand names
-  something outside the fabric. `https:`/`http:` sources work as read ends
-  (`set x - < https://…`); writing to an external scheme stays out of scope
-  until a use rules it in.
+  something outside the fabric. `file:` is the v1 member; `https:` read
+  ends are designed and deferred ([`futures.md`](futures.md)), and writing
+  to an external scheme stays out of scope until a use rules it in.
 - Shuttle maintains two working positions: the fabric cwd and one
   **external working location**. `xcd` sets it — `xcd file:~/data`,
   `xcd https://foo.com/a/b/` — and, its argument being already on the
@@ -282,23 +285,16 @@ anything outside the fabric is named by an explicit scheme.
   whatever that location's scheme, so no operand ever changes plane by
   position. A bare relative operand is always fabric.
 
-## Pipes: native tools and escaped locals
+## Pipes: escaped locals
 
-Shuttle publishes a **native tool set**: names that work bare in a pipeline
-— `get topics --json | jq '.[].title'` — and are guaranteed present
-wherever shuttle runs, including an eventual terminal with no local
-execution environment behind it. A native tool may begin as a forward to a
-local binary; that is implementation, not contract. The initial set:
-`jq`, `grep`, `wc`, `head`, `tail`, `sort`, `uniq`, `cut`. `cat` is
-deliberately absent — printing a value is `get`, feeding a local file is
-`< file:…`, and concatenation, its one irreplaceable job, waits for a
-demand (`! cat` reaches the local one meanwhile).
-
-Arbitrary local programs run only behind the explicit escape — `|!` in a
-pipeline, line-initial `!` for a whole command — so stepping outside the
-portable surface is always visible on the line. The split is deliberate:
-the basics stay covered naturally, and nobody gets used to running local
-tools invisibly.
+Local programs run behind the explicit escape — `|!` in a pipeline
+(`get topics --json |! jq '.[].title'`), line-initial `!` for a whole
+command — so stepping outside the portable surface is always visible on
+the line. Bare `|` is reserved, and its error names `|!`: the **native
+tool set** — names that work bare and are guaranteed wherever shuttle
+runs — is designed and deferred past v1 ([`futures.md`](futures.md)),
+and reserving the spelling now means v1 teaches no invisible-local habit
+the set would have to unteach.
 
 ## Open questions
 

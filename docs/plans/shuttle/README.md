@@ -1,8 +1,11 @@
 # Shuttle — a place-aware fabric shell
 
 Status: v1 design settled — the decisions below are ruled, and nothing
-blocks construction. Nothing here is built yet; the order of construction is
-[`build-sequence.md`](build-sequence.md). This document
+blocks construction. The v1 cutline is drawn: a handful of settled designs
+are deferred past v1 and preserved in [`futures.md`](futures.md), so they
+are re-scheduled later rather than re-litigated, and the decisions below
+say so where they defer. Nothing here is built yet; the order of
+construction is [`build-sequence.md`](build-sequence.md). This document
 stays the working design state: new decisions land here as they are made.
 
 Shuttle is an interactive terminal tool for exploring and editing fabric
@@ -61,9 +64,8 @@ commands cannot have at any flag cost: warm pieces serving live computed
 values without a per-command `--step`, subscriptions feeding watches and
 views, pagination cursors, the handle table, invocation-session
 continuity. And where an environment variable makes context ambient and
-invisible, the prompt renders the whole ambient record — place, scope,
-warm or cold — so what every command is about to touch is visible before
-it runs.
+invisible, the prompt renders the whole ambient record — place and scope
+— so what every command is about to touch is visible before it runs.
 
 ## Settled decisions
 
@@ -116,11 +118,12 @@ it runs.
    work in `packages/cli`.
 10. **Run state: entering warms.** `cd` into a piece (or `watch`) starts the
     pattern in-process and reads inside it are live; pieces merely listed
-    stay cold. A cold-browse mode — unmistakably visible in prompt and views
-    — walks the space with no computation, serving labeled stored state.
-11. **A space root lists facets, never pieces directly** — `slugs/`,
-    `pieces/`, and `fuse/` (the FUSE layout mirrored, leveraging
-    `packages/fuse` rather than reinventing it). Facet names are reserved at
+    stay cold — which is v1's whole run-state story. A cold-browse mode is
+    designed and deferred past v1 ([`futures.md`](futures.md)).
+11. **A space root lists facets, never pieces directly** — `slugs/` and
+    `pieces/` in v1; the `fuse/` facet (the FUSE layout mirrored,
+    leveraging `packages/fuse` rather than reinventing it) is designed and
+    deferred ([`futures.md`](futures.md)). Facet names are reserved at
     the space root only.
 12. **A view is not necessarily a place.** Pagination and search produce
     views to look at and pick from; they need no path-shaped address unless
@@ -135,15 +138,16 @@ it runs.
 15. **Externals are schemed; nothing outside the fabric is a default.**
     Redirection targets fabric paths; a local file is always spelled
     `file:…`, and `file:` is one member of an open scheme family (`https:`
-    sources work; external writes wait for a use). Beside the place shuttle
-    tracks one **external working location**, schemed like its operands:
-    `xcd` sets or relative-moves it, `xpwd` prints it.
-16. **Pipelines: a published native tool set, and escaped locals.** Names
-    in the native set (`jq`, `grep`, `wc` among the first) work bare and
-    are guaranteed wherever shuttle runs — a native tool may start as a
-    forward to a local binary, but that is implementation, not contract.
+    sources are designed and deferred; external writes wait for a use).
+    Beside the place shuttle tracks one **external working location**,
+    schemed like its operands: `xcd` sets or relative-moves it, `xpwd`
+    prints it.
+16. **Pipelines: escaped locals now, a published native tool set later.**
     Arbitrary local programs need an explicit escape, so leaving the
-    portable surface is always visible on the line.
+    portable surface is always visible on the line; bare `|` is reserved,
+    and its error names `|!`. The native set — names that work bare and
+    are guaranteed wherever shuttle runs, contract not implementation —
+    is designed and deferred ([`futures.md`](futures.md)).
 17. **Numbered handles.** Listings number their rows and `%n` is a
     reference until the next listing — the mechanism by which a view
     (decision 12) feeds the next command without being a place.
@@ -165,15 +169,18 @@ it runs.
     `..` and `-`. A suffix names the base scope or the reading identity's own
     overlays, never another identity's; standing in another identity's
     overlay is a canonical-grammar extension, out of v1.
-21. **The native tool set v0** is `jq`, `grep`, `wc`, `head`, `tail`,
-    `sort`, `uniq`, `cut` — grown by ruling. `cat` is deliberately absent:
-    `get` prints, `< file:…` feeds, and concatenation waits for a demand.
+21. **The native tool set v0 is ruled and deferred** with decision 16's
+    contract: the list, and `cat`'s deliberate absence, are preserved in
+    [`futures.md`](futures.md).
 22. **`where` is the ambient context's one surface.** Every dimension —
-    connection, cwd pair, external location, browse mode, invocation
-    session — prints in `where`, and `where <dimension> <value>` sets any
-    of them; the heavyweight ones rebuild the connection and say so.
-    `cd`/`xcd` are conveniences over the hottest dimensions; launch flags
-    seed the initial record.
+    connection, cwd pair, external location, invocation session — prints
+    in `where`, and `where <dimension> <value>` sets the light ones (scope,
+    the external location). The heavyweight dimensions — api endpoint,
+    identity — are fixed at launch in v1, and restarting is the switch;
+    editing them live is designed and deferred ([`futures.md`](futures.md)),
+    which also honors the one-connection-per-process limit the seam work
+    records. `cd`/`xcd` are conveniences over the hottest dimensions;
+    launch flags seed the initial record.
 23. **A scheme is legal only on an absolute complete path.** Relative
     external operands are rooted with the `x:` base (`> x:../out.json`) —
     a base name, not a scheme — and a bare relative operand is always
@@ -215,12 +222,12 @@ it runs.
     vocabulary rather than a data path, and the receiver is the
     addressable thing.
 28. **Watches are session objects.** `watch` arms a subscription that
-    outlives its view: leaving the view keeps it armed, each settled
-    change appends one event line at the prompt, and a pinned strip above
-    the prompt renders armed watches' values live while scrollback flows
-    past. `watches` lists what is armed, `unwatch` disarms, and scrollback
-    stays append-only — liveness lives in the strip and the event lines,
-    never in mutated history.
+    outlives its view: leaving the view keeps it armed, and each settled
+    change appends one event line at the prompt. `watches` lists what is
+    armed, `unwatch` disarms, and scrollback stays append-only — liveness
+    lives in the event lines, never in mutated history. The pinned strip
+    (a live region above the prompt) is designed and deferred
+    ([`futures.md`](futures.md)).
 
 The line grammar itself — resolution rules, facets, listings, run-state and
 write surfaces, and the redirection/pipe proposals — is drafted in
@@ -239,7 +246,7 @@ The ambient context is one record:
 - **Connection**: api endpoint, identity.
 - **The cwd pair**: position (space, optionally a piece, optionally a path
   inside it) and scope.
-- **External working location**, **browse mode**, **invocation session**.
+- **External working location**, **invocation session**.
 
 `cd` accepts relative path segments, `..`, rooted and complete canonical
 references, slugs, space names, wish targets, and scope suffixes. Every

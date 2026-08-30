@@ -47,6 +47,48 @@ The scripting bundle is also the agent door the non-goals hold open:
 stable machine-readable output, exit-code discipline, and deterministic
 non-TTY behavior (no views, no strip) arrive with it, not before.
 
+## Deferred from v1, design settled
+
+Each of these was ruled during the v1 design and then deferred past v1 to
+keep the first build small. The designs are settled — recorded here so
+they are re-scheduled later, never re-litigated — and the main document's
+decisions point here where they defer.
+
+- **The pinned strip.** A reserved region above the prompt renders armed
+  watches' current values live while scrollback flows past. Event lines
+  carry the arm-then-act loop in v1; the strip returns when watch density
+  demands it. Open: its height, and what it shows when more watches are
+  armed than fit.
+- **Cold-browse mode.** Walking around with no computation: reads serve
+  stored state, labeled as such, with the mode unmistakable in the prompt
+  and every view, toggled as a `where` mode dimension. It insures against
+  a warming cost not yet observed; warm-on-enter already leaves merely
+  listed pieces cold, which is v1's whole run-state story.
+- **The native tool set.** Published names that work bare in a pipeline
+  and are guaranteed wherever shuttle runs — a native tool may start as a
+  forward to a local binary; that is implementation, not contract. The
+  v0 list: `jq`, `grep`, `wc`, `head`, `tail`, `sort`, `uniq`, `cut`,
+  with `cat` deliberately absent (`get` prints, `< file:…` feeds, and
+  concatenation waits for a demand). Until the set ships, bare `|` is
+  reserved and its error names `|!`, so nobody learns an invisible local
+  habit v1 would have to unteach.
+- **`where` editing the heavyweight dimensions.** Switching api endpoint
+  or identity mid-session, rebuilding the connection and saying so. v1
+  fixes both at launch — restarting is the switch — which also honors the
+  one-connection-per-process limit the seam work records.
+- **The `fuse/` facet.** The FUSE layout mirrored at the space root, for
+  mutual legibility between the two tools. Shuttle reuses `packages/fuse`
+  naming and hydration work regardless; the facet is the presentation
+  half, and it waits.
+- **Fabric-to-fabric redirection.** `get topics/3 > drafts/copy` as a
+  value copy, with `link` remaining the only reference-writer. The plane
+  grammar — bare relative operands are fabric, schemes are explicit — is
+  settled and v1 grammar; the copy itself waits for a demand.
+- **`https:` read ends.** The scheme family is open by design; `file:` is
+  its v1 member, and `set x - < https://…` joins when a use rules it in.
+- **`search`.** A `search <query>` verb at any place, over what stands
+  below it. Pipes over `ls` cover the interim.
+
 ## Candidates, ranked
 
 1. **The weaver bridge.** `cd <weaver-URL>` lands in that piece one layer

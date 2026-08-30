@@ -19,9 +19,9 @@ disciplines it leans on are in
   runtime (guard plus `idle()`), never a timer. A view's own sinks are
   canceled on exit; a watch's sink belongs to the watch, which outlives
   the view (see "Watches are session objects").
-- **Cold-browse mode reaches into views**: an unmistakable banner, stored
-  values labeled as stored, no sinks, no warming; `r` re-pulls stored state
-  (a storage read, not a pattern run).
+- **Views are live because entering warms** (the run-state rule). The
+  deferred cold-browse mode ([`futures.md`](futures.md)) will reach into
+  views when it lands — banner, labeled stored values, no sinks.
 
 ## The v1 views
 
@@ -57,18 +57,15 @@ the other two.
 `watch <ref>` arms a watch — a session-level subscription with its own
 handle — and opens the value view as one lens onto it. `q` closes the lens
 and leaves the watch armed. While the prompt is up, an armed watch shows
-its changes two ways:
-
-- **Event lines.** Each settled change appends one line —
-  `watch topics/3: replies 14 → 15` — and the prompt is redrawn beneath
-  it, so cause and effect interleave in one transcript that doubles as a
-  record.
-- **The pinned strip.** A reserved region above the prompt renders armed
-  watches' current values live while scrollback flows past it.
+its changes as **event lines**: each settled change appends one line —
+`watch topics/3: replies 14 → 15` — and the prompt is redrawn beneath it,
+so cause and effect interleave in one transcript that doubles as a
+record. (A pinned strip rendering armed watches live above the prompt is
+designed and deferred: [`futures.md`](futures.md).)
 
 `watches` lists what is armed (`where` shows it too); `unwatch <handle>`
 disarms. Terminal output that has scrolled off is never mutated: liveness
-lives in the strip and the event lines, and history stays append-only.
+lives in the event lines, and history stays append-only.
 
 ## Keys
 
@@ -140,5 +137,5 @@ first work item, made in `packages/cli` where the substrate lives.
    watch. (The shallow-sink question is settled above: not expressible
    through `Cell.sink`; the raw-document seam and its proving gate are
    issue [#6534](https://github.com/commontoolsinc/labs/issues/6534).)
-2. The pinned strip's layout: its height, and what it shows when more
-   watches are armed than fit.
+2. The pinned strip's layout — deferred with the strip itself
+   ([`futures.md`](futures.md)).

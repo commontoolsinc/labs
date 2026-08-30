@@ -100,26 +100,24 @@ since `set` is what makes stale computed state visible.
 here). `Cell.sink` with the guard-plus-`idle()` settling discipline; the
 value, list, and structured piece-overview views on the `cf view` pager
 substrate; session watches (`watch`, `watches`, `unwatch`) with prompt
-event lines and the pinned strip; cold-browse mode and the `where mode`
-dimension that toggles it. Governed by [`views.md`](views.md); it opens
-with the two experiments and the raw-document-subscription proving test
-from issue [#6534](https://github.com/commontoolsinc/labs/issues/6534),
-falling back to the capped deep sink if the seam disappoints.
+event lines. Governed by [`views.md`](views.md); it opens with the two
+experiments and the raw-document-subscription proving test from issue
+[#6534](https://github.com/commontoolsinc/labs/issues/6534), falling back
+to the capped deep sink if the seam disappoints.
 
-**B4 — redirection, schemes, pipes.** `>` and `<` over fabric paths,
-`file:` and `https:` read ends, the native tool set v0 and the local
-escape. The external working location (`xcd`/`xpwd`, the `x:` base) lands
-here, and with it `where` reaches its full surface: every dimension
-settable, the heavyweight ones rebuilding the connection and saying so
+**B4 — externals and escapes.** `>` and `<` to and from `file:` externals
+under the scheme-absolute rule; the external working location
+(`xcd`/`xpwd`, the `x:` base); the `!` escape family — line-initial `!`,
+`|!` in a pipeline (bare `|` reserved, its error naming `|!`), and `!cf`
+with place-derived flags injected. With the external location, `where`
+reaches its v1 surface: every dimension printed, the light ones settable
 (decision 22).
 
-**B5 — search, the `fuse/` facet, `!cf` escape.** `search` at any place,
-cursoring over large listings, and the subprocess escape with
-place-derived flags injected. The `fuse/` facet (decision 11) lands here
-too: mirroring `packages/fuse`'s tree is a self-contained slice whose only
-prerequisite is B1's facet machinery, so it sits at the tail by scheduling
-rather than by dependency, and can move earlier if the mirror proves
-cheap.
+B4 closes v1. The deferred set — the pinned strip, cold-browse mode, the
+native tool set, heavyweight `where` edits, the `fuse/` facet,
+fabric-to-fabric redirection, `https:` read ends, and `search` — is
+designed and preserved in [`futures.md`](futures.md), each returning as
+its own slice when scheduled.
 
 ## Working rules
 
