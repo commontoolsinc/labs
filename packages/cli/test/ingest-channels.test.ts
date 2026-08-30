@@ -120,12 +120,12 @@ afterAll(async () => {
 
 describe("resolveSpaceDid", () => {
   describe("control-plane URL construction", () => {
-    it("keeps the configured base path", () => {
-      // A root-absolute path resolved against a base URL discards the base's
-      // own path, so a deployment served under a prefix had every command
-      // addressed at the origin — failing as a 404 from somewhere else rather
-      // than as a configuration error.
+    // A root-absolute path resolved against a base URL discards the base's own
+    // path, so a deployment served under a prefix had every command addressed at
+    // the origin — failing as a 404 from somewhere else rather than as a
+    // configuration error.
 
+    it("keeps the configured base path", () => {
       expect(
         controlPlaneUrl(new URL("https://host.example/fabric"), "mint").href,
       )

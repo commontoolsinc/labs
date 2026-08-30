@@ -4714,12 +4714,12 @@ describe("runtimeErrorLog", () => {
 });
 
 describe("schemaIsObjectShaped", () => {
-  it("rejects boolean schemas and accepts object shapes", () => {
-    // Pinned directly: the gate's caller pre-filters non-object roots, so the
-    // defensive boolean-target guard is unreachable through it, and the
-    // combinator boundary this function encodes (allOf conjunctions count,
-    // disjunctions never) deserves its own record.
+  // Pinned directly: the gate's caller pre-filters non-object roots, so the
+  // defensive boolean-target guard is unreachable through it, and the
+  // combinator boundary this function encodes (allOf conjunctions count,
+  // disjunctions never) deserves its own record.
 
+  it("rejects boolean schemas and accepts object shapes", () => {
     expect(schemaIsObjectShaped(true, true)).toBe(false);
     expect(schemaIsObjectShaped(false, false)).toBe(false);
     expect(schemaIsObjectShaped({ type: "object" }, {})).toBe(true);
