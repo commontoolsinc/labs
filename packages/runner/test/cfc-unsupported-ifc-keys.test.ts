@@ -7,15 +7,16 @@ import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-unsupported-ifc-keys");
 
-// Regression guard for unimplemented ifc.* claims (audit S10).
-//
-// Several ifc keys are defined by the spec but unimplemented in the runner.
-// They were silently ignored (and dropped by schema-merge), so an author
-// declaring them got no enforcement and no error — a fail-open trap. A write
-// to a path declaring an unsupported claim must fail closed, the same way
-// collection already does (projection is implemented — see
-// cfc-projection.test.ts).
 describe("CFC unsupported ifc claims fail closed", () => {
+  // Regression guard for unimplemented ifc.* claims (audit S10).
+  //
+  // Several ifc keys are defined by the spec but unimplemented in the runner.
+  // They were silently ignored (and dropped by schema-merge), so an author
+  // declaring them got no enforcement and no error — a fail-open trap. A write
+  // to a path declaring an unsupported claim must fail closed, the same way
+  // collection already does (projection is implemented — see
+  // cfc-projection.test.ts).
+
   const unsupportedClaims: Array<[string, unknown]> = [
     ["opaque", true],
     ["passThrough", true],

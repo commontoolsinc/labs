@@ -561,9 +561,10 @@ describe("delivery shaping (scheduler integration)", () => {
     }
   });
 
-  // W4: the in-queue backlog cap. Non-renderer events go straight to the queue
-  // (the shaper only holds renderer input), so they exercise the cap.
   it("caps the per-stream in-queue backlog, collapsing the overflow", async () => {
+    // W4: the in-queue backlog cap. Non-renderer events go straight to the
+    // queue (the shaper only holds renderer input), so they exercise the cap.
+
     const runtime = makeRuntime();
     try {
       const { tx, linkRef, received } = streamWithHandler(runtime, "w4/cap");
@@ -582,12 +583,13 @@ describe("delivery shaping (scheduler integration)", () => {
     }
   });
 
-  // W4 exclusion: a caller-supplied durable id names an invocation whose
-  // receipt address derives from it, so it must never be last-wins-merged.
-  // At the cap it is refused loudly before dispatch — callback settled
-  // errored, nothing executed — rather than silently folded into another
-  // event's identity.
   it("refuses a caller-id send at the backlog cap instead of collapsing it", async () => {
+    // W4 exclusion: a caller-supplied durable id names an invocation whose
+    // receipt address derives from it, so it must never be last-wins-merged.
+    // At the cap it is refused loudly before dispatch — callback settled
+    // errored, nothing executed — rather than silently folded into another
+    // event's identity.
+
     const runtime = makeRuntime();
     try {
       const { tx, linkRef, received } = streamWithHandler(runtime, "w4/refuse");
@@ -634,11 +636,12 @@ describe("delivery shaping (scheduler integration)", () => {
     }
   });
 
-  // Same pair, same stream: the same invocation. At the cap a retry rides the
-  // already-pending entry — first payload wins, matching the create-only
-  // receipt arbitration it would get after dispatch — and both senders settle
-  // on the one outcome.
   it("coalesces a same-id send at the cap onto its pending invocation", async () => {
+    // Same pair, same stream: the same invocation. At the cap a retry rides the
+    // already-pending entry — first payload wins, matching the create-only
+    // receipt arbitration it would get after dispatch — and both senders settle
+    // on the one outcome.
+
     const runtime = makeRuntime();
     try {
       const { tx, linkRef, received } = streamWithHandler(
@@ -692,10 +695,11 @@ describe("delivery shaping (scheduler integration)", () => {
     }
   });
 
-  // The other direction of the exclusion: a minted flood collapsing at the cap
-  // must never select a caller-id entry as its survivor, which would rewrite
-  // the payload that entry's receipt is about to witness.
   it("never rewrites a queued caller-id entry when a minted flood collapses", async () => {
+    // The other direction of the exclusion: a minted flood collapsing at the
+    // cap must never select a caller-id entry as its survivor, which would
+    // rewrite the payload that entry's receipt is about to witness.
+
     const runtime = makeRuntime();
     try {
       const { tx, linkRef, received } = streamWithHandler(runtime, "w4/keep");
@@ -726,12 +730,14 @@ describe("delivery shaping (scheduler integration)", () => {
     }
   });
 
-  // The collapse is last-wins for the event TIME as well as the payload: a
-  // dispatched handler must read the instant of the event it actually runs, not
-  // the first event that happened to occupy the collapsed slot. These events are
-  // origin-less (no originTx) with distinct instants — the case where the times
-  // genuinely differ (a same-origin flood shares one frozen instant).
   it("collapse carries the newest event's time, not the first collapsed one", async () => {
+    // The collapse is last-wins for the event TIME as well as the payload: a
+    // dispatched handler must read the instant of the event it actually runs,
+    // not the first event that happened to occupy the collapsed slot. These
+    // events are origin-less (no originTx) with distinct instants — the case
+    // where the times genuinely differ (a same-origin flood shares one frozen
+    // instant).
+
     const runtime = makeRuntime();
     try {
       const tx = runtime.edit();

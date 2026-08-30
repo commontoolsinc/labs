@@ -166,22 +166,23 @@ const rawStoredSourceMap = async (
   }
 };
 
-// A compiled closure read back from one space's storage must hand its
-// consumers plain VALUES — not live query-result views over the space it was
-// read from. Before the fix, `loadCompiledClosure` returned `cell.get()`
-// documents whose `sourceMap` was a query-result proxy; a runtime that
-// storage-served a program's modules from space A and then wrote them back
-// into space B persisted B's copy of each shared doc with `/sourceMap` as a
-// QUOTED CROSS-SPACE LINK into A instead of the map:
-//
-//   - when B's copy of the doc already existed WITH its stored CFC envelope
-//     (the server-side space-root ensure writes the default-app closure into
-//     every served space), the link write is CFC-relevant and the write-back
-//     ABORTS: "missing link source metadata for <doc> at /sourceMap" — the
-//     ensure-ON pattern-shard-10 sx2-scale red;
-//   - when B's copy did not exist yet, the corrupt link landed SILENTLY
-//     (observed durably in ensure-OFF stores).
 describe("compile-cache storage-served closures round-trip as values", () => {
+  // A compiled closure read back from one space's storage must hand its
+  // consumers plain VALUES — not live query-result views over the space it was
+  // read from. Before the fix, `loadCompiledClosure` returned `cell.get()`
+  // documents whose `sourceMap` was a query-result proxy; a runtime that
+  // storage-served a program's modules from space A and then wrote them back
+  // into space B persisted B's copy of each shared doc with `/sourceMap` as a
+  // QUOTED CROSS-SPACE LINK into A instead of the map:
+  //
+  //   - when B's copy of the doc already existed WITH its stored CFC envelope
+  //     (the server-side space-root ensure writes the default-app closure into
+  //     every served space), the link write is CFC-relevant and the write-back
+  //     ABORTS: "missing link source metadata for <doc> at /sourceMap" — the
+  //     ensure-ON pattern-shard-10 sx2-scale red;
+  //   - when B's copy did not exist yet, the corrupt link landed SILENTLY
+  //     (observed durably in ensure-OFF stores).
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
 
   const runtimeIn = (byteCache?: ModuleByteCache) =>

@@ -560,21 +560,22 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
     }
   });
 
-  // The measurement quantifies over paths a schema could have declared a
-  // policy at, and the raw meta seam is not one: `setMetaRaw` lands on a
-  // document-root sibling of `value` (`schema`, `internal`, and the rest of
-  // the `MetaField` union), which no value schema describes.
-  //
-  // One route does reach a ceiling there — a document-root declaration
-  // resolves at every meta path by longest prefix — but it widens the
-  // ceiling over the whole payload, and a declaration on a single result
-  // field, which is how a pattern normally labels one, leaves the seam's
-  // ceiling empty. Such a pattern is then un-updatable: the pattern updater,
-  // `setsrc`, and setup over an existing piece all stamp meta.
-  //
-  // The seam is outside the check at every rung, so these cases assert on
-  // both the strict reject and the persist-and-flag diagnostic below it.
   describe("meta-seam exemption", () => {
+    // The measurement quantifies over paths a schema could have declared a
+    // policy at, and the raw meta seam is not one: `setMetaRaw` lands on a
+    // document-root sibling of `value` (`schema`, `internal`, and the rest of
+    // the `MetaField` union), which no value schema describes.
+    //
+    // One route does reach a ceiling there — a document-root declaration
+    // resolves at every meta path by longest prefix — but it widens the
+    // ceiling over the whole payload, and a declaration on a single result
+    // field, which is how a pattern normally labels one, leaves the seam's
+    // ceiling empty. Such a pattern is then un-updatable: the pattern updater,
+    // `setsrc`, and setup over an existing piece all stamp meta.
+    //
+    // The seam is outside the check at every rung, so these cases assert on
+    // both the strict reject and the persist-and-flag diagnostic below it.
+
     // Pinned rather than inherited: this exemption is only observable at the
     // strictness where the misfit rejects.
     const strictRuntime = (
@@ -863,12 +864,13 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
     });
   });
 
-  // Reserved CFC documents (policy manifests, release grants) hold policy
-  // state the runtime persists through its privileged writers, so they are
-  // not value-write targets the fit measures. The grant document declares no
-  // store policy of its own, and the transaction that authors one has read
-  // the resource it releases — a tainted join.
   it("admits a reserved grant document under enforce-strict", async () => {
+    // Reserved CFC documents (policy manifests, release grants) hold policy
+    // state the runtime persists through its privileged writers, so they are
+    // not value-write targets the fit measures. The grant document declares no
+    // store policy of its own, and the transaction that authors one has read
+    // the resource it releases — a tainted join.
+
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = newRuntime(storageManager);
     try {

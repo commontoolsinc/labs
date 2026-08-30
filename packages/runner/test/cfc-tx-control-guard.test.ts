@@ -7,14 +7,16 @@ import type { JSONSchema } from "../src/builder/types.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-tx-control-guard");
 
-// Regression guard for the transaction control surface (audit S3).
-//
-// setCfcEnforcementMode / prepareCfc are on the public IExtendedStorageTransaction
-// and cell.tx is public, so code holding a Cell can reach them. prepareCfc was
-// fixed to always verify (S2); the remaining weakening lever is
-// setCfcEnforcementMode lowering an enforcing transaction back to disabled/observe.
-// The mode must not be lowerable below the highest enforcing level set on a tx.
 describe("CFC transaction control guard", () => {
+  // Regression guard for the transaction control surface (audit S3).
+  //
+  // setCfcEnforcementMode / prepareCfc are on the public
+  // IExtendedStorageTransaction and cell.tx is public, so code holding a Cell
+  // can reach them. prepareCfc was fixed to always verify (S2); the remaining
+  // weakening lever is setCfcEnforcementMode lowering an enforcing transaction
+  // back to disabled/observe. The mode must not be lowerable below the highest
+  // enforcing level set on a tx.
+
   it("refuses to weaken an enforcing transaction's mode", async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({

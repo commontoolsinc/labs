@@ -579,18 +579,19 @@ describe("OW27 event-flood shaping — per-stream pacing, pace-never-drop (READM
 });
 
 describe("intent outcome consumption (events.md §5's client signal)", () => {
-  // Destination-level pins over the SCRIPTED STORAGE-NOTIFICATION seam
-  // (stage C design (e), RULED 2026-08-18): the notice arms, the
-  // retirement calls, the subscriber signal, and the listener release —
-  // the "client MUST be signaled" machinery (events.md §5) that the e2e
-  // suites exercise only incidentally (the watermark backstop also
-  // retires echoes there, so without these pins the mechanism was
-  // feature-deletion-survivable). The seam is the one production
-  // consumes — `storageManager.subscribe` + the raw replica read — not a
-  // hand-stubbed `cell.sink` (retired with the sink); the full pin set
-  // (visits, microtask, release, T25, no scheduler node, OFF) lives in
-  // `speculation-intent-listener.test.ts`.
   it("consequenced retires; dropped/errored retire AND signal; the intent listener releases with its last tracked id", async () => {
+    // Destination-level pins over the SCRIPTED STORAGE-NOTIFICATION seam
+    // (stage C design (e), RULED 2026-08-18): the notice arms, the
+    // retirement calls, the subscriber signal, and the listener release —
+    // the "client MUST be signaled" machinery (events.md §5) that the e2e
+    // suites exercise only incidentally (the watermark backstop also
+    // retires echoes there, so without these pins the mechanism was
+    // feature-deletion-survivable). The seam is the one production
+    // consumes — `storageManager.subscribe` + the raw replica read — not a
+    // hand-stubbed `cell.sink` (retired with the sink); the full pin set
+    // (visits, microtask, release, T25, no scheduler node, OFF) lives in
+    // `speculation-intent-listener.test.ts`.
+
     const scripted = scriptedIntentManager();
     const runtimeStub = { storageManager: scripted.manager } as never;
     const destination = new SpeculationOverlayDestination(runtimeStub);
