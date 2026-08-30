@@ -361,8 +361,12 @@ Deno.test("the polling-waitFor ALLOWLIST has no stale entries", async () => {
   );
 });
 
+//
+// The command entry point
+//
 // The next two tests drive the command entry point over a temp fixture tree, so
 // they cover the clean and violation paths without depending on the real tree.
+//
 
 Deno.test(
   "check-no-waitfor main reports success and returns 0 on a clean tree",

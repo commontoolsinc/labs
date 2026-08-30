@@ -26,6 +26,10 @@ const sqliteOperation: Operation = {
 };
 
 describe("commit-telemetry", () => {
+  // Server-execution v2 stage C.2 removed the scheduler-observation wire
+  // fields, so no commit can classify as `scheduler_observation` anymore;
+  // the kind stays in the union so dashboards keep their shape.
+
   it("returns `semantic` for non-SQLite entity operations", () => {
     expect(classifyCommitTelemetry(commit([semanticOperation]))).toEqual({
       kind: "semantic",
@@ -34,10 +38,6 @@ describe("commit-telemetry", () => {
       sqliteOperationCount: 0,
     });
   });
-
-  // Server-execution v2 stage C.2 removed the scheduler-observation wire
-  // fields, so no commit can classify as `scheduler_observation` anymore;
-  // the kind stays in the union so dashboards keep their shape.
 
   it("returns `sqlite` for SQLite-only requests", () => {
     expect(classifyCommitTelemetry(commit([sqliteOperation]))).toEqual({

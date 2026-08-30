@@ -180,8 +180,12 @@ describe("properties named after Object.prototype members", () => {
     expect(stored.toLocaleString).toBe("written");
   });
 
+  //
+  // More public paths with the same predicate
+  //
   // Review of the first pass found four more public paths with the same
   // predicate. Each is pinned here through the surface a caller actually uses.
+  //
 
   it("removing such a property actually removes it", () => {
     const c = runtime.getCell<Record<string, unknown>>(

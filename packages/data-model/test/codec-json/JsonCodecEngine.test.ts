@@ -1723,10 +1723,14 @@ describe("JsonCodecEngine", () => {
       expect(Object.isFrozen(result)).toBe(true);
     });
 
-    // Every arm of the dispatch, so that the guarantee does not depend on
-    // which one produced the value. `isDeepFrozen()` rather than
-    // `Object.isFrozen()`: an arm that froze only the value it built, and not
-    // what it wrapped, would pass the shallow check.
+    //
+    // Every arm of the dispatch
+    //
+    // Every arm of the dispatch, so that the guarantee does not depend on which
+    // one produced the value. `isDeepFrozen()` rather than `Object.isFrozen()`:
+    // an arm that froze only the value it built, and not what it wrapped, would
+    // pass the shallow check.
+    //
 
     it("deep-freezes an `UnknownValue` from an unrecognized tag", () => {
       const result = fromEncodedFormat(

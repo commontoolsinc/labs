@@ -582,12 +582,16 @@ Deno.test("the persisted lease-holder exemption does not survive session resume 
   }
 });
 
-// Instance identity across the wire seam (threads r3731191411 and
-// r3731191526): the wire strips scope KEYS (frames carry scope names), so
-// the server must refuse what the wire cannot express — one watch set (or
-// query) resolving TWO instances of one (branch, id, scope) — and must
-// treat a changed `entityScopeKey` on an existing watch id as a changed
-// spec, never silently the same watch.
+//
+// Instance identity across the wire seam
+//
+// Instance identity across the wire seam (threads r3731191411 and r3731191526):
+// the wire strips scope KEYS (frames carry scope names), so the server must
+// refuse what the wire cannot express — one watch set (or query) resolving TWO
+// instances of one (branch, id, scope) — and must treat a changed
+// `entityScopeKey` on an existing watch id as a changed spec, never silently
+// the same watch.
+//
 
 Deno.test("stage A: a lease holder names two instances of one (branch, id, scope) and receives BOTH, keyed — watch.set, watch.add, graph.query, and the push frame; the collapse guard still refuses a non-holder (OW17's wire leg)", async () => {
   // OW17's wire leg (server-execution v2 stage A, 2026-08-16): a LIVE lease

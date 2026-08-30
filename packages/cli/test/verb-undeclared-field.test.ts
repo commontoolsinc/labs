@@ -667,9 +667,13 @@ describe("verb-undeclared-field", () => {
     });
   });
 
-  // Positions the walk cannot judge, each asserted as the call GOING OUT
-  // rather than as no refusal coming back. The two are different facts, and
-  // only the first one states that a caller can still make the call.
+  //
+  // Positions the walk cannot judge
+  //
+  // Positions the walk cannot judge, each asserted as the call GOING OUT rather
+  // than as no refusal coming back. The two are different facts, and only the
+  // first one states that a caller can still make the call.
+  //
 
   describe("a schema that forbids undeclared fields", () => {
     it("refuses the undeclared field rather than letting it be dropped", () => {
