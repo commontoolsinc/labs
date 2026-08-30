@@ -16,6 +16,9 @@
 // control case using an ordinary name, so a harness that stops exercising the
 // path fails loudly rather than passing vacuously.
 //
+// Review of the first pass found four more public paths with the same
+// predicate. Each is pinned here through the surface a caller actually uses.
+//
 // Sibling of the same bug class in the query-result proxy's
 // `getOwnPropertyDescriptor` trap (#5357).
 
@@ -179,13 +182,6 @@ describe("properties named after Object.prototype members", () => {
     const stored = c.get() as Record<string, unknown>;
     expect(stored.toLocaleString).toBe("written");
   });
-
-  //
-  // More public paths with the same predicate
-  //
-  // Review of the first pass found four more public paths with the same
-  // predicate. Each is pinned here through the surface a caller actually uses.
-  //
 
   it("removing such a property actually removes it", () => {
     const c = runtime.getCell<Record<string, unknown>>(

@@ -254,6 +254,13 @@ Deno.test(
   },
 );
 
+//
+// A binding the walker never has to enter
+//
+// The parentheses and assertions here wrap the binding VALUE, not a type, so
+// no substitution happens and the walker is not reached at all.
+//
+
 Deno.test(
   "supported binding wrapped in parentheses and assertions is accepted",
   async () => {
