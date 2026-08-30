@@ -248,7 +248,7 @@ above is prescriptive on this point: `<read opts>` is a position, not an
 illustration, and a projection written before the verb is refused rather than
 accepted quietly.
 
-`piece call` places them before the callable name today, because everything
+`cf call` places them before the callable name today, because everything
 after that name belongs to the callable's own schema-derived parser. So the one
 position the layout allows is the one position the command rejects, a caller who
 writes them where the layout shows them gets an error about a rule they did not
@@ -579,7 +579,7 @@ than taking anything away.
 
 1. **Factor out the shared read step** so a single implementation turns a cell
    and a shape into structured output.
-2. **Give every arrival access to it** — `piece call` gains `--select`,
+2. **Give every arrival access to it** — `cf call` gains `--select`,
    `--schema` and `--filter`, `wish` gains them, and an address renders identically from each.
 3. **`--piece` accepts the `of:` address form**, so an emitted address composes
    into the next command. This is where addressing stops being piece-flavored
@@ -676,13 +676,13 @@ leading position stays legal where nothing is ambiguous; the documentation stops
 using it.
 
 **Each step carries its own documentation.** `--input`, `--piece`, and
-`piece get` appear across the tutorial, `packages/cli/README.md`, and the
+`cf get` appear across the tutorial, `packages/cli/README.md`, and the
 pattern documentation, so a single sweep at the end would leave every
 intermediate state wrong. What each step owes:
 
 | Step | Documentation owed |
 | --- | --- |
-| 2 | The read options gain a second host — `piece call`'s section in `packages/cli/README.md`, and [Verbs over the CLI](../common/verbs/over-the-cli.md) |
+| 2 | The read options gain a second host — `cf call`'s section in `packages/cli/README.md`, and [Verbs over the CLI](../common/verbs/over-the-cli.md) |
 | 3 | Address forms wherever `--piece` is taught: the CLI README and the tutorial's workflow chapter |
 | 4 | `#argument` beside every `--input` example, in the same places |
 | 5 | The new spellings alongside the old ones everywhere both work |

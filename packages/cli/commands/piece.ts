@@ -1859,9 +1859,9 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
     .stopEarly()
     .arguments("<callable:string> [tail...:string]")
     .action(async function (
-      // Spelled out because this builder stands alone: the target options
-      // arrive as `piece` globals on one mount and as own options on the
-      // other, so neither inference sees the whole surface.
+      // Spelled out because `targetOptions` attaches the target options
+      // after the builder returns, so what the builder declares on its own
+      // is not the whole surface the action receives.
       options:
         & PieceCLIOptions
         & PieceCallReadbackFlags
@@ -1973,10 +1973,9 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
 
 /**
  * A piece data command, mounted at top level: `cf get`, `cf set`, and
- * `cf call`. One definition per command and one spelling for it — the
- * piece-mounted spellings these once shared a definition with are removed
- * (docs/plans/cli-surface-shape.md, step 6b). `name` reaches the builder
- * because a command's own help quotes the spelling a caller types.
+ * `cf call` — one definition per command, and one spelling for it. `name`
+ * reaches the builder because a command's own help quotes the spelling a
+ * caller types.
  */
 // deno-lint-ignore no-explicit-any
 export function pieceDataCommand(name: "get" | "set" | "call"): Command<any> {
