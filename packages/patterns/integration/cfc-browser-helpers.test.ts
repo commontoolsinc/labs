@@ -2528,6 +2528,13 @@ describe("CFC browser helpers", () => {
     }
   });
 
+  //
+  // The click-to-own-render echo
+  //
+  // Not about where a control sits, but about what the sender observes coming
+  // back from its own click — including through a shadow root.
+  //
+
   it("samples the sender's click-to-own-render echo, shadow roots included", async () => {
     const echoPage = await browser.newPage();
     try {
