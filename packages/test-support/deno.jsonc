@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "exports": {
     ".": "./src/mod.ts",
+    "./bench-worker": "./src/bench-worker.ts",
     "./clock-preload": "./test/clock-preload.ts",
     "./compile-byte-cache": "./src/compile-byte-cache.ts",
     "./fixture-runner": "./src/fixture-runner.ts",

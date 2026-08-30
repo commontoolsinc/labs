@@ -32,71 +32,16 @@
  *     deno task bench
  */
 
+import { BenchWorker } from "@commonfabric/test-support/bench-worker";
+
 import { realmFromFabricValue } from "@commonfabric/data-model/codecs";
 import type { FabricValue } from "@commonfabric/data-model/fabric-value";
 
 import { serializeEvent } from "../src/main/events.ts";
-import type { EventAck, EventRequest } from "./fixtures/dom-event-far-side.ts";
-
-/** The outstanding request's settlement, held while it is in flight. */
-type PendingRequest = {
-  readonly resolve: () => void;
-  readonly reject: (reason: Error) => void;
-};
-
-/** One worker for the whole run, one message outstanding at a time. */
-class FarSide {
-  readonly #worker: Worker;
-  #pending: PendingRequest | undefined;
-
-  constructor() {
-    this.#worker = new Worker(
-      import.meta.resolve("./fixtures/dom-event-far-side.ts"),
-      { type: "module" },
-    );
-
-    this.#worker.onmessage = (ev: MessageEvent<EventAck>) => {
-      const pending = this.#pending;
-      this.#pending = undefined;
-      if (ev.data.ok) pending?.resolve();
-      else pending?.reject(new Error(`Far side refused: ${ev.data.error}`));
-    };
-
-    // A worker that fails to start, or throws where nothing catches, sends no
-    // ack -- and a benchmark waiting on one that will never arrive hangs rather
-    // than failing, which is the worst way for a measurement to end.
-    this.#worker.onerror = (ev: ErrorEvent) => {
-      const pending = this.#pending;
-      this.#pending = undefined;
-      pending?.reject(new Error(`Far side failed: ${ev.message}`));
-    };
-
-    this.#worker.onmessageerror = () => {
-      const pending = this.#pending;
-      this.#pending = undefined;
-      pending?.reject(new Error("Far side could not deserialize the message"));
-    };
-  }
-
-  /**
-   * Sends one request and settles when the far side acks.
-   *
-   * @throws If the far side reports failure. An unexamined ack is what makes a
-   *   benchmark measure the wrong thing silently.
-   */
-  send(request: EventRequest): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.#pending = { resolve, reject };
-      this.#worker.postMessage(request);
-    });
-  }
-
-  close(): void {
-    this.#worker.terminate();
-  }
-}
-
-const farSide = new FarSide();
+import type { EventRequest } from "./fixtures/dom-event-far-side.ts";
+const farSide = new BenchWorker<EventRequest>(
+  import.meta.resolve("./fixtures/dom-event-far-side.ts"),
+);
 
 /** An event, as the applicator's listener receives one. */
 class BenchEvent {

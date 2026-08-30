@@ -33,6 +33,8 @@
  *     deno bench --allow-read --no-check bench/ipc-status-quo.bench.ts
  */
 
+import { BenchWorker } from "@commonfabric/test-support/bench-worker";
+
 import { realmFromFabricValue } from "@/codecs.ts";
 import { FabricBytes } from "@/fabric-primitives/FabricBytes.ts";
 import type { FabricValue } from "@/interface.ts";
@@ -41,68 +43,10 @@ import {
   makeObject,
   OBJECTS,
 } from "./fixtures/codec-fixtures.ts";
-import type { IpcAck, IpcRequest } from "./fixtures/realm-ipc-worker.ts";
-
-type PendingRequest = {
-  readonly resolve: () => void;
-  readonly reject: (reason: Error) => void;
-};
-
-/** One worker for the whole run, one message outstanding at a time. */
-class FarSide {
-  readonly #worker: Worker;
-  #pending: PendingRequest | undefined;
-
-  constructor() {
-    this.#worker = new Worker(
-      import.meta.resolve("./fixtures/realm-ipc-worker.ts"),
-      { type: "module" },
-    );
-
-    this.#worker.onmessage = (ev: MessageEvent<IpcAck>) => {
-      const pending = this.#pending;
-      this.#pending = undefined;
-      if (ev.data.ok) pending?.resolve();
-      else pending?.reject(new Error(`Far side refused: ${ev.data.error}`));
-    };
-
-    // A worker that fails to start, or throws where nothing catches, sends no
-    // ack -- and a benchmark waiting on one that will never arrive hangs
-    // rather than failing, which is the worst way for a measurement to end.
-    // `messageerror` covers the far side receiving something it cannot
-    // deserialize, which no `error` event reports.
-    this.#worker.onerror = (ev: ErrorEvent) => {
-      const pending = this.#pending;
-      this.#pending = undefined;
-      pending?.reject(new Error(`Far side failed: ${ev.message}`));
-    };
-
-    this.#worker.onmessageerror = () => {
-      const pending = this.#pending;
-      this.#pending = undefined;
-      pending?.reject(new Error("Far side could not deserialize the message"));
-    };
-  }
-
-  /**
-   * Sends one request and settles when the far side acks.
-   *
-   * @throws If the far side reports failure. An unexamined ack is what makes a
-   *   benchmark measure the wrong thing silently.
-   */
-  send(request: IpcRequest): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.#pending = { resolve, reject };
-      this.#worker.postMessage(request);
-    });
-  }
-
-  close(): void {
-    this.#worker.terminate();
-  }
-}
-
-const farSide = new FarSide();
+import type { IpcRequest } from "./fixtures/realm-ipc-worker.ts";
+const farSide = new BenchWorker<IpcRequest>(
+  import.meta.resolve("./fixtures/realm-ipc-worker.ts"),
+);
 
 /**
  * A spread of payload shapes rather than sizes of one shape: what a crossing
