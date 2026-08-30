@@ -50,8 +50,9 @@ type ArrayElementType<ArrayType extends readonly unknown[]> = ArrayType extends
   readonly (infer ElementType)[] ? ElementType : never;
 
 describe("Schema-to-TS Type Conversion", () => {
-  // These tests verify the type conversion at compile time
-  // They don't have runtime assertions but help ensure the Schema type works correctly
+  // These tests verify the type conversion at compile time. Most carry no
+  // runtime assertions and exist to ensure the Schema type works correctly;
+  // the last drives real data through the runtime.
 
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;

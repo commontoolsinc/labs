@@ -1094,8 +1094,9 @@ describe("CFC browser helpers", () => {
   //
   // Filling and typing
   //
-  // The same settle discipline as the click helpers, for the helpers that put
-  // text into a control rather than click one.
+  // The helpers that put text into a control rather than click one: the same
+  // settle discipline as the click helpers, and what happens when a commit
+  // replaces the control they were typing into.
   //
 
   it("settles the view before pressing Enter in a submit input", async () => {
