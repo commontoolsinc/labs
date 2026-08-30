@@ -77,12 +77,13 @@ interface SchemaRoot {
     expect(JSON.stringify(returning)).not.toContain("fid");
   });
 
-  // C1 puts the result in the TYPE; emitting it into the schema is C3. Until
-  // then a returning verb and a value-less one generate byte-identical
-  // schemas and the result type never reaches `$defs` at all. Pinned so that
-  // C3 has a baseline to move rather than a belief to check, and so the day
-  // this stops being true is a failing test rather than a discovery.
   it("does not yet carry the result into the schema — that is C3", async () => {
+    // C1 puts the result in the TYPE; emitting it into the schema is C3. Until
+    // then a returning verb and a value-less one generate byte-identical
+    // schemas and the result type never reaches `$defs` at all. Pinned so that
+    // C3 has a baseline to move rather than a belief to check, and so the day
+    // this stops being true is a failing test rather than a discovery.
+
     const schema = await schemaFor(`
 interface AddTopic {
   title: string;
