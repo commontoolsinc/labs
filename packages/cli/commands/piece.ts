@@ -656,7 +656,7 @@ export function localPatternEntry(
 }
 
 /**
- * A `piece get` failure caused by a data condition rather than bad arguments:
+ * A `cf get` failure caused by a data condition rather than bad arguments:
  * a path that doesn't resolve, a result schema that can't project stored data
  * (PieceResultProjectionError), a filter/projection that doesn't fit the
  * selected value (CellSelectionError), or a path that lands on a verb
@@ -674,7 +674,7 @@ export function isPieceGetDataError(error: unknown): error is Error {
 }
 
 /**
- * Build the stderr report for a `piece get` failure. Returns null when the
+ * Build the stderr report for a `cf get` failure. Returns null when the
  * error is not a data error (the caller should rethrow). `message` is the
  * one-line error; `hint` is an optional next-step tip. A projection error
  * already carries its own `--step` guidance, selection errors stand alone,
@@ -707,7 +707,7 @@ export function pieceGetDataErrorReport(
  * Build the stderr report for a `piece link` validation failure. Returns null
  * when the error is not a LinkValidationError (the caller should rethrow).
  * Link validation fails on data conditions — a source/target piece or path
- * that doesn't exist, read over the network — so it reports like `piece get`'s
+ * that doesn't exist, read over the network — so it reports like `cf get`'s
  * unresolved-path data error rather than as a Cliffy usage error.
  */
 export function pieceLinkDataErrorReport(
@@ -724,7 +724,7 @@ export function pieceLinkDataErrorReport(
 }
 
 /**
- * Build the stderr report for a `piece call` payload rejection. Returns null
+ * Build the stderr report for a `cf call` payload rejection. Returns null
  * when the error is not a VerbInputValidationError (the caller should
  * rethrow). The flags parsed fine and the piece resolved — the values simply
  * do not fit the verb — so it reports like the other data errors rather than
@@ -745,7 +745,7 @@ export function verbInputErrorReport(
 
 /**
  * Print a data-error report — message plus optional hint — to stderr and exit
- * 1. The single exit path for the `piece get` / `piece link` data errors
+ * 1. The single exit path for the `cf get` / `piece link` data errors
  * above. The `deps` seam lets unit tests observe the wiring without a real
  * process exit; runtime callers use the defaults.
  */
@@ -766,7 +766,7 @@ export function exitWithDataError(
 }
 
 /**
- * Turn a failed `piece call` into its stderr report, or re-throw.
+ * Turn a failed `cf call` into its stderr report, or re-throw.
  *
  * A named function rather than an inline `.catch` in the command action: the
  * action body only ever runs under Cliffy, so anything written there is
@@ -2726,7 +2726,7 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     } catch (error) {
       // A link that fails validation is a data error (the pieces/paths read
       // over the network don't support the link), not a usage error — report
-      // it like `piece get` does instead of letting Cliffy dump the help
+      // it like `cf get` does instead of letting Cliffy dump the help
       // screen over it.
       const report = pieceLinkDataErrorReport(error, {
         sourcePieceId: source.pieceId,
@@ -4416,7 +4416,7 @@ export async function checkPieceSourceFromCommand(
   if (!report.compatible) {
     // A refusal is a data condition — this source and this piece's stored
     // state don't fit — not an arg-parse failure, so it reports like the
-    // `piece get` / `piece link` data errors above: plain stderr and exit 1,
+    // `cf get` / `piece link` data errors above: plain stderr and exit 1,
     // never a Cliffy ValidationError, which would dump the usage screen over
     // the verdict.
     exitWithDataError({

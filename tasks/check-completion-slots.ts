@@ -68,7 +68,6 @@ export const NO_CANDIDATES = new Map<string, string>([
   // docs/plans/cli-completion-coverage.md builds the candidates; which slot
   // receives them waits on step 10 of docs/plans/cli-surface-shape.md.
   ["call:tail", "the callable's own vocabulary"],
-  ["piece call:tail", "the same"],
   ["exec:tail", "the same"],
 ]);
 
@@ -172,8 +171,6 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
   // docs/plans/cli-surface-shape.md for the verb to precede the cursor.
   ["call:select", "the verb's own result shape"],
   ["call:schema", "the same"],
-  ["piece call:select", "the same"],
-  ["piece call:schema", "the same"],
   ["exec:select", "the same"],
   ["exec:schema", "the same"],
   // `wish` projects what its query resolved to, and resolving a wish commits a

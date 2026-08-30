@@ -151,11 +151,6 @@ answer composes into the next command.
   them. The suffix also needs the canonical form, so with `--url` or a bare id,
   `--input` is the spelling that reaches it.
 
-`cf piece get|set|call` name the same commands under a deprecated spelling: they
-work and warn on stderr with the date they stop working. That date lives once,
-as `PIECE_DATA_SPELLING_END_DATE` in `packages/cli/commands/piece.ts`. Prefer
-the top-level spellings.
-
 ## Where the read options go
 
 `--select`, `--schema` and `--filter` shape what a read returns, and every

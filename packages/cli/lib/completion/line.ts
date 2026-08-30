@@ -183,7 +183,7 @@ function expandBundle(
  * Subcommands that represent real commands.
  *
  * `main` registers `help` with `.global()`, so Cliffy propagates it to every
- * descendant and `hasCommands()` is true even on leaves like `piece call`.
+ * descendant and `hasCommands()` is true even on leaves like `cf call`.
  * Taking that at face value would resolve every leaf's positional to a
  * subcommand slot and silently disable all dynamic value completion.
  */
@@ -217,9 +217,6 @@ function stopsEarly(command: AnyCommand): boolean {
  * reason `PRE_PARSE_GLOBALS` is.
  */
 const POSITIONAL_ADDRESS_COMMANDS: ReadonlySet<string> = new Set([
-  "piece get",
-  "piece set",
-  "piece call",
   "get",
   "set",
   "call",

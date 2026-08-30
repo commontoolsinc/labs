@@ -177,13 +177,8 @@ which is why both the test commands and the flags are required.
   **host** is a separate, in-poll role (first joiner — see Identity below).
 
 **Command spellings:** the data commands are `cf get`, `cf set` and `cf call`.
-The `cf piece get` / `cf piece set` / `cf piece call` spellings still run and
-print a deprecation notice on stderr naming the day they stop working.
-`PIECE_DATA_SPELLING_END_DATE` in
-[`packages/cli/commands/piece.ts`](../../cli/commands/piece.ts) is where that
-day is set, and the notice quotes it. The piece-lifecycle commands keep the
-`cf piece` prefix: `new`, `setsrc`, `getsrc`, `step`, `inspect`, `render`, `ls`,
-`rm`, `verbs`, `recreate-root`.
+The piece-lifecycle commands keep the `cf piece` prefix: `new`, `setsrc`,
+`getsrc`, `step`, `inspect`, `render`, `ls`, `rm`, `verbs`, `recreate-root`.
 
 ## Option A — ordinary compatible source updates
 

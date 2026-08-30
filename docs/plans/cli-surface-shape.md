@@ -22,7 +22,7 @@ have landed.
 | --- | --- |
 | 1–5 — the shared read step, the read options on every arrival, `--piece` taking the `of:` form, positional addresses with the `#argument` suffix, and `cf get`/`set`/`call` | on main |
 | 6a — the old spellings warn, each naming its end date | on main |
-| 6b — the old spellings are removed | pending, on the date `PIECE_DATA_SPELLING_END_DATE` names |
+| 6b — the old spellings are removed | on main |
 | 7 — the duplicated nouns are merged | not started; it is last because each pair is two working commands |
 
 **Arc two — how a caller writes what a command acts on.**
@@ -31,7 +31,7 @@ have landed.
 | --- | --- |
 | 8 — `CF_SPACE` is ambient, and a write names the space it wrote to | on main |
 | 9 — a reference takes a space by name and a piece by slug, positionally | not started; lands with 11, not alone |
-| 10 — the verb opens the callable's section and `--` closes it | not started; `PIECE_DATA_SPELLING_END_DATE` is the thing to check first |
+| 10 — the verb opens the callable's section and `--` closes it | not started; 6b has landed, so nothing gates it |
 | 11 — `--url` decomposes into the transport it names and the reference it carries | not started; lands with 9 |
 
 ## What the surface is for
@@ -607,12 +607,8 @@ spelling.
 
 **Naming the target is a second arc, not a later step.** Steps 1 through 7
 decide what the commands are called; the work below decides how a caller writes
-what a command acts on. The two are independent except at one point — 6b removes
-the spellings 6a warned about, so nothing here changes those same commands until
-it has landed. `PIECE_DATA_SPELLING_END_DATE` in
-`packages/cli/commands/piece.ts` is the date those warnings name and the one
-thing to check before starting step
-10.
+what a command acts on. The two are independent: 6b has removed the
+spellings 6a warned about, so step 10 is free to change those same commands.
 
 8. **Give the space an ambient source** in `CF_SPACE`, with the flag overriding
    it, serving reads and writes alike; and every command that writes names the
