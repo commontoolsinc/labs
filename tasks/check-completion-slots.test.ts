@@ -324,11 +324,12 @@ describe("check-completion-slots", () => {
   });
 
   describe("as the task runs it", () => {
-    // Calling main() above would still pass if the entry point never ran it,
-    // or if the permissions the task declares were too narrow to walk the
-    // tree. This is the promise the CI job makes: the command exits 0, having
-    // done the work.
     it("exits 0 reporting the slots it walked", async () => {
+      // Calling main() above would still pass if the entry point never ran it,
+      // or if the permissions the task declares were too narrow to walk the
+      // tree. This is the promise the CI job makes: the command exits 0, having
+      // done the work.
+
       const { code, out } = await runAsProgram();
       expect(code).toBe(0);
       expect(out).toContain("Completion slots OK");

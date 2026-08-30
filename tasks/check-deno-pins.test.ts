@@ -63,10 +63,11 @@ Deno.test("parseMisePins returns every pin in order", () => {
   );
 });
 
-// TOML rejects a key defined twice even when both values agree, so mise fails
-// to load the file. Reading only the first pin would report the toolchain as
-// aligned while `mise install` — the documented way to get it — is broken.
 Deno.test("findProblems flags a Deno pin defined twice", () => {
+  // TOML rejects a key defined twice even when both values agree, so mise fails
+  // to load the file. Reading only the first pin would report the toolchain as
+  // aligned while `mise install` — the documented way to get it — is broken.
+
   for (
     const miseToml of [
       '[tools]\ndeno = "2.8.1"\ndeno = "2.8.1"\n',
@@ -128,9 +129,10 @@ Deno.test("compareVersions compares components numerically", () => {
   assertEquals(compareVersions("2.8.1", "2.8.1"), 0);
 });
 
-// Reading only the leading components would compare "2.8.0.1" as "2.8.0" and
-// answer as though the trailing component were not there.
 Deno.test("compareVersions rejects a version that is not exact", () => {
+  // Reading only the leading components would compare "2.8.0.1" as "2.8.0" and
+  // answer as though the trailing component were not there.
+
   for (const bad of ["2.8.0.1", "2.8", "abc", "", "v2.8.0"]) {
     assertThrows(
       () => compareVersions(bad, "2.8.0"),
@@ -255,10 +257,11 @@ Deno.test("findProblems flags a range that excludes the pin", () => {
   assert(problems[0].includes("range"));
 });
 
-// The name mise.toml stays in the action's description and comments after the
-// read is replaced by a literal, so this fixture is what a "just inline the
-// version" refactor actually leaves behind.
 Deno.test("findProblems flags an action that stops reading mise.toml", () => {
+  // The name mise.toml stays in the action's description and comments after the
+  // read is replaced by a literal, so this fixture is what a "just inline the
+  // version" refactor actually leaves behind.
+
   const files = {
     ...alignedFiles(),
     denoSetupAction: '    description: "Defaults to the pin in mise.toml."\n' +

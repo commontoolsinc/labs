@@ -120,11 +120,12 @@ describe("OpenTelemetry setup", () => {
   );
 });
 
-// The setup tests above only prove a provider object exists, which stays true
-// even if nothing is wired to an exporter. These drive the real span processor,
-// metric reader and OTLP exporters against a receiver on the loopback interface
-// and check what actually lands on the wire.
 describe("OpenTelemetry export", () => {
+  // The setup tests above only prove a provider object exists, which stays true
+  // even if nothing is wired to an exporter. These drive the real span
+  // processor, metric reader and OTLP exporters against a receiver on the
+  // loopback interface and check what actually lands on the wire.
+
   interface Request {
     path: string;
     body: string;

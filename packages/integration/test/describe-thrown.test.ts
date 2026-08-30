@@ -47,10 +47,11 @@ describe("describe-thrown", () => {
       );
     });
 
-    // A caller that reports a failure it does not own — the page probe inside
-    // a state-wait report — attaches someone else's error as the cause, so a
-    // summary that deferred to "the cause" would name the wrong failure.
     it("keeps a deeply nested value to one line", () => {
+      // A caller that reports a failure it does not own — the page probe inside
+      // a state-wait report — attaches someone else's error as the cause, so a
+      // summary that deferred to "the cause" would name the wrong failure.
+
       expect(describeThrown({ a: { b: { c: { d: 1 } } }, list: [1, 2, 3] }))
         .toBe("{ a: [Object], list: [Array] }");
     });

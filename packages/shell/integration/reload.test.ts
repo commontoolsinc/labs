@@ -18,13 +18,15 @@ describe("shell reload tests", () => {
   const shell = new ShellIntegration();
   shell.bindLifecycle();
 
-  // `globalThis.app` is the handle every driver reaches the shell through, and
-  // the shell publishes it as the last step of its bootstrap module. That
-  // module body runs on past the document's load event, so a navigation that
-  // returns on load can return while the shell is still booting, and a driver
-  // that reads the shell right then reads nothing. A test that reloads should
-  // not have to know that: when a reload returns, the shell behind it answers.
   it("answers for its state as soon as a reload returns", async () => {
+    // `globalThis.app` is the handle every driver reaches the shell through,
+    // and the shell publishes it as the last step of its bootstrap module. That
+    // module body runs on past the document's load event, so a navigation that
+    // returns on load can return while the shell is still booting, and a driver
+    // that reads the shell right then reads nothing. A test that reloads should
+    // not have to know that: when a reload returns, the shell behind it
+    // answers.
+
     const identity = await Identity.generate({ implementation: "noble" });
     const spaceName = globalThis.crypto.randomUUID();
     const page = shell.page();
