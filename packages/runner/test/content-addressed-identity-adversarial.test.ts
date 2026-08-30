@@ -667,7 +667,7 @@ describe("content-addressed identity — adversarial (C5 red-team gate)", () => 
 
   describe("attack 6: fn.src spoofing", () => {
     // Attack 6 — fn.src spoofing vs the provenance identity.
-
+    //
     // These probe resolveProvenanceImplementationIdentity directly: we fabricate
     // a provenance entry (the trusted channel's effect) on a function WE control,
     // then mismatch its src. recordVerifiedProvenance is the exact write the real

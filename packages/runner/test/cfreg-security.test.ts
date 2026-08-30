@@ -1,3 +1,10 @@
+/**
+ * Defense-in-depth on the real registrar (run-once / closed-window /
+ * transactional) lives in cfreg-builder-identity.test.ts; here we only assert
+ * the rejecting variant, the trust gate, and the approval signal — the pieces
+ * the verifier-gating relies on.
+ */
+
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
@@ -109,11 +116,6 @@ describe("isTrustedBuilderArtifact rejects forged values", () => {
 
 describe("HoistRegistrationSink stays untouched on a rejected registration", () => {
   it("an approved registrar still stages+commits normally", () => {
-    // Defense-in-depth on the real registrar (run-once / closed-window /
-    // transactional) lives in cfreg-builder-identity.test.ts; here we only
-    // assert the rejecting variant, the trust gate, and the approval signal —
-    // the pieces the verifier-gating relies on.
-
     const sink: HoistRegistrationSink = new Map();
     const { register, commit } = createHoistRegistrar("id", sink);
     register({ __cfPattern_1: brandTrustedBuilderArtifact({}) });
