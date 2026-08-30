@@ -822,14 +822,15 @@ describe("opening a space root", () => {
     ).toBeUndefined();
   });
 
-  // The boot path (ensureDefaultPattern) reconciles an unloadable root before
-  // start — but registry listings, `cf piece ls`, FUSE, and the shell's list
-  // cells all resolve the root through PiecesController.getDefaultPattern instead,
-  // which used to inherit NO heal: the load failure propagated and every
-  // listing died with the root (2026-07-29 vendor gate, the cf-cell-context
-  // type retirement). The controller choke point must run the same awaited
-  // updater check and retry once.
   it("heals an unloadable stale root on the REGISTRY path (not just boot)", async () => {
+    // The boot path (ensureDefaultPattern) reconciles an unloadable root before
+    // start — but registry listings, `cf piece ls`, FUSE, and the shell's list
+    // cells all resolve the root through PiecesController.getDefaultPattern
+    // instead, which used to inherit NO heal: the load failure propagated and
+    // every listing died with the root (2026-07-29 vendor gate, the
+    // cf-cell-context type retirement). The controller choke point must run the
+    // same awaited updater check and retry once.
+
     await setup();
     const piece = await controller.ensureDefaultPattern();
     const root = piece.getCell();

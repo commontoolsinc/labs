@@ -579,9 +579,11 @@ describe("RuntimeClient", () => {
   });
 
   describe("boot-window diagnostics", () => {
-    // Both getters are main-thread snapshots forwarded straight from the
-    // connection (no worker round-trip), so a connection stub pins the wiring.
     it("exposes pending-request and request-timeline snapshots", () => {
+      // Both getters are main-thread snapshots forwarded straight from the
+      // connection (no worker round-trip), so a connection stub pins the
+      // wiring.
+
       const pending = [{ msgId: 7, type: RequestType.Idle, ageMs: 12 }];
       const timeline = [
         { msgId: 7, type: RequestType.Idle, sentAtMs: 3, doneAtMs: 8 },
