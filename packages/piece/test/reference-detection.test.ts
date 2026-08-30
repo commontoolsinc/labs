@@ -8,8 +8,6 @@ import { isObjectNotArray, isObjectOrArray } from "@commonfabric/utils/types";
  */
 describe("Reference detection core functionality", () => {
   it("should identify object structures with cell and path properties", () => {
-    // Test detection of object structures similar to cell links
-
     // Create an object with a structure similar to a cell link
     const objWithCellAndPath = {
       cell: {/* mock cell properties */},
@@ -30,8 +28,6 @@ describe("Reference detection core functionality", () => {
   });
 
   it("should find aliases in nested objects", () => {
-    // Test finding aliases with different structures
-
     // Create test data with different alias structures
     const testData = {
       directAlias: {
@@ -85,8 +81,6 @@ describe("Reference detection core functionality", () => {
   });
 
   it("should recursively search for references in deep structures", () => {
-    // Test recursive search for references
-
     const foundReferences: string[] = [];
 
     // Mock a recursive search function similar to what we use in getReadingFrom
@@ -162,8 +156,6 @@ describe("Reference detection core functionality", () => {
   });
 
   it("should handle mixed reference types", () => {
-    // Test the behavior of our reference detection with mixed reference types
-
     const foundReferences: Array<{ type: string; id: string }> = [];
 
     // Mock a detection function that handles both cell links and aliases
