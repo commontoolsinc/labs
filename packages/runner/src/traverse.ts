@@ -639,6 +639,26 @@ type PreparedAnyOfBranch = {
   closedLength: number | undefined;
 };
 
+/**
+ * A branch whose prefilter verdict is already settled, so none of the
+ * value-dependent derivations apply to it.
+ */
+function constantBranch(
+  merged: JSONSchema,
+  constant: boolean,
+  hasAsCell: boolean,
+): PreparedAnyOfBranch {
+  return {
+    optionIsFalse: false,
+    merged,
+    constant,
+    hasAsCell,
+    types: undefined,
+    required: undefined,
+    closedLength: undefined,
+  };
+}
+
 const _preparedAnyOfCache = new WeakMap<
   JSONSchemaObj,
   readonly PreparedAnyOfBranch[]
@@ -661,41 +681,17 @@ function prepareAnyOfBranch(
   const merged = mergeSchemaOption(restSchema, option);
   if (typeof merged === "boolean") {
     // canBranchMatch's first check: boolean schemas decide immediately.
-    return {
-      optionIsFalse: false,
-      merged,
-      constant: merged,
-      hasAsCell: false,
-      types: undefined,
-      required: undefined,
-      closedLength: undefined,
-    };
+    return constantBranch(merged, merged, false);
   }
   const hasAsCell = SchemaObjectTraverser.hasAsCell(merged);
   let resolved: JSONSchema | undefined = merged;
   if ("$ref" in merged) {
     resolved = resolveSchemaRefsCanonical(merged);
     if (typeof resolved === "boolean") {
-      return {
-        optionIsFalse: false,
-        merged,
-        constant: resolved,
-        hasAsCell,
-        types: undefined,
-        required: undefined,
-        closedLength: undefined,
-      };
+      return constantBranch(merged, resolved, hasAsCell);
     } else if (resolved === undefined) {
       // Unresolved $ref: pass the prefilter; traversal complains properly.
-      return {
-        optionIsFalse: false,
-        merged,
-        constant: true,
-        hasAsCell,
-        types: undefined,
-        required: undefined,
-        closedLength: undefined,
-      };
+      return constantBranch(merged, true, hasAsCell);
     }
   }
   const types = resolved.type !== undefined

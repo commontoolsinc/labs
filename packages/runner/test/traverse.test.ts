@@ -2361,6 +2361,89 @@ describe("anyOf optimization integration", () => {
     expect(traverser.anyOfFastRejects).toBe(1);
   });
 
+  it("passes a branch whose $ref does not resolve", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-anyof-unresolved-ref" as URI;
+    const docEntity = docUri as Entity;
+    const value = "hello";
+
+    store.set(`${docUri}/${type}`, {
+      the: type,
+      of: docEntity,
+      is: { value },
+      since: 1,
+    });
+
+    const selector = internPathSelector({
+      path: ["value"],
+      schema: {
+        anyOf: [{ $ref: "#/$defs/Absent" }, { type: "number" }],
+      },
+    });
+    expect(isInternedSchema(selector.schema!)).toBe(true);
+
+    const traverser = getTraverser(store, selector);
+    const { ok, error } = traverser.traverse({
+      address: {
+        space: "did:null:null",
+        id: docUri,
+        type,
+        path: ["value"],
+      },
+      value,
+    });
+
+    // The prefilter defers on a branch it cannot resolve rather than turning
+    // it down, so only the number branch is fast-rejected. Refusing the value
+    // is then traversal's to do, which is where the failure comes from.
+    expect(traverser.anyOfFastRejects).toBe(1);
+    expect(ok).toBeUndefined();
+    expect(error?.code).toBe("NO_MATCHING_ANY_OF");
+  });
+
+  it("fast-rejects a branch whose tuple closure the array outruns", () => {
+    const store = new Map<string, Revision<State>>();
+    const type = "application/json" as const;
+    const docUri = "of:doc-anyof-closed-tuple" as URI;
+    const docEntity = docUri as Entity;
+    const value = ["a", "b"];
+
+    store.set(`${docUri}/${type}`, {
+      the: type,
+      of: docEntity,
+      is: { value },
+      since: 1,
+    });
+
+    const selector = internPathSelector({
+      path: ["value"],
+      schema: {
+        anyOf: [
+          { type: "array", prefixItems: [{ type: "string" }], items: false },
+          { type: "array", items: { type: "string" } },
+        ],
+      },
+    });
+    expect(isInternedSchema(selector.schema!)).toBe(true);
+
+    const traverser = getTraverser(store, selector);
+    const { ok, error } = traverser.traverse({
+      address: {
+        space: "did:null:null",
+        id: docUri,
+        type,
+        path: ["value"],
+      },
+      value,
+    });
+
+    // The closed branch is turned away on length alone; the open one answers.
+    expect(error).toBeUndefined();
+    expect(ok).toEqual(value);
+    expect(traverser.anyOfFastRejects).toBe(1);
+  });
+
   it("fast-rejects incompatible branches and still produces correct result", () => {
     const store = new Map<string, Revision<State>>();
     const type = "application/json" as const;
