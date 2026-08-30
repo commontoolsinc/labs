@@ -161,7 +161,9 @@ describe("stage G outbox + sqlite discharge", () => {
     await server.close();
   });
 
-  // the effect handoff at the seal destination
+  //
+  // The effect handoff at the seal destination
+  //
 
   it("defers a sealed tx's post-commit effects to the destination; without the hook the inline flush stays (serving-loop.md §3)", async () => {
     const lease = liveLease();
@@ -232,7 +234,9 @@ describe("stage G outbox + sqlite discharge", () => {
     lease.release();
   });
 
-  // the process-local effect half
+  //
+  // The process-local effect half
+  //
 
   it("admits sealed effects post-commit with in-flight dedupe per key; counters and carriage are live (serving-loop.md §4–§5, §7)", async () => {
     const { outbox, stats } = newOutbox();
@@ -380,7 +384,11 @@ describe("stage G outbox + sqlite discharge", () => {
     expect(stats.outbox.completed).toBe(0);
   });
 
-  // the durable half: rows in the wave's own transaction (FP1)
+  //
+  // The durable half: rows in the wave's own transaction
+  //
+  // (FP1)
+  //
 
   it("lands outbound append rows INSIDE the wave's engine transaction, for surviving contributions only (FP1; the model's committed-only fold)", async () => {
     const lease = liveLease();
@@ -471,7 +479,11 @@ describe("stage G outbox + sqlite discharge", () => {
     lease.release();
   });
 
-  // delivery: admit at the target, then delete (FP1 closure)
+  //
+  // Delivery: admit at the target, then delete
+  //
+  // (FP1 closure)
+  //
 
   it("delivers pending rows: delegated admission at the target stamps firedAt from the CARRIED actor (LT5 envelope), then deletes the row; a re-sent duplicate dedupes at the eventId horizon", async () => {
     const lease = liveLease();
@@ -1110,7 +1122,11 @@ describe("stage G outbox + sqlite discharge", () => {
       .toBe(0);
   });
 
-  // the sqliteQuery memo decision (B1's fix, serving-loop.md §4/§6)
+  //
+  // The sqliteQuery memo decision
+  //
+  // (B1's fix, serving-loop.md §4/§6)
+  //
 
   it("sqliteQuery memo decision: a settled result is a hit, a bare claim never is; an orphaned claim re-issues ONLY under the serving posture", () => {
     // No stored key: issue (the ordinary miss).
