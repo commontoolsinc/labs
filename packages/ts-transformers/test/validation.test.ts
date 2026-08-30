@@ -2833,7 +2833,7 @@ Deno.test("Pattern Context Validation - Object Members", async (t) => {
     "reports object-member for transparently-wrapped function properties",
     async () => {
       // A function-valued property may be wrapped in transparent expressions
-      // (parentheses, `as`, `satisfies`, `!`, `<T>`) before the property
+      // (parentheses, `as`, `satisfies`, `!`) before the property
       // assignment. The wrapped spelling is the same member and reports
       // object-member, not function-creation, in and out of JSX.
 

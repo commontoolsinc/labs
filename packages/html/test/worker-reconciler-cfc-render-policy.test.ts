@@ -1200,6 +1200,14 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
       },
     );
 
+    //
+    // Strict text integrity over child text
+    //
+    // Whether a text node's own integrity lets it render: matching and
+    // mismatched integrity, authorship derived from a represented profile,
+    // and the treatment of unsigned and literal text.
+    //
+
     await t.step(
       "strict text integrity renders child text with matching integrity",
       async () => {
@@ -1811,7 +1819,11 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
     );
 
     //
-    // Strict text integrity
+    // Strict text integrity over visible props
+    //
+    // The same integrity applied to the props a node renders rather than to
+    // its child text, and what becomes of the blocked state when children are
+    // reused, a sibling changes, or the policy is removed.
     //
 
     await t.step(
