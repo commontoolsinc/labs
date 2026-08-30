@@ -1623,7 +1623,9 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
 
     // Reactive-update companions to the two mount-time tests above. They guard
     // the composed semantics across cell updates: a block must reach every
-    // enclosing boundary, and an unblock must clear every enclosing boundary.
+    // enclosing boundary, an unblock must clear every enclosing boundary, and
+    // an inner boundary that stops verifying must make the enclosing one
+    // recompute.
     const nestedAuthorshipTree = (innerChild: unknown) => ({
       type: "vnode",
       name: "div",
