@@ -93,10 +93,6 @@ a record: archive it to `docs/history/plans/` following the procedure in
   board and topic grow their verbs without breaking the pieces already holding
   data: the shape the board demands of a stored topic, the one rehearsed break
   that narrowing it needs, and the items waiting on platform work.
-- Topics migration rehearsal has been executed and is archived at
-  [`../history/plans/topics-migration-rehearsal.md`](../history/plans/topics-migration-rehearsal.md);
-  what the live run found, including where that script was wrong, is in
-  [`../history/topics-board-migration-2026-08-28.md`](../history/topics-board-migration-2026-08-28.md).
 - [`cf space clone` rehearsal](space-clone-rehearsal.md) records the design for
   rehearsal-grade copies of populated spaces. The tooling has shipped (`cf
   space`, `cf inspect churn`); the operating procedure lives in
