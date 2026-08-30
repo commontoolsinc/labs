@@ -47,8 +47,8 @@ describe("section-marker", () => {
     });
 
     it("names the command the marker was written on", () => {
-      expect(() => refuseSectionMarker("piece get", ["--", "--select", "t"]))
-        .toThrow(/cf piece get/);
+      expect(() => refuseSectionMarker("get", ["--", "--select", "t"]))
+        .toThrow(/cf get/);
     });
 
     it("names the two commands the marker is written on", () => {
