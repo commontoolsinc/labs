@@ -157,6 +157,14 @@ describe("data-uri-codec", () => {
       expect(dataUriFromValue(NaN)).not.toBe(dataUriFromValue(-Infinity));
     });
 
+    //
+    // Canonical sameness
+    //
+    // The other direction, and the reason distinctness is not the whole
+    // property: equal values mint one URI. Every `NaN` payload collapses to
+    // the same identifier, and a repeated value mints deterministically.
+    //
+
     it("mints one URI for every `NaN`, whatever its payload", () => {
       // Arithmetic only ever yields one `NaN` bit pattern, so `NaN` and `0 / 0`
       // are the same value and comparing them proves only determinism. A

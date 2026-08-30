@@ -1724,12 +1724,13 @@ describe("JsonCodecEngine", () => {
     });
 
     //
-    // Every arm of the dispatch
+    // The fallback arms, deep-frozen
     //
-    // Every arm of the dispatch, so that the guarantee does not depend on which
-    // one produced the value. `isDeepFrozen()` rather than `Object.isFrozen()`:
-    // an arm that froze only the value it built, and not what it wrapped, would
-    // pass the shallow check.
+    // These pin the guarantee on the arms that wrap wire state rather than
+    // decode it — an `UnknownValue` and a `ProblematicValue`. They assert
+    // with `isDeepFrozen()` rather than `Object.isFrozen()`, because an arm
+    // that froze only the value it built, and not what it wrapped, would pass
+    // the shallow check.
     //
 
     it("deep-freezes an `UnknownValue` from an unrecognized tag", () => {
