@@ -142,13 +142,14 @@ Deno.test(
   },
 );
 
-// The model-call span gets its attributes from enrichSpan rather than from the
-// supplemental runtime-context option, so it is the span that can disagree with
-// the rest of the trace about how a value is spelled.
 Deno.test(
   "nested and non-string runtime context is flattened the same way on every span",
   { sanitizeOps: false, sanitizeResources: false },
   async () => {
+    // The model-call span gets its attributes from enrichSpan rather than from
+    // the supplemental runtime-context option, so it is the span that can
+    // disagree with the rest of the trace about how a value is spelled.
+
     const spans = await collectSpans(
       {
         isEnabled: true,
@@ -241,13 +242,14 @@ Deno.test("runtimeContextFromMetadata passes nothing on when there is no metadat
   });
 });
 
-// The reported gap: object metadata reached the root span as JSON but never any
-// AI SDK span. Routed through runtimeContextFromMetadata it now reaches every
-// span, spelled the same way the root span spells it.
 Deno.test(
   "object metadata reaches every span as the JSON the root span records",
   { sanitizeOps: false, sanitizeResources: false },
   async () => {
+    // The reported gap: object metadata reached the root span as JSON but never
+    // any AI SDK span. Routed through runtimeContextFromMetadata it now reaches
+    // every span, spelled the same way the root span spells it.
+
     const { runtimeContext, includeRuntimeContext } =
       runtimeContextFromMetadata(
         { labels: { team: "search" }, attempt: 2 },

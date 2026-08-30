@@ -60,13 +60,14 @@ Deno.test("MEMORY_ACL_MODE defaults to enforce and accepts rollout overrides", (
 // toolshed, the CLI, and the background-piece-service; its coverage lives in
 // `packages/runner/test/runtime-presets.test.ts`.
 
-// The self-serve ingest control plane must be OFF unless a deployment opts in.
-// Minting issues a durable, operator-backed append capability, and on a
-// deployment where named-space keys derive from a public passphrase anyone who
-// knows a space NAME can mint legitimately — which repairing the derivation
-// later does not retract. A default-on flag here would be a production
-// takeover primitive, so the default is the security property.
 Deno.test("INGEST_SELF_SERVE_ENABLED is off unless explicitly enabled", () => {
+  // The self-serve ingest control plane must be OFF unless a deployment opts
+  // in. Minting issues a durable, operator-backed append capability, and on a
+  // deployment where named-space keys derive from a public passphrase anyone
+  // who knows a space NAME can mint legitimately — which repairing the
+  // derivation later does not retract. A default-on flag here would be a
+  // production takeover primitive, so the default is the security property.
+
   const flag = (v: string | undefined) =>
     EnvSchema.parse(v === undefined ? {} : { INGEST_SELF_SERVE_ENABLED: v })
       .INGEST_SELF_SERVE_ENABLED;

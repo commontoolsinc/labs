@@ -4,14 +4,15 @@ import { createRouter } from "@/lib/create-app.ts";
 import { ingestGate } from "./gate.ts";
 import { BASE } from "./ingest-channels.routes.ts";
 
-// The gate's ROUTING consequence, which env.test.ts does not cover — that pins
-// the flag's default value, not what the router does with it.
-//
-// This mounts the REAL `ingestGate` — the same function
-// `ingest-channels.index.ts` mounts first — with the flag passed in, because
-// `.env.test` enables the feature so the other suites can reach the handlers.
-// Only the flag is a stub; the middleware under test is production code.
 describe("self-serve gate", () => {
+  // The gate's ROUTING consequence, which env.test.ts does not cover — that
+  // pins the flag's default value, not what the router does with it.
+  //
+  // This mounts the REAL `ingestGate` — the same function
+  // `ingest-channels.index.ts` mounts first — with the flag passed in, because
+  // `.env.test` enables the feature so the other suites can reach the handlers.
+  // Only the flag is a stub; the middleware under test is production code.
+
   const build = (enabled: boolean) => {
     const seen: string[] = [];
     const router = createRouter();
