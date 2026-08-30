@@ -515,13 +515,12 @@ describe("module-policy manifest consultation", () => {
     }
   });
 
+  // Reserved manifest documents are not value-write targets: the privileged
+  // persistence during prepare is CFC machinery, so the strict writer-fit
+  // must not measure the manifest write against its own (undeclared) store
+  // policy, and the flagged modes must not attach flow labels or misfit
+  // flags to it.
   it("commits a tainted flow that persists its manifest under enforce-strict", async () => {
-    // Reserved manifest documents are not value-write targets: the privileged
-    // persistence during prepare is CFC machinery, so the strict writer-fit
-    // must not measure the manifest write against its own (undeclared) store
-    // policy, and the flagged modes must not attach flow labels or misfit
-    // flags to it.
-
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),

@@ -97,15 +97,14 @@ describe("relaxDefaultedRequired", () => {
     })).toBeUndefined();
   });
 
+  // The recursion threads each level's own scope (`cfcSchemaChildRoot`), so
+  // a property `$ref` beneath a NESTED object's own `$defs` resolves against
+  // that pool. Passing the outer root at every level — the previous behavior
+  // — missed the nested pool's default, left `mode` required, and the gate
+  // refused `{ opts: {} }` ("opts: missing required property mode") for a
+  // payload runtime materialization accepts and defaults (review repro on
+  // the D5/D6 PR).
   it("relaxes a defaulted-required behind a nested object's own $defs", () => {
-    // The recursion threads each level's own scope (`cfcSchemaChildRoot`), so
-    // a property `$ref` beneath a NESTED object's own `$defs` resolves against
-    // that pool. Passing the outer root at every level — the previous behavior
-    // — missed the nested pool's default, left `mode` required, and the gate
-    // refused `{ opts: {} }` ("opts: missing required property mode") for a
-    // payload runtime materialization accepts and defaults (review repro on
-    // the D5/D6 PR).
-
     expect(relaxedValidationError({ opts: {} }, {
       type: "object",
       properties: {
