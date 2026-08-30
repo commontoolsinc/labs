@@ -142,7 +142,7 @@ export declare const CELL_INNER_TYPE: unique symbol;
  * Nothing reads this at runtime — a verb's result schema travels on
  * `module.resultSchema`, never on the stream cell's own schema, which stays
  * the event/payload schema that `cf piece verbs` publishes and that
- * `piece call` validates against.
+ * `cf call` validates against.
  */
 export declare const CELL_RESULT_TYPE: unique symbol;
 

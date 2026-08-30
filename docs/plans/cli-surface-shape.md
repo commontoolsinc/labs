@@ -137,8 +137,8 @@ with the address suffix (`--select 'topic@,topic.title'`), and leaves "shape"
 free as the word for what a caller asks for — covering both spellings rather
 than competing with one of them.
 
-Both spellings are carried on every command that reads — `piece get`,
-`piece call`, `wish` and `exec` — and a command naming both is refused rather
+Both spellings are carried on every command that reads — `get`, `call`,
+`wish` and `exec` — and a command naming both is refused rather
 than resolved, because it has not said which shape it wants.
 
 **What a reader may not supply, in either syntax.** `asCell`, `default`,

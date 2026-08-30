@@ -151,7 +151,7 @@ function escapeRegExp(text: string): string {
  * A document names a command by writing it the way a caller types it, which
  * is the whole command path between boundaries. Three things look like that
  * and are not it. `cf piece setsrc` is a different command with its own prose
- * obligation, so it cannot stand in for `cf piece set`. `scf brew` is a word
+ * obligation, so it cannot stand in for `cf set`. `scf brew` is a word
  * that happens to end in the command's letters. And `cf piece ls` names the
  * child: a reader looking up `cf piece` finds nothing about `cf piece` there,
  * so the parent still owes prose of its own — which is why the next segment
