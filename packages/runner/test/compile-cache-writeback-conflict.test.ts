@@ -14,18 +14,19 @@ const signer = await Identity.fromPassphrase("writeback conflict test");
 const space = signer.did();
 
 describe("compile-cache write-back after a runtime-version bump", () => {
-  // CT-1824 regression: a runtime-version bump sends loads through the
-  // cold-load recovery path (recompile + write-back). The write-back re-writes
-  // version-independent source docs whose cell-layer-derived documents (link/
-  // import-edge cells) already exist from the original compile — documents a
-  // cold replica has never read. The commit then carries stale seq-0 reads and
-  // fails with a ConflictError; before the fix, editWithRetry re-ran
-  // immediately against the same stale replica, so every retry failed
-  // identically, the compiled cache never healed, and EVERY subsequent cold
-  // boot recompiled. The conflict's `readyToRetry` catch-up gate is the
-  // designed remedy; editWithRetry must await it like the scheduler does
-  // (scheduler/action-run.ts).
   it("recovery write-back persists despite pre-existing docs on a cold replica", async () => {
+    // CT-1824 regression: a runtime-version bump sends loads through the
+    // cold-load recovery path (recompile + write-back). The write-back
+    // re-writes version-independent source docs whose cell-layer-derived
+    // documents (link/ import-edge cells) already exist from the original
+    // compile — documents a cold replica has never read. The commit then
+    // carries stale seq-0 reads and fails with a ConflictError; before the fix,
+    // editWithRetry re-ran immediately against the same stale replica, so every
+    // retry failed identically, the compiled cache never healed, and EVERY
+    // subsequent cold boot recompiled. The conflict's `readyToRetry` catch-up
+    // gate is the designed remedy; editWithRetry must await it like the
+    // scheduler does (scheduler/action-run.ts).
+
     const server = newSharedServer();
     const program = {
       main: "/main.tsx",
@@ -125,20 +126,21 @@ describe("compile-cache write-back after a runtime-version bump", () => {
 });
 
 describe("write-back pre-sync materializes edge element docs (CT-1848)", () => {
-  // CT-1848: the write-target pre-sync carries the one-hop edge selector, so
-  // the per-edge element docs (the derived docs the cell layer hoists each
-  // `imports[i]` into) are client-known BEFORE the re-write. A schema-less
-  // pre-sync normalizes to the rejecting selector and delivers only the root
-  // doc; in the browser the re-write then touches the element docs blind and
-  // the engine reveals the conflicts one per attempt (the CT-1824 loop,
-  // converged only by the retry budget). NOTE: the blind-conflict itself does
-  // not reproduce in-process (this fixture's flows warm the element docs some
-  // other way — same limitation as the healing test above); the conflict-free
-  // attempt-1 property is verified live on the browser rig. What IS pinned
-  // here, differentially, is the selector semantics the fix rides on: the
-  // edge-schema sync materializes the element docs into a cold replica, the
-  // schema-less sync does not.
   it("edge-schema sync delivers element docs to a cold replica; schema-less does not", async () => {
+    // CT-1848: the write-target pre-sync carries the one-hop edge selector, so
+    // the per-edge element docs (the derived docs the cell layer hoists each
+    // `imports[i]` into) are client-known BEFORE the re-write. A schema-less
+    // pre-sync normalizes to the rejecting selector and delivers only the root
+    // doc; in the browser the re-write then touches the element docs blind and
+    // the engine reveals the conflicts one per attempt (the CT-1824 loop,
+    // converged only by the retry budget). NOTE: the blind-conflict itself does
+    // not reproduce in-process (this fixture's flows warm the element docs some
+    // other way — same limitation as the healing test above); the conflict-free
+    // attempt-1 property is verified live on the browser rig. What IS pinned
+    // here, differentially, is the selector semantics the fix rides on: the
+    // edge-schema sync materializes the element docs into a cold replica, the
+    // schema-less sync does not.
+
     const server = newSharedServer();
     const program = {
       main: "/main.tsx",
@@ -249,9 +251,11 @@ describe("write-back pre-sync materializes edge element docs (CT-1848)", () => {
 });
 
 describe("editWithRetry conflict catch-up", () => {
-  // Direct contract test for the fix: a conflict's `readyToRetry` catch-up gate
-  // must be awaited BEFORE the retry re-runs, and the retry then succeeds.
   it("awaits readyToRetry between attempts and then succeeds", async () => {
+    // Direct contract test for the fix: a conflict's `readyToRetry` catch-up
+    // gate must be awaited BEFORE the retry re-runs, and the retry then
+    // succeeds.
+
     const server = newSharedServer();
     const sm = EmulatedStorageManager.connectTo(server, { as: signer });
     const runtime = new Runtime({
@@ -301,16 +305,18 @@ describe("editWithRetry conflict catch-up", () => {
 });
 
 describe("editWithRetry sequential conflict discovery", () => {
-  // The browser cold-boot shape of CT-1824 (live-traced on the rig): the
-  // write-back's derived docs are discovered ONE per attempt — the engine
-  // rejects on the first stale read, the retry pulls exactly that doc, and only
-  // then does the next attempt's diff reach the following one. editWithRetry
-  // must (a) pull the doc each conflict names so each round makes progress, and
-  // (b) survive a pull or catch-up failure without giving up the round (the
-  // retry's commit is the definitive outcome). Convergence takes one round per
-  // pre-existing derived doc, which is why writeBackCompileCache passes a
-  // budget sized to its write set instead of DEFAULT_MAX_RETRIES.
   it("pulls each named doc and converges one doc per round", async () => {
+    // The browser cold-boot shape of CT-1824 (live-traced on the rig): the
+    // write-back's derived docs are discovered ONE per attempt — the engine
+    // rejects on the first stale read, the retry pulls exactly that doc, and
+    // only then does the next attempt's diff reach the following one.
+    // editWithRetry must (a) pull the doc each conflict names so each round
+    // makes progress, and (b) survive a pull or catch-up failure without giving
+    // up the round (the retry's commit is the definitive outcome). Convergence
+    // takes one round per pre-existing derived doc, which is why
+    // writeBackCompileCache passes a budget sized to its write set instead of
+    // DEFAULT_MAX_RETRIES.
+
     const server = newSharedServer();
     const sm = EmulatedStorageManager.connectTo(server, { as: signer });
     const runtime = new Runtime({

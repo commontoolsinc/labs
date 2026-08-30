@@ -45,11 +45,12 @@ describe("listResultSchema", () => {
     storageManager = undefined;
   });
 
-  // Do-not-regress for the flowPrecisionClaim removal: list builtin result
-  // containers get plain array schemas with no ifc annotations. Pointwise
-  // label precision is structural (per-element ops run in their own
-  // transactions reading only their element), not a minted trusted claim.
   it("attaches claim-free array schemas to list builtin outputs", async () => {
+    // Do-not-regress for the flowPrecisionClaim removal: list builtin result
+    // containers get plain array schemas with no ifc annotations. Pointwise
+    // label precision is structural (per-element ops run in their own
+    // transactions reading only their element), not a minted trusted claim.
+
     storageManager = StorageManager.emulate({
       as: signer,
     });

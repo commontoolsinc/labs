@@ -630,19 +630,20 @@ describe("load by module identity (warm + version-bump recovery)", () => {
   });
 });
 
-// CT-1838: pre-#4158 pipelines stored the helper-INJECTED pretransform form
-// as the source-of-record. The current guard rejects the reserved
-// `__cfHelpers` symbol, so without tolerance every pre-#4158 stored pattern
-// bricks on cold load — and, via the default pattern, all piece creation in
-// aged spaces. These tests pin the tolerance: exact-envelope stored docs
-// self-heal on load (T1/T2), the authoring guard is untouched (T3), the
-// tolerance is exact-envelope-only (T4), mixed and replicated closures work
-// (T5/T6/T9), and a new pattern can fabric-import a legacy one (T10).
-// Fixture shape is byte-calibrated against a REAL poisoned doc dumped
-// from the production space (see packages/ts-transformers/test/core/
-// legacy-envelope.test.ts): stored bytes = [HELPERS_STMT, source,
-// usedStmt].join("\n"), identities computed over the INJECTED bytes.
 describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
+  // CT-1838: pre-#4158 pipelines stored the helper-INJECTED pretransform form
+  // as the source-of-record. The current guard rejects the reserved
+  // `__cfHelpers` symbol, so without tolerance every pre-#4158 stored pattern
+  // bricks on cold load — and, via the default pattern, all piece creation in
+  // aged spaces. These tests pin the tolerance: exact-envelope stored docs
+  // self-heal on load (T1/T2), the authoring guard is untouched (T3), the
+  // tolerance is exact-envelope-only (T4), mixed and replicated closures work
+  // (T5/T6/T9), and a new pattern can fabric-import a legacy one (T10).
+  // Fixture shape is byte-calibrated against a REAL poisoned doc dumped
+  // from the production space (see packages/ts-transformers/test/core/
+  // legacy-envelope.test.ts): stored bytes = [HELPERS_STMT, source,
+  // usedStmt].join("\n"), identities computed over the INJECTED bytes.
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   const runtimes: Runtime[] = [];
 
@@ -1105,10 +1106,11 @@ describe("legacy-envelope tolerance on cold load (CT-1838)", () => {
     }
   });
 
-  // Companion negative-memo coverage: only failures explicitly classified
-  // after source verification may suppress later attempts. Every transient
-  // boundary is exercised by making the missing state arrive in-session.
   it("T8a: a deterministic compile failure is memoized", async () => {
+    // Companion negative-memo coverage: only failures explicitly classified
+    // after source verification may suppress later attempts. Every transient
+    // boundary is exercised by making the missing state arrive in-session.
+
     const rt = newRuntime();
     const nonEnvelope = "// leading comment\n" + injectCfHelpers(
       "import { pattern } from 'commonfabric';\n" +

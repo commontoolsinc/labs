@@ -8,8 +8,9 @@ import { parseAliasBinding } from "../src/link-utils.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-// Benchmarks using Deno.bench
 Deno.bench("followWriteRedirects with simple alias", () => {
+  // Benchmarks using Deno.bench
+
   const storageManager = StorageManager.emulate({
     as: signer,
   });

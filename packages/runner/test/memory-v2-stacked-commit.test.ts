@@ -4838,24 +4838,25 @@ for (
   });
 }
 
-// Integrated from PR #4961 (Hixie's repro for the cf-render counter flake):
-// a foreground editWithRetry write that reads documents the scheduler is
-// concurrently writing declares pending reads on still-unconfirmed optimistic
-// writes. When one of those is rejected, the dependant is doomed — its
-// pending read names a localSeq that will never become a confirmed seq — and
-// a client without the cascade leaves it in flight awaiting its own verdict,
-// burning editWithRetry's bounded retry budget and surfacing the raw
-// "pending dependency not resolved" ConflictError to the caller.
-//
-// Distinct from the basic cascade test above: T2's OWN verdict stays gated
-// for the whole test, so the ONLY thing that can settle it is the client-side
-// cascade off T1's drop — pinning that the settle is entirely local (the
-// server never judges T2 at all). Adapted from the original's 2s wall-clock
-// absence bound to a settled-flag + microtask drain: the clock preload
-// freezes test-file timers, and the cascade path is pure promise flow, so a
-// missing cascade surfaces within microtasks as a failed assertion instead
-// of a hang.
 Deno.test("memory v2 stacked commits: a dependant stranded by a dropped optimistic sibling is rejected off the drop alone, without its own server verdict", async () => {
+  // Integrated from PR #4961 (Hixie's repro for the cf-render counter flake):
+  // a foreground editWithRetry write that reads documents the scheduler is
+  // concurrently writing declares pending reads on still-unconfirmed optimistic
+  // writes. When one of those is rejected, the dependant is doomed — its
+  // pending read names a localSeq that will never become a confirmed seq — and
+  // a client without the cascade leaves it in flight awaiting its own verdict,
+  // burning editWithRetry's bounded retry budget and surfacing the raw
+  // "pending dependency not resolved" ConflictError to the caller.
+  //
+  // Distinct from the basic cascade test above: T2's OWN verdict stays gated
+  // for the whole test, so the ONLY thing that can settle it is the client-side
+  // cascade off T1's drop — pinning that the settle is entirely local (the
+  // server never judges T2 at all). Adapted from the original's 2s wall-clock
+  // absence bound to a settled-flag + microtask drain: the clock preload
+  // freezes test-file timers, and the cascade path is pure promise flow, so a
+  // missing cascade surfaces within microtasks as a failed assertion instead
+  // of a hang.
+
   const harness = await createHarness();
   const g1 = Promise.withResolvers<void>();
   const g2 = Promise.withResolvers<void>();

@@ -225,17 +225,19 @@ describe("effect commit-conflict recovery (no retry budget)", () => {
   // conflict guarantee (off-budget re-queue after catch-up, #4343) is covered
   // by the plain variant above and the dataless-catch-up strand test below.
 
-  // Deterministic regression for the #4210/#4343 strand: a reactive action whose
-  // commit conflicts must re-evaluate even when the conflict's catch-up delivers
-  // NO reader-dirty (the "already-delivered write" case). The real strand is a
-  // timing window that doesn't reproduce deterministically — on a normal conflict
-  // the read-repair force-notifies, so reader-dirty fires and the action
-  // self-recovers even without a re-queue. `suppressReaderDirty` stands in for the
-  // dataless catch-up: the real ConflictError still flows via the commit promise
-  // and the repaired value still lands in confirmed storage, so recovery is left
-  // ONLY to the re-queue. Passes with #4343's re-queue; strands (fails) with a
-  // no-requeue handler (the #4210 / #4349-ordinary behavior).
   it("recovers only via the re-queue when the catch-up is dataless", async () => {
+    // Deterministic regression for the #4210/#4343 strand: a reactive action
+    // whose commit conflicts must re-evaluate even when the conflict's catch-up
+    // delivers NO reader-dirty (the "already-delivered write" case). The real
+    // strand is a timing window that doesn't reproduce deterministically — on a
+    // normal conflict the read-repair force-notifies, so reader-dirty fires and
+    // the action self-recovers even without a re-queue. `suppressReaderDirty`
+    // stands in for the dataless catch-up: the real ConflictError still flows
+    // via the commit promise and the repaired value still lands in confirmed
+    // storage, so recovery is left ONLY to the re-queue. Passes with #4343's
+    // re-queue; strands (fails) with a no-requeue handler (the #4210 /
+    // #4349-ordinary behavior).
+
     const srcKey = "strand-src";
     const resKey = "strand-res";
 

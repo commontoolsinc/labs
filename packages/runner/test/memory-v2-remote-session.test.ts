@@ -299,12 +299,13 @@ class RecordingWebSocket extends EventTarget {
 }
 
 describe("StorageManager per-space host wiring", () => {
-  // The pending session promises hold no resources, but their microtask
-  // chains outlive the test body; opt out of the op sanitizer for that.
   it("dials a mapped space on its host and others on the default", {
     sanitizeOps: false,
     sanitizeResources: false,
   }, async () => {
+    // The pending session promises hold no resources, but their microtask
+    // chains outlive the test body; opt out of the op sanitizer for that.
+
     const realWebSocket = globalThis.WebSocket;
     (globalThis as { WebSocket: unknown }).WebSocket = RecordingWebSocket;
     try {
@@ -344,9 +345,10 @@ describe("StorageManager per-space host wiring", () => {
   });
 });
 
-// Site-table v0: runtime-learned host hints. A default-host connection remains
-// provisional until the first configured or accepted route is known.
 describe("StorageManager.registerSpaceHost", () => {
+  // Site-table v0: runtime-learned host hints. A default-host connection
+  // remains provisional until the first configured or accepted route is known.
+
   const spaceSeeded = "did:key:z6Mk-register-seeded" as MemorySpace;
   const spaceLearned = "did:key:z6Mk-register-learned" as MemorySpace;
   const spaceOpened = "did:key:z6Mk-register-opened" as MemorySpace;

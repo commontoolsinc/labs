@@ -1,18 +1,19 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
-// A settled transaction must not keep the callbacks it already dispatched.
-// Commit callbacks are closures over whatever registered them — a result
-// cell, a child registry, an action's captured frame — and long-lived
-// structures do hold references to settled transactions, so a retained
-// callback set turns one settled transaction into a root for everything its
-// callbacks closed over.
-//
-// The scenario runs in a subprocess because proving release needs WeakRefs, a
-// forced collection (`--expose-gc`), and a real task boundary — this
-// package's preload freezes timers armed from test files, and the test task
-// does not expose gc.
 describe("commit callback release", () => {
+  // A settled transaction must not keep the callbacks it already dispatched.
+  // Commit callbacks are closures over whatever registered them — a result
+  // cell, a child registry, an action's captured frame — and long-lived
+  // structures do hold references to settled transactions, so a retained
+  // callback set turns one settled transaction into a root for everything its
+  // callbacks closed over.
+  //
+  // The scenario runs in a subprocess because proving release needs WeakRefs, a
+  // forced collection (`--expose-gc`), and a real task boundary — this
+  // package's preload freezes timers armed from test files, and the test task
+  // does not expose gc.
+
   it("drops dispatched callbacks so a settled transaction roots nothing", async () => {
     const helper = new URL(
       "./commit-callback-release-helper.ts",

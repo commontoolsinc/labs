@@ -363,11 +363,12 @@ Deno.bench(
   },
 );
 
-// Also run the regression delta over all parking bodies summed
 Deno.bench(
   "two-pass: parking",
   { group: "shadow-delta-all", baseline: true },
   () => {
+    // Also run the regression delta over all parking bodies summed
+
     for (const [specifier, body] of parkingBodies) {
       verifyCompiledModuleBody(body, specifier);
     }

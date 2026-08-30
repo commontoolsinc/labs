@@ -109,13 +109,14 @@ describe("PatternManager.compileAndRegisterModules", () => {
     expect(runtime.patternManager.getArtifactEntryRef(entry)).toBeDefined();
   });
 
-  // The cf-test harness injects a process-wide module byte cache
-  // (`RuntimeOptions.moduleByteCache`) so repeated pattern compiles across
-  // runtimes skip the transform-and-emit step. Pin that seam here: a fresh
-  // runtime given a previously populated cache must serve the compile from
-  // cached bytes (a COMPLETE set — partial sets recompile) and still register
-  // the evaluated artifacts exactly like a cold compile.
   it("reuses an injected module byte cache across runtimes and still registers", async () => {
+    // The cf-test harness injects a process-wide module byte cache
+    // (`RuntimeOptions.moduleByteCache`) so repeated pattern compiles across
+    // runtimes skip the transform-and-emit step. Pin that seam here: a fresh
+    // runtime given a previously populated cache must serve the compile from
+    // cached bytes (a COMPLETE set — partial sets recompile) and still register
+    // the evaluated artifacts exactly like a cold compile.
+
     const entries = new Map<
       string,
       { identity: string } & CompiledModuleArtifact

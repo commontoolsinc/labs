@@ -107,11 +107,12 @@ describe("convert-cells-to-links-vetting", () => {
     });
   });
 
-  // A `Map` mints nothing, so what refuses it is the vet, the same as for
-  // anything else with no fabric form. Letting one through would land it in
-  // the record branch, which would rebuild it -- a `Map` having no enumerable
-  // own properties -- as a bare `{}`.
   it("throws for a `Map`", () => {
+    // A `Map` mints nothing, so what refuses it is the vet, the same as for
+    // anything else with no fabric form. Letting one through would land it in
+    // the record branch, which would rebuild it -- a `Map` having no enumerable
+    // own properties -- as a bare `{}`.
+
     expect(() => convertCellsToLinks({ x: new Map() } as never)).toThrow(
       "`Map` (a `FabricNativeObject`, so conversion is what decides it)",
     );
