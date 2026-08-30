@@ -9,15 +9,14 @@ import {
   mergeableOpPayloadContains,
 } from "../src/storage/mergeable-ops.ts";
 
+// Ties the three places a mergeable patch op is registered together, so a new op
+// added to one but not the others fails loudly here rather than silently
+// degrading a mergeable write to a whole-value diff:
+//
+//   1. api MERGEABLE_OP_METHODS      — the author method + wire tag + classification
+//   2. runner storage/mergeable-ops  — how the op folds intent and builds wire ops
+//   3. memory v2/patch descriptors   — the wire op's shape, apply, and touched paths
 describe("mergeable op registry consistency", () => {
-  // Ties the three places a mergeable patch op is registered together, so a new
-  // op added to one but not the others fails loudly here rather than silently
-  // degrading a mergeable write to a whole-value diff:
-  //
-  // 1. api MERGEABLE_OP_METHODS      — the author method + wire tag + classification
-  // 2. runner storage/mergeable-ops  — how the op folds intent and builds wire ops
-  // 3. memory v2/patch descriptors   — the wire op's shape, apply, and touched paths
-
   const catalogWireOps = MERGEABLE_OP_METHODS.map((op) => op.wireOp);
 
   it("every catalog method records a real wire patch op", () => {
@@ -42,12 +41,11 @@ describe("mergeable op registry consistency", () => {
 });
 
 describe("mergeable op createsKey stamping", () => {
+  // A create-from-absent mergeable op adds a key to its parent container; the
+  // build stamps `createsKey` so the conflict matcher invalidates a shape
+  // reader of the parent (see docs/specs/memory-v2/08-conflict-granularity.md
+  // and the engine-side conflict test in packages/memory).
   it("stamps createsKey when a tail op materializes an absent array", () => {
-    // A create-from-absent mergeable op adds a key to its parent container; the
-    // build stamps `createsKey` so the conflict matcher invalidates a shape
-    // reader of the parent (see docs/specs/memory-v2/08-conflict-granularity.md
-    // and the engine-side conflict test in packages/memory).
-
     expect(
       buildMergeableIntent(
         { op: "append", path: ["value", "items"], count: 1 },

@@ -345,10 +345,9 @@ describe("StorageManager per-space host wiring", () => {
   });
 });
 
+// Site-table v0: runtime-learned host hints. A default-host connection remains
+// provisional until the first configured or accepted route is known.
 describe("StorageManager.registerSpaceHost", () => {
-  // Site-table v0: runtime-learned host hints. A default-host connection
-  // remains provisional until the first configured or accepted route is known.
-
   const spaceSeeded = "did:key:z6Mk-register-seeded" as MemorySpace;
   const spaceLearned = "did:key:z6Mk-register-learned" as MemorySpace;
   const spaceOpened = "did:key:z6Mk-register-opened" as MemorySpace;

@@ -637,13 +637,12 @@ describe("combineSchemaForLink reader precedence", () => {
     expect(combineSchemaForLink(true, false)).toBe(false);
   });
 
+  // `ifc` deliberately does not ride the combination: write policy consumes
+  // declared schemas verbatim (`recordSchemaWritePolicyInput`), so a clause
+  // grafted onto the reader's schema would read as a declaration nobody
+  // authored. The read entry point marks cfc relevance off the link schema
+  // directly instead (`validateAndTransform`'s `schemaHasIfc` gate).
   it("leaves a discarded link schema's ifc off a shaped reader", () => {
-    // `ifc` deliberately does not ride the combination: write policy consumes
-    // declared schemas verbatim (`recordSchemaWritePolicyInput`), so a clause
-    // grafted onto the reader's schema would read as a declaration nobody
-    // authored. The read entry point marks cfc relevance off the link schema
-    // directly instead (`validateAndTransform`'s `schemaHasIfc` gate).
-
     const labeledLink = {
       ...linkContactSchema,
       ifc: { confidentiality: ["confidential"] },
@@ -663,11 +662,10 @@ describe("combineSchemaForLink reader precedence", () => {
     expect(combineSchemaForLink(true, labeledLink)).toEqual(labeledLink);
   });
 
+  // `default` crosses the precedence line: a value's default is inherited
+  // from the last crossed schema that declares one, the nearest declaration
+  // to the data being the aptest.
   it("inherits the link's default onto a shaped reader", () => {
-    // `default` crosses the precedence line: a value's default is inherited
-    // from the last crossed schema that declares one, the nearest declaration
-    // to the data being the aptest.
-
     const defaultedLink = {
       ...linkContactSchema,
       default: { name: "someone" },

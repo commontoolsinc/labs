@@ -415,13 +415,12 @@ describe("computed cell kinds", () => {
     });
   });
 
+  // Negative battery for the fail-closed fallbacks: every branch here exists
+  // because under-collection means silently dropped user writes, so each one
+  // must provably disqualify (or, for the read-only-kind check, provably
+  // spare) its roots. Hand-built modules via createNodeFactory reach the
+  // writer/input shapes the trusted builders never emit.
   describe("fail-closed disqualifier battery", () => {
-    // Negative battery for the fail-closed fallbacks: every branch here exists
-    // because under-collection means silently dropped user writes, so each one
-    // must provably disqualify (or, for the read-only-kind check, provably
-    // spare) its roots. Hand-built modules via createNodeFactory reach the
-    // writer/input shapes the trusted builders never emit.
-
     const mkModule = (spec: Record<string, unknown>) =>
       createNodeFactory(spec as never);
 
