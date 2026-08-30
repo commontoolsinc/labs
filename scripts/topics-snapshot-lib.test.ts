@@ -30,6 +30,13 @@ describe("topics-snapshot-lib", () => {
       expect(argumentIdOf(document)).toBe("of:fid1:arg");
     });
 
+    //
+    // Neither encoding
+    //
+    // A document that links nothing, and one whose `argument` is not a link at
+    // all, both read as no argument entity.
+    //
+
     it("returns undefined when the document links nothing", () => {
       expect(argumentIdOf({})).toBeUndefined();
       expect(argumentIdOf({ argument: "not a link" })).toBeUndefined();
