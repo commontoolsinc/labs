@@ -10,19 +10,19 @@ if (env.ENV !== "test") {
   throw new Error("ENV must be 'test'");
 }
 
-// The POSITIVE auth path, which nothing else covers: a genuinely signed
-// first-party request reaching a handler. Everything before this asserted only
-// that bad requests are rejected — "the real thing is accepted" is the half
-// that actually has to work.
-//
-// Under test the `runtime` singleton these handlers import is uninitialized, so
-// any path touching storage answers 502. That is itself the storage-error
-// contract, and it proves the request cleared the signature check, the rate
-// limiter, and body validation to get there. The authorization logic proper is
-// tested against a real ACL-enforcing memory server in
-// ingest-channels.utils.test.ts.
-
 describe("Ingest channels route (authenticated)", () => {
+  // The POSITIVE auth path, which nothing else covers: a genuinely signed
+  // first-party request reaching a handler. Everything before this asserted
+  // only that bad requests are rejected — "the real thing is accepted" is the
+  // half that actually has to work.
+  //
+  // Under test the `runtime` singleton these handlers import is uninitialized,
+  // so any path touching storage answers 502. That is itself the storage-error
+  // contract, and it proves the request cleared the signature check, the rate
+  // limiter, and body validation to get there. The authorization logic proper
+  // is tested against a real ACL-enforcing memory server in
+  // ingest-channels.utils.test.ts.
+
   // A distinct client per request: the limiters are module-level, so sharing a
   // key across tests turns a later 502 expectation into a 429.
   let clientCounter = 0;

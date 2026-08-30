@@ -1,3 +1,11 @@
+/**
+ * The EXPERIMENTAL_* → ExperimentalOptions mapping (including its tri-state
+ * unset/true/false fidelity) now lives in the runner's canonical
+ * `experimentalOptionsFromEnv` / `EXPERIMENTAL_ENV_VARS` (CT-1814), shared by
+ * toolshed, the CLI, and the background-piece-service; its coverage lives in
+ * `packages/runner/test/runtime-presets.test.ts`.
+ */
+
 import { assertEquals } from "@std/assert";
 import { EnvSchema } from "@/env.ts";
 
@@ -53,12 +61,6 @@ Deno.test("MEMORY_ACL_MODE defaults to enforce and accepts rollout overrides", (
   assertEquals(aclMode("observe"), "observe");
   assertEquals(aclMode("enforce"), "enforce");
 });
-
-// The EXPERIMENTAL_* → ExperimentalOptions mapping (including its tri-state
-// unset/true/false fidelity) now lives in the runner's canonical
-// `experimentalOptionsFromEnv` / `EXPERIMENTAL_ENV_VARS` (CT-1814), shared by
-// toolshed, the CLI, and the background-piece-service; its coverage lives in
-// `packages/runner/test/runtime-presets.test.ts`.
 
 Deno.test("INGEST_SELF_SERVE_ENABLED is off unless explicitly enabled", () => {
   // The self-serve ingest control plane must be OFF unless a deployment opts

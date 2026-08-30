@@ -48,17 +48,17 @@ const err = (result: ControlResult<unknown>): string => {
   return result.body.error;
 };
 
-// The brief's acceptance criteria, run against a REAL memory server with
-// `acl: { mode: "enforce" }`: a user holding only their own identity key can
-// mint a channel for their own space, is refused when naming a space they do
-// not control, can list / rotate / revoke, and a revoked token stops working.
-//
-// Ownership is enforced against a space with a CONCRETE, non-derived owner.
-// That matters: on a deployment where space DIDs derive from a public
-// passphrase, anyone can sign as the space and grant themselves OWNER, so a
-// test against such a space would prove nothing about the check.
-
 describe("ingest-channels control plane", () => {
+  // The brief's acceptance criteria, run against a REAL memory server with
+  // `acl: { mode: "enforce" }`: a user holding only their own identity key can
+  // mint a channel for their own space, is refused when naming a space they do
+  // not control, can list / rotate / revoke, and a revoked token stops working.
+  //
+  // Ownership is enforced against a space with a CONCRETE, non-derived owner.
+  // That matters: on a deployment where space DIDs derive from a public
+  // passphrase, anyone can sign as the space and grant themselves OWNER, so a
+  // test against such a space would prove nothing about the check.
+
   let server: MemoryV2Server.Server;
   let factory: LoopbackSessionFactory;
   let operator: Identity;

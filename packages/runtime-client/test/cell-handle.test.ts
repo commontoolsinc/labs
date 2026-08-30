@@ -2635,10 +2635,14 @@ describe("cell-handle", () => {
         }),
       }) as unknown as RuntimeClient;
 
+    //
+    // Three methods that serialize
+    //
     // Three methods serialize, and each used to refuse a `FabricSpecialObject`
-    // through a different caller contract. All three carry one now, and
-    // pinning all three is what keeps a later refactor from carrying it on
-    // only the path `set()` takes.
+    // through a different caller contract. All three carry one now, and pinning
+    // all three is what keeps a later refactor from carrying it on only the
+    // path `set()` takes.
+    //
 
     it("carries one through `push()`", () => {
       const requests: Array<{ values?: unknown[] }> = [];
