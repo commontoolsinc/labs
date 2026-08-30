@@ -45,8 +45,8 @@ authority, and a new test file is a reason to open it rather than to copy a
 neighbor. Not every file in the tree follows it, so what sits beside you in
 the same directory is not evidence of what to write.
 
-The five its readers most often get wrong by defaulting to the surrounding
-code:
+The five rules its readers most often get wrong by defaulting to the
+surrounding code:
 
 - BDD only — `describe()` / `it()` / `beforeEach()` from `@std/testing/bdd`,
   never `Deno.test()`.

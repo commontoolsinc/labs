@@ -191,8 +191,9 @@ declare class DonutWeight {
 }
 
 describe("instance members", () => {
-  // Each member reads through the snapshot the constructor froze, so a
-  // mutation to the source object after construction is invisible here.
+  // Comparing two `DonutWeight`s would rest on whatever equality the class
+  // gives. Each case reads `grams` off the result instead, so what the
+  // assertion turns on is the arithmetic alone.
 
   describe("plus()", () => {
     it("returns the sum of the two weights", () => {
@@ -225,8 +226,9 @@ Two nearby shapes are not this one:
 - A [section marker](code-comment-style.md#section-markers) titles a region of
   the file holding several blocks. Reach is what tells the two apart, not
   length or subject matter. A marker covering a single block is not marking a
-  region: either it says something about that block, and goes inside it in the
-  form above, or it restates the block's own description, and goes.
+  region. Where it says something about that block, it becomes a block comment
+  in the form above. Where it only restates the block's own description, it is
+  deleted.
 
 ## Assertions
 
