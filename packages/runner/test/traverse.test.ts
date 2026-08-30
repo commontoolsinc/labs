@@ -546,9 +546,8 @@ describe("SchemaObjectTraverser array traversal", () => {
 
   it("rejects populated array when items is false and no prefixItems (B3)", () => {
     // CT-1562 / B3: companion to the test above, with the same `items: false`
-    // constraint but without `prefixItems`. The traverser currently accepts
-    // populated arrays through this schema, returning them unchanged. RED until
-    // B3 is fixed.
+    // constraint but without `prefixItems`. The traverser rejects a populated
+    // array against it.
 
     const store = new Map<string, Revision<State>>();
     const type = "application/json" as const;
@@ -2072,9 +2071,11 @@ describe("canBranchMatch", () => {
 
   it("accepts empty array against items: false (only empty arrays match)", () => {
     // CT-1562 / B1: `items: false` on an array schema means "no items allowed"
-    // (only the empty array `[]` matches). canBranchMatch currently checks
-    // `type === "array"` but ignores `items: false`, so populated arrays
-    // falsely pass the fast-reject check. These tests RED until B1 is fixed.
+    // (only the empty array `[]` matches). canBranchMatch checks
+    // `type === "array"` but ignores `items: false`, so a populated array still
+    // passes this fast-reject check. This case pins the empty-array half, which
+    // matches either way; nothing here covers the populated half, so the gap
+    // shows up in no failing test.
 
     expect(canBranchMatch({ type: "array", items: false }, [])).toBe(true);
   });

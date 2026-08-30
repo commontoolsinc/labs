@@ -17,11 +17,6 @@ import { trustExecutable } from "./support/trusted-builder.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-// Two storage managers that share ONE in-memory server (the persistence
-// boundary) but keep SEPARATE client caches. This models a reload: the second
-// runtime starts cold and must fetch persisted docs from the server, rather
-// than reading the first runtime's warm cache.
-
 describe("rehydrate internal default (CT-1666)", () => {
   // Regression coverage for CT-1666.
   //
@@ -101,6 +96,10 @@ describe("rehydrate internal default (CT-1666)", () => {
     throw new Error(`Missing internal manifest entry for ${partialCause}`);
   };
 
+  // Two storage managers that share ONE in-memory server (the persistence
+  // boundary) but keep SEPARATE client caches. This models a reload: the second
+  // runtime starts cold and must fetch persisted docs from the server, rather
+  // than reading the first runtime's warm cache.
   beforeEach(() => {
     server = newSharedServer();
     sm1 = EmulatedStorageManager.connectTo(server, { as: signer });
