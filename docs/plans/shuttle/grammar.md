@@ -12,9 +12,9 @@ redirection surface. Ruled points are stated plainly; anything marked
 ```
 
 Navigation verbs are shuttle-native: `cd`, `ls`, `pwd`, `watch`,
-`unwatch`, `watches`, `back` (`cd -` returns to the previous place). Data
-verbs are `cf`'s own — `get`,
-`set`, `call`, `wish`, `verbs`, `describe`, … — accepting their existing
+`unwatch`, `watches` (`cd -` returns to the previous place). Data verbs
+are `cf`'s own — `get`, `set`, `call`, `wish`, `verbs`, `describe`, … —
+accepting their existing
 read and projection options (`--filter`, `--select`, `--schema`, `--json`),
 with the place supplying target options. `!` marks "this runs on the local
 machine" everywhere it appears: line-initial `! <cmd>` runs any local
@@ -137,7 +137,7 @@ no computation, stored reads labeled — is designed and deferred past v1
 ## Scope is the cwd's second dimension
 
 A cell can carry per-identity overlays — `@user`, `@session` — so the same
-piece reads differently per identity (`cf inspect scopes` shows that
+piece reads differently per identity (`cf inspect scopes <space>` shows that
 ground truth offline). Scope is a way of seeing every place, not a
 location, so the cwd is a **pair**: position and scope. Both stick while
 you navigate, both render in the prompt, and `pwd` prints both.
@@ -182,7 +182,7 @@ The canonical grammar bounds what a suffix on a reference can say
   spelling) is not in the grammar and is out of v1. It is a
   canonical-grammar extension first — "the alias must not grow a
   capability the canonical form lacks" (`packages/cli/lib/llm-friendly-ref.ts`)
-  — and a permission question besides; `cf inspect scopes` remains the
+  — and a permission question besides; `cf inspect scopes <space>` remains the
   offline way to see other identities' overlays.
 
 ## The ambient context and `where`

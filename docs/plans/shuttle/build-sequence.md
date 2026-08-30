@@ -26,13 +26,17 @@ list is the record of which internals have a second caller. (The view
 substrate's entries wait for B3, which is when they earn their place on
 that record.)
 
-**A2 — connection injection for the write path.** Thread
-`deps.loadPieces` (the existing `PieceResolutionDeps` seam) through the
-functions that hardcode `await loadPieces(config)` today, in order of
-shuttle's need: `setCellValue` and `callPieceHandler` and `stepPiece`
-first (v1 verbs), then `removePiece`, `getPieceView`, `renderPiece`, the
-`lib/acl.ts` loaders. Each conversion carries the unit test the seam
-makes possible; that is the PR's standalone value.
+**A2 — connection injection for the write path.** Three shapes of work,
+not one. `stepPiece` is already done — it gained the
+`PieceResolutionDeps` seam with its write receipt (#6556), and its unit
+test is the template. `callPieceHandler` and `getPieceView` are
+forwarding gaps: each delegates to an already-injectable function
+(`resolvePieceCallable`, `inspectPiece`) without passing deps through, so
+the fix is a threaded parameter. The genuine conversions — the functions
+that call `loadPieces(config)` directly — are `setCellValue` first (a v1
+verb), then `removePiece`, `renderPiece`, and the `lib/acl.ts` loaders.
+Each change carries the unit test the seam makes possible; that is the
+PR's standalone value.
 
 **A3 — extract `callFromCommand`.** `buildCallCommand`'s action is inline
 and bound to Cliffy's `this` (`getLiteralArgs`); its constituents are

@@ -148,10 +148,17 @@ injection point that lets a lib function reuse a held controller:
 
 - **Accept it:** `getCellValue`, `listPieces`, `listSpaceSlugs`,
   `searchPieces`, `inspectPiece`, `executePieceCallable` (via
-  `PieceCallableDependencies`), `readWish`, `runExec`, all of `lib/bulk.ts`.
-- **Hardcode `loadPieces` instead:** `setCellValue`, `callPieceHandler`,
-  `stepPiece`, `removePiece`, `getPieceView`, `renderPiece`, the
-  `lib/acl.ts` loaders. Each opens a fresh runtime and WebSocket per call.
+  `PieceCallableDependencies`), `readWish`, `runExec`, all of
+  `lib/bulk.ts` — and `stepPiece`, seamed when it gained its write receipt
+  (#6556), whose unit test is the template the rest of this list follows.
+- **Forwarding gaps:** `callPieceHandler` and `getPieceView` hardcode
+  nothing themselves — each delegates to an already-injectable function
+  (`resolvePieceCallable` via `PieceCallableDependencies`; `inspectPiece`)
+  without forwarding a deps argument. The fix is a parameter threaded
+  through, not a conversion.
+- **Hardcode `loadPieces`:** `setCellValue`, `removePiece`, `renderPiece`,
+  the `lib/acl.ts` loaders. Each opens a fresh runtime and WebSocket per
+  call; these are the genuine conversions.
 
 `call` is the one verb with no seam at all: `buildCallCommand`'s action is
 inline and bound to Cliffy's `this` (`getLiteralArgs`). Its constituents are
