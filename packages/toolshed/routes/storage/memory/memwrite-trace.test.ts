@@ -124,6 +124,14 @@ describe("memwrite-trace", () => {
       expect(vhashOf(inf)).not.toBe(vhashOf(nul));
     });
 
+    //
+    // When the hasher refuses
+    //
+    // The cost of that choice, rather than a reason for it: a value the
+    // canonical hasher cannot encode must not take the rest of the commit's
+    // ops down with it.
+    //
+
     it("never throws on a value the canonical hasher rejects", () => {
       // Not expected for a real FabricValue, but the trace must stay alive: a
       // value the hasher can't encode (here, a function) yields a sentinel
