@@ -299,14 +299,15 @@ describe("executePieceCallable", () => {
     expect(harness.tracker.sendOptions).toEqual([]);
   });
 
-  // The schema below is the deployed shape a stream's event is routinely
-  // written in: a top-level local $ref with the stream marker. The arg
-  // parser reads the definition's fields, so absence is refused where the
-  // caller can act on it — naming the type to supply — rather than deeper in
-  // at the payload gate. Either way nothing dispatches; what this pins is
-  // that the id survives a refusal, so the retry that does send a payload
-  // can still use it.
   it("refuses an absent payload against a verb that provably cannot run without one", async () => {
+    // The schema below is the deployed shape a stream's event is routinely
+    // written in: a top-level local $ref with the stream marker. The arg
+    // parser reads the definition's fields, so absence is refused where the
+    // caller can act on it — naming the type to supply — rather than deeper in
+    // at the payload gate. Either way nothing dispatches; what this pins is
+    // that the id survives a refusal, so the retry that does send a payload
+    // can still use it.
+
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "recordMessage",
@@ -352,13 +353,14 @@ describe("executePieceCallable", () => {
     expect(harness.tracker.sendOptions).toEqual([]);
   });
 
-  // A $ref-carrying stream shape declares its fields in the definition, and
-  // the arg parser reads them there — so a bare call takes the same
-  // implicit-pipe path as the identical verb written without the
-  // indirection ("infers piped stdin for object handlers", below). Piped
-  // bytes reach a verb through this shape; how the schema spells its event
-  // is not something a caller should have to know to pipe into it.
   it("infers piped stdin for a bare $ref-stream verb call", async () => {
+    // A $ref-carrying stream shape declares its fields in the definition, and
+    // the arg parser reads them there — so a bare call takes the same
+    // implicit-pipe path as the identical verb written without the
+    // indirection ("infers piped stdin for object handlers", below). Piped
+    // bytes reach a verb through this shape; how the schema spells its event
+    // is not something a caller should have to know to pipe into it.
+
     const harness = createPieceCallableHarness({
       callableKind: "handler",
       cellKey: "recordMessage",
@@ -4379,11 +4381,12 @@ describe("verbInputSchemaError", () => {
       .toBeUndefined();
   });
 
-  // `{}` rather than a misspelling, so this reaches the schema validation
-  // rather than the undeclared-field refusal that now precedes it — a
-  // misspelled required property is BOTH, and it is refused as the undeclared
-  // field it is (verb-undeclared-field.test.ts).
   it("rejects a missing required property", () => {
+    // `{}` rather than a misspelling, so this reaches the schema validation
+    // rather than the undeclared-field refusal that now precedes it — a
+    // misspelled required property is BOTH, and it is refused as the undeclared
+    // field it is (verb-undeclared-field.test.ts).
+
     expect(verbInputSchemaError({}, objectSchema)).toMatch(/message/);
   });
 
@@ -4401,13 +4404,14 @@ describe("verbInputSchemaError", () => {
     expect(verbInputSchemaError({ anything: 1 }, true)).toBeUndefined();
   });
 
-  // The runtime injects a property's default when the payload omits it, so
-  // requiring it here would refuse a call the verb would have accepted. This
-  // pins that the gate APPLIES the relaxation; the relaxation's own semantics
-  // ($ref chains, combinators, cycles, the `definitions` refusal) are pinned
-  // where the helpers live (runner `cfc-defaulted-required-relaxation.test.ts`
-  // — verb contract D6).
   it("treats a defaulted property as satisfied when omitted", () => {
+    // The runtime injects a property's default when the payload omits it, so
+    // requiring it here would refuse a call the verb would have accepted. This
+    // pins that the gate APPLIES the relaxation; the relaxation's own semantics
+    // ($ref chains, combinators, cycles, the `definitions` refusal) are pinned
+    // where the helpers live (runner
+    // `cfc-defaulted-required-relaxation.test.ts` — verb contract D6).
+
     expect(verbInputSchemaError({}, {
       type: "object",
       properties: { mode: { type: "string", default: "fast" } },
@@ -4476,10 +4480,11 @@ describe("normalizeAbsentVerbPayload", () => {
     expect(normalizeAbsentVerbPayload(undefined, true)).toBeUndefined();
   });
 
-  // An absent payload must keep passing a `false` schema — a supplied one is
-  // already refused by the validator ("schema rejects all values"), and
-  // normalizing here would convert every call into that refusal.
   it("leaves absence alone against a boolean false schema", () => {
+    // An absent payload must keep passing a `false` schema — a supplied one is
+    // already refused by the validator ("schema rejects all values"), and
+    // normalizing here would convert every call into that refusal.
+
     expect(normalizeAbsentVerbPayload(undefined, false)).toBeUndefined();
   });
 
@@ -4492,9 +4497,10 @@ describe("normalizeAbsentVerbPayload", () => {
     })).toBeUndefined();
   });
 
-  // Refuse only on proof: a $ref nobody can resolve proves nothing about the
-  // event being an object, so absence keeps today's pass-through behavior.
   it("leaves absence alone when the top-level $ref cannot be resolved", () => {
+    // Refuse only on proof: a $ref nobody can resolve proves nothing about the
+    // event being an object, so absence keeps today's pass-through behavior.
+
     expect(normalizeAbsentVerbPayload(undefined, {
       $ref: "#/$defs/Absent",
       asCell: ["stream"],
@@ -4502,10 +4508,11 @@ describe("normalizeAbsentVerbPayload", () => {
     } as JSONSchema)).toBeUndefined();
   });
 
-  // A boolean definition is a resolvable target that still proves nothing
-  // about the event being an object — absence passes through, like any other
-  // non-object target.
   it("leaves absence alone when the top-level $ref names a boolean def", () => {
+    // A boolean definition is a resolvable target that still proves nothing
+    // about the event being an object — absence passes through, like any other
+    // non-object target.
+
     expect(normalizeAbsentVerbPayload(undefined, {
       $ref: "#/$defs/Anything",
       asCell: ["stream"],
@@ -4513,12 +4520,13 @@ describe("normalizeAbsentVerbPayload", () => {
     } as JSONSchema)).toBeUndefined();
   });
 
-  // An allOf conjunction with an object-schema branch IS an object schema —
-  // no branch choice is involved, so `{}` is exactly as meaningful as for a
-  // direct object root, and the gate then judges it the same way (refused
-  // when non-defaulted required survives relaxation, dispatched with defaults
-  // engaging when it does not).
   it("normalizes absence to {} against an allOf of object schemas", () => {
+    // An allOf conjunction with an object-schema branch IS an object schema —
+    // no branch choice is involved, so `{}` is exactly as meaningful as for a
+    // direct object root, and the gate then judges it the same way (refused
+    // when non-defaulted required survives relaxation, dispatched with defaults
+    // engaging when it does not).
+
     expect(normalizeAbsentVerbPayload(undefined, {
       allOf: [
         {
@@ -4542,10 +4550,11 @@ describe("normalizeAbsentVerbPayload", () => {
     } as unknown as JSONSchema)).toEqual({});
   });
 
-  // Disjunctive roots stay out of scope (the D5 rule's recorded combinator
-  // boundary): normalizing `{}` against anyOf/oneOf would pick among
-  // alternatives on the caller's behalf.
   it("leaves absence alone against anyOf/oneOf roots", () => {
+    // Disjunctive roots stay out of scope (the D5 rule's recorded combinator
+    // boundary): normalizing `{}` against anyOf/oneOf would pick among
+    // alternatives on the caller's behalf.
+
     expect(normalizeAbsentVerbPayload(undefined, {
       anyOf: [{ type: "object", properties: {} }],
     } as unknown as JSONSchema)).toBeUndefined();
@@ -4554,10 +4563,11 @@ describe("normalizeAbsentVerbPayload", () => {
     } as unknown as JSONSchema)).toBeUndefined();
   });
 
-  // The schema-less handler-input shape (`{ asCell: ["stream"] }` with no
-  // type and no properties) is not an object schema; `{}` means nothing
-  // there.
   it("leaves absence alone against a schema-less stream marker", () => {
+    // The schema-less handler-input shape (`{ asCell: ["stream"] }` with no
+    // type and no properties) is not an object schema; `{}` means nothing
+    // there.
+
     expect(normalizeAbsentVerbPayload(undefined, {
       asCell: ["stream"],
     } as JSONSchema)).toBeUndefined();
@@ -4616,10 +4626,11 @@ describe("reportVerbInputErrorOrRethrow", () => {
     expect(printed[1]).toMatch(/<piece>/);
   });
 
-  // Anything that is not an input rejection has to keep traveling: a network
-  // failure reported as a payload problem would send an agent to fix a payload
-  // that was fine.
   it("re-throws an unrelated failure untouched", () => {
+    // Anything that is not an input rejection has to keep traveling: a network
+    // failure reported as a payload problem would send an agent to fix a
+    // payload that was fine.
+
     const { printed, exited, deps } = sink();
     const original = new Error("network unreachable");
 
@@ -4683,10 +4694,11 @@ describe("the pre-dispatch gate on the forced-stream path", () => {
 });
 
 describe("runtimeErrorLog", () => {
-  // Pinned directly rather than left to incidental coverage: which execution
-  // paths hand this a non-object runtime varies by run and sharding, and the
-  // coverage gate has flagged the resulting phantom deltas on unrelated PRs.
   it("returns [] for non-object runtimes and runtimes without a log", () => {
+    // Pinned directly rather than left to incidental coverage: which execution
+    // paths hand this a non-object runtime varies by run and sharding, and the
+    // coverage gate has flagged the resulting phantom deltas on unrelated PRs.
+
     expect(runtimeErrorLog(undefined)).toEqual([]);
     expect(runtimeErrorLog("not a runtime")).toEqual([]);
     expect(runtimeErrorLog({})).toEqual([]);
@@ -4706,6 +4718,7 @@ describe("schemaIsObjectShaped", () => {
   // defensive boolean-target guard is unreachable through it, and the
   // combinator boundary this function encodes (allOf conjunctions count,
   // disjunctions never) deserves its own record.
+
   it("rejects boolean schemas and accepts object shapes", () => {
     expect(schemaIsObjectShaped(true, true)).toBe(false);
     expect(schemaIsObjectShaped(false, false)).toBe(false);

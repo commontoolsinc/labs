@@ -49,11 +49,12 @@ describe("verb-emitted-address", () => {
         .toEqual({ value: { on: ENVELOPE } });
     });
 
-    // The compiled contract spells a named reference `{$ref: …, asCell: […]}`
-    // — the marker rides the REFERENCE SITE. A walk that resolves the `$ref`
-    // before looking loses it and converts nothing, which is exactly how the
-    // first live probe of this feature failed.
     it("reads the marker off the `$ref` site, where the compiled contract carries it", () => {
+      // The compiled contract spells a named reference `{$ref: …, asCell: […]}`
+      // — the marker rides the REFERENCE SITE. A walk that resolves the `$ref`
+      // before looking loses it and converts nothing, which is exactly how the
+      // first live probe of this feature failed.
+
       const schema: JSONSchema = {
         type: "object",
         properties: { on: { $ref: "#/$defs/Item", asCell: ["cell"] } },
@@ -95,10 +96,11 @@ describe("verb-emitted-address", () => {
       );
     });
 
-    // `#argument` names a piece's arguments cell for commands that take
-    // `--input`; as a verb argument it addresses nothing a reference position
-    // can hold.
     it("refuses the `#argument` suffix at a reference position", () => {
+      // `#argument` names a piece's arguments cell for commands that take
+      // `--input`; as a verb argument it addresses nothing a reference position
+      // can hold.
+
       const resolved = resolveEmittedAddressArguments(
         { on: `${ADDRESS}#argument` },
         inlineMarker,
@@ -106,10 +108,11 @@ describe("verb-emitted-address", () => {
       expect(resolved.refusal).toContain("is not an address");
     });
 
-    // The parser THROWS on an unknown suffix rather than declining; the walk
-    // absorbs that into the same refusal, so a caller never sees a parser
-    // stack where a refusal was owed.
     it("refuses a suffix the address grammar rejects outright", () => {
+      // The parser THROWS on an unknown suffix rather than declining; the walk
+      // absorbs that into the same refusal, so a caller never sees a parser
+      // stack where a refusal was owed.
+
       const resolved = resolveEmittedAddressArguments(
         { on: `${ADDRESS}#bogus` },
         inlineMarker,
@@ -145,9 +148,10 @@ describe("verb-emitted-address", () => {
         .toEqual({ value: payload });
     });
 
-    // The event root is where the payload ITSELF sits; a marker there says
-    // how the runtime holds the event, not that the caller sends an address.
     it("never converts at the event root", () => {
+      // The event root is where the payload ITSELF sits; a marker there says
+      // how the runtime holds the event, not that the caller sends an address.
+
       const schema: JSONSchema = {
         type: "object",
         asCell: ["cell"],
@@ -199,10 +203,11 @@ describe("verb-emitted-address", () => {
       ).toEqual({ value: { pair: ["label", ENVELOPE, ADDRESS] } });
     });
 
-    // A record schema names no key at all: its values are declared on
-    // `additionalProperties`, which is where a map of references puts its
-    // marker. Reading only `properties` skips every one of them.
     it("walks a record schema's values through `additionalProperties`", () => {
+      // A record schema names no key at all: its values are declared on
+      // `additionalProperties`, which is where a map of references puts its
+      // marker. Reading only `properties` skips every one of them.
+
       const schema: JSONSchema = {
         type: "object",
         additionalProperties: { type: "object", asCell: ["cell"] },
@@ -214,9 +219,10 @@ describe("verb-emitted-address", () => {
       ).toContain('"nope" at <event>.anything is not an address');
     });
 
-    // A named key keeps its own account; `additionalProperties` covers only
-    // what `properties` does not name.
     it("prefers a named property over `additionalProperties`", () => {
+      // A named key keeps its own account; `additionalProperties` covers only
+      // what `properties` does not name.
+
       const schema: JSONSchema = {
         type: "object",
         properties: { plain: { type: "string" } },
@@ -244,9 +250,10 @@ describe("verb-emitted-address", () => {
       ).toContain('"nope" at <event>.on is not an address');
     });
 
-    // Choosing a disjunction branch is the caller's; converting inside one
-    // would pick it for them.
     it("passes over disjunction interiors", () => {
+      // Choosing a disjunction branch is the caller's; converting inside one
+      // would pick it for them.
+
       const schema: JSONSchema = {
         type: "object",
         properties: {
@@ -326,9 +333,10 @@ describe("verb-emitted-address", () => {
       expect((event.$defs as Record<string, unknown>).Item).toBeDefined();
     });
 
-    // A stream two handler nodes share is still a verb, but it names no
-    // single contract — matching what its declared result does.
     it("maps a stream two handler nodes share to `undefined`", () => {
+      // A stream two handler nodes share is still a verb, but it names no
+      // single contract — matching what its declared result does.
+
       const argumentSchema = {
         type: "object",
         properties: { $event: eventDef, $ctx: true },
@@ -576,13 +584,14 @@ describe("verb-emitted-address", () => {
       });
     });
 
-    // #5560 in its sharpest form, and the one the published schema alone
-    // cannot catch: a copy carrying every field the target declares, which
-    // validates precisely BECAUSE it matches the shape. Refusing the
-    // incomplete copy above while accepting this one would leave the
-    // corruption exactly where it was found — silent, and shaped like
-    // success.
     it("refuses a copy that satisfies the published shape in full", async () => {
+      // #5560 in its sharpest form, and the one the published schema alone
+      // cannot catch: a copy carrying every field the target declares, which
+      // validates precisely BECAUSE it matches the shape. Refusing the
+      // incomplete copy above while accepting this one would leave the
+      // corruption exactly where it was found — silent, and shaped like
+      // success.
+
       await withProbe("emitted-address-refuses-full-copy", async (probe) => {
         const complete = {
           "$NAME": "complete",
@@ -616,14 +625,15 @@ describe("verb-emitted-address", () => {
       });
     });
 
-    // The dispatch-cost contract, and the bound on the copy check above.
-    // Sanitization strips the reference MARKER and keeps the SHAPE, so a
-    // string at a declared reference is refused by the published schema
-    // before the gate asks, and only two payloads can have their reading
-    // changed by the contract: one the shape refused, and one it accepted
-    // carrying an inline object. A flat payload of scalars is neither, and
-    // dispatches without loading the compiled pattern.
     it("loads the pattern only where the contract can change the answer", async () => {
+      // The dispatch-cost contract, and the bound on the copy check above.
+      // Sanitization strips the reference MARKER and keeps the SHAPE, so a
+      // string at a declared reference is refused by the published schema
+      // before the gate asks, and only two payloads can have their reading
+      // changed by the contract: one the shape refused, and one it accepted
+      // carrying an inline object. A flat payload of scalars is neither, and
+      // dispatches without loading the compiled pattern.
+
       await withProbe("emitted-address-load-cost", async (probe) => {
         await probe.call("note", { body: "no load" });
         expect(probe.patternLoads()).toBe(0);
@@ -638,10 +648,11 @@ describe("verb-emitted-address", () => {
       });
     });
 
-    // A conversion repairs one position; it does not vouch for the rest of
-    // the payload. What the published shape still refuses after it is the
-    // refusal the caller reads — the REMAINING problem, not the solved one.
     it("re-judges a converted payload, and reports what still fails", async () => {
+      // A conversion repairs one position; it does not vouch for the rest of
+      // the payload. What the published shape still refuses after it is the
+      // refusal the caller reads — the REMAINING problem, not the solved one.
+
       await withProbe("emitted-address-rejudge", async (probe) => {
         const failure = await probe.call("tag", { on: probe.address })
           .then(() => undefined, (error: unknown) => String(error));
@@ -651,10 +662,11 @@ describe("verb-emitted-address", () => {
       });
     });
 
-    // Degradation, not a crash: a pattern that will not load costs the call
-    // its conversion — the plain shape refusal stands — while a payload the
-    // published shape accepts still dispatches.
     it("keeps the plain refusal when the pattern will not load", async () => {
+      // Degradation, not a crash: a pattern that will not load costs the call
+      // its conversion — the plain shape refusal stands — while a payload the
+      // published shape accepts still dispatches.
+
       await withProbe("emitted-address-no-pattern", async (probe) => {
         await expect(probe.call("relate", { on: probe.address }))
           .rejects.toThrow("does not match type object");
