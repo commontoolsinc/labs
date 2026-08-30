@@ -243,11 +243,10 @@ describe("console/src/cell-chip", () => {
       expect(spaceHoldsNoLabel(view())).toBe(true);
     });
 
+    // The negative half, stated state by state. The claim is a conjunction,
+    // so an edit that drops one of its terms widens it without failing
+    // anything that only checks the positive case.
     it("refuses a cell no reading recorded", () => {
-      // The negative half, stated state by state. The claim is a conjunction,
-      // so an edit that drops one of its terms widens it without failing
-      // anything that only checks the positive case.
-
       expect(spaceHoldsNoLabel(view({ recorded: false }))).toBe(false);
     });
 
