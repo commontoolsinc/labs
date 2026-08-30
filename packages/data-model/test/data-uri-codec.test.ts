@@ -132,12 +132,11 @@ describe("data-uri-codec", () => {
       expect(Object.is(parsed.i, -Infinity)).toBe(true);
     });
 
+    // Distinctness is a separate property from round-tripping, and the more
+    // important one here: these URIs are content addresses, so two values that
+    // are not equal must not mint the same identifier. A codec could round-trip
+    // every value faithfully and still collide.
     it("mints distinct URIs for `-0` and `+0`", () => {
-      // Distinctness is a separate property from round-tripping, and the more
-      // important one here: these URIs are content addresses, so two values
-      // that are not equal must not mint the same identifier. A codec could
-      // round-trip every value faithfully and still collide.
-
       expect(dataUriFromValue(-0)).not.toBe(dataUriFromValue(0));
       expect(dataUriFromValue({ z: -0 })).not.toBe(dataUriFromValue({ z: 0 }));
     });
