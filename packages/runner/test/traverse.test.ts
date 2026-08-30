@@ -2069,15 +2069,38 @@ describe("canBranchMatch", () => {
     ).toBe(true);
   });
 
-  it("accepts empty array against items: false (only empty arrays match)", () => {
-    // CT-1562 / B1: `items: false` on an array schema means "no items allowed"
-    // (only the empty array `[]` matches). canBranchMatch checks
-    // `type === "array"` but ignores `items: false`, so a populated array still
-    // passes this fast-reject check. This case pins the empty-array half, which
-    // matches either way; nothing here covers the populated half, so the gap
-    // shows up in no failing test.
-
+  it("accepts an empty array against items: false", () => {
     expect(canBranchMatch({ type: "array", items: false }, [])).toBe(true);
+  });
+
+  it("rejects a populated array against items: false", () => {
+    expect(canBranchMatch({ type: "array", items: false }, ["a"])).toBe(false);
+  });
+
+  it("accepts a closed tuple filled to its slots", () => {
+    expect(
+      canBranchMatch(
+        { type: "array", prefixItems: [{ type: "string" }], items: false },
+        ["a"],
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a closed tuple carrying an element past its slots", () => {
+    expect(
+      canBranchMatch(
+        { type: "array", prefixItems: [{ type: "string" }], items: false },
+        ["a", "b"],
+      ),
+    ).toBe(false);
+  });
+
+  it("accepts a populated array where items is a schema", () => {
+    // The counterweight to the two rejections above: only `items: false`
+    // bounds the length, so an open `items` admits any number of elements.
+    expect(
+      canBranchMatch({ type: "array", items: { type: "string" } }, ["a", "b"]),
+    ).toBe(true);
   });
 });
 

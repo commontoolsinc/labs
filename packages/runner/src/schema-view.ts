@@ -62,6 +62,7 @@ import {
   processDefaultValue,
   validateAndTransform,
 } from "./schema.ts";
+import { closedArrayLength } from "./schema-match.ts";
 import { type IExtendedStorageTransaction } from "./storage/interface.ts";
 import {
   canBranchMatch,
@@ -578,6 +579,18 @@ export function materializeSchemaView(
   const epoch = tx.issueReadEpoch();
 
   if (Array.isArray(value)) {
+    // The array's counterpart to the required-property gate below. A schema
+    // that closes its tuple with `items: false` describes no array longer than
+    // the slots it declares, and an eager read voids the whole array for such
+    // data rather than dropping what sits past them.
+    const closed = isObjectOrArray(schema)
+      ? closedArrayLength(schema as JSONSchemaObj)
+      : undefined;
+    if (closed !== undefined && value.length > closed) {
+      return mismatch(
+        `array of ${value.length} against a tuple closed at ${closed}`,
+      );
+    }
     return createArrayView(
       runtime,
       tx,

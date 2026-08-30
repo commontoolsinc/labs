@@ -58,6 +58,7 @@ import {
 } from "./schema-registry.ts";
 import { getReaderSchemaPrecedenceConfig } from "./reader-schema-precedence-config.ts";
 import { markIfcBearingLinkCrossing } from "./schema-ifc.ts";
+import { closedArrayLength } from "./schema-match.ts";
 import type {
   CellScope,
   JSONObject,
@@ -633,6 +634,9 @@ type PreparedAnyOfBranch = {
 
   /** Required property names, when the resolved type admits objects. */
   required: readonly string[] | undefined;
+
+  /** Longest array the branch's tuple closure admits, if it closes one. */
+  closedLength: number | undefined;
 };
 
 const _preparedAnyOfCache = new WeakMap<
@@ -651,6 +655,7 @@ function prepareAnyOfBranch(
     hasAsCell: false,
     types: undefined,
     required: undefined,
+    closedLength: undefined,
   };
   if (ContextualFlowControl.isFalseSchema(option)) return rejected;
   const merged = mergeSchemaOption(restSchema, option);
@@ -663,6 +668,7 @@ function prepareAnyOfBranch(
       hasAsCell: false,
       types: undefined,
       required: undefined,
+      closedLength: undefined,
     };
   }
   const hasAsCell = SchemaObjectTraverser.hasAsCell(merged);
@@ -677,6 +683,7 @@ function prepareAnyOfBranch(
         hasAsCell,
         types: undefined,
         required: undefined,
+        closedLength: undefined,
       };
     } else if (resolved === undefined) {
       // Unresolved $ref: pass the prefilter; traversal complains properly.
@@ -687,6 +694,7 @@ function prepareAnyOfBranch(
         hasAsCell,
         types: undefined,
         required: undefined,
+        closedLength: undefined,
       };
     }
   }
@@ -704,6 +712,7 @@ function prepareAnyOfBranch(
     hasAsCell,
     types,
     required,
+    closedLength: closedArrayLength(resolved),
   };
 }
 
@@ -3962,6 +3971,13 @@ export class SchemaObjectTraverser<V extends FabricValue>
             )
           ) {
             match = false;
+          } else if (
+            branch.closedLength !== undefined && Array.isArray(doc.value) &&
+            doc.value.length > branch.closedLength
+          ) {
+            // canBranchMatch's array-closure check: nothing past the slots an
+            // `items: false` branch declares.
+            match = false;
           } else if (branch.required !== undefined && valueIsRecord) {
             match = true;
             for (const req of branch.required) {
@@ -5330,6 +5346,7 @@ function mergeSchemaOption(
  * Checks performed (all on the top-level resolved branch):
  * - Type mismatch: branch.type vs actual JS type of value
  * - Missing required properties
+ * - An array longer than the branch's tuple closure admits
  *
  * Const/enum checks are intentionally omitted: property values may contain
  * unresolved links that would match after link resolution during traversal.
@@ -5370,6 +5387,14 @@ export function canBranchMatch(
         )
       ) return false;
     }
+  }
+
+  // For an array value, the length the branch's tuple closure admits. Shallow
+  // like the rest of this prefilter: only `items: false` and the `prefixItems`
+  // count decide, and what is in the elements is left to traversal.
+  if (Array.isArray(value)) {
+    const closed = closedArrayLength(resolved);
+    if (closed !== undefined && value.length > closed) return false;
   }
 
   // For plain object values, check missing required properties.
