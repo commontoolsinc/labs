@@ -175,6 +175,59 @@ Description strings may run past the 80-column line width the rest of the
 repository holds to. A description that reads well is worth more than a
 description that wraps well.
 
+### Commenting a block
+
+A comment about a test, or about a group of tests, goes inside the block it
+describes, as the first thing in the callback, followed by a blank line:
+
+```ts
+import { describe, it } from "@std/testing/bdd";
+import { expect } from "@std/expect";
+
+declare class DonutWeight {
+  constructor(grams: number);
+  readonly grams: number;
+  plus(other: DonutWeight): DonutWeight;
+}
+
+describe("instance members", () => {
+  // Each member reads through the snapshot the constructor froze, so a
+  // mutation to the source object after construction is invisible here.
+
+  describe("plus()", () => {
+    it("returns the sum of the two weights", () => {
+      expect(new DonutWeight(3).plus(new DonutWeight(4)).grams).toBe(7);
+    });
+  });
+});
+```
+
+Above the call, such a comment is held in place by adjacency and nothing else.
+A block inserted at that line lands between the two, and the comment then heads
+a group it was not written for while the group it describes has none. Inside
+the callback there is nothing to insert between them, and the indentation says
+how far the comment reaches.
+
+The blank line under it separates the two jobs a `//` comment does here. With
+one, the comment is about the block. Without one, it is about the statement
+directly beneath it, which is the ordinary use and is untouched by any of this.
+
+Every block that takes a body works this way: `describe()`, `it()`, the
+`beforeEach()` family, and `Deno.test()`, `Deno.bench()` and `t.step()` where a
+file uses them.
+
+Two nearby shapes are not this one:
+
+- A comment describing the **file** rather than any block in it is a file
+  header. It goes at the top of the file as a doc comment, per
+  [File headers](code-comment-style.md#file-headers), and not above the
+  top-level `describe()`.
+- A [section marker](code-comment-style.md#section-markers) titles a region of
+  the file holding several blocks. Reach is what tells the two apart, not
+  length or subject matter. A marker covering a single block is not marking a
+  region: either it says something about that block, and goes inside it in the
+  form above, or it restates the block's own description, and goes.
+
 ## Assertions
 
 Default to `expect()`-style assertions — `expect(...).toBe(...)`,

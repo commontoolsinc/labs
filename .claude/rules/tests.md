@@ -45,7 +45,7 @@ authority, and a new test file is a reason to open it rather than to copy a
 neighbor. Not every file in the tree follows it, so what sits beside you in
 the same directory is not evidence of what to write.
 
-The four its readers most often get wrong by defaulting to the surrounding
+The five its readers most often get wrong by defaulting to the surrounding
 code:
 
 - BDD only — `describe()` / `it()` / `beforeEach()` from `@std/testing/bdd`,
@@ -57,6 +57,10 @@ code:
   function", not "rejects a bare function".
 - `expect()` over `assert*()`, always for structured values. Plain `assert(x)`
   only where truthiness itself is the assertion.
+- A comment about a test or a group of tests goes inside the block, as the
+  first thing in the callback and followed by a blank line. Above the
+  `describe()` or `it()` line, the next block inserted there lands between the
+  comment and what it describes.
 
 On placement: a test goes in the package's `test/` tree, mirroring `src/`. The
 exception is a directory of independent components, `packages/ui` and

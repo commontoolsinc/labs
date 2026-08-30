@@ -242,7 +242,10 @@ we were not looking."
 Section markers separate major portions of a file or class. They are not
 headers for individual functions and their helpers — doc comments already
 carry that structure, and a reader navigating by rendered documentation never
-sees the marker at all.
+sees the marker at all. They are not headers for individual test blocks
+either;
+[`unit-test-coding-style.md`](unit-test-coding-style.md#commenting-a-block)
+says where a comment about one of those goes.
 
 Where `//` comments can be used, mark a section of a file or a class with a
 `//` comment block that opens and closes with a line holding nothing but `//`.
