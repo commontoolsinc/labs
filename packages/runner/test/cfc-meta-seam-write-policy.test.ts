@@ -13,27 +13,28 @@ import {
 
 const signer = await Identity.fromPassphrase("runner-cfc-meta-seam");
 
-// The prepare pass requires a schema write-policy input for every write it
-// records on a document carrying stored label metadata. A raw meta write
-// (`setMetaRaw`) lands on a document-root sibling of `value` — `slug`,
-// `patternIdentity`, and the rest of the `MetaField` union — and no schema
-// describes that seam, so no writer can supply the input the requirement
-// asks for. Such a write must therefore commit without a "missing schema
-// write-policy input" reason, or every runtime flow that stamps meta on a
-// labeled piece document (slug assignment, the pattern updater's identity
-// swap, setup over an existing piece) rejects under the enforcing modes.
-//
-// The exemption reaches the schema-policy requirement and nothing else. A
-// meta write is still a flow-label target: it carries the writing
-// transaction's join onto the document it lands on, so a value read from a
-// labeled document and parked in a meta field arrives labeled.
-//
-// The exemption is recorded per RAW storage path. A user field literally
-// named `slug` lives under `["value", "slug"]` and canonicalizes to the
-// same logical path as the meta field's raw `["slug"]`, so keying on the
-// canonical path would exempt the user field too; it must stay a
-// policy-targeted value write.
 describe("cfc-meta-seam-write-policy", () => {
+  // The prepare pass requires a schema write-policy input for every write it
+  // records on a document carrying stored label metadata. A raw meta write
+  // (`setMetaRaw`) lands on a document-root sibling of `value` — `slug`,
+  // `patternIdentity`, and the rest of the `MetaField` union — and no schema
+  // describes that seam, so no writer can supply the input the requirement
+  // asks for. Such a write must therefore commit without a "missing schema
+  // write-policy input" reason, or every runtime flow that stamps meta on a
+  // labeled piece document (slug assignment, the pattern updater's identity
+  // swap, setup over an existing piece) rejects under the enforcing modes.
+  //
+  // The exemption reaches the schema-policy requirement and nothing else. A
+  // meta write is still a flow-label target: it carries the writing
+  // transaction's join onto the document it lands on, so a value read from a
+  // labeled document and parked in a meta field arrives labeled.
+  //
+  // The exemption is recorded per RAW storage path. A user field literally
+  // named `slug` lives under `["value", "slug"]` and canonicalizes to the
+  // same logical path as the meta field's raw `["slug"]`, so keying on the
+  // canonical path would exempt the user field too; it must stay a
+  // policy-targeted value write.
+
   const setup = async () => {
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({

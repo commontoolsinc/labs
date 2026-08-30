@@ -10,13 +10,14 @@ const signer = await Identity.fromPassphrase(
   "runner-cfc-label-metadata-protection-dial",
 );
 
-// Inv-12 Stage 1 (SC-25): the `cfcLabelMetadataProtection` dial —
-// `off | observe | enforce`, default `off` — following the established dial
-// plumbing (cfcWriteFloor / cfcPolicyEvaluation): RuntimeOptions → per-tx
-// threading at edit() → CfcTxState, with the anti-downgrade pin (once
-// `enforce`, weakening throws) and prepared-state invalidation on a real
-// mode change after prepare.
 describe("CFC label-metadata protection dial (inv-12 Stage 1)", () => {
+  // Inv-12 Stage 1 (SC-25): the `cfcLabelMetadataProtection` dial —
+  // `off | observe | enforce`, default `off` — following the established dial
+  // plumbing (cfcWriteFloor / cfcPolicyEvaluation): RuntimeOptions → per-tx
+  // threading at edit() → CfcTxState, with the anti-downgrade pin (once
+  // `enforce`, weakening throws) and prepared-state invalidation on a real
+  // mode change after prepare.
+
   const makeRuntime = (mode?: CfcLabelMetadataProtectionMode) => {
     const storageManager = StorageManager.emulate({ as: signer });
     return new Runtime({

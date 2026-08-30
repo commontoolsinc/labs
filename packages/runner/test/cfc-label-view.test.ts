@@ -1641,9 +1641,10 @@ describe("redactSigilCfcLabelViewsForDisplay", () => {
     expect(redacted.tagged).not.toBe(mixed.tagged);
   });
 
-  // The inbound sibling: rather than redacting the view, ingress strips it
-  // entirely (main-thread views must not become worker label state).
   it("stripSigilCfcLabelViews removes views and keeps addressing intact", () => {
+    // The inbound sibling: rather than redacting the view, ingress strips it
+    // entirely (main-thread views must not become worker label state).
+
     const value = {
       items: [linkWithView("of:strip-a")],
       plain: 7,

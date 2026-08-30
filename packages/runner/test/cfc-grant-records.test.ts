@@ -332,8 +332,9 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
-  // Build-order item 2: grant records + reserved-path storage discipline.
   describe("grant document addressing", () => {
+    // Build-order item 2: grant records + reserved-path storage discipline.
+
     const identity = {
       space: ALICE,
       kind: "ShareGrant",
@@ -693,13 +694,14 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
       });
     });
 
-    // Under a non-rejecting mode the forged write reaches storage, so the
-    // flow stage must still measure it. The reserved namespaces are held out
-    // of value-write targeting because the runtime persists policy state
-    // through them; a document some transaction forged is not that, and the
-    // label it carries is what ties a later read of the stash back to what
-    // the forging transaction observed.
     it("labels an unprivileged write to a grant document under observe", async () => {
+      // Under a non-rejecting mode the forged write reaches storage, so the
+      // flow stage must still measure it. The reserved namespaces are held out
+      // of value-write targeting because the runtime persists policy state
+      // through them; a document some transaction forged is not that, and the
+      // label it carries is what ties a later read of the stash back to what
+      // the forging transaction observed.
+
       await withRuntime(
         { enforcement: "observe", flowLabels: "persist" },
         async (runtime, storageManager) => {
@@ -771,8 +773,9 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
-  // Resolution wired into the egress gate (build-order items 1+3).
   describe("grant resolution at the sink egress gate", () => {
+    // Resolution wired into the egress gate (build-order items 1+3).
+
     it("a live grant releases the owner clause to the audience (enforce)", async () => {
       await withRuntime({}, async (runtime) => {
         await writeGrant(runtime);
@@ -955,8 +958,9 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
-  // Build-order item 3: read non-taint + digest binding.
   describe("read non-taint (internalVerifierRead discipline)", () => {
+    // Build-order item 3: read non-taint + digest binding.
+
     it("grant lookups never enter the consumed read set", async () => {
       await withRuntime({}, async (runtime) => {
         const { id: grantId } = await writeGrant(runtime);
@@ -981,10 +985,11 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
-  // Arm-level coverage: every reachable validation / fail-closed branch is
-  // pinned directly (the repo standard — defensive arms reachable from the
-  // runner side get tests, not just the happy path).
   describe("writer validation arms (prepareCfcGrantWrite)", () => {
+    // Arm-level coverage: every reachable validation / fail-closed branch is
+    // pinned directly (the repo standard — defensive arms reachable from the
+    // runner side get tests, not just the happy path).
+
     const base: CfcGrantWriteInput = {
       kind: "ShareGrant",
       owner: ALICE,

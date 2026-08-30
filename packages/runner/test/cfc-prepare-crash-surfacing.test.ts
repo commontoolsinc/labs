@@ -280,22 +280,23 @@ describe("wish commit-prep failure surfacing (OW50 seat S-J)", () => {
     });
   });
 
-  // The wish-surface half of OW50: when the wish action's own commit is
-  // REFUSED, the failure must land in the wish UI — `error` + `[UI]` on the
-  // wish state doc — instead of dying with the transaction (the state the
-  // profile-embed test observes as "the wish UI silently never mounts").
-  //
-  // The flow reproduces the live served-wish mechanism end to end, on the live
-  // two-writer topology (one shared memory server, two runtimes — the serving
-  // loop and the browser client in the CI shape): the wish requests an
-  // ifc-carrying schema, so its own state schema is
-  // `result: anyOf[undefined, <ifc view>]` (built by `wishStateSchemaForResult`);
-  // writer A's run commits and persists that envelope; the wish target is then
-  // repointed, and writer B's run writes a DIFFERENT /result link against the
-  // stored envelope — commit-prep walks into the divergence assert and the
-  // commit is refused (surfaced as a modeled rejection by the prepareCfc fix
-  // above). The wish must then SHOW that refusal.
   describe("the wish surfaces its refused commit", () => {
+    // The wish-surface half of OW50: when the wish action's own commit is
+    // REFUSED, the failure must land in the wish UI — `error` + `[UI]` on the
+    // wish state doc — instead of dying with the transaction (the state the
+    // profile-embed test observes as "the wish UI silently never mounts").
+    //
+    // The flow reproduces the live served-wish mechanism end to end, on the
+    // live two-writer topology (one shared memory server, two runtimes — the
+    // serving loop and the browser client in the CI shape): the wish requests
+    // an ifc-carrying schema, so its own state schema is `result:
+    // anyOf[undefined, <ifc view>]` (built by `wishStateSchemaForResult`);
+    // writer A's run commits and persists that envelope; the wish target is
+    // then repointed, and writer B's run writes a DIFFERENT /result link
+    // against the stored envelope — commit-prep walks into the divergence
+    // assert and the commit is refused (surfaced as a modeled rejection by the
+    // prepareCfc fix above). The wish must then SHOW that refusal.
+
     const makeServer = () =>
       new MemoryV2Server.Server({
         sessions: new SessionRegistry({ ttlMs: 600_000 }),
@@ -539,14 +540,15 @@ describe("wish commit-prep failure surfacing (OW50 seat S-J)", () => {
     });
   });
 
-  // The failure observer's admission filter and its surfaced text
-  // (verification-coverage OW50): deliberate control-flow aborts must NOT
-  // paint a red error over converging control flow — `RetryImmediately`
-  // (run.ts's rescheduleActionForImmediateRetry aborts the transaction and
-  // immediately re-runs the action, which lands the good state) is the
-  // confirmed benign class. Killing mutation: removing the RetryImmediately
-  // exclusion from `isSurfacableWishCommitFailure` flips the first pin red.
   describe("surfacability filter", () => {
+    // The failure observer's admission filter and its surfaced text
+    // (verification-coverage OW50): deliberate control-flow aborts must NOT
+    // paint a red error over converging control flow — `RetryImmediately`
+    // (run.ts's rescheduleActionForImmediateRetry aborts the transaction and
+    // immediately re-runs the action, which lands the good state) is the
+    // confirmed benign class. Killing mutation: removing the RetryImmediately
+    // exclusion from `isSurfacableWishCommitFailure` flips the first pin red.
+
     it("excludes RetryImmediately-reasoned aborts (benign control flow)", () => {
       expect(isSurfacableWishCommitFailure({
         name: "StorageTransactionAborted",
@@ -592,13 +594,14 @@ describe("wish commit-prep failure surfacing (OW50 seat S-J)", () => {
     });
   });
 
-  // Backstop: the scheduler must survive ANY throw escaping
-  // `prepareTxForCommit` — not only the CFC-prep class the boundary catch above
-  // models. Before the fix, a prep throw left the action's transaction
-  // unsettled, re-entered the finalize path from the run promise's rejection
-  // handler, threw AGAIN, and escaped as an unhandled rejection with the run
-  // promise never resolving.
   describe("scheduler prep-throw backstop", () => {
+    // Backstop: the scheduler must survive ANY throw escaping
+    // `prepareTxForCommit` — not only the CFC-prep class the boundary catch
+    // above models. Before the fix, a prep throw left the action's transaction
+    // unsettled, re-entered the finalize path from the run promise's rejection
+    // handler, threw AGAIN, and escaped as an unhandled rejection with the run
+    // promise never resolving.
+
     let storageManager: ReturnType<typeof StorageManager.emulate>;
     let runtime: Runtime;
 

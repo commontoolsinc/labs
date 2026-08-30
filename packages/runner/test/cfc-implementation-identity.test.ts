@@ -227,12 +227,13 @@ describe("CFC builtin implementation identity", () => {
     tx.abort("test-complete");
   });
 
-  // (The former "unsafe-host:" debugName short-circuit test is gone with the
-  // arm itself: nothing mints unsafe-host refs anymore (identity E5 — host
-  // values ride pseudo-modules), and the generic forged-debugName behavior —
-  // kind:"builtin", which satisfies no verified-binding claim — is pinned by
-  // the adversarial suite (attack 12).)
   it("resolves verified compiled modules through provenance, with binding identity and bundle id", () => {
+    // (The former "unsafe-host:" debugName short-circuit test is gone with the
+    // arm itself: nothing mints unsafe-host refs anymore (identity E5 — host
+    // values ride pseudo-modules), and the generic forged-debugName behavior —
+    // kind:"builtin", which satisfies no verified-binding claim — is pinned by
+    // the adversarial suite (attack 12).)
+
     // PR E2: the implementationRef × verifiedLoadId registry arm is gone; the
     // function object's provenance (recorded during verified evaluation) is
     // the only source of `kind: "verified"`. This drives the resolver through

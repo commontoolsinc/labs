@@ -3,13 +3,14 @@ import { expect } from "@std/expect";
 import { ContextualFlowControl } from "../src/cfc.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
 
-// Regression guard for joinSchema combinator descent (audit 1.6 / W2.16).
-//
-// lubSchema (confidentiality tainting) descended into properties/items/$ref but
-// not anyOf/oneOf/allOf or prefixItems, so branch-local confidentiality was
-// silently dropped — an under-tainting fail-open in the core algebra. The LUB
-// must union the confidentiality of every branch a value could match.
 describe("ContextualFlowControl.lubSchema combinator descent", () => {
+  // Regression guard for joinSchema combinator descent (audit 1.6 / W2.16).
+  //
+  // lubSchema (confidentiality tainting) descended into properties/items/$ref
+  // but not anyOf/oneOf/allOf or prefixItems, so branch-local confidentiality
+  // was silently dropped — an under-tainting fail-open in the core algebra. The
+  // LUB must union the confidentiality of every branch a value could match.
+
   const atomsOf = (schema: JSONSchema) =>
     (ContextualFlowControl.lubSchema(schema) ?? []).map((a) => a).sort();
 
@@ -64,10 +65,11 @@ describe("ContextualFlowControl.lubSchema combinator descent", () => {
     } as JSONSchema)).toEqual(["el", "ref"]);
   });
 
-  // A plain `not` over-taints conservatively, but a nested `not` (not-of-not)
-  // re-selects values that DO match the inner subschema — descending `not` is
-  // needed for soundness, not just conservatism.
   it("unions confidentiality under not (conservative over-taint)", () => {
+    // A plain `not` over-taints conservatively, but a nested `not` (not-of-not)
+    // re-selects values that DO match the inner subschema — descending `not` is
+    // needed for soundness, not just conservatism.
+
     expect(atomsOf({
       type: "string",
       not: { ifc: { confidentiality: ["n"] } },

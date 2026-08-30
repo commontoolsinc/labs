@@ -22,18 +22,19 @@ type StoredEntry = {
   observes?: string;
 };
 
-// Epic C stage C2 (docs/specs/cfc-observation-classes.md §5/§8): the persist
-// region writes the per-tx flow join as per-class entries — an
-// `observes:"value"` derived entry carrying the full J plus an
-// `observes:"shape"` (existence) entry carrying confidentiality only — and
-// `structure` stamps state `observes:"shape"` explicitly.
-//
-// Rollout (C0 §9): additively safe, no dial. A class-unaware reader treats
-// both split entries as covering and sees exactly today's atoms; the C1
-// class-aware reader joins them back identically for value reads. No
-// `observes:"followRef"` entry is newly persisted here — link-origin entries
-// already carry that class implicitly.
 describe("CFC observation classes (C2 persist split)", () => {
+  // Epic C stage C2 (docs/specs/cfc-observation-classes.md §5/§8): the persist
+  // region writes the per-tx flow join as per-class entries — an
+  // `observes:"value"` derived entry carrying the full J plus an
+  // `observes:"shape"` (existence) entry carrying confidentiality only — and
+  // `structure` stamps state `observes:"shape"` explicitly.
+  //
+  // Rollout (C0 §9): additively safe, no dial. A class-unaware reader treats
+  // both split entries as covering and sees exactly today's atoms; the C1
+  // class-aware reader joins them back identically for value reads. No
+  // `observes:"followRef"` entry is newly persisted here — link-origin entries
+  // already carry that class implicitly.
+
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
   let runtime: Runtime | undefined;
 
@@ -116,10 +117,11 @@ describe("CFC observation classes (C2 persist split)", () => {
     return { id, entries: entriesOf(id) };
   };
 
-  // The core split: a derived flow stamp lands as an `observes:"value"`
-  // entry carrying the full J (confidentiality + integrity) plus an
-  // `observes:"shape"` existence entry carrying confidentiality only.
   it("persists the flow join as a value + shape entry pair", async () => {
+    // The core split: a derived flow stamp lands as an `observes:"value"`
+    // entry carrying the full J (confidentiality + integrity) plus an
+    // `observes:"shape"` existence entry carrying confidentiality only.
+
     const rt = makeRuntime();
     const certified = { type: CFC_ATOM_TYPE.PolicyCertified, policy: "p1" };
     const sourceId = await seedDoc(rt, "ps-source", { n: 1 }, [
@@ -155,13 +157,14 @@ describe("CFC observation classes (C2 persist split)", () => {
     expect(shapeEntry.path).toEqual(valueEntry.path);
   });
 
-  // Structure stamps (pure-link-structure writes) split per channel: the
-  // MEMBERSHIP stamp is observes:"enumerate" (replace-from-criteria,
-  // §8.12.8 — labs-axis approximation of the spec's container-level
-  // iterate classes) and the container's EXISTENCE is a separate frozen
-  // observes:"shape" entry minted at creation (freeze-at-creation, spec
-  // branch cfc/existence-freeze-at-creation).
   it("structure stamps split into enumerate membership + frozen shape existence", async () => {
+    // Structure stamps (pure-link-structure writes) split per channel: the
+    // MEMBERSHIP stamp is observes:"enumerate" (replace-from-criteria,
+    // §8.12.8 — labs-axis approximation of the spec's container-level
+    // iterate classes) and the container's EXISTENCE is a separate frozen
+    // observes:"shape" entry minted at creation (freeze-at-creation, spec
+    // branch cfc/existence-freeze-at-creation).
+
     const rt = makeRuntime();
     const el0 = await seedDoc(rt, "ps-el-0", { n: 1 }, [
       { path: [], label: { confidentiality: ["alice"] } },
@@ -203,10 +206,11 @@ describe("CFC observation classes (C2 persist split)", () => {
     }
   });
 
-  // SC-11 idempotence per class: re-deriving an unchanged label must not
-  // rewrite the ["cfc"] doc — the split pair must canonicalize identically
-  // across re-derivations.
   it("keeps re-derivation idempotent per class (SC-11)", async () => {
+    // SC-11 idempotence per class: re-deriving an unchanged label must not
+    // rewrite the ["cfc"] doc — the split pair must canonicalize identically
+    // across re-derivations.
+
     const rt = makeRuntime();
     const sourceId = await seedDoc(rt, "ps-idem-source", { n: 1 }, [
       { path: [], label: { confidentiality: ["secret"] } },
@@ -229,10 +233,11 @@ describe("CFC observation classes (C2 persist split)", () => {
     expect(derived.map((e) => e.observes).sort()).toEqual(["shape", "value"]);
   });
 
-  // Reader parity across the split: a class-aware value read of split
-  // entries derives the same downstream join a single covering entry
-  // produced.
   it("value-read flow joins over split entries match the covering join", async () => {
+    // Reader parity across the split: a class-aware value read of split
+    // entries derives the same downstream join a single covering entry
+    // produced.
+
     const rt = makeRuntime();
     const sourceId = await seedDoc(rt, "ps-parity-source", { n: 1 }, [
       { path: [], label: { confidentiality: ["secret"] } },
@@ -247,12 +252,13 @@ describe("CFC observation classes (C2 persist split)", () => {
     }
   });
 
-  // Per-class consumption refinement (intended, fail-safe): a nonRecursive
-  // (shape) read of a split-labeled path consumes the existence
-  // confidentiality but no longer inherits the value entry's content
-  // certification into the hereditary meet — shape observations are not
-  // content inputs (SC-9: under-claim, never over-claim).
   it("shape reads over split entries taint without inheriting content certification", async () => {
+    // Per-class consumption refinement (intended, fail-safe): a nonRecursive
+    // (shape) read of a split-labeled path consumes the existence
+    // confidentiality but no longer inherits the value entry's content
+    // certification into the hereditary meet — shape observations are not
+    // content inputs (SC-9: under-claim, never over-claim).
+
     const rt = makeRuntime();
     const certified = { type: CFC_ATOM_TYPE.PolicyCertified, policy: "p1" };
     const sourceId = await seedDoc(rt, "ps-shape-source", { n: 1 }, [
@@ -285,10 +291,11 @@ describe("CFC observation classes (C2 persist split)", () => {
     ).toEqual([]);
   });
 
-  // Overwrite discipline at C2: the value entry is replaced by the new
-  // derivation (§8.12.8). The shape entry's replace-vs-grow is deliberately
-  // NOT pinned here — C3 upgrades it to grow (SC-4).
   it("overwrite replaces the value entry with the new derivation", async () => {
+    // Overwrite discipline at C2: the value entry is replaced by the new
+    // derivation (§8.12.8). The shape entry's replace-vs-grow is deliberately
+    // NOT pinned here — C3 upgrades it to grow (SC-4).
+
     const rt = makeRuntime();
     const secretId = await seedDoc(rt, "ps-ow-secret", { n: 1 }, [
       { path: [], label: { confidentiality: ["old-secret"] } },
@@ -325,12 +332,13 @@ describe("CFC observation classes (C2 persist split)", () => {
     expect(valueEntry?.label.confidentiality).not.toContainEqual("old-secret");
   });
 
-  // Wire-compat (C0 §9, the plan's mixed-version discipline): a
-  // class-UNAWARE reader — one that ignores `observes` entirely and treats
-  // every entry as covering — resolves exactly today's atoms from the split
-  // pair: same confidentiality, and the integrity still present via the
-  // value entry. More restrictive is allowed, less is not.
   it("split entries read as covering by a class-unaware reader lose nothing", async () => {
+    // Wire-compat (C0 §9, the plan's mixed-version discipline): a
+    // class-UNAWARE reader — one that ignores `observes` entirely and treats
+    // every entry as covering — resolves exactly today's atoms from the split
+    // pair: same confidentiality, and the integrity still present via the
+    // value entry. More restrictive is allowed, less is not.
+
     const rt = makeRuntime();
     const certified = { type: CFC_ATOM_TYPE.PolicyCertified, policy: "p1" };
     const sourceId = await seedDoc(rt, "ps-compat-source", { n: 1 }, [
@@ -360,10 +368,11 @@ describe("CFC observation classes (C2 persist split)", () => {
     expect(legacyIntegrity).toContainEqual(certified);
   });
 
-  // The SC-8 probe consumption composes with the split: standalone probes
-  // still consume only followRef-class entries — never the new value/shape
-  // pair.
   it("standalone probes do not consume the split value/shape entries", async () => {
+    // The SC-8 probe consumption composes with the split: standalone probes
+    // still consume only followRef-class entries — never the new value/shape
+    // pair.
+
     const rt = makeRuntime();
     const sourceId = await seedDoc(rt, "ps-probe-source", { n: 1 }, [
       { path: [], label: { confidentiality: ["secret"] } },

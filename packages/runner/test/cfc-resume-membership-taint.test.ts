@@ -36,20 +36,21 @@ const PROGRAM: RuntimeProgram = {
   }],
 };
 
-// The resume-time twin of "filter: structure label re-stamps from J when the
-// list grows" in cfc-flow-pointwise.test.ts. There the list grows while the
-// coordinator is live; here it grows while nothing is running, so the taint has
-// to reach the container's shape across a cold resume.
-//
-// What carries the taint across the resume is the coordinator's declaration of
-// its result container, which every reconcile makes at the top of its run,
-// before any of that reconcile's early returns. The resume publishes the
-// rebuilt aggregate from a separate transaction that makes no such declaration,
-// so the label depends on a reconcile running afterwards — which one does,
-// because the element results that drive the rebuild also invalidate the
-// reconcile. This test pins the outcome, so a change to either half is caught
-// here rather than in a space with real labels.
 describe("CFC resume membership taint", () => {
+  // The resume-time twin of "filter: structure label re-stamps from J when the
+  // list grows" in cfc-flow-pointwise.test.ts. There the list grows while the
+  // coordinator is live; here it grows while nothing is running, so the taint
+  // has to reach the container's shape across a cold resume.
+  //
+  // What carries the taint across the resume is the coordinator's declaration
+  // of its result container, which every reconcile makes at the top of its run,
+  // before any of that reconcile's early returns. The resume publishes the
+  // rebuilt aggregate from a separate transaction that makes no such
+  // declaration, so the label depends on a reconcile running afterwards — which
+  // one does, because the element results that drive the rebuild also
+  // invalidate the reconcile. This test pins the outcome, so a change to either
+  // half is caught here rather than in a space with real labels.
+
   let storageManager: ReturnType<typeof StorageManager.emulate> | undefined;
 
   afterEach(async () => {
