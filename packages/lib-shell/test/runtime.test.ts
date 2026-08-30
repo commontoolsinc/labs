@@ -519,11 +519,12 @@ describe("RuntimeInternals", () => {
     ).toBeUndefined();
   });
 
-  // create() builds the client options and sends the Initialize request; this
-  // covers that path end to end and asserts the host flags reach the worker.
-  // A stub worker completes the READY handshake, then fails Initialize so
-  // create() aborts without a real runtime.
   describe("create() forwards host flags to the worker", () => {
+    // create() builds the client options and sends the Initialize request; this
+    // covers that path end to end and asserts the host flags reach the worker.
+    // A stub worker completes the READY handshake, then fails Initialize so
+    // create() aborts without a real runtime.
+
     type CapturedInitData = {
       forwardWorkerConsole?: boolean;
       concurrentWatchRefresh?: boolean;
@@ -609,10 +610,11 @@ describe("RuntimeInternals", () => {
     });
   });
 
-  // A deployed page must keep its worker and lazy chunks on the same immutable
-  // module graph. Local/legacy builds retain the root worker URL and manifest
-  // cache-buster.
   describe("worker URL versioning", () => {
+    // A deployed page must keep its worker and lazy chunks on the same
+    // immutable module graph. Local/legacy builds retain the root worker URL
+    // and manifest cache-buster.
+
     async function workerUrlFromCreate(
       options: {
         getBuildHash: () => Promise<string | undefined>;
@@ -719,11 +721,12 @@ describe("RuntimeInternals", () => {
     });
   });
 
-  // CT-1623: starting a piece is expensive (pattern instantiation + eager
-  // dependency collection in the worker). Read-only consumers like the header
-  // pieces menu must be able to resolve page handles WITHOUT starting, and a
-  // non-started cache entry must not block a later display-path start.
   describe("getPattern start semantics", () => {
+    // CT-1623: starting a piece is expensive (pattern instantiation + eager
+    // dependency collection in the worker). Read-only consumers like the header
+    // pieces menu must be able to resolve page handles WITHOUT starting, and a
+    // non-started cache entry must not block a later display-path start.
+
     const spaceDid = "did:key:z6Mk-lib-shell-runtime-did-pattern" as DID;
 
     function makeRuntime() {
@@ -810,9 +813,10 @@ describe("RuntimeInternals", () => {
     });
   });
 
-  // One runtime serves every space; a pattern's address is (space, id)
-  // and the cache is keyed by that address.
   describe("getPattern multi-space", () => {
+    // One runtime serves every space; a pattern's address is (space, id)
+    // and the cache is keyed by that address.
+
     const homeDid = "did:key:z6Mk-lib-shell-runtime-home" as DID;
     const otherDid = "did:key:z6Mk-lib-shell-runtime-other" as DID;
 

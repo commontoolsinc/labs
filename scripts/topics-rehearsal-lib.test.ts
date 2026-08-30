@@ -16,9 +16,10 @@ import {
 
 describe("topics-rehearsal-lib", () => {
   describe("retiredKeys", () => {
-    // The case this exists for: an export taken before a migration carries a
-    // field the migrated schema no longer declares.
     it("names a key the live read does not surface", () => {
+      // The case this exists for: an export taken before a migration carries a
+      // field the migrated schema no longer declares.
+
       const exported = [{ author: { name: "a" }, authorName: "a", body: "x" }];
       const live = [{ author: { name: "a" }, body: "x" }];
       expect(retiredKeys(exported, live)).toEqual(["[].authorName"]);
@@ -60,9 +61,10 @@ describe("topics-rehearsal-lib", () => {
       expect(retiredKeys("a legacy display name", "changed")).toEqual([]);
     });
 
-    // `null` is how a declared-but-empty field reads back, so it is a present
-    // value that lost its content — a difference, never a retirement.
     it("does not name a whole value that reads back null", () => {
+      // `null` is how a declared-but-empty field reads back, so it is a present
+      // value that lost its content — a difference, never a retirement.
+
       expect(retiredKeys("a legacy display name", null)).toEqual([]);
     });
   });
@@ -90,10 +92,11 @@ describe("topics-rehearsal-lib", () => {
         .toEqual({ body: "x" });
     });
 
-    // The verdict the restore actually reaches, asked the way it asks it:
-    // read the field back, forgive what the schema retired, compare the rest.
-    // A retired top-level field passes; a damaged one still fails.
     it("forgives a wholly retired field and nothing else", () => {
+      // The verdict the restore actually reaches, asked the way it asks it:
+      // read the field back, forgive what the schema retired, compare the rest.
+      // A retired top-level field passes; a damaged one still fails.
+
       const survives = (exported: unknown, live: unknown) =>
         deepEqual(
           live,
@@ -115,6 +118,7 @@ describe("topics-rehearsal-lib", () => {
   describe("isAbsentPathError", () => {
     // The restore forgives an absent field as retired, so only a read that
     // landed and reported the path missing may present as absent.
+
     it("recognizes the runtime's missing-property failure through cf", () => {
       const error = new Error(
         "cf get -q --input authorName exited 1\nCannot access path " +
@@ -221,16 +225,17 @@ describe("topics-rehearsal-lib", () => {
     });
   });
 
-  // `topics-restore.ts` declares `--allow-run --allow-read --allow-env` in its
-  // shebang and talks to a running server over `cf`. `@db/sqlite` opens its
-  // dynamic library with a top-level `await dlopen`, and the only entry point
-  // `@commonfabric/state-inspector` publishes re-exports the module that
-  // imports it — so one import of that barrel anywhere in the restore's graph
-  // makes the script die at module load with a permission error, whatever
-  // permissions the pure function it wanted actually needs. Twice now that
-  // failure was hidden by testing the script under `deno run -A`, which is why
-  // this asks the graph rather than trusting the run.
   describe("import graph", () => {
+    // `topics-restore.ts` declares `--allow-run --allow-read --allow-env` in
+    // its shebang and talks to a running server over `cf`. `@db/sqlite` opens
+    // its dynamic library with a top-level `await dlopen`, and the only entry
+    // point `@commonfabric/state-inspector` publishes re-exports the module
+    // that imports it — so one import of that barrel anywhere in the restore's
+    // graph makes the script die at module load with a permission error,
+    // whatever permissions the pure function it wanted actually needs. Twice
+    // now that failure was hidden by testing the script under `deno run -A`,
+    // which is why this asks the graph rather than trusting the run.
+
     it("names no store-reader dependency in the restore's graph", async () => {
       // Static `from "…"` specifiers followed through relative hops, which is
       // the whole of these scripts' own graph: they use no dynamic import and

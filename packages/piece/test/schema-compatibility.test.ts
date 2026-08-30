@@ -41,17 +41,19 @@ const oldPattern = pattern(
 );
 
 describe("piece schema compatibility", () => {
-  // A CFC write authorization (`TrustedActionWrite`) lowers to an
-  // `ifc.writeAuthorizedBy.__ctWriterIdentityOf` whose `moduleIdentity` is the
-  // content-addressed hash of the authoring module. Editing that module at all
-  // — a type annotation, a comment, whitespace — rehashes it, so `moduleIdentity`
-  // changes while `file`, `path`, and the `uiContract` stay identical. That is a
-  // recompile of the same authorization, not a narrowed contract, so the
-  // backward-compatibility check accepts it: the content-addressed identity is
-  // normalized out of the `ifc` comparison. The ten baselined patterns that
-  // carry a CFC write (system/home, system/profile-*, lobby, and the cfc-*
-  // demos) depend on this to stay editable.
   it("accepts a recompile that only changes writeAuthorizedBy moduleIdentity", () => {
+    // A CFC write authorization (`TrustedActionWrite`) lowers to an
+    // `ifc.writeAuthorizedBy.__ctWriterIdentityOf` whose `moduleIdentity` is
+    // the content-addressed hash of the authoring module. Editing that module
+    // at all — a type annotation, a comment, whitespace — rehashes it, so
+    // `moduleIdentity` changes while `file`, `path`, and the `uiContract` stay
+    // identical. That is a recompile of the same authorization, not a narrowed
+    // contract, so the backward-compatibility check accepts it: the
+    // content-addressed identity is normalized out of the `ifc` comparison. The
+    // ten baselined patterns that carry a CFC write (system/home,
+    // system/profile-*, lobby, and the cfc-* demos) depend on this to stay
+    // editable.
+
     const resultSchema = (moduleIdentity: string): JSONSchema => ({
       type: "object",
       properties: {
@@ -131,15 +133,16 @@ describe("piece schema compatibility", () => {
     ).not.toThrow();
   });
 
-  // A writer claim's `file` is the module's source-file spelling, and that
-  // spelling is resolver-dependent: the same module compiles to a different
-  // `file` under piece-deploy staging, a piece manifest, and HTTP resolution,
-  // while its content-addressed `moduleIdentity` agrees everywhere (labs#4772).
-  // The runtime authorizes a write on `moduleIdentity` plus the binding `path`
-  // and never on `file`, so a cross-resolver recompile that re-spells only the
-  // `file` — same `moduleIdentity`, same `path`, same `uiContract` — is the same
-  // authorization, and the update is accepted.
   it("accepts a cross-resolver recompile that only re-spells the writeAuthorizedBy file", () => {
+    // A writer claim's `file` is the module's source-file spelling, and that
+    // spelling is resolver-dependent: the same module compiles to a different
+    // `file` under piece-deploy staging, a piece manifest, and HTTP resolution,
+    // while its content-addressed `moduleIdentity` agrees everywhere
+    // (labs#4772). The runtime authorizes a write on `moduleIdentity` plus the
+    // binding `path` and never on `file`, so a cross-resolver recompile that
+    // re-spells only the `file` — same `moduleIdentity`, same `path`, same
+    // `uiContract` — is the same authorization, and the update is accepted.
+
     const respelled = (file: string): JSONSchema =>
       trustedWriteResult({ ...baselineIdentity, file }, baselineUiContract);
     expect(() =>
@@ -150,12 +153,13 @@ describe("piece schema compatibility", () => {
     ).not.toThrow();
   });
 
-  // `file` carries no authorization signal beyond the content-addressed
-  // `moduleIdentity` (which the runtime re-verifies live) and the binding
-  // `path`, so it is normalized out of the comparison entirely rather than made
-  // spelling-tolerant. Any `file` change is accepted while the `path` and
-  // `uiContract` are unchanged.
   it("accepts a writeAuthorizedBy binding file change", () => {
+    // `file` carries no authorization signal beyond the content-addressed
+    // `moduleIdentity` (which the runtime re-verifies live) and the binding
+    // `path`, so it is normalized out of the comparison entirely rather than
+    // made spelling-tolerant. Any `file` change is accepted while the `path`
+    // and `uiContract` are unchanged.
+
     expect(() =>
       assertPatternSchemasBackwardCompatible(
         pattern(

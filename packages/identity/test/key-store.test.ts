@@ -57,11 +57,13 @@ Deno.test("KeyStore recovers a key pair holding handles as one", async () => {
   );
 });
 
-// The database name is persisted browser state, so it is pinned to its literal
-// here rather than to the constant: reading the constant on both sides of the
-// comparison would agree with itself no matter what the name became, and a
-// silent change to it would orphan every key a user has already stored.
 Deno.test("KeyStore.open() with no name opens `common-key-store`", async () => {
+  // The database name is persisted browser state, so it is pinned to its
+  // literal here rather than to the constant: reading the constant on both
+  // sides of the comparison would agree with itself no matter what the name
+  // became, and a silent change to it would orphan every key a user has already
+  // stored.
+
   assert(KeyStore.DEFAULT_DB_NAME === "common-key-store");
 
   const defaulted = await KeyStore.open();

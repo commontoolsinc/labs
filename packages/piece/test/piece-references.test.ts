@@ -106,7 +106,6 @@ describe("Piece reference detection", () => {
     assertEquals(foundPiece2, true, "Should find reference to piece2");
   });
 
-  // Test specifically the issue where only one reference is found when there are multiple
   it("should find multiple references in argument data that matches the reported issue", () => {
     // Mock the scenario where a piece's argument refers to two other pieces
     const mockPiece1Id = entityRefFromString("piece-1-id");
@@ -220,7 +219,6 @@ describe("Piece reference detection", () => {
     // references are found first, potentially causing some to be missed
   });
 
-  // Test for n-depth reference detection
   it("should follow result metadata chains to find deeply nested references", () => {
     // Mock test data
     const mockPiece1Id = entityRefFromString("piece-1-source");
