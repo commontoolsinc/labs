@@ -73,7 +73,10 @@ const baseInput = {
 };
 
 describe("CFC single-use grants (§2.2 single-use releases)", () => {
+  //
   // Item 1: the `singleUse` field.
+  //
+
   describe("singleUse field (writer validation)", () => {
     it("accepts singleUse: true and stores it in the value", () => {
       const prepared = prepareCfcGrantWrite(
