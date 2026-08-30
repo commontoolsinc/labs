@@ -65,6 +65,7 @@ describe("deep-freeze", () => {
       // that freeze objects-with-methods keep working. A function's internal
       // `prototype` and closure state stays mutable, which the opacity does not
       // and cannot cover.
+
       it("returns `true` for a function", () => {
         expect(isDeepFrozen(() => {})).toBe(true);
         expect(isDeepFrozen(function () {})).toBe(true);
@@ -247,18 +248,19 @@ describe("deep-freeze", () => {
       });
     });
 
-    // Coverage for `isDeepFrozen` on `FabricInstance` and `FabricPrimitive`
-    // inputs, including a `FabricInstance` participating in a circular
-    // reference. `isDeepFrozen`'s recursion threads an
-    // `inProgress: Set<object>` for cycle-safety and resolves a
-    // `FabricInstance` via its `[IS_DEEP_FROZEN]` protocol member --
-    // inspecting its logical contents, not its enumerable own-props -- so
-    // values held in non-enumerable slots (such as
-    // `FabricError`'s private extras `Map`) are checked too.
-    // (`isValidDeepFrozenFabricValue` uses the same protocol dispatch but
-    // additionally type-guards the value as a `FabricValue`; it has its own
-    // coverage in the sibling describe below.)
     describe("`FabricInstance` and `FabricPrimitive`", () => {
+      // Coverage for `isDeepFrozen` on `FabricInstance` and `FabricPrimitive`
+      // inputs, including a `FabricInstance` participating in a circular
+      // reference. `isDeepFrozen`'s recursion threads an
+      // `inProgress: Set<object>` for cycle-safety and resolves a
+      // `FabricInstance` via its `[IS_DEEP_FROZEN]` protocol member --
+      // inspecting its logical contents, not its enumerable own-props -- so
+      // values held in non-enumerable slots (such as
+      // `FabricError`'s private extras `Map`) are checked too.
+      // (`isValidDeepFrozenFabricValue` uses the same protocol dispatch but
+      // additionally type-guards the value as a `FabricValue`; it has its own
+      // coverage in the sibling describe below.)
+
       it("returns `true` for a `FabricPrimitive` (self-frozen at construction)", () => {
         const epoch = new FabricEpochNsec(1234567890n);
         expect(isDeepFrozen(epoch)).toBe(true);
@@ -472,6 +474,7 @@ describe("deep-freeze", () => {
     // Only registry-interned symbols are `FabricValue`s; unique (uninterned)
     // symbols are not portable across realms and are rejected, consistent with
     // `isValidFabricValue()` / `isValidFabricValueLayer()`.
+
     it("returns `true` for an interned symbol", () => {
       expect(isValidDeepFrozenFabricValue(Symbol.for("k"))).toBe(true);
     });
@@ -512,16 +515,17 @@ describe("deep-freeze", () => {
     });
   });
 
-  // Cycle coverage for `deepFreeze()`'s arms (per the function's doc-comment
-  // 4-arm dispatch) and for `isValidDeepFrozenFabricValue()`, which composes
-  // `isValidFabricValue()` and `isDeepFrozen()` -- each threading its own
-  // cycle-tracking set (`seen` / `inProgress`) through its recursion.
-  //
-  // Termination assertion: a cycle without such threading would manifest as
-  // `RangeError: Maximum call stack size exceeded` (a clean fast throw, not a
-  // hang). `.not.toThrow()` is the discriminating assertion for "this call
-  // terminates."
   describe("cycle behavior", () => {
+    // Cycle coverage for `deepFreeze()`'s arms (per the function's doc-comment
+    // 4-arm dispatch) and for `isValidDeepFrozenFabricValue()`, which composes
+    // `isValidFabricValue()` and `isDeepFrozen()` -- each threading its own
+    // cycle-tracking set (`seen` / `inProgress`) through its recursion.
+    //
+    // Termination assertion: a cycle without such threading would manifest as
+    // `RangeError: Maximum call stack size exceeded` (a clean fast throw, not a
+    // hang). `.not.toThrow()` is the discriminating assertion for "this call
+    // terminates."
+
     describe("`deepFreeze()` (plain object / array)", () => {
       it("terminates on a self-referential plain object", () => {
         const a: Record<string, unknown> = { x: 1 };
@@ -562,6 +566,7 @@ describe("deep-freeze", () => {
       // `isDeepFrozen()`, each of which threads its own cycle-tracking set
       // through its recursion, so the composition is cycle-safe. These tests
       // pin that property so a future change does not regress it.
+
       it("terminates on a deep-frozen self-referential plain object", () => {
         const a: Record<string, unknown> = { x: 1 };
         a.self = a;

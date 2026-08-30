@@ -247,6 +247,7 @@ describe("objects", () => {
     // dispatch is: it needs the prototype for its own null test, so asking it
     // to hand the object over and have the prototype read again would be one
     // read too many and a second answer to disagree with.
+
     it("returns the constructor a prototype names", () => {
       expect(constructorOfPrototype(Object.prototype)).toBe(Object);
       expect(constructorOfPrototype(Map.prototype)).toBe(Map);

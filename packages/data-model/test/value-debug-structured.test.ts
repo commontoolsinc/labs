@@ -121,10 +121,11 @@ describe("toStructuredDebugValue()", () => {
     });
   });
 
-  // Every case here holds at least one value that does not survive conversion
-  // unchanged, so that a walk which returned its input untouched would be
-  // caught. A container of scalars alone cannot tell the two apart.
   describe("containers", () => {
+    // Every case here holds at least one value that does not survive conversion
+    // unchanged, so that a walk which returned its input untouched would be
+    // caught. A container of scalars alone cannot tell the two apart.
+
     it("returns a plain object with its values converted", () => {
       expect(
         toStructuredDebugValue({ a: 1, fn: function foo() {}, m: new Map() }),
@@ -544,9 +545,10 @@ describe("toStructuredDebugValue()", () => {
       expect(result.z).toBe(2);
     });
 
-    // What lands in the `/unconvertible` payload depends on what was thrown,
-    // and anything at all can be thrown.
     describe("the `/unconvertible` message", () => {
+      // What lands in the `/unconvertible` payload depends on what was thrown,
+      // and anything at all can be thrown.
+
       /** Converts a value whose sole property throws `thrown` when read. */
       function messageFor(thrown: unknown): unknown {
         const value = {

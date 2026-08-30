@@ -567,6 +567,7 @@ describe("CodecRegistry", () => {
   describe("frozen instances", () => {
     // `Object.freeze()` cannot reach a private `Map` or `Set`, so each mutator
     // has to refuse on its own; these cases pin that each one does.
+
     describe("register()", () => {
       it("throws", () => {
         const registry = Object.freeze(new CodecRegistry(TEST_FORMAT));

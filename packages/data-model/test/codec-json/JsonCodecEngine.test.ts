@@ -2046,6 +2046,7 @@ describe("JsonCodecEngine", () => {
     // JSON that happens to look similar does not. One case feeds it real
     // encoder output, so the shape recognized here cannot drift from the shape
     // produced.
+
     it("recognizes a string with the encoding prefix", () => {
       expect(JsonCodecEngine.seemsLikeEncoded('fvj1:{"a":1}')).toBe(true);
       expect(JsonCodecEngine.seemsLikeEncoded("fvj1:null")).toBe(true);

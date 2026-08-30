@@ -25,9 +25,10 @@ import { deepFreeze, isValidDeepFrozenFabricValue } from "@/deep-freeze.ts";
 import { subFreeze, subIsDeepFrozen } from "../fabric-instances/fixtures.ts";
 
 describe("ProblematicValue", () => {
-  // Subclass-checking-superclass identity: lives directly under the class
-  // describe (the rule's cross-cutting carve-out).
   it("is an instance of `BaseFabricInstance`", () => {
+    // Subclass-checking-superclass identity: lives directly under the class
+    // describe (the rule's cross-cutting carve-out).
+
     const value = new ProblematicValue("Test@1", "state", "oops");
     expect(value instanceof BaseFabricInstance).toBe(true);
   });
