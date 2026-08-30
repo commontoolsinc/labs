@@ -10,9 +10,14 @@ import { argumentIdOf } from "./topics-snapshot-lib.ts";
 
 describe("topics-snapshot-lib", () => {
   describe("argumentIdOf", () => {
-    // Both encodings reach a reader of a real snapshot, and a reader that
-    // knows only one of them reports the other as "no argument entity" — for
-    // the export, that aborts the run rather than skipping a field.
+    //
+    // Both encodings
+    //
+    // Both encodings reach a reader of a real snapshot, and a reader that knows
+    // only one of them reports the other as "no argument entity" — for the
+    // export, that aborts the run rather than skipping a field.
+    //
+
     it("reads the id out of a sigil-encoded link", () => {
       const document = {
         argument: { "/": { "link@1": { id: "of:fid1:arg" } } },
@@ -24,6 +29,13 @@ describe("topics-snapshot-lib", () => {
       const document = { argument: new FabricLink({ id: "of:fid1:arg" }) };
       expect(argumentIdOf(document)).toBe("of:fid1:arg");
     });
+
+    //
+    // Neither encoding
+    //
+    // A document that links nothing, and one whose `argument` is not a link at
+    // all, both read as no argument entity.
+    //
 
     it("returns undefined when the document links nothing", () => {
       expect(argumentIdOf({})).toBeUndefined();

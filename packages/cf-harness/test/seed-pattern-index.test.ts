@@ -89,9 +89,14 @@ describe("seed-pattern-index", () => {
       ]);
     });
 
+    //
+    // Refusals
+    //
     // An atom the index cannot be searched for is worth less than no atom, and
     // one described by a guess is worse than either, so each of these stops the
     // run before anything is published.
+    //
+
     it("refuses an atom with no doc comment", () => {
       expect(() => seedMetadataFromSource("atom", "export const X = 1;\n"))
         .toThrow(/no leading doc comment/);

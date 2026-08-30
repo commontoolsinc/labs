@@ -150,13 +150,13 @@ Deno.test(
   },
 );
 
-// Branch: `updateLocalCollectionBinding` deletes the tracked map-value binding
-// when two `.set()` calls store non-equal sources so their merge is undefined
-// (capability-analysis.ts ~1977-1979). Contrast with a single `.set()`, where
-// the binding survives and a later `.get(k).name` resolves through it.
 Deno.test(
   "a single map .set() lets a later .get().member resolve through the value binding",
   () => {
+    // Branch: with a single `.set()`, the tracked map-value binding survives,
+    // so a later `.get(k).name` resolves through it. The contrast is the
+    // conflicting-sources case below.
+
     const input = getPaths(
       analyzeNoChecker(
         `const fn = (input) => {
@@ -176,6 +176,10 @@ Deno.test(
 Deno.test(
   "conflicting map .set() values drop the value binding so .get().member no longer resolves",
   () => {
+    // Branch: `updateLocalCollectionBinding` deletes the tracked map-value
+    // binding when two `.set()` calls store non-equal sources, so their merge
+    // is undefined (capability-analysis.ts ~1977-1979).
+
     const input = getPaths(
       analyzeNoChecker(
         `const fn = (input) => {
