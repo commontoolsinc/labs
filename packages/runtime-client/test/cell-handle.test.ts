@@ -324,11 +324,12 @@ describe("cell-handle", () => {
       }]);
     });
 
-    // Inv-12 Stage 0: the link a handle names itself by re-enters the worker
-    // without passing getCell/cellRefToSigilLink, so the ref's display view
-    // must not ride it (codex/cubic review on the Stage 0 PR). Like
-    // toWireString, only addressing fields (+schema) go.
     it("does not serialize the ref-carried label view into sigil links", () => {
+      // Inv-12 Stage 0: the link a handle names itself by re-enters the worker
+      // without passing getCell/cellRefToSigilLink, so the ref's display view
+      // must not ride it (codex/cubic review on the Stage 0 PR). Like
+      // toWireString, only addressing fields (+schema) go.
+
       const runtime = {
         [$conn]: () => ({
           request: () => Promise.resolve({}),

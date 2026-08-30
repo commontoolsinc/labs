@@ -192,10 +192,12 @@ describe("web-worker-console-bridge", () => {
     });
   });
 
-  // NOTE: this describe must stay AFTER the console-bridge one. Initializing the
-  // worker sets the entry module's `worker`/`workerInitialization` for the rest
-  // of the file, and the bridge test asserts pre-initialization behavior.
   describe("web worker request ledger and timing", () => {
+    // NOTE: this describe must stay AFTER the console-bridge one. Initializing
+    // the worker sets the entry module's `worker`/`workerInitialization` for
+    // the rest of the file, and the bridge test asserts pre-initialization
+    // behavior.
+
     const ledgerCount = (key: string) =>
       getLogger("runtime-worker.ipc").countsByKey[key]?.total ?? 0;
     const timingCount = (...keys: string[]) =>
