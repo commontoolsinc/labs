@@ -273,16 +273,15 @@ export function serializeEvent(event: Event): SerializedEvent {
 
   // TODO(danfuzz): a `detail` is a whole value a component chose to hand the
   // pattern, and the pattern's handler receives it as a `FabricValue`. The
-  // conversion below narrows it to the JSON-compatible subset on the way in: a
-  // `bigint` throws out of `JSON.stringify()` and lands in the `catch`, which
-  // replaces the entire detail with `String(detail)`, and a `FabricBytes`
-  // stringifies to `{}`. The crossing is `postMessage`, not JSON text, so
-  // `codec-realm` carries the whole domain here; what has to stay is the
-  // separate job the conversion does of turning an unencodable detail into
-  // something rather than failing the event. The same holds of a target's
-  // `value` and `checked` above. The outbound half of this seam is closed:
-  // `SetPropOp.value` in `../vdom-ops.ts` is a `FabricValue` the envelope's
-  // encoding carries whole.
+  // conversion below takes each member as it stands, so one with a fabric form
+  // but a native spelling -- a `Date`, a `Uint8Array`, an `Error` -- is refused
+  // by the encoding at the crossing, and the event dies there rather than
+  // degrading. Minting such a member into fabric form here carries a `Date` and
+  // a `Uint8Array` whole; an `Error` becomes a `FabricError`, which waits on
+  // the worker's event ingress descending a `FabricInstance` rather than
+  // refusing one. The same holds of a target's `value` and `checked` above. The
+  // outbound half of this seam is closed: `SetPropOp.value` in `../vdom-ops.ts`
+  // is a `FabricValue` the envelope's encoding carries whole.
   if ("detail" in event && (event as CustomEvent).detail !== undefined) {
     serialized.detail = toSerializableValue((event as CustomEvent).detail);
   }
@@ -364,23 +363,29 @@ function carriedTargetValue(
  * serialization protocol that happens to yield one.
  *
  * Anything else is refused: a value whose very top layer has no fabric form.
- * What reaches this is enumerable, and none of it is something a handler could
- * act on:
  *
- * * an `Error`, from `cf-error` -- `cf-code-editor` raises six, and
- *   `cf-file-input`, `cf-file-download` and `cf-copy-button` one apiece.
+ * What a component puts in a detail that cannot cross is enumerable, and none
+ * of it is something a handler could act on. Each rides as a *member* of a
+ * plain-object detail, which is the encoding's verdict at the crossing rather
+ * than this refusal's; what reaches here is a detail that is one of them
+ * outright:
+ *
+ * * an `Error`, from `cf-error` -- raised by `cf-code-editor`, `cf-file-input`
+ *   and `cf-voice-input` -- and from the separately named `cf-download-error`
+ *   and `cf-autosave-error` of `cf-file-download`, `cf-copy-error` of
+ *   `cf-copy-button`, and `cf-transcription-error` of `cf-voice-input`.
  * * a `Blob`, from `cf-voice-input`'s `cf-recording-stop`, as `audioData`.
  * * a `FileList`, from `cf-input`'s own `cf-input` event, which carries `files`
  *   when the input's `type` is `file`.
- * * an `Element`, from `cf-radio`, `cf-tab` and `cf-tab-bar-item`, each of
- *   which puts itself in its own detail.
+ * * an `Element`, from `cf-tab`'s `tab-click` and `cf-tab-bar-item`'s
+ *   `tab-bar-click`, each of which puts itself in its own detail.
  * * a `Date`, a `Map`, a `Set`, a `RegExp`, or an object that merely defines a
  *   `toJSON()`. No component exposes one.
  *
- * Nothing binds a handler to any of those events, so nothing reaches this
- * today. Deliberately absent from the list, being already answered above: the
- * file inputs' `cf-change`, which carries `StoredFile` records -- plain records
- * of scalars, which cross as themselves.
+ * Nothing binds a handler to any of those events, so none of it crosses today.
+ * Deliberately absent from the list, being already answered above: the file
+ * inputs' `cf-change`, which carries `StoredFile` records -- plain records of
+ * scalars, which cross as themselves.
  *
  * The refusal is a tripwire rather than a verdict on any of them. The set this
  * accepts is expected to grow, and where each refused value should go instead
