@@ -747,12 +747,11 @@ function generateAddresses(
   return addresses;
 }
 
+// Benchmark: sortAndCompactPaths
 Deno.bench(
   "Utility - sortAndCompactPaths (100 paths)",
   { group: "utilities" },
   () => {
-    // Benchmark: sortAndCompactPaths
-
     const addresses = generateAddresses(100, 10);
     sortAndCompactPaths(addresses);
   },
@@ -767,12 +766,11 @@ Deno.bench(
   },
 );
 
+// Benchmark: addressesToPathByEntity
 Deno.bench(
   "Utility - addressesToPathByEntity (100 paths)",
   { group: "utilities" },
   () => {
-    // Benchmark: addressesToPathByEntity
-
     const addresses = generateAddresses(100, 10);
     addressesToPathByEntity(addresses, TEST_IDENTITY);
   },

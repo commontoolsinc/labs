@@ -231,13 +231,12 @@ describe("stored-link-schema-precedence", () => {
       expect(projectionOf(handle.get())).toEqual({ title: "cruller" });
     });
 
+    // A stored schema can be NOTHING BUT a default — a top-level `default`
+    // is otherwise a true schema, and narrowing can reduce a stored schema
+    // to one. The resolution carry must not treat that as saying nothing:
+    // the default is the nearest declaration and stands in for the absent
+    // value.
     it("inherits a default-only stored schema's default across the crossing", () => {
-      // A stored schema can be NOTHING BUT a default — a top-level `default`
-      // is otherwise a true schema, and narrowing can reduce a stored schema
-      // to one. The resolution carry must not treat that as saying nothing:
-      // the default is the nearest declaration and stands in for the absent
-      // value.
-
       const target = runtime.getCell(space, `row-${seq}-seed`, undefined, tx);
       // Deliberately never written: the stored default is all a read has.
       const holder = runtime.getCell<Holder>(
