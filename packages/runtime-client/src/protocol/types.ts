@@ -610,9 +610,10 @@ export type IPCRemotePost = IPCRemoteMessage | IPCTransportNotification;
 export type BaseRequest = {
   /**
    * Which request this is. Every arm narrows it to one member, so it is
-   * the discriminant dispatch turns on. The narrowing itself is left
-   * undocumented in each arm: what the request does belongs on the request
-   * type, and a doc on `type: RequestType.Foo` has nowhere else to go.
+   * the discriminant dispatch turns on. Each arm's narrowing is left
+   * undocumented on purpose: what a request does belongs on the request
+   * type, so a doc on `type: RequestType.Foo` would have nothing of its own
+   * to say.
    */
   type: RequestType;
 };
@@ -672,7 +673,7 @@ export type InitializationData = {
     /**
      * Whether a link is a `FabricLink` and an entity reference a
      * `FabricHash`, rather than the plain `{ "/": ... }` envelopes that
-     * spell both otherwise. Recognition is strict per regime, so the two
+     * represent both otherwise. Recognition is strict per regime, so the two
      * spellings are a clean break rather than a pair a reader accepts.
      */
     modernCellRep?: boolean;
@@ -762,7 +763,7 @@ export type InitializationData = {
    * its own.
    */
   trustSnapshot?: {
-    /** Identifies the snapshot, so both realms can say which one they hold. */
+    /** Identifies the snapshot. The CFC gates require it to be present. */
     id: string;
 
     /**
@@ -773,8 +774,10 @@ export type InitializationData = {
     actingPrincipal?: string;
 
     /**
-     * Which revision of the snapshot this is, so a stale one is
-     * recognizable as stale rather than merely different.
+     * Which revision of the snapshot this is: the runtime id with the
+     * trust configuration's digest folded in. It compares as equal or not
+     * rather than as older or newer, and a change to it is what invalidates
+     * digests prepared against the previous one.
      */
     revision?: string;
   };
@@ -1007,7 +1010,9 @@ export type OperationQueryRequest = BaseRequest & {
 
   /**
    * The cursor to report from, exclusive: only operations integrated after
-   * it come back. Absent asks for the field from its retained beginning.
+   * it come back. Absent asks for the field from its beginning, which a
+   * field whose history has been trimmed answers with no operations and
+   * `reset`, telling the caller to rebuild from `materialized` instead.
    */
   after?: OpCursor;
 };
@@ -1064,10 +1069,12 @@ export type OperationApplyRequest = BaseRequest & {
   base: OpCursor | null;
 
   /**
-   * The hash of the materialized value the payload was written against,
-   * where the submitter has one. It says which baseline the operations
-   * assume, so the two ends can tell that apart from the one the field
-   * currently holds.
+   * The hash of the materialized value the payload was written against.
+   * Required exactly when `base` is `null`, and refused otherwise: an apply
+   * opening an epoch names the baseline it assumes, and one continuing from
+   * a cursor inherits it. A hash that does not match the field's own
+   * refuses the apply rather than integrating against a value the payload
+   * was not written for.
    */
   baselineHash?: string;
 
@@ -1100,7 +1107,9 @@ export type OperationSubscribeRequest = BaseRequest & {
 
   /**
    * The cursor to report from, exclusive: only operations integrated after
-   * it come back. Absent asks for the field from its retained beginning.
+   * it come back. Absent asks for the field from its beginning, which a
+   * field whose history has been trimmed answers with no operations and
+   * `reset`, telling the caller to rebuild from `materialized` instead.
    */
   after?: OpCursor;
 };
@@ -1120,12 +1129,14 @@ export type OperationReleaseRequest = BaseRequest & {
    */
   operationSessionId?: string;
 
-  /** Names the codec whose hold on the field is being given up. */
+  /** The field's codec, which must be the one it currently holds. */
   codec: string;
 
   /**
-   * The cursor the releaser has integrated through. Operations at or before
-   * it are ones it no longer needs retained on its behalf.
+   * The field's head, exactly -- epoch and version both. A release naming
+   * anything else is refused, which is what keeps one racing an apply from
+   * discarding the other writer's work. Releasing deactivates the field for
+   * every client, and the next apply opens a fresh epoch.
    */
   cursor: OpCursor;
 };
@@ -1164,9 +1175,11 @@ export type OperationFieldResponse = {
 /** A response naming the operation codecs available for a cell. */
 export type OperationCapabilitiesResponse = {
   /**
-   * The codecs the cell's operation field reports itself able to work in,
-   * by name. It is what a submitter chooses an
-   * {@link OperationApplyRequest.codec} from.
+   * The operation codecs the space's server connection advertises, by name.
+   * It is what a submitter chooses an {@link OperationApplyRequest.codec}
+   * from, and it says nothing about any one cell: the answer is the same
+   * for every cell in the space, and a field pins its codec once its epoch
+   * is open, so the choice exists only at the apply that opens one.
    */
   codecs: readonly string[];
 };
@@ -1183,9 +1196,15 @@ export type OperationApplyResponse = {
 
 /** SQLite bind values as the main-thread connection carries them. */
 export type SqliteParams =
-  | { kind: "positional"; values: readonly FabricValue[] }
   | {
-    /** Marks this as the named-parameter form. */
+    /** Marks the positional form, whose values bind in the order given. */
+    kind: "positional";
+
+    /** The bind values, one per placeholder, in statement order. */
+    values: readonly FabricValue[];
+  }
+  | {
+    /** Marks the named form, whose entries bind by parameter name. */
     kind: "named";
 
     /** The bindings, as name/value pairs in no particular order. */
@@ -1282,8 +1301,8 @@ export type ResolveEventAttentionRequest = BaseRequest & {
   eventId: string;
 
   /**
-   * Which delivery attempt for that event this is, so a notice is resolved
-   * against the attempt it names rather than against a later one.
+   * The stream seq the engine stamped on the commit that appended the
+   * event, which with `eventId` is what identifies the entry.
    */
   seq: number;
 
@@ -1889,7 +1908,7 @@ export type PageCreateRequest = BaseRequest & {
     /** Where to fetch the program from. */
     url: string;
   } | {
-    /** The program itself, already compiled. */
+    /** The program's entry point and its sources, given rather than fetched. */
     program: Program;
   };
 
@@ -3012,7 +3031,11 @@ export type EventAttentionNotice = {
   /** The event that failed to deliver. */
   eventId: string;
 
-  /** Which delivery attempt for that event the notice is about. */
+  /**
+   * The stream seq the engine stamped on the commit that appended the
+   * event. One notice covers every delivery attempt of that entry; the
+   * attempts themselves are counted inside `attention`.
+   */
   seq: number;
 
   /** The sidecar record the notice is stored as, and the handle a
@@ -3036,11 +3059,13 @@ export type EventNeedsAttentionNotification = EventAttentionNotice & {
   type: NotificationType.EventNeedsAttention;
 };
 
-/** The unresolved notices one space is holding. */
+/** The unresolved notices in one space that the requester may act on. */
 export type EventAttentionListResponse = {
   /**
-   * Every notice still awaiting a person, in no promised order. Empty when
-   * the space has none.
+   * The notices still awaiting a person, in no promised order, narrowed to
+   * those whose acting user is the requesting identity plus those with no
+   * acting user at all. Empty therefore says the requester has none to act
+   * on, not that the space is holding none.
    */
   notices: EventAttentionNotice[];
 };
