@@ -209,11 +209,16 @@ describe("CFC flow labels: pointwise structure (phase B)", () => {
     expect(conf1).not.toContainEqual("alice-secret");
   });
 
-  // §8.5.6.1 membership taint: which elements survive a filter is decided
-  // by the predicate outputs, and those are values the coordinator reads —
-  // so the filtered container's derived component must join the predicate
-  // taint of every element it considered. (No flow-precision claims
-  // needed: the membership channel rides ordinary value reads.)
+  //
+  // Membership taint (§8.5.6.1)
+  //
+  // §8.5.6.1 membership taint: which elements survive a filter is decided by
+  // the predicate outputs, and those are values the coordinator reads — so the
+  // filtered container's derived component must join the predicate taint of
+  // every element it considered. (No flow-precision claims needed: the
+  // membership channel rides ordinary value reads.)
+  //
+
   it("filter: membership structure carries the predicate outputs' taint", async () => {
     storageManager = StorageManager.emulate({ as: signer });
     runtime = new Runtime({
