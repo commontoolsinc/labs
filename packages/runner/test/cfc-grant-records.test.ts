@@ -778,9 +778,11 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
-  describe("grant resolution at the sink egress gate", () => {
-    // Resolution wired into the egress gate (build-order items 1+3).
+  //
+  // Resolution wired into the egress gate (build-order items 1+3).
+  //
 
+  describe("grant resolution at the sink egress gate", () => {
     it("a live grant releases the owner clause to the audience (enforce)", async () => {
       await withRuntime({}, async (runtime) => {
         await writeGrant(runtime);
@@ -963,9 +965,11 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
     });
   });
 
-  describe("read non-taint (internalVerifierRead discipline)", () => {
-    // Build-order item 3: read non-taint + digest binding.
+  //
+  // Build-order item 3: read non-taint
+  //
 
+  describe("read non-taint (internalVerifierRead discipline)", () => {
     it("grant lookups never enter the consumed read set", async () => {
       await withRuntime({}, async (runtime) => {
         const { id: grantId } = await writeGrant(runtime);
@@ -1488,6 +1492,10 @@ describe("CFC grant records (§8.12.7 route 2a)", () => {
       });
     });
   });
+
+  //
+  // Build-order item 3: digest binding
+  //
 
   describe("digest binding of consulted grants", () => {
     const base: PreparedDigestInput = {

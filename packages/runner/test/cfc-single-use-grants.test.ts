@@ -164,9 +164,11 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
     });
   });
 
-  describe("consumption receipt derivation", () => {
-    // Item 2: the consumption receipt identity.
+  //
+  // Item 2: the consumption receipt identity.
+  //
 
+  describe("consumption receipt derivation", () => {
     const grantId = cfcGrantDocId(identity);
 
     it("derives a deterministic receipt id in the reserved namespace", () => {
@@ -365,11 +367,14 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
       (write) => write.address.id === receiptId,
     );
 
-  describe("consumption context (resolver + evaluator threading)", () => {
-    // Consuming vs observing context (the seam decision): single-use grants
-    // resolve ONLY in consuming contexts; everywhere else they are
-    // unsatisfiable, fail closed.
+  //
+  // Consuming vs observing context (the seam decision)
+  //
+  // Single-use grants resolve ONLY in consuming contexts; everywhere else they
+  // are unsatisfiable, fail closed.
+  //
 
+  describe("consumption context (resolver + evaluator threading)", () => {
     const singleUseRule: ExchangeRule = {
       id: "single-use-share",
       appliesTo: { type: CFC_ATOM_TYPE.User, subject: { var: "$owner" } },
@@ -687,9 +692,11 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
     });
   });
 
-  describe("claim staging (flushCfcGrantConsumptionClaims)", () => {
-    // Claim staging arms.
+  //
+  // Claim staging arms.
+  //
 
+  describe("claim staging (flushCfcGrantConsumptionClaims)", () => {
     it("no claims → no writes, no reasons", async () => {
       await withRuntime({}, (runtime) => {
         const tx = runtime.edit();
@@ -824,9 +831,13 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
     });
   });
 
-  describe("single-use release at the sink egress gate", () => {
-    // The core: consumption semantics at the sink egress gate, end to end.
+  //
+  // The core
+  //
+  // Consumption semantics at the sink egress gate, end to end.
+  //
 
+  describe("single-use release at the sink egress gate", () => {
     it("releases once, committing the receipt atomically; the second evaluation fails closed", async () => {
       await withRuntime({}, async (runtime) => {
         await writeGrant(runtime);
@@ -1261,10 +1272,14 @@ describe("CFC single-use grants (§2.2 single-use releases)", () => {
     });
   });
 
-  describe("digest binding of the receipt state", () => {
-    // Digest binding (item 3): receipt consulted-state rides consultedGrants
-    // with the grants' own canonicalization + invalidation discipline.
+  //
+  // Digest binding (item 3)
+  //
+  // Receipt consulted-state rides consultedGrants with the grants' own
+  // canonicalization + invalidation discipline.
+  //
 
+  describe("digest binding of the receipt state", () => {
     it("a receipt appearing between evaluations invalidates the prepared digest", async () => {
       await withRuntime({}, (runtime) => {
         const receiptId = cfcGrantConsumedReceiptId(grantIdFor(runtime));
