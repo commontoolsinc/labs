@@ -688,7 +688,11 @@ describe("stage G SpaceServer recovery seams", () => {
     expect(notices.length).toBe(1);
   });
 
-  // stage P2-F: late-notice accounting (the sx2 unskip flake)
+  //
+  // Stage P2-F: late-notice accounting
+  //
+  // (the sx2 unskip flake)
+  //
 
   it("counts an authored notice that arrives AFTER a higher-seq echo (the two-producer notice race): late records still count and re-arm, and coverage stays in-order", async () => {
     const stats = emptyServingLoopStats();
@@ -821,6 +825,13 @@ describe("stage G SpaceServer recovery seams", () => {
         return typeof value === "function" ? value.bind(target) : value;
       },
     }) as typeof server;
+
+  //
+  // The terminal decision for a demanded root
+  //
+  // Reaching it and stopping the per-cycle churn, counting a root that stays
+  // parked short of it, and re-arming out of it on a later commit.
+  //
 
   it("terminalizes a confirmed no-meta demanded root and STOPS the per-cycle churn (OW19's terminal half)", async () => {
     // A doc that EXISTS durably with a plain value and NO pattern meta
@@ -1097,7 +1108,9 @@ describe("stage G SpaceServer recovery seams", () => {
     }
   });
 
-  // stage P2-F: the argument-doc demand → owning-piece run supply
+  //
+  // Stage P2-F: the argument-doc demand → owning-piece run supply
+  //
 
   it("supplies a scoped ARGUMENT-doc demand's identity to the owning piece's derivation runs: the ensure-resolved root differs from the demanded id, and the derived commit still carries the demanding actor (the #pieceRootByDemandKey arm)", async () => {
     // An ordinary nested-doc watch: the client's scoped subscription
@@ -1285,6 +1298,13 @@ describe("stage G SpaceServer recovery seams", () => {
     expect(stats.structureLoadTerminal).toBe(0);
     expect(stats.structureLoadFailures).toBe(0);
   });
+
+  //
+  // LT6 at the events-down layer
+  //
+  // The same demanded-run attribution, seen where the event is emitted rather
+  // than where the run is supplied.
+  //
 
   it("LT6 at the events-down layer: an event emitted by a DEMANDED (user, session) derivation run carries the demanding actor on its durable entry — and with the supply neutral (no demanded instance) the same emission classifies userless", async () => {
     // The cross-stack blocker this pin closes (round-2, STEP 3): under

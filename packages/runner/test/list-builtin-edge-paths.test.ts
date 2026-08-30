@@ -27,20 +27,20 @@ import {
 const signer = await Identity.fromPassphrase("list builtin edge paths");
 const space = signer.did();
 
-// These tests exercise edge paths in the three list builtins (map/filter/
-// flatMap) that the resume-preservation tests do not reach:
-//
-//   - The usesIndex re-run branch: a reused per-element run whose element keeps
-//     its identity (a cell link) but lands at a new index re-executes its op so
-//     the index argument it observes is current.
-//   - The non-array guard: a list input that resolves to a non-array value makes
-//     the reconcile throw.
-//
-// Both are driven against a live runtime (no resume needed): cell-link elements
-// give stable identity across a reorder, and a direct set() of a scalar list
-// drives the non-array path.
-
 describe("list builtin edge paths", () => {
+  // These tests exercise edge paths in the three list builtins (map/filter/
+  // flatMap) that the resume-preservation tests do not reach:
+  //
+  //   - The usesIndex re-run branch: a reused per-element run whose element
+  //     keeps its identity (a cell link) but lands at a new index re-executes
+  //     its op so the index argument it observes is current.
+  //   - The non-array guard: a list input that resolves to a non-array value
+  //     makes the reconcile throw.
+  //
+  // Both are driven against a live runtime (no resume needed): cell-link
+  // elements give stable identity across a reorder, and a direct set() of a
+  // scalar list drives the non-array path.
+
   let storageManager: ReturnType<typeof StorageManager.emulate>;
   let runtime: Runtime;
   let tx: IExtendedStorageTransaction;
