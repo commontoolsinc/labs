@@ -101,8 +101,10 @@ first work item, made in `packages/cli` where the substrate lives.
 
 - A list view observes membership through a **raw-document subscription**:
   the collection doc under the rejecting selector, links parsed from the
-  raw value — and sinks deeply only the rows on screen, so cost is bounded
-  by page size rather than collection size. Schema shapes that look
+  raw value — and sinks deeply only the rows on screen. Element cost is
+  bounded by the visible page; membership is one document whose size
+  grows with the collection's link array — the linear-in-links frame
+  that replaces the element-closure shape behind the 89MB sync. Schema shapes that look
   shallow to a reader do not bound what the server syncs, so this is the
   one place shuttle reads below `Cell.sink`; the seam
   (`SpaceReplica.sinkDocument`) exists but is unexercised. Issue

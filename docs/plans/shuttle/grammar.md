@@ -38,7 +38,11 @@ as the canonical grammar's context rule already works:
   is refused rather than followed — `validateEmbeddedSpaces`
   (`packages/cli/lib/llm-friendly-ref.ts`) already holds `cf` to that, and
   shuttle v1 holds one connection.
-- `#…` — a wish target (entry point), resolvable from anywhere.
+- `#…` — a wish target (entry point), resolvable from anywhere within
+  the connected space. A target anchored elsewhere — profile and
+  favorites resolve against the reading identity's home space regardless
+  of the connected space (`packages/cli/lib/wish.ts`) — is refused with
+  the reason in v1, which holds one connection to one space.
 - `..` — up one level; `cd -` — the previous place.
 - Anything else — relative: resolved as a child of the current position
   (a facet at a space root, a key or index inside a piece, a slug inside

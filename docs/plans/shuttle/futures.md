@@ -74,8 +74,9 @@ decisions point here where they defer.
   habit v1 would have to unteach.
 - **`where` editing the heavyweight dimensions.** Switching api endpoint
   or identity mid-session, rebuilding the connection and saying so. v1
-  fixes both at launch — restarting is the switch — which also honors the
-  one-connection-per-process limit the seam work records.
+  fixes them at launch, the space too (decision 22) — restarting is the
+  switch — which also honors the one-connection-per-process limit the
+  seam work records.
 - **The `fuse/` facet.** The FUSE layout mirrored at the space root, for
   mutual legibility between the two tools. Shuttle reuses `packages/fuse`
   naming and hydration work regardless; the facet is the presentation
@@ -100,15 +101,22 @@ decisions point here where they defer.
    `where writes off` dimension, and per-space protection — shuttle
    refuses writes to a marked space until explicitly armed — encode the
    local, rehearsal, production discipline into the tool.
-3. **History and records.** Persistent, searchable command history; a
+3. **Multi-space sessions.** Per-space controllers behind one prompt, so
+   `cd` can cross spaces and home-anchored wish targets can be followed.
+   Not yet designed: it needs the per-process module globals the seam
+   work records scoped per connection, and a controller lifecycle per
+   space. Until it lands, one shuttle process serves one space,
+   restarting is the space switch, and cross-space references are
+   refused with the reason.
+4. **History and records.** Persistent, searchable command history; a
    `record` verb writing the transcript to a `file:` target or into the
    fabric. The event-line design already makes transcripts evidence;
    this makes them saveable.
-4. **Time and diff.** `history <ref>` and `diff` across time or between
+5. **Time and diff.** `history <ref>` and `diff` across time or between
    references — the state inspector's reconstruction machinery is the
    offline prior art — plus a modest `undo` that writes back what the
    session last saw, honest about concurrent writes.
-5. **Small muscle memory.** `pushd`/`popd` on the place stack;
+6. **Small muscle memory.** `pushd`/`popd` on the place stack;
    `watch --bell` and `--notify` (local side effects, marked as such); an
    opt-in `--resume` restoring the user's own last ambient record — which
    is not the persisted cross-process ambience the non-goals rule out,

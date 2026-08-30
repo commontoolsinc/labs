@@ -86,8 +86,12 @@ invisible, the prompt renders the whole ambient record — place and scope
 5. **Place model: reference prefixes plus named entry points.** A place is a
    prefix of the canonical reference — a space, a piece, a path under a piece
    — and named entry points (wish targets such as `#favorites`, slugs, space
-   names) are navigable: `cd #favorites` works, and `cf wish` already
-   resolves those targets headlessly. Virtual places — standing inside a
+   names) are navigable: `cd #favorites` works when the target resolves
+   within the connected space, and `cf wish` already resolves those
+   targets headlessly. A target anchored elsewhere — profile and
+   favorites resolve against the reading identity's home space — is
+   refused with the reason in v1, which serves one space per process
+   (decision 22). Virtual places — standing inside a
    search result, a survey's holders, a filtered collection — are a designed
    extension: the place abstraction must not assume a place is only a
    prefix.
@@ -176,7 +180,10 @@ invisible, the prompt renders the whole ambient record — place and scope
     connection, cwd pair, external location, invocation session — prints
     in `where`, and `where <dimension> <value>` sets the light ones (scope,
     the external location). The heavyweight dimensions — api endpoint,
-    identity — are fixed at launch in v1, and restarting is the switch;
+    identity, and the space — are fixed at launch in v1, and restarting is
+    the switch: one shuttle process serves one space, so `cd` moves within
+    it (multi-space sessions are a named candidate in
+    [`futures.md`](futures.md));
     editing them live is designed and deferred ([`futures.md`](futures.md)),
     which also honors the one-connection-per-process limit the seam work
     records. `cd`/`xcd` are conveniences over the hottest dimensions;
@@ -194,7 +201,9 @@ invisible, the prompt renders the whole ambient record — place and scope
     — shapes that look shallow to a reader do not bound what the server
     syncs), so membership comes from a raw-document subscription on the
     collection doc and only visible rows sink deeply — cost bounded by
-    page size, never collection size. The seam and solution lanes are
+    the visible page in element documents; membership is one document whose
+    size grows with the collection's link array — linear in links, not in
+    element closures. The seam and solution lanes are
     issue [#6534](https://github.com/commontoolsinc/labs/issues/6534); B3
     opens by proving the seam, and falls back to a capped deep sink with
     an honest label if it disappoints. The raw subscription serves the
@@ -249,7 +258,8 @@ The ambient context is one record:
 - **External working location**, **invocation session**.
 
 `cd` accepts relative path segments, `..`, rooted and complete canonical
-references, slugs, space names, wish targets, and scope suffixes. Every
+references, slugs, wish targets, and scope suffixes (space names join
+when multi-space sessions do). Every
 reference a command takes resolves against the cwd, and how much of the
 cwd it needs varies: a rooted `/of:…` fixes the piece and path but still
 draws its space from the place, so only a complete
@@ -269,7 +279,7 @@ several) stay reachable later.
 | --- | --- | --- |
 | Canonical + alias reference grammar | `packages/cli/lib/llm-friendly-ref.ts` (doc comment), runner's `parseLLMFriendlyLink` | The address syntax; shuttle consumes it and must not fork it |
 | Target option surface | `targetOptions` in `packages/cli/commands/piece.ts` | The enumeration of exactly what a place must supply |
-| Live-state completion | `packages/cli/lib/completion/providers.ts` (`cellPathCandidates`, `childKeys`, verb candidates with doc comments) | The `ls` primitive and tab completion, already written against live state |
+| Live-state completion | `packages/cli/lib/completion/providers.ts` — the listing logic is module-private (`cellPathCandidates`, `childKeys`) beside the exported `keysOf`, and opens its own runtime through the default `getCellValue` path | The `ls` primitive and tab completion; A1 factors the listing behind an injectable connection and exports it |
 | Pager/TUI substrate | `packages/cli/lib/view/` — `pager.ts` is the only module doing raw-mode full-screen TTY handling; `mod.ts` and `loadinput.ts` touch stdio for the one-shot path (capability probes, plain-output writes, piped input); `keys.ts`, `ansi.ts`, `render.ts`, `session.ts` hold state and decoding as pure logic | The full-screen half: raw mode, frames, key decoding, testable without a terminal; already follows references and edits buffers |
 | FUSE mount | `packages/fuse` | The same addressing as a POSIX filesystem; prior art for layout (arrays as numeric directories, handlers as executables, links as symlinks). Shuttle is its interactive, live sibling, not a replacement |
 | Offline inspector | `packages/state-inspector`, `cf inspect` | The forensic counterpart (snapshots, scopes, history); its HTML explorer is prior art for tree-plus-detail browsing |

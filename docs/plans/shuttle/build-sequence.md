@@ -15,7 +15,12 @@ prerequisites land.
 **A1 — export entries.** `@commonfabric/cli` exports only `.` → `mod.ts`,
 whose import runs CLI startup. Add workspace-internal export entries for
 the modules a sibling calls: `./lib/piece`, `./commands/piece`,
-`./lib/wish`, `./lib/piece-render`, `./lib/completion/providers`. Keep the
+`./lib/wish`, `./lib/piece-render`. The completion listing is not a plain
+entry: `cellPathCandidates` and `childKeys` in
+`lib/completion/providers.ts` are module-private and open a fresh runtime
+through the default `getCellValue` path, so A1 factors the listing logic
+behind an injectable connection and exports that, beside the
+already-public `keysOf`. Keep the
 list to what shuttle names — an export entry is a contract, and the short
 list is the record of which internals have a second caller. (The view
 substrate's entries wait for B3, which is when they earn their place on
@@ -65,8 +70,12 @@ is half of what a place is (decision 20): `cd @user` and `cd @space` move
 it, the prompt renders it, and `pwd` prints both halves. The prompt, a
 readline loop, and `cd` / `ls` / `pwd` / `get` over one held
 `PiecesController`, with `cd -` for the previous place and `#name` wish
-targets navigable (`cd #favorites`, and the `wish` verb, over the
-`./lib/wish` export entry A1 adds). `where` lands here as the printing
+targets navigable within the connected space (`cd #favorites`, and the
+`wish` verb, over the `./lib/wish` export entry A1 adds; a home-anchored
+target from elsewhere is refused with the reason — decision 5). Slug and
+name resolution rides the machinery `--piece` already uses
+(`resolveStoredPieceAddress`, `listSpaceSlugs`), so no CLI-surface arc
+step gates B1. `where` lands here as the printing
 surface for the ambient record; later milestones add their dimensions to it
 as they add the dimensions themselves. Facets `slugs/` and `pieces/` only.
 
@@ -82,7 +91,9 @@ permanently failed, because no such surface exists today and both the
 prompt and the view markers consume it. No retry loop in shuttle on either
 half.
 
-**B2 — writes, calls, handles** (after A2, A3). `set` with inline values,
+**B2 — writes, calls, handles** (after A2, A3, and A4 — a failed call or
+write must surface as a value, never reach `Deno.exit`). `set` with
+inline values,
 `edit` over `$EDITOR`, and `link` — the one spelling that writes a
 reference instead of copying a value (decision 14), and the only write of
 the three that has no `cf` equivalent to lean on. `call` through
@@ -93,8 +104,11 @@ continues a listing *and its handle numbering* (decision 24), so it needs
 the handle table, not merely a page cursor. Handles are structured at mint
 — each row's kind, plus receiver and verb name for a callable row — which
 is what `call %n` resolves against (decision 27). The invocation session is
-minted once at startup and passed explicitly. Warm-on-enter lands here,
-since `set` is what makes stale computed state visible.
+minted once at startup and passed explicitly. The step-10 call section
+is shuttle's own line grammar, parsed locally and fed to the
+schema-derived flag machinery `cf` already exports (`pieceCallRawArgs`,
+`pieceCallInvocation`), so no arc step gates it either. Warm-on-enter
+lands here, since `set` is what makes stale computed state visible.
 
 **B3 — watch and views** (after A4; view-substrate export entries added
 here). `Cell.sink` with the guard-plus-`idle()` settling discipline; the
