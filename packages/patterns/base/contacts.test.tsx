@@ -27,7 +27,7 @@ import {
   propsOf,
   textContent,
 } from "../test/vnode-helpers.ts";
-import type { ContactPiece } from "./contact-types.tsx";
+import type { ContactPiece, Person as PersonRecord } from "./contact-types.tsx";
 import Contacts from "./contacts.tsx";
 import FamilyMember from "./family-member.tsx";
 import Person from "./person.tsx";
@@ -96,7 +96,7 @@ export default pattern(() => {
   // Person reads through the `Person` interface, which has no `relationship`.
   // This cell stores one anyway, standing in for the every-day case of a
   // record that carries more than the reader it is handed to declares.
-  const widerCell = new Writable({
+  const widerCell = new Writable<PersonRecord & { relationship: string }>({
     firstName: "Ada",
     lastName: "Lovelace",
     middleName: "",
