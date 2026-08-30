@@ -393,10 +393,13 @@ describe("Phase 4 client-effect channel", () => {
   };
 
   it("the served intent (T2 hops 1–4): fire → wave computes navigateTo → the §5 entry lands in the FIRING session's instance, issuedIn stamped, annotations addressing + acting", async () => {
-    const navigations: string[] = [];
+    // HEADLESS (no navigate callback): the §5 entry these assertions
+    // read stays unacked and durable. A client that CAN enact acks the
+    // nonce and the next wave retires the entry, so the state hops 1–4
+    // name is one an enacting client races to clear. Hops 5–6 are the
+    // client half's own test.
     ({ manager: clientManager, runtime: clientRuntime } = openClient(
       aliceSigner,
-      { navigations },
     ));
     const engine = await server.engineForSpace(space);
     const { argument, result } = await standUp(
