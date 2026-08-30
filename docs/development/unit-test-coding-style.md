@@ -85,7 +85,9 @@ implementation.
 
 Group related tests with nested `describe()` blocks rather than comment
 banners. A `describe()` title appears in the test run transcript, where it
-tells a reader which group failed; a comment does not.
+tells a reader which group failed; a comment does not. A comment that turns out
+to describe several adjacent tests is the usual sign that a group is missing;
+see [Commenting a block](#commenting-a-block).
 
 ### Describing a class
 
@@ -213,12 +215,28 @@ The blank line under it separates the two jobs a `//` comment does here. With
 one, the comment is about the block. Without one, it is about the statement
 directly beneath it, which is the ordinary use and is untouched by any of this.
 
-Every block that takes a body works this way: `describe()`, `it()`, the
-`beforeEach()` family, and `Deno.test()`, `Deno.bench()` and `t.step()` where a
-file uses them.
+This holds for a test and for a group of them: `describe()`, `it()`, and
+`Deno.test()`, `Deno.bench()` and `t.step()` where a file uses them. It does
+not reach the `beforeEach()` family. A hook is setup rather than a case, and
+reads the way any other statement does with a line or two of `//` over it.
 
-Two nearby shapes are not this one:
+A callback with no braces has no inside, and its comment stays where it is.
+`it("rejects a schema-qualified target", () => expect(f(x)).toBeUndefined())`
+is one, and so is `Deno.test("would-pass", function () {});`. This is the same
+allowance [`code-comment-style.md`](code-comment-style.md#where-one-goes) makes
+for a declaration with no body to put a note in.
 
+Three nearby shapes are not this one:
+
+- A comment whose subject is a **run of sibling blocks** — two or three
+  adjacent cases that each pin one part of what it says — has no home inside
+  any one of them. That comment is telling you the run wants a
+  `describe()`: give the run its own block, and the comment goes inside that
+  block by the rule above, which is where a long rationale belongs anyway. A
+  run that should not become a block takes a
+  [section marker](code-comment-style.md#section-markers) instead, and then the
+  region needs closing — a second marker after the run — or a reader cannot
+  see where it ends.
 - A comment describing the **file** rather than any block in it is a file
   header. It goes at the top of the file as a doc comment, per
   [File headers](code-comment-style.md#file-headers), and not above the

@@ -60,7 +60,10 @@ surrounding code:
 - A comment about a test or a group of tests goes inside the block, as the
   first thing in the callback and followed by a blank line. Above the
   `describe()` or `it()` line, the next block inserted there lands between the
-  comment and what it describes.
+  comment and what it describes. Hooks are the exception -- a `beforeEach()`
+  reads like any other statement with a comment over it -- and a comment
+  covering several adjacent tests is telling you those tests want a
+  `describe()` of their own.
 
 On placement: a test goes in the package's `test/` tree, mirroring `src/`. The
 exception is a directory of independent components, `packages/ui` and
