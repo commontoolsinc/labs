@@ -43,6 +43,7 @@ import { Runtime } from "../src/runtime.ts";
 import type { MemorySpace } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const spaceSigner = await Identity.fromPassphrase("dprime w0 space");
 const space = spaceSigner.did() as MemorySpace;
@@ -50,21 +51,6 @@ const serviceSigner = await Identity.fromPassphrase("dprime w0 service");
 const aliceSigner = await Identity.fromPassphrase("dprime w0 alice");
 const bobSigner = await Identity.fromPassphrase("dprime w0 bob");
 const carolSigner = await Identity.fromPassphrase("dprime w0 carol");
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string | (() => string),
-  timeoutMs = 20_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      const rendered = typeof label === "function" ? label() : label;
-      throw new Error(`timed out waiting for ${rendered}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 const FAN_OUT_PATTERN = [
   "import { computed, Default, pattern, PerUser, Writable } from 'commonfabric';",

@@ -848,6 +848,19 @@ boundary the test can await without adding one to production code.
   it at quiescence. The equivalent reads in `counter.test.ts` and
   `nested-counter.test.ts` resolve a `defer()` from an existing
   `resultCell.sink(...)`.
+- `packages/runner/test/support/wait-until.ts` — the `waitUntil` the runner's
+  server-execution suites share. Twenty-two test files wait through it on state
+  the serving loop produces as a side effect of its own cycles: an engine row,
+  a watermark advance, a stats counter. Nothing reports those. `SpaceServer`
+  exposes `stats()` and `spaceServer()` and no notification, and the engine is
+  a synchronous store, so there is no event boundary without adding one to
+  production code. Its deadline is a stuck-condition backstop rather than a
+  bound at the call site, and it stays for a second reason: the serving loop
+  holds the event loop open through its lease-renew interval, so the fail-fast
+  described above never fires and an unbounded wait there would hang a run
+  instead of failing it. The failure names elapsed milliseconds and the poll
+  count, which is what separates a predicate that never came true from one the
+  test never got to evaluate.
 
 ### A pull that drives its own loading
 

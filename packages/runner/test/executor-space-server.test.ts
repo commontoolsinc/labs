@@ -55,6 +55,7 @@ import {
   type ServingLoopStats,
 } from "../src/executor/stats.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const spaceSigner = await Identity.fromPassphrase("space-server test space");
 const space = spaceSigner.did() as MemorySpace;
@@ -63,20 +64,6 @@ const targetSpace = targetSigner.did() as MemorySpace;
 const serviceSigner = await Identity.fromPassphrase(
   "space-server test service",
 );
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 10_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 const pendingRowStream = { id: "of:space-server-stream", path: [] as string[] };
 const pendingRowSidecar = streamEntriesDocId(pendingRowStream);

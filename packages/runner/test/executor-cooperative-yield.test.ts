@@ -42,6 +42,7 @@ import type {
 import { ExecutorHost } from "../src/executor/host.ts";
 import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import { CooperativeYield } from "../src/scheduler/cooperative-yield.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const newSharedServer = () =>
   new MemoryV2Server.Server({
@@ -61,21 +62,6 @@ const serviceSigner = await Identity.fromPassphrase(
   "cooperative yield service",
 );
 const aliceSigner = await Identity.fromPassphrase("cooperative yield alice");
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 15_000,
-  pollMs = 5,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, pollMs));
-  }
-};
 
 /** Synchronous CPU work — a stand-in for one demand-walk instance run. */
 const burn = (ms: number): void => {

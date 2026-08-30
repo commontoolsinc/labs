@@ -60,6 +60,7 @@ import {
   resolveEntryIdentity,
 } from "../src/index.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const spaceSigner = await Identity.fromPassphrase("space root ensure space");
 const space = spaceSigner.did() as MemorySpace;
@@ -81,20 +82,6 @@ function rootSource(marker: string): string {
     "",
   ].join("\n");
 }
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 20_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 describe("SpaceServer space-root ensure (OW45 arm-B stage 1)", () => {
   let server: MemoryV2Server.Server;

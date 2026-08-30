@@ -43,24 +43,11 @@ import {
   flushMicrotasks,
   scriptedIntentManager,
 } from "./speculation-intent-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const spaceSigner = await Identity.fromPassphrase("event append space");
 const space = spaceSigner.did() as MemorySpace;
 const aliceSigner = await Identity.fromPassphrase("event append alice");
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 15_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 const namedError = (name: string, message: string): Error => {
   const error = new Error(message);

@@ -64,6 +64,7 @@ import {
   markRendererTrustedEvent,
 } from "../src/cfc/ui-contract.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 /** The serving-loop harness's settle-gate seam (see
  * executor-serving-loop.test.ts): when set, the loop's settle hangs at
@@ -244,20 +245,6 @@ const sidecarIdsIn = (engine: Engine.Engine): string[] =>
   (engine.database.prepare(
     `SELECT id FROM head WHERE id LIKE 'of:stream-events:%' AND op != 'delete'`,
   ).all() as Array<{ id: string }>).map((row) => row.id);
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 20_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 const BUMP_PATTERN = [
   "import { handler, pattern, Stream, Writable } from 'commonfabric';",

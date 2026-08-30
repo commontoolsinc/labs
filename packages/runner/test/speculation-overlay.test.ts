@@ -59,6 +59,7 @@ import { isTerminalRejection } from "../src/storage/rejection.ts";
 import type { PostCommitSideEffect } from "../src/cfc/types.ts";
 import { readStoredCfcMetadata } from "../src/cfc/metadata.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const spaceSigner = await Identity.fromPassphrase("speculation overlay space");
 const space = spaceSigner.did() as MemorySpace;
@@ -66,20 +67,6 @@ const serviceSigner = await Identity.fromPassphrase(
   "speculation overlay service",
 );
 const aliceSigner = await Identity.fromPassphrase("speculation overlay alice");
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 15_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 describe("Phase 2 speculation overlay", () => {
   let server: MemoryV2Server.Server;

@@ -65,6 +65,7 @@ import type { MemorySpace } from "../src/storage/interface.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { WaveAccumulator, waveRunContextOf } from "../src/executor/wave.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 /** The settle-gate seam (see executor-events-down.test.ts): holds the
  * serving loop's settle so a test can dispose a client INSIDE the
@@ -98,20 +99,6 @@ const sidecarIdsIn = (engine: Engine.Engine): string[] =>
   (engine.database.prepare(
     `SELECT id FROM head WHERE id LIKE 'of:stream-events:%' AND op != 'delete'`,
   ).all() as Array<{ id: string }>).map((row) => row.id);
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 20_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 /** The highest AUTHORED seq that wrote `docId` — the only seq class a
  * kick-and-await-W barrier may target (protocol.md §4: settled for a

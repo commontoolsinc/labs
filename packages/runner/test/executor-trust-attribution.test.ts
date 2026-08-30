@@ -45,6 +45,7 @@ import type { CfcTrustConfigInput } from "../src/cfc/trust.ts";
 import { ExecutorHost } from "../src/executor/host.ts";
 import { markRendererTrustedEvent } from "../src/cfc/ui-contract.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const spaceSigner = await Identity.fromPassphrase("trust attribution space");
 const space = spaceSigner.did() as MemorySpace;
@@ -61,22 +62,6 @@ const sidecarIdsIn = (engine: Engine.Engine): string[] =>
   (engine.database.prepare(
     `SELECT id FROM head WHERE id LIKE 'of:stream-events:%' AND op != 'delete'`,
   ).all() as Array<{ id: string }>).map((row) => row.id);
-
-// Bounded poll over DURABLE server state (the executor family's honest
-// wait: the engine exposes no event for "a background wave landed this").
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 20_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 const BUMP_PATTERN = [
   "import { handler, pattern, Stream, Writable } from 'commonfabric';",

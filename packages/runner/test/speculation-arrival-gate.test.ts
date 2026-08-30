@@ -70,24 +70,11 @@ import {
   stampSpeculationRunContext,
 } from "../src/speculation/overlay-destination.ts";
 import { readWatermarkSeq as readWatermark } from "../src/executor/watermark.ts";
+import { waitUntil } from "./support/wait-until.ts";
 
 const spaceSigner = await Identity.fromPassphrase("arrival gate space");
 const space = spaceSigner.did() as MemorySpace;
 const aliceSigner = await Identity.fromPassphrase("arrival gate alice");
-
-const waitUntil = async (
-  predicate: () => boolean,
-  label: string,
-  timeoutMs = 20_000,
-): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!predicate()) {
-    if (Date.now() > deadline) {
-      throw new Error(`timed out waiting for ${label}`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-};
 
 /** A per-user derivation: `echo` reads a PerUser draft, so its output
  * narrows into the reader's user instance — exactly the shape whose
