@@ -1350,13 +1350,9 @@ describe("storedSchemaCoversCandidateEnvelope (merge-skip decision)", () => {
 describe("cfcSchemaMergeIssue", () => {
   // `cfcSchemaMergeIssue` is the dry-run seam over the SAME merge: `cf piece
   // setsrc --check` asks it whether a candidate envelope would be accepted
-  //
-  // The dry-run seam over the same merge
-  //
   // rather than attempting the swap and taking a low-level commit rejection.
   // What it must not do is reimplement the rules, so these cases pin that its
   // verdict is the merge's own — including the message, verbatim.
-  //
 
   it("reports no issue when the merge succeeds", () => {
     expect(cfcSchemaMergeIssue({

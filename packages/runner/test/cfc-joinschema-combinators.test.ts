@@ -43,11 +43,7 @@ describe("ContextualFlowControl.lubSchema combinator descent", () => {
   describe("more than one of additionalProperties, items and $ref", () => {
     // joinSchema used to chain additionalProperties / items / $ref with `else
     // if`, so a schema carrying more than one of them joined only the first —
-    //
-    // More than one of additionalProperties, items and $ref
-    //
     // the same under-tainting class as the combinator gap above.
-    //
 
     it("unions additionalProperties and items together", () => {
       expect(atomsOf({
