@@ -245,7 +245,9 @@ Three nearby shapes are not this one:
   run that should not become a block takes a
   [section marker](code-comment-style.md#section-markers) instead, and then the
   region needs closing — a second marker after the run — or a reader cannot
-  see where it ends.
+  see where it ends. Where the comment's clauses name the cases one by one,
+  splitting it is simpler than either: each half becomes its own case's
+  comment.
 - A comment describing the **file** rather than any block in it is a file
   header. It goes at the top of the file as a doc comment, per
   [File headers](code-comment-style.md#file-headers), and not above the
@@ -255,7 +257,22 @@ Three nearby shapes are not this one:
   length or subject matter. A marker covering a single block is not marking a
   region. Where it says something about that block, it becomes a block comment
   in the form above. Where it only restates the block's own description, it is
-  deleted.
+  deleted — the disposition for any comment that says no more than the
+  description above it.
+
+### Where these run out
+
+A comment above a block delimits: it ends the reach of whatever comment heads
+the run before it. Move one inside its block and the comment above it quietly
+covers more than it used to. So where a file is organized by a series of region
+labels, the series carries weight no single label does, and a series that reads
+one way throughout is worth more than each of its members being separately
+right.
+
+That is the shape of every hard case here, and the reason none of this is
+checked mechanically: the exceptions keep coming, and a gate would only make
+them expensive. Take all of it as guidance. Where following it would leave a
+file reading worse, the file wins.
 
 ## Assertions
 

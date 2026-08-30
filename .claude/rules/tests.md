@@ -63,7 +63,8 @@ surrounding code:
   comment and what it describes. Hooks are the exception -- a `beforeEach()`
   reads like any other statement with a comment over it -- and a comment
   covering several adjacent tests is telling you those tests want a
-  `describe()` of their own.
+  `describe()` of their own, or wants splitting across them. None of this is
+  checked mechanically; a file that reads better than the rule wins.
 
 On placement: a test goes in the package's `test/` tree, mirroring `src/`. The
 exception is a directory of independent components, `packages/ui` and
