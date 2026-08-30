@@ -220,11 +220,20 @@ This holds for a test and for a group of them: `describe()`, `it()`, and
 not reach the `beforeEach()` family. A hook is setup rather than a case, and
 reads the way any other statement does with a line or two of `//` over it.
 
-A callback with no braces has no inside, and its comment stays where it is.
-`it("rejects a schema-qualified target", () => expect(f(x)).toBeUndefined())`
-is one, and so is `Deno.test("would-pass", function () {});`. This is the same
-allowance [`code-comment-style.md`](code-comment-style.md#where-one-goes) makes
-for a declaration with no body to put a note in.
+A callback that opens no body of its own has nowhere to hold a comment, and
+the note stays beside it. Two shapes do that — a body that is a bare
+expression, and an empty body written on the opener's line:
+
+```ts
+// Shown for illustration only.
+
+it("returns `undefined` for a bad name", () => expect(f(x)).toBeUndefined());
+Deno.test("would-pass", function () {});
+```
+
+This is the same allowance
+[`code-comment-style.md`](code-comment-style.md#where-one-goes) makes for a
+declaration with no body to put a note in.
 
 Three nearby shapes are not this one:
 
