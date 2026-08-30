@@ -637,11 +637,16 @@ describe("combineSchemaForLink reader precedence", () => {
     expect(combineSchemaForLink(true, false)).toBe(false);
   });
 
-  // `ifc` deliberately does not ride the combination: write policy consumes
-  // declared schemas verbatim (`recordSchemaWritePolicyInput`), so a clause
-  // grafted onto the reader's schema would read as a declaration nobody
-  // authored. The read entry point marks cfc relevance off the link schema
-  // directly instead (`validateAndTransform`'s `schemaHasIfc` gate).
+  //
+  // `ifc` does not ride the combination
+  //
+  // Write policy consumes declared schemas verbatim
+  // (`recordSchemaWritePolicyInput`), so a clause grafted onto the reader's
+  // schema would read as a declaration nobody authored. The read entry point
+  // marks cfc relevance off the link schema directly instead
+  // (`validateAndTransform`'s `schemaHasIfc` gate).
+  //
+
   it("leaves a discarded link schema's ifc off a shaped reader", () => {
     const labeledLink = {
       ...linkContactSchema,
@@ -662,9 +667,13 @@ describe("combineSchemaForLink reader precedence", () => {
     expect(combineSchemaForLink(true, labeledLink)).toEqual(labeledLink);
   });
 
-  // `default` crosses the precedence line: a value's default is inherited
-  // from the last crossed schema that declares one, the nearest declaration
-  // to the data being the aptest.
+  //
+  // `default` crosses the precedence line
+  //
+  // A value's default is inherited from the last crossed schema that declares
+  // one, the nearest declaration to the data being the aptest.
+  //
+
   it("inherits the link's default onto a shaped reader", () => {
     const defaultedLink = {
       ...linkContactSchema,
@@ -741,10 +750,15 @@ describe("combineSchemaForLink reader precedence", () => {
     });
   });
 
-  it("restores the strict pseudo-intersection while the rollback is set", () => {
-    // The `readerSchemaPrecedence` experimental flag
-    // (docs/development/EXPERIMENTAL_OPTIONS.md) is the rollback override.
+  //
+  // The rollback
+  //
+  // Reader precedence is behind the `readerSchemaPrecedence` experimental flag
+  // (docs/development/EXPERIMENTAL_OPTIONS.md). With the flag off,
+  // combineSchemaForLink must agree with combineSchema exactly.
+  //
 
+  it("restores the strict pseudo-intersection while the rollback is set", () => {
     setReaderSchemaPrecedenceConfig(false);
     try {
       expect(combineSchemaForLink(readerSchema, linkContactSchema)).toEqual(

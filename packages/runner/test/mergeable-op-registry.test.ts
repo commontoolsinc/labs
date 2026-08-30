@@ -9,14 +9,18 @@ import {
   mergeableOpPayloadContains,
 } from "../src/storage/mergeable-ops.ts";
 
-// Ties the three places a mergeable patch op is registered together, so a new op
-// added to one but not the others fails loudly here rather than silently
-// degrading a mergeable write to a whole-value diff:
-//
-//   1. api MERGEABLE_OP_METHODS      — the author method + wire tag + classification
-//   2. runner storage/mergeable-ops  — how the op folds intent and builds wire ops
-//   3. memory v2/patch descriptors   — the wire op's shape, apply, and touched paths
 describe("mergeable op registry consistency", () => {
+  // Ties the three places a mergeable patch op is registered together, so a
+  // new op added to one but not the others fails loudly here rather than
+  // silently degrading a mergeable write to a whole-value diff:
+  //
+  //   1. api MERGEABLE_OP_METHODS — the author method + wire tag +
+  //      classification
+  //   2. runner storage/mergeable-ops — how the op folds intent and builds
+  //      wire ops
+  //   3. memory v2/patch descriptors — the wire op's shape, apply, and
+  //      touched paths
+
   const catalogWireOps = MERGEABLE_OP_METHODS.map((op) => op.wireOp);
 
   it("every catalog method records a real wire patch op", () => {

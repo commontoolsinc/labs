@@ -300,11 +300,11 @@ describe("data-uri", () => {
         .toBeUndefined();
     });
 
-    // The walk rebuilds a container only when something under it was
-    // rewritten, so these two exercise the rebuilding branch and pin what it
-    // has to carry across: the holes in a sparse array, and every sibling of
-    // the member that changed.
     it("keeps the holes in a sparse array that also holds a link", () => {
+      // The walk rebuilds a container only when something under it was
+      // rewritten. A sparse array holding a link takes that branch, and the
+      // holes have to survive it.
+
       const baseCell = runtime.getCell(space, "base", undefined, tx);
       const sparse: unknown[] = [];
       sparse[0] = { "/": { [LINK_V1_TAG]: { path: ["item"] } } };
@@ -321,6 +321,9 @@ describe("data-uri", () => {
     });
 
     it("keeps the siblings of a rewritten link untouched", () => {
+      // The same rebuilding branch, pinning the other thing it has to carry
+      // across: every sibling of the member that changed.
+
       const baseCell = runtime.getCell(space, "base", undefined, tx);
       const baseId = baseCell.getAsNormalizedFullLink().id;
       const data = {
