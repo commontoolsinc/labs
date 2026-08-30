@@ -127,7 +127,7 @@ describe("CFC additive-required default preserves old documents", () => {
   });
 
   //
-  // The same rule through a real compile
+  // The same rule end to end
   //
 
   it("materializes the real home pattern over a pre-favorites root under enforcement", async () => {

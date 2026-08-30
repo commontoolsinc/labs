@@ -1230,9 +1230,10 @@ Deno.bench("Cell equals - comparison operations (100x)", async (b) => {
 });
 
 //
-// Benchmark: Complex linked document graph (MentionablePiece pattern) This
-// tests .get() performance on a medium-complexity object spread across many
-// documents
+// Benchmark: Complex linked document graph (MentionablePiece pattern)
+//
+// This tests .get() performance on a medium-complexity object spread across
+// many documents
 //
 
 Deno.bench(
@@ -1349,9 +1350,12 @@ Deno.bench(
   },
 );
 
-// Benchmark: Notebook/Notes pattern - tests History.claim() optimization impact
-// These benchmarks measure repeated .get() calls on a notebook with linked notes
-// The claim optimization removes O(n²) overhead during reads
+//
+// Notebook/Notes pattern: the History.claim() optimization's impact
+//
+// These benchmarks measure repeated .get() calls on a notebook with linked
+// notes. The claim optimization removes O(n²) overhead during reads.
+//
 
 const noteSchema: JSONSchema = {
   type: "object",
@@ -1427,10 +1431,6 @@ async function benchmarkNotebookReads(noteCount: number, readCount: number) {
   await storageManager.close();
 }
 
-//
-// 10 notes
-//
-
 Deno.bench("Notebook read - 10 notes, 0 reads (setup only)", async () => {
   await benchmarkNotebookReads(10, 0);
 });
@@ -1442,10 +1442,6 @@ Deno.bench("Notebook read - 10 notes, 100 reads", async () => {
 Deno.bench("Notebook read - 10 notes, 1000 reads", async () => {
   await benchmarkNotebookReads(10, 1000);
 });
-
-//
-// 100 notes
-//
 
 Deno.bench("Notebook read - 100 notes, 0 reads (setup only)", async () => {
   await benchmarkNotebookReads(100, 0);
