@@ -121,8 +121,9 @@ Deno.test("keying - generateKey", async (t) => {
   //
   // A hole and a cycle
   //
-  // Neither is a value the keyer can hash: one is a gap where an element
-  // would be, the other a structure that would not terminate if followed.
+  // Neither is a value the keyer can hash by following it: one is a gap where
+  // an element would be, the other a structure that would not terminate if
+  // followed.
   //
 
   await t.step("keys a hole apart from an undefined element", () => {

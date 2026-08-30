@@ -1534,9 +1534,9 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
           // The inner boundary sees the mismatch and blocks the text.
           assertEquals(lastTextIntegrityStateFor(innerId), "blocked");
           // Composed semantics: the enclosing boundary transitively encloses
-          // content that fails its own (X) requirement, so it must ALSO report
-          // blocked. (Red on main today: the block is attributed only to the
-          // inner boundary, so the outer stays "ok".)
+          // content that fails its own (X) requirement, so it ALSO reports
+          // blocked — the block is attributed to every enclosing boundary, not
+          // only the innermost.
           assertEquals(lastTextIntegrityStateFor(outerId), "blocked");
 
           // The failing text is hidden.
@@ -1602,9 +1602,7 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
 
           // Composed semantics (option i): allowLiteralText composes as
           // parent && inner, so the inner cannot re-enable literals the outer
-          // forbade. The attacker-shaped literal must be hidden, not rendered.
-          // (Red on main today: the inner replaces the outer's policy, so the
-          // literal renders clean.)
+          // forbade. The attacker-shaped literal is hidden, not rendered.
           const renderedText = collector.getOpsOfType("create-text")
             .map((op) => op.text);
           assertEquals(renderedText.includes(attackerText), false);
@@ -1613,9 +1611,8 @@ Deno.test("worker reconciler CFC render policy", async (t) => {
             true,
           );
 
-          // Both boundaries must report blocked: the enclosing boundary's
-          // stricter literal-text rule applies transitively through the inner.
-          // (Red on main today: both stay "ok".)
+          // Both boundaries report blocked: the enclosing boundary's stricter
+          // literal-text rule applies transitively through the inner.
           assertEquals(lastTextIntegrityStateFor(innerId), "blocked");
           assertEquals(lastTextIntegrityStateFor(outerId), "blocked");
         } finally {
