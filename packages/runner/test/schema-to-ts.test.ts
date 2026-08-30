@@ -897,8 +897,9 @@ describe("Schema-to-TS Type Conversion", () => {
     // type Debug = ReturnType<typeof processPattern>;
   });
 
-  // Runtime tests to verify the Schema type works with actual data
   it("should work with real data at runtime", () => {
+    // Runtime tests to verify the Schema type works with actual data
+
     // Define a schema that uses various features
     const schema = {
       type: "object",

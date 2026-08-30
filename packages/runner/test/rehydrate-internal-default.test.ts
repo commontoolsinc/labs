@@ -17,34 +17,31 @@ import { trustExecutable } from "./support/trusted-builder.ts";
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
 
-// Two storage managers that share ONE in-memory server (the persistence
-// boundary) but keep SEPARATE client caches. This models a reload: the second
-// runtime starts cold and must fetch persisted docs from the server, rather
-// than reading the first runtime's warm cache.
-
-// Regression coverage for CT-1666.
-//
-// A pattern's derived internal cell carries a build-time default (in home.tsx,
-// `const activeTab = new Writable("spaces").for("activeTab")` →
-// `derivedInternalCells = [{ partialCause: "activeTab", schema: { default: "spaces" } }]`).
-// After the user picks a
-// value ("profile") and it is persisted, re-running the pattern must NOT revert
-// the cell to the build-time default.
-//
-// `Runner.#applySetupState` reads the persisted internal value and merges the
-// build-time default UNDER it (persisted wins). But the internal cell lives in
-// a separate content-addressed doc reached only via the result cell's meta link
-// — not through the schema/value graph — so the run's awaited sync gate
-// (`syncCellsForRunningPattern`) did not load it. The fix makes that gate sync
-// the `internal`/`argument` meta docs, so the persisted value is loaded before
-// the pattern (re)starts and renders.
-//
-// `activeTab` is intentionally internal-only here (never exported in `result`),
-// matching home.tsx where it is bound only to `<cf-tabs $value={activeTab}>`.
-//
-// A fresh runtime sharing the same emulated store rehydrates from a cold client
-// cache, exercising the load path the gate is responsible for.
 describe("rehydrate internal default (CT-1666)", () => {
+  // Regression coverage for CT-1666.
+  //
+  // A pattern's derived internal cell carries a build-time default (in
+  // home.tsx, `const activeTab = new Writable("spaces").for("activeTab")` →
+  // `derivedInternalCells = [{ partialCause: "activeTab", schema: { default:
+  // "spaces" } }]`). After the user picks a value ("profile") and it is
+  // persisted, re-running the pattern must NOT revert the cell to the
+  // build-time default.
+  //
+  // `Runner.#applySetupState` reads the persisted internal value and merges the
+  // build-time default UNDER it (persisted wins). But the internal cell lives
+  // in a separate content-addressed doc reached only via the result cell's meta
+  // link — not through the schema/value graph — so the run's awaited sync gate
+  // (`syncCellsForRunningPattern`) did not load it. The fix makes that gate
+  // sync the `internal`/`argument` meta docs, so the persisted value is loaded
+  // before the pattern (re)starts and renders.
+  //
+  // `activeTab` is intentionally internal-only here (never exported in
+  // `result`), matching home.tsx where it is bound only to `<cf-tabs
+  // $value={activeTab}>`.
+  //
+  // A fresh runtime sharing the same emulated store rehydrates from a cold
+  // client cache, exercising the load path the gate is responsible for.
+
   let server: MemoryV2Server.Server;
   let sm1: EmulatedStorageManager;
   let sm2: EmulatedStorageManager;
@@ -99,6 +96,10 @@ describe("rehydrate internal default (CT-1666)", () => {
     throw new Error(`Missing internal manifest entry for ${partialCause}`);
   };
 
+  // Two storage managers that share ONE in-memory server (the persistence
+  // boundary) but keep SEPARATE client caches. This models a reload: the second
+  // runtime starts cold and must fetch persisted docs from the server, rather
+  // than reading the first runtime's warm cache.
   beforeEach(() => {
     server = newSharedServer();
     sm1 = EmulatedStorageManager.connectTo(server, { as: signer });

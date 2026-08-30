@@ -470,13 +470,14 @@ describe("schema-view", () => {
   });
 
   describe("handles", () => {
-    // An optional handle — `Cell<T> | undefined` — generates as a union whose
-    // one branch carries `asCell` and whose other is the absent case, and the
-    // branches arrive as `$ref`s into `$defs`. Both facts hid the marker: a
-    // union satisfies `hasAsCell` only when EVERY branch declares one, and a
-    // bare `$ref` declares nothing until it is resolved. A reader got a plain
-    // value where the pattern declared a handle.
     it("returns a Cell for an optional handle declared through $ref branches", async () => {
+      // An optional handle — `Cell<T> | undefined` — generates as a union whose
+      // one branch carries `asCell` and whose other is the absent case, and the
+      // branches arrive as `$ref`s into `$defs`. Both facts hid the marker: a
+      // union satisfies `hasAsCell` only when EVERY branch declares one, and a
+      // bare `$ref` declares nothing until it is resolved. A reader got a plain
+      // value where the pattern declared a handle.
+
       const read = await seeded(
         "optional-handle",
         { entry: { origin: "sent", author: { name: "ada" } } },

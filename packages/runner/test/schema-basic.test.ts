@@ -12,12 +12,14 @@ import { Runtime } from "../src/runtime.ts";
 import { ContextualFlowControl } from "../src/cfc.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
 
-// The read follow-cap (link-resolution/traverse) and the write target scope
-// (data-updating) both derive from ContextualFlowControl.getSchemaScopeCap, so
-// they can never disagree about which scoped instance a slot addresses. This
-// pins the single precedence: outermost asCell entry scope first (the immediate
-// cell/slot), then the top-level `scope` (the value when there is no wrapper).
 Deno.test("getSchemaScopeCap precedence: asCell entry before top-level scope", () => {
+  // The read follow-cap (link-resolution/traverse) and the write target scope
+  // (data-updating) both derive from ContextualFlowControl.getSchemaScopeCap,
+  // so they can never disagree about which scoped instance a slot addresses.
+  // This pins the single precedence: outermost asCell entry scope first (the
+  // immediate cell/slot), then the top-level `scope` (the value when there is
+  // no wrapper).
+
   const cap = (schema: JSONSchema) =>
     ContextualFlowControl.getSchemaScopeCap(schema);
   assertSchemaScope(

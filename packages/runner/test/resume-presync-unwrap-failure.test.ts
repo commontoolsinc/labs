@@ -17,13 +17,14 @@ const presyncWarns = () => {
 };
 
 describe("resume pre-sync unwrap failure", () => {
-  // The resume pre-sync (syncCellsForRunningPatternInner) unwraps each node's
-  // bindings before walking them for write redirects. A node whose bindings
-  // cannot be bound — here a partialCause alias with no matching
-  // derivedInternalCells descriptor — must be skipped with a warn rather than
-  // breaking the pre-sync walk. (Instantiation then rejects the same alias at
-  // bind time; that failure is the pattern's problem, not the pre-sync's.)
   it("skips a node whose bindings do not unwrap, with a warn", async () => {
+    // The resume pre-sync (syncCellsForRunningPatternInner) unwraps each node's
+    // bindings before walking them for write redirects. A node whose bindings
+    // cannot be bound — here a partialCause alias with no matching
+    // derivedInternalCells descriptor — must be skipped with a warn rather than
+    // breaking the pre-sync walk. (Instantiation then rejects the same alias at
+    // bind time; that failure is the pattern's problem, not the pre-sync's.)
+
     const storageManager = StorageManager.emulate({ as: signer });
     try {
       // Seed run: a trivial pattern whose setup writes the result cell's

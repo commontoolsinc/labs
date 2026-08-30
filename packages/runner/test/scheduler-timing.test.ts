@@ -330,10 +330,11 @@ describe("debounce and throttling", () => {
     expect(runCount).toBe(0);
   });
 
-  // #4108: clearing/unsubscribing a debounced action must recompute the single
-  // shared wake timer. Otherwise the stale wake keeps idle() blocked until its
-  // dead deadline fires, even though no gated work remains.
   it("resolves idle promptly after unsubscribing a debounced effect with an armed wake", async () => {
+    // #4108: clearing/unsubscribing a debounced action must recompute the
+    // single shared wake timer. Otherwise the stale wake keeps idle() blocked
+    // until its dead deadline fires, even though no gated work remains.
+
     let runCount = 0;
     const effect: Action = () => {
       runCount++;

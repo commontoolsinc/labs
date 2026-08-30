@@ -58,18 +58,19 @@ function rejectNextTransact(
   };
 }
 
-// CT-1795: a handler must not dispatch against a provisional snapshot while a
-// replica load for an address in its read closure is still in flight.
-//
-// The wish shape: a computation reads a cold document (the wish kicks a
-// fire-and-forget pull and settles CLEAN on a provisional value), and a
-// handler's closure reads through that computation's output. The graph is
-// eventually correct — the load's arrival re-invalidates the computation
-// through the one channel — but the handler is at-most-once (D7), so its
-// dispatch must park until the closure's in-flight loads complete (a
-// definitively absent doc counts as complete). The wake source is load
-// completion, mirroring the lineage park's callback wake.
 describe("event dispatch parks on in-flight closure loads", () => {
+  // CT-1795: a handler must not dispatch against a provisional snapshot while a
+  // replica load for an address in its read closure is still in flight.
+  //
+  // The wish shape: a computation reads a cold document (the wish kicks a
+  // fire-and-forget pull and settles CLEAN on a provisional value), and a
+  // handler's closure reads through that computation's output. The graph is
+  // eventually correct — the load's arrival re-invalidates the computation
+  // through the one channel — but the handler is at-most-once (D7), so its
+  // dispatch must park until the closure's in-flight loads complete (a
+  // definitively absent doc counts as complete). The wake source is load
+  // completion, mirroring the lineage park's callback wake.
+
   let env: SchedulerTestRuntime;
   let releaseHeldSync: (() => void) | undefined;
 
@@ -313,19 +314,20 @@ describe("event dispatch parks on in-flight closure loads", () => {
     expect(callbackRuns).toBe(1);
   });
 
-  // The SERVED counterpart of the test above, and the reason the two
-  // arms differ (verification-coverage.md's OW45 residue member): a
-  // client event has no durable entry, so its load-park failure has
-  // nowhere to be re-delivered from and keeps the terminal drop. A
-  // SERVED event's entry IS durable, so the same failure must reach the
-  // drain as a DEFERRAL — no consequence sealed, the entry left pending
-  // for a later drain. events.md §5's T3 predicate is "no runnable
-  // handler", never "the run raced", and a transient read failure over
-  // a doc that exists durably is the second. This pins the contract the
-  // SpaceServer's `onFailure` branches on; the end-to-end consequence,
-  // ordering, and exactly-once behaviour live in
-  // executor-events-down.test.ts.
   it("a SERVED event's load-park failure reaches the drain as a load-park DEFERRAL, not a drop", async () => {
+    // The SERVED counterpart of the test above, and the reason the two
+    // arms differ (verification-coverage.md's OW45 residue member): a
+    // client event has no durable entry, so its load-park failure has
+    // nowhere to be re-delivered from and keeps the terminal drop. A
+    // SERVED event's entry IS durable, so the same failure must reach the
+    // drain as a DEFERRAL — no consequence sealed, the entry left pending
+    // for a later drain. events.md §5's T3 predicate is "no runnable
+    // handler", never "the run raced", and a transient read failure over
+    // a doc that exists durably is the second. This pins the contract the
+    // SpaceServer's `onFailure` branches on; the end-to-end consequence,
+    // ordering, and exactly-once behaviour live in
+    // executor-events-down.test.ts.
+
     const { runtime, tx } = env;
     const coldDoc = runtime.getCell<string>(
       space,
@@ -419,18 +421,19 @@ describe("event dispatch parks on in-flight closure loads", () => {
     expect(outcomes.length, "settled exactly once").toBe(1);
   });
 
-  // The barrier's TWO DELIBERATE EXCLUSIONS, pinned rather than merely
-  // documented. When a served head's load park fails, every later-arrived
-  // DURABLE served entry in the SAME space defers with it (events.md §2's
-  // arrival order). Two neighbours are deliberately left alone:
-  //   - another SPACE's entry — §2 orders within one space, and deferring a
-  //     stranger's event would be a liveness cost with no ordering benefit;
-  //   - an LT1 in-process copy (`served` with no `streamEntry`) — it has no
-  //     durable entry to re-drain, so deferring it would LOSE it; its durable
-  //     twin re-drains with a `streamEntry` on its own.
-  // Both were argued in review and neither was exercised — they were also
-  // exactly the two uncovered lines the coverage ratchet caught.
   it("the barrier's exclusions: the same-space durable sibling defers, while another space's entry and a streamEntry-less LT1 copy are left alone", async () => {
+    // The barrier's TWO DELIBERATE EXCLUSIONS, pinned rather than merely
+    // documented. When a served head's load park fails, every later-arrived
+    // DURABLE served entry in the SAME space defers with it (events.md §2's
+    // arrival order). Two neighbours are deliberately left alone:
+    //   - another SPACE's entry — §2 orders within one space, and deferring a
+    //     stranger's event would be a liveness cost with no ordering benefit;
+    //   - an LT1 in-process copy (`served` with no `streamEntry`) — it has no
+    //     durable entry to re-drain, so deferring it would LOSE it; its durable
+    //     twin re-drains with a `streamEntry` on its own.
+    // Both were argued in review and neither was exercised — they were also
+    // exactly the two uncovered lines the coverage ratchet caught.
+
     const { runtime, tx } = env;
     const otherSpace = (await Identity.fromPassphrase("load-park other space"))
       .did() as MemorySpace;
@@ -789,11 +792,12 @@ describe("event dispatch parks on in-flight closure loads", () => {
     ).toEqual([]);
   });
 
-  // F4d: loadsSettled counts remaining by keys.length but adds a single shared
-  // onSettled callback to each entry's waiter Set, which fires once per settled
-  // entry. A duplicated key inflates the count without adding a matching
-  // callback, so remaining never reaches zero and the promise hangs.
   it("loadsSettled resolves when keys contains a duplicate", async () => {
+    // F4d: loadsSettled counts remaining by keys.length but adds a single
+    // shared onSettled callback to each entry's waiter Set, which fires once
+    // per settled entry. A duplicated key inflates the count without adding a
+    // matching callback, so remaining never reaches zero and the promise hangs.
+
     const { runtime, tx } = env;
     const coldDoc = runtime.getCell<string>(
       space,

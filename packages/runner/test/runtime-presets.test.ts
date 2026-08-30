@@ -407,10 +407,11 @@ describe("runtimePresets conformance (CT-1814)", () => {
         });
       });
 
-      // A responding server that declares no readerSchemaPrecedence predates
-      // the flag and necessarily runs the strict combine: absence adopts as
-      // the legacy false. A declared value wins as usual.
       it("adopts legacy false for an absent readerSchemaPrecedence declaration", () => {
+        // A responding server that declares no readerSchemaPrecedence predates
+        // the flag and necessarily runs the strict combine: absence adopts as
+        // the legacy false. A declared value wins as usual.
+
         expect(parseServerExperimentalOptions({}).readerSchemaPrecedence)
           .toBe(false);
         expect(

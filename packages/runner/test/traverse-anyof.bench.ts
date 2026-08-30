@@ -63,8 +63,9 @@ function makeDoc(
   };
 }
 
-// Benchmark 1: 5-branch discriminated union with const discriminator
 Deno.bench("anyOf: 5-branch const discriminator", { group: "anyOf" }, (b) => {
+  // Benchmark 1: 5-branch discriminated union with const discriminator
+
   const store = new Map<string, Revision<State>>();
   const doc = makeDoc(store, "of:bench-disc", {
     kind: "circle",
@@ -120,8 +121,9 @@ Deno.bench("anyOf: 5-branch const discriminator", { group: "anyOf" }, (b) => {
   b.end();
 });
 
-// Benchmark 2: 2-branch disjoint property merge
 Deno.bench("anyOf: 2-branch disjoint merge", { group: "anyOf" }, (b) => {
+  // Benchmark 2: 2-branch disjoint property merge
+
   const store = new Map<string, Revision<State>>();
   const doc = makeDoc(store, "of:bench-disjoint", {
     name: "Alice",
@@ -149,11 +151,12 @@ Deno.bench("anyOf: 2-branch disjoint merge", { group: "anyOf" }, (b) => {
   b.end();
 });
 
-// Benchmark 3: Multi-branch object schema with anyOf at each property level
 Deno.bench(
   "anyOf: 3-branch nested object",
   { group: "anyOf" },
   (b) => {
+    // Benchmark 3: Multi-branch object schema with anyOf at each property level
+
     const store = new Map<string, Revision<State>>();
 
     const root = makeDoc(store, "of:bench-nested", {
@@ -204,8 +207,9 @@ Deno.bench(
   },
 );
 
-// Benchmark 4: 10-branch wide union with type discriminator
 Deno.bench("anyOf: 10-branch type discriminator", { group: "anyOf" }, (b) => {
+  // Benchmark 4: 10-branch wide union with type discriminator
+
   const store = new Map<string, Revision<State>>();
   const doc = makeDoc(store, "of:bench-wide", { x: 1, y: 2 });
 
@@ -245,11 +249,13 @@ Deno.bench("anyOf: 10-branch type discriminator", { group: "anyOf" }, (b) => {
   b.end();
 });
 
-// Benchmark 5: 2-level deep nested anyOf — every property is itself an anyOf
 Deno.bench(
   "anyOf: 2-level deep (props are anyOf)",
   { group: "anyOf" },
   (b) => {
+    // Benchmark 5: 2-level deep nested anyOf — every property is itself an
+    // anyOf
+
     const store = new Map<string, Revision<State>>();
     const doc = makeDoc(store, "of:bench-deep2", {
       a: "hello",
@@ -291,11 +297,13 @@ Deno.bench(
   },
 );
 
-// Benchmark 6: 3-level deep nested anyOf — object → anyOf props → anyOf sub-props
 Deno.bench(
   "anyOf: 3-level deep (nested objects with anyOf at each)",
   { group: "anyOf" },
   (b) => {
+    // Benchmark 6: 3-level deep nested anyOf — object → anyOf props → anyOf
+    // sub-props
+
     const store = new Map<string, Revision<State>>();
     const doc = makeDoc(store, "of:bench-deep3", {
       user: {
@@ -348,11 +356,12 @@ Deno.bench(
   },
 );
 
-// Benchmark 7: 3-level deep with discriminators at every level
 Deno.bench(
   "anyOf: 3-level deep discriminated",
   { group: "anyOf" },
   (b) => {
+    // Benchmark 7: 3-level deep with discriminators at every level
+
     const store = new Map<string, Revision<State>>();
     const doc = makeDoc(store, "of:bench-deep3-disc", {
       type: "container",
@@ -463,11 +472,13 @@ Deno.bench(
   },
 );
 
-// Benchmark 8: Wide + deep — 4 branches at top, each with 3-branch anyOf properties
 Deno.bench(
   "anyOf: wide+deep (4x3 branches)",
   { group: "anyOf" },
   (b) => {
+    // Benchmark 8: Wide + deep — 4 branches at top, each with 3-branch anyOf
+    // properties
+
     const store = new Map<string, Revision<State>>();
     const doc = makeDoc(store, "of:bench-wide-deep", {
       kind: "B",

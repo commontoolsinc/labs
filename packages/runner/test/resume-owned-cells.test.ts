@@ -277,19 +277,21 @@ describe("resume owned-cell pre-sync", () => {
   });
 });
 
-// Direct refutation of the review note:
-//   "Cycle-detection key is not identity-safe; collisions can skip sub-pattern
-//    traversal and miss required pre-sync cells on resume."
-//
-// collectResumeOwnedCells dedups sub-pattern nodes on `${space}\0${id}\0${scope}`
-// (runner.ts). The id is the content-addressed entity id createRef() mints from
-// the child node's resultFor cause {space, id, path}, so the output-spot path
-// that distinguishes sibling nodes is already folded into the id. These tests
-// mint child result cells exactly the way the walk does and show the key is
-// injective over distinct nodes: distinct nodes get distinct keys, the \0
-// delimiter is unambiguous because every component is null-free, and only a
-// genuinely identical node collapses.
 describe("resume owned-cell walk cycle-detection key", () => {
+  // Direct refutation of the review note:
+  // "Cycle-detection key is not identity-safe; collisions can skip sub-pattern
+  //  traversal and miss required pre-sync cells on resume."
+  //
+  // collectResumeOwnedCells dedups sub-pattern nodes on
+  // `${space}\0${id}\0${scope}` (runner.ts). The id is the content-addressed
+  // entity id createRef() mints from the child node's resultFor cause {space,
+  // id, path}, so the output-spot path that distinguishes sibling nodes is
+  // already folded into the id. These tests mint child result cells exactly the
+  // way the walk does and show the key is injective over distinct nodes:
+  // distinct nodes get distinct keys, the \0 delimiter is unambiguous because
+  // every component is null-free, and only a genuinely identical node
+  // collapses.
+
   let keyServer: MemoryV2Server.Server;
   let keySm: LoopbackStorageManager;
   let rt: Runtime;
