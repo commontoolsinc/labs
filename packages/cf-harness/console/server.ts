@@ -74,6 +74,7 @@ import { PATTERN_AUTHOR_SUBAGENT_PROFILE } from "../src/contracts/subagent.ts";
 import type { BuiltinToolId } from "../src/contracts/tool-descriptor.ts";
 import {
   createHarnessInteractiveChatService,
+  type CreateHarnessInteractiveChatServiceOptions,
   type HarnessInteractiveChatEventListener,
   type HarnessInteractiveChatService,
 } from "../src/interactive-chat-service.ts";
@@ -318,7 +319,46 @@ interface ConsoleConfig {
   spaceDbPath?: string;
   maxModelTurns?: number;
   skillsRoot?: string;
+
+  /**
+   * System prompt seeded into every console session, read from the file named
+   * by `--system-prompt-file`. Absent, a session runs with no system message,
+   * which is this surface's default: the parent's only standing guidance is
+   * its tool descriptors.
+   */
+  systemPrompt?: string;
+
+  /**
+   * Whether a `pattern-author` child keeps the guidance telling it to compose
+   * what the index holds rather than rewrite it. True unless
+   * `--no-child-composition-guidance` is passed.
+   */
+  childCompositionGuidance: boolean;
 }
+
+/**
+ * Reads the seeded system prompt off disk. A named file that is empty or
+ * unreadable is a startup failure rather than a session that quietly runs
+ * without the prompt the operator asked for — a variant measured against a
+ * prompt that never loaded is a variant that measured nothing.
+ */
+const readSystemPromptFile = (path: string, cwd: string): string => {
+  const resolved = resolve(cwd, path);
+  let contents: string;
+  try {
+    contents = Deno.readTextFileSync(resolved);
+  } catch (error) {
+    throw new Error(
+      `--system-prompt-file could not be read: ${resolved}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  if (contents.trim() === "") {
+    throw new Error(`--system-prompt-file is empty: ${resolved}`);
+  }
+  return contents;
+};
 
 const nonEmpty = (value: string | undefined): string | undefined =>
   value === undefined || value.trim() === "" ? undefined : value.trim();
@@ -367,10 +407,15 @@ export const resolveConsoleConfig = (
       "fabric-cfc-enforcement-mode",
       "fabric-cfc-flow-labels",
       "fabric-cfc-posture",
+      "system-prompt-file",
     ],
+    boolean: ["no-child-composition-guidance"],
   });
   const flag = (name: string): string | undefined =>
     typeof parsed[name] === "string" ? nonEmpty(parsed[name]) : undefined;
+
+  const systemPromptFile = flag("system-prompt-file") ??
+    nonEmpty(env.CF_HARNESS_CONSOLE_SYSTEM_PROMPT_FILE);
 
   const port = flag("port") !== undefined
     ? positiveInteger(flag("port")!, "--port")
@@ -521,6 +566,10 @@ export const resolveConsoleConfig = (
       }
       : {}),
     skillsRoot: skillsRootFlag,
+    ...(systemPromptFile !== undefined
+      ? { systemPrompt: readSystemPromptFile(systemPromptFile, cwd) }
+      : {}),
+    childCompositionGuidance: parsed["no-child-composition-guidance"] !== true,
   };
 };
 
@@ -1279,6 +1328,44 @@ const chatErrorResponse = (response: HarnessChatResponse): Response =>
   );
 
 /**
+ * Carries resolved console configuration into each interactive chat session.
+ */
+export const createConsoleInteractiveServiceOptions = (
+  config: ConsoleConfig,
+  modelOptions: CreateHarnessPromptLoopOptions,
+  onEvent: HarnessInteractiveChatEventListener,
+  sessionStore?: HarnessChatSessionStore,
+): CreateHarnessInteractiveChatServiceOptions => ({
+  basePromptLoopOptions: {
+    ...modelOptions,
+    model: config.model,
+    artifactRoot: config.artifactRoot,
+    workspaceHostPath: config.workspacePath,
+    cfcResultDir: config.cfcResultDir,
+    cfcInvocationContextDir: config.cfcInvocationContextDir,
+    fabricSession: config.fabricSession,
+    ...(config.patternIndex !== undefined
+      ? { patternIndex: config.patternIndex }
+      : {}),
+    ...(config.maxModelTurns !== undefined
+      ? { maxModelTurns: config.maxModelTurns }
+      : {}),
+    ...(config.skillsRoot !== undefined
+      ? { skillsRoot: config.skillsRoot }
+      : {}),
+    subagentCompositionGuidance: config.childCompositionGuidance,
+  },
+  ...(config.systemPrompt !== undefined
+    ? { systemPrompt: config.systemPrompt }
+    : {}),
+  ...(modelOptions.credentialOwner !== undefined
+    ? { credentialOwner: modelOptions.credentialOwner }
+    : {}),
+  ...(sessionStore !== undefined ? { sessionStore } : {}),
+  onEvent,
+});
+
+/**
  * Builds the service and starts serving. The fabric session and the pattern
  * index reach the engine as resolved configuration on the base prompt-loop
  * options: `CreateHarnessPromptLoopOptions` extends the engine's options,
@@ -1310,31 +1397,14 @@ export const startConsoleServer = async (
   const server = new ConsoleServer(
     config,
     (onEvent) =>
-      createHarnessInteractiveChatService({
-        basePromptLoopOptions: {
-          ...modelOptions,
-          model: config.model,
-          artifactRoot: config.artifactRoot,
-          workspaceHostPath: config.workspacePath,
-          cfcResultDir: config.cfcResultDir,
-          cfcInvocationContextDir: config.cfcInvocationContextDir,
-          fabricSession: config.fabricSession,
-          ...(config.patternIndex !== undefined
-            ? { patternIndex: config.patternIndex }
-            : {}),
-          ...(config.maxModelTurns !== undefined
-            ? { maxModelTurns: config.maxModelTurns }
-            : {}),
-          ...(config.skillsRoot !== undefined
-            ? { skillsRoot: config.skillsRoot }
-            : {}),
-        },
-        ...(modelOptions.credentialOwner !== undefined
-          ? { credentialOwner: modelOptions.credentialOwner }
-          : {}),
-        ...(sessionStore !== undefined ? { sessionStore } : {}),
-        onEvent,
-      }),
+      createHarnessInteractiveChatService(
+        createConsoleInteractiveServiceOptions(
+          config,
+          modelOptions,
+          onEvent,
+          sessionStore,
+        ),
+      ),
   );
   await server.service.initializeFromStore();
 

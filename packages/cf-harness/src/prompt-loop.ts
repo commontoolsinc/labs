@@ -179,6 +179,14 @@ export interface CreateHarnessPromptLoopOptions
   promptCacheMode?: "implicit" | "explicit";
   reasoningEffort?: string;
   compactThreshold?: number;
+
+  /**
+   * Whether a `pattern-author` child receives the four composition and wiring
+   * bullets. Search-technique and publishing guidance remain in place. The
+   * narrow scope is intentional so a null result can be interpreted. Defaults
+   * to true, which is the guidance the profile ships with.
+   */
+  subagentCompositionGuidance?: boolean;
 }
 
 export interface RunHarnessPromptOptions {
@@ -1093,8 +1101,9 @@ const buildSubagentSystemPrompt = (
   profileConfig: HarnessSubagentProfileConfig,
   options: {
     structuredReturn: boolean;
+    compositionGuidance: boolean;
     browserAccess?: HarnessBrowserAccessLease;
-  } = { structuredReturn: false },
+  } = { structuredReturn: false, compositionGuidance: true },
 ): string =>
   [
     "You are a focused cf-harness subagent working on one delegated task.",
@@ -1177,10 +1186,19 @@ const buildSubagentSystemPrompt = (
             "Search the pattern index with search_patterns before you author anything. A published pattern that already does the job is the better answer: run it by passing its patternId to run_pattern instead of sourceText.",
             "Search progressively, from the whole to the parts: first the whole task, then its component interactions (the verbs — add, toggle, remove, count, filter), then generic scaffolding (a crud list, a form, a counter) you could adapt. Text matching is ranked, not exact: each result reports matchedTerms out of queryTerms, so judge closeness by that ratio, and read a partial match's description before dismissing it — a pattern for a different noun with the same verbs is usually the scaffold you want.",
             'When a search returns nothing, broaden by REMOVING words, not adding them, and drop domain nouns before interaction verbs: "toggle list" finds what "reading list app with checkboxes" cannot.',
-            'When you do author, prefer composing what the index already holds over rewriting it. Each search result carries the import specifier that composes it — `import X from "cf:pattern:<patternId>"` — along with the argument and result shapes to wire against. You never see an indexed pattern\'s source, and you do not need it.',
-            "An indexed pattern imported that way is a component of the source you are writing: run_pattern fetches and compiles each one you name before it compiles your source, so composing one costs you the import line and nothing else. Reach for that before reimplementing what a search already found.",
-            'Compose one by calling it where you want its result. `import Card from "cf:pattern:<patternId>"` and then `card: Card({ item })` puts its result object under a field of yours; writing the same call inside your JSX — `<div>{Card({ item })}</div>` — renders its UI in place. The result shapes search_patterns reported are what you wire against.',
-            "A search hit is a component to wire, not a specification to rebuild. When a result's description says it does something one of your atoms needs, import and call it. Rewriting it from its description is the one move that makes the index worth nothing: it publishes a second pattern doing the same job under a different id, and the next searcher has two things to choose between and no reason to prefer either.",
+            // The composition four. Withheld together by
+            // `subagentCompositionGuidance`, and only these: the search
+            // bullets above and the publishing bullets below govern discovery
+            // and what the run contributes back, which are separate questions
+            // from whether the child imports rather than rewrites.
+            ...(options.compositionGuidance
+              ? [
+                'When you do author, prefer composing what the index already holds over rewriting it. Each search result carries the import specifier that composes it — `import X from "cf:pattern:<patternId>"` — along with the argument and result shapes to wire against. You never see an indexed pattern\'s source, and you do not need it.',
+                "An indexed pattern imported that way is a component of the source you are writing: run_pattern fetches and compiles each one you name before it compiles your source, so composing one costs you the import line and nothing else. Reach for that before reimplementing what a search already found.",
+                'Compose one by calling it where you want its result. `import Card from "cf:pattern:<patternId>"` and then `card: Card({ item })` puts its result object under a field of yours; writing the same call inside your JSX — `<div>{Card({ item })}</div>` — renders its UI in place. The result shapes search_patterns reported are what you wire against.',
+                "A search hit is a component to wire, not a specification to rebuild. When a result's description says it does something one of your atoms needs, import and call it. Rewriting it from its description is the one move that makes the index worth nothing: it publishes a second pattern doing the same job under a different id, and the next searcher has two things to choose between and no reason to prefer either.",
+              ]
+              : []),
             "A pattern you author and run successfully is recorded in the index for later evaluation, so pass run_pattern a `description` saying in one line what it does and `hashtags` naming the words someone should find it under if evidence earns discoverability. Write them for the next person, not for this task: a pattern recorded without a description is not published at all.",
             "Give every atom its own description and hashtags, not just the composition on top of them. The atom is the part someone else can reuse; the composition is usually specific to the task that asked for it.",
             'Tag at two levels: the domain (what it is about — "grocery", "budget") AND the capabilities (what interactions it embodies — "crud-list", "form-input", "counter", "toggle"). Searchers hunting a scaffold for a different domain find your pattern only through its capability tags. The description should name the interactions too: "add items, toggle done, count remaining" finds readers that "a handy list app" never will.',
@@ -2292,6 +2310,7 @@ export class CfHarnessPromptLoop {
   readonly #promptCacheMode?: "implicit" | "explicit";
   readonly #reasoningEffort?: string;
   readonly #compactThreshold?: number;
+  readonly #subagentCompositionGuidance: boolean;
 
   constructor(options: CreateHarnessPromptLoopOptions = {}) {
     this.engine = options.engine ?? new CfHarnessEngine(options);
@@ -2382,6 +2401,8 @@ export class CfHarnessPromptLoop {
     this.#promptCacheMode = options.promptCacheMode;
     this.#reasoningEffort = options.reasoningEffort;
     this.#compactThreshold = options.compactThreshold;
+    this.#subagentCompositionGuidance = options.subagentCompositionGuidance ??
+      true;
   }
 
   /** @deprecated Prefer `modelClient`; unavailable for `openai-codex`. */
@@ -3992,6 +4013,7 @@ export class CfHarnessPromptLoop {
           profileConfig,
           {
             structuredReturn: delegateInput.returnSchema !== undefined,
+            compositionGuidance: this.#subagentCompositionGuidance,
             ...(delegateInput.profile === BROWSER_SUBAGENT_PROFILE &&
                 this.#browserAccess !== undefined
               ? { browserAccess: this.#browserAccess }

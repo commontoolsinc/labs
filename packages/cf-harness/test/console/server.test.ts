@@ -3,7 +3,11 @@ import { expect } from "@std/expect";
 import { join, resolve, toFileUrl } from "@std/path";
 import { Identity } from "@commonfabric/identity";
 import { runDenoCommandWithTemporaryLock } from "@commonfabric/test-support/isolated-deno";
-import { ConsoleServer, resolveConsoleConfig } from "../../console/server.ts";
+import {
+  ConsoleServer,
+  createConsoleInteractiveServiceOptions,
+  resolveConsoleConfig,
+} from "../../console/server.ts";
 import type { ConsoleSessionListing } from "../../console/sessions.ts";
 import {
   createHarnessChatEventEnvelope,
@@ -242,6 +246,103 @@ describe("console/server", () => {
       sequence,
       event,
     });
+
+  describe("console prompt configuration", () => {
+    it("reads the named prompt and disables child composition guidance", async () => {
+      const directory = await Deno.makeTempDir({
+        prefix: "cf-harness-console-prompt-",
+      });
+      try {
+        await Deno.writeTextFile(
+          join(directory, "system.txt"),
+          "COMPOSE FIRST\n",
+        );
+        const resolved = resolveConsoleConfig(
+          [
+            "--fabric-identity",
+            "key.pkcs8",
+            "--fabric-space",
+            "console-test",
+            "--session-db",
+            "none",
+            "--system-prompt-file",
+            "system.txt",
+            "--no-child-composition-guidance",
+          ],
+          {},
+          directory,
+        );
+
+        expect(resolved.systemPrompt).toBe("COMPOSE FIRST\n");
+        expect(resolved.childCompositionGuidance).toBe(false);
+        const serviceOptions = createConsoleInteractiveServiceOptions(
+          resolved,
+          {
+            modelProvider: "openai-compatible-gateway",
+            modelAuthSource: "none",
+            gatewayAuthMode: "none",
+          },
+          () => {},
+        );
+        expect(serviceOptions.systemPrompt).toBe("COMPOSE FIRST\n");
+        expect(
+          serviceOptions.basePromptLoopOptions?.subagentCompositionGuidance,
+        ).toBe(false);
+      } finally {
+        await Deno.remove(directory, { recursive: true });
+      }
+    });
+
+    it("rejects a prompt file that cannot be read", () => {
+      expect(() =>
+        resolveConsoleConfig(
+          [
+            "--fabric-identity",
+            "key.pkcs8",
+            "--fabric-space",
+            "console-test",
+            "--session-db",
+            "none",
+            "--system-prompt-file",
+            "missing.txt",
+          ],
+          {},
+          "/console-prompt-test",
+        )
+      ).toThrow(
+        "--system-prompt-file could not be read: /console-prompt-test/missing.txt",
+      );
+    });
+
+    it("rejects a prompt file containing only whitespace", async () => {
+      const directory = await Deno.makeTempDir({
+        prefix: "cf-harness-console-prompt-",
+      });
+      try {
+        const promptPath = join(directory, "empty.txt");
+        await Deno.writeTextFile(promptPath, " \n\t");
+
+        expect(() =>
+          resolveConsoleConfig(
+            [
+              "--fabric-identity",
+              "key.pkcs8",
+              "--fabric-space",
+              "console-test",
+              "--session-db",
+              "none",
+              "--system-prompt-file",
+              promptPath,
+            ],
+            {},
+            directory,
+          )
+        ).toThrow(`--system-prompt-file is empty: ${promptPath}`);
+      } finally {
+        await Deno.remove(directory, { recursive: true });
+      }
+    });
+  });
 
   describe("the cell-label snapshot a terminal event waits on", () => {
     it("writes a terminal event to a stream only once its snapshot has landed", async () => {
