@@ -52,10 +52,8 @@ flags, and index corpus readings before and after both batches.
 
 The traps are fixed before results: `run_pattern` **by id is reuse, not
 composition**. The composition bar is **at least two distinct tasks importing
-distinct atoms**; repeated calls by one task do not clear it. If an
-admissibility read finds a whole answer, this record names the task id and
-answering pattern, drops that task loudly, and stops rather than silently
-changing the suite.
+distinct atoms**, and applies **only to composition-suite cells**; repeated
+calls by one task do not clear it.
 
 ## Per-cell ledger
 
@@ -75,14 +73,30 @@ anomalies. A provider error stops the experiment; it is never retried.
 | sol/V2 | standing six | not yet read | not yet read | not run |
 | sol/V2 | composition four | not yet read | not yet read | not run |
 
+## Amendment before the first provider turn: standing-suite purpose
+
+The first admissibility read found whole answers for all six standing tasks.
+That disqualifies them from composition measurement, but not from the other
+half of this A/B: discovery and whole-reuse under the corpus's permanent
+whole-answer condition. The cells are reinstated before any provider turn with
+this purpose: searches per task, by-id rate, first-try success, source rebuilds
+despite a whole answer, and compile-error burn. The known terra baseline is the
+2026-08-29 V0 control: six of six by id, zero source, zero compile errors.
+
+For standing-suite cells, Terra/V0 predicts that baseline shape; Sol cells
+predict either the same shape or fewer searches/errors. A standing-suite cell
+is falsified by source rebuilding of a whole-answered task, a lower by-id rate,
+or greater search/error burn than the terra baseline. It is never scored
+against the composition bar.
+
 ## Admissibility read, before the first provider turn
 
 Read through the current-main console's read-only index proxy against the
-deployed index. The standing suite is **dropped loudly**: every task has a
-single whole application in its top-five result set, so it cannot measure
-discovery/reuse rather than corpus saturation.
+deployed index. Every standing task has a single whole application in its
+top-five result set. That is recorded as the condition of its reuse cells, not
+as a composition claim.
 
-| Dropped id | Whole answering pattern |
+| Whole-answered reuse-cell id | Answering pattern |
 | --- | --- |
 | `counter` | `U5g1VlAb1uFmmec7D-fzPXZy0erldi7inqmXN8j7Vi0` |
 | `reading-list` | `FimzoBmTy8QTJQOjaKpsHPjmyMCUJFAGCXoO2vKJMDc` |
