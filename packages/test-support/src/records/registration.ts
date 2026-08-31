@@ -330,21 +330,14 @@ export function installRegistrationCapture(
     through: (definition: Deno.TestDefinition) => void,
     extra: Partial<Deno.TestDefinition>,
   ) =>
-  (
-    nameOrDef:
-      | string
-      | Deno.TestDefinition
-      | ((
-        t: Deno.TestContext,
-      ) => void | Promise<void>),
-    fn?: (t: Deno.TestContext) => void | Promise<void>,
-  ): void => {
-    const definition = asDefinition(nameOrDef, fn);
+  (...args: unknown[]): void => {
+    const definition = asDefinition(args);
     if (definition === undefined) {
       // A shape this wrapper does not model reaches the real registrar
-      // untouched, so an unfamiliar overload still runs.
+      // untouched and with its own arguments, so an unfamiliar overload
+      // still runs and still reports its own error.
       // deno-lint-ignore no-explicit-any
-      (through as any)(nameOrDef, fn);
+      (through as any)(...args);
       return;
     }
     const file = fileOf(registeringModule(new Error().stack ?? ""));
@@ -366,25 +359,47 @@ export function installRegistrationCapture(
 }
 
 /**
- * The one `Deno.test` shape this wrapper models: a definition object, or a
- * name and a body. Undefined for anything else, including the
- * function-only form, whose name comes from the function rather than from
- * an argument.
+ * One definition, whichever way `Deno.test` was called. It takes a name
+ * and a body, an options object and a body, a name and options and a
+ * body, a whole definition, or a named function alone, and the options
+ * carry the sanitizer and permission settings a test needs — so reading
+ * only the first two arguments drops the body of several of them and
+ * builds a definition Deno rejects.
+ *
+ * Undefined for a shape this does not model, including an anonymous
+ * function with no name to take. The caller passes those through
+ * untouched, so Deno reports them as it would have.
  */
 function asDefinition(
-  nameOrDef:
-    | string
-    | Deno.TestDefinition
-    | ((
-      t: Deno.TestContext,
-    ) => void | Promise<void>),
-  fn?: (t: Deno.TestContext) => void | Promise<void>,
+  args: readonly unknown[],
 ): Deno.TestDefinition | undefined {
-  if (typeof nameOrDef === "string") {
-    return fn === undefined ? undefined : { name: nameOrDef, fn };
+  const [first, second, third] = args;
+  const isBody = (value: unknown): value is Deno.TestDefinition["fn"] =>
+    typeof value === "function";
+  const isOptions = (value: unknown): value is Record<string, unknown> =>
+    typeof value === "object" && value !== null;
+
+  if (typeof first === "string") {
+    if (isBody(second)) return { name: first, fn: second };
+    if (isOptions(second) && isBody(third)) {
+      return { ...second, name: first, fn: third } as Deno.TestDefinition;
+    }
+    return undefined;
   }
-  if (typeof nameOrDef === "object" && nameOrDef !== null) {
-    return nameOrDef;
+  if (isOptions(first)) {
+    if (isBody(first.fn) && typeof first.name === "string") {
+      return first as unknown as Deno.TestDefinition;
+    }
+    if (isBody(second)) {
+      const name = typeof first.name === "string" ? first.name : second.name;
+      if (name.length > 0) {
+        return { ...first, name, fn: second } as Deno.TestDefinition;
+      }
+    }
+    return undefined;
+  }
+  if (isBody(first) && first.name.length > 0) {
+    return { name: first.name, fn: first };
   }
   return undefined;
 }

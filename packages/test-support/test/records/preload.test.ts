@@ -104,6 +104,18 @@ const BARE_FILE = `Deno.test("bare kept", () => {});
 Deno.test("bare dropped", () => {});
 `;
 
+// Every way `Deno.test` can be called. The options forms carry the
+// sanitizer settings a test needs, and they put the body in the second or
+// third argument, so a wrapper that reads only the first two registers a
+// definition with no body and Deno refuses the whole module.
+const OVERLOAD_FILE = `Deno.test("name and body", () => {});
+Deno.test("name, options and body", { sanitizeOps: false }, () => {});
+Deno.test({ name: "whole definition", fn: () => {} });
+Deno.test({ name: "options and body", sanitizeResources: false }, () => {});
+Deno.test({ sanitizeOps: false }, function namedByItsFunction() {});
+Deno.test(function bodyAlone() {});
+`;
+
 describe("preload", () => {
   it("records the file each test was registered from", async () => {
     const fixture = await makeFixture({
@@ -128,6 +140,48 @@ describe("preload", () => {
       const byName = new Map(records.map((r) => [r.test.n, r.file]));
       expect(byName.get("outer > kept")).toEqual("bdd.test.ts");
       expect(byName.get("bare kept")).toEqual("bare.test.ts");
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
+  it("registers every way `Deno.test` can be called", async () => {
+    const fixture = await makeFixture({ "overloads.test.ts": OVERLOAD_FILE });
+    try {
+      const run = await runFixture(fixture, ["overloads.test.ts"]);
+      assert(run.success, new TextDecoder().decode(run.stderr));
+      const reported = await outcomes(fixture);
+      expect([...reported.keys()].sort()).toEqual([
+        "bodyAlone",
+        "name and body",
+        "name, options and body",
+        "namedByItsFunction",
+        "options and body",
+        "whole definition",
+      ].sort());
+      for (const outcome of reported.values()) expect(outcome).toEqual("pass");
+      // The options each form carried have to survive the wrapper, or a
+      // test that opted out of a sanitizer is run under it again.
+      const names = await readNameMaps(fixture.spool);
+      expect(names.get("name, options and body")).toEqual("overloads.test.ts");
+      expect(names.get("options and body")).toEqual("overloads.test.ts");
+      expect(names.get("namedByItsFunction")).toEqual("overloads.test.ts");
+    } finally {
+      await Deno.remove(fixture.dir, { recursive: true });
+    }
+  });
+
+  it("skips a listed test whichever way it was registered", async () => {
+    const fixture = await makeFixture({ "overloads.test.ts": OVERLOAD_FILE });
+    try {
+      const run = await runFixture(fixture, ["overloads.test.ts"], {
+        "overloads.test.ts": ["name, options and body", "options and body"],
+      });
+      assert(run.success, new TextDecoder().decode(run.stderr));
+      const reported = await outcomes(fixture);
+      expect(reported.get("name, options and body")).toEqual("skip");
+      expect(reported.get("options and body")).toEqual("skip");
+      expect(reported.get("whole definition")).toEqual("pass");
     } finally {
       await Deno.remove(fixture.dir, { recursive: true });
     }
