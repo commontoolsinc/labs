@@ -7,7 +7,11 @@
  * infra-managed Actions variables.
  */
 
-import { type Environment, readEnv } from "@commonfabric/test-support/records";
+import {
+  type Environment,
+  readEnv,
+  type ServiceAccountKey,
+} from "@commonfabric/test-support/records";
 
 /** Canonical name of this repository in every record context. */
 export const REPO = "commontoolsinc/labs";
@@ -57,29 +61,25 @@ export function localSubmissionsPrefix(
 }
 
 /**
- * A personal key file is the service-account key JSON with one extra
- * field: the GitHub username the minting workflow issued it for, which
- * names the holder's own submissions folder.
+ * A personal key file is a service-account key with one extra field: the
+ * GitHub username the minting workflow issued it for, which names the
+ * holder's own submissions folder. The accounts that write on their own
+ * behalf rather than a person's — the compactor among them — hold a key
+ * with no such field, and are read as the service-account key they are.
  */
-export interface PersonalKeyFile {
-  client_email: string;
-  private_key: string;
-  token_uri: string;
+export interface PersonalKeyFile extends ServiceAccountKey {
   cf_username: string;
 }
 
 /**
- * The one token endpoint a personal key may name. The uploader sends a
- * signed assertion wherever this field points, so the parser accepts
- * exactly Google's HTTPS endpoint — the value every minted key carries —
- * and nothing else.
+ * The one token endpoint a key may name. A holder sends a signed
+ * assertion wherever this field points, so the parser accepts exactly
+ * Google's HTTPS endpoint — the value every minted key carries — and
+ * nothing else.
  */
 export const KEY_TOKEN_URI = "https://oauth2.googleapis.com/token";
 
-/** Parses a personal key file, returning undefined when it is not one. */
-export function parsePersonalKeyFile(
-  text: string,
-): PersonalKeyFile | undefined {
+function parsedObject(text: string): Record<string, unknown> | undefined {
   let value: unknown;
   try {
     value = JSON.parse(text);
@@ -87,24 +87,46 @@ export function parsePersonalKeyFile(
     return undefined;
   }
   if (typeof value !== "object" || value === null) return undefined;
-  const key = value as Record<string, unknown>;
+  return value as Record<string, unknown>;
+}
+
+/**
+ * Parses a service-account key file, returning undefined when it is not
+ * one.
+ */
+export function parseServiceAccountKey(
+  text: string,
+): ServiceAccountKey | undefined {
+  const key = parsedObject(text);
+  if (key === undefined) return undefined;
   if (
-    typeof key.client_email !== "string" ||
-    typeof key.private_key !== "string" ||
+    typeof key.client_email !== "string" || key.client_email.length === 0 ||
+    typeof key.private_key !== "string" || key.private_key.length === 0 ||
     key.token_uri !== KEY_TOKEN_URI
   ) {
     return undefined;
-  }
-  let username = key.cf_username;
-  if (typeof username !== "string" || username.length === 0) {
-    const match = key.client_email.match(/^test-records-gh-([^@]+)@/);
-    if (!match) return undefined;
-    username = match[1]!;
   }
   return {
     client_email: key.client_email,
     private_key: key.private_key,
     token_uri: KEY_TOKEN_URI,
-    cf_username: username as string,
   };
+}
+
+/** Parses a personal key file, returning undefined when it is not one. */
+export function parsePersonalKeyFile(
+  text: string,
+): PersonalKeyFile | undefined {
+  const key = parseServiceAccountKey(text);
+  if (key === undefined) return undefined;
+  const named = parsedObject(text)!.cf_username;
+  let username: string;
+  if (typeof named === "string" && named.length > 0) {
+    username = named;
+  } else {
+    const match = key.client_email.match(/^test-records-gh-([^@]+)@/);
+    if (!match) return undefined;
+    username = match[1]!;
+  }
+  return { ...key, cf_username: username };
 }

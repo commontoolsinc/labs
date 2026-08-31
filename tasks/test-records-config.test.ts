@@ -5,6 +5,7 @@ import {
   ciSubmissionsPrefix,
   localSubmissionsPrefix,
   parsePersonalKeyFile,
+  parseServiceAccountKey,
   storeBucket,
   storePrefix,
 } from "./test-records-config.ts";
@@ -45,6 +46,47 @@ describe("test-records-config", () => {
       expect(localSubmissionsPrefix("octocat", () => undefined)).toBe(
         "labs/test-records/submissions/local/octocat",
       );
+    });
+  });
+
+  describe("parseServiceAccountKey()", () => {
+    it("returns the key of an account that names no person", () => {
+      // The compactor writes on its own behalf, so its account carries no
+      // username to derive and its key file carries no field naming one.
+      const parsed = parseServiceAccountKey(JSON.stringify({
+        ...KEY,
+        client_email: "test-records-compactor@proj.iam.gserviceaccount.com",
+      }));
+      expect(parsed?.client_email).toBe(
+        "test-records-compactor@proj.iam.gserviceaccount.com",
+      );
+      expect(parsed?.private_key).toBe(KEY.private_key);
+    });
+
+    it("returns undefined for malformed JSON", () => {
+      expect(parseServiceAccountKey("{nope")).toBeUndefined();
+    });
+
+    it("returns undefined for a key missing a field it signs with", () => {
+      expect(parseServiceAccountKey(JSON.stringify({
+        client_email: KEY.client_email,
+        token_uri: KEY.token_uri,
+      }))).toBeUndefined();
+      expect(
+        parseServiceAccountKey(JSON.stringify({ ...KEY, private_key: "" })),
+      )
+        .toBeUndefined();
+      expect(
+        parseServiceAccountKey(JSON.stringify({ ...KEY, client_email: "" })),
+      )
+        .toBeUndefined();
+    });
+
+    it("returns undefined for any token endpoint but Google's", () => {
+      expect(parseServiceAccountKey(JSON.stringify({
+        ...KEY,
+        token_uri: "https://oauth2.example/token",
+      }))).toBeUndefined();
     });
   });
 

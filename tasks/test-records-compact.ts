@@ -59,7 +59,7 @@ import {
 } from "@commonfabric/test-support/records";
 import {
   ciSubmissionsPrefix,
-  parsePersonalKeyFile,
+  parseServiceAccountKey,
   storeBucket,
   storePrefix,
 } from "./test-records-config.ts";
@@ -586,7 +586,7 @@ async function main(): Promise<void> {
       );
       Deno.exit(2);
     }
-    const key = parsePersonalKeyFile(await Deno.readTextFile(keyPath));
+    const key = parseServiceAccountKey(await Deno.readTextFile(keyPath));
     if (key === undefined) {
       console.error(`${keyPath} is not a service-account key file`);
       Deno.exit(2);
