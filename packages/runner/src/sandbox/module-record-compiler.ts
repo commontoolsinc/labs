@@ -1035,7 +1035,10 @@ export interface CachedCompiledModule {
    */
   exportNames?: readonly string[];
 
+  /** The `export *` target specifiers of that same surface. */
   starTargetSpecs?: readonly string[];
+
+  /** The runtime import specifiers of that same surface. */
   importSpecs?: readonly string[];
 
   /**
