@@ -1663,9 +1663,10 @@ FUSE-to-sandbox taint, command completion after a FUSE read, FUSE write
 attempts, and joins between explicit `cfcInputLabels` and a prior FUSE read. The
 result sidecar env var is required for all CFC flow assertions, and the
 invocation context sidecar env var is required for the cases that seed
-`cfcInputLabels`. The installed Docker `runsc-cfc` runtime must also be
-configured with the same `--cfc-invocation-context-dir`, otherwise those
-invocation-label cases are skipped even if cf-harness writes sidecars.
+`cfcInputLabels`. Both env vars gate on being set, not on the installed Docker
+`runsc-cfc` runtime being registered against the same directories; register it
+with the matching `--cfc-invocation-context-dir` as well, or an enforcing case
+refuses at `docker create` rather than exercising the labels it seeds.
 
 The default Fabric CFC flow gate exercises the immediate result sidecar after a
 FUSE read. The stricter host-bind readback probe is opt-in with
@@ -1697,6 +1698,32 @@ payload contains audit/provenance context plus optional trusted `cfcInputLabels`
 for supported startup inputs (`command`, `argv`, `args`, `env`, `cwd`, and
 `stdin`). `stdin` labels are modeled as labels on the stdin source and taint
 only after the sandbox reads or maps fd 0, not as automatic startup task taint.
+
+Configuring `cfcInvocationContextDir` says where `cf-harness` writes; it says
+nothing about whether the runtime reads there, and the two sidecar directories
+are registered independently, so a host can have a working result transport —
+sidecars arrive, output mediation succeeds — while every input label goes into a
+directory nothing reads. Under an `enforce-*` mode `cf-harness` therefore reads
+the runtime's registered arguments from `docker info` before starting a
+container, and refuses the invocation when no valid absolute invocation-context
+directory is registered, because that half fails open: nothing downstream
+notices a sandbox that started untainted. `unregistered` is the only status that
+states a fact about the world: no valid absolute directory is registered.
+`registered` means only that something absolute is registered, never that the
+transport works; the snapshot reports both paths without comparing them because
+path text cannot establish that the daemon and harness resolve two names to the
+same directory. Moby shell-parses the registered argument strings before runsc
+sees them, so `cf-harness` trusts a registration only when every argument
+consists of characters in `[A-Za-z0-9._/=:,-]`. Any other character produces the
+distinct `unsafe-runtime-arguments` decline-to-affirm and refuses an enforcing
+invocation; a legitimate directory containing an excluded character must be
+renamed. A registration that could not be read at all is reported as
+`indeterminate` and the run proceeds, so an unreachable Docker daemon cannot
+pass for evidence of a misconfiguration. The CFC policy snapshot carries that
+reading as `cfc.invocationContextTransportReadiness` — `registered`,
+`unregistered`, `unsafe-runtime-arguments`, `indeterminate`, or `unverified`
+before any enforcing invocation has probed.
+
 When a trusted prompt-slot binding is present, `cf-harness` also derives
 confidentiality-only prompt influence labels for model-authored invocation
 inputs such as shell commands, structured file-tool arguments, and stdin
