@@ -148,9 +148,10 @@ Deno.test("resolve: a second positional advances to the next argument", () => {
   assertEquals(line.slot.index, 1);
 });
 
-Deno.test("resolve: words after -- are passthrough, not CLI options", () => {
-  // `cf call ... -- --flag` hands `--flag` to the callable's own parser.
-  const line = resolve("cf call --piece x handler -- --title ");
+Deno.test("resolve: words after -- reach the read step, not the option tree", () => {
+  // `--` closes the callable's section, so what follows is the read options
+  // rather than any flag the command tree declares in the ordinary positions.
+  const line = resolve("cf call --piece x handler -- --select ");
   assertEquals(line.slot?.kind, "passthrough");
 });
 
@@ -169,9 +170,9 @@ Deno.test("resolve: a pre-parse global does not disturb later resolution", () =>
 });
 
 Deno.test("resolve: a stopEarly command offers no option slot past its callable", () => {
-  // `cf call` ends option parsing at the callable name, so every later word
-  // belongs to the callable's own parser. Offering `--invocation` there names a
-  // flag the command refuses.
+  // `cf call` ends option parsing at the callable name, which is where the
+  // callable's own section opens, so every later word belongs to its parser.
+  // Offering `--invocation` there names a flag the command refuses.
   const line = resolve("cf call --piece x addItem --");
   assert(line.slot?.kind === "argument");
   assertEquals(line.slot.argument.name, "tail");
@@ -193,8 +194,10 @@ Deno.test("resolve: the boundary does not reach a command that parses to the end
   assertEquals(line.slot?.kind, "option-name");
 });
 
-Deno.test("resolve: `--` after the callable name still opens the passthrough slot", () => {
-  const line = resolve("cf call --piece x addItem -- --title ");
+Deno.test("resolve: `--` after the callable name closes its section", () => {
+  // The verb's own flags stand before the marker; the words past it are the
+  // read step's, and the slot is what tells them apart.
+  const line = resolve("cf call --piece x addItem --title x -- --select ");
   assertEquals(line.slot?.kind, "passthrough");
 });
 

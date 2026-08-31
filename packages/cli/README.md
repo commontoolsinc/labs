@@ -316,7 +316,8 @@ gets both, minted for that one call.
   greps for `load-pattern-by-identity-source-miss`). Use `--log-level error` to
   drop warnings; the two compose.
 - `cf call` accepts its payload as an inline JSON argument, `-` for stdin, an
-  implicit pipe (no payload argument), or schema-derived flags after `--`.
+  implicit pipe (no payload argument), or schema-derived flags in the callable's
+  section — directly after the verb, before any `--`.
 - A `cf get` path that doesn't resolve prints a one-line error on stderr and
   exits 1 — it is a data error, not a usage error. A `piece link` that fails
   validation (a source/target piece or path that doesn't exist) reports the same
@@ -400,11 +401,13 @@ cf get --piece ID items \
   --select id,title,author.name
 ```
 
-`cf call` writes them before the callable name:
+`cf call` writes them **past the `--` that closes the callable's section**. The
+callable name opens that section, so everything between the two belongs to the
+verb, and a projection reaches the read step by stepping past the marker:
 
 ```bash
-cf call --piece ID --select topic.title addTopic '{"title":"Ship it"}'
-cf call --piece ID --filter '.status == "open"' listTopics
+cf call --piece ID addTopic '{"title":"Ship it"}' -- --select topic.title
+cf call --piece ID listTopics -- --filter '.status == "open"'
 ```
 
 `wish` writes them beside the target it resolves:
@@ -414,13 +417,30 @@ cf wish '#profile' -i ./claude.key --select name,avatar
 cf wish '#mentionable' -i ./claude.key -s my-space --filter '.status == "open"'
 ```
 
-`exec` writes them **before the mounted file**, because everything after the
-file belongs to the callable's own schema-derived interface:
+`exec` writes them the same way, past the marker that closes the section the
+mounted file opened:
 
 ```bash
-cf exec --select id,title /tmp/cf/…/result/search.tool --query milk
-cf exec --select 'entry@' /tmp/cf/…/result/add.handler --title Milk
+cf exec /tmp/cf/…/result/search.tool --query milk -- --select id,title
+cf exec /tmp/cf/…/result/add.handler --title Milk -- --select 'entry@'
 ```
+
+That is one rule rather than two. The read options come after the thing they
+shape on every command that has them, and the marker appears exactly where
+something else owns flags in between:
+
+```text
+cf get  <addr> [path]           --select …
+cf wish <target>                --select …
+cf call <target> <verb> <input> -- --select …
+cf exec <mountedFile> <input>   -- --select …
+```
+
+A projection written before the verb is refused rather than accepted quietly —
+it would name positions in a result nothing has identified yet — and so is one
+written inside the callable's section, where the verb's own fields are read.
+Each refusal names the section the flag belongs to and prints the line that
+works.
 
 A mounted callable run through its own shebang — `./search.tool --query milk` —
 cannot carry them, because the shim appends its arguments after the file. Reach
@@ -936,17 +956,25 @@ printf '%s' '{"query":"milk"}' | cf call ... search --json
 ```
 
 Bare `--json` reads stdin. An inline value immediately after it is parsed as the
-complete input. `cf call` also accepts a single positional JSON value. Put
-schema-derived piece-call flags after `--`, for example
-`cf call ... search -- --query milk`. Use `-- --json-file <path>` for a
-piece-call JSON file. These rules keep the options before the callable name for
-`cf call` itself and the arguments after the name for the invoked callable.
+complete input. `cf call` also accepts a single positional JSON value.
+Schema-derived piece-call flags are written in the section the callable name
+opened, for example `cf call ... search --query milk`, and `--json-file <path>`
+stands in the same place. These rules keep the options before the callable name
+for `cf call` itself and the arguments after the name for the invoked callable.
 
-`--` belongs to the commands that have a callable section to close. `cf get`,
-`cf set` and `cf wish` have none, so a `--` written on one of those is refused
-rather than read: the parser sets every word after it aside, and the command
-would otherwise return a value the caller did not ask for and exit zero. The
-refusal names the words that were set aside and the line that works.
+`--` belongs to the commands that have a callable section to close. On `cf call`
+and `cf exec` it closes the section the callable name opened and opens the read
+step's, so the only words that follow it are `--select`, `--schema` and
+`--filter`; anything else there is refused with the line that puts it back in
+the section. `--help` is the exception, and deliberately: written past the
+marker it still reaches the callable and prints that verb's own page, since a
+caller wanting this command's page writes it with no verb at all.
+
+`cf get`, `cf set` and `cf wish` have no callable section, so a `--` written on
+one of those is refused rather than read: the parser sets every word after it
+aside, and the command would otherwise return a value the caller did not ask for
+and exit zero. The refusal names the words that were set aside and the line that
+works.
 
 ## Command visibility
 

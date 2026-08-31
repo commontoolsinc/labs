@@ -27,6 +27,7 @@ import {
   type ParsedExecArgs,
   renderExecHelp,
   renderExecHelpJson,
+  usageCommandPrefix,
 } from "./exec-schema.ts";
 import {
   canonicalizeMountLookupPath,
@@ -373,6 +374,7 @@ export async function executeMountedCallableFile(
     },
     commandSpec: resolved.commandSpec,
     rawArgs,
+    sectionPrefix: usageCommandPrefix(filePath, invocationStyle),
     deps: {
       ...deps,
       invocation,

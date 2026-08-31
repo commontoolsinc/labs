@@ -60,17 +60,17 @@ describe("check-verb-session-sync", () => {
   describe("tokenize", () => {
     it("keeps a quoted span as one token without its quotes", () => {
       expect(
-        tokenize(`cf call --select 'item@' addItem -- --title "Login rewrite"`),
+        tokenize(`cf call addItem --title "Login rewrite" -- --select 'item@'`),
       )
         .toEqual([
           "cf",
           "call",
-          "--select",
-          "item@",
           "addItem",
-          "--",
           "--title",
           "Login rewrite",
+          "--",
+          "--select",
+          "item@",
         ]);
     });
   });
@@ -151,8 +151,8 @@ describe("check-verb-session-sync", () => {
   describe("commandMatches", () => {
     it("returns true across variable and placeholder tokens", () => {
       expect(commandMatches(
-        tokenize(`cf call "$EPIC" blockOn -- --on "$OTHER"`),
-        tokenize(`cf call <cookies-address> blockOn -- --on <csrf-address>`),
+        tokenize(`cf call "$EPIC" blockOn --on "$OTHER"`),
+        tokenize(`cf call <cookies-address> blockOn --on <csrf-address>`),
       )).toBe(true);
     });
 
@@ -199,11 +199,13 @@ describe("check-verb-session-sync", () => {
     });
 
     it("catches a composed command the demo does not run", () => {
-      // The historical case: read options drifting behind the `--`, where
-      // they become the verb's arguments and the command stops working.
+      // The case this exists for: a read option drifting back ahead of the
+      // verb, where a projection names positions in a result nothing has
+      // identified and the command stops working.
       const broken = md.replace(
-        "cf call --piece board --select 'item@' addItem -- \\",
-        "cf call --piece board addItem -- --select 'item@' \\",
+        'cf call --piece board addItem --title "Login rewrite" \\',
+        "cf call --piece board --select 'item@' addItem " +
+          '--title "Login rewrite" \\',
       );
       expect(broken).not.toEqual(md);
       const found = findViolations(sh, broken);

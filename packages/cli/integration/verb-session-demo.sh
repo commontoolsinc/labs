@@ -223,7 +223,7 @@ say "tooling; reads and calls already answer in JSON."
 
 act "3 · Ask what a verb wants"
 say "Flags, types, required-ness and result all come from the author's TypeScript."
-run cf call -s "$SPACE" --piece board addItem -- --help
+run cf call -s "$SPACE" --piece board addItem --help
 
 act "4 · Create, and act on what you were handed"
 say "The create returns the piece it made. Its address is the next command's target."
@@ -233,7 +233,13 @@ say "a comma-separated list of fields, a dot to walk into one, and a trailing"
 say "@ meaning 'the address of this position, not the contents behind it'."
 say "So item@ says hand back where the new item lives rather than a copy of"
 say "it — and an address is what the rest of the session is built on."
-run cf call -s "$SPACE" --piece board --select item@ addItem -- --title "Login rewrite"
+say ""
+say "It is written past the -- and not before the verb, because a result has"
+say "to be named before it can be shaped. The verb opens its own section and"
+say "-- closes it: the verb's fields stand between them, the read options"
+say "after. Reading the line left to right is reading it in the order the"
+say "words become knowable."
+run cf call -s "$SPACE" --piece board addItem --title "Login rewrite" -- --select item@
 say "The @ renders under the key \$link, which is the spelling every address"
 say "in this transcript arrives in. Capturing one in your own shell is a single"
 say "jq hop — and the quotes around \$link are load-bearing, since jq reads a"
@@ -264,13 +270,13 @@ say "fields' prose, and a summary line per verb, all from the item's author."
 run cf piece describe -s "$SPACE" --piece "$EPIC"
 say "On get and call the address needs no flag at all: it begins with '/' and"
 say "a path never does, so it stands bare in the first position."
-run cf call -s "$SPACE" "$EPIC" addChild -- --title "Session cookies"
+run cf call -s "$SPACE" "$EPIC" addChild --title "Session cookies"
 say "The item it hands back can be reached from inside itself: its parent holds"
 say "it, and it holds its parent. The position where the author's own type"
 say "re-enters answers with an address, so the whole result is still one value."
-# Read options come before the address: the first positional starts the
-# callable's own command line, so a flag after it belongs to the verb.
-run cf call -s "$SPACE" --select item.title "$EPIC" addChild -- --title "CSRF tokens"
+# The verb opens the callable's section and `--` closes it: --title is a field
+# of addChild's and stands before the marker, and the read options follow it.
+run cf call -s "$SPACE" "$EPIC" addChild --title "CSRF tokens" -- --select item.title
 say "And a caller who names one field is given one field, circle or no circle."
 say "item.title is the dotted form: it walks into item and keeps title. Note it"
 say "prunes rather than flattens — the answer is still shaped like the result,"
@@ -299,7 +305,7 @@ CSRF=$(printf '%s' "$OUT" | jq -r '.[] | select(.title=="CSRF tokens")."$link"')
 
 act "7 · A verb returns what only the pattern could compute"
 say "The note's timestamp is the pattern's; the caller never supplied one."
-run cf call -s "$SPACE" "$EPIC" recordNote -- --body "blocked on the cookie spec"
+run cf call -s "$SPACE" "$EPIC" recordNote --body "blocked on the cookie spec"
 # The receipt out of the run just shown, not a second call. Every invocation
 # envelope carries one, and it is an address like any other.
 RECEIPT=$(printf '%s' "$OUT" | jq -r '.receipt')
@@ -316,10 +322,10 @@ say ""
 say "That route needs the address. The other one is for when you never got it"
 say "— a dropped connection, a response nobody saw. Name the call with an"
 say "--invocation id and the id itself becomes the handle."
-run cf call -s "$SPACE" --invocation note-retry "$EPIC" recordNote -- --body "first attempt"
+run cf call -s "$SPACE" --invocation note-retry "$EPIC" recordNote --body "first attempt"
 say "Replaying that id hands back the original. The payload below is"
 say "deliberately different text, and it does not take:"
-run cf call -s "$SPACE" --invocation note-retry "$EPIC" recordNote -- --body "a different body entirely"
+run cf call -s "$SPACE" --invocation note-retry "$EPIC" recordNote --body "a different body entirely"
 say "Same body, same receipt — and deduplicated: true, a field the first call"
 say "did not carry. The same caution applies: a replay is DEFINED to hand the"
 say "original snapshot back, so the envelope would look like this whether or"
@@ -341,8 +347,8 @@ act "8 · Finishing reports what the caller could not know"
 say "openBelow walks the whole subtree — a caller would need N reads to learn it."
 say "A grandchild is filed first, under the child act 6 handed back, so there"
 say "is a subtree to walk."
-run cf call -s "$SPACE" --select item.title "$KID" addChild -- --title "Rotate signing key"
-run cf call -s "$SPACE" "$EPIC" finish -- --body "shipping behind a flag"
+run cf call -s "$SPACE" "$KID" addChild --title "Rotate signing key" -- --select item.title
+run cf call -s "$SPACE" "$EPIC" finish --body "shipping behind a flag"
 
 act "9 · A verb that declares no result"
 say "archive is Stream<void>: nothing to supply, nothing handed back. The call"
@@ -394,14 +400,14 @@ say "The tracker is a graph, not just a tree: an item can wait on any other."
 say "The spelling this session taught throughout — the address as printed —"
 say "stands where the verb declares a reference, and the edge that lands is"
 say "the target itself rather than a copy."
-run cf call -s "$SPACE" --select blocked@,on@,blockedOnCount "$KID" blockOn -- --on "$CSRF"
+run cf call -s "$SPACE" "$KID" blockOn --on "$CSRF" -- --select blocked@,on@,blockedOnCount
 say "The two payloads that could only ever be mistakes at a reference"
 say "position are refused naming it: a string that is no address, and an"
 say "inline copy — which would store a detached document inside this item"
 say "and report success."
 refused "a string that is not an address, where a reference is declared" \
   "is not an address" \
-  cf call -s "$SPACE" "$KID" blockOn -- --on "not-an-address"
+  cf call -s "$SPACE" "$KID" blockOn --on "not-an-address"
 refused "an inline copy at a reference position" \
   "detached document" \
   cf call -s "$SPACE" "$KID" blockOn '{"on":{"title":"a copy"}}'

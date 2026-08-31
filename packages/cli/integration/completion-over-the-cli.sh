@@ -355,8 +355,8 @@ step "8. The verb's own fields do not complete yet"
 # author's vocabulary, not the CLI's. `shapeVerbFlagCandidates` derives them
 # from the listing's `inputSchema` — the same enumeration the help page below
 # renders, so a flag the parser accepts cannot be named by one and not the
-# other. Only the slot waits: step 10 of docs/plans/cli-surface-shape.md
-# decides whether a verb's fields are written before the marker or after it.
+# other. Only the wiring is left: the fields stand directly after the verb
+# name, which is the `tail` positional no provider dispatches on yet.
 check "pinned,title" "$($CF piece verbs --piece board $ARGS --json 2>/dev/null |
   jq -r '.verbs[] | select(.name == "addItem") | .inputSchema.properties |
     keys | sort | join(",")')" \
@@ -367,9 +367,9 @@ check "1" "$(printf '%s\n' "$HELP" | grep -c -- '^  --title <string>')" \
 check "1" "$(printf '%s\n' "$HELP" | grep -c -- '^  --pinned | --no-pinned')" \
   "including both spellings of a boolean field"
 check "1" "$(succeeds $CF call --quiet --piece board $ARGS --invocation flags-1 \
-  addItem -- --title 'Flagged item')" "and the parser accepts them as flags"
-gap "cf call $LINE_ARGS --piece board addItem -- --" \
-  "a verb's fields after the marker"
+  addItem --title 'Flagged item')" "and the parser accepts them as flags"
+gap "cf call $LINE_ARGS --piece board addItem --" \
+  "a verb's fields inside the section the verb opens"
 
 step "9. A cell path completes one segment at a time"
 check ":cf:nospace" "$(directives_at "cf get $LINE_ARGS --piece board ")" \
@@ -437,8 +437,10 @@ check "@,density,density@,theme,theme@" \
 check "dark" "$($CF get --quiet --piece board $ARGS settings --select theme \
   2>/dev/null | jq -r '.theme')" "and the command reads it from there too"
 # A verb's result is a different vocabulary and is not this one; `cf call`'s
-# projection stays empty until the verb before it can be read.
-check "" "$(complete_at "cf call $LINE_ARGS --piece board --select ")" \
+# projection stays empty until the verb before it can be read. Written past
+# the marker, which is the one position the grammar accepts it in — before the
+# verb it is refused rather than completed.
+check "" "$(complete_at "cf call $LINE_ARGS --piece board addItem -- --select ")" \
   "a call's projection is not completed from the piece's root"
 
 step "12. A name on two cells completes against the one the dispatcher reaches"

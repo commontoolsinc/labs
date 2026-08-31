@@ -373,6 +373,7 @@ export interface ResolvedPieceCallable extends CallableResolution {
 
 export interface PieceCallableDependencies extends CallableExecutionDeps {
   helpCommandPrefix?: string;
+
   loadPieces?: (config: SpaceConfig) => Promise<any>;
   loadPiece?: (
     pieces: any,
@@ -3387,12 +3388,19 @@ export async function executePieceCallable(
     callableName,
     deps,
   );
+  // The mount that was invoked, named once: the verb's help page and a
+  // refusal about the verb's own section both reprint the command a caller
+  // typed, and printing two spellings of it would be two answers to the same
+  // question.
+  const commandPrefix = deps.helpCommandPrefix ??
+    cliCommand(["call", "...", callableName]);
   return await executeCallableCommand({
     resolved,
     execution: resolved,
     commandSpec: resolved.commandSpec,
     rawArgs,
     deps,
+    sectionPrefix: commandPrefix,
     renderHelp: async (commandSpec, parsed) => {
       // The pattern is consulted HERE and nowhere earlier: the parse has
       // established that a page is being rendered, so the load it costs is
@@ -3404,15 +3412,10 @@ export async function executePieceCallable(
       const spec = await withDeclaredPatternDocs(commandSpec, resolved);
       return parsed.showHelpJson
         ? renderExecHelpJson(spec)
-        : renderPieceCallHelp(
-          // Each mount passes its own spelling, so the page names the
-          // command that was typed. The fallback is the canonical top-level
-          // spelling: a page minted with no mount to name must not teach
-          // the deprecated one.
-          deps.helpCommandPrefix ??
-            cliCommand(["call", "...", callableName]),
-          spec,
-        );
+        // Each mount passes its own spelling, so the page names the command
+        // that was typed; `commandPrefix` above holds the fallback for a page
+        // minted with no mount to name.
+        : renderPieceCallHelp(commandPrefix, spec);
     },
   });
 }

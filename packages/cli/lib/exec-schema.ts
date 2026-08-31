@@ -15,6 +15,13 @@ import {
   verbRunsWithoutPayload,
 } from "./callable.ts";
 import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
+import {
+  firstReadOption,
+  projectionInSectionRefusal,
+  READ_OPTION_NAMES,
+  type SpendsNextWord,
+  VERB_KEYWORDS,
+} from "./verb-section.ts";
 
 export interface ExecCommandSpec {
   callableKind: "handler" | "tool";
@@ -244,6 +251,22 @@ const SCALAR_INPUT_FLAGS = [
 ] as const;
 
 /**
+ * Which words of a single-value verb's section are values.
+ *
+ * Three of the four flags above take whatever word stands next: the value IS
+ * the payload, and a payload or a path beginning with dashes is still a
+ * payload or a path. `--json` alone declines one, because bare it reads stdin
+ * and a flag-shaped word after it is refused rather than taken.
+ *
+ * That is where this and {@link sectionValueSpend} part company, and the
+ * parsers are what part: `--json-file` refuses a flag-shaped path at the field
+ * door and accepts one here. An oracle that reported the same rule at both
+ * doors would print a corrected line one of the two parsers rejects.
+ */
+const SCALAR_VALUE_SPEND: SpendsNextWord = (flag, next) =>
+  flag !== "json" || !next.startsWith("--");
+
+/**
  * `--help` was given an argument by a verb that declares no `help` field.
  *
  * Written once and used at both arrival points, which parse their arguments
@@ -322,9 +345,36 @@ function undeclaredFlagError(
       }`);
 }
 
+/**
+ * Which words of this verb's section are values rather than flags.
+ *
+ * The same answer the loop below acts on, in the form the refusals need it:
+ * they are handed a section to re-render and have to divide it exactly as the
+ * verb's own parser did, or they move a word the verb had already spent.
+ */
+function sectionValueSpend(
+  descriptors: ReadonlyMap<string, FlagDescriptor>,
+): SpendsNextWord {
+  return (flag, next) => {
+    // Both refuse a flag-shaped word outright rather than taking it as the
+    // payload, so one never stands as their value.
+    if (flag === "json" || flag === "json-file") return !next.startsWith("--");
+    // A negation carries its own answer, and so does a boolean field.
+    if (!descriptors.has(flag) && flag.startsWith("no-")) {
+      return !descriptors.has(flag.slice(3));
+    }
+    const descriptor = descriptors.get(flag);
+    if (descriptor) return schemaType(descriptor.schema) !== "boolean";
+    // An undeclared name against a schema that judges nothing is taken as the
+    // string the caller typed, which is the word after it.
+    return true;
+  };
+}
+
 function parseObjectInput(
   schema: JSONSchema,
   args: string[],
+  sectionPrefix: string,
 ): ParsedInputMode {
   const properties = objectProperties(schema) ?? {};
   const descriptors = new Map<string, FlagDescriptor>();
@@ -407,6 +457,24 @@ function parseObjectInput(
       negated = descriptor !== undefined;
     }
     if (!descriptor) {
+      // A read option that names no field of this verb is a projection
+      // written inside the callable's section. It is answered before the
+      // schema is consulted at all, because the two vocabularies are
+      // independent: a schema that judges nothing would otherwise absorb the
+      // word as a field and run the handler with input the caller never
+      // meant, which is the silent reinterpretation the boundary exists to
+      // stop. A verb that DOES declare the field never reaches here.
+      if (READ_OPTION_NAMES.includes(rawFlag)) {
+        throw new Error(
+          projectionInSectionRefusal(
+            rawFlag,
+            sectionPrefix,
+            args,
+            new Set(descriptors.keys()),
+            sectionValueSpend(descriptors),
+          ),
+        );
+      }
       // The question is whether the SCHEMA judges its fields, not whether
       // this particular name is declared. Asking the second lets a declared
       // field typed in its schema spelling — `--fooBar` where the flag is
@@ -509,7 +577,32 @@ function parseObjectInput(
 function parseNonObjectInput(
   schema: JSONSchema,
   args: string[],
+  sectionPrefix: string,
 ): ParsedInputMode {
+  // The boundary the field door draws, on a verb with no fields for a read
+  // option to collide with. Such a verb declares nothing, so every read option
+  // written here as a FLAG is a projection inside the callable's section —
+  // answered with the position it belongs to and the line that puts it there,
+  // the same as at the field door. The vocabulary refusal below would
+  // otherwise name the four value flags, which is a true sentence about the
+  // wrong subject.
+  //
+  // Written as a value it is the payload, and this verb's payload is one whole
+  // word the caller chose: `--value --select` asks for the string "--select",
+  // which is not a projection and not this door's to touch.
+  const projection = firstReadOption(args, SCALAR_VALUE_SPEND);
+  if (projection !== undefined) {
+    throw new Error(
+      projectionInSectionRefusal(
+        projection,
+        sectionPrefix,
+        args,
+        new Set(),
+        SCALAR_VALUE_SPEND,
+      ),
+    );
+  }
+
   if (args.length === 0) {
     return {
       input: undefined,
@@ -778,13 +871,14 @@ export async function resolveExecInvocation(
   spec: ExecCommandSpec,
   rawArgs: string[],
   deps: ExecInputResolverDeps = {},
+  sectionPrefix?: string,
 ): Promise<ResolvedExecInvocation> {
   const implicit = await resolveImplicitPipedHandlerInput(spec, rawArgs, deps);
   if (implicit) {
     return implicit;
   }
 
-  const parsed = parseExecArgs(spec, rawArgs);
+  const parsed = parseExecArgs(spec, rawArgs, sectionPrefix);
   if (parsed.showHelp) {
     return { parsed };
   }
@@ -1089,7 +1183,16 @@ function outputSectionLines(spec: ExecCommandSpec): string[] {
   ];
 }
 
-function usageCommandPrefix(
+/**
+ * The command through the word that opened the callable's section, as both a
+ * usage line and a refusal about that section print it.
+ *
+ * Exported because the refusal is raised by the parser, which is handed this
+ * string rather than the path: two spellings of the same command on a help
+ * page and on the refusal that page's flags earn would be two answers to one
+ * question.
+ */
+export function usageCommandPrefix(
   mountedFilePath: string,
   invocationStyle: "cf" | "direct",
   commandPrefix?: string,
@@ -1177,6 +1280,7 @@ function handlerAllowsInvokeWithoutInputs(schema: JSONSchema): boolean {
 export function parseExecArgs(
   spec: ExecCommandSpec,
   rawArgs: string[],
+  sectionPrefix = "...",
 ): ParsedExecArgs {
   const args = [...rawArgs];
   let verb = spec.defaultVerb;
@@ -1211,7 +1315,7 @@ export function parseExecArgs(
     }
   }
 
-  if (args[0] === "invoke" || args[0] === "run") {
+  if (VERB_KEYWORDS.includes(args[0])) {
     if (args[0] !== spec.defaultVerb) {
       throw new Error(
         `Invalid verb ${
@@ -1262,9 +1366,13 @@ export function parseExecArgs(
   }
 
   const properties = objectProperties(spec.inputSchema);
+  // The keyword was shifted off `args`, so it rejoins the prefix: a refusal
+  // reprints the line the caller wrote, and a word dropped from it is a word
+  // they would put back and be refused again for.
+  const inputPrefix = explicitVerb ? `${sectionPrefix} ${verb}` : sectionPrefix;
   const parsedInput = properties
-    ? parseObjectInput(spec.inputSchema, args)
-    : parseNonObjectInput(spec.inputSchema, args);
+    ? parseObjectInput(spec.inputSchema, args, inputPrefix)
+    : parseNonObjectInput(spec.inputSchema, args, inputPrefix);
 
   return {
     verb,
@@ -1357,7 +1465,20 @@ function pieceFlagUsageLine(
   commandPrefix: string,
   spec: ExecCommandSpec,
 ): string {
-  return usageLine(commandPrefix, spec, "cf", `${commandPrefix} --`);
+  return usageLine(commandPrefix, spec, "cf", commandPrefix);
+}
+
+/**
+ * The line that teaches the marker, and the only one on this page about the
+ * read step rather than about the verb.
+ *
+ * It earns its place because this page is where a caller is looking at the
+ * verb's own flags — the moment the boundary between those and a projection
+ * has to be legible. `--select` stands for all three read options; the
+ * command's own `--help` enumerates them.
+ */
+function pieceReadOptionUsageLine(commandPrefix: string): string {
+  return `${commandPrefix} ... -- --select <fields>`;
 }
 
 function pieceUsageLines(
@@ -1370,20 +1491,21 @@ function pieceUsageLines(
     `  ${commandPrefix} --help --json`,
     ...(spec.callableKind === "handler" &&
         handlerAllowsInvokeWithoutInputs(spec.inputSchema)
-      ? [`  ${commandPrefix}`, `  ${commandPrefix} -- invoke`]
+      ? [`  ${commandPrefix}`, `  ${commandPrefix} invoke`]
       : []),
     `  ${pieceJsonUsageLine(commandPrefix)}`,
     `  ${pieceExplicitJsonUsageLine(commandPrefix)}`,
-    `  ${commandPrefix} -- --json-file <path>`,
+    `  ${commandPrefix} --json-file <path>`,
     `  ${pieceFlagUsageLine(commandPrefix, spec)}`,
-    ...(!properties ? [`  ${commandPrefix} -- --value-file <path>`] : []),
+    ...(!properties ? [`  ${commandPrefix} --value-file <path>`] : []),
+    `  ${pieceReadOptionUsageLine(commandPrefix)}`,
   ];
 }
 
 function pieceJsonInputLines(schema: JSONSchema): string[] {
   return [
     "  Pass inline JSON as one positional argument or after `--json`. Bare `--json` reads JSON from stdin.",
-    "  Use `-- --json-file <path>` for a file. Schema-derived flags also follow `--`.",
+    "  Use `--json-file <path>` for a file. Schema-derived flags are written in the same place, which the callable name opened.",
     ...schemaShapeString(schema).split("\n").map((line) => `  ${line}`),
   ];
 }
@@ -1408,7 +1530,7 @@ export function renderPieceCallHelp(
 
   if (specificFlags.length > 0) {
     lines.push("");
-    lines.push("Flags after `--`:");
+    lines.push("Flags:");
     lines.push(...specificFlags);
   }
 

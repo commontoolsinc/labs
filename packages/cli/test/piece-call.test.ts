@@ -940,6 +940,50 @@ describe("executePieceCallable", () => {
     expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
+  it("reads the words past the marker as a projection whatever the verb declares", async () => {
+    // `record` declares a `select` field and the read step owns `--select`,
+    // and the two vocabularies stay independent: past the marker the word is
+    // the read step's, so the line carries no verb input and the ordinary
+    // parse says so. Nothing here weighs the two readings against each other.
+    const declaring = () =>
+      createPieceCallableHarness({
+        callableKind: "handler",
+        cellKey: "record",
+        inputSchema: {
+          type: "object",
+          properties: { select: { type: "string" } },
+          required: ["select"],
+        },
+      });
+    const config = {
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/test-identity.pem",
+      piece: "fid1:piece-123",
+      space: "home",
+    };
+
+    const bare = declaring();
+    await expect(executePieceCallable(config, "record", [], {
+      loadPieces: () => Promise.resolve(bare.pieces),
+      loadPiece: () => Promise.resolve(bare.piece),
+      isStdinTerminal: () => true,
+    })).rejects.toThrow(/Handler requires input/);
+    expect(bare.tracker.handlerWrites).toStrictEqual([]);
+
+    // And a pipe is input, so the same line dispatches: the projection was
+    // never the verb's to read, and stdin fills the section it left empty.
+    const piped = declaring();
+    await executePieceCallable(config, "record", [], {
+      loadPieces: () => Promise.resolve(piped.pieces),
+      loadPiece: () => Promise.resolve(piped.piece),
+      isStdinTerminal: () => false,
+      readTextInput: () => Promise.resolve('{"select":"input"}'),
+    });
+    expect(piped.tracker.handlerWrites).toStrictEqual([
+      { cellProp: "result", path: ["record"], value: { select: "input" } },
+    ]);
+  });
+
   it("renders help under the canonical spelling when no mount names itself", async () => {
     const harness = createPieceCallableHarness({
       callableKind: "tool",
@@ -984,7 +1028,7 @@ describe("executePieceCallable", () => {
       "cf call ... search --help",
     );
     expect(result.helpText).toContain(
-      "cf call ... search -- [run] --query <string>",
+      "cf call ... search [run] --query <string>",
     );
     expect(result.helpText).toContain("JSON input:");
     expect(result.helpText).toContain(
@@ -994,12 +1038,12 @@ describe("executePieceCallable", () => {
       "cf call ... search --json [<json>]",
     );
     expect(result.helpText).toContain("query: string");
-    expect(result.helpText).toContain("Flags after `--`:");
+    expect(result.helpText).toContain("Flags:");
     expect(result.helpText).not.toContain(
       "Read the full input object from stdin.",
     );
     expect(result.helpText).not.toContain(
-      "cf call ... search -- [run] --help",
+      "cf call ... search [run] --help",
     );
     expect(result.helpText).not.toContain("cf exec");
   });
@@ -1925,27 +1969,27 @@ describe("forced-stream fallback dispatch", () => {
 describe("call stdin payloads", () => {
   it("identifies JSON output without treating delimited fields as selectors", () => {
     expect(
-      pieceCallInvocation(["--json", '{"query":"milk"}'], []),
+      pieceCallInvocation(["--json", '{"query":"milk"}']),
     ).toEqual({
       rawArgs: ["--json", '{"query":"milk"}'],
       jsonOutput: true,
     });
     expect(
-      pieceCallInvocation([], ["--json-file", "/tmp/input.json"]),
+      pieceCallInvocation(["--json-file", "/tmp/input.json"]),
     ).toEqual({
       rawArgs: ["--json-file", "/tmp/input.json"],
       jsonOutput: true,
     });
-    expect(pieceCallInvocation([], ["run", "--json", "{}"])).toEqual({
+    expect(pieceCallInvocation(["run", "--json", "{}"])).toEqual({
       rawArgs: ["run", "--json", "{}"],
       jsonOutput: true,
     });
-    expect(pieceCallInvocation([], ["--query", "--json"])).toEqual({
+    expect(pieceCallInvocation(["--query", "--json"])).toEqual({
       rawArgs: ["--query", "--json"],
       jsonOutput: false,
     });
     expect(
-      pieceCallInvocation([], ["invoke", "--query", "--json"]),
+      pieceCallInvocation(["invoke", "--query", "--json"]),
     ).toEqual({
       rawArgs: ["invoke", "--query", "--json"],
       jsonOutput: false,
@@ -2395,40 +2439,53 @@ describe("call stdin payloads", () => {
   });
 
   it('maps a bare "-" payload onto the --json-file stdin path', () => {
-    expect(pieceCallRawArgs(["-"], [])).toEqual(["--json-file", "-"]);
-  });
-
-  it("forwards explicit two-token stdin sentinels instead of rejecting them", () => {
-    // `cf call h --json-file -` (and the --value-file / --json variants)
-    // should read stdin, matching `cf exec` and the bare "-" form, rather than
-    // hitting the multi-argument rejection.
-    expect(pieceCallRawArgs(["--json-file", "-"], [])).toEqual([
+    expect(pieceCallRawArgs(["-"])).toEqual(["--json-file", "-"]);
+    // Behind the verb keyword the payload is still the one positional it is,
+    // and the keyword stays where the caller wrote it.
+    expect(pieceCallRawArgs(["invoke", "-"])).toEqual([
+      "invoke",
       "--json-file",
       "-",
     ]);
-    expect(pieceCallRawArgs(["--value-file", "-"], [])).toEqual([
+  });
+
+  it("forwards the callable's own flags to its parser untranslated", () => {
+    // The verb opened the section, so everything in it is the verb's
+    // vocabulary and reaches its parser as written — including the file paths
+    // and stdin sentinels that used to need a marker in front of them.
+    expect(pieceCallRawArgs(["--json-file", "-"])).toEqual([
+      "--json-file",
+      "-",
+    ]);
+    expect(pieceCallRawArgs(["--value-file", "-"])).toEqual([
       "--value-file",
       "-",
     ]);
-    expect(pieceCallRawArgs(["--json", "-"], [])).toEqual(["--json", "-"]);
-    // A file path (not "-") still requires "--"; it is not a stdin sentinel.
-    expect(() => pieceCallRawArgs(["--json-file", "/p.json"], [])).toThrow(
-      /single inline JSON argument or "--"/,
-    );
+    expect(pieceCallRawArgs(["--json", "-"])).toEqual(["--json", "-"]);
+    expect(pieceCallRawArgs(["--json-file", "/p.json"])).toEqual([
+      "--json-file",
+      "/p.json",
+    ]);
+    expect(pieceCallRawArgs(["--query", "milk", "--limit", "5"])).toEqual([
+      "--query",
+      "milk",
+      "--limit",
+      "5",
+    ]);
   });
 
-  it("rejects a payload token combined with post-`--` flags instead of dropping it", () => {
-    // `cf call h - -- --query milk` → tail=["-"], literalArgs=["--query",
-    // "milk"]. The "-" used to be silently ignored (post-`--` flags win); now
-    // the conflict is loud.
-    expect(() => pieceCallRawArgs(["-"], ["--query", "milk"])).toThrow(
-      /payload argument .* or .* schema-derived flags after/,
-    );
-    expect(() => pieceCallRawArgs(['{"x":1}'], ["--query", "milk"])).toThrow(
-      /not both/,
-    );
-    // The legit "flags after -- only" shape (tail empty) still passes through.
-    expect(pieceCallRawArgs([], ["--query", "milk"])).toEqual([
+  it("forwards a payload written beside flags rather than translating it", () => {
+    // `cf call ... search '{"x":1}' --query milk` names its input twice. The
+    // verb's own parser owns both spellings, so it is the door that refuses
+    // them together — this one does not translate the payload and so does not
+    // hide the second spelling from it.
+    expect(pieceCallRawArgs(['{"x":1}', "--query", "milk"])).toEqual([
+      '{"x":1}',
+      "--query",
+      "milk",
+    ]);
+    expect(pieceCallRawArgs(["-", "--query", "milk"])).toEqual([
+      "-",
       "--query",
       "milk",
     ]);
@@ -3924,7 +3981,7 @@ describe("call selection", () => {
         "call " +
           "--identity ./definitely-missing-piece-call-review.key " +
           "--api-url https://cf.dev --space common-knowledge " +
-          "--piece fid1:piece-123 --select a..b addTopic",
+          "--piece fid1:piece-123 addTopic -- --select a..b",
       );
       const errors = stripAnsi(stderr.join("\n"));
       expect(code).toBe(1);
@@ -4070,8 +4127,9 @@ describe("call over a live runtime", () => {
 
   it("returns the address of what a verb returned, in place of its contents", async () => {
     // The `$link` marker reaches a call through the same step, which is what
-    // makes `cf call --schema '{"properties":{"topic":{"$link":true}}}'`
-    // — the command's own example — an address a later call can use.
+    // makes `cf call ... addTopic <json> -- --schema
+    // '{"properties":{"topic":{"$link":true}}}'` — the command's own example
+    // — an address a later call can use.
     const tx = runtime.edit();
     const topic = runtime.getCell(space, "created-topic", undefined, tx);
     topic.set({ title: "Ship it", body: "the initial document" });

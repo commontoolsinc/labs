@@ -294,7 +294,7 @@ act "8 · A verb writes, and leaves the derived fields behind just the same"
 say "A verb is how a pattern changes its own state: the handler runs inside"
 say "the piece, and what it returns is computed there. Watch what it hands"
 say "back —"
-run cf call -s "$SPACE" --piece thermostat setTarget -- --celsius 10
+run cf call -s "$SPACE" --piece thermostat setTarget --celsius 10
 say "— and then read the piece. The target is the verb's; the derived fields"
 say "still answer to the target the last step saw. Settlement is the"
 say "handler's commit, not the recomputation that commit sets off, so a call"

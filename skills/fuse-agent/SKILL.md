@@ -30,7 +30,7 @@ ID=$(cf piece new packages/patterns/<path>.tsx \
   --space SPACE --root packages/patterns 2>/dev/null | head -1)
 
 # 3. Set title
-cf call --quiet --piece $ID --space SPACE setTitle -- --value "My Title"
+cf call --quiet --piece $ID --space SPACE setTitle --value "My Title"
 
 # 4. Step to materialize
 cf piece step --piece $ID --space SPACE

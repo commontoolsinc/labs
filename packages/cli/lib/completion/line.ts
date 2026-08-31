@@ -48,9 +48,11 @@ export type CompletionSlot =
     readonly index: number;
   }
   /**
-   * A word after `--`. `cf call` and `cf exec` hand these to the
-   * callable's own schema-derived parser, so the CLI's option tree does not
-   * describe them.
+   * A word after `--`, which on `cf call` and `cf exec` is the read step's
+   * section: `--select`, `--schema` and `--filter`, and `--help` reaching the
+   * callable. Item 6 of
+   * [CLI completion coverage](../../../../docs/plans/cli-completion-coverage.md)
+   * is what fills it, from the verb's declared result.
    */
   | { readonly kind: "passthrough"; readonly index: number }
   /** The value of a pre-parse global such as `--log-level`. */
@@ -354,9 +356,10 @@ export function resolveCompletionLine(
       continue;
     }
 
-    // Past a `stopEarly()` boundary every word belongs to the callable, so a
-    // flag-shaped one is data rather than an option. Reading it as an option
-    // would shift the positional index the argument slot depends on.
+    // Past a `stopEarly()` boundary the verb has opened its own section, so
+    // every word belongs to the callable and a flag-shaped one is data rather
+    // than an option. Reading it as an option would shift the positional index
+    // the argument slot depends on.
     if (positionals.length > 0 && stopsEarly(command)) {
       positionals.push(token);
       continue;

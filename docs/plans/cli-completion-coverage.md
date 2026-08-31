@@ -80,9 +80,9 @@ read before picking one up; this table is the roll-up.
 | 1 | Inline `--option=value` drops every live candidate | correctness | done |
 | 2 | Flags offered past a `stopEarly()` boundary | correctness | done |
 | 3 | Target resolution lags the reference grammar | correctness | done |
-| 4 | Verb flags do not complete | pattern vocabulary | shaper done, wiring after step 10 |
+| 4 | Verb flags do not complete | pattern vocabulary | shaper done, wiring open |
 | 5 | Result field paths for `get` and `wish` | pattern vocabulary | `get` done, `wish` declined |
-| 6 | Result field paths for `call` and `exec` | pattern vocabulary | needs step 10 |
+| 6 | Result field paths for `call` and `exec` | pattern vocabulary | open |
 | 7 | Slugs never complete | pattern vocabulary | done |
 | 8 | `--space` has no source a caller recognizes | first link | partly settled |
 | 9 | A verb's annotation is its kind, not its prose | comprehension | done |
@@ -97,11 +97,10 @@ read before picking one up; this table is the roll-up.
 | 18 | A live-provider test seam | mechanism | done |
 | 19 | A gate that fails when a new slot has no decision | mechanism | done |
 
-**What can be picked up today.** Nothing on this list. What is left is held or
-settled rather than open: item 4's wiring waits on step 10 of
-[CLI surface shape](cli-surface-shape.md) and item 6 waits on the same step;
-items 8 and 11 hold decisions; and item 5's `wish` half is declined, because
-resolving a wish writes.
+**What can be picked up today.** Items 4 and 6. Step 10 of
+[CLI surface shape](cli-surface-shape.md) has landed, so the position each of
+them fills is settled and neither is waiting on anything. Items 8 and 11 hold
+decisions; item 5's `wish` half is declined, because resolving a wish writes.
 
 One defect this list does not enumerate is open and unranked: the cell-path slot
 offers a piece's callables, which `cf get` refuses and redirects to `cf call`.
@@ -110,15 +109,14 @@ callable from a value at a path needs the verbs listing, which that provider
 does not fetch — so it is a round trip rather than a filter, and that is the
 decision it waits on.
 
-Item 4's candidates are built and its wiring waits: step 10 decides whether a
-verb's fields are written before the `--` marker or after it, and the position
-offers nothing until then. That is the honest state for one whose vocabulary the
-command cannot yet name.
+Item 4's candidates are built and its wiring is what is left: the verb opens
+the callable's section, so its fields fill the `tail` argument directly after
+the verb name, and `liveCandidates` does not dispatch on that slot yet.
 
-Item 6 is the one to leave alone. Under the current grammar it needs the whole
-line read for context, since a projection precedes the verb it shapes; after
-step 10 the verb is already before the cursor and it needs nothing. Building it
-now means building the machinery that step 10 makes unnecessary.
+Item 6 is the same shape one boundary later. A projection now follows the verb
+it shapes rather than preceding it, so the verb is already before the cursor
+and the slot needs no whole-line read to find it — which is the machinery this
+item was waiting to be spared.
 
 Items 8 and 11 hold open decisions and are not work yet. Item 5's `wish` half is
 closed rather than open: resolving a wish writes, so the slot cannot be
@@ -217,12 +215,12 @@ field, so past the callable name on `cf call` and past the mounted file on
 positional index. That keeps the property where the command declares it: a
 third command becoming `stopEarly()` needs no edit in the completion layer.
 
-This holds under either grammar. A `cf` flag past the verb is refused today, and
-after step 10 of [Naming the target](cli-surface-shape.md#naming-the-target) the
-position belongs to the callable — so declining to offer one there is correct
-now and stays correct. It leaves the position offering nothing until item 4
-fills it, which is what a position whose vocabulary the command cannot yet name
-should offer.
+The position belongs to the callable: the verb opens its section, and a `cf`
+flag written there is refused with the section it belongs to named — see
+[Naming the target](cli-surface-shape.md#naming-the-target). So declining to
+offer one there is correct. It leaves the position offering nothing until item
+4 fills it, which is what a position whose vocabulary the command cannot yet
+name should offer.
 
 ### 3. Target resolution lags the reference grammar
 
@@ -260,16 +258,15 @@ A verb's own fields are the pattern author's vocabulary rather than the CLI's,
 so this is the position where a caller has least to go on and completion has
 most to give. Nothing is offered there.
 
-Where "there" is depends on step 10. Today the fields are written after `--`;
-afterwards the verb opens the callable's section and they are written directly
-after the verb, with `--` closing that section and opening the read step's:
+Where "there" is, step 10 settled: the verb opens the callable's section and
+its fields are written directly after the verb, with `--` closing that section
+and opening the read step's.
 
 ```text
-cf call --piece <piece> addItem --ti<TAB>        # after step 10
-cf call --piece <piece> addItem -- --ti<TAB>     # before it
+cf call --piece <piece> addItem --ti<TAB>
 ```
 
-**The candidates and their slot are separable, and only the slot waits.**
+**The candidates and their slot are separable, and only the wiring is left.**
 `shapeVerbFlagCandidates` in `lib/completion/verb-flags.ts` turns a listing
 row's `inputSchema` into the flags the parser accepts: one per declared field,
 kebab-cased, both spellings of a boolean, the value flags of a non-object input,
@@ -285,10 +282,9 @@ The module sits beside the providers rather than inside `providers.ts` because
 reading a declared input resolves `callable.ts`, which costs about a third of a
 whole static completion — and `providers.ts` is resolved on every Tab.
 
-The wiring is what waits. `liveCandidates` dispatches on `option-value` and
-`argument` slots only, so neither position reaches a provider, and routing it to
-the current position would teach the spelling step 10 retires while the
-retirement is being taught.
+The wiring is what is left. `liveCandidates` dispatches on `option-value` and
+`argument` slots only, so the position — the `tail` argument, past the callable
+name — reaches no provider.
 
 The slot past the marker is not this one. It belongs to the read options, and
 completing it from the verb's declared result is item 6.
@@ -336,41 +332,30 @@ which is item 6's subject and not this one.
 The same flags on a call shape the verb's result, whose vocabulary is the verb's
 `outputSchema` — carried by the same listing item 4 reads.
 
-This one is not really a completion item, and the surface work dissolves most
-of it. `stopEarly()` requires a projection before the callable name today, and a
-caller who writes it after gets one of three outcomes with no rule connecting
-them:
+This one is not really a completion item, because the surface settles most of
+it. [Naming the target](cli-surface-shape.md#naming-the-target) puts a
+projection past the `--` that closes the callable's section, and therefore
+always after the verb it shapes:
 
 ```text
-call <verb> --select item.title '{...}'   Use a single inline JSON argument or
-                                          "--" before schema-derived flags.
-call <verb> -- --title x --select y       "--select" at <event> is not a field
-                                          this verb declares.
-call <verb> --json '{...}'                works
+cf call --piece <piece> addItem --title x -- --select it<TAB>
 ```
 
-The first message names a rule the caller did not break: they passed a single
-inline JSON argument, and `--select` is not a schema-derived flag. It is what
-`--invocation` and `--show-links` say too. The second is a good message about
-the wrong subject. The third succeeds, because `--json` is a token the
-callable's parser accepts — so the surface is not "a `cf` flag never works after
-the verb", it is "some do", which is not a rule anyone can infer from using it.
+The verb is on the line ahead of the cursor, so the candidates come from the
+`outputSchema` the listing in item 4 already carries, read from the words before
+the cursor like every other slot. The slot itself is the one `--` opens, which
+`resolveCompletionLine` reports as `passthrough` and `liveCandidates` does not
+dispatch on.
 
-[Naming the target](cli-surface-shape.md#naming-the-target) settles this: the
-verb opens the callable's section and `--` closes it, so a projection is written
-after the marker and therefore always after the verb. That ordering is what this
-item was waiting on, and it arrives with the verb already on the line ahead of
-the cursor — so the candidates come from the `outputSchema` the listing in item
-4 already carries, read from the words before the cursor like every other slot.
-
-What survives is one improvement completion wants on its own account.
-`resolveCompletionLine` derives two different things from `words.slice(1,
-cursor)` — which slot the cursor is in, and which piece and verb the line names
-— and only the first needs the prefix. Resolving the slot from the prefix while
-gathering context from the whole line is what makes mid-line editing complete
-against the position being edited rather than against the end of the line. It is
-no longer load-bearing for this item, and it is still the difference between a
-line that completes as it is typed and one that completes however it is edited.
+What is left beyond that wiring is one improvement completion wants on its own
+account. `resolveCompletionLine` derives two different things from
+`words.slice(1, cursor)` — which slot the cursor is in, and which piece and verb
+the line names — and only the first needs the prefix. Resolving the slot from
+the prefix while gathering context from the whole line is what makes mid-line
+editing complete against the position being edited rather than against the end
+of the line. It is not load-bearing for this item, and it is still the
+difference between a line that completes as it is typed and one that completes
+however it is edited.
 
 ### 7. Slugs never complete
 

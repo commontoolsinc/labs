@@ -143,7 +143,7 @@ $CF piece describe --piece board $ARGS --json 2>/dev/null |
   bad "describe --json is missing purpose, state, or the verb rows"
 
 step "3. Ask what a verb wants — flags and prose, both derived"
-HELP=$($CF call --piece board $ARGS addItem -- --help 2>/dev/null)
+HELP=$($CF call --piece board $ARGS addItem --help 2>/dev/null)
 echo "$HELP" | grep -q -- "--title" &&
   ok "the flag is derived from the event schema" ||
   bad "no --title flag in the generated help"

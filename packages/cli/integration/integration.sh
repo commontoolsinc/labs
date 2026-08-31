@@ -589,7 +589,7 @@ run_piece_call() {
     '{"query":"json-input","help":"","source":"bound-source","summary":"bound-source:json-input:"}' \
     "Explicit inline --json should pass the complete tool input"
 
-  cf call $SPACE_ARGS --piece $CALLABLE_PIECE_ID recordMessage -- --message "piece-flags"
+  cf call $SPACE_ARGS --piece $CALLABLE_PIECE_ID recordMessage --message "piece-flags"
   RESULT=$(cf get $SPACE_ARGS --piece $CALLABLE_PIECE_ID lastMessage)
   if [ "$RESULT" != '"piece-flags"' ]; then
     error "Flag-based handler call should update lastMessage, got: $RESULT"
@@ -602,13 +602,13 @@ run_piece_call() {
     error "Bare no-arg handler call should increment legacyCount, got: $RESULT"
   fi
 
-  cf call $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyWrite -- invoke
+  cf call $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyWrite invoke
   RESULT=$(cf get $SPACE_ARGS --piece $CALLABLE_PIECE_ID legacyCount)
   if [ "$RESULT" != "$((LEGACY_COUNT_BEFORE + 2))" ]; then
     error "Explicit invoke should still call an empty-object handler, got legacyCount=$RESULT"
   fi
 
-  TOOL_RESULT=$(cf call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search -- --query tea)
+  TOOL_RESULT=$(cf call $SPACE_ARGS --piece $CALLABLE_PIECE_ID search --query tea)
   assert_json_eq \
     "$TOOL_RESULT" \
     '{"query":"tea","help":"","source":"bound-source","summary":"bound-source:tea:"}' \
@@ -636,7 +636,7 @@ run_piece_call_retry() {
   set +e
   cf call --api-url="http://127.0.0.1:1" --identity="$IDENTITY" --space="$SPACE" \
     --piece "$RETRY_PIECE_ID" --invocation "never-dispatched" \
-    recordMessage -- --message "pre-dispatch" > /dev/null 2>&1
+    recordMessage --message "pre-dispatch" > /dev/null 2>&1
   PRE_DISPATCH_STATUS=$?
   set -e
   if [ "$PRE_DISPATCH_STATUS" -eq 0 ]; then
@@ -646,7 +646,7 @@ run_piece_call_retry() {
     "A pre-dispatch failure must not record a message"
 
   cf call $SPACE_ARGS --piece "$RETRY_PIECE_ID" --invocation "$(new_invocation_id)" \
-    recordMessage -- --message "pre-dispatch" > /dev/null
+    recordMessage --message "pre-dispatch" > /dev/null
   assert_message_count "$RETRY_PIECE_ID" 1 \
     "A fresh-id retry after a pre-dispatch failure should record exactly one message"
 
@@ -662,7 +662,7 @@ run_piece_call_retry() {
   mkfifo "$ANNOUNCE_FIFO"
   set +e
   cf call $SPACE_ARGS --piece "$RETRY_PIECE_2" --invocation "$INVOCATION_2" \
-    recordMessage -- --message "dispatched-then-killed" > /dev/null 2> "$ANNOUNCE_FIFO" &
+    recordMessage --message "dispatched-then-killed" > /dev/null 2> "$ANNOUNCE_FIFO" &
   CALL_PID=$!
   set -e
   # Blocking read on the pipe — no poll, no deadline. If the process exits
@@ -691,7 +691,7 @@ run_piece_call_retry() {
   COMMITTED_BEFORE_KILL=$(message_count "$RETRY_PIECE_2")
   set +e
   RETRY_2=$(cf call $SPACE_ARGS --piece "$RETRY_PIECE_2" --invocation "$INVOCATION_2" \
-    recordMessage -- --message "dispatched-then-killed" 2>/dev/null)
+    recordMessage --message "dispatched-then-killed" 2>/dev/null)
   RETRY_2_STATUS=$?
   set -e
   if [ "$RETRY_2_STATUS" -ne 0 ]; then
@@ -715,11 +715,11 @@ run_piece_call_retry() {
   RETRY_PIECE_3=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
   INVOCATION_3=$(new_invocation_id)
   cf call $SPACE_ARGS --piece "$RETRY_PIECE_3" --invocation "$INVOCATION_3" \
-    recordMessage -- --message "lost-response" > /dev/null
+    recordMessage --message "lost-response" > /dev/null
 
   set +e
   REPLAY=$(cf call $SPACE_ARGS --piece "$RETRY_PIECE_3" --invocation "$INVOCATION_3" \
-    recordMessage -- --message "lost-response" 2>/dev/null)
+    recordMessage --message "lost-response" 2>/dev/null)
   REPLAY_STATUS=$?
   set -e
   if [ "$REPLAY_STATUS" -ne 0 ]; then
@@ -739,9 +739,9 @@ run_piece_call_retry() {
   RETRY_PIECE_4=$(cf piece new --main-export $CUSTOM_EXPORT $SPACE_ARGS "$SCRIPT_DIR/pattern/fuse-exec.tsx")
   INVOCATION_4=$(new_invocation_id)
   cf call $SPACE_ARGS --piece "$RETRY_PIECE_4" --invocation "$INVOCATION_4" \
-    recordMessage -- --message "original-payload" > /dev/null
+    recordMessage --message "original-payload" > /dev/null
   cf call $SPACE_ARGS --piece "$RETRY_PIECE_4" --invocation "$INVOCATION_4" \
-    recordMessage -- --message "second-payload" > /dev/null
+    recordMessage --message "second-payload" > /dev/null
   assert_message_count "$RETRY_PIECE_4" 1 \
     "Reusing a settled id with a different payload should leave exactly one message"
   LAST=$(cf get $SPACE_ARGS --piece "$RETRY_PIECE_4" lastMessage)
@@ -758,7 +758,7 @@ run_piece_call_retry() {
   INVOCATION_5=$(new_invocation_id)
   set +e
   BAD_PAYLOAD=$(cf call $SPACE_ARGS --piece "$RETRY_PIECE_5" --invocation "$INVOCATION_5" \
-    recordMessage -- --json '{"mesage":"typo"}' 2>&1)
+    recordMessage --json '{"mesage":"typo"}' 2>&1)
   BAD_STATUS=$?
   set -e
   if [ "$BAD_STATUS" -eq 0 ]; then
@@ -772,7 +772,7 @@ run_piece_call_retry() {
     "A refused payload must not record a message"
 
   cf call $SPACE_ARGS --piece "$RETRY_PIECE_5" --invocation "$INVOCATION_5" \
-    recordMessage -- --message "corrected" > /dev/null
+    recordMessage --message "corrected" > /dev/null
   assert_message_count "$RETRY_PIECE_5" 1 \
     "A refused call never spent its id, so the corrected retry should record one"
   LAST_5=$(cf get $SPACE_ARGS --piece "$RETRY_PIECE_5" lastMessage)
@@ -795,7 +795,7 @@ run_piece_call_retry() {
   INVOCATION_6=$(new_invocation_id)
   set +e
   ABSENT_OUT=$(cf call $SPACE_ARGS --piece "$RETRY_PIECE_6" --invocation "$INVOCATION_6" \
-    recordNote -- invoke 2>&1)
+    recordNote invoke 2>&1)
   ABSENT_STATUS=$?
   set -e
   if [ "$ABSENT_STATUS" -eq 0 ]; then
@@ -809,7 +809,7 @@ run_piece_call_retry() {
     "A refused absent-payload call must not record a message"
 
   cf call $SPACE_ARGS --piece "$RETRY_PIECE_6" --invocation "$INVOCATION_6" \
-    recordNote -- --json '{"note":"corrected"}' > /dev/null
+    recordNote --json '{"note":"corrected"}' > /dev/null
   assert_message_count "$RETRY_PIECE_6" 1 \
     "The refused call never spent its id, so the corrected retry should record one"
   LAST_6=$(cf get $SPACE_ARGS --piece "$RETRY_PIECE_6" lastMessage)
@@ -859,7 +859,7 @@ run_three_topic_fixture() {
   INV_UMBRELLA=$(new_invocation_id)
   UMBRELLA_PAYLOAD='{"title":"Umbrella","body":"Tracks the D4 fixture family.","agentName":"fable-d4"}'
   UMBRELLA_JSON=$(cf call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" \
-    --invocation "$INV_UMBRELLA" createTopic -- --json "$UMBRELLA_PAYLOAD" 2>/dev/null)
+    --invocation "$INV_UMBRELLA" createTopic --json "$UMBRELLA_PAYLOAD" 2>/dev/null)
   echo "$UMBRELLA_JSON" | jq -e --arg id "$INV_UMBRELLA" \
     '.invocation == $id and .status == "settled"' > /dev/null ||
     error "The umbrella create should settle under the caller's id, got: $UMBRELLA_JSON"
@@ -882,7 +882,7 @@ run_three_topic_fixture() {
     '{title: "Child A", body: ("Refines " + $u + "."), agentName: "fable-d4",
       references: [$u]}')
   CHILD_A_JSON=$(cf call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" \
-    --invocation "$INV_CHILD_A" createTopic -- --json "$CHILD_A_PAYLOAD" 2>/dev/null)
+    --invocation "$INV_CHILD_A" createTopic --json "$CHILD_A_PAYLOAD" 2>/dev/null)
   CHILD_A_ID=$(echo "$CHILD_A_JSON" | jq -re '.result.topic.id') ||
     error "Child A's Invocation JSON should carry its declared result, got: $CHILD_A_JSON"
   CHILD_A_PATH=$(echo "$CHILD_A_JSON" | jq -re '.result.topic.path')
@@ -909,7 +909,7 @@ run_three_topic_fixture() {
   CF_CLI_INTEGRATION_TIMINGS_FILE="$D4_TIMINGS.killed" \
   CF_TEST_ANNOUNCE_INVOCATION_PHASES=1 \
     cf call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" --invocation "$INV_CHILD_B" \
-    createTopic -- --json "$CHILD_B_PAYLOAD" > /dev/null 2> "$ANNOUNCE_FIFO" &
+    createTopic --json "$CHILD_B_PAYLOAD" > /dev/null 2> "$ANNOUNCE_FIFO" &
   CALL_PID=$!
   set -e
   COMMIT_ANNOUNCED=""
@@ -937,7 +937,7 @@ run_three_topic_fixture() {
 
   set +e
   CHILD_B_JSON=$(cf call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" \
-    --invocation "$INV_CHILD_B" createTopic -- --json "$CHILD_B_PAYLOAD" 2>/dev/null)
+    --invocation "$INV_CHILD_B" createTopic --json "$CHILD_B_PAYLOAD" 2>/dev/null)
   CHILD_B_STATUS=$?
   set -e
   if [ "$CHILD_B_STATUS" -ne 0 ]; then
@@ -960,7 +960,7 @@ run_three_topic_fixture() {
   IMPOSTER_PAYLOAD='{"title":"Child B imposter","body":"Must not exist.","agentName":"impostor"}'
   set +e
   REPLAY_JSON=$(cf call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" \
-    --invocation "$INV_CHILD_B" createTopic -- --json "$IMPOSTER_PAYLOAD" 2>/dev/null)
+    --invocation "$INV_CHILD_B" createTopic --json "$IMPOSTER_PAYLOAD" 2>/dev/null)
   REPLAY_STATUS=$?
   set -e
   if [ "$REPLAY_STATUS" -ne 0 ]; then
@@ -979,7 +979,7 @@ run_three_topic_fixture() {
     '{id: $u, body: ("Umbrella over " + $a + " and " + $b + "."),
       agentName: "fable-d4-editor", references: [$a, $b]}')
   REVISE_JSON=$(cf call $SPACE_ARGS --piece "$TOPIC_PIECE_ID" \
-    --invocation "$INV_REVISE" reviseBody -- --json "$REVISE_PAYLOAD" 2>/dev/null)
+    --invocation "$INV_REVISE" reviseBody --json "$REVISE_PAYLOAD" 2>/dev/null)
   echo "$REVISE_JSON" | jq -e --arg id "$UMBRELLA_ID" --arg path "$UMBRELLA_PATH" \
     '.status == "settled" and .result.topic.id == $id and .result.topic.path == $path' > /dev/null ||
     error "reviseBody should return the umbrella's own reference, got: $REVISE_JSON"

@@ -281,7 +281,7 @@ piece, with capabilities a caller does not have, and what it returns was
 computed there. The result of this call is right.
 
 ```bash
-cf call -s demo --piece thermostat setTarget -- --celsius 10
+cf call -s demo --piece thermostat setTarget --celsius 10
 cf get -s demo --piece thermostat --select target,targetFahrenheit,belowTarget
 ```
 

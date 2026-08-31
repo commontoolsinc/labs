@@ -15,6 +15,12 @@ import {
   parseCellSelectionOptions,
 } from "../lib/cell-selection.ts";
 import type { ExecutedMountedCallableFile } from "../lib/exec.ts";
+import {
+  parseReadSection,
+  readSectionAsksVerbHelp,
+  refuseProjectionBeforeSection,
+  sectionWithVerbHelp,
+} from "../lib/verb-section.ts";
 
 /**
  * `cf exec` runs no verbose in-flight span, so the failure exit it shares with
@@ -24,8 +30,11 @@ import type { ExecutedMountedCallableFile } from "../lib/exec.ts";
  */
 const NO_SPAN = { finish: () => {} };
 
-/** The `cf exec` flags cliffy parses before the mounted file. Everything
- * after it belongs to the callable's own schema-derived interface. */
+/** The read options `cf exec` shapes a result with. They are declared on the
+ * command so its page names them, and read from the words past the `--` that
+ * closes the callable's section — the mounted file opens that section, and
+ * everything between the two belongs to the callable's own schema-derived
+ * interface. */
 export interface ExecCommandOptions {
   filter?: string;
   select?: string;
@@ -168,33 +177,66 @@ export const exec = new Command()
   )
   .example(
     cliText(
-      "cf exec --select id,title /tmp/cf/home/pieces/notes/result/search.tool --query milk",
+      "cf exec /tmp/cf/home/pieces/notes/result/search.tool --query milk -- --select id,title",
     ),
-    "Project the result to selected fields (read options precede the file).",
+    'Project the result to selected fields (read options follow the "--" ' +
+      "that closes the callable's section).",
   )
+  // The three read options are declared so this page names them and a caller
+  // who writes one before the mounted file meets a refusal that can say where
+  // it belongs. They are READ from the words past `--`, which is the one
+  // position the grammar accepts them in; see lib/verb-section.ts.
   .option(
     "--filter <predicate:string>",
-    "Filter an array with a jq-inspired predicate (before the mounted file)",
+    'Filter an array with a jq-inspired predicate (past the "--" that ' +
+      "closes the callable's section)",
   )
   .option(
     "--select <fields:string>",
-    "Project output to comma-separated field paths (before the mounted " +
-      "file); a trailing @ asks for a position's address",
+    'Project output to comma-separated field paths (past the "--" that ' +
+      "closes the callable's section); a trailing @ asks for a position's " +
+      "address",
   )
   .option(
     "--schema <schema:string>",
     "Project output with an inline JSON Schema, @file, or the --select " +
-      "field list (before the mounted file)",
+      'field list (past the "--" that closes the callable\'s section)',
     // Both flags carry the one projection, so a command naming both has not
     // said which shape it wants. Refuse before the call rather than pick.
     { conflicts: ["select"] },
   )
   .stopEarly()
   .arguments("<mountedFile:string> [tail...:string]")
-  .action(async (options: ExecCommandOptions, mountedFile, ...tail) => {
+  .action(async function (
+    options: ExecCommandOptions,
+    mountedFile: string,
+    ...tail: string[]
+  ) {
+    // The grammar is a fact about the argv alone, settled before a mount is
+    // looked up or an invocation minted: a projection written before the
+    // mounted file names positions in a result nothing has produced.
+    refuseProjectionBeforeSection(
+      "exec",
+      "the mounted file",
+      this.getRawArgs(),
+      options,
+    );
+    const literalArgs = this.getLiteralArgs();
+    // `-- --help` reaches the callable's own page rather than this command's,
+    // so those words rejoin the section rather than being read here.
+    const asksVerbHelp = readSectionAsksVerbHelp(literalArgs);
+    const readSection = asksVerbHelp ? {} : await parseReadSection(
+      "exec",
+      this.getRawArgs(),
+      literalArgs,
+    );
+    // Into the section, at the position the callable's parser reads `--help`.
+    const sectionArgs = asksVerbHelp
+      ? sectionWithVerbHelp(tail, literalArgs)
+      : tail;
     // Outside the failure wrapper below, and refusing before a mount is even
     // looked up: see {@link parseExecSelection}.
-    const selection = await parseExecSelection(options);
+    const selection = await parseExecSelection(readSection);
 
     // Minted here rather than inside the dispatch so this frame can both
     // announce it and name it again if the call fails. `cf exec` accepts no
@@ -212,7 +254,7 @@ export const exec = new Command()
     try {
       const result = await executeMountedCallableFile(
         mountedFile,
-        tail,
+        sectionArgs,
         { onPhase },
         {
           invocation,

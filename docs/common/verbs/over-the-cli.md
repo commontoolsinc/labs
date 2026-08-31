@@ -202,27 +202,41 @@ receipt to name.
 A verb decides what it returns; the caller decides how much of it to look at.
 `--filter`, `--select`, and `--schema` — the same three flags `cf get`,
 `cf wish` and `cf exec` take, with the same grammar — shape the `result` before
-it reaches stdout, and go before the callable name:
+it reaches stdout, and come after the thing they shape.
 
-Where they go depends on whether a callable's own vocabulary stands between the
-command and them. `cf get` and `cf wish` have none, so the three flags sit on
-the line like any others. `cf call` and `cf exec` do, so the flags precede the
-name that opens it — the callable name on `call`, the mounted file on `exec` —
-and everything after that name belongs to the callable.
+One rule covers all four commands, and it turns on whether a callable's own
+vocabulary stands between the command and the read options. `cf get` and
+`cf wish` have none, so nothing separates their read options from the rest of
+the line. `cf call` and `cf exec` have one, so a marker closes it:
 
-The two spell that boundary differently today. `cf exec` takes the callable's
-arguments straight after the mounted file with nothing between them, while
-`cf call` wants `--` before the same words in the same position. A caller who
-learns one has not learned the other, and closing that gap is what step 10 of
-[CLI surface shape](../../plans/cli-surface-shape.md) is for.
+```text
+cf get  <addr> [path]           --select …
+cf wish <target>                --select …
+cf call <target> <verb> <input> -- --select …
+cf exec <mountedFile> <input>   -- --select …
+```
+
+The name that opens the callable's section — the verb on `call`, the mounted
+file on `exec` — needs no marker of its own, the same boundary `docker run`
+draws at an image name and `ssh` at a host. `--` is spent on the boundary no
+positional draws: where the callable's section ends and the read step's begins.
+
+A projection written before the verb is refused rather than accepted quietly,
+because it would name positions in a result nothing has identified yet; so is
+one written inside the callable's section, where the verb's own fields are
+read and either vocabulary may grow a name the other already has. Each refusal
+names the section the flag belongs to and prints the line that works.
+`--help` is the one word that crosses the marker on purpose: written past it,
+it still reaches the callable and prints that verb's page, since a caller
+wanting the command's own page writes it with no verb at all.
 
 Where a command has no callable section at all, `--` closes nothing: it is
 refused on `cf get`, `cf set` and `cf wish` rather than silently setting aside
 words that nothing reads.
 
 ```bash
-cf call --piece <topic> --select comment.writtenAt addComment \
-  '{"body":"first","agentName":"Sol"}'
+cf call --piece <topic> addComment '{"body":"first","agentName":"Sol"}' \
+  -- --select comment.writtenAt
 ```
 
 ```json
@@ -251,16 +265,16 @@ every name is read as written. A JSON `--schema` states a shape of its own and
 is held to none of this.
 
 **A verb reached through a filesystem mount is the same call.** `cf exec` takes
-the three flags too, written before the mounted file, since everything after it
-belongs to the callable's own schema-derived interface. It settles the handling
-under an invocation of its own and prints the same Invocation JSON this section
-shows, so a mounted handler's outcome has an address and a shape rather than
-being unreported:
+the three flags too, past the marker that closes the section the mounted file
+opened — everything between the two belongs to the callable's own
+schema-derived interface. It settles the handling under an invocation of its
+own and prints the same Invocation JSON this section shows, so a mounted
+handler's outcome has an address and a shape rather than being unreported:
 
 ```bash
-cf exec --select comment.writtenAt \
-  /tmp/cf/<space>/pieces/<piece>/result/addComment.handler \
-  --body first --agent-name Sol
+cf exec /tmp/cf/<space>/pieces/<piece>/result/addComment.handler \
+  --body first --agent-name Sol \
+  -- --select comment.writtenAt
 ```
 
 A tool prints its result on stdout as it always did, with the result cell's
@@ -290,7 +304,7 @@ the circle, so that position renders its address and the rest reads as it
 always did:
 
 ```bash
-cf call --piece "$EPIC" addChild -- --title "Session cookie handling"
+cf call --piece "$EPIC" addChild --title "Session cookie handling"
 ```
 
 ```json
@@ -324,7 +338,7 @@ declaration leaves open — an index signature beside its named members — stil
 reads every key stored at it, because those keys are declared too.
 
 ```bash
-cf call --piece "$BOARD" addTopic -- --title "Session cookie handling" \
+cf call --piece "$BOARD" addTopic --title "Session cookie handling" \
   --agent-name b7
 ```
 

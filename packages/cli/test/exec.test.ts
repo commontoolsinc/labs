@@ -36,6 +36,20 @@ function makeSpec(
   };
 }
 
+/** The message `parseExecArgs` refused `args` with, or "" where it did not. */
+function refusalFrom(
+  spec: ExecCommandSpec,
+  args: string[],
+  sectionPrefix?: string,
+): string {
+  try {
+    parseExecArgs(spec, args, sectionPrefix);
+  } catch (error) {
+    return (error as Error).message;
+  }
+  return "";
+}
+
 describe("parseExecArgs", () => {
   it("defaults handlers to invoke and tools to run when flags are provided", () => {
     const handler = parseExecArgs(
@@ -440,6 +454,240 @@ describe("parseExecArgs", () => {
     const bare = makeSpec("handler", { type: "object", properties: {} });
     expect(() => parseExecArgs(bare, ["invoke", "--titel", "x"]))
       .toThrow(/<event> declares no fields at all/);
+  });
+
+  it("refuses a read option inside the callable's section, and says where it goes", () => {
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { title: { type: "string" } },
+      required: ["title"],
+    });
+
+    // The projection is not a near miss for `--title`; it is a `cf` flag in
+    // the wrong section, and the answer is the section it belongs to.
+    const message = (() => {
+      try {
+        parseExecArgs(
+          spec,
+          ["--select", "topic.title", "--title", "Ship it"],
+          "cf call ... addTopic",
+        );
+      } catch (error) {
+        return (error as Error).message;
+      }
+      return "";
+    })();
+    expect(message).toContain('"--select" is a `cf` read option');
+    expect(message).toContain(
+      "written:  cf call ... addTopic --select topic.title --title 'Ship it'",
+    );
+    expect(message).toContain(
+      "write:    cf call ... addTopic --title 'Ship it' -- --select topic.title",
+    );
+  });
+
+  it("refuses all three read options in the section, and none the verb declares", () => {
+    const spec = makeSpec("tool", {
+      type: "object",
+      properties: { query: { type: "string" } },
+    });
+    for (const flag of ["--select", "--schema", "--filter"]) {
+      expect(() => parseExecArgs(spec, [flag, "x"]), flag)
+        .toThrow(/is a `cf` read option/);
+    }
+
+    // Nothing reserves a field name. A verb that declares `select` owns the
+    // word inside its own section, and the refusal never sees it.
+    const declaring = makeSpec("tool", {
+      type: "object",
+      properties: { select: { type: "string" } },
+    });
+    expect(parseExecArgs(declaring, ["--select", "manual"]).input)
+      .toEqual({ select: "manual" });
+  });
+
+  it("leaves a declared read-option name where its owner reads it", () => {
+    // `filter` is this verb's field and `select` is nobody's. The corrected
+    // line moves the one that names no field and leaves the other in the
+    // section — moving both would hand the verb's own input to the read step.
+    const spec = makeSpec("tool", {
+      type: "object",
+      properties: { filter: { type: "string" } },
+    });
+    const message = (() => {
+      try {
+        parseExecArgs(
+          spec,
+          ["--filter", "mine", "--select", "title"],
+          "cf call ... findItems",
+        );
+      } catch (error) {
+        return (error as Error).message;
+      }
+      return "";
+    })();
+    expect(message).toContain(
+      "write:    cf call ... findItems --filter mine -- --select title",
+    );
+  });
+
+  it("refuses a read option in the section of a verb whose schema judges nothing", () => {
+    // An open schema accepts any field, so this flag would otherwise be
+    // absorbed as one and the handler would run with input the caller never
+    // meant — a projection asked for, an unprojected value returned, exit
+    // zero. That is the silent case the boundary exists for, so the answer
+    // comes before the schema is consulted at all.
+    const open = makeSpec("handler", { type: "object" });
+    expect(() => parseExecArgs(open, ["--select", "title"]))
+      .toThrow(/is a `cf` read option/);
+    expect(parseExecArgs(open, ["--anything", "else"]).input)
+      .toEqual({ anything: "else" });
+  });
+
+  it("refuses a read option in the section of a verb taking a single value", () => {
+    // A verb with no fields reaches a different parser, and the boundary is
+    // the same one: the alternative is the four value flags, which is a true
+    // sentence about a vocabulary the caller was never reaching for.
+    for (
+      const spec of [
+        makeSpec("handler", { type: "string" }),
+        makeSpec("handler", true),
+      ]
+    ) {
+      const message = (() => {
+        try {
+          parseExecArgs(
+            spec,
+            ["--value", "Ship", "--select", "topic.title"],
+            "cf call ... setTitle",
+          );
+        } catch (error) {
+          return (error as Error).message;
+        }
+        return "";
+      })();
+      expect(message).toContain('"--select" is a `cf` read option');
+      expect(message).toContain(
+        "write:    cf call ... setTitle --value Ship -- --select topic.title",
+      );
+    }
+
+    // The keyword rejoins the prefix here too, so the corrected line is the
+    // caller's own rather than one with a word silently dropped.
+    expect(
+      refusalFrom(
+        makeSpec("handler", { type: "string" }),
+        ["invoke", "--filter", "open"],
+        "cf call ... setTitle",
+      ),
+    ).toContain("write:    cf call ... setTitle invoke -- --filter open");
+  });
+
+  it("takes a flag-shaped word after `--value` as the value it is", () => {
+    // Such a verb's whole payload is one word the caller chose, and a word
+    // beginning with dashes is a payload like any other. Reading it as a
+    // projection refuses a call that names no projection at all.
+    expect(
+      parseExecArgs(makeSpec("handler", { type: "string" }), [
+        "--value",
+        "--select",
+      ]).input,
+    ).toBe("--select");
+  });
+
+  it("takes a flag-shaped word after `--value-file` and `--json-file` as the path", () => {
+    // The same rule, and the reason the four flags are checked one at a time:
+    // a path beginning with dashes is a path this verb accepts, so neither of
+    // these leaves the word standing for the projection scan to find.
+    const spec = makeSpec("handler", { type: "string" });
+    expect(parseExecArgs(spec, ["--value-file", "--select"]).inputFile)
+      .toStrictEqual({ format: "text", path: "--select" });
+    expect(parseExecArgs(spec, ["--json-file", "--select"]).inputFile)
+      .toStrictEqual({ format: "json", path: "--select" });
+  });
+
+  it("reads a read option after a bare `--json` as a read option", () => {
+    // `--json` is the one of the four that declines a flag-shaped word: bare
+    // it reads stdin, so the word after it is nobody's value and a read option
+    // written there is a projection inside the callable's section.
+    const spec = makeSpec("handler", { type: "string" });
+    expect(
+      refusalFrom(
+        spec,
+        ["--json", "--select", "topic.title"],
+        "cf call ... scalar",
+      ),
+    )
+      .toContain("write:    cf call ... scalar --json -- --select topic.title");
+    // And still spends a payload that is not flag-shaped.
+    expect(parseExecArgs(spec, ["--json", '"hi"']).input).toBe("hi");
+  });
+
+  it("leaves a field's own value in the section, flag-shaped or not", () => {
+    // `--title` declares a string, so the word after it is that string. A
+    // correction re-reading it as a flag moves the title's value out of the
+    // section, breaks the pairing of the flag that really is misplaced, and
+    // prints a line asking for something the caller never wrote.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { title: { type: "string" } },
+      required: ["title"],
+    });
+    expect(
+      refusalFrom(
+        spec,
+        ["--title", "--select", "--schema", "topic"],
+        "cf call ... addItem",
+      ),
+    ).toContain(
+      "write:    cf call ... addItem --title --select -- --schema topic",
+    );
+  });
+
+  it("moves a read option with its value where the field before it takes none", () => {
+    // A boolean field spends no word, so the read option after it opens its
+    // own pair and both words move together.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { draft: { type: "boolean" }, title: { type: "string" } },
+    });
+    expect(
+      refusalFrom(
+        spec,
+        ["--draft", "--select", "topic.title"],
+        "cf call ... addItem",
+      ),
+    ).toContain(
+      "write:    cf call ... addItem --draft -- --select topic.title",
+    );
+    // A negation says which value it means, so it spends no word either.
+    expect(
+      refusalFrom(
+        spec,
+        ["--no-draft", "--select", "topic.title"],
+        "cf call ... addItem",
+      ),
+    ).toContain(
+      "write:    cf call ... addItem --no-draft -- --select topic.title",
+    );
+  });
+
+  it("leaves a flag after `--json` standing as a flag, which `--json` refuses to take", () => {
+    // `--json` takes a payload and refuses a flag-shaped word outright, so a
+    // read option written after it is a read option rather than its value.
+    const spec = makeSpec("handler", {
+      type: "object",
+      properties: { title: { type: "string" } },
+    });
+    expect(
+      refusalFrom(
+        spec,
+        ["--select", "a", "--json", "--filter", "b"],
+        "cf call ... addItem",
+      ),
+    ).toContain(
+      "write:    cf call ... addItem --json -- --select a --filter b",
+    );
   });
 });
 
@@ -1551,18 +1799,22 @@ describe("renderPieceCallHelp", () => {
     expect(help).toContain("cf call ... search --help --json");
     expect(help).toContain("cf call ... search <json>");
     expect(help).toContain("cf call ... search --json [<json>]");
+    // The verb opens the section, so its own flags follow the name with
+    // nothing between; the marker appears once, on the read-option line.
     expect(help).toContain(
-      "cf call ... search -- [run] --query <string>",
+      "cf call ... search [run] --query <string>",
     );
+    expect(help).toContain("cf call ... search ... -- --select <fields>");
+    expect(help).not.toContain("cf call ... search -- ");
     expect(help).toContain("JSON input:");
     expect(help).toContain(
       "Pass inline JSON as one positional argument or after `--json`",
     );
     expect(help).toContain("query: string");
     expect(help).toContain("help?: string");
-    expect(help).toContain("Flags after `--`:");
+    expect(help).toContain("Flags:");
     expect(help).not.toContain("Read the full input object from stdin.");
-    expect(help).not.toContain("cf call ... search -- [run] --help");
+    expect(help).not.toContain("cf call ... search [run] --help");
   });
 
   it("renders bare usage for schema-less handler piece-call help", () => {
@@ -1572,7 +1824,7 @@ describe("renderPieceCallHelp", () => {
     );
 
     expect(help).toContain("cf call ... onAddContact");
-    expect(help).toContain("cf call ... onAddContact -- invoke");
+    expect(help).toContain("cf call ... onAddContact invoke");
     expect(help).toContain(
       "Invoke alone will call the handler without any inputs.",
     );
