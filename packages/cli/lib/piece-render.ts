@@ -119,7 +119,7 @@ export function renderVDomToHtml(
 export async function renderPiece(
   config: PieceConfig,
   options: RenderOptions = {},
-  deps: PieceResolutionDeps = {},
+  deps: Pick<PieceResolutionDeps, "loadPieces"> = {},
 ): Promise<string | (() => void)> {
   const pieces = await (deps.loadPieces ?? loadPieces)(config);
   const piece = await pieces.get(

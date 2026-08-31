@@ -14,6 +14,7 @@ import type { PiecesController } from "@commonfabric/piece/ops";
 import { getAcl, removeAclEntry, setAclEntry } from "../lib/acl.ts";
 import type { SpaceConfig } from "../lib/piece.ts";
 import { resetWriteReceipts } from "../lib/write-receipt.ts";
+import { captureStderr } from "./utils.ts";
 
 const SPACE = "did:key:z6MkjcdxtxTiUWkPkPffhs8ENkCcJjuRCQPpJFb2xyzwHqEk";
 const OWNER = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK";
@@ -97,21 +98,6 @@ function over(held: Connection) {
   };
 }
 
-/** Collects what a receipt writes, and restores the console afterwards. */
-async function captureStderr(body: () => Promise<void>): Promise<string[]> {
-  const lines: string[] = [];
-  const original = console.error;
-  console.error = (...args: unknown[]) => {
-    lines.push(args.map(String).join(" "));
-  };
-  try {
-    await body();
-  } finally {
-    console.error = original;
-  }
-  return lines;
-}
-
 describe("acl", () => {
   describe("getAcl()", () => {
     it("returns the ACL the space holds", async () => {
@@ -142,7 +128,7 @@ describe("acl", () => {
       expect(held.disposed).toBe(false);
     });
 
-    it("raises the denial the space recorded during the read", async () => {
+    it("throws the denial the space recorded during the read", async () => {
       const denied = new Error("not authorized for this space");
       const held = connection(stored, denied);
       await expect(getAcl(config, over(held))).rejects.toThrow(denied);

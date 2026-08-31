@@ -29,9 +29,13 @@ import {
   setCellValue,
 } from "../lib/piece.ts";
 import { resetWriteReceipts } from "../lib/write-receipt.ts";
+import { captureStderr } from "./utils.ts";
 
 const SPACE = "did:key:z6MkjcdxtxTiUWkPkPffhs8ENkCcJjuRCQPpJFb2xyzwHqEk";
 const PIECE = "fid1:connection-piece";
+
+/** What a resolver in these tests maps {@link PIECE} to. */
+const RESOLVED_PIECE = "fid1:resolved";
 
 const config: PieceConfig = {
   apiUrl: "http://localhost:8000",
@@ -48,49 +52,51 @@ function over(pieces: PiecesController): PieceResolutionDeps {
   };
 }
 
-/** Collects what a receipt writes, and restores the console afterwards. */
-async function captureStderr(body: () => Promise<void>): Promise<string[]> {
-  const lines: string[] = [];
-  const original = console.error;
-  console.error = (...args: unknown[]) => {
-    lines.push(args.map(String).join(" "));
-  };
-  try {
-    await body();
-  } finally {
-    console.error = original;
-  }
-  return lines;
-}
-
 describe("piece-connection", () => {
   describe("setCellValue()", () => {
-    // One write per case, so the recorded write is the whole assertion: which
-    // of the piece's two cells it landed on, at what path, with what value.
+    // One write per case, so the recorded write is the whole assertion: the
+    // piece it was asked for, which of that piece's two cells it landed on,
+    // at what path, with what value.
 
     interface CellWrite {
+      piece: string;
       cell: "input" | "result";
       value: unknown;
       path: (string | number)[];
     }
 
     function stubController(writes: CellWrite[]): PiecesController {
-      const setter = (cell: "input" | "result") => ({
-        set: (value: unknown, path: (string | number)[]) => {
-          writes.push({ cell, value, path });
-          return Promise.resolve();
-        },
-      });
       return {
-        get: () =>
-          Promise.resolve({
+        get: (piece: string) => {
+          const setter = (cell: "input" | "result") => ({
+            set: (value: unknown, path: (string | number)[]) => {
+              writes.push({ piece, cell, value, path });
+              return Promise.resolve();
+            },
+          });
+          return Promise.resolve({
             input: setter("input"),
             result: setter("result"),
-          }),
+          });
+        },
       } as unknown as PiecesController;
     }
 
-    it("writes the value at the path on the result cell", async () => {
+    /**
+     * A held connection whose resolver maps the configured address to a
+     * different id. Reaching the piece under that id is what says the write
+     * went through the resolution rather than around it: the address in
+     * `config` already carries a scheme, which the stored resolver hands back
+     * untouched, so an identity resolver here would agree with skipping it.
+     */
+    function overResolving(pieces: PiecesController): PieceResolutionDeps {
+      return {
+        loadPieces: () => Promise.resolve(pieces),
+        resolvePieceAddress: () => Promise.resolve(RESOLVED_PIECE),
+      };
+    }
+
+    it("writes the value at the path on the resolved piece's result cell", async () => {
       resetWriteReceipts();
       const writes: CellWrite[] = [];
       const lines = await captureStderr(() =>
@@ -99,12 +105,15 @@ describe("piece-connection", () => {
           ["items", 0, "title"],
           "Milk",
           undefined,
-          over(stubController(writes)),
+          overResolving(stubController(writes)),
         )
       );
-      expect(writes).toEqual([
-        { cell: "result", value: "Milk", path: ["items", 0, "title"] },
-      ]);
+      expect(writes).toEqual([{
+        piece: RESOLVED_PIECE,
+        cell: "result",
+        value: "Milk",
+        path: ["items", 0, "title"],
+      }]);
       expect(lines).toContain(`wrote to space ${SPACE}`);
     });
 
@@ -117,12 +126,15 @@ describe("piece-connection", () => {
           ["title"],
           "Bread",
           { input: true },
-          over(stubController(writes)),
+          overResolving(stubController(writes)),
         )
       );
-      expect(writes).toEqual([
-        { cell: "input", value: "Bread", path: ["title"] },
-      ]);
+      expect(writes).toEqual([{
+        piece: RESOLVED_PIECE,
+        cell: "input",
+        value: "Bread",
+        path: ["title"],
+      }]);
     });
   });
 
@@ -145,10 +157,10 @@ describe("piece-connection", () => {
       const lines = await captureStderr(() =>
         removePiece(config, {
           loadPieces: () => Promise.resolve(stubController(true, calls)),
-          resolvePieceAddress: () => Promise.resolve("fid1:resolved"),
+          resolvePieceAddress: () => Promise.resolve(RESOLVED_PIECE),
         })
       );
-      expect(calls).toEqual(["fid1:resolved"]);
+      expect(calls).toEqual([RESOLVED_PIECE]);
       expect(lines).toContain(`wrote to space ${SPACE}`);
     });
 
@@ -158,7 +170,8 @@ describe("piece-connection", () => {
         await expect(removePiece(config, over(stubController(false))))
           .rejects.toThrow(`Piece "${PIECE}" not found`);
       });
-      // A receipt claims the space changed, and nothing was removed.
+      // A receipt is a claim that the space changed, and a refused removal
+      // changes nothing in it.
       expect(lines).toEqual([]);
     });
   });
@@ -240,7 +253,7 @@ describe("piece-connection", () => {
       expect(lines).toContain(`wrote to space ${SPACE}`);
     });
 
-    it("refuses a path neither endpoint holds, and links nothing", async () => {
+    it("throws for a path neither endpoint holds, and links nothing", async () => {
       const links: LinkCall[] = [];
       await expect(
         linkPieces(

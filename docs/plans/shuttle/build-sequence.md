@@ -100,8 +100,9 @@ half.
 write must surface as a value, never reach `Deno.exit`). `set` with
 inline values,
 `edit` over `$EDITOR`, and `link` — the one spelling that writes a
-reference instead of copying a value (decision 14), and the only write of
-the three that has no `cf` equivalent to lean on. `call` through
+reference instead of copying a value (decision 14), which leans on
+`cf piece link`. `edit` is the only write of the three with no `cf`
+equivalent behind it. `call` through
 `callFromCommand`, with `verbs` and `describe` beside it, since listing a
 piece's callables is what makes `call` usable without leaving the shell.
 Numbered handles from listings land here, and `more` with them: `more`

@@ -13,6 +13,14 @@ import {
 import { throwOnSpaceAuthorizationError } from "./utils.ts";
 import { noteWroteTo } from "./write-receipt.ts";
 
+/**
+ * The connection an ACL operation runs over. It carries the loader alone: an
+ * ACL document is addressed by the space DID, so nothing here resolves a
+ * piece address and a `resolvePieceAddress` accepted alongside would be a
+ * promise no function keeps.
+ */
+export type AclConnectionDeps = Pick<PieceResolutionDeps, "loadPieces">;
+
 // Open the space and hand an ACLManager to `run`. The ACL document is
 // addressed by the space DID and read through the ACLManager, so the space
 // cell's contents are never needed here and their sync is deferred.
@@ -20,7 +28,7 @@ async function withAcl<T>(
   config: SpaceConfig,
   run: (acl: ACLManager) => Promise<T>,
   options: { writes?: boolean } = {},
-  deps: PieceResolutionDeps = {},
+  deps: AclConnectionDeps = {},
 ): Promise<T> {
   const pieces = await (deps.loadPieces ?? loadPieces)({
     ...config,
@@ -48,7 +56,7 @@ export async function setAclEntry(
   config: SpaceConfig,
   user: string,
   capability: Capability,
-  deps: PieceResolutionDeps = {},
+  deps: AclConnectionDeps = {},
 ): Promise<void> {
   const userDid = userToACLUser(user);
   await withAcl(config, (acl) => acl.set(userDid, capability), {
@@ -60,7 +68,7 @@ export async function setAclEntry(
 export async function removeAclEntry(
   config: SpaceConfig,
   user: string,
-  deps: PieceResolutionDeps = {},
+  deps: AclConnectionDeps = {},
 ): Promise<void> {
   const userDid = userToACLUser(user);
   await withAcl(config, (acl) => acl.remove(userDid), { writes: true }, deps);
@@ -69,7 +77,7 @@ export async function removeAclEntry(
 // Get the current ACL for a space
 export async function getAcl(
   config: SpaceConfig,
-  deps: PieceResolutionDeps = {},
+  deps: AclConnectionDeps = {},
 ): Promise<ACL | null> {
   return await withAcl(config, (acl) => acl.get(), {}, deps);
 }
