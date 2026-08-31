@@ -47,7 +47,7 @@ export const CFC_LABEL_READ_FAILED_ATOM = "cfc:label-read-failed";
 // `{digestOf: H(marker)}` spelling can only be crafted — and with atom
 // equality now commitment-aware, a marker-naming ceiling would otherwise
 // subsume that spelling. Recognize it here so BOTH forms stay ungrantable.
-const clauseBearsReadFailedMarker = (clause: unknown): boolean =>
+export const clauseBearsReadFailedMarker = (clause: unknown): boolean =>
   clauseAlternatives(clause as CfcConfClause).some((alternative) =>
     deepEqual(alternative, CFC_LABEL_READ_FAILED_ATOM) ||
     commitmentAwareEquals(alternative, CFC_LABEL_READ_FAILED_ATOM)

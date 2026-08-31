@@ -36,6 +36,15 @@ export const CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION =
 export const CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION =
   "runtime.setup.seed-materialization";
 
+// A document a piece is being set up in: its argument document, or an
+// internal document or stream its result projects to. `target` is the
+// document, minted from the piece's result cell; `sources` is that result
+// document. The prepare gate reads it for the §8.12.5 route-2 declaration
+// described in `docs/specs/cfc-enforcement-matrix.md` §4, and takes it only
+// where `target` names a whole document.
+export const CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE =
+  "runtime.setup.piece-substrate";
+
 export type CfcEnforcementMode =
   | "disabled"
   | "observe"

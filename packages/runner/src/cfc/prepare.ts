@@ -115,6 +115,7 @@ import {
   type CfcFloorTrustContext,
   cfcIntegritySatisfiesFloor,
   cfcIntegritySatisfiesFloorCoherently,
+  clauseBearsReadFailedMarker,
   uniqueCfcAtoms,
 } from "./observation.ts";
 import { CFC_POLICY_MANIFEST_ID_PREFIX } from "./policy.ts";
@@ -123,6 +124,7 @@ import { cfcSchemaEntries } from "./schema-label-view.ts";
 import { mergeCfcSchemaEnvelopes } from "./schema-merge.ts";
 import { createTrustResolver } from "./trust.ts";
 import {
+  CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE,
   CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
   CFC_STRUCTURAL_PROVENANCE_SETUP_PROJECTION,
   type CfcAddress,
@@ -816,6 +818,34 @@ const writeIsPatternSetupInitialization = (
       );
     })
   );
+};
+
+/**
+ * The documents this transaction is setting a piece up in, as target keys —
+ * each piece's argument document, and the internal documents its result
+ * projects to.
+ *
+ * A marker whose address carries a path names part of a document rather than
+ * the document, and is ignored: the route below declares a policy for the
+ * whole store, so it may only take a marker that claims the whole store. The
+ * setup path records the empty path for every document it mints from a
+ * piece's result cell, so this excludes only an argument link that was stored
+ * pointing into some other document.
+ */
+const pieceSetupSubstrateDocuments = (
+  tx: IExtendedStorageTransaction,
+): Set<string> => {
+  const documents = new Set<string>();
+  for (const input of tx.getCfcState().writePolicyInputs) {
+    if (
+      input.kind === "structural-provenance" &&
+      input.claim === CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE &&
+      canonicalizeLogicalPath(input.target.path).length === 0
+    ) {
+      documents.add(targetKey(input.target));
+    }
+  }
+  return documents;
 };
 
 const storedMetadataFor = (
@@ -5678,6 +5708,16 @@ export const prepareBoundaryCommit = (
     );
   }
   const targetKeys = new Set([...candidates.keys(), ...linkWrites.keys()]);
+  // Computed once: the §8.12.5 route-2 seam is a property of the transaction,
+  // and the persist loop below asks about it per target.
+  // The §8.12.5 route-2 seam is a property of the transaction, so it is read
+  // once. Only the strict rung's declaration consults it, and only where the
+  // flow join is stamped, so no other posture pays for the scan — and every
+  // rung below keeps the persist-and-flag diagnostic that is its rollout
+  // signal, storing no declared policy it could never take back.
+  const pieceSubstrateDocuments = flowPersist && writerFitRejects
+    ? pieceSetupSubstrateDocuments(tx)
+    : new Set<string>();
   // A vouched ingest writes its provenance mark even when the payload write
   // carries no schema candidate and flow labels are off, so the ingest target
   // must enter the persist loop on its own. The anchor is the cell the helper
@@ -5777,14 +5817,18 @@ export const prepareBoundaryCommit = (
     //   foreign labeled contribution makes the WHOLE stamped entry eligible
     //   — ambiguous provenance fails toward protection.
     //
-    // NOT eligible (persist verbatim): `declared` entries (authored schema
+    // NOT eligible (persist verbatim): AUTHORED `declared` entries (schema
     // policy — the schema document replicates to the destination anyway, so
     // transforming the mirror entries would protect nothing), carried-
     // forward existing entries (already at rest in this doc; migration
     // never rewrites persisted envelopes), and the local external-ingest
     // mark (minted from this tx's own channel stamp — no cross-space
     // observation feeds it; its atoms commit like any others if they later
-    // flow into a foreign target through the join).
+    // flow into a foreign target through the join). The §8.12.5 route-2
+    // declaration below is the one `declared` entry that IS eligible: its
+    // content is the flow join rather than an author's schema, so leaving
+    // it verbatim beside a committed derived stamp of the same atoms would
+    // publish in one entry what the other protects.
     const crossSpaceEligible = labelProtectionMode !== "off"
       ? new Set<LabelMapEntry>()
       : undefined;
@@ -6052,8 +6096,12 @@ export const prepareBoundaryCommit = (
     // item 3): the declared-component monotonicity gate. Each declared entry
     // this walk is about to persist replaces the stored declared entry at
     // the same path (the carry-forward below skips replaced paths), so this
-    // is the ONE point where the store policy can change — compare against
-    // the stored entries per canUpdateStoreLabel before it does. The stored
+    // is where a schema-minted store policy changes — compare against the
+    // stored entries per canUpdateStoreLabel before it does. The §8.12.5
+    // route-2 declaration in the flow-persist stamping below adds clauses
+    // after this point rather than replacing any, which is the restricting
+    // direction; it coalesces with the carried-forward stored entry instead
+    // of standing in for it. The stored
     // metadata was read above under the internal-verifier meta
     // (storedMetadataFor), so the gate consumes no additional reads. Under
     // `enforce` a violation records fail-closed reasons and skips persisting
@@ -6575,6 +6623,12 @@ export const prepareBoundaryCommit = (
           readConsumesEntry("value", entry)
         )
         : [];
+      // Whether a misfit below is answered by declaring a covering policy
+      // (§8.12.5 route 2) instead of refusing: this document is one the
+      // runner named as a piece's substrate, at a rung that would reject.
+      // `cfc-enforcement-matrix.md` §4 states the route; the rest of the
+      // conditions on it are at the mint below.
+      const pieceSetupSubstrate = pieceSubstrateDocuments.has(key);
       // SC-4, freeze-at-creation form: a path's shape (existence) entry is
       // minted ONCE — at creation, or at the one-time migration of legacy
       // pre-class entries (whose accumulated confidentiality is absorbed
@@ -6716,6 +6770,76 @@ export const prepareBoundaryCommit = (
               ...residencyCeiling,
             ],
           );
+          if (
+            offending.length > 0 && pieceSetupSubstrate &&
+            // A schema that declares at this exact path owns the store's
+            // policy there; widening it from the join would make the walk's
+            // own re-mint non-monotone on the next write and brick the path
+            // under the declared-monotonicity gate. That store's route 2 is
+            // the author's, in the schema.
+            !remintedDeclaredPaths.has(pathKey(path)) &&
+            // The read-failed marker is ungrantable: a measurement the
+            // runtime could not take proves nothing about the audience, so
+            // it is outside every ceiling including one that names it.
+            // Declaring it would both admit a poisoned measurement and
+            // write a clause no reader can ever satisfy.
+            !offending.some(clauseBearsReadFailedMarker) &&
+            // A `Space` clause is honored by a replica set, not by a
+            // reader check: §4.9.3 resolves it against that space's ACL,
+            // the document that also decides who holds the bytes. A store
+            // in THIS space cannot keep a promise made to another space's
+            // readers, which is why residency admits only this space's own
+            // clause. Declaring a foreign one would put the bytes in front
+            // of this space's members under a promise made to somebody
+            // else's, so the route leaves that write to the refusal below.
+            !offending.some((clause) =>
+              clauseAlternatives(clause as CfcConfClause).some((alternative) =>
+                isObjectOrArray(alternative) &&
+                (alternative as { type?: unknown }).type ===
+                  CFC_ATOM_TYPE.Space &&
+                (alternative as { id?: unknown }).id !== space
+              )
+            )
+          ) {
+            // §8.12.5 route 2, the monotone-safe upgrade: the transaction
+            // writing the join onto this path also declares, in that same
+            // transaction, a policy covering it. What lands is the ceiling
+            // resolved above plus exactly the clauses that had nowhere to
+            // go, so the store's promise becomes the audience of what it
+            // holds. A piece's substrate is filled by the runtime out of
+            // what the setup transaction read — the argument document, and
+            // the internal documents and streams its result projects to —
+            // and no value schema can carry that declaration, because the
+            // atoms are a property of the transaction rather than of the
+            // pattern.
+            //
+            // The declaration only ever grows, which is what §8.12.1 asks
+            // of a declared component. `declaredCeiling` resolves over the
+            // entries this walk is about to persist, carried-forward stored
+            // declared entries among them, so the union below contains
+            // every clause the path already declared, and adding clauses is
+            // the restricting direction.
+            //
+            // Marked like a flow stamp rather than like an authored
+            // declaration: the content is the join, so it carries whatever
+            // foreign label metadata the join carries.
+            persistedLabelEntries.push(markFlowStampEntry({
+              path,
+              label: {
+                confidentiality: foldedUnique([
+                  ...declaredCeiling as readonly CfcConfClause[],
+                  ...offending as readonly CfcConfClause[],
+                ]),
+              },
+              origin: "declared",
+            }));
+            tx.noteCfcDiagnostic(
+              `writer-fit(piece-substrate-declared): ${id} at /${
+                path.join("/")
+              } (§8.12.5 route 2): ${offending.map(renderCfcAtom).join(", ")}`,
+            );
+            continue;
+          }
           if (offending.length > 0) {
             // SC-18c error contract: a stable reason naming the rule id and
             // the target path, plus the offending clause(s) so a flag names

@@ -9,9 +9,13 @@ import {
 } from "./cfc-seed-envelope.ts";
 import { StorageManager } from "../src/storage/cache.deno.ts";
 import { Runtime } from "../src/runtime.ts";
-import { parseLink } from "../src/link-utils.ts";
+import { getDerivedInternalCellLink, parseLink } from "../src/link-utils.ts";
 import { CFC_LABEL_READ_FAILED_ATOM } from "../src/cfc/observation.ts";
-import type { JSONSchema } from "../src/builder/types.ts";
+import {
+  CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE,
+  CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
+} from "../src/cfc/types.ts";
+import type { JSONSchema, Pattern } from "../src/builder/types.ts";
 import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-writer-fit");
@@ -157,6 +161,42 @@ const deriveIntoTarget = async (
 const writerFitDiagnostics = (
   tx: { getCfcState(): { diagnostics: string[] } },
 ) => tx.getCfcState().diagnostics.filter((d) => d.includes("writer-fit"));
+
+// The marker the runner records for each document it instantiates a piece
+// into, naming the piece's result document as the source.
+const recordPieceSubstrate = (
+  tx: ReturnType<Runtime["edit"]>,
+  resultCell: {
+    getAsNormalizedFullLink(): { space: string; scope: string; id: string };
+  },
+  substrateCell: {
+    getAsNormalizedFullLink(): {
+      space: string;
+      scope: string;
+      id: string;
+      path: readonly string[];
+    };
+  },
+): void => {
+  const result = resultCell.getAsNormalizedFullLink();
+  const substrate = substrateCell.getAsNormalizedFullLink();
+  tx.recordCfcWritePolicyInput({
+    kind: "structural-provenance",
+    target: {
+      space: substrate.space as `did:${string}:${string}`,
+      scope: substrate.scope as "space",
+      id: substrate.id,
+      path: [...substrate.path],
+    },
+    claim: CFC_STRUCTURAL_PROVENANCE_PIECE_SUBSTRATE,
+    sources: [{
+      space: result.space as `did:${string}:${string}`,
+      scope: result.scope as "space",
+      id: result.id,
+      path: [],
+    }],
+  });
+};
 
 describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
   // H4 writer-fit (SC-18b, spec §8.12.4): a write whose derived flow label does
@@ -1120,5 +1160,824 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
       await runtime.dispose();
       await storageManager.close();
     }
+  });
+
+  // The pattern the end-to-end cases set up: one argument field, and one
+  // derived internal cell the result projects to.
+  const seamResultSchema = {
+    type: "object",
+    properties: { savedTitle: { type: "string" } },
+    required: ["savedTitle"],
+  } as const satisfies JSONSchema;
+
+  const seamPattern = {
+    argumentSchema: {
+      type: "object",
+      properties: { title: { type: "string" } },
+    } as const,
+    resultSchema: seamResultSchema,
+    derivedInternalCells: [{
+      partialCause: "savedTitle",
+      schema: { type: "string", default: "" },
+    }],
+    result: {
+      savedTitle: { $alias: { partialCause: "savedTitle", path: [] } },
+    },
+    nodes: [],
+  } satisfies Pattern;
+
+  describe("the piece-substrate declaration (§8.12.5 route 2)", () => {
+    // A piece's substrate is filled by the runtime out of whatever the setup
+    // transaction read: the argument document, and the internal documents
+    // and streams the result projects to. No value schema can declare a
+    // covering policy for them, because the atoms are a property of the
+    // transaction rather than of the pattern, so the transaction declares
+    // that policy itself. `docs/specs/cfc-enforcement-matrix.md` §4 states
+    // the route and the four conditions on it; one test per condition
+    // follows.
+
+    it("declares the join on a document the substrate marker names", async () => {
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-seam-source");
+
+        const tx = runtime.edit();
+        tx.setCfcEnforcementMode("enforce-strict");
+        const source = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const result = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-result",
+          undefined,
+          tx,
+        );
+        const substrate = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-substrate",
+          undefined,
+          tx,
+        );
+        recordPieceSubstrate(tx, result, substrate);
+        substrate.set({ copied: `${raw.secret}!` });
+        const substrateId = substrate.getAsNormalizedFullLink().id;
+        tx.prepareCfc();
+        expect((await tx.commit()).ok).toBeDefined();
+
+        const entries = replicaEntries(storageManager, substrateId);
+        expect(entries.some((entry) =>
+          entry.origin === "declared" &&
+          (entry.label.confidentiality ?? []).includes("secret")
+        )).toBe(true);
+
+        // A permanent change to a store's policy leaves a trace even at the
+        // rung that admits it.
+        const flags = writerFitDiagnostics(tx);
+        expect(flags.length).toBe(1);
+        expect(flags[0]).toContain("writer-fit(piece-substrate-declared)");
+        expect(flags[0]).toContain(`${substrateId} at /`);
+        expect(flags[0]).toContain('"secret"');
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("rejects the same write on a document no substrate marker names", async () => {
+      // The negative twin of the test above: one transaction, one marker, and
+      // a second target the marker does not name. The route reaches the seam
+      // and stops there.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-seam-bystander-source");
+
+        const tx = runtime.edit();
+        tx.setCfcEnforcementMode("enforce-strict");
+        const source = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-bystander-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const result = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-bystander-result",
+          undefined,
+          tx,
+        );
+        const substrate = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-bystander-substrate",
+          undefined,
+          tx,
+        );
+        recordPieceSubstrate(tx, result, substrate);
+        const bystander = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-bystander",
+          undefined,
+          tx,
+        );
+        bystander.set({ copied: `${raw.secret}!` });
+        const bystanderId = bystander.getAsNormalizedFullLink().id;
+        tx.prepareCfc();
+        const committed = await tx.commit();
+        expect(committed.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(committed.error?.message).toContain(`for ${bystanderId} at /`);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("grows the declaration when a later transaction carries a wider join", async () => {
+      // The declared component only ever tightens (§8.12.1), so a second
+      // atom joins the first rather than replacing it. A piece created
+      // before its inputs were labeled reaches the same path: nothing was
+      // declared at birth, and the write that first carries a join declares
+      // it then.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-seam-grow-first");
+        await seedSecretSource(runtime, "writer-fit-seam-grow-second", [
+          "other",
+        ]);
+
+        const born = runtime.edit();
+        const untainted = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-grow-substrate",
+          undefined,
+          born,
+        );
+        untainted.set({ copied: "public" });
+        const substrateId = untainted.getAsNormalizedFullLink().id;
+        expect((await born.commit()).ok).toBeDefined();
+        expect(replicaEntries(storageManager, substrateId)).toEqual([]);
+
+        const declaredClauses = async (sources: readonly string[]) => {
+          const tx = runtime.edit();
+          tx.setCfcEnforcementMode("enforce-strict");
+          const copied = sources.map((name) =>
+            (runtime.getCell(signer.did(), name, undefined, tx)
+              .getRaw() as { secret?: string }).secret
+          ).join("/");
+          const result = runtime.getCell(
+            signer.did(),
+            "writer-fit-seam-grow-result",
+            undefined,
+            tx,
+          );
+          const substrate = runtime.getCell(
+            signer.did(),
+            "writer-fit-seam-grow-substrate",
+            undefined,
+            tx,
+          );
+          recordPieceSubstrate(tx, result, substrate);
+          substrate.set({ copied });
+          tx.prepareCfc();
+          expect((await tx.commit()).ok).toBeDefined();
+          const declared = replicaEntries(storageManager, substrateId)
+            .filter((entry) => entry.origin === "declared");
+          // One entry per path per component: a second declaration at the
+          // same path would coalesce, and a stored one that failed to
+          // coalesce would rewrite the envelope on every reconcile.
+          expect(declared.length).toBe(1);
+          return declared[0].label.confidentiality ?? [];
+        };
+
+        expect(await declaredClauses(["writer-fit-seam-grow-first"]))
+          .toEqual(["secret"]);
+        // Re-declaring the same join changes nothing.
+        expect(await declaredClauses(["writer-fit-seam-grow-first"]))
+          .toEqual(["secret"]);
+        const grown = await declaredClauses([
+          "writer-fit-seam-grow-first",
+          "writer-fit-seam-grow-second",
+        ]);
+        expect(grown).toContain("secret");
+        expect(grown).toContain("other");
+        // And the wider declaration survives a transaction that carries only
+        // the narrower join: the declared component never shrinks.
+        expect(await declaredClauses(["writer-fit-seam-grow-first"]))
+          .toEqual(grown);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("rejects a substrate write at a path its own schema declares", async () => {
+      // A schema that declares at the written path owns the store's policy
+      // there, and widening it from the join would make the walk's own
+      // re-mint non-monotone on the next write. That store's route 2 is the
+      // author's, in the schema.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-seam-declared-source");
+
+        // The field has to exist already: a key write into a document this
+        // transaction is also creating materializes the whole document, and
+        // lands at the root rather than at the declared field.
+        const create = runtime.edit();
+        runtime.getCell<{ copied?: string }>(
+          signer.did(),
+          "writer-fit-seam-declared-substrate",
+          undefined,
+          create,
+        ).set({ copied: "public" });
+        expect((await create.commit()).ok).toBeDefined();
+
+        const tx = runtime.edit();
+        tx.setCfcEnforcementMode("enforce-strict");
+        const source = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-declared-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const result = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-declared-result",
+          undefined,
+          tx,
+        );
+        const substrate = runtime.getCell<{ copied?: string }>(
+          signer.did(),
+          "writer-fit-seam-declared-substrate",
+          {
+            type: "object",
+            properties: {
+              copied: {
+                type: "string",
+                ifc: { confidentiality: ["policy"] },
+              },
+            },
+          },
+          tx,
+        );
+        recordPieceSubstrate(tx, result, substrate);
+        substrate.key("copied").set(`${raw.secret}!`);
+        tx.prepareCfc();
+        const committed = await tx.commit();
+        expect(committed.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(committed.error?.message).toContain("at /copied");
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("rejects a substrate write whose marker names only part of the document", async () => {
+      // The route declares a policy for the whole store, so it takes a
+      // marker only where the marker claims the whole store. Setup records
+      // the empty path for every document it mints from a result cell, so
+      // this excludes a stored argument link that points inside some other
+      // document.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-seam-partial-source");
+
+        const tx = runtime.edit();
+        tx.setCfcEnforcementMode("enforce-strict");
+        const source = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-partial-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const result = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-partial-result",
+          undefined,
+          tx,
+        );
+        const substrate = runtime.getCell<{ copied?: string }>(
+          signer.did(),
+          "writer-fit-seam-partial-substrate",
+          undefined,
+          tx,
+        );
+        recordPieceSubstrate(tx, result, substrate.key("copied"));
+        substrate.set({ copied: `${raw.secret}!` });
+        tx.prepareCfc();
+        const committed = await tx.commit();
+        expect(committed.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("rejects a clause naming a space other than the target's", async () => {
+      // A `Space` clause is honored by a replica set, not by a reader check,
+      // which is why residency admits only the target's own. Declaring a
+      // foreign one would put the bytes in front of this space's members
+      // under a promise made to another space's readers.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-seam-foreign-source", [{
+          type: "https://commonfabric.org/cfc/atom/Space",
+          id: "did:key:z6MkfZ3gV6ZKqmyWLTPYnPYRUYQBqTHTNCJgqbCkNBzYqZ4H",
+        }]);
+
+        const tx = runtime.edit();
+        tx.setCfcEnforcementMode("enforce-strict");
+        const source = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-foreign-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const result = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-foreign-result",
+          undefined,
+          tx,
+        );
+        const substrate = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-foreign-substrate",
+          undefined,
+          tx,
+        );
+        recordPieceSubstrate(tx, result, substrate);
+        substrate.set({ copied: `${raw.secret}!` });
+        const substrateId = substrate.getAsNormalizedFullLink().id;
+        tx.prepareCfc();
+        const committed = await tx.commit();
+        expect(committed.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(storedDocument(storageManager, substrateId)).toBeUndefined();
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("rejects a substrate write named by a different provenance claim", async () => {
+      // The claim discriminates. The seed-materialization marker records a
+      // whole-document address too, so without it that unrelated runtime
+      // marker would carry the route.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-seam-claim-source");
+
+        const tx = runtime.edit();
+        tx.setCfcEnforcementMode("enforce-strict");
+        const source = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-claim-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const substrate = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-claim-substrate",
+          undefined,
+          tx,
+        );
+        const link = substrate.getAsNormalizedFullLink();
+        tx.recordCfcWritePolicyInput({
+          kind: "structural-provenance",
+          target: {
+            space: link.space,
+            scope: link.scope,
+            id: link.id,
+            path: [],
+          },
+          claim: CFC_STRUCTURAL_PROVENANCE_SEED_MATERIALIZATION,
+          sources: [{
+            space: link.space,
+            scope: link.scope,
+            id: link.id,
+            path: [],
+          }],
+        });
+        substrate.set({ copied: `${raw.secret}!` });
+        tx.prepareCfc();
+        const committed = await tx.commit();
+        expect(committed.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("rejects a poisoned measurement on a substrate document", async () => {
+      // The ungrantable read-failed marker is outside every ceiling, so it
+      // is outside what the route may declare: a measurement the runtime
+      // could not take proves nothing about the audience, and declaring it
+      // would write a clause no reader can ever satisfy.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-seam-poisoned-source", [{
+          anyOf: [CFC_LABEL_READ_FAILED_ATOM, ownSpacePrincipal],
+        }]);
+
+        const tx = runtime.edit();
+        tx.setCfcEnforcementMode("enforce-strict");
+        const source = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-poisoned-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const result = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-poisoned-result",
+          undefined,
+          tx,
+        );
+        const substrate = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-poisoned-substrate",
+          undefined,
+          tx,
+        );
+        recordPieceSubstrate(tx, result, substrate);
+        substrate.set({ copied: `${raw.secret}!` });
+        const substrateId = substrate.getAsNormalizedFullLink().id;
+        tx.prepareCfc();
+        const committed = await tx.commit();
+        expect(committed.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(committed.error?.message).toContain(CFC_LABEL_READ_FAILED_ATOM);
+        expect(storedDocument(storageManager, substrateId)).toBeUndefined();
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("keeps the clauses an ancestor path already declared", async () => {
+      // The route declares the resolved ceiling as well as the offending
+      // clauses. Reads resolve declared entries by longest prefix, so a mint
+      // that carried only what was offending would shadow the ancestor
+      // declaration at every path below it — lowering the store's promise
+      // through the very entry meant to raise it.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-seam-ancestor-first");
+        await seedSecretSource(runtime, "writer-fit-seam-ancestor-second", [
+          "other",
+        ]);
+
+        const writeUnder = async (sourceName: string, field: string) => {
+          const tx = runtime.edit();
+          tx.setCfcEnforcementMode("enforce-strict");
+          const source = runtime.getCell(
+            signer.did(),
+            sourceName,
+            undefined,
+            tx,
+          );
+          const raw = source.getRaw() as { secret?: string };
+          const result = runtime.getCell(
+            signer.did(),
+            "writer-fit-seam-ancestor-result",
+            undefined,
+            tx,
+          );
+          const substrate = runtime.getCell<Record<string, string>>(
+            signer.did(),
+            "writer-fit-seam-ancestor-substrate",
+            undefined,
+            tx,
+          );
+          recordPieceSubstrate(tx, result, substrate);
+          if (field === "") {
+            substrate.set({ first: `${raw.secret}!` });
+          } else {
+            substrate.key(field).set(`${raw.secret}!`);
+          }
+          const substrateId = substrate.getAsNormalizedFullLink().id;
+          tx.prepareCfc();
+          expect((await tx.commit()).ok).toBeDefined();
+          return replicaEntries(storageManager, substrateId);
+        };
+
+        // The document root declares the first join.
+        expect(
+          (await writeUnder("writer-fit-seam-ancestor-first", ""))
+            .filter((entry) =>
+              entry.origin === "declared" && entry.path.length === 0
+            )
+            .flatMap((entry) => entry.label.confidentiality ?? []),
+        ).toEqual(["secret"]);
+
+        // A later write below it carries a join the root does not cover, so
+        // the route declares at the deeper path — and that declaration is
+        // what a reader of the deeper path resolves, so it has to carry the
+        // root's clause too.
+        const deeper = (await writeUnder(
+          "writer-fit-seam-ancestor-second",
+          "second",
+        ))
+          .filter((entry) =>
+            entry.origin === "declared" && entry.path.join("/") === "second"
+          )
+          .flatMap((entry) => entry.label.confidentiality ?? []);
+        expect(deeper).toContain("secret");
+        expect(deeper).toContain("other");
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("leaves the persist-and-flag diagnostic in place under enforce-explicit", async () => {
+      // The route is the strict rung's, like the reject it replaces. Every
+      // rung below keeps the diagnostic that is its rollout signal, and
+      // stores no declared policy it could never take back.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = newRuntime(storageManager);
+      try {
+        await seedSecretSource(runtime, "writer-fit-seam-explicit-source");
+
+        const tx = runtime.edit();
+        const source = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-explicit-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const result = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-explicit-result",
+          undefined,
+          tx,
+        );
+        const substrate = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-explicit-substrate",
+          undefined,
+          tx,
+        );
+        recordPieceSubstrate(tx, result, substrate);
+        substrate.set({ copied: `${raw.secret}!` });
+        const substrateId = substrate.getAsNormalizedFullLink().id;
+        tx.prepareCfc();
+        expect((await tx.commit()).ok).toBeDefined();
+
+        const flags = writerFitDiagnostics(tx);
+        expect(flags.length).toBeGreaterThan(0);
+        expect(flags[0]).toContain("writer-fit(persist-and-flag)");
+        expect(
+          replicaEntries(storageManager, substrateId)
+            .filter((entry) => entry.origin === "declared"),
+        ).toEqual([]);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("declares on both documents a real setup writes", async () => {
+      // Drives the production recorder rather than the marker the tests
+      // above hand-record: `setup` marks the argument document and each
+      // internal document its result projects to, and a first setup inside
+      // a labeled transaction writes both.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+        cfcEnforcementMode: "enforce-strict",
+        cfcFlowLabels: "persist",
+      });
+      try {
+        await seedSecretSource(runtime, "writer-fit-seam-both-source");
+
+        const tx = runtime.edit();
+        const source = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-both-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const resultCell = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-both",
+          seamResultSchema,
+          tx,
+        );
+        await runtime.setup(
+          tx,
+          seamPattern,
+          { title: `${raw.secret}!` },
+          resultCell,
+        );
+        const argumentId = parseLink(
+          resultCell.getMetaRaw("argument"),
+          resultCell,
+        )!.id!;
+        const internalId = getDerivedInternalCellLink(
+          resultCell,
+          seamPattern.derivedInternalCells[0],
+        ).id;
+        tx.prepareCfc();
+        expect((await tx.commit()).ok).toBeDefined();
+
+        for (const id of [argumentId, internalId]) {
+          expect(
+            replicaEntries(storageManager, id).filter((entry) =>
+              entry.origin === "declared" &&
+              (entry.label.confidentiality ?? []).includes("secret")
+            ).length,
+          ).toBe(1);
+        }
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("rejects a setup whose stored argument link names another document", async () => {
+      // `setup` reads the argument address back out of the result cell's
+      // stored meta, where it need not name the document that result cell's
+      // cause mints. The marker follows the minted address, so a stored link
+      // aimed elsewhere carries no route and that document keeps its own
+      // ceiling.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+        cfcEnforcementMode: "enforce-strict",
+        cfcFlowLabels: "persist",
+      });
+      try {
+        await seedSecretSource(runtime, "writer-fit-seam-aimed-source");
+
+        const aim = runtime.edit();
+        const resultCell = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-aimed",
+          seamResultSchema,
+          aim,
+        );
+        const bystander = runtime.getCell<{ note?: string }>(
+          signer.did(),
+          "writer-fit-seam-aimed-bystander",
+          undefined,
+          aim,
+        );
+        bystander.set({ note: "public" });
+        const bystanderId = bystander.getAsNormalizedFullLink().id;
+        resultCell.withTx(aim).setMetaRaw(
+          "argument",
+          bystander.getAsWriteRedirectLink({ base: resultCell }),
+          rawMetaWriteAuthorization,
+        );
+        expect((await aim.commit()).ok).toBeDefined();
+
+        const tx = runtime.edit();
+        const source = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-aimed-source",
+          undefined,
+          tx,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const reused = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-aimed",
+          seamResultSchema,
+          tx,
+        );
+        await runtime.setup(
+          tx,
+          seamPattern,
+          { title: `${raw.secret}!` },
+          reused,
+        );
+        tx.prepareCfc();
+        const committed = await tx.commit();
+        expect(committed.error?.message).toContain(
+          "writer-fit confidentiality misfit",
+        );
+        expect(
+          replicaEntries(storageManager, bystanderId)
+            .filter((entry) => entry.origin === "declared"),
+        ).toEqual([]);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
+
+    it("commits a piece instantiation whose transaction read labeled data", async () => {
+      // The end-to-end shape the hand-recorded marker above stands in for: a
+      // real `setup` writing a real piece's argument document. The piece is
+      // set up twice — first with nothing labeled in the transaction, then
+      // inside one that read a labeled document — so the second setup
+      // finds an argument document that already exists and declares
+      // nothing, which a create-only route would refuse.
+
+      const storageManager = StorageManager.emulate({ as: signer });
+      const runtime = new Runtime({
+        apiUrl: new URL("https://example.com"),
+        storageManager,
+        cfcEnforcementMode: "enforce-strict",
+        cfcFlowLabels: "persist",
+      });
+      try {
+        await seedSecretSource(runtime, "writer-fit-seam-piece-source");
+
+        const tx = runtime.edit();
+        const resultCell = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-piece",
+          seamResultSchema,
+          tx,
+        );
+        await runtime.setup(
+          tx,
+          seamPattern,
+          { title: "public" },
+          resultCell,
+        );
+        const argumentId = parseLink(
+          resultCell.getMetaRaw("argument"),
+          resultCell,
+        )!.id!;
+        tx.prepareCfc();
+        expect((await tx.commit()).ok).toBeDefined();
+
+        const labeled = runtime.edit();
+        const source = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-piece-source",
+          undefined,
+          labeled,
+        );
+        const raw = source.getRaw() as { secret?: string };
+        const reused = runtime.getCell(
+          signer.did(),
+          "writer-fit-seam-piece",
+          seamResultSchema,
+          labeled,
+        );
+        await runtime.setup(
+          labeled,
+          seamPattern,
+          { title: `${raw.secret}!` },
+          reused,
+        );
+        labeled.prepareCfc();
+        expect((await labeled.commit()).ok).toBeDefined();
+
+        const entries = replicaEntries(storageManager, argumentId);
+        expect(entries.some((entry) =>
+          entry.origin === "declared" &&
+          (entry.label.confidentiality ?? []).includes("secret")
+        )).toBe(true);
+      } finally {
+        await runtime.dispose();
+        await storageManager.close();
+      }
+    });
   });
 });

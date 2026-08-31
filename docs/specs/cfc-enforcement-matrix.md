@@ -292,6 +292,100 @@ The strict-only delta is:
   label at their shared logical path past what that field declares. The
   direction is over-taint, so reads stay protected; giving the envelope seam
   a path space of its own is what removes the collision.
+
+- **Piece-substrate declaration (§8.12.5 route 2) — implemented.** The
+  runtime writes a small set of documents while it sets a piece up: the
+  piece's argument document, and the internal documents and streams its
+  result projects to. It fills them with whatever the setup transaction
+  read. An author cannot know which atoms a given transaction will carry, so
+  a declaration written into a schema either misses them or over-declares
+  every instance of the pattern. The transaction declares the policy
+  instead, which is §8.12.5's route 2: the write that puts the join on a
+  path also declares, in that same transaction, a policy covering it. What
+  lands is the ceiling that resolved at the path plus exactly the clauses
+  that had nowhere to go, as an ordinary `declared` entry, so the fit test
+  passes and the store's promise becomes the audience of what it holds.
+
+  Declaring is what makes the route sound where an exemption would not be.
+  The atoms persist as store policy, so readers of the substrate consume
+  them, and go on consuming them after an overwrite clears the derived stamp
+  that carried them. The cost is the ratchet §8.12.2 asks for: a substrate
+  document that once held data derived from a labeled read keeps that clause
+  after the read stops. The direction is over-taint.
+
+  The route is the strict rung's, like the reject it replaces. Every rung
+  below keeps its `writer-fit(persist-and-flag)` diagnostic, which is the
+  rollout signal, and stores no declared policy it could never take back —
+  so `enforce-explicit` keeps the shipped posture bit-for-bit here too. At
+  strict, a declaration records a `writer-fit(piece-substrate-declared)`
+  diagnostic naming the document, the path, and the clauses added: a
+  permanent change to a store's policy leaves a trace even at the rung that
+  admits it.
+
+  Five conditions bound it:
+
+  - **The marker.** Only a document the runner named through its
+    piece-substrate write-policy input is reached, and only where that
+    marker's address names the whole document rather than a path inside
+    one. Every other document keeps the ceiling it resolves to, and a
+    misfit there is refused as before, with the §8.12.5 remedy in the
+    reason. The runner records only addresses it MINTS from the piece's
+    result cell: the argument address it would derive, and each derived
+    internal cell's. It reads the argument address back out of the result
+    cell's stored meta on every setup after the first, and where that
+    stored link names some other document — a nested piece's argument lives
+    in its HOST's document — no marker is recorded, so that document keeps
+    its own ceiling. Within a marked document the route reaches every path
+    that transaction writes, not only the paths setup wrote.
+  - **No schema declaration at that path.** A schema that declares at the
+    written path owns the store's policy there. Widening it from the join
+    would make the walk's own re-mint non-monotone on the next write, and
+    would brick the path under the declared-monotonicity gate. That store's
+    route 2 is the author's, in the schema. The reverse order stays
+    reachable, and is §8.12.1 rather than a defect of the route: a pattern
+    that later adds an `ifc` at a path the route already declared has to
+    name what the store already promises, or the monotonicity gate rejects
+    the write for dropping a stored clause. The gate ships `off`, so this is
+    latent until it is turned on.
+  - **No poisoned measurement.** The ungrantable read-failed marker is
+    outside every ceiling, so it is outside what the route may declare: a
+    measurement the runtime could not take proves nothing about the
+    audience, and declaring it would write a clause no reader can satisfy.
+  - **No foreign container clause.** A `Space` clause is honored by a
+    replica set rather than by a reader check — §4.9.3 resolves it against
+    that space's ACL, the document that also decides who holds the bytes —
+    so a store in this space cannot keep a promise made to another space's
+    readers. That is why residency admits only the target's own space
+    clause, and the route declares no `Space` clause naming another.
+  - **Growth only.** Within the walk, the ceiling the declaration starts
+    from resolves over the entries that walk is about to persist,
+    carried-forward stored declared entries among them, so a later
+    transaction carrying a wider join adds its clauses to what the path
+    already declared rather than replacing them. The entry coalesces with
+    the carried-forward stored entry rather than standing in for it. Adding
+    clauses is the restricting direction, so the monotonicity gate that runs
+    earlier in the same walk cannot be contradicted by what this route
+    pushes. Growth is also what reaches a piece whose substrate was written
+    before any labeled read entered a transaction writing it: that substrate
+    declares nothing, and the write that first carries a join is the one
+    that declares it.
+
+  What the route does NOT reach is the piece's running graph. A lift or
+  handler writing in a later transaction records no setup marker, so its
+  target — commonly a `computed:` document — measures against its own
+  ceiling and a misfit there still refuses. Under strict that turns "the
+  piece will not start" into "the piece starts and drops those writes",
+  which is progress on the setup seam and not a working strict rung.
+
+  Implementation in
+  [prepare.ts](../../packages/runner/src/cfc/prepare.ts)
+  (`prepareBoundaryCommit` writer-fit) and
+  [runner.ts](../../packages/runner/src/runner.ts) (`recordPieceSubstrate`),
+  asserted condition by condition in
+  [cfc-writer-fit.test.ts](../../packages/runner/test/cfc-writer-fit.test.ts),
+  and against the cross-space representation transform in
+  [cfc-label-metadata-protection.test.ts](../../packages/runner/test/cfc-label-metadata-protection.test.ts).
+
 - **Future strict-only fail-closed cases.** Any new check that wants a
   persist-and-flag grace under explicit puts its reject at the strict level,
   same shape.
