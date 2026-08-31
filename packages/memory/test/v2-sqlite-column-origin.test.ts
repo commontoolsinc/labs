@@ -161,6 +161,13 @@ function origins(
   }
 }
 
+//
+// Column-origin soundness
+//
+// What the bound library reports for a query, once the picking rule above
+// has chosen a file.
+//
+
 Deno.test({
   name: "column-origin metadata is reachable in this deployment",
   sanitizeResources: false,

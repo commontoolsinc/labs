@@ -162,6 +162,10 @@ Deno.test("throws when a declaration closes more braces than it opens", () => {
 // finds nothing to remove and rewrites nothing.
 //
 
+//
+// The command over the checked-in libraries
+//
+
 Deno.test("runCli --check passes on the stripped libraries", async () => {
   assertEquals(await runCli(["--check"]), 0);
 });
