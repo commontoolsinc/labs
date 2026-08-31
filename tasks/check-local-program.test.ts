@@ -109,6 +109,7 @@ Deno.test("namesResolverInCode ignores a string literal", () => {
 Deno.test("namesResolverInCode reads past a comment marker inside a string", () => {
   // A scan that blanked a line from its first `//` would stop reading here at
   // the URL and never reach the construction that follows it.
+
   assert(
     namesResolverInCode(
       `const docs = "https://example.com/x"; const r = new FileSystemProgramResolver(m);`,
@@ -141,6 +142,7 @@ Deno.test("namesResolverInCode parses markup in a .tsx file", () => {
 Deno.test("namesResolverInCode ignores a same-named property of another object", () => {
   // A property access still names the resolver, so it counts; a property whose
   // name merely resembles it does not.
+
   assertFalse(
     namesResolverInCode(
       `const x = { fileSystemProgramResolver: 1 };`,

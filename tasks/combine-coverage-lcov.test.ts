@@ -34,6 +34,7 @@ Deno.test("normalizeSourcePath handles a dotted repository name", () => {
 Deno.test("normalizeSourcePath anchors on the checkout, not an earlier repeat", () => {
   // A self-hosted runner whose work directory itself repeats the repo name must
   // still anchor on the deepest doubled segment (the checkout root).
+
   assertEquals(
     normalizeSourcePath(
       "/srv/labs/labs/_work/labs/labs/scripts/build.ts",
@@ -63,6 +64,7 @@ Deno.test("normalizeSourcePath leaves synthetic pattern paths unchanged", () => 
 Deno.test("mergeLcovReports sums line coverage for a file seen in two jobs", () => {
   // The two jobs reach the file under different runner checkout roots and
   // include the function/branch records deno emits, which the merge drops.
+
   const jobA = [
     "SF:/home/runner/work/labs/labs/packages/a/mod.ts",
     "FN:1,add",

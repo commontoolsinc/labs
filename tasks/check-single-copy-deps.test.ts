@@ -73,6 +73,7 @@ Deno.test("findProblems reports a package resolved twice", () => {
   // The shape of the bug this check exists for: rolling the arizeai packages
   // alone leaves the AI SDK resolved twice, once for toolshed and once for
   // @ai-sdk/otel.
+
   const lock = singleCopyLock();
   lock.npm["ai@5.0.27_zod@3.25.76"] = {};
 
