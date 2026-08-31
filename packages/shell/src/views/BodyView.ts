@@ -10,6 +10,8 @@ import "../components/OmniLayout.ts";
 import { rendererVDOMSchema } from "@commonfabric/runner/schemas";
 import type { JSONSchema } from "@commonfabric/runner/shared";
 import { CellHandle, PageHandle, VNode } from "@commonfabric/runtime-client";
+import type { DID } from "@commonfabric/identity";
+import { openPieceMenu } from "@commonfabric/ui";
 
 type SubPages = {
   sidebarUI?: VNode;
@@ -134,6 +136,10 @@ export class XBodyView extends BaseView {
   @property({ attribute: false })
   accessor rt: RuntimeInternals | undefined = undefined;
 
+  /** The space being viewed, which the piece menu addresses. */
+  @property({ attribute: false })
+  accessor space: DID | undefined = undefined;
+
   @property({ attribute: false })
   accessor activePattern: PageHandle | undefined = undefined;
 
@@ -169,10 +175,33 @@ export class XBodyView extends BaseView {
     args: () => [this.activePattern, this.embedded],
   });
 
+  /**
+   * Open the piece menu over the surface a piece failed to load into. A right
+   * click reaches `cf-render` everywhere else, and there is no `cf-render`
+   * here, so this stands in for it: the menu is handed the space with no
+   * piece, and offers what it can reach without one.
+   */
+  #onLoadErrorContextMenu = (event: MouseEvent) => {
+    const space = this.space;
+    if (!space || !this.rt) return;
+    event.preventDefault();
+    openPieceMenu({
+      space,
+      runtime: this.rt.runtime(),
+      x: event.clientX,
+      y: event.clientY,
+      themeFrom: this,
+    });
+  };
+
   override render() {
     const mainContent = this.loadError
       ? html`
-        <div slot="main" class="load-error">
+        <div
+          slot="main"
+          class="load-error"
+          @contextmenu="${this.#onLoadErrorContextMenu}"
+        >
           <cf-alert status="error">
             <span slot="icon" class="load-error-icon" aria-hidden="true">
               !
