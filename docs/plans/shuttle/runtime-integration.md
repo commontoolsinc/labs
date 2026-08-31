@@ -185,8 +185,9 @@ the literal-args array becomes a parameter.
 Each of these is small and lands on its own; together they are what decision
 9's "factor the seam in `cli`, not reimplement in shuttle" means concretely.
 
-1. **Export entries.** `@commonfabric/cli` exports only `.` → `mod.ts`. A
-   sibling package needs real entries for the lib modules it calls.
+1. **Export entries.** Done. `@commonfabric/cli` carries an entry for each
+   lib module a sibling calls, beside `.` → `mod.ts`, whose import runs CLI
+   startup.
 2. **Thread `deps.loadPieces` through the hardcoded functions** —
    `setCellValue` first; `set` is a v1 verb and today cannot share a
    connection.
