@@ -130,7 +130,7 @@ describe("main command", () => {
     );
     const normalizedHelp = help.replaceAll(/\s+/g, " ");
     expect(normalizedHelp).toContain(
-      `The callable name separates piece-call options from the callable's arguments. Arguments after the callable use the same parser as cf exec. Use --json with an optional inline value for complete JSON input; bare --json reads JSON from stdin. A single positional JSON value or "-" stdin sentinel is also accepted. Use --help --json for machine-readable schema help. Put schema-derived flags after --. Handlers interpret piped input when no input argument is present.`,
+      `The callable name opens the callable's section and "--" closes it: piece-call options come before the name, the callable's own arguments after it, and the read options (--select, --schema, --filter) past the marker. Arguments in the section use the same parser as cf exec. Use --json with an optional inline value for complete JSON input; bare --json reads JSON from stdin. A single positional JSON value or "-" stdin sentinel is also accepted. Use --help --json for machine-readable schema help. Handlers interpret piped input when no input argument is present.`,
     );
     expect(code).toBe(0);
 
@@ -147,7 +147,8 @@ describe("main command", () => {
     await call.parse(["search", '{"query":"tea"}']);
     await call.parse(["search", "--help"]);
     await call.parse(["search", "-"]);
-    await call.parse(["search", "--", "--json"]);
+    await call.parse(["search", "--query", "milk"]);
+    await call.parse(["search", "--", "--select", "id"]);
     expect(parsedCalls).toEqual([
       {
         positionals: ["search", '{"query":"tea"}'],
@@ -155,7 +156,14 @@ describe("main command", () => {
       },
       { positionals: ["search", "--help"], literalArguments: [] },
       { positionals: ["search", "-"], literalArguments: [] },
-      { positionals: ["search"], literalArguments: ["--json"] },
+      // The verb opened the section, so its own flags are positionals of
+      // this command and the marker sets nothing aside.
+      {
+        positionals: ["search", "--query", "milk"],
+        literalArguments: [],
+      },
+      // And the marker is what hands the read step its words.
+      { positionals: ["search"], literalArguments: ["--select", "id"] },
     ]);
   });
 
@@ -195,7 +203,11 @@ describe("main command", () => {
     expect(sessions).toEqual(["from-flag", "from-env", undefined]);
   });
 
-  it("rejects multiple inline inputs to piece call", async () => {
+  it("refuses a projection before the verb on piece call", async () => {
+    // Refused on the argv alone, before a piece is resolved or a request
+    // sent: the api-url below is never reached. Two inline payloads are the
+    // other shape, and they are NOT refused here — they belong to the
+    // callable's section, so its own parser is what names them.
     const { main } = await import(
       "../commands/main.ts?piece-call-inline-validation-test"
     );
@@ -210,13 +222,12 @@ describe("main command", () => {
         "common-knowledge",
         "--piece",
         "abcdefghijklmnopqrstuvwxyz",
+        "--select",
+        "id",
         "search",
         '{"query":"tea"}',
-        '{"limit":5}',
       ]),
-    ).rejects.toThrow(
-      'Use a single inline JSON argument or "--" before schema-derived flags.',
-    );
+    ).rejects.toThrow(/--select shapes the result/);
   });
 
   it("mounts the data commands at top level and nowhere under piece", async () => {

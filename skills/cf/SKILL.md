@@ -158,13 +158,25 @@ command that returns data carries all three: `cf get`, `cf wish`, `cf call`,
 `cf exec`. `--select` takes a field list, `--schema` a full JSON Schema, and
 naming both on one line is refused rather than resolved.
 
-Their position depends on whether a callable's own vocabulary is on the line.
-`cf get` and `cf wish` have none, so the flags sit anywhere. `cf call` and
-`cf exec` do, so the flags precede the name that opens that section — the verb,
-or the mounted file — and everything after it belongs to the callable. `--` is
-what ends the callable's section, which is why it appears on those two and is
-**refused** on `cf get`, `cf set` and `cf wish`: there is no section to close,
-and the words after it would be set aside unread.
+They come after the thing they shape, on all four. Whether a marker stands in
+between depends on whether a callable's own vocabulary does. `cf get` and
+`cf wish` have none, so the flags follow the target directly. `cf call` and
+`cf exec` have one — the verb, or the mounted file, opens the callable's section
+— so `--` closes that section and the read options follow it:
+
+```text
+cf get  <addr> [path]           --select …
+cf wish <target>                --select …
+cf call <target> <verb> <input> -- --select …
+cf exec <mountedFile> <input>   -- --select …
+```
+
+A projection written before the verb is **refused**, and so is one written
+inside the callable's section; each refusal names the section the flag belongs
+to and prints the corrected line. `--` is **refused** on `cf get`, `cf set` and
+`cf wish`: there is no section to close, and the words after it would be set
+aside unread. `--help` past the marker still reaches the callable and prints
+that verb's page.
 
 **Resolving a wish writes.** `cf wish` commits a cell to the space as part of
 resolving the query, so it is not a free read and not safe to issue
@@ -188,7 +200,7 @@ speculatively against a space you do not intend to touch.
 | Step + get         | `deno task cf get --piece ID fieldPath --step ...`                                                                           |
 | Set field          | `echo '{"data":...}' \| deno task cf set --piece ID path ...`                                                                |
 | Call handler       | `deno task cf call --piece ID handlerName ...`                                                                               |
-| Shape a result     | `deno task cf call --piece ID --select topic.title addTopic ...`                                                             |
+| Shape a result     | `deno task cf call --piece ID addTopic ... -- --select topic.title`                                                          |
 | List verbs         | `deno task cf piece verbs --piece ID --json ...` (`--all` adds wrapper/deprecated; `hidden` counts them)                     |
 | Trigger recompute  | `deno task cf piece step --piece ID ...`                                                                                     |
 | Mint a session     | `export CF_INVOCATION_SESSION="$(deno task cf invocation-session new)"` (once per run; ids deduplicate only within it)       |
@@ -387,13 +399,13 @@ passed over too, and the read reports the reference itself. A JSON `--schema`
 states a shape of its own rather than naming the source's fields, and is not
 held to that vocabulary.
 
-`cf call` takes the same three flags, before the callable name, with the same
-grammar, the same `--select`/`--schema` conflict, and the same error messages.
-They shape the result of the call — a handler's `result` inside the Invocation
-JSON, or a tool's JSON on stdout:
+`cf call` takes the same three flags, past the `--` that closes the callable's
+section, with the same grammar, the same `--select`/`--schema` conflict, and the
+same error messages. They shape the result of the call — a handler's `result`
+inside the Invocation JSON, or a tool's JSON on stdout:
 
 ```bash
-deno task cf call --piece ID --select topic.title addTopic '{"title":"Ship it"}'
+deno task cf call --piece ID addTopic '{"title":"Ship it"}' -- --select topic.title
 ```
 
 A selection shapes a result that already exists; it does not narrow what the
@@ -413,22 +425,22 @@ were handed — but not with `--filter`, which moves the positions a link names.
 `wish` and `exec` take the same three flags too, so all four arrivals shape
 their output the one way. `wish` writes them beside its target and shapes the
 cell the query resolved to; a query that matched nothing stays an ordinary empty
-result rather than becoming an error. `exec` writes them **before the mounted
-file**, because everything after it belongs to the callable's own schema-derived
-interface — which also means a callable run through its own shebang cannot carry
-them. `exec` settles a handler under an invocation of its own and prints the
-same Invocation JSON `cf call` does; a tool's result stays on stdout with its
-result cell's address on stderr, written as an address argument `--piece` takes
-unchanged.
+result rather than becoming an error. `exec` writes them **past the marker that
+closes the section the mounted file opened**, since everything between the two
+belongs to the callable's own schema-derived interface — which also means a
+callable run through its own shebang cannot carry them. `exec` settles a handler
+under an invocation of its own and prints the same Invocation JSON `cf call`
+does; a tool's result stays on stdout with its result cell's address on stderr,
+written as an address argument `--piece` takes unchanged.
 
 ```bash
 deno task cf wish '#profile' -i ./claude.key --select name,avatar
-deno task cf exec --select id,title /tmp/cf/…/result/search.tool --query milk
+deno task cf exec /tmp/cf/…/result/search.tool --query milk -- --select id,title
 ```
 
 For `cf call`, options before the callable name configure `cf call`. Arguments
-after the callable name configure the invoked handler or tool. The JSON forms
-match `cf exec`:
+after the callable name configure the invoked handler or tool, until `--` closes
+that section. The JSON forms match `cf exec`:
 
 ```bash
 # Complete input as an inline JSON value
@@ -441,14 +453,14 @@ printf '%s' '{"query":"milk"}' |
 # Machine-readable callable schema
 deno task cf call --piece ID search --help --json
 
-# Schema-derived input flags
-deno task cf call --piece ID search -- --query milk
+# Schema-derived input flags, in the section the callable name opened
+deno task cf call --piece ID search --query milk
 ```
 
 A single positional JSON value after the callable is also accepted. Use
-`-- --json-file <path>` to read JSON from a file. Handler confirmations move to
-stderr when JSON input is selected, so stdout remains available for JSON tool
-results. Errors always go to stderr.
+`--json-file <path>`, in the same section, to read JSON from a file. Handler
+confirmations move to stderr when JSON input is selected, so stdout remains
+available for JSON tool results. Errors always go to stderr.
 
 ## Gotcha: Always `step` After `set` or `call`
 

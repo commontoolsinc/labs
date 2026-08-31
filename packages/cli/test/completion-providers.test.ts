@@ -688,8 +688,10 @@ Deno.test("live candidates: a fabric slot without context degrades to empty", as
         // The projection guards, which answer before any fabric is reached: a
         // call's projection is a verb's result rather than the piece's root,
         // and a `--schema` word opening with `@` or `{` is a file or a schema.
-        "cf call --piece x --select ",
-        "cf exec /tmp/x --select ",
+        // Written past the marker, which is the one position the grammar
+        // takes them in.
+        "cf call --piece x addItem -- --select ",
+        "cf exec /tmp/x -- --select ",
         "cf get --piece x --schema @",
         "cf get --piece x --schema {",
         "cf piece get-label --piece x ",

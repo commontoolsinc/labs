@@ -227,41 +227,43 @@ describe("JSON command contracts", () => {
 
 describe("call JSON arguments", () => {
   it("passes explicit JSON input through like cf exec", () => {
-    expect(pieceCallRawArgs(["--json"], [])).toEqual(["--json"]);
-    expect(pieceCallRawArgs(["--json", '{"query":"milk"}'], [])).toEqual([
+    expect(pieceCallRawArgs(["--json"])).toEqual(["--json"]);
+    expect(pieceCallRawArgs(["--json", '{"query":"milk"}'])).toEqual([
       "--json",
       '{"query":"milk"}',
     ]);
   });
 
-  it("retains positional JSON and delimited schema flags", () => {
-    expect(pieceCallRawArgs(['{"query":"milk"}'], [])).toEqual([
+  it("retains positional JSON and the schema-derived flags beside it", () => {
+    expect(pieceCallRawArgs(['{"query":"milk"}'])).toEqual([
       "--json",
       '{"query":"milk"}',
     ]);
-    expect(pieceCallRawArgs([], ["--query", "milk"])).toEqual([
+    // The verb opened the section, so its flags stand there with no marker
+    // between them and the name.
+    expect(pieceCallRawArgs(["--query", "milk"])).toEqual([
       "--query",
       "milk",
     ]);
   });
 
-  it("rejects callable arguments on both sides of the delimiter", () => {
-    expect(() => pieceCallRawArgs(["--json"], ["--query", "milk"])).toThrow(
-      'Callable arguments cannot appear on both sides of "--".',
-    );
-  });
-
-  it("reports mixed callable argument modes as a validation error", async () => {
+  it("reports a verb's own flag past the marker as a validation error", async () => {
+    // The spelling this grammar replaces, and the one every caller migrating
+    // writes first. The refusal prints the line that works rather than
+    // reporting an unknown name.
     const { code, stdout, stderr } = await cf(
-      "call --identity ./missing.key --api-url http://127.0.0.1:1 --space test --piece example search --json -- --query milk",
+      "call --identity ./missing.key --api-url http://127.0.0.1:1 --space test --piece example search -- --query milk",
     );
 
     expect(code).toBe(2);
     expect(stdout).toEqual([]);
-    expect(stripAnsi(stderr.join("\n"))).toContain(
-      'Callable arguments cannot appear on both sides of "--".',
+    const errors = stripAnsi(stderr.join("\n"));
+    expect(errors).toContain('"--query" is not a read option');
+    expect(errors).toContain(
+      "write:    cf call --identity ./missing.key --api-url " +
+        "http://127.0.0.1:1 --space test --piece example search --query milk",
     );
-    expect(stripAnsi(stderr.join("\n"))).not.toContain("pieceCallRawArgs");
+    expect(errors).not.toContain("pieceCallRawArgs");
   });
 
   it("writes watch status to stderr in JSON mode", () => {

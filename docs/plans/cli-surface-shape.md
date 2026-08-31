@@ -31,7 +31,7 @@ have landed.
 | --- | --- |
 | 8 — `CF_SPACE` is ambient, and a write names the space it wrote to | on main |
 | 9 — a reference takes a space by name and a piece by slug, positionally | not started; lands with 11, not alone |
-| 10 — the verb opens the callable's section and `--` closes it | not started; 6b has landed, so nothing gates it |
+| 10 — the verb opens the callable's section and `--` closes it | on main |
 | 11 — `--url` decomposes into the transport it names and the reference it carries | not started; lands with 9 |
 
 ## What the surface is for
@@ -74,11 +74,6 @@ The `--piece` case is not cosmetic. Believing the target had to be a piece is
 what made a verb's receipt look like it needed purpose-built read machinery,
 when it is an ordinary cell that any read already handles.
 
-**One grammar, two spellings.** `cf exec` writes a callable's arguments
-directly after the mounted file that names it. `cf call` requires `--` before
-the same words in the same position. The two commands invoke a callable the same
-way and disagree about how a caller says so.
-
 **One word, two jobs — twice.** `piece inspect` examines a running piece, while
 `cf inspect` reads the database offline and has its own `piece` subcommand.
 Separately, `piece view` prints an ASCII rendering of a piece while `view` is a
@@ -86,10 +81,10 @@ pager for source files. `piece map` and `cf inspect graph` both draw the graph
 of entities and their connections — one live, one offline.
 
 **Two commands, overlapping but not equivalent.** `piece apply` validates a
-whole input against `argumentSchema` and re-executes the pattern with it; `piece
-set` writes at one path. Both target the arguments cell, and the overlap invites
-merging them, but they are not the same operation — which is why any merge
-belongs in the last step rather than among the renames.
+whole input against `argumentSchema` and re-executes the pattern with it;
+`cf set` writes at one path. Both target the arguments cell, and the overlap
+invites merging them, but they are not the same operation — which is why any
+merge belongs in the last step rather than among the renames.
 
 ### One flag, two syntaxes
 
@@ -248,13 +243,12 @@ above is prescriptive on this point: `<read opts>` is a position, not an
 illustration, and a projection written before the verb is refused rather than
 accepted quietly.
 
-`cf call` places them before the callable name today, because everything
-after that name belongs to the callable's own schema-derived parser. So the one
-position the layout allows is the one position the command rejects, a caller who
-writes them where the layout shows them gets an error about a rule they did not
-break, and the same three flags sit in a different place on `call` than on
-`get`. That is the layout's own constraint going unmet, and closing it is the
-work below rather than a new proposal.
+`cf call` reads them past the `--` that closes the callable's section, which
+is the position the layout names: everything between the verb and the marker
+belongs to the callable's own schema-derived parser, and the read options
+follow. A projection written before the verb is refused rather than accepted
+quietly, so the three flags sit in the same relative place on `call` as on
+`get` — after the thing they shape.
 
 ### What names a target today
 
@@ -375,12 +369,11 @@ cf exec <mountedFile> <verb input> -- <read opts>
 
 One marker at most, and it appears only on a call that asks for a projection.
 
-`cf exec` already reads this way — its arguments are written directly after the
-mounted file, with nothing between. `cf call` requires a marker for the same
-words in the same position, so the two commands spell one grammar two ways. This
-settles that disagreement in the direction the sibling already went, and it is
-the smaller change of the two: what the callable's section needs is not a new
-boundary at its start but a way out at its end.
+`cf exec` already read this way — its arguments written directly after the
+mounted file, with nothing between — so `call` was brought to the sibling's
+spelling rather than a third one being invented. It is the smaller change of
+the two: what the callable's section needs is not a new boundary at its start
+but a way out at its end.
 
 **This is one rule across every command that reads.** Six carry the read
 options, and they divide by whether a callable's vocabulary stands between the
@@ -399,11 +392,10 @@ The read options come after the thing they shape in all four, and the marker
 appears exactly where something else owns flags in between. That is one rule a
 caller derives rather than two they memorize.
 
-The documentation already writes it this way wherever the grammar allows.
-Every `get` and `wish` example puts the read options last; every `call` and
-`exec` example puts them first, which is the only position those two accept.
-Nobody chose the split — the grammar imposed it — and closing it converges the
-surface rather than giving `call` a spelling of its own.
+Every example in the documentation writes it this way, on all four commands.
+The split that used to run through them was imposed by the grammar rather than
+chosen, and closing it converged the surface rather than giving `call` a
+spelling of its own.
 
 **Parsing what follows the marker needs nothing new.** The tokens past it are
 the read options and only those, so they parse against a command carrying just
@@ -663,17 +655,17 @@ the canonical reference's structure is right and only its vocabulary is
 missing. That assumption is worth testing before 9 and 11 are built, because a
 resolution layer would make both of them smaller — or unnecessary.
 
-The sweep is bounded and enumerable: twelve files across `docs/`, `skills/`,
-`packages/cli/README.md`, and the CLI's own tests and integration scripts teach
-the old marker. Two of them are the verb session documents, whose commands
-`check-verb-session-sync` holds to what the demo script runs — so those change
-in the same commit as the script, or the gate fails.
+The sweep step 10 carried ran to twenty-one files across `docs/`, `skills/`,
+`packages/cli/README.md`, and the CLI's own tests and integration scripts — the
+count is worth recording because the estimate written before it was twelve, and
+`git grep -E` reads `\b` as a literal rather than a word boundary, so a pattern
+written that way finds nothing and says so silently. Two of the twenty-one are
+the verb session documents, whose commands `check-verb-session-sync` holds to
+what the demo script runs, so those changed in the same commit as the script.
 
-**The trailing form is taught throughout**, in the same pass as step 10. The
-read options go after the thing they shape on every command that has them, which
-is what `get` and `wish` already show and what `call` and `exec` gain. Their
-leading position stays legal where nothing is ambiguous; the documentation stops
-using it.
+**The trailing form is taught throughout.** The read options go after the thing
+they shape on every command that has them, which is what `get` and `wish`
+already showed and what `call` and `exec` gained.
 
 **Each step carries its own documentation.** `--input`, `--piece`, and
 `cf get` appear across the tutorial, `packages/cli/README.md`, and the
@@ -727,9 +719,8 @@ preserve that.
 **`piece link` stays.** It writes a link with reactive-wiring meaning that a
 general value write does not express.
 
-**That the position which works everywhere today stops working.** The read
-options may precede the positional on all six commands now. Afterwards a
-projection before the verb is refused, so the one spelling a caller could carry
-between commands is the one being taken away. It is replaced by a spelling that
-works on all six, which is the trade, and it is worth stating rather than
-discovering.
+**That the position which once worked everywhere stopped working.** The read
+options could precede the positional on all six commands. A projection before
+the verb is now refused, so the one spelling a caller could carry between
+commands was taken away and replaced by a spelling that works on all six. That
+was the trade, and it is recorded rather than left to be discovered.

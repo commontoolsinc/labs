@@ -64,9 +64,10 @@ export const NO_CANDIDATES = new Map<string, string>([
   // Words the caller is coining or composing.
   ["acl set:capability", "a capability string, composed rather than chosen"],
   ["piece search:query", "a search query"],
-  // Words that belong to a callable rather than to the CLI. Item 4 of
-  // docs/plans/cli-completion-coverage.md builds the candidates; which slot
-  // receives them waits on step 10 of docs/plans/cli-surface-shape.md.
+  // Words that belong to a callable rather than to the CLI: the verb opens the
+  // callable's section, so its own vocabulary fills this positional. Item 4 of
+  // docs/plans/cli-completion-coverage.md builds the candidates and is what
+  // will route them here.
   ["call:tail", "the callable's own vocabulary"],
   ["exec:tail", "the same"],
 ]);
@@ -166,9 +167,9 @@ export const NO_OPTION_CANDIDATES = new Map<string, string>([
   ["inspect timeline:scope", "the same"],
   ["inspect value-at:scope", "the same"],
   // A projection into a VERB's result rather than into the value at a target,
-  // so its vocabulary is the verb's `outputSchema`. Item 6 of
-  // docs/plans/cli-completion-coverage.md builds it, and waits on step 10 of
-  // docs/plans/cli-surface-shape.md for the verb to precede the cursor.
+  // so its vocabulary is the verb's `outputSchema`. Written past the `--` that
+  // closes the callable's section, so the verb already precedes the cursor.
+  // Item 6 of docs/plans/cli-completion-coverage.md is what builds it.
   ["call:select", "the verb's own result shape"],
   ["call:schema", "the same"],
   ["exec:select", "the same"],

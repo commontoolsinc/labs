@@ -37,7 +37,13 @@ import {
   runSurvey,
 } from "../lib/bulk.ts";
 import { addressArgument, VerbInputValidationError } from "../lib/callable.ts";
+import { listFlags } from "../lib/refusal.ts";
 import { refuseSectionMarker } from "../lib/section-marker.ts";
+import {
+  parseReadSection,
+  readSectionAsksVerbHelp,
+  refuseProjectionBeforeSection,
+} from "../lib/verb-section.ts";
 import type {
   InvocationIdentity,
   InvocationOutcome,
@@ -849,76 +855,42 @@ export function exitPieceCallFailure(
   return exit(1);
 }
 
-export function pieceCallRawArgs(
-  tail: string[],
-  literalArgs: string[],
-): string[] {
-  if (literalArgs.length > 0) {
-    // Schema-derived flags after `--`. A payload token before `--` (inline
-    // JSON or the `-` stdin sentinel) would be silently dropped here, so
-    // reject the combination loudly instead — the same no-op this family of
-    // fixes is stamping out. Mirrors the `tail.length > 1` rejection below.
-    if (tail.length > 0) {
-      throw new ValidationError(
-        'Callable arguments cannot appear on both sides of "--". ' +
-          'Pass either a payload argument (inline JSON or "-" for stdin) ' +
-          'or schema-derived flags after "--", not both.',
-      );
-    }
-    return literalArgs;
-  }
-
-  if (tail.length === 0) {
-    return [];
-  }
-
-  if (tail[0] === "--help") {
-    if (tail.length === 1) {
-      return tail;
-    }
-    if (tail.length === 2 && tail[1] === "--json") {
-      return tail;
-    }
-    throw new ValidationError(
-      'Use "-- --help <value>" to set an input field named "help".',
-    );
-  }
-
-  // Explicit two-token stdin sentinels (a JSON/value flag plus "-"), forwarded
-  // to the exec layer so the friendly surface matches `cf exec` and the bare
-  // "-" form. Without this they'd hit the multi-argument rejection below.
-  if (
-    tail.length === 2 && tail[1] === "-" &&
-    (tail[0] === "--json" || tail[0] === "--json-file" ||
-      tail[0] === "--value-file")
-  ) {
-    return [tail[0], "-"];
-  }
-
-  if (tail[0] === "--json") {
+/**
+ * The callable's section, as the schema-derived parser reads it.
+ *
+ * The verb opens the section, so every word after it belongs to the callable
+ * and reaches its parser as written — its own flags, its `invoke`/`run`
+ * keyword, `--help`, and the generic input flags alike. Nothing here decides
+ * what those words mean; that is the verb's own vocabulary, and this command
+ * does not hold it.
+ *
+ * One shape is translated rather than forwarded: a lone positional payload.
+ * Inline JSON is the same argument as the flags that would replace it, so it
+ * sits in the same section, and `--json` is the spelling the parser takes it
+ * in. `-` is the conventional stdin sentinel and routes through `--json-file`
+ * so empty stdin still fails loudly. A payload written beside flags is
+ * forwarded untranslated and refused by the parser that owns both, which
+ * names the verb's vocabulary rather than this command's.
+ */
+export function pieceCallRawArgs(tail: string[]): string[] {
+  // The verb keyword is the callable's own word and stays where it was
+  // written; it is skipped here only so a payload behind it is still seen as
+  // the one positional it is.
+  const keyword = tail[0] === "invoke" || tail[0] === "run" ? 1 : 0;
+  const payload = tail.slice(keyword);
+  if (payload.length !== 1 || payload[0].startsWith("--")) {
     return tail;
   }
-
-  if (tail.length > 1) {
-    throw new ValidationError(
-      'Use a single inline JSON argument or "--" before schema-derived flags.',
-    );
-  }
-
-  // "-" is the conventional stdin sentinel; route it through the existing
-  // --json-file stdin path so empty stdin still fails loudly.
-  if (tail[0] === "-") {
-    return ["--json-file", "-"];
-  }
-
-  return ["--json", tail[0]];
+  return [
+    ...tail.slice(0, keyword),
+    ...(payload[0] === "-" ? ["--json-file", "-"] : ["--json", payload[0]]),
+  ];
 }
 
 export function pieceCallInvocation(
   tail: string[],
-  literalArgs: string[],
 ): { rawArgs: string[]; jsonOutput: boolean } {
-  const rawArgs = pieceCallRawArgs(tail, literalArgs);
+  const rawArgs = pieceCallRawArgs(tail);
   const argumentOffset = rawArgs[0] === "invoke" || rawArgs[0] === "run"
     ? 1
     : 0;
@@ -1293,12 +1265,6 @@ export function resolveWaitControl(
     return { mode: "settle", boundSeconds: options.wait };
   }
   return { mode: "settle" };
-}
-
-/** Flag names as prose: "--a", "--a and --b", "--a, --b and --c". */
-function listFlags(flags: readonly string[]): string {
-  if (flags.length <= 1) return flags.join("");
-  return `${flags.slice(0, -1).join(", ")} and ${flags.at(-1)}`;
 }
 
 /**
@@ -1706,12 +1672,14 @@ function buildCallCommand(spelling: string): Command<any> {
     .description(
       `Invoke a callable within a piece.
 
-The callable name separates piece-call options from the callable's arguments.
-Arguments after the callable use the same parser as cf exec. Use --json with an
-optional inline value for complete JSON input; bare --json reads JSON from
-stdin. A single positional JSON value or "-" stdin sentinel is also accepted.
-Use --help --json for machine-readable schema help. Put schema-derived flags
-after --. Handlers interpret piped input when no input argument is present.
+The callable name opens the callable's section and "--" closes it: piece-call
+options come before the name, the callable's own arguments after it, and the
+read options (--select, --schema, --filter) past the marker. Arguments in the
+section use the same parser as cf exec. Use --json with an optional inline
+value for complete JSON input; bare --json reads JSON from stdin. A single
+positional JSON value or "-" stdin sentinel is also accepted. Use --help --json
+for machine-readable schema help. Handlers interpret piped input when no input
+argument is present.
 
 ADDRESS: The target can precede the callable name instead of riding --piece
 when written as a canonical reference (it begins with "/"):
@@ -1743,9 +1711,10 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
     )
     .example(
       cliText(
-        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} search -- --query milk`,
+        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} search --query milk`,
       ),
-      `Run the "search" tool using schema-derived flags after "--".`,
+      `Run the "search" tool using schema-derived flags, which the callable ` +
+        `name opens the section for.`,
     )
     .example(
       cliText(
@@ -1755,16 +1724,16 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
     )
     .example(
       cliText(
-        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} --select topic.title addTopic ` +
-          `'{"title":"Ship it"}'`,
+        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} addTopic ` +
+          `'{"title":"Ship it"}' -- --select topic.title`,
       ),
       "Return only the selected fields of the verb's result.",
     )
     .example(
       cliText(
-        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} ` +
-          `--schema '{"properties":{"topic":{"$link":true}}}' addTopic ` +
-          `'{"title":"Ship it"}'`,
+        `cf ${spelling} ${EX_ID} ${EX_COMP_PIECE} addTopic ` +
+          `'{"title":"Ship it"}' -- ` +
+          `--schema '{"properties":{"topic":{"$link":true}}}'`,
       ),
       "Return the address of what the verb returned instead of its contents.",
     )
@@ -1837,18 +1806,24 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
         "appear only where a path is backed by a different document. Handler " +
         "invocations only — a tool already reports its result cell on stderr.",
     )
+    // The three read options are declared so this page names them and a
+    // caller who writes one before the callable meets a refusal that can say
+    // where it belongs. They are READ from the words past `--`, which is the
+    // one position the grammar accepts them in; see lib/verb-section.ts.
     .option(
       "--filter <predicate:string>",
-      "Filter an array with a jq-inspired predicate",
+      'Filter an array with a jq-inspired predicate (past the "--" that ' +
+        "closes the callable's section)",
     )
     .option(
       "--select <fields:string>",
-      "Project output to comma-separated field paths",
+      'Project output to comma-separated field paths (past the "--" that ' +
+        "closes the callable's section)",
     )
     .option(
       "--schema <schema:string>",
       "Project output with an inline JSON Schema, @file, or the --select " +
-        "field list",
+        'field list (past the "--" that closes the callable\'s section)',
       // Both flags carry the one projection, so a command naming both has not
       // said which shape it wants. Refuse before the call rather than pick.
       { conflicts: ["select"] },
@@ -1873,19 +1848,44 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
       callableArg: string,
       ...tailArgs: string[]
     ) {
-      // Positional-address intake first: it is a fact about the argv alone,
-      // so a refusal here names no invocation and no phase.
-      const { piece, callableName, tail } = readCallTarget(
+      // The grammar and the positional-address intake come first, and both
+      // are facts about the argv alone: a projection written before the verb,
+      // the words past the marker, and an address standing where `--piece`
+      // would, are all settled before an invocation exists for a refusal to
+      // name a phase to retry from.
+      refuseProjectionBeforeSection(
+        spelling,
+        "the verb",
+        this.getRawArgs(),
+        options,
+      );
+      const literalArgs = this.getLiteralArgs();
+      // `-- --help` reaches the verb's own page rather than this command's,
+      // so those words rejoin the section rather than being read here.
+      const asksVerbHelp = readSectionAsksVerbHelp(literalArgs);
+      const readSection = asksVerbHelp ? {} : await parseReadSection(
+        spelling,
+        this.getRawArgs(),
+        literalArgs,
+      );
+      const { piece, callableName, tail: sectionTail } = readCallTarget(
         options,
         callableArg,
         tailArgs,
       );
+      // At the head of the section, which is where the verb's parser reads
+      // `--help`: the address intake runs first, since it may take the
+      // section's own first word as the callable name.
+      const tail = asksVerbHelp
+        ? [...literalArgs, ...sectionTail]
+        : sectionTail;
+      const readback = { ...readSection, showLinks: options.showLinks };
       const identity = resolveInvocationIdentity(
         options.invocation,
         options.invocationSession,
       );
       const invocationId = identity.id;
-      const waitControl = resolveWaitControl(options);
+      const waitControl = resolveWaitControl({ ...options, ...readback });
       let phase: InvocationPhase = "initial_sync";
       const observer = pieceCallPhaseObserver(
         !!options.verbose,
@@ -1900,7 +1900,7 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
       // RESULT does sit inside it, and does name one.
       let selection: CellSelection | undefined;
       try {
-        selection = await parsePieceCallSelection(options);
+        selection = await parsePieceCallSelection(readback);
       } catch (error) {
         // Both exits below leave without reaching the action's catch, so the
         // verbose in-flight span is closed here.
@@ -1911,10 +1911,7 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
         throw error;
       }
       try {
-        const invocation = pieceCallInvocation(
-          tail,
-          this.getLiteralArgs(),
-        );
+        const invocation = pieceCallInvocation(tail);
         const pieceConfig = parsePieceOptions({
           ...options,
           ...(piece !== undefined && { piece }),
@@ -1934,6 +1931,11 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
               helpCommandPrefix: cliCommand(
                 [...spelling.split(" "), "...", callableName],
               ),
+              // Only where the section is empty: a field before the marker
+              // leaves it non-empty, and the reading is then unambiguous.
+              ...(tail.length === 0 && literalArgs.length > 0
+                ? { emptySectionReadOptions: literalArgs }
+                : {}),
               skipReadback: waitControl.mode === "commit",
               showLinks: !!options.showLinks,
               ...(selection === undefined ? {} : { selection }),
@@ -4347,7 +4349,7 @@ export async function describePieceFromCommand(
   }
   hint(
     cliText(
-      `TIP: 'cf piece verbs --piece ${pieceConfig.piece} --json' has each verb's schemas; 'cf call --piece ${pieceConfig.piece} <verb> -- --help' documents one verb.`,
+      `TIP: 'cf piece verbs --piece ${pieceConfig.piece} --json' has each verb's schemas; 'cf call --piece ${pieceConfig.piece} <verb> --help' documents one verb.`,
     ),
   );
 }

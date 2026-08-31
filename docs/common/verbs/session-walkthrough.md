@@ -306,14 +306,15 @@ sections claiming the pattern declares nothing.
 ## 3. Ask what a verb wants
 
 ```bash
-cf call --piece board addItem -- --help
+cf call --piece board addItem --help
 ```
 
 ```text
 Usage:
-  cf call --piece board addItem -- --help
-  cf call --piece board addItem <json>
-  cf call --piece board addItem -- --title <string>
+  cf call ... addItem --help
+  cf call ... addItem <json>
+  cf call ... addItem [invoke] --title <string>
+  cf call ... addItem ... -- --select <fields>
 
 File a new root item on the board.
 
@@ -321,7 +322,7 @@ JSON input:
   Pass inline JSON as one positional argument or after `--json`.
   { title: string }
 
-Flags after `--`:
+Flags:
   --title <string>    Required. One line naming the work.
 
 Output:
@@ -425,11 +426,11 @@ uses, and escaping a literal `@` — is in
 [verbs over the CLI](over-the-cli.md#asking-a-read-for-an-address).
 
 ```bash
-EPIC=$(cf call --piece board --select 'item@' addItem -- \
-       --title "Login rewrite" | jq -r '.result.item."$link"')
+EPIC=$(cf call --piece board addItem --title "Login rewrite" \
+       -- --select 'item@' | jq -r '.result.item."$link"')
 
-cf call "$EPIC" addChild -- --title "Session cookies"
-cf call "$EPIC" recordNote -- --body "blocked on the cookie spec"
+cf call "$EPIC" addChild --title "Session cookies"
+cf call "$EPIC" recordNote --body "blocked on the cookie spec"
 cf get "$EPIC/status"
 ```
 
@@ -639,9 +640,9 @@ instead. Name a call with `--invocation`, and replaying that id hands back
 the original outcome:
 
 ```bash
-cf call --invocation note-retry "$EPIC" recordNote -- --body "first attempt"
+cf call --invocation note-retry "$EPIC" recordNote --body "first attempt"
 
-cf call --invocation note-retry "$EPIC" recordNote -- --body "a different body entirely"
+cf call --invocation note-retry "$EPIC" recordNote --body "a different body entirely"
 ```
 
 ```text
@@ -740,7 +741,7 @@ and they answer in this same shape.
 ## 8. Relate two items
 
 ```bash
-cf call --select blocked@,on@,blockedOnCount "$KID" blockOn -- --on "$CSRF"
+cf call "$KID" blockOn --on "$CSRF" -- --select blocked@,on@,blockedOnCount
 
 cf get "$EPIC" children --select @,title,blockedOn@
 ```
@@ -782,7 +783,7 @@ which positions declare references, and the same contract refuses the two
 payloads that could only ever be mistakes at one:
 
 ```bash
-cf call "$KID" blockOn -- --on "not-an-address"
+cf call "$KID" blockOn --on "not-an-address"
 
 cf call "$KID" blockOn '{"on":{"title":"a copy"}}'
 ```
