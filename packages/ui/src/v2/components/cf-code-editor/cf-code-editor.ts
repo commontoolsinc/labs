@@ -394,6 +394,10 @@ export class CFCodeEditor extends BaseElement {
   // The resolved cell behind each mentionable entry, which a reference stores
   // directly rather than by id. Populated by the same pass.
   private _resolvedPieceCells = new Map<number, CellHandle<Mentionable>>();
+  // Which resolution pass may publish its maps. The mentionable HANDLE stays
+  // identical when its contents change, so identity alone cannot stop an
+  // older pass finishing late and overwriting a newer pass's ordering.
+  private _resolveGeneration = 0;
   private _referencesUnsub: (() => void) | null = null;
   // Label text last seen for each reference key, to detect a user's edit.
   private _previousRefLabels = new Map<string, string>();
@@ -1222,8 +1226,12 @@ export class CFCodeEditor extends BaseElement {
 
     const mentionableData = (handle.get() ?? []) as MentionableArray;
 
-    // Keep a reference to the current mentionable to detect staleness
+    // Keep a reference to the current mentionable to detect a rebind, and a
+    // generation to detect a newer pass over the SAME handle: contents can
+    // change under an identical handle, and an older pass finishing late
+    // must not overwrite the newer pass's ordering.
     const currentMentionable = this.mentionable;
+    const generation = ++this._resolveGeneration;
     const newResolved = new Map<number, string>();
     const newCells = new Map<number, CellHandle<Mentionable>>();
 
@@ -1253,8 +1261,12 @@ export class CFCodeEditor extends BaseElement {
 
     await Promise.all(promises);
 
-    // Only apply if mentionable hasn't changed while we were resolving
-    if (this.mentionable === currentMentionable) {
+    // Only apply if mentionable hasn't been rebound and no newer pass has
+    // started while we were resolving
+    if (
+      this.mentionable === currentMentionable &&
+      generation === this._resolveGeneration
+    ) {
       this._resolvedPieceIds = newResolved;
       this._resolvedPieceCells = newCells;
       // Re-resolve mentioned from content now that we have stable IDs

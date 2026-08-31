@@ -270,6 +270,69 @@ describe("MentionController — mention insertion", () => {
 });
 
 //
+// Indexed rows: entries that carry their piece as a reference
+//
+
+describe("MentionController — indexed rows", () => {
+  /** An index-row list: each entry is bookkeeping standing for its piece. */
+  function createIndexedCell(entries: { name: string; pieceId: string }[]) {
+    const pieces = entries.map(({ name, pieceId }) =>
+      createMockCellHandle({ [NAME]: name }, { id: pieceId as any })
+    );
+    const rows: MentionableArray = entries.map(({ name }, i) => ({
+      [NAME]: name,
+      title: name,
+      piece: pieces[i],
+    }));
+    return {
+      cell: createMockCellHandle(rows, {
+        id: "of:mention-index" as any,
+        schema: { type: "array", items: { type: "object" } },
+      }),
+      pieces,
+    };
+  }
+
+  it("encodes an index row's mention as its piece", async () => {
+    // The row is somebody's bookkeeping; the piece is what the mention
+    // names. The persisted href must carry the piece's id, never the
+    // index document's.
+    const inserts: string[] = [];
+    const content = "@";
+    const cursor = 1;
+    const ctrl = new MentionController(createMockHost(), {
+      getContent: () => content,
+      getCursorPosition: () => cursor,
+      onInsert: (markdown) => inserts.push(markdown),
+    });
+    const { cell } = createIndexedCell([
+      { name: "Indexed Topic", pieceId: "of:target-piece" },
+    ]);
+    ctrl.setMentionable(cell);
+    ctrl.handleInput(new Event("input"));
+
+    await ctrl.insertMention(ctrl.getFilteredMentions()[0]);
+
+    expect(inserts.length).toBe(1);
+    expect(inserts[0]).toBe("[Indexed Topic](/of:target-piece)");
+  });
+
+  it("decodes a piece href back to its index row", async () => {
+    // The round trip: the id the encode persists is the piece's, so the
+    // decode has to match it through the row's destination too.
+    const ctrl = new MentionController(createMockHost());
+    const { cell } = createIndexedCell([
+      { name: "Indexed Topic", pieceId: "of:target-piece" },
+    ]);
+    ctrl.setMentionable(cell);
+
+    const decoded = await ctrl.decodePieceFromHref("/of:target-piece");
+    expect(decoded).not.toBe(null);
+    expect(decoded?.get()?.[NAME]).toBe("Indexed Topic");
+  });
+});
+
+//
 // extractMentionsFromText
 //
 

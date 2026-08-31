@@ -403,4 +403,49 @@ describe("CFCodeEditor mention-piece resolution", () => {
     const found = element.findPieceById(element._getPieceId(0));
     expect(found?.id()).toBe(piece.id());
   });
+
+  it("keeps the newer resolution when an older pass finishes late", async () => {
+    // The mentionable HANDLE stays identical when its contents change, so an
+    // older pass that resolves slowly can finish after a newer one. The
+    // slow pass here is gated open only once the fast pass has published;
+    // what the caches hold at the end decides the race.
+    const element = internals(new CFCodeEditor());
+    const slow = createMockCellHandle(
+      { title: "Slow" },
+      { id: "of:slow-piece" } as Partial<CellRef>,
+    );
+    const fast = createMockCellHandle(
+      { title: "Fast" },
+      { id: "of:fast-piece" } as Partial<CellRef>,
+    );
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    // The resolution path reads the piece through an `asSchema` copy, so the
+    // gate has to ride the copy: an override on `slow` itself would be left
+    // behind by the copy and the "slow" pass would resolve instantly.
+    const realResolve = slow.resolveAsCell.bind(slow);
+    const realAsSchema = slow.asSchema.bind(slow);
+    slow.asSchema = ((schema: never) => {
+      const copy = realAsSchema(schema);
+      copy.resolveAsCell = (async () => {
+        await gate;
+        return await realResolve();
+      }) as typeof copy.resolveAsCell;
+      return copy;
+    }) as typeof slow.asSchema;
+
+    const list = createMockCellHandle([
+      { [NAME]: "Row", title: "Row", piece: slow },
+    ]);
+    element.mentionable = list as unknown as CellHandle<MentionableArray>;
+    const older = element._resolvePieceIds();
+
+    list.set([{ [NAME]: "Row", title: "Row", piece: fast }]);
+    await element._resolvePieceIds();
+    expect(element._resolvedPieceCells.get(0)?.id()).toBe(fast.id());
+
+    release();
+    await older;
+    expect(element._resolvedPieceCells.get(0)?.id()).toBe(fast.id());
+  });
 });
