@@ -75,6 +75,7 @@ import type {
   WritePolicyInput,
 } from "../cfc/mod.ts";
 import type { NormalizedFullLink } from "../link-types.ts";
+import { RAW_META_WRITE } from "../meta-seam.ts";
 export type { DID, MediaType, MemorySpace, Result, Signer, State, Unit, URI };
 export type ChangeGroup = unknown;
 
@@ -909,6 +910,12 @@ export interface IWriteOptions {
    * from absent. A root-path delete retracts the document.
    */
   delete?: boolean;
+  /**
+   * Marks the write as one the runtime makes on a document's meta seam. See
+   * {@link RAW_META_WRITE}: the write chokepoint accepts a write that reaches
+   * a meta field on this mark and refuses one that arrives without it.
+   */
+  readonly [RAW_META_WRITE]?: true;
 }
 
 export interface ITransactionWriteRequest {

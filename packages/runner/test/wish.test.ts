@@ -22,6 +22,7 @@ import {
   getPatternEnvironment,
   setPatternEnvironment,
 } from "../src/builder/env.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("wish built-in tests");
 const space = signer.did();
@@ -413,10 +414,11 @@ describe("wish built-in", () => {
       defaultPatternCell.setMetaRaw("patternIdentity", {
         identity: "stored-default-app",
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
       defaultPatternCell.setMetaRaw(
         "patternSource",
         "/api/patterns/system/default-app.tsx",
+        rawMetaWriteAuthorization,
       );
       (spaceCell as any).key("defaultPattern").set(defaultPatternCell);
 

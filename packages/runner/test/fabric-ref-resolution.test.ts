@@ -8,6 +8,7 @@ import { resolveFabricRefToIdentity } from "../src/fabric-ref-resolution.ts";
 import { slugIdForSpace } from "../src/slugs.ts";
 import { entityIdFrom } from "../src/create-ref.ts";
 import type { Cell } from "../src/cell.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("fabric ref resolution test");
 const space = signer.did();
@@ -98,7 +99,7 @@ describe("fabric ref resolution", () => {
       pieceWithTx.setMetaRaw("patternIdentity", {
         identity: ENTRY_A,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     await writeSlug("dep", piece);
 
@@ -145,7 +146,7 @@ describe("fabric ref resolution", () => {
       pieceWithTx.setMetaRaw("patternIdentity", {
         identity: ENTRY_A,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     const pieceUri = piece.getAsNormalizedFullLink().id; // "of:fid1:<hash>"
     expect(pieceUri.startsWith("of:fid1:")).toBe(true);

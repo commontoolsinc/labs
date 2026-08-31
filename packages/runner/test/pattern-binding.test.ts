@@ -40,6 +40,7 @@ import { Runtime } from "../src/runtime.ts";
 import { LINK_V1_TAG } from "../src/sigil-types.ts";
 import { type IExtendedStorageTransaction } from "../src/storage/interface.ts";
 import { createTrustedBuilder } from "./support/trusted-builder.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -111,6 +112,7 @@ describe("pattern-binding", () => {
       testCell.setMetaRaw(
         "argument",
         argumentCell.getAsWriteRedirectLink({ base: testCell }),
+        rawMetaWriteAuthorization,
       );
 
       sendValueToBinding(tx, testCell, undefined, {

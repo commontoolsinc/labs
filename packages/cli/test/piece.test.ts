@@ -65,6 +65,7 @@ import {
 } from "../lib/piece.ts";
 import { safeStringify } from "../lib/render.ts";
 import { cf, checkStderr, stripAnsi } from "./utils.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
 const API_URL = "https://cf.dev";
 const SPACE = "common-knowledge";
@@ -2924,12 +2925,13 @@ describe("cli piece parsing", () => {
       unregisteredPieceValue.setMetaRaw("patternIdentity", {
         identity: "P".repeat(43),
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
       unregisteredKeylessValue.set({ text: "unregistered keyless match" });
       unregisteredKeylessArgument.set({});
       unregisteredKeylessValue.setMetaRaw(
         "argument",
         unregisteredKeylessArgument.getAsWriteRedirectLink(),
+        rawMetaWriteAuthorization,
       );
       ownerResult.set({});
       ownerInput.set({

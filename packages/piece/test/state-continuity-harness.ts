@@ -87,6 +87,7 @@ import {
   companionSpace,
   vintageCompanionDir,
 } from "./vintage-layout.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
 class LoopbackSessions implements SessionFactory {
   readonly #server: () => MemoryV2Server.Server;
@@ -1563,7 +1564,7 @@ export async function materializeOnCell(
     root.withTx(tx).setMetaRaw("patternIdentity", {
       identity: ref.identity,
       symbol: ref.symbol,
-    });
+    }, rawMetaWriteAuthorization);
   });
   if (stampError !== undefined) {
     throw new Error(

@@ -9,6 +9,7 @@ import { ensurePieceRunning } from "../src/ensure-piece-running.ts";
 import { trustPattern } from "./support/trusted-builder.ts";
 import { getDerivedInternalCell, getMetaCell } from "../src/link-utils.ts";
 import { setResultCell } from "../src/result-utils.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -65,7 +66,7 @@ describe("ensurePieceRunning", () => {
     );
 
     resultCell.set({ value: 1 });
-    resultCell.setMetaRaw("argument", { value: 1 });
+    resultCell.setMetaRaw("argument", { value: 1 }, rawMetaWriteAuthorization);
 
     await tx.commit();
     tx = runtime.edit();
@@ -92,8 +93,8 @@ describe("ensurePieceRunning", () => {
     resultCell.setMetaRaw("patternIdentity", {
       identity: "missing-pattern-identity",
       symbol: "default",
-    });
-    resultCell.setMetaRaw("argument", { value: 1 });
+    }, rawMetaWriteAuthorization);
+    resultCell.setMetaRaw("argument", { value: 1 }, rawMetaWriteAuthorization);
 
     await tx.commit();
     tx = runtime.edit();
@@ -168,8 +169,16 @@ describe("ensurePieceRunning", () => {
     resultCell.setRaw({
       doubled: doubledCell.getAsWriteRedirectLink(),
     });
-    resultCell.setMetaRaw("patternIdentity", patternIdentity);
-    resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    resultCell.setMetaRaw(
+      "patternIdentity",
+      patternIdentity,
+      rawMetaWriteAuthorization,
+    );
+    resultCell.setMetaRaw(
+      "argument",
+      argumentCell.getAsWriteRedirectLink(),
+      rawMetaWriteAuthorization,
+    );
     setResultCell(doubledCell, resultCell);
     argumentCell.set({ value: 5 });
 
@@ -235,8 +244,16 @@ describe("ensurePieceRunning", () => {
     );
 
     resultCell.set({});
-    resultCell.setMetaRaw("patternIdentity", patternIdentity);
-    resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    resultCell.setMetaRaw(
+      "patternIdentity",
+      patternIdentity,
+      rawMetaWriteAuthorization,
+    );
+    resultCell.setMetaRaw(
+      "argument",
+      argumentCell.getAsWriteRedirectLink(),
+      rawMetaWriteAuthorization,
+    );
     argumentCell.set({});
 
     await tx.commit();
@@ -312,8 +329,16 @@ describe("ensurePieceRunning", () => {
     );
 
     resultCell.set({});
-    resultCell.setMetaRaw("patternIdentity", patternIdentity);
-    resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    resultCell.setMetaRaw(
+      "patternIdentity",
+      patternIdentity,
+      rawMetaWriteAuthorization,
+    );
+    resultCell.setMetaRaw(
+      "argument",
+      argumentCell.getAsWriteRedirectLink(),
+      rawMetaWriteAuthorization,
+    );
     argumentCell.set({});
 
     await tx.commit();
@@ -472,8 +497,16 @@ describe("queueEvent with auto-start", () => {
       doubled: doubledCell.getAsWriteRedirectLink(),
       events: eventsCell.getAsWriteRedirectLink(),
     });
-    resultCell.setMetaRaw("patternIdentity", patternIdentity);
-    resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    resultCell.setMetaRaw(
+      "patternIdentity",
+      patternIdentity,
+      rawMetaWriteAuthorization,
+    );
+    resultCell.setMetaRaw(
+      "argument",
+      argumentCell.getAsWriteRedirectLink(),
+      rawMetaWriteAuthorization,
+    );
     setResultCell(doubledCell, resultCell);
     setResultCell(eventsCell, resultCell);
     argumentCell.set({ value: 5 });
@@ -626,8 +659,16 @@ describe("queueEvent with auto-start", () => {
       events: eventsCell.getAsWriteRedirectLink(),
       eventCount: eventCountCell.getAsWriteRedirectLink(),
     });
-    resultCell.setMetaRaw("patternIdentity", patternIdentity);
-    resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    resultCell.setMetaRaw(
+      "patternIdentity",
+      patternIdentity,
+      rawMetaWriteAuthorization,
+    );
+    resultCell.setMetaRaw(
+      "argument",
+      argumentCell.getAsWriteRedirectLink(),
+      rawMetaWriteAuthorization,
+    );
     setResultCell(doubledCell, resultCell);
     setResultCell(eventsCell, resultCell);
     setResultCell(eventCountCell, resultCell);
@@ -769,8 +810,16 @@ describe("queueEvent with auto-start", () => {
       doubled: doubledCell.getAsWriteRedirectLink(),
       events: eventsCell.getAsWriteRedirectLink(),
     });
-    resultCell.setMetaRaw("patternIdentity", patternIdentity);
-    resultCell.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    resultCell.setMetaRaw(
+      "patternIdentity",
+      patternIdentity,
+      rawMetaWriteAuthorization,
+    );
+    resultCell.setMetaRaw(
+      "argument",
+      argumentCell.getAsWriteRedirectLink(),
+      rawMetaWriteAuthorization,
+    );
     setResultCell(doubledCell, intermediateCell);
     setResultCell(eventsCell, intermediateCell);
     argumentCell.set({ value: 6 });

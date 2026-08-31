@@ -41,6 +41,7 @@ import {
   type URI,
 } from "../src/storage/interface.ts";
 import { trustExecutable } from "./support/trusted-builder.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -1528,6 +1529,7 @@ describe("setup/start", () => {
     resultCell.withTx(metaTx).setMetaRaw(
       "internal",
       legacyInternalCell.getAsWriteRedirectLink({ base: resultCell }),
+      rawMetaWriteAuthorization,
     );
     await metaTx.commit();
 
@@ -2072,7 +2074,11 @@ describe("setup/start", () => {
       undefined,
       tx,
     );
-    candidate.setMetaRaw("argument", argumentCell.getAsWriteRedirectLink());
+    candidate.setMetaRaw(
+      "argument",
+      argumentCell.getAsWriteRedirectLink(),
+      rawMetaWriteAuthorization,
+    );
 
     expect(guard(candidate)).toBe(false);
     tx.abort();
@@ -2105,6 +2111,7 @@ describe("setup/start", () => {
     resultCell.setMetaRaw(
       "argument",
       argumentCell.getAsWriteRedirectLink(),
+      rawMetaWriteAuthorization,
     );
     await setupTx.commit();
     await runtime.idle();
@@ -2135,6 +2142,7 @@ describe("setup/start", () => {
     differentCandidate.setMetaRaw(
       "argument",
       differentArgument.getAsWriteRedirectLink(),
+      rawMetaWriteAuthorization,
     );
     expect(guard(differentCandidate)).toBe(false);
     differentTx.abort();
@@ -2175,6 +2183,7 @@ describe("setup/start", () => {
     resultCell.setMetaRaw(
       "argument",
       argumentCell.getAsWriteRedirectLink(),
+      rawMetaWriteAuthorization,
     );
     await setupTx.commit();
     await runtime.idle();
@@ -2425,7 +2434,7 @@ describe("runner utils", () => {
     resultCell.setMetaRaw("patternSetupIdentity", {
       identity: "pattern-identity",
       symbol: "main",
-    });
+    }, rawMetaWriteAuthorization);
     expect(getPatternSetupIdentityRef(resultCell)).toEqual({
       identity: "pattern-identity",
       symbol: "main",
@@ -2434,7 +2443,7 @@ describe("runner utils", () => {
     resultCell.setMetaRaw("patternSetupIdentity", {
       identity: 42,
       symbol: "main",
-    });
+    }, rawMetaWriteAuthorization);
     expect(getPatternSetupIdentityRef(resultCell)).toBeUndefined();
   });
 

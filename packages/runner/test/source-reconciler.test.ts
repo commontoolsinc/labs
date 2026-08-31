@@ -17,6 +17,7 @@ import {
   setPatternSource,
   systemPatternSource,
 } from "../src/index.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("piece source reconciliation");
 const PARENT_PATH = "/api/patterns/system/reconcile-parent.tsx";
@@ -1523,7 +1524,11 @@ describe("piece source reconciliation", () => {
       // A detach lands while the update is resolving. The transition it was
       // going to write names an origin the piece no longer follows.
       await runtime.editWithRetry((tx) => {
-        piece.withTx(tx).setMetaRaw("patternSource", undefined);
+        piece.withTx(tx).setMetaRaw(
+          "patternSource",
+          undefined,
+          rawMetaWriteAuthorization,
+        );
       });
       identityGate.resolve();
 
@@ -1564,7 +1569,11 @@ describe("piece source reconciliation", () => {
       const moved = await compileMarkerPattern("v3");
       const movedRef = runtime.patternManager.getArtifactEntryRef(moved)!;
       const { error } = await runtime.editWithRetry((tx) => {
-        piece.withTx(tx).setMetaRaw("patternIdentity", movedRef);
+        piece.withTx(tx).setMetaRaw(
+          "patternIdentity",
+          movedRef,
+          rawMetaWriteAuthorization,
+        );
       });
       expect(error).toBeUndefined();
       identityGate.resolve();
@@ -1593,7 +1602,11 @@ describe("piece source reconciliation", () => {
       ) => {
         const unchanged = await sync(...args);
         const { error } = await runtime.editWithRetry((tx) => {
-          piece.withTx(tx).setMetaRaw("patternIdentity", movedRef);
+          piece.withTx(tx).setMetaRaw(
+            "patternIdentity",
+            movedRef,
+            rawMetaWriteAuthorization,
+          );
         });
         expect(error).toBeUndefined();
         return unchanged;

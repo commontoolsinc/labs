@@ -25,6 +25,7 @@ import {
   readPieceSourceState,
   reconcilePieceSource,
 } from "../src/ops/piece-origin.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
 // The routes those refs resolve to. A system pattern is still SERVED at, and
 // its modules still NAMED by, the route path; the `system:` ref is what a
@@ -375,7 +376,11 @@ describe("opening a space root", () => {
     const piece = await controller.ensureDefaultPattern();
     const identityFetchesBefore = stub.identityFetches();
     const { error } = await runtime.editWithRetry((tx) => {
-      piece.getCell().withTx(tx).setMetaRaw("patternIdentity", "missing");
+      piece.getCell().withTx(tx).setMetaRaw(
+        "patternIdentity",
+        "missing",
+        rawMetaWriteAuthorization,
+      );
     });
     expect(error).toBeUndefined();
     const root = (await controller.getDefaultPattern(false))!;
@@ -476,7 +481,11 @@ describe("opening a space root", () => {
     expect(currentPattern.resultSchema).toEqual(root.getMetaRaw("schema"));
 
     const metadataUpdate = await runtime.editWithRetry((tx) => {
-      root.withTx(tx).setMetaRaw("patternIdentity", currentRef);
+      root.withTx(tx).setMetaRaw(
+        "patternIdentity",
+        currentRef,
+        rawMetaWriteAuthorization,
+      );
     });
     expect(metadataUpdate.error).toBeUndefined();
     const metadataOnlyRoot = (await controller.getDefaultPattern(false))!;
@@ -531,7 +540,11 @@ describe("opening a space root", () => {
       currentPattern,
     )!;
     const metadataUpdate = await runtime.editWithRetry((tx) => {
-      root.withTx(tx).setMetaRaw("patternIdentity", currentRef);
+      root.withTx(tx).setMetaRaw(
+        "patternIdentity",
+        currentRef,
+        rawMetaWriteAuthorization,
+      );
     });
     expect(metadataUpdate.error).toBeUndefined();
     const metadataOnlyRoot = (await controller.getDefaultPattern(false))!;
@@ -733,13 +746,17 @@ describe("opening a space root", () => {
     );
     await controller.stopPiece(root);
     const { error } = await runtime.editWithRetry((tx) => {
-      root.withTx(tx).setMetaRaw("patternIdentity", {
-        identity: staleIdentity,
-        // The obsolete runtime selected an export the current system source no
-        // longer has. Dead-root recovery must select the official entry's
-        // default export, rather than trying to preserve this broken symbol.
-        symbol: "removed-export",
-      });
+      root.withTx(tx).setMetaRaw(
+        "patternIdentity",
+        {
+          identity: staleIdentity,
+          // The obsolete runtime selected an export the current system source no
+          // longer has. Dead-root recovery must select the official entry's
+          // default export, rather than trying to preserve this broken symbol.
+          symbol: "removed-export",
+        },
+        rawMetaWriteAuthorization,
+      );
     });
     expect(error).toBeUndefined();
     const staleRoot = (await controller.getDefaultPattern(false))!;
@@ -776,8 +793,12 @@ describe("opening a space root", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: orphan,
         symbol: "default",
-      });
-      root.withTx(tx).setMetaRaw("patternSource", undefined);
+      }, rawMetaWriteAuthorization);
+      root.withTx(tx).setMetaRaw(
+        "patternSource",
+        undefined,
+        rawMetaWriteAuthorization,
+      );
     });
     expect(error).toBeUndefined();
 
@@ -845,7 +866,7 @@ describe("opening a space root", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: staleIdentity,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     expect(error).toBeUndefined();
 
@@ -884,7 +905,7 @@ describe("opening a space root", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: staleIdentity,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     expect(error).toBeUndefined();
     stub.setSource(SOURCE_V2);
@@ -973,7 +994,7 @@ describe("opening a space root", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: staleIdentity,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     expect(error).toBeUndefined();
     stub.setSource(SOURCE_V2);
@@ -1298,7 +1319,11 @@ describe("opening a space root", () => {
     const identityFetchesBefore = stub.identityFetches();
     const externalSource = "https://patterns.example/root.tsx";
     const { error } = await runtime.editWithRetry((tx) => {
-      piece.getCell().withTx(tx).setMetaRaw("patternSource", externalSource);
+      piece.getCell().withTx(tx).setMetaRaw(
+        "patternSource",
+        externalSource,
+        rawMetaWriteAuthorization,
+      );
     });
     expect(error).toBeUndefined();
     const root = (await controller.getDefaultPattern(false))!;
@@ -1724,7 +1749,7 @@ describe("opening a space root", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: targetId,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     expect(error).toBeUndefined();
 
@@ -1778,7 +1803,7 @@ describe("opening a space root", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: oldRef.identity,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     expect(pinError).toBeUndefined();
     // The pinned OLD pattern really is loadable — "loadable but unrunnable" is
@@ -1912,7 +1937,7 @@ describe("opening a space root", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: oldRef.identity,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     expect(pinError).toBeUndefined();
 
@@ -2114,7 +2139,7 @@ describe("opening a space root", () => {
             root.withTx(tx).setMetaRaw("patternIdentity", {
               identity: concurrentId,
               symbol: "default",
-            });
+            }, rawMetaWriteAuthorization);
           });
           throw new Error(MIGRATION_REJECTION);
         })();
@@ -2228,7 +2253,7 @@ describe("opening a space root", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: officialRef.identity,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     const restore = patchRunSynced((opts) =>
       opts?.expectedPatternIdentity?.identity === officialRef.identity
@@ -2297,7 +2322,7 @@ describe("opening a space root", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: legacyRef.identity,
         symbol: "legacyHome",
-      });
+      }, rawMetaWriteAuthorization);
     });
     expect(pinError).toBeUndefined();
 
@@ -2454,7 +2479,11 @@ describe("opening a space root", () => {
       currentPattern,
     )!;
     const metadataUpdate = await runtime.editWithRetry((tx) => {
-      root.withTx(tx).setMetaRaw("patternIdentity", currentRef);
+      root.withTx(tx).setMetaRaw(
+        "patternIdentity",
+        currentRef,
+        rawMetaWriteAuthorization,
+      );
     });
     expect(metadataUpdate.error).toBeUndefined();
 
@@ -2517,7 +2546,7 @@ describe("opening a space root", () => {
       root.withTx(tx).setMetaRaw("patternIdentity", {
         identity: targetId,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     expect(error).toBeUndefined();
 
@@ -2568,7 +2597,11 @@ describe("opening a space root", () => {
     const root = (await controller.getDefaultPattern(false))!;
     await controller.stopPiece(root);
     const { error } = await runtime.editWithRetry((tx) => {
-      root.withTx(tx).setMetaRaw("patternIdentity", { malformed: true });
+      root.withTx(tx).setMetaRaw(
+        "patternIdentity",
+        { malformed: true },
+        rawMetaWriteAuthorization,
+      );
     });
     expect(error).toBeUndefined();
 

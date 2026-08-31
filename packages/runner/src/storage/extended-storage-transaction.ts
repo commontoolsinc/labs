@@ -107,12 +107,19 @@ import {
   type NormalizedFullLink,
   toMemorySpaceAddress,
 } from "../link-types.ts";
+import {
+  metaFieldsWritten,
+  NO_META_FIELDS,
+  rawMetaWriteAuthorized,
+  storedMetaFields,
+} from "../meta-seam.ts";
 import { ignoreReadForScheduling } from "../scheduler.ts";
 import { normalizeCellScope, scopeRank } from "../scope.ts";
 import type { MergeableOpDelta } from "./mergeable-ops.ts";
 import { CFC_ENFORCEMENT_REJECTION_PREFIX } from "./rejection.ts";
 import {
   clearSchemaRefusalTx,
+  ignoreReadForCommit,
   isInternalVerifierRead,
   isLazyMaterializationTx,
   isUiInputBlindWriteTx,
@@ -920,12 +927,70 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // disabled window must still be on record when a later escalation evaluates
   // it. A transaction still `disabled` at commit never runs
   // prepareBoundaryCommit, so the record stays inert there.
-  #noteSystemWrite(address: IMemorySpaceAddress): void {
+  #noteSystemWrite(
+    address: IMemorySpaceAddress,
+    value?: FabricValue,
+    options?: IWriteOptions,
+  ): void {
     if (this.#privilegedSystemWriteDepth > 0) return;
     if (address.id.startsWith(CFC_POLICY_MANIFEST_ID_PREFIX)) {
       throw new Error(
         `cfcPolicyManifest: ${address.id} is immutable reserved policy state`,
       );
+    }
+    // The raw meta seam. A meta field is a document-root sibling of `value`:
+    // `patternIdentity` and `pattern` name the program a piece runs,
+    // `argument`, `result` and `internal` name the cells it is wired to,
+    // `schema` names the shape its result is validated against, `slug` names
+    // it in the space, and the source fields record where its program came
+    // from. A write there redirects a piece rather than editing its data, so
+    // the seam is the runtime's: `setMetaRaw` marks the write it makes with
+    // `rawMetaWriteAuthorization`, carried in the write's own options, and a
+    // meta write arriving unmarked is refused here. The refusal is in-process
+    // and holds whatever the CFC enforcement mode, like the space-ACL arm
+    // below and unlike the ["cfc"] arm at the end — this is an authorization
+    // decision about the piece graph rather than a label-derivation signal
+    // whose treatment follows the mode. It is also the first arm that can
+    // refuse: every arm below is keyed by target id, and one that recorded
+    // and returned ahead of this would leave the seam open on the documents
+    // its prefix names.
+    if (!rawMetaWriteAuthorized(options)) {
+      // Three shapes reach a meta field: an address naming the field, a
+      // document-root envelope carrying it as a key, and a document-root
+      // write that leaves it out — the root write replaces the envelope, so
+      // every stored meta field it does not carry is a field it drops. The
+      // first two are settled by the write alone. The third is settled by
+      // reading what the document carries, one meta member at a time,
+      // through the inner transaction and under a read that carries no
+      // weight of its own. Reading through the outer transaction would put
+      // the guard's read in the reactivity log and the flow join. Reading
+      // the document root would name a logical path covering every entry in
+      // the document's label map, widening what the transaction counts as
+      // consumed. And the read takes no commit precondition:
+      // `ignoreReadForCommit` drops it from the conflict set, so the blind
+      // root writes the runtime makes stay blind rather than becoming
+      // read-modify-writes that lose the race against any advance of the
+      // document they replace. What that leaves open is an erasure racing
+      // the guard, never a forgery — the two shapes that name a field are
+      // refused from the write itself, with no read at all.
+      const written = metaFieldsWritten(address.path, value);
+      const dropped = address.path.length === 0
+        ? storedMetaFields((field) =>
+          this.tx.read({ ...address, path: [field] }, {
+            meta: { ...ignoreReadForScheduling, ...ignoreReadForCommit },
+          }).ok?.value
+        ).filter((field) => !written.includes(field))
+        : NO_META_FIELDS;
+      if (written.length > 0 || dropped.length > 0) {
+        const reached = [...written, ...dropped];
+        throw new Error(
+          `${address.id}: refusing an unauthorized write to the meta seam (${
+            reached.join(", ")
+          }). These document-root fields name the program a piece runs and ` +
+            `the cells it is wired to; the runtime writes them through ` +
+            `setMetaRaw.`,
+        );
+      }
     }
     // Reserved grant documents (§8.12.7 route 2a, cfc/grants.ts): the WHOLE
     // document is policy state — a forged grant at the derived address would
@@ -2016,7 +2081,9 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     // write. The ["cfc"]-path arm is structurally unreachable here (a
     // NormalizedFullLink always yields a value-rooted storage path), but the
     // reserved `grant:cfc:` documents are keyed by ID, and the mergeable
-    // path must not slip an unprivileged grant mutation past the gate.
+    // path must not slip an unprivileged grant mutation past the gate. The
+    // meta-seam arm is unreachable for the same reason the ["cfc"] arm is,
+    // which is why no value reaches it from here.
     this.#noteSystemWrite(address);
     // Record a mergeable intent only when the underlying transaction can also
     // poison it. Recording an intent that can never be poisoned would let a
@@ -2135,7 +2202,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IWriteOptions,
   ): Result<IAttestation, WriteError | WriterError> {
     this.#assertWritable("write()");
-    this.#noteSystemWrite(address);
+    this.#noteSystemWrite(address, value, options);
     this.#noteWriteIdentity();
     if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-after-prepare");
@@ -2154,7 +2221,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     options?: IWriteOptions,
   ): void {
     this.#assertWritable("writeOrThrow()");
-    this.#noteSystemWrite(address);
+    this.#noteSystemWrite(address, value, options);
     this.#noteWriteIdentity();
     if (this.#cfcState.prepare.status === "prepared") {
       this.invalidateCfc("write-after-prepare");
@@ -2275,8 +2342,15 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       // throw propagate past the commit, which is what every caller does
       // today). See `writeValuesOrThrow` partial-batch coverage in
       // `packages/runner/test/memory-v2-acl-mutation.test.ts`.
-      const noteSystemWrite = (address: IMemorySpaceAddress) =>
-        this.#noteSystemWrite(address);
+      // The value reaches the chokepoint's meta-seam arm, which reads the
+      // envelope of a document-root write. A batch addresses its writes by
+      // link, and `toMemorySpaceAddress` prefixes "value", so no batch write
+      // is addressed at a document root; the value travels anyway, so the
+      // batch and single-write paths ask the chokepoint the same question.
+      const noteSystemWrite = (
+        address: IMemorySpaceAddress,
+        value: FabricValue,
+      ) => this.#noteSystemWrite(address, value);
       // Capture the identity per yielded write, not once up front: an empty
       // batch authored nothing, so it must not record a write for the
       // transaction's write-identity summary.
@@ -2291,7 +2365,7 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
         (function* () {
           for (const write of writes) {
             const address = toMemorySpaceAddress(write.address);
-            noteSystemWrite(address);
+            noteSystemWrite(address, write.value);
             noteWriteIdentity();
             if (!write.delete && getContentAddressedSchemasConfig()) {
               staged.push({ address, value: write.value });

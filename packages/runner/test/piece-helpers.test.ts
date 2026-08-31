@@ -10,6 +10,7 @@ import {
 } from "../src/piece-helpers.ts";
 import { Runtime } from "../src/runtime.ts";
 import type { IExtendedStorageTransaction } from "../src/storage/interface.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("test piece helpers");
 const space = signer.did();
@@ -281,7 +282,7 @@ describe("getResultCellWithSourceSchema", () => {
       undefined,
       tx,
     );
-    resultCell.setMetaRaw("schema", resultSchema);
+    resultCell.setMetaRaw("schema", resultSchema, rawMetaWriteAuthorization);
 
     const titleCell = getResultCellWithSourceSchema(
       resultCell.key("title"),
@@ -313,7 +314,7 @@ describe("getResultCellWithSourceSchema", () => {
       undefined,
       tx,
     );
-    resultCell.setMetaRaw("schema", resultSchema);
+    resultCell.setMetaRaw("schema", resultSchema, rawMetaWriteAuthorization);
 
     const explicitCell = resultCell.key("title").asSchema(explicitSchema);
     const annotated = getResultCellWithSourceSchema(explicitCell);

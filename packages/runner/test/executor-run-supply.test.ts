@@ -40,6 +40,7 @@ import type {
   TransactionSealDestination,
 } from "../src/storage/interface.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("p2f run supply");
 const space = signer.did();
@@ -785,7 +786,7 @@ describe("stage P2-F piece-start commit failure surfacing (F1)", () => {
     cell.withTx(tx2).setMetaRaw("patternIdentity", {
       identity: v3Ref.identity,
       symbol: v3Ref.symbol,
-    });
+    }, rawMetaWriteAuthorization);
     await tx2.commit();
     return cell;
   };

@@ -174,6 +174,7 @@ import { normalizeSandboxResult } from "./sandbox/result-normalization.ts";
 import { isCellScope, narrowestScope } from "./scope.ts";
 import { SigilLink } from "./sigil-types.ts";
 import { toURI } from "./uri-utils.ts";
+import { rawMetaWriteAuthorization } from "./meta-seam.ts";
 export {
   extractDefaultValues,
   mergeObjects,
@@ -2074,7 +2075,7 @@ export class Runner {
       meta: ignoreReadForScheduling,
     });
     if (!deepEqual(previous, resultSchema)) {
-      cell.setMetaRaw("schema", resultSchema);
+      cell.setMetaRaw("schema", resultSchema, rawMetaWriteAuthorization);
     }
   }
 
@@ -2316,7 +2317,11 @@ export class Runner {
       resultCell,
       previousInternal,
     );
-    resultCell.withTx(tx).setMetaRaw("internal", internalManifest);
+    resultCell.withTx(tx).setMetaRaw(
+      "internal",
+      internalManifest,
+      rawMetaWriteAuthorization,
+    );
 
     let nextArgument: T | undefined = argument;
     let argumentUpdated = false;
@@ -2343,7 +2348,11 @@ export class Runner {
         includeSchema: true,
         keepAsCell: KeepAsCell.All,
       });
-      resultCell.withTx(tx).setMetaRaw("argument", newArgumentSigilLink);
+      resultCell.withTx(tx).setMetaRaw(
+        "argument",
+        newArgumentSigilLink,
+        rawMetaWriteAuthorization,
+      );
 
       argumentLink = newArgumentCell.getAsNormalizedFullLink();
       if (argumentLink === undefined) {
@@ -2367,7 +2376,11 @@ export class Runner {
         includeSchema: true,
         keepAsCell: KeepAsCell.All,
       });
-      resultCell.withTx(tx).setMetaRaw("argument", nextArgumentSigilLink);
+      resultCell.withTx(tx).setMetaRaw(
+        "argument",
+        nextArgumentSigilLink,
+        rawMetaWriteAuthorization,
+      );
       argumentLink = nextArgumentCell.getAsNormalizedFullLink();
 
       if (argument === undefined && previousArgument === undefined) {
@@ -2448,7 +2461,7 @@ export class Runner {
       resultCell.withTx(tx).setMetaRaw("patternIdentity", {
         identity: durableEntryRef.identity,
         symbol: durableEntryRef.symbol,
-      });
+      }, rawMetaWriteAuthorization);
     }
     // The instantiation observer is a session-side reporting channel, not a
     // durable write, so it deliberately does NOT share the durable stamp's
@@ -2486,7 +2499,7 @@ export class Runner {
       resultCell.withTx(tx).setMetaRaw("patternSetupIdentity", {
         identity: durableEntryRef.identity,
         symbol: durableEntryRef.symbol,
-      });
+      }, rawMetaWriteAuthorization);
       // The durable stamps staged above supersede a keyless session pointer
       // — WHEN they commit. They are transaction state, so the pointer
       // removal rides the same commit: dropping it at staging would leave a
@@ -2517,12 +2530,20 @@ export class Runner {
       // (no-pattern-meta), and clearing writes no keyless identity.
       const staleRef = getPatternIdentityRef(resultCell.withTx(tx));
       if (staleRef !== undefined) {
-        resultCell.withTx(tx).setMetaRaw("patternIdentity", undefined);
+        resultCell.withTx(tx).setMetaRaw(
+          "patternIdentity",
+          undefined,
+          rawMetaWriteAuthorization,
+        );
       }
       if (
         getPatternSetupIdentityRef(resultCell.withTx(tx)) !== undefined
       ) {
-        resultCell.withTx(tx).setMetaRaw("patternSetupIdentity", undefined);
+        resultCell.withTx(tx).setMetaRaw(
+          "patternSetupIdentity",
+          undefined,
+          rawMetaWriteAuthorization,
+        );
       }
       // The KEYLESS piece's stand-in for both skipped stamps, session-side:
       // the pattern pointer (start/resume flows) and the setup-completion
@@ -3425,7 +3446,7 @@ export class Runner {
                     resultCell.withTx(tx).setMetaRaw("patternIdentity", {
                       identity: revertRef.identity,
                       symbol: revertRef.symbol,
-                    });
+                    }, rawMetaWriteAuthorization);
                     return true;
                   }).then((result) => {
                     // Only reclaim the observed key while it is STILL the
@@ -6596,7 +6617,9 @@ export class Runner {
         // transaction, which the create-only mark below gates, so the schema
         // and the value it describes commit together or not at all.
         const shape = receiptShapeSchema(receiptValue);
-        if (shape !== undefined) receipt.setMetaRaw("schema", shape);
+        if (shape !== undefined) {
+          receipt.setMetaRaw("schema", shape, rawMetaWriteAuthorization);
+        }
         tx.markCreateOnly?.(receiptCell.getAsNormalizedFullLink());
       }
       return result;
@@ -8721,7 +8744,11 @@ export function setPatternSource(
   tx: IExtendedStorageTransaction,
   url: string,
 ): void {
-  resultCell.withTx(tx).setMetaRaw("patternSource", url);
+  resultCell.withTx(tx).setMetaRaw(
+    "patternSource",
+    url,
+    rawMetaWriteAuthorization,
+  );
 }
 
 /** Read the validated, append-only source revisions carried by a piece. */
@@ -8842,6 +8869,7 @@ export function setPieceReconciliation(
   resultCell.withTx(tx).setMetaRaw(
     "pieceReconciliation",
     reconciliation as unknown as FabricValue,
+    rawMetaWriteAuthorization,
   );
 }
 
@@ -8951,7 +8979,9 @@ function initializePieceSourceHistory(
   ) {
     return;
   }
-  if (origin !== undefined) candidate.setMetaRaw("patternSource", origin);
+  if (origin !== undefined) {
+    candidate.setMetaRaw("patternSource", origin, rawMetaWriteAuthorization);
+  }
   candidate.setMetaRaw("pieceSourceHistory", [{
     revisionId: crypto.randomUUID(),
     timestamp: Date.now(),
@@ -8959,7 +8989,7 @@ function initializePieceSourceHistory(
     source: sourceRetentionLink(runtime, resultCell, tx, pattern),
     ...(origin === undefined ? {} : { origin }),
     operation: "create",
-  }]);
+  }], rawMetaWriteAuthorization);
 }
 
 function samePieceSourceSnapshot(
@@ -9127,7 +9157,7 @@ export function applyPieceSourceTransition(
       identity: current.pattern.identity,
       symbol: current.pattern.symbol,
       displacedAt: transition.timestamp,
-    });
+    }, rawMetaWriteAuthorization);
   }
 
   const history = getPieceSourceRevisions(candidate);
@@ -9178,15 +9208,24 @@ export function applyPieceSourceTransition(
       ? {}
       : { selectedRevisionId: transition.selectedRevisionId }),
   });
-  candidate.setMetaRaw("patternSource", nextOrigin.origin ?? undefined);
+  candidate.setMetaRaw(
+    "patternSource",
+    nextOrigin.origin ?? undefined,
+    rawMetaWriteAuthorization,
+  );
   candidate.setMetaRaw(
     "pieceSourceHistory",
     history as unknown as FabricValue,
+    rawMetaWriteAuthorization,
   );
   // An accepted transition supersedes whatever the last reconciliation
   // concluded: the piece has moved, and the recorded outcome describes a state
   // it has left.
-  candidate.setMetaRaw("pieceReconciliation", undefined);
+  candidate.setMetaRaw(
+    "pieceReconciliation",
+    undefined,
+    rawMetaWriteAuthorization,
+  );
 }
 
 /** Read an explicitly supplied repository locator for a piece's source. */
@@ -9205,7 +9244,11 @@ export function setPatternRepository(
   tx: IExtendedStorageTransaction,
   repository: string,
 ): void {
-  resultCell.withTx(tx).setMetaRaw("patternRepository", repository);
+  resultCell.withTx(tx).setMetaRaw(
+    "patternRepository",
+    repository,
+    rawMetaWriteAuthorization,
+  );
 }
 
 /** Narrow a raw meta value to a `{ identity, symbol }` pattern ref, or undefined. */

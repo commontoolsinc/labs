@@ -20,6 +20,7 @@ import {
   reconcilePieceSource,
 } from "../src/ops/piece-origin.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
 const signer = await Identity.fromPassphrase("piece source lifecycle");
 
@@ -658,7 +659,11 @@ describe("piece source lifecycle", () => {
       if (!cleared) {
         cleared = true;
         const tx = runtime.edit();
-        cell.withTx(tx).setMetaRaw("patternIdentity", undefined);
+        cell.withTx(tx).setMetaRaw(
+          "patternIdentity",
+          undefined,
+          rawMetaWriteAuthorization,
+        );
         await tx.commit();
       }
       return pattern;
@@ -689,7 +694,11 @@ describe("piece source lifecycle", () => {
       if (!cleared) {
         cleared = true;
         const tx = runtime.edit();
-        cell.withTx(tx).setMetaRaw("patternIdentity", undefined);
+        cell.withTx(tx).setMetaRaw(
+          "patternIdentity",
+          undefined,
+          rawMetaWriteAuthorization,
+        );
         await tx.commit();
       }
       return pattern;
@@ -756,7 +765,11 @@ describe("piece source lifecycle", () => {
     const editWithRetry = runtime.editWithRetry;
     runtime.editWithRetry = (async () => {
       const tx = runtime.edit();
-      cell.withTx(tx).setMetaRaw("pieceSourceHistory", "invalid");
+      cell.withTx(tx).setMetaRaw(
+        "pieceSourceHistory",
+        "invalid",
+        rawMetaWriteAuthorization,
+      );
       await tx.commit();
       return {
         ok: false,
@@ -865,7 +878,11 @@ describe("piece source lifecycle", () => {
     expect(second.entityId).toEqual(first.entityId);
 
     const tx = runtime.edit();
-    first.withTx(tx).setMetaRaw("patternIdentity", undefined);
+    first.withTx(tx).setMetaRaw(
+      "patternIdentity",
+      undefined,
+      rawMetaWriteAuthorization,
+    );
     await tx.commit();
     await expect(
       pieces.setupPersistent(pattern, {}, cause),
@@ -1557,7 +1574,11 @@ describe("piece source lifecycle", () => {
     const runWithPattern = pieces.runWithPattern.bind(pieces);
     mutablePieces.runWithPattern = async (...args) => {
       const tx = runtime.edit();
-      piece.getCell().withTx(tx).setMetaRaw("argument", undefined);
+      piece.getCell().withTx(tx).setMetaRaw(
+        "argument",
+        undefined,
+        rawMetaWriteAuthorization,
+      );
       await tx.commit();
       return await runWithPattern(...args);
     };

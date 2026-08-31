@@ -683,50 +683,6 @@ export interface IReadable<T> {
   sample(): Readonly<StripDefaultBrand<T>>;
 }
 
-export type MetaLinkField =
-  | "pattern"
-  | "argument"
-  | "result";
-
-/**
- * The `pattern` field links a result cell to its pattern
- * The `argument` field links a result cell to its argument cell
- * The `internal` field contains a manifest with links to derived internal cells.
- * The `schema` field stores the schema for a result cell
- * The `patternSetupIdentity` field records the pattern identity whose complete
- * setup state was installed on a result cell.
- * The `result` field lets a result cell link to its parent result cell,
- * and also lets the argument and derived internal cells link back to the result cell.
- *
- * `cfc` is deliberately NOT a MetaField: the `["cfc"]` document field holds
- * raw label metadata (Caveat.source and other principal identities), which
- * must not ride the raw meta seam (inv-12 Stage 0 / SC-14 / SC-25). The cfc
- * code reads the field directly through its own verifier seams; display
- * consumers get the redacted view via getCfcLabel.
- */
-export type MetaField =
-  | MetaLinkField
-  | "patternIdentity" // content-addressed {identity, symbol} pattern reference
-  | "patternSetupIdentity" // setup-completion {identity, symbol} marker
-  | "patternSource" // active web or `cf:` source origin
-  | "pieceSourceHistory" // append-only source revisions and retention roots
-  | "pieceReconciliation" // what following the active origin last did:
-  // {outcome, at, origin, offered?, reason?, detail?} — a piece that refused
-  // or could not reach its origin looks otherwise exactly like one that is
-  // running what its origin offers
-  | "patternRepository" // optional caller-supplied repository locator
-  | "displacedPattern" // {identity, symbol, displacedAt}: the prior pattern
-  // reference recorded when system-pattern auto-update replaces an unloadable
-  // sourceless root — the recovery pointer for a displaced custom program
-  | "internal"
-  | "schema"
-  | "slug";
-
-export interface IMetaCell {
-  getMetaRaw(metaField: MetaField, options?: unknown): FabricValue;
-  setMetaRaw(metaField: MetaField, value: FabricValue): void;
-}
-
 /**
  * Writable cells can update their value.
  *
@@ -1564,7 +1520,6 @@ export interface ICell<T>
     IEquatable,
     IKeyable<T, AsCell>,
     IDerivable<T>,
-    IMetaCell,
     IResolvable<T, Cell<T>> {}
 
 export interface Cell<T = unknown> extends BrandedCell<T, "cell">, ICell<T> {}

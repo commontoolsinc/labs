@@ -12,6 +12,7 @@ import { Runtime } from "../src/runtime.ts";
 import { parseLink } from "../src/link-utils.ts";
 import { CFC_LABEL_READ_FAILED_ATOM } from "../src/cfc/observation.ts";
 import type { JSONSchema } from "../src/builder/types.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-writer-fit");
 
@@ -632,8 +633,16 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
         await target.sync();
         // The two paths the piece-update flows land on, and the two the
         // strict measurement used to reject at.
-        target.setMetaRaw("schema", { type: "object" });
-        target.setMetaRaw("internal", { derived: raw.secret });
+        target.setMetaRaw(
+          "schema",
+          { type: "object" },
+          rawMetaWriteAuthorization,
+        );
+        target.setMetaRaw(
+          "internal",
+          { derived: raw.secret },
+          rawMetaWriteAuthorization,
+        );
         tx.prepareCfc();
 
         const result = await tx.commit();
@@ -687,7 +696,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
           tx,
         );
         await target.sync();
-        target.setMetaRaw("slug", `${raw.secret}!`);
+        target.setMetaRaw("slug", `${raw.secret}!`, rawMetaWriteAuthorization);
         tx.prepareCfc();
 
         expect((await tx.commit()).ok).toBeDefined();
@@ -795,7 +804,7 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
           tx,
         );
         await target.sync();
-        target.setMetaRaw("slug", `${raw.secret}!`);
+        target.setMetaRaw("slug", `${raw.secret}!`, rawMetaWriteAuthorization);
         tx.prepareCfc();
 
         expect((await tx.commit()).ok).toBeDefined();
@@ -840,7 +849,11 @@ describe("CFC writer-fit (canWrite, §8.12.4 / SC-18b)", () => {
           tx,
         );
         await target.sync();
-        target.setMetaRaw("schema", { type: "object" });
+        target.setMetaRaw(
+          "schema",
+          { type: "object" },
+          rawMetaWriteAuthorization,
+        );
         tx.writeOrThrow({
           space: signer.did(),
           scope: "space",

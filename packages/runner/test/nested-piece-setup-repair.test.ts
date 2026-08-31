@@ -7,6 +7,7 @@ import { Runtime } from "../src/runtime.ts";
 import { getMetaLink } from "../src/link-utils.ts";
 import { isMissingStreamMarkerFailure } from "../src/runner.ts";
 import type { RuntimeProgram } from "../src/harness/types.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 // A nested/embedded piece — a profile mounted via a `#wish`, say — is
 // instantiated by the runtime's start walk WITHOUT a setup phase and with no
@@ -155,7 +156,7 @@ describe("nested-piece cold-start setup repair", () => {
     cell.withTx(tx2).setMetaRaw("patternIdentity", {
       identity: v3Ref.identity,
       symbol: v3Ref.symbol,
-    });
+    }, rawMetaWriteAuthorization);
     await tx2.commit();
     // It is not the space's defaultPattern, so the runner repair (not the
     // controller) is what must heal it.
