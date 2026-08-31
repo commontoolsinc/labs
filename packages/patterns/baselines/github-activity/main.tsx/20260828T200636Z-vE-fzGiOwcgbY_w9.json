@@ -1,0 +1,527 @@
+{
+  "argumentSchema": {
+    "$defs": {
+      "GithubHostHealth": {
+        "properties": {
+          "formatVersion": {
+            "type": "number"
+          },
+          "lastComplete": {
+            "properties": {
+              "completedAt": {
+                "type": "string"
+              },
+              "pullRequestCount": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "completedAt",
+              "pullRequestCount"
+            ],
+            "type": "object"
+          },
+          "schema": {
+            "enum": [
+              "commonfabric.github-connector.health.v1"
+            ],
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "startedAt": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "sync": {
+            "properties": {
+              "completedAt": {
+                "type": "string"
+              },
+              "error": {
+                "type": "string"
+              },
+              "pullRequestCount": {
+                "type": "number"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "startedAt": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason",
+              "status",
+              "startedAt"
+            ],
+            "type": "object"
+          },
+          "target": {
+            "properties": {
+              "cells": {
+                "properties": {
+                  "health": {
+                    "type": "string"
+                  },
+                  "index": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "index",
+                  "health"
+                ],
+                "type": "object"
+              },
+              "spaceDid": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "spaceDid",
+              "cells"
+            ],
+            "type": "object"
+          },
+          "updatedAt": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "service",
+          "formatVersion",
+          "status",
+          "startedAt",
+          "updatedAt",
+          "target"
+        ],
+        "type": "object"
+      },
+      "GithubPullRequestIndex": {
+        "properties": {
+          "formatVersion": {
+            "type": "number"
+          },
+          "generatedAt": {
+            "type": "string"
+          },
+          "generation": {
+            "type": "number"
+          },
+          "lastCompleteCollectionAt": {
+            "type": "string"
+          },
+          "pullRequests": {
+            "items": {
+              "$ref": "#/$defs/GithubPullRequestIndexRow"
+            },
+            "type": "array"
+          },
+          "schema": {
+            "enum": [
+              "commonfabric.github-connector.pull-request-index.v1"
+            ],
+            "type": "string"
+          },
+          "viewer": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "schema",
+          "formatVersion",
+          "viewer",
+          "generatedAt",
+          "lastCompleteCollectionAt",
+          "generation",
+          "pullRequests"
+        ],
+        "type": "object"
+      },
+      "GithubPullRequestIndexRow": {
+        "properties": {
+          "baseRefName": {
+            "type": "string"
+          },
+          "baseRefOid": {
+            "type": "string"
+          },
+          "checkState": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "detail": {
+            "$ref": "#/$defs/PullRequestDetail",
+            "asCell": [
+              "opaque"
+            ]
+          },
+          "headRefName": {
+            "type": "string"
+          },
+          "headRefOid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "headRepository": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "headRepositoryUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "isDraft": {
+            "type": "boolean"
+          },
+          "mergeState": {
+            "type": "string"
+          },
+          "mergeable": {
+            "enum": [
+              "CONFLICTING",
+              "MERGEABLE",
+              "UNKNOWN"
+            ]
+          },
+          "number": {
+            "type": "number"
+          },
+          "observedAt": {
+            "type": "string"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "repositoryUrl": {
+            "type": "string"
+          },
+          "reviewDecision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/$defs/PullRequestStatus"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "visibility": {
+            "enum": [
+              "visible",
+              "unknown"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "url",
+          "title",
+          "repository",
+          "repositoryUrl",
+          "baseRefName",
+          "baseRefOid",
+          "headRefName",
+          "headRefOid",
+          "headRepository",
+          "headRepositoryUrl",
+          "isDraft",
+          "mergeable",
+          "mergeState",
+          "reviewDecision",
+          "checkState",
+          "createdAt",
+          "updatedAt",
+          "observedAt",
+          "visibility",
+          "status"
+        ],
+        "type": "object"
+      },
+      "PullRequestDetail": {
+        "properties": {
+          "schema": {
+            "enum": [
+              "commonfabric.github-connector.pull-request.v1"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PullRequestStatus": {
+        "enum": [
+          "draft",
+          "tests-failed",
+          "tests-running",
+          "merge-conflicts",
+          "merge-blocked",
+          "visibility-unknown",
+          "green-and-can-land"
+        ]
+      }
+    },
+    "description": "Inputs for connector data and the public-repository fallback.",
+    "properties": {
+      "health": {
+        "$ref": "#/$defs/GithubHostHealth"
+      },
+      "pullRequestIndex": {
+        "$ref": "#/$defs/GithubPullRequestIndex"
+      },
+      "repoUrl": {
+        "asCell": [
+          "cell"
+        ],
+        "default": "https://github.com/anthropics/claude-code",
+        "type": "string"
+      }
+    },
+    "required": [
+      "repoUrl"
+    ],
+    "type": "object"
+  },
+  "pattern": "github-activity/main.tsx",
+  "resultSchema": {
+    "$defs": {
+      "GithubPullRequestFields": {
+        "properties": {
+          "baseRefName": {
+            "type": "string"
+          },
+          "baseRefOid": {
+            "type": "string"
+          },
+          "checkState": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "headRefName": {
+            "type": "string"
+          },
+          "headRefOid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "headRepository": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "headRepositoryUrl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "isDraft": {
+            "type": "boolean"
+          },
+          "mergeState": {
+            "type": "string"
+          },
+          "mergeable": {
+            "enum": [
+              "CONFLICTING",
+              "MERGEABLE",
+              "UNKNOWN"
+            ]
+          },
+          "number": {
+            "type": "number"
+          },
+          "observedAt": {
+            "type": "string"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "repositoryUrl": {
+            "type": "string"
+          },
+          "reviewDecision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/$defs/PullRequestStatus"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "visibility": {
+            "enum": [
+              "visible",
+              "unknown"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "number",
+          "url",
+          "title",
+          "repository",
+          "repositoryUrl",
+          "baseRefName",
+          "baseRefOid",
+          "headRefName",
+          "headRefOid",
+          "headRepository",
+          "headRepositoryUrl",
+          "isDraft",
+          "mergeable",
+          "mergeState",
+          "reviewDecision",
+          "checkState",
+          "createdAt",
+          "updatedAt",
+          "observedAt",
+          "visibility",
+          "status"
+        ],
+        "type": "object"
+      },
+      "PullRequestStatus": {
+        "enum": [
+          "draft",
+          "tests-failed",
+          "tests-running",
+          "merge-conflicts",
+          "merge-blocked",
+          "visibility-unknown",
+          "green-and-can-land"
+        ]
+      }
+    },
+    "description": "The rendered view and its machine-readable pull-request summary.",
+    "properties": {
+      "$NAME": {
+        "type": "string"
+      },
+      "$UI": {
+        "$ref": "https://commonfabric.org/schemas/vnode.json"
+      },
+      "needsAttentionCount": {
+        "type": "number"
+      },
+      "pullRequestCount": {
+        "type": "number"
+      },
+      "pullRequests": {
+        "items": {
+          "$ref": "#/$defs/GithubPullRequestFields"
+        },
+        "type": "array"
+      },
+      "readyToLandCount": {
+        "type": "number"
+      },
+      "repositoryCount": {
+        "type": "number"
+      }
+    },
+    "required": [
+      "pullRequests",
+      "pullRequestCount",
+      "repositoryCount",
+      "readyToLandCount",
+      "needsAttentionCount",
+      "$NAME",
+      "$UI"
+    ],
+    "type": "object"
+  }
+}
