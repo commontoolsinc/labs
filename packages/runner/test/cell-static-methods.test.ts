@@ -212,10 +212,12 @@ describe("Cell Static Methods", () => {
     // The static-data walk over special objects
     //
     // The static-data validation walk descends anything `typeof === "object"`,
-    // which admits a `FabricSpecialObject`. Such a value survives it because it
-    // has zero enumerable own properties: `Object.keys()` is empty, the descent
-    // ends there, and the walk only ever reads -- it never rebuilds. Nothing
-    // guards that, so these pin it.
+    // which admits a `FabricSpecialObject`. A `FabricPrimitive` survives it
+    // because it has zero enumerable own properties: `Object.keys()` is empty,
+    // the descent ends there, and the walk only ever reads -- it never
+    // rebuilds. A `FabricInstance` is refused instead, its codec contents being
+    // able to hold a `Cell` the walk would never reach by property name.
+    // Nothing guards either, so these pin both.
     //
 
     it("should accept a `FabricBytes` in static data", () => {
@@ -281,7 +283,7 @@ describe("Cell Static Methods", () => {
     });
 
     //
-    // Ordinary values
+    // More `Cell.of()` value cases
     //
 
     it("should create a cell with undefined value", () => {
@@ -349,6 +351,10 @@ describe("Cell Static Methods", () => {
         expect(cell.get()).toEqual(complex);
       });
     });
+
+    //
+    // The schema parameter
+    //
 
     it("should accept a schema as second parameter", () => {
       withinHandlerContext(runtime, space, tx, () => {

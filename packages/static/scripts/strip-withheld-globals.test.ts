@@ -157,6 +157,8 @@ Deno.test("throws when a declaration closes more braces than it opens", () => {
 });
 
 //
+// The command over the checked-in libraries
+//
 // The checked-in type libraries are kept stripped, so the CLI run over them is
 // the up-to-date path: --check reports clean and returns 0, and a plain run
 // finds nothing to remove and rewrites nothing.
@@ -173,6 +175,10 @@ Deno.test("runCli without --check leaves up-to-date libraries unchanged", async 
   assertEquals(await Deno.readTextFile(path), before);
 });
 
+//
+// The entry-point gate
+//
+
 Deno.test("cliMain does nothing unless this module is the entry point", async () => {
   let called: number | undefined;
   await cliMain(["--check"], false, (code) => called = code);
@@ -186,7 +192,9 @@ Deno.test("cliMain exits with the CLI status when it is the entry point", async 
 });
 
 //
-// The error and write paths are driven with injected files rather than the
+// The error and write paths
+//
+// Driven with injected files rather than the
 // checked-in libraries, which are kept clean.
 //
 
@@ -223,6 +231,14 @@ Deno.test("runCli without --check writes the stripped text back", async () => {
   assertEquals(writes.length, 1);
   assertEquals(writes[0][1], "");
 });
+
+//
+// Stripping a namespace
+//
+// The members a withheld namespace declares, and the shapes that make finding
+// their bounds hard: braces in prose, a signature wrapped across lines, a
+// declaration split across blocks.
+//
 
 Deno.test("strips a namespace's value members and keeps its types", () => {
   const { text, removed } = stripWithheldGlobals(
