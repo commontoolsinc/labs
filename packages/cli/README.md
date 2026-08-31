@@ -316,7 +316,8 @@ gets both, minted for that one call.
   greps for `load-pattern-by-identity-source-miss`). Use `--log-level error` to
   drop warnings; the two compose.
 - `cf call` accepts its payload as an inline JSON argument, `-` for stdin, an
-  implicit pipe (no payload argument), or schema-derived flags after `--`.
+  implicit pipe (no payload argument), or schema-derived flags in the callable's
+  section — directly after the verb, before any `--`.
 - A `cf get` path that doesn't resolve prints a one-line error on stderr and
   exits 1 — it is a data error, not a usage error. A `piece link` that fails
   validation (a source/target piece or path that doesn't exist) reports the same

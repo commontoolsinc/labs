@@ -529,6 +529,53 @@ describe("parseExecArgs", () => {
     expect(parseExecArgs(open, ["--anything", "else"]).input)
       .toEqual({ anything: "else" });
   });
+
+  it("refuses a read option in the section of a verb taking a single value", () => {
+    // A verb with no fields reaches a different parser, and the boundary is
+    // the same one: the alternative is the four value flags, which is a true
+    // sentence about a vocabulary the caller was never reaching for.
+    for (
+      const spec of [
+        makeSpec("handler", { type: "string" }),
+        makeSpec("handler", true),
+      ]
+    ) {
+      const message = (() => {
+        try {
+          parseExecArgs(
+            spec,
+            ["--value", "Ship", "--select", "topic.title"],
+            "cf call ... setTitle",
+          );
+        } catch (error) {
+          return (error as Error).message;
+        }
+        return "";
+      })();
+      expect(message).toContain('"--select" is a `cf` read option');
+      expect(message).toContain(
+        "write:    cf call ... setTitle --value Ship -- --select topic.title",
+      );
+    }
+
+    // The keyword rejoins the prefix here too, so the corrected line is the
+    // caller's own rather than one with a word silently dropped.
+    const withKeyword = (() => {
+      try {
+        parseExecArgs(
+          makeSpec("handler", { type: "string" }),
+          ["invoke", "--filter", "open"],
+          "cf call ... setTitle",
+        );
+      } catch (error) {
+        return (error as Error).message;
+      }
+      return "";
+    })();
+    expect(withKeyword).toContain(
+      "write:    cf call ... setTitle invoke -- --filter open",
+    );
+  });
 });
 
 describe("parseExecArgs edge cases", () => {

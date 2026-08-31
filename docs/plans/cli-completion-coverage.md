@@ -332,41 +332,30 @@ which is item 6's subject and not this one.
 The same flags on a call shape the verb's result, whose vocabulary is the verb's
 `outputSchema` — carried by the same listing item 4 reads.
 
-This one is not really a completion item, and the surface work dissolves most
-of it. `stopEarly()` requires a projection before the callable name today, and a
-caller who writes it after gets one of three outcomes with no rule connecting
-them:
+This one is not really a completion item, because the surface settles most of
+it. [Naming the target](cli-surface-shape.md#naming-the-target) puts a
+projection past the `--` that closes the callable's section, and therefore
+always after the verb it shapes:
 
 ```text
-call <verb> --select item.title '{...}'   Use a single inline JSON argument or
-                                          "--" before schema-derived flags.
-call <verb> -- --title x --select y       "--select" at <event> is not a field
-                                          this verb declares.
-call <verb> --json '{...}'                works
+cf call --piece <piece> addItem --title x -- --select it<TAB>
 ```
 
-The first message names a rule the caller did not break: they passed a single
-inline JSON argument, and `--select` is not a schema-derived flag. It is what
-`--invocation` and `--show-links` say too. The second is a good message about
-the wrong subject. The third succeeds, because `--json` is a token the
-callable's parser accepts — so the surface is not "a `cf` flag never works after
-the verb", it is "some do", which is not a rule anyone can infer from using it.
+The verb is on the line ahead of the cursor, so the candidates come from the
+`outputSchema` the listing in item 4 already carries, read from the words before
+the cursor like every other slot. The slot itself is the one `--` opens, which
+`resolveCompletionLine` reports as `passthrough` and `liveCandidates` does not
+dispatch on.
 
-[Naming the target](cli-surface-shape.md#naming-the-target) settles this: the
-verb opens the callable's section and `--` closes it, so a projection is written
-after the marker and therefore always after the verb. That ordering is what this
-item was waiting on, and it arrives with the verb already on the line ahead of
-the cursor — so the candidates come from the `outputSchema` the listing in item
-4 already carries, read from the words before the cursor like every other slot.
-
-What survives is one improvement completion wants on its own account.
-`resolveCompletionLine` derives two different things from `words.slice(1,
-cursor)` — which slot the cursor is in, and which piece and verb the line names
-— and only the first needs the prefix. Resolving the slot from the prefix while
-gathering context from the whole line is what makes mid-line editing complete
-against the position being edited rather than against the end of the line. It is
-no longer load-bearing for this item, and it is still the difference between a
-line that completes as it is typed and one that completes however it is edited.
+What is left beyond that wiring is one improvement completion wants on its own
+account. `resolveCompletionLine` derives two different things from
+`words.slice(1, cursor)` — which slot the cursor is in, and which piece and verb
+the line names — and only the first needs the prefix. Resolving the slot from
+the prefix while gathering context from the whole line is what makes mid-line
+editing complete against the position being edited rather than against the end
+of the line. It is not load-bearing for this item, and it is still the
+difference between a line that completes as it is typed and one that completes
+however it is edited.
 
 ### 7. Slugs never complete
 

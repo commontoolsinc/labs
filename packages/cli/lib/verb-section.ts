@@ -60,11 +60,33 @@ export interface ReadSection {
   schema?: string;
 }
 
+/** The name a `--flag` or `--flag=value` token spells, without its value. */
+function optionName(token: string): string {
+  return token.slice(2).split("=", 1)[0];
+}
+
 /** Whether `token` is a read option, in either the spaced or `=` spelling. */
 function readOptionName(token: string): string | undefined {
   if (!token.startsWith("--")) return undefined;
-  const name = token.slice(2).split("=", 1)[0];
+  const name = optionName(token);
   return READ_OPTION_NAMES.includes(name) ? name : undefined;
+}
+
+/**
+ * The first read option written among `tokens`, or `undefined` where none is.
+ *
+ * For the doors that judge a section holding no declared names of its own, and
+ * so have nothing to weigh a read option against: the first one found is the
+ * one the refusal is about.
+ */
+export function firstReadOption(
+  tokens: readonly string[],
+): string | undefined {
+  for (const token of tokens) {
+    const name = readOptionName(token);
+    if (name !== undefined) return name;
+  }
+  return undefined;
 }
 
 /**
@@ -285,6 +307,36 @@ export function readSectionAsksVerbHelp(
 }
 
 /**
+ * The words that name a callable's verb at the head of its section.
+ *
+ * Writing one or leaving it out calls the same verb; what it changes is that
+ * the section is not empty. One list rather than a literal at each door, so a
+ * third keyword reaches every reader that has to recognize one.
+ */
+export const VERB_KEYWORDS: readonly string[] = ["invoke", "run"];
+
+/**
+ * The callable's section with a marker-routed `--help` placed where the
+ * callable's own parser reads it.
+ *
+ * That is the head of the section, except where the section opens with a verb
+ * keyword: the keyword is the first word the callable reads, and a `--help`
+ * put ahead of it arrives as an argument to `--help` — which every verb
+ * declaring no `help` field refuses.
+ */
+export function sectionWithVerbHelp(
+  sectionArgs: readonly string[],
+  literalArgs: readonly string[],
+): string[] {
+  const opensWithKeyword = VERB_KEYWORDS.includes(sectionArgs[0]) ? 1 : 0;
+  return [
+    ...sectionArgs.slice(0, opensWithKeyword),
+    ...literalArgs,
+    ...sectionArgs.slice(opensWithKeyword),
+  ];
+}
+
+/**
  * Refuse a word past the marker that is not a read option.
  *
  * The corrected line answers the likelier of two readings, and the near miss
@@ -299,20 +351,33 @@ export function readSectionAsksVerbHelp(
  * than the argument parser's: a verb field is not a misspelled read option,
  * and answering `--query` with "did you mean --filter" sends a caller to fix
  * a name that was never wrong.
+ *
+ * `index` is the token's position past the marker, and it is what the
+ * rewritten line is keyed on: the same spelling may also stand in the
+ * callable's section, where it is a field of the verb's and not this door's
+ * to touch.
  */
 function refuseWordPastMarker(
   spelling: string,
   rawArgs: readonly string[],
   token: string,
+  index: number,
 ): never {
-  const written = rawArgs.indexOf(token);
   const marker = rawArgs.indexOf("--");
+  const written = marker + 1 + index;
+  const equals = token.indexOf("=");
   const nearest = token.startsWith("--")
-    ? nearestName(token.slice(2).split("=", 1)[0], READ_OPTION_NAMES)
+    ? nearestName(optionName(token), READ_OPTION_NAMES)
     : undefined;
-  const corrected = nearest === undefined
+  // The `=` spelling carries its value inside the token, so only the name is
+  // replaced: a read option printed without the value the caller wrote is a
+  // corrected line that fails for a second reason.
+  const spelled = nearest === undefined
+    ? undefined
+    : `--${nearest}${equals === -1 ? "" : token.slice(equals)}`;
+  const corrected = spelled === undefined
     ? [...rawArgs.slice(0, marker), ...rawArgs.slice(marker + 1)]
-    : rawArgs.map((word, index) => index === written ? `--${nearest}` : word);
+    : rawArgs.map((word, at) => at === written ? spelled : word);
   throw new ValidationError(
     `"${token}" is not a read option, and \`--\` opens the read step's ` +
       `section. ` +
@@ -366,7 +431,7 @@ export async function parseReadSection(
     const token = literalArgs[i];
     if (token === "--") refuseSecondMarker(spelling, rawArgs);
     const name = readOptionName(token);
-    if (name === undefined) refuseWordPastMarker(spelling, rawArgs, token);
+    if (name === undefined) refuseWordPastMarker(spelling, rawArgs, token, i);
     // The value of a spaced read option is the caller's own word and is not
     // checked against anything here; the parse below is what judges it.
     if (!token.includes("=")) i++;

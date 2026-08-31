@@ -61,7 +61,8 @@ what this looks like when it bites.
   deliberately leaves the log floor alone — scripts parse those warnings).
 - `cf call` payloads: inline JSON argument, `-` to read stdin
   (`echo '{...}' | cf call ... handler -`), a bare pipe with no payload
-  argument, or schema-derived flags after `--`. Empty stdin fails loudly.
+  argument, or schema-derived flags in the callable's section — directly after
+  the verb, before any `--`. Empty stdin fails loudly.
 - A `cf get` path that doesn't resolve is a data error: one-line message on
   stderr, exit 1 (no usage screen). A `piece link` that fails validation
   (missing source/target piece or path) reports the same way. So does a `cf get`

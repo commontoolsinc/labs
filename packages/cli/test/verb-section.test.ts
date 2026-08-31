@@ -6,7 +6,9 @@ import {
   readSectionAsksVerbHelp,
   refuseFieldsReadAsProjection,
   refuseProjectionBeforeSection,
+  sectionWithVerbHelp,
 } from "../lib/verb-section.ts";
+import { parseExecArgs } from "../lib/exec-schema.ts";
 import { pieceDataCommand } from "../commands/piece.ts";
 import { exec } from "../commands/exec.ts";
 
@@ -242,6 +244,30 @@ describe("verb-section", () => {
       expect(message).toContain("write:    cf call v -- --select a");
     });
 
+    it("corrects the `=` spelling with the caller's value still attached", async () => {
+      const message = await asyncMessageFrom(() =>
+        parseReadSection("call", ["v", "--", "--selct=a,b"], ["--selct=a,b"])
+      );
+      expect(message).toContain("write:    cf call v -- --select=a,b");
+    });
+
+    it("corrects the occurrence past the marker, not one before it", async () => {
+      // Nothing reserves a name, so the same word may be a field of the verb
+      // in the section and a misspelled read option past the marker. Only the
+      // second is this door's, and rewriting the first prints a line that
+      // fails exactly as the one the caller wrote did.
+      const message = await asyncMessageFrom(() =>
+        parseReadSection(
+          "call",
+          ["add", "--selct", "verb-value", "--", "--selct", "a"],
+          ["--selct", "a"],
+        )
+      );
+      expect(message).toContain(
+        "write:    cf call add --selct verb-value -- --select a",
+      );
+    });
+
     it("refuses a bare word past the marker", async () => {
       const message = await asyncMessageFrom(() =>
         parseReadSection("call", ["v", "--", "payload"], ["payload"])
@@ -366,6 +392,48 @@ describe("verb-section", () => {
       // `--help` with a value is the verb's `help` FIELD, which the section
       // holds; it is not this command's page either way.
       expect(readSectionAsksVerbHelp(["--help", "x"])).toBe(false);
+    });
+  });
+
+  describe("sectionWithVerbHelp()", () => {
+    it("returns the help words at the head of a section that opens with a field", () => {
+      expect(sectionWithVerbHelp([], ["--help"])).toEqual(["--help"]);
+      expect(sectionWithVerbHelp(["--title", "x"], ["--help", "--json"]))
+        .toEqual(["--help", "--json", "--title", "x"]);
+    });
+
+    it("returns a verb keyword still first, ahead of the help words", () => {
+      expect(sectionWithVerbHelp(["invoke"], ["--help"]))
+        .toEqual(["invoke", "--help"]);
+      expect(sectionWithVerbHelp(["run"], ["--help", "--json"]))
+        .toEqual(["run", "--help", "--json"]);
+    });
+
+    it("composes a section the callable's parser reads as a help request", () => {
+      // The two halves are separately correct and can still disagree: the
+      // callable reads `--help` at the head of its section or directly after
+      // the keyword, and ahead of the keyword it is an argument to `--help`
+      // — which a verb declaring no `help` field refuses outright.
+      const spec = {
+        callableKind: "handler",
+        defaultVerb: "invoke",
+        inputSchema: {
+          type: "object",
+          properties: { title: { type: "string" } },
+          required: ["title"],
+        },
+      } as const;
+      for (const section of [[], ["invoke"]]) {
+        expect(
+          parseExecArgs(spec, sectionWithVerbHelp(section, ["--help"])),
+        ).toMatchObject({ showHelp: true, showHelpJson: false });
+        expect(
+          parseExecArgs(
+            spec,
+            sectionWithVerbHelp(section, ["--help", "--json"]),
+          ),
+        ).toMatchObject({ showHelp: true, showHelpJson: true });
+      }
     });
   });
 

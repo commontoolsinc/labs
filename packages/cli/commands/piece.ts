@@ -43,6 +43,7 @@ import {
   parseReadSection,
   readSectionAsksVerbHelp,
   refuseProjectionBeforeSection,
+  sectionWithVerbHelp,
 } from "../lib/verb-section.ts";
 import type {
   InvocationIdentity,
@@ -1873,11 +1874,11 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
         callableArg,
         tailArgs,
       );
-      // At the head of the section, which is where the verb's parser reads
-      // `--help`: the address intake runs first, since it may take the
-      // section's own first word as the callable name.
+      // Into the section, at the position the verb's parser reads `--help`.
+      // The address intake runs first, since it may take the section's own
+      // first word as the callable name.
       const tail = asksVerbHelp
-        ? [...literalArgs, ...sectionTail]
+        ? sectionWithVerbHelp(sectionTail, literalArgs)
         : sectionTail;
       const readback = { ...readSection, showLinks: options.showLinks };
       const identity = resolveInvocationIdentity(

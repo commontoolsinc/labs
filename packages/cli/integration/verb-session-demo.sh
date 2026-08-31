@@ -274,8 +274,8 @@ run cf call -s "$SPACE" "$EPIC" addChild --title "Session cookies"
 say "The item it hands back can be reached from inside itself: its parent holds"
 say "it, and it holds its parent. The position where the author's own type"
 say "re-enters answers with an address, so the whole result is still one value."
-# Read options come before the address: the first positional starts the
-# callable's own command line, so a flag after it belongs to the verb.
+# The verb opens the callable's section and `--` closes it: --title is a field
+# of addChild's and stands before the marker, and the read options follow it.
 run cf call -s "$SPACE" "$EPIC" addChild --title "CSRF tokens" -- --select item.title
 say "And a caller who names one field is given one field, circle or no circle."
 say "item.title is the dotted form: it walks into item and keeps title. Note it"

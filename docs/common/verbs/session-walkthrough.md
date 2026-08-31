@@ -496,8 +496,8 @@ the address may carry the path, as the `get` above shows. The slug stays on
 `--piece`, where no path competes for the position; naming the target both
 ways at once is refused. Identity survives the round trip instead of being
 flattened into a copy of the item's contents. Read options (`--select`,
-`--schema`, `--filter`) come before the address on a `call`, because the first
-positional starts the callable's own command line.
+`--schema`, `--filter`) come after the `--` on a `call`, because the verb opens
+the callable's section and the marker closes it.
 
 `--show-links` is a second spelling of the same move: it returns a
 dictionary of RFC 6901 pointers naming the document behind each result path, so
@@ -592,9 +592,10 @@ containers holding it rather than being read past.
 
 The same options work on a call's result, on a wish, on a verb reached through
 a filesystem mount, and on a direct read: one read layer, four arrivals.
-`cf exec` writes them before the mounted file, since everything after it
-belongs to the callable's own interface; the other three take them wherever
-their own options go.
+`cf exec` writes them past a `--`, since the mounted file opens the callable's
+section and the marker closes it — the same boundary `cf call` draws at its
+verb; `cf get` and `cf wish` name no callable, so they take them wherever their
+own options go.
 
 **A read may be asked twice; a call may not.** A projection is a question, and
 asking it changes nothing — that is the invariant, and it is what makes every

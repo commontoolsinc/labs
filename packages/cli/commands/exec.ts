@@ -19,6 +19,7 @@ import {
   parseReadSection,
   readSectionAsksVerbHelp,
   refuseProjectionBeforeSection,
+  sectionWithVerbHelp,
 } from "../lib/verb-section.ts";
 
 /**
@@ -229,9 +230,10 @@ export const exec = new Command()
       this.getRawArgs(),
       literalArgs,
     );
-    // At the head of the section, which is where the callable's parser reads
-    // `--help`.
-    const sectionArgs = asksVerbHelp ? [...literalArgs, ...tail] : tail;
+    // Into the section, at the position the callable's parser reads `--help`.
+    const sectionArgs = asksVerbHelp
+      ? sectionWithVerbHelp(tail, literalArgs)
+      : tail;
     // Outside the failure wrapper below, and refusing before a mount is even
     // looked up: see {@link parseExecSelection}.
     const selection = await parseExecSelection(readSection);

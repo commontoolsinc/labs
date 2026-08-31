@@ -16,8 +16,10 @@ import {
 } from "./callable.ts";
 import { EVENT_ROOT_POSITION, nearestName } from "./refusal.ts";
 import {
+  firstReadOption,
   projectionInSectionRefusal,
   READ_OPTION_NAMES,
+  VERB_KEYWORDS,
 } from "./verb-section.ts";
 
 export interface ExecCommandSpec {
@@ -531,7 +533,21 @@ function parseObjectInput(
 function parseNonObjectInput(
   schema: JSONSchema,
   args: string[],
+  sectionPrefix: string,
 ): ParsedInputMode {
+  // The boundary the field door draws, on a verb with no fields for a read
+  // option to collide with. Such a verb declares nothing, so every read option
+  // written here is a projection inside the callable's section — answered with
+  // the position it belongs to and the line that puts it there, the same as at
+  // the field door. The vocabulary refusal below would otherwise name the four
+  // value flags, which is a true sentence about the wrong subject.
+  const projection = firstReadOption(args);
+  if (projection !== undefined) {
+    throw new Error(
+      projectionInSectionRefusal(projection, sectionPrefix, args, new Set()),
+    );
+  }
+
   if (args.length === 0) {
     return {
       input: undefined,
@@ -1244,7 +1260,7 @@ export function parseExecArgs(
     }
   }
 
-  if (args[0] === "invoke" || args[0] === "run") {
+  if (VERB_KEYWORDS.includes(args[0])) {
     if (args[0] !== spec.defaultVerb) {
       throw new Error(
         `Invalid verb ${
@@ -1295,16 +1311,13 @@ export function parseExecArgs(
   }
 
   const properties = objectProperties(spec.inputSchema);
+  // The keyword was shifted off `args`, so it rejoins the prefix: a refusal
+  // reprints the line the caller wrote, and a word dropped from it is a word
+  // they would put back and be refused again for.
+  const inputPrefix = explicitVerb ? `${sectionPrefix} ${verb}` : sectionPrefix;
   const parsedInput = properties
-    ? parseObjectInput(
-      spec.inputSchema,
-      args,
-      // The keyword was shifted off `args`, so it rejoins the prefix: a
-      // refusal reprints the line the caller wrote, and a word dropped from
-      // it is a word they would put back and be refused again for.
-      explicitVerb ? `${sectionPrefix} ${verb}` : sectionPrefix,
-    )
-    : parseNonObjectInput(spec.inputSchema, args);
+    ? parseObjectInput(spec.inputSchema, args, inputPrefix)
+    : parseNonObjectInput(spec.inputSchema, args, inputPrefix);
 
   return {
     verb,

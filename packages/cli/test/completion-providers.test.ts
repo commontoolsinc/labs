@@ -355,7 +355,12 @@ Deno.test("provider keys report which commands each option provider answers on",
   assertEquals(options.get("scope"), ["wish"]);
   assertEquals(options.get("list"), ["piece survey", "piece repair"]);
   assertEquals(options.get("diff"), ["piece survey"]);
+  // Both projection flags answer on `get` alone. On `call` and `exec` they
+  // name positions in a verb's result, and the piece's root is a different
+  // value — so offering its fields there would offer plausible names for
+  // something else, which is worse than offering none.
   assertEquals(options.get("select"), ["get"]);
+  assertEquals(options.get("schema"), ["get"]);
   assertEquals(options.get("root"), [
     "check",
     "piece new",
@@ -686,12 +691,16 @@ Deno.test("live candidates: a fabric slot without context degrades to empty", as
     for (
       const text of [
         // The projection guards, which answer before any fabric is reached: a
-        // call's projection is a verb's result rather than the piece's root,
+        // call's projection names positions in a VERB's result rather than in
+        // the piece's root, so the provider declines on those two commands,
         // and a `--schema` word opening with `@` or `{` is a file or a schema.
-        // Written past the marker, which is the one position the grammar
-        // takes them in.
-        "cf call --piece x addItem -- --select ",
-        "cf exec /tmp/x -- --select ",
+        // Each of these stands the cursor on the option's own value slot,
+        // which is the only place a provider is looked up — past the `--` the
+        // slot belongs to the read step, and nothing is consulted at all.
+        // Which commands the provider answers on is pinned by the
+        // provider-key test above.
+        "cf call --piece x --select ",
+        "cf exec --select ",
         "cf get --piece x --schema @",
         "cf get --piece x --schema {",
         "cf piece get-label --piece x ",
