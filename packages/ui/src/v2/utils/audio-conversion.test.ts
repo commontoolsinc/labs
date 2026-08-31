@@ -11,7 +11,8 @@ import {
 } from "./audio-conversion.ts";
 
 describe("audio-conversion", () => {
-  // These cover the exported helper functions directly. `convertToWav` itself
+  // These cover the exported helper functions directly, plus two format
+  // details asserted in place. `convertToWav` itself
   // requires a browser AudioContext, which Deno's test runner does not
   // provide.
 
