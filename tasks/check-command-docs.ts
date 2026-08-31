@@ -216,6 +216,7 @@ export async function documentedCommands(
 export interface CommandDocReport {
   /** Commands no live document names and no allowance covers. */
   readonly undocumented: string[];
+
   /** Allowances naming a command the tree no longer accepts. */
   readonly staleAllowance: string[];
 }

@@ -21,6 +21,7 @@ export type InitializationData = {
    * out of everything it logs, and it redacts by name.
    */
   encodedIdentity: RealmEncodedValue;
+
   experimental?: {
     modernCellRep?: boolean;
   };

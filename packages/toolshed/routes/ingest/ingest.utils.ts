@@ -93,6 +93,7 @@ export const containsLink = (value: unknown): boolean => {
   }
   return false;
 };
+
 export const isValidPartition = isValidSegment;
 
 export interface IngestRegistration {
@@ -115,6 +116,7 @@ export interface IngestRegistration {
    * stream-channel id can never silently be given journal semantics here.
    */
   sink: "journal";
+
   secretHash: string;
 
   /**
@@ -129,6 +131,7 @@ export interface IngestRegistration {
    * proof-of-possession, so nothing leaks to a guesser.
    */
   previousSecretHash?: string;
+
   createdBy: string;
   createdAt: string;
   enabled: boolean;

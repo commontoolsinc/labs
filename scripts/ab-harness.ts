@@ -30,6 +30,7 @@
  * is the comparison, not any single run.
  */
 const ROOT = Deno.env.get("CF_ROOT");
+
 if (!ROOT) {
   console.error("set CF_ROOT to a checkout root");
   Deno.exit(2);
@@ -73,6 +74,7 @@ const { dataUriFromValue } = await import(
 
 /** Identity on a tree with no preflight, so the same probe runs on both. */
 let flatten: (v: unknown) => unknown = (v) => v;
+
 try {
   flatten = (await import(`${R}/storage-preflight.ts`)).flattenBuilderArtifacts;
 } catch { /* baseline */ }

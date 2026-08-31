@@ -84,6 +84,7 @@ export class DomApplicator {
 
   /** Children tracking: parentId → Set<childId> for O(n) descendant cleanup */
   readonly #nodeChildren = new Map<number, Set<number>>();
+
   readonly #document: Document;
   readonly #onEvent: (message: DomEventMessage) => void;
   readonly #runtimeClient?: RuntimeClient;

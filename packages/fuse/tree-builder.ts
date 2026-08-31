@@ -299,6 +299,7 @@ interface JsonTreeBuild {
    * waiting rather than every node it has passed.
    */
   readonly queue: (BuildJsonTreeTask | undefined)[];
+
   nextIndex: number;
   rootIno?: bigint;
 }

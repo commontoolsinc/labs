@@ -15,8 +15,10 @@ export const PATTERNS_DIR = "packages/patterns";
 export interface PatternTree {
   /** Repository-relative directory containing the source modules. */
   readonly directory: string;
+
   /** Baseline-key prefix when the source tree is outside `PATTERNS_DIR`. */
   readonly keyPrefix?: string;
+
   /** Program root allowed to resolve the tree's local imports. */
   readonly programRoot?: string;
 }

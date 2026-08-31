@@ -134,6 +134,7 @@ export interface InitializedRuntimeConnection extends RuntimeConnection {}
 export interface VDomConnection {
   /** The connection's lifetime signal; aborts on disposal. */
   readonly signal: AbortSignal;
+
   mount(
     mountId: number,
     cellRef: CellRef,

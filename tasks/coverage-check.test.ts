@@ -1492,9 +1492,13 @@ async function walk(
   return { lines, read };
 }
 
-/** Three `main` runs, newest first, along the ancestry `RANKS` describes. */
+/** The newest of three `main` runs along the ancestry `RANKS` describes. */
 const RUN_AT_BASE = makeRun(3, SHA_C, "2026-08-04T10:40:00Z");
+
+/** The one before it. */
 const RUN_ONE_BACK = makeRun(2, SHA_B, "2026-08-04T10:20:00Z");
+
+/** The one before that. */
 const RUN_TWO_BACK = makeRun(1, SHA_A, "2026-08-04T10:00:00Z");
 
 Deno.test("walkBaselineRuns prefers the base-branch commit's own run", async () => {

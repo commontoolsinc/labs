@@ -27,6 +27,7 @@ export interface MeasureEntry {
 export interface Span {
   /** The logger key, with the uniquifying suffix removed. */
   key: string;
+
   start: number;
   end: number;
   parent: number;

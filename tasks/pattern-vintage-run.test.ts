@@ -104,6 +104,7 @@ const MOVED_KEY = HEALTHY.replace(".for('items')", ".for('itemList')");
  * only the default export.
  */
 const NESTED_KEY = "vintage-gate-nested.tsx";
+
 const NESTED_TEST_KEY = NESTED_KEY.replace(/\.tsx$/, ".test.tsx");
 
 const nestedSource = (extra: { field?: string; line?: string } = {}) =>
@@ -256,6 +257,7 @@ const NESTED_ROW_ARGS_TIGHTENED = nestedSource()
  * witness a moved storage key.
  */
 const UNDECLARED_KEY = "vintage-gate-undeclared.tsx";
+
 const UNDECLARED_TEST_KEY = UNDECLARED_KEY.replace(/\.tsx$/, ".test.tsx");
 
 const undeclaredSource = (storageKey: string, trailer = "") =>
@@ -326,6 +328,7 @@ const undeclaredTest = [
  * required result without a default (the compatible output-evolution case).
  */
 const CROSS_KEY = "vintage-gate-crossspace.tsx";
+
 const CROSS_TEST_KEY = CROSS_KEY.replace(/\.tsx$/, ".test.tsx");
 
 /**

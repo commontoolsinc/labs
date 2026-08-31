@@ -34,19 +34,25 @@ export interface Acting {
 }
 
 /**
- * Scope-key constructors — RESTATED from the real wire vocabulary
- * (`packages/memory/v2.ts`: `resolveScopeKey` /
- * `resolvePrincipalSessionKey`), never imported (model.ts stays
- * import-free). The real constructor encodeURIComponent-encodes each
- * component, so the literal `:` separators split segments exactly and
- * construction is INJECTIVE for `:`-bearing principals (DIDs) and
- * arbitrary session ids — un-encoded interpolation would collide
- * `("a:b","c")` with `("a","b:c")`. The conformance bridge test in
- * properties.test.ts asserts byte-agreement with the real vocabulary.
+ * Encodes one component of the scope keys constructed below — RESTATED from
+ * the real wire vocabulary (`packages/memory/v2.ts`: `resolveScopeKey` /
+ * `resolvePrincipalSessionKey`), never imported (model.ts stays import-free).
+ * The real constructor encodeURIComponent-encodes each component, so the
+ * literal `:` separators split segments exactly and construction is INJECTIVE
+ * for `:`-bearing principals (DIDs) and arbitrary session ids — un-encoded
+ * interpolation would collide `("a:b","c")` with `("a","b:c")`. The
+ * conformance bridge test in properties.test.ts asserts byte-agreement with
+ * the real vocabulary.
  */
 const encodeKeyPart = (value: string): string => encodeURIComponent(value);
+
+/** The space scope's key, which takes no component. */
 export const SPACE_KEY = "space";
+
+/** The per-user scope's key constructor. */
 export const userKey = (u: UserId): string => `user:${encodeKeyPart(u)}`;
+
+/** The per-session scope's key constructor. */
 export const sessionKey = (u: UserId, s: SessionId): string =>
   `session:${encodeKeyPart(u)}:${encodeKeyPart(s)}`;
 
@@ -144,6 +150,7 @@ export interface CommitRecord {
 
   /** "session:<u>:<s>" for client commits; "service:<space>" else. */
   envelope: string;
+
   holder?: string;
   derivedThrough?: number;
   consequenceOf?: EventId[];
@@ -180,6 +187,7 @@ export interface SpaceState {
 
   /** sessionKey -> intents (the effects doc's per-session instance). */
   effects: Record<string, Intent[]>;
+
   W: number;
   commits: CommitRecord[];
   leaseHolder: string | null;
@@ -191,6 +199,7 @@ export interface SpaceState {
   /** per-doc-instance head seq — what the wave commit CASes
    * against (serving-loop §3d). */
   docHeads: Record<string, number>;
+
   derivations: DerivationSpec[];
 
   /** FP1 (RULED): pending cross-space appends as DURABLE rows,
@@ -239,6 +248,7 @@ export interface EventContribution {
 
   /** null for cascade entries minted this wave (seq at commit). */
   entrySeq: number | null;
+
   parent?: EventId;
   writes: WriteRow[];
   cascadesSame: Array<{
@@ -265,10 +275,12 @@ export interface PendingWave {
 
   /** store seq at compute start — the wave's read basis. */
   basisSeq: number;
+
   contributions: EventContribution[];
 
   /** re-derivable derivation outputs (drop class, §3d). */
   pureWrites: WriteRow[];
+
   exhausted: boolean;
 }
 
@@ -291,11 +303,13 @@ export interface World {
 
   /** chain root per event (audit-only; inheritance ground truth). */
   rootOf: Record<EventId, Acting>;
+
   nextEvent: number;
   nextNonce: number;
 
   /** spec-breach detections (must stay empty on legal schedules). */
   violations: string[];
+
   trace: string[];
 
   /** config: split every wave commit in two (serving-loop §3). */
@@ -1227,6 +1241,7 @@ export interface FanoutState {
   /** Every run, as `action × instance` (serving-loop §3c): one entry
    * per RUN with the single instance it ran as and wrote. */
   runs: Array<{ instanceKey: string; wrote: string }>;
+
   violations: string[];
 }
 

@@ -564,6 +564,7 @@ export interface SelectBaselinesOptions {
 
   /** Reads one baseline run; called only for the runs the walk reaches. */
   readRun: (run: WorkflowRun) => Promise<BaselineRunReading>;
+
   isPullRequest: boolean;
   readBaseSha?: () => Promise<string | null>;
   fetchRanks?: (baseSha: string) => Promise<Map<string, number>>;
@@ -574,6 +575,7 @@ export interface SelectBaselinesOptions {
 
   /** Wraps the GitHub calls made here so a rate limit skips the check. */
   guard?: <T>(description: string, operation: () => Promise<T>) => Promise<T>;
+
   log?: (message: string) => void;
   warn?: (message: string) => void;
 }
@@ -1171,6 +1173,7 @@ export interface Row {
    * `main` commit whose code the measurement covers.
    */
   baseSha?: string;
+
   pctIncrease?: number;
 }
 
@@ -1513,12 +1516,14 @@ function measurementFromFailures(failures: Row[]): CoverageMeasurement {
 export interface UnattributedRegressionOptions {
   /** Repository checkout whose source files the LCOV reports describe. */
   rootDir: string;
+
   groups: CoverageSuggestionGroup[];
   coverageFailures: Row[];
   prFiles: PRFile[];
 
   /** LCOV from this run. */
   lcov: string;
+
   readBaselineLcov: (runId: number) => Promise<string | null>;
 }
 

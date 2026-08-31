@@ -2,6 +2,7 @@
  * live halves are exercised by the rehearsal drill
  * (`packages/cli/integration/topics-restore-drill.sh`). */
 import { describe, it } from "@std/testing/bdd";
+
 import { expect } from "@std/expect";
 import {
   buildRestoreDocument,

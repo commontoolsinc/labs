@@ -40,6 +40,7 @@ export interface DayAggregate {
 
   /** "yyyy/mm/dd". */
   day: string;
+
   runs: number;
   failures: number;
   skips: number;

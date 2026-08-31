@@ -270,6 +270,7 @@ export function subscribeEventAttentionNotifications(
  * value that survives is smaller than the number here.
  */
 const MAX_CONSOLE_DEBUG_DEPTH = 7;
+
 const blobUploadCodec = newDefaultJsonCodecEngine();
 
 /** Each registered logger's enabled state and level. */

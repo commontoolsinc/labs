@@ -39,6 +39,7 @@ export interface GraphNode {
 
   /** The bare entity id (for display / navigation); equals `id` for local nodes. */
   entityId: string;
+
   kind: EntityKind;
   label: string;
 

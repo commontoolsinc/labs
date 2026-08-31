@@ -7,6 +7,7 @@ import type { JSONSchema } from "@commonfabric/runner";
 export interface OAuth2ProviderConfig {
   /** Short lowercase name: "google", "airtable" */
   name: string;
+
   clientId: string;
   clientSecret: string;
   authorizationEndpointUri: string;

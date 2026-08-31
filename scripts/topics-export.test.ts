@@ -67,6 +67,7 @@ const COMMENT = "of:fid1:comment";
 
 /** A stored link, in the sigil form the engine writes. */
 const link = (id: string) => ({ "/": { "link@1": { id } } });
+
 const stream = { $stream: true };
 
 /** The comment body an element of `comments` points at, never inlines. */

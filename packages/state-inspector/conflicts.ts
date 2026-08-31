@@ -50,6 +50,7 @@ export interface Writer {
 
   /** The writer's identity (principal DID parsed from the session). */
   principal?: string;
+
   op: string;
   createdAt: string;
 }
@@ -66,6 +67,7 @@ export interface ContendedEntity {
 
   /** True when ≥2 distinct identities wrote it (multi-user, not multi-session). */
   multiUser: boolean;
+
   writes: number;
 
   /** Writer timeline, seq-ordered. */
@@ -187,6 +189,7 @@ export function contendedEntities(
 export interface StaleRead {
   /** The commit that read the entity. */
   readerCommitSeq: number;
+
   readerSession: string;
 
   /** The seq the reader saw the entity at. */
@@ -203,6 +206,7 @@ export interface StaleRead {
 
   /** A conflicting write the engine's own check would have rejected. */
   missedWriteSeq: number;
+
   missedWriteSession: string;
 
   /** The op of the conflicting write (`set`/`delete` always conflict; `patch`
@@ -220,6 +224,7 @@ export interface EntityConflicts {
 
   /** Distinct writer identities — `>=2` is real cross-user contention. */
   writerPrincipals: number;
+
   multiUser: boolean;
   interleaved: boolean;
 

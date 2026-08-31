@@ -10,6 +10,7 @@ import type { FuseProvider } from "./platform.ts";
  * caching untouched) or one second to one day.
  */
 export const ATTRCACHE_TIMEOUT_MIN_SECONDS = 0;
+
 export const ATTRCACHE_TIMEOUT_MAX_SECONDS = 86_400;
 
 /**

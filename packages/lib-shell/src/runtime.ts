@@ -127,6 +127,7 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
    * worker. Spaces absent from the map resolve to `apiUrl`, the default host.
    */
   spaceHostMap?: Record<string, string>;
+
   experimental?: ExperimentalRuntimeFlags;
   cfcEnforcementMode?: RuntimeCfcEnforcementMode;
 
@@ -146,6 +147,7 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
    * (H3b) is not implemented.
    */
   cfcRenderCeiling?: boolean;
+
   trustSnapshot?: RuntimeTrustSnapshot | null;
 
   /**
@@ -182,6 +184,7 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
    * fall back to `/scripts/worker-runtime.js`.
    */
   workerUrl?: URL;
+
   getBuildHash?: () => Promise<string | undefined>;
 
   /**
@@ -199,6 +202,7 @@ export type RuntimeInternalsCreateOptions = RuntimeInternalsCallbacks & {
  * Cached at module level — the hash doesn't change within a page session.
  */
 let buildHashPromise: Promise<string | undefined> | undefined;
+
 export function fetchBuildHash(): Promise<string | undefined> {
   if (!buildHashPromise) {
     buildHashPromise = (async () => {
