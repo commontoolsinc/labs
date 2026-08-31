@@ -56,6 +56,7 @@ describe("mergeCfcSchemaEnvelopes", () => {
       expect((rows.ifc as { observes?: string }).observes).toBeUndefined();
     });
   });
+
   it("allows additive required fields when a default preserves old documents", () => {
     const merged = mergeCfcSchemaEnvelopes({
       type: "object",
@@ -894,6 +895,7 @@ describe("mergeCfcSchemaEnvelopes", () => {
       ).toThrow(/divergent anyOf branches/);
     });
   });
+
   it("rejects divergent ifc branches nested under a tuple slot", () => {
     // CT-1895: the guard's recursion visited only properties and items, so
     // a divergent-ifc shape under a prefixItems slot escaped it.
