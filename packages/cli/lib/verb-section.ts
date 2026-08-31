@@ -103,6 +103,7 @@ export const EVERY_FLAG_TAKES_A_VALUE: SpendsNextWord = () => true;
 export interface SectionUnit {
   /** The flag's name without its `--`, or `undefined` for a bare word. */
   readonly flag?: string;
+
   /** The unit's words, in the order they were written. */
   readonly tokens: readonly string[];
 }
