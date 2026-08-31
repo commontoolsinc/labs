@@ -108,10 +108,12 @@ describe("resume-presync-demand", () => {
     // document the pre-sync did not warm. The commit machinery owns
     // correctness there — a genuinely cold read of an existing document
     // enters the commit basis at sequence zero and the engine rejects the
-    // commit, which compile-cache-writeback-conflict.test.ts pins on a
-    // cold replica end to end. This test pins the outcome from this side:
-    // with only the holder warmed as a document, the committed derivation
-    // is over the target's real value.
+    // commit, which compile-cache-writeback-conflict.test.ts pins on a cold
+    // replica end to end. The in-process loopback may deliver the target sync
+    // kicked by get() before that read returns, so retry count is deliberately
+    // not an assertion here. This test pins the outcome from this side: with
+    // only the holder explicitly warmed, the committed derivation is over the
+    // target's real value.
     const otherSm = EmulatedStorageManager.connectTo(server, { as: signer });
     const otherRuntime = new Runtime({
       apiUrl: new URL(import.meta.url),
@@ -137,43 +139,55 @@ describe("resume-presync-demand", () => {
       await authorTx.commit();
       await otherSm.synced();
 
-      // This replica warms the holder as a document only — what the clamped
-      // pre-sync provides — so the link target is genuinely cold.
-      const holder = runtime.getCell<{ value: number }>(
-        space,
-        "unwarmed-link-holder",
-      );
-      await holder.asSchema(false).sync();
-
-      let runs = 0;
-      const result = await runtime.editWithRetry((tx) => {
-        runs++;
-        // The holder is local (the document-bounded sync above); the target
-        // its value links to is not, and this read observes that absence.
-        const seen = runtime.getCell<{ value: number }>(
+      // Connect the reader only after the authoring commit has settled. The
+      // suite's primary replica is already connected in beforeEach and may
+      // receive the target through unrelated session activity, which would
+      // make the purported cold-read retry vacuous.
+      const coldSm = EmulatedStorageManager.connectTo(server, { as: signer });
+      const coldRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: coldSm,
+      });
+      try {
+        // This fresh replica warms the holder as a document only — what the
+        // clamped pre-sync provides — so the link target is genuinely cold.
+        const holder = coldRuntime.getCell<{ value: number }>(
           space,
-          "unwarmed-link-target",
-          undefined,
-          tx,
-        ).get()?.value;
-        runtime.getCell<{ doubled: number }>(
+          "unwarmed-link-holder",
+        );
+        await holder.asSchema(false).sync();
+
+        const result = await coldRuntime.editWithRetry((tx) => {
+          // The holder is local (the document-bounded sync above); the target
+          // its value links to was not part of that warm. This read kicks the
+          // target's own load, which loopback may deliver immediately.
+          const seen = coldRuntime.getCell<{ value: number }>(
+            space,
+            "unwarmed-link-target",
+            undefined,
+            tx,
+          ).get()?.value;
+          coldRuntime.getCell<{ doubled: number }>(
+            space,
+            "derived-output",
+            undefined,
+            tx,
+          ).set({ doubled: (seen ?? 0) * 2 });
+        });
+
+        expect(result.error).toBeUndefined();
+        // The committed derivation is over the target's real value, not the
+        // optimistic fallback used if the target had not arrived yet.
+        const committed = coldRuntime.getCell<{ doubled: number }>(
           space,
           "derived-output",
-          undefined,
-          tx,
-        ).set({ doubled: (seen ?? 0) * 2 });
-      });
-
-      expect(result.error).toBeUndefined();
-      expect(runs).toBeGreaterThan(0);
-      // The committed derivation is over the target's real value, not the
-      // absence the first run observed.
-      const committed = runtime.getCell<{ doubled: number }>(
-        space,
-        "derived-output",
-      );
-      await committed.sync();
-      expect(committed.get()).toEqual({ doubled: 84 });
+        );
+        await committed.sync();
+        expect(committed.get()).toEqual({ doubled: 84 });
+      } finally {
+        await coldRuntime.dispose({ closeStorage: false });
+        await coldSm.close();
+      }
     } finally {
       await otherRuntime.dispose();
       await otherSm.close();
@@ -211,6 +225,7 @@ describe("resume-presync-demand", () => {
       await otherSm.synced();
     } finally {
       await otherRuntime.dispose({ closeStorage: false });
+      await otherSm.close();
     }
 
     const resumed = await runtime.patternManager.compilePattern(PROGRAM, {
