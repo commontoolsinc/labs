@@ -271,11 +271,10 @@ comment; without the one below, the frame reads as a note on the declaration it
 touches rather than as a heading over what follows.
 
 Directly under an opening bracket there is nothing above to separate from, and
-`deno fmt` removes a blank line there in any case. A frame in that position is
-also the first content of the block, which is where a comment about the whole
-block goes, so the two shapes are indistinguishable to a reader: put the
-region's first marker after the block's shared setup instead, or let the
-whole-block comment do the work.
+`deno fmt` removes a blank line there in any case. A frame there takes no blank
+line above it, and reads as the first region of the block rather than as a note
+on it. Where the block opens with shared setup instead, the region's first
+marker goes after it.
 
 **A region has an end, and writing the marker is choosing it.** A marker opens
 a region that runs to the next marker at the same level, or to the end of the
