@@ -100,6 +100,23 @@ ensureNotRenderThread();
 const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
   Deno.env.get("CF_CLI_TRACE_TIMINGS") === "1";
 
+/**
+ * What opening a piece does beyond resolving its cell.
+ *
+ * `reconcile` rolls a stored source forward to the origin it follows, keeping
+ * a followed root current. `start` runs the pattern, which materializes
+ * everything its result reaches.
+ *
+ * They are separable because they are wanted separately: a caller that
+ * RENDERS a piece needs both, while a caller that reads what a piece
+ * exported needs the value it reads to be current without paying to run it.
+ * A boolean asks for both or neither.
+ */
+export type PieceOpen = { reconcile: boolean; start: boolean };
+
+const normalizePieceOpen = (open: boolean | PieceOpen): PieceOpen =>
+  typeof open === "boolean" ? { reconcile: open, start: open } : open;
+
 const PRIVILEGED_PIECE_LIST_SCHEMA = internSchema({
   type: "array",
   items: { type: "unknown", asCell: ["cell"] },
@@ -473,8 +490,9 @@ export class PiecesController<T = unknown> {
    * @returns The default pattern cell, or undefined if not set
    */
   async getDefaultPattern(
-    runIt: boolean = true,
+    open: boolean | PieceOpen = true,
   ): Promise<Cell<NameSchema> | undefined> {
+    const { reconcile, start } = normalizePieceOpen(open);
     const cell = await timePiecePhase(
       "getDefaultPattern.spaceCell.sync",
       () => this.#spaceCell.key("defaultPattern").sync(),
@@ -496,11 +514,11 @@ export class PiecesController<T = unknown> {
     }
     try {
       return await timePiecePhase(
-        `getDefaultPattern.get(runIt=${runIt})`,
+        `getDefaultPattern.get(reconcile=${reconcile},start=${start})`,
         () =>
           this.getPieceCell(
             defaultPattern,
-            runIt,
+            { reconcile, start },
             nameSchema,
           ),
       );
@@ -513,7 +531,7 @@ export class PiecesController<T = unknown> {
       // this runtime cannot load. Roll that one forward to the space's
       // official system root and retry the start ONCE. Every other failure
       // rethrows untouched.
-      if (!runIt) throw error;
+      if (!start) throw error;
       let healed: Cell<NameSchema>;
       try {
         const root = await this.getPieceCell(defaultPattern, false, nameSchema);
@@ -545,7 +563,7 @@ export class PiecesController<T = unknown> {
         await this.runtime.idle();
         return await timePiecePhase(
           "getDefaultPattern.get(retry-after-heal)",
-          () => this.getPieceCell(healed, runIt, nameSchema),
+          () => this.getPieceCell(healed, { reconcile, start }, nameSchema),
         );
       } catch (retryError) {
         pieceUpdateLogger.warn("default-root-heal-retry-failed", () => [
@@ -581,14 +599,81 @@ export class PiecesController<T = unknown> {
       origin === deriveSystemPatternSource(this.#space, this.runtime);
   }
 
+  /** The root's `pieceRegistry` export, addressed but not yet synced. */
+  #pieceRegistryExport(root: Cell<NameSchema>): Cell<Cell<unknown>[]> {
+    const cell = root.asSchema({
+      type: "object",
+      properties: {
+        pieceRegistry: pieceListSchema,
+      },
+    });
+    return cell.key("pieceRegistry") as Cell<Cell<unknown>[]>;
+  }
+
   /**
    * Get the cell containing the registered pieces in this space.
    * This is the discovery root, not a list of every stored piece root. Reads
    * the default pattern's pieceRegistry export.
+   *
+   * A listing is a read, and a read does not need the root running. Every
+   * writer of this export — {@link add}, {@link remove}, the root's own
+   * remove handler, and patterns that reach it through `wish()` — persists
+   * what it writes, so the stored value is current at every quiescent
+   * moment, and a listing can be served from it.
+   *
+   * The root is reconciled before the registry is read, so a listing heals a
+   * stale root without calling `runtime.start()`, the dominant phase of
+   * opening a space whose root reaches a large piece.
+   * Running is kept for the cases that cannot be served from what is stored:
+   * a root that has never exported a registry here, one whose passive open
+   * fails, and `add()`.
    */
   async getPieceRegistry(): Promise<Cell<Cell<unknown>[]>> {
-    const defaultPattern = await this.getDefaultPattern(true);
+    // Reconcile without starting so the registry is read from current stored
+    // exports without materializing the root's result graph.
+    let passiveError: unknown;
+    let passiveRoot: Cell<NameSchema> | undefined;
+    try {
+      passiveRoot = await this.getDefaultPattern({
+        reconcile: true,
+        start: false,
+      });
+    } catch (error) {
+      passiveError = error;
+      pieceUpdateLogger.warn("passive-registry-open-failed", () => [
+        "getPieceRegistry: passive default-root open failed; retrying with start",
+        error,
+      ]);
+    }
+    if (passiveRoot) {
+      const exported = this.#pieceRegistryExport(passiveRoot);
+      await this.syncPieces(exported);
+      // `pieceListSchema` carries `default: []`, so a root that never
+      // exported a registry and a root whose registry is empty read the same
+      // way through the schema. The raw value is what separates them, and
+      // only the first needs the root run.
+      if (exported.getRaw() !== undefined) {
+        return exported;
+      }
+    }
+
+    // The running path supplies a registry when no stored export is available.
+    // If both opens fail, retain both causes so the passive failure is not
+    // hidden by the fallback.
+    let defaultPattern: Cell<NameSchema> | undefined;
+    try {
+      defaultPattern = await this.getDefaultPattern(true);
+    } catch (error) {
+      if (passiveError !== undefined) {
+        throw new AggregateError(
+          [passiveError, error],
+          `Could not open the piece registry for space ${this.#space}`,
+        );
+      }
+      throw error;
+    }
     if (!defaultPattern) {
+      if (passiveError !== undefined) throw passiveError;
       // Return empty array cell if no default pattern. Loud on purpose: any
       // subscription made against this placeholder never fires again, so a
       // cold-cache miss here silently freezes piece listings (e.g. FUSE).
@@ -599,13 +684,7 @@ export class PiecesController<T = unknown> {
       return this.runtime.getCell(this.#space, "empty-pieces", pieceListSchema);
     }
 
-    const cell = defaultPattern.asSchema({
-      type: "object",
-      properties: {
-        pieceRegistry: pieceListSchema,
-      },
-    });
-    const pieceRegistry = cell.key("pieceRegistry") as Cell<Cell<unknown>[]>;
+    const pieceRegistry = this.#pieceRegistryExport(defaultPattern);
     await this.syncPieces(pieceRegistry);
     return pieceRegistry;
   }
@@ -689,22 +768,23 @@ export class PiecesController<T = unknown> {
    */
   async getPieceCell<S extends JSONSchema = JSONSchema>(
     id: string | Cell<unknown>,
-    runIt: boolean,
+    open: boolean | PieceOpen,
     asSchema: S,
     scope?: CellScope,
   ): Promise<Cell<Schema<S>>>;
   async getPieceCell<T = unknown>(
     id: string | Cell<unknown>,
-    runIt?: boolean,
+    open?: boolean | PieceOpen,
     asSchema?: JSONSchema,
     scope?: CellScope,
   ): Promise<Cell<T>>;
   async getPieceCell<T = unknown>(
     id: string | Cell<unknown>,
-    runIt: boolean = false,
+    open: boolean | PieceOpen = false,
     asSchema?: JSONSchema,
     scope?: CellScope,
   ): Promise<Cell<T>> {
+    const { reconcile, start } = normalizePieceOpen(open);
     // Get the piece cell
     const addressed: Cell<unknown> = isCell(id)
       ? id
@@ -735,7 +815,7 @@ export class PiecesController<T = unknown> {
     // further sync. Idempotent for a normal top-level piece.
     let piece = addressed.resolveAsCell();
 
-    if (runIt) {
+    if (reconcile) {
       const outcome = await timePiecePhase(
         "get.reconcileSource",
         () => reconcilePieceSource(this.runtime, piece),
@@ -743,10 +823,12 @@ export class PiecesController<T = unknown> {
       if (outcome === "updated") {
         // The transition committed through a transaction view, and the caller
         // may have handed us a cell bound to a read transaction older than it.
-        // Detach and resync, or the start below loads the identity the origin
+        // Detach and resync, or a start below loads the identity the origin
         // just replaced — and reads through the returned cell describe it.
         piece = await piece.withTx().sync();
       }
+    }
+    if (start) {
       // start() handles pattern loading and running. It's idempotent - no
       // effect if already running.
       await timePiecePhase(

@@ -310,7 +310,14 @@ export class RuntimeInternals extends EventTarget {
   #disposed = false;
   #favorites: FavoritesManager;
   #callbacks: RuntimeInternalsCallbacks;
-  #spaceRootPatterns: Map<DID, Promise<PageHandle<NameSchema>>> = new Map();
+  /** Cached space roots, with whether the cached one was STARTED: a
+   * started root also answers a caller that only reads its exports, while
+   * one resolved without starting does not answer a caller that needs it
+   * running. */
+  #spaceRootPatterns: Map<
+    DID,
+    { pattern: Promise<PageHandle<NameSchema>>; started: boolean }
+  > = new Map();
   #patternCache: Map<
     string,
     { promise: Promise<PageHandle<NameSchema>>; started: boolean }
@@ -380,16 +387,26 @@ export class RuntimeInternals extends EventTarget {
     return this.#client.getPiecesListCell<T>(space);
   }
 
-  getSpaceRootPattern(space: DID): Promise<PageHandle<NameSchema>> {
+  /**
+   * The space's root pattern. `start` defaults to true, which a view that
+   * renders the root needs; pass false to read its exports without running
+   * it.
+   */
+  getSpaceRootPattern(
+    space: DID,
+    options: { start?: boolean } = {},
+  ): Promise<PageHandle<NameSchema>> {
     this.#check();
+    const start = options.start ?? true;
     const cached = this.#spaceRootPatterns.get(space);
-    if (cached) return cached;
-    const pattern = this.#client.getSpaceRootPattern(space);
-    this.#spaceRootPatterns.set(space, pattern);
+    if (cached && (cached.started || !start)) return cached.pattern;
+    const pattern = this.#client.getSpaceRootPattern(space, { start });
+    const entry = { pattern, started: start };
+    this.#spaceRootPatterns.set(space, entry);
     // Evict on rejection: a transient failure (unreachable host, authz)
     // must not poison the space for the runtime's lifetime.
     pattern.catch(() => {
-      if (this.#spaceRootPatterns.get(space) === pattern) {
+      if (this.#spaceRootPatterns.get(space) === entry) {
         this.#spaceRootPatterns.delete(space);
       }
     });
@@ -406,7 +423,10 @@ export class RuntimeInternals extends EventTarget {
     // Clear cached pattern since we're recreating it
     this.#spaceRootPatterns.delete(space);
     const pattern = await this.#client.recreateSpaceRootPattern(space);
-    this.#spaceRootPatterns.set(space, Promise.resolve(pattern));
+    this.#spaceRootPatterns.set(space, {
+      pattern: Promise.resolve(pattern),
+      started: true,
+    });
     return pattern;
   }
 
