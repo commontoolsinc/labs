@@ -55,6 +55,7 @@ export type ViewMode = "source" | "rendered";
 export interface Span {
   /** 0-based column where this span starts on its line. */
   readonly col: number;
+
   readonly text: string;
   readonly cls: TokenClass;
 
@@ -69,6 +70,7 @@ export interface Span {
 
   /** Rich-text modifiers used by rendered document views. */
   readonly bold?: boolean;
+
   readonly italic?: boolean;
   readonly underline?: boolean;
   readonly strikethrough?: boolean;
@@ -115,6 +117,7 @@ export interface SchemaField {
 
   /** Compact type, e.g. `string`, `string[]`, `object`, `boolean`. */
   readonly type: string;
+
   readonly required: boolean;
 
   /** Nested fields for object types / array-of-object item types. */
@@ -147,10 +150,12 @@ export type NodeMeta =
 
     /** Builder family: `pattern`, `lift`, `handler`, `computed`, … */
     readonly builder: string;
+
     readonly synthetic: boolean;
 
     /** Callback parameters — the captured input cells, e.g. `{ token }`. */
     readonly captures: readonly string[];
+
     readonly input?: SchemaMeta;
     readonly output?: SchemaMeta;
 
@@ -211,6 +216,7 @@ export interface StructureNode {
   /** Char offset of the declared identifier (the `name`), for semantic queries
    * (type-at / definition-at). Absent when the node declares no single name. */
   readonly nameOffset?: number;
+
   readonly startLine: number;
   readonly endLine: number;
 
@@ -222,6 +228,7 @@ export interface StructureNode {
 
   /** Character offset of the node start, for definition peeks. */
   readonly startOffset: number;
+
   readonly endOffset: number;
   readonly depth: number;
   readonly children: StructureNode[];
@@ -271,6 +278,7 @@ export function flattenStructure(
 export interface Document {
   /** Verbatim source text exactly as piped in, in either view mode. */
   readonly text: string;
+
   readonly lines: readonly Line[];
 
   /** Root-level structure nodes (sections, or top-level statements). */

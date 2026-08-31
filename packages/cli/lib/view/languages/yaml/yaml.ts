@@ -36,6 +36,7 @@ interface ExplicitKeyState {
 interface HighlightState {
   /** Logical indentation of each open flow collection. */
   readonly flow: number[];
+
   readonly explicitKeys: ExplicitKeyState[];
   documentPrefix: boolean;
   quote?: QuoteState;

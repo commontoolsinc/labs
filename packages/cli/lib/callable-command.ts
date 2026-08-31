@@ -22,6 +22,7 @@ export interface CallableCommandExecutionResult<TResolved> {
 
   /** Tool result cell address, passed through from ExecutedCallable. */
   resultRef?: CallableResultRef;
+
   parsed: ParsedExecArgs;
   resolved: TResolved;
 }
@@ -46,6 +47,7 @@ export interface CallableCommandExecutionOptions<
     commandSpec: ExecCommandSpec,
     parsed: ParsedExecArgs,
   ) => string | Promise<string>;
+
   validateRawArgs?: (
     rawArgs: string[],
     commandSpec: ExecCommandSpec,

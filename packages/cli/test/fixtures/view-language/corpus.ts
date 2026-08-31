@@ -27,6 +27,7 @@ export interface ViewLanguageFixture {
 
   /** Other adapters that deliberately share this fixture's token evidence. */
   readonly highlightingPeers?: readonly string[];
+
   readonly surveyRepository: string;
   readonly surveyCommit: string;
   readonly surveyPath: string;

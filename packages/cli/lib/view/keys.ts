@@ -19,11 +19,13 @@ export interface Key {
    * printable key ("a", "/", "?").
    */
   readonly name: string;
+
   readonly ctrl?: boolean;
 
   /** Alt/Meta modifier (from `ESC <key>` or a CSI modifier param). For an
    * Alt+letter, `name` is the letter and `char` is unset. */
   readonly alt?: boolean;
+
   readonly shift?: boolean;
 
   /** The printable character, when the key produced one. */

@@ -35,6 +35,7 @@ type SessionPrivates = {
   openPickedFile(absPath: string): void;
   adjustHunkCounts(oldDelta: number, newDelta: number): void;
 };
+
 const priv = (s: Session) => s as unknown as SessionPrivates;
 
 Deno.test("selectNode: an out-of-range index leaves the selection untouched", () => {

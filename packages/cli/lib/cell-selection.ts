@@ -110,6 +110,7 @@ export interface RenderedLinkAddress {
 export interface LinkMarkers {
   /** The address at this position was asked for. */
   marked?: true;
+
   properties?: Record<string, LinkMarkers>;
   items?: LinkMarkers;
 }
@@ -595,9 +596,10 @@ const UNSUPPORTED_PROJECTION_KEYS = new Set([
 ]);
 
 /**
- * The keywords that apply to exactly one container. Naming one says which
- * container the position describes, so the traversal that reads the projection
- * back needs no separate `type` from the caller.
+ * The keywords that apply to an object and to nothing else. Naming one says
+ * which container the position describes, so the traversal that reads the
+ * projection back needs no separate `type` from the caller; the array half is
+ * `ARRAY_PROJECTION_KEYS` below.
  */
 const OBJECT_PROJECTION_KEYS = [
   "properties",
@@ -606,6 +608,8 @@ const OBJECT_PROJECTION_KEYS = [
   "minProperties",
   "maxProperties",
 ];
+
+/** The keywords that apply to an array and to nothing else. */
 const ARRAY_PROJECTION_KEYS = [
   "items",
   "minItems",
@@ -1665,6 +1669,7 @@ type ProjectionMask =
   | false
   | ArrayProjectionMask
   | ObjectProjectionMask;
+
 interface ObjectPredicateMask extends ObjectMask<PredicateMask> {}
 type PredicateMask = true | ObjectPredicateMask;
 
@@ -2785,6 +2790,7 @@ interface WalkedPosition {
    * path that crosses a link can land the source elsewhere.
    */
   contextSpace: MemorySpace | undefined;
+
   stored?: { value: unknown };
 }
 

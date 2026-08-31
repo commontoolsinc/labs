@@ -37,6 +37,7 @@ export interface CardTarget {
 
   /** Destination line/column in the main document. */
   readonly destLine: number;
+
   readonly destCol: number;
 
   /** Char offset of the declaration to select, when the target is a definition. */

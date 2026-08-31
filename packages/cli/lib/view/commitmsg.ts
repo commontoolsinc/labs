@@ -54,6 +54,7 @@ export interface CommitMessage {
 
   /** First and last (inclusive) 0-based line indices of the indented message. */
   readonly start: number;
+
   readonly end: number;
 }
 

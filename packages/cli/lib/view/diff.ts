@@ -38,10 +38,12 @@ export interface DiffHunk {
 
   /** 1-based start line in the old file (from the `@@` header). */
   readonly oldStart: number;
+
   readonly oldCount: number;
 
   /** 1-based start line in the new file (from the `@@` header). */
   readonly newStart: number;
+
   readonly newCount: number;
 
   /** Trailing context from the header (the enclosing function), if any. */
@@ -63,6 +65,7 @@ export interface DiffFile {
 
   /** 0-based diff-text line index of the file's last line. */
   readonly endLine: number;
+
   readonly hunks: readonly DiffHunk[];
 }
 

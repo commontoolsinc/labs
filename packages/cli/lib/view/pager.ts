@@ -53,10 +53,12 @@ export interface PagerTty {
 export interface PagerDeps {
   /** Open the controlling terminal for reading; throws when there is none. */
   openTty(): PagerTty;
+
   write(text: string): void;
 
   /** The terminal size; may throw when there is no console. */
   consoleSize(): { columns: number; rows: number };
+
   env(key: string): string | undefined;
   addSignalListener(signal: Deno.Signal, handler: () => void): void;
   removeSignalListener(signal: Deno.Signal, handler: () => void): void;

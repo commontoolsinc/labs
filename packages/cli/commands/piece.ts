@@ -3040,6 +3040,7 @@ export interface PieceCLIOptions {
    * directly states it.
    */
   explicitSpace?: boolean;
+
   url?: string;
   mainExport?: string;
   repository?: string;
@@ -3322,6 +3323,7 @@ export interface SurveyCLIOptions extends BulkSelectionOptions {
 
   /** A plan this survey is reported against rather than emitted beside. */
   diff?: string;
+
   out?: string;
 }
 
@@ -3405,6 +3407,7 @@ export function planDiffConverged(diff: PlanDiff): boolean {
 export interface BulkSelectionOptions extends PieceCLIOptions {
   /** Inherited from the `piece` mount's global target options. */
   quiet?: boolean;
+
   path?: string;
   side?: string;
   list?: string[];
@@ -3772,6 +3775,7 @@ export async function repairFromCommand(
 export interface RetargetCLIOptions extends PieceCLIOptions {
   /** Inherited from the `piece` mount's global target options. */
   quiet?: boolean;
+
   plan: string;
   acceptUnretained?: string[];
   apply?: boolean;
@@ -4101,6 +4105,7 @@ async function reportApplyRun(
 export interface RollbackCLIOptions extends PieceCLIOptions {
   /** Inherited from the `piece` mount's global target options. */
   quiet?: boolean;
+
   plan: string;
   acceptUnretained?: string[];
   apply?: boolean;
@@ -4200,6 +4205,7 @@ export async function rollbackFromCommand(
 export interface RestoreCLIOptions extends PieceCLIOptions {
   /** Inherited from the `piece` mount's global target options. */
   quiet?: boolean;
+
   revision?: string;
   apply?: boolean;
 }

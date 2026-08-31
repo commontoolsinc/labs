@@ -46,6 +46,7 @@ export interface ItemOutput {
 
   /** Mark this item archived. Declares no result — the value-less shape. */
   archive: Stream<void>;
+
   [NAME]: string;
   title: string;
 

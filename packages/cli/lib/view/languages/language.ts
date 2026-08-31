@@ -180,6 +180,7 @@ export interface HunkStructureContext {
 
   /** Last diff line of the hunk (its extent). */
   readonly hunkEnd: number;
+
   readonly diffLineStarts: number[];
   readonly rawLines: string[];
 
@@ -378,6 +379,9 @@ export function readOnlyReasonFor(language: Language): string | undefined {
 // selection
 //
 
+/** Memo for {@link allLanguages}, filled on its first call. */
+let languages: readonly Language[] | undefined;
+
 /**
  * Every language the pager knows, most specific first, built on first use.
  * Plain text comes last and remains the fallback after metadata selection.
@@ -388,7 +392,6 @@ export function readOnlyReasonFor(language: Language): string | undefined {
  * building the array eagerly would read a singleton that a cycle-first load had
  * not yet initialized. By first use every module has finished evaluating.
  */
-let languages: readonly Language[] | undefined;
 function allLanguages(): readonly Language[] {
   return languages ??= [
     typeScriptLanguage,

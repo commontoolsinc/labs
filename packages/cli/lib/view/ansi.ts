@@ -24,6 +24,7 @@ export const CSI = `${ESC}[`;
 
 /** Operating System Command introducer and its BEL terminator. */
 const OSC = `${ESC}]`;
+
 const BEL = "\x07";
 export const RESET = `${CSI}0m`;
 

@@ -4,6 +4,7 @@ export interface DecodedLanguageSource {
 
   /** Whether the decoded source began with a UTF-8 byte-order mark. */
   readonly hasUtf8Bom: boolean;
+
   encode(text: string): Uint8Array;
 }
 

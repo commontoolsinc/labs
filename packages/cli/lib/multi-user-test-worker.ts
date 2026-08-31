@@ -86,6 +86,7 @@ export interface StepMeta {
 
   /** Marker name for label/await steps. */
   marker?: string;
+
   skip?: boolean;
 }
 
@@ -125,6 +126,7 @@ let engine: Engine | undefined;
 
 /** Every participant's marker document, keyed by participant name. */
 const markersCells = new Map<string, Cell<Record<string, boolean>>>();
+
 let selfParticipant: string | undefined;
 let stepCells: Cell<unknown>[] = [];
 let patternCoverage: PatternCoverageCollector | undefined;
@@ -134,6 +136,7 @@ const runtimeErrors: string[] = [];
 
 /** Channel 1: console.error/warn captured via the harness console event. */
 const consoleErrors: string[] = [];
+
 const consoleWarnings: string[] = [];
 const continuousUiErrors: Error[] = [];
 let continuousUiCancel: (() => void) | undefined;

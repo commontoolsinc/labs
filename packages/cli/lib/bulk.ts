@@ -247,6 +247,7 @@ export interface RetargetRunRequest {
    * any such row is refused without them; a dry run needs none.
    */
   accept?: readonly string[];
+
   /** Write each row's source; absent, the run is the classification alone. */
   apply?: boolean;
 
@@ -358,6 +359,7 @@ export interface RollbackRunRequest {
    * precondition being the reference that row produced.
    */
   planPath: string;
+
   /**
    * Pieces the operator accepts, by name, as ones this rollback cannot
    * return — their prior source is not retained. Every other unretained row
@@ -365,12 +367,16 @@ export interface RollbackRunRequest {
    * refuses it too.
    */
   accept?: readonly string[];
+
   /** Restore each row's revision; absent, the run is the classification. */
   apply?: boolean;
+
   /** Pieces one session serves before it is replaced. */
   groupSize?: number;
+
   /** Called as each row settles, for reporting as the run proceeds. */
   onRow?: (row: ApplyRow) => void;
+
   /** The derived plan's `takenAt`; defaults to now. A seam so tests can pin it. */
   takenAt?: string;
 }
@@ -425,6 +431,7 @@ export interface RestoreRunRequest {
    * returned to and writes nothing.
    */
   revisionId?: string;
+
   /** Perform the restore; absent, the run reads and writes nothing. */
   apply?: boolean;
 }

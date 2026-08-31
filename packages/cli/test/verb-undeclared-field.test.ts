@@ -202,6 +202,7 @@ interface Tracker {
   /** What the handlers recorded, read off the cell rather than through any
    * rendering, so it says what the handler actually received. */
   entries: () => string[];
+
   root: Cell<any>;
 }
 

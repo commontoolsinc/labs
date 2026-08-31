@@ -19,15 +19,18 @@ export interface DiffFileRange {
   /** First and last (inclusive) diff-text line of the file (header … last
    * hunk line). */
   readonly headerLine: number;
+
   readonly endLine: number;
 
   /** The path used for file-category detection (new side, else old side). */
   readonly path: string;
+
   readonly isTest: boolean;
   readonly isMarkdown: boolean;
 
   /** Added and removed line counts within the file's range. */
   readonly adds: number;
+
   readonly dels: number;
 
   /** The one-line summary shown when the file is collapsed. */

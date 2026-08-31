@@ -16,6 +16,7 @@ import {
  * these shape.
  */
 const userIdentity = await Identity.fromPassphrase("cf-wish-read-options-user");
+
 const profileSpace =
   (await Identity.fromPassphrase("cf-wish-read-options-profile")).did();
 

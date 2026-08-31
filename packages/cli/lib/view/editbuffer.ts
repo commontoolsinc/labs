@@ -45,6 +45,7 @@ export class EditBuffer {
   #lastYank:
     | { row: number; col: number; endRow: number; endCol: number }
     | null = null;
+
   #lastKill: LastKill = "none";
 
   #original: string;

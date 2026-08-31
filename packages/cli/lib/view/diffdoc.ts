@@ -328,6 +328,7 @@ export interface DiffEdit {
 export interface DiffHunkInfo {
   /** The workspace file the hunk maps to, or null when it resolves to none. */
   readonly absPath: string | null;
+
   readonly newStart: number;
   readonly newCount: number;
   readonly verified: boolean;
@@ -1048,15 +1049,20 @@ interface HunkCtx {
   definitions: Map<string, Definition[]>;
   hunks: DiffHunkInfo[];
 
-  /** The languages of the new and old sides (they differ across a rename that
-   * changes the extension); each colors its side's fragments and, for the new
-   * side, projects the hunk's structure. */
+  /** The new side's language. It colors that side's fragments, and it is the
+   * one that projects the hunk's structure. */
   newLanguage: Language;
+
+  /** The old side's language, which colors its own fragments. Differs from
+   * `newLanguage` across a rename that changes the extension. */
   oldLanguage: Language;
 
-  /** Paths whose extensions the parsers use to pick a script variant. */
+  /** New-side path, whose extension the parsers use to pick a script variant. */
   newFileName: string | undefined;
+
+  /** Old-side path, read the same way. */
   oldFileName: string | undefined;
+
   viewMode: ViewMode;
 }
 
