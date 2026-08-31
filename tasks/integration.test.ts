@@ -404,6 +404,7 @@ Deno.test("every recorded blocked port is one fetch refuses", async () => {
   // probes at a host that cannot resolve reaches no network service: the
   // blocked answer arrives first, and any other port would fail on the name
   // instead.
+
   const stillBlocked: number[] = [];
   for (const port of ports.blockedPorts) {
     try {
