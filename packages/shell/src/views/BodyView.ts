@@ -179,11 +179,13 @@ export class XBodyView extends BaseView {
    * Open the piece menu over the surface a piece failed to load into. A right
    * click reaches `cf-render` everywhere else, and there is no `cf-render`
    * here, so this stands in for it: the menu is handed the space with no
-   * piece, and offers what it can reach without one.
+   * piece, and offers what it can reach without one. Shift reaches the
+   * browser's own menu, as it does over piece content, which is how the error
+   * text under here is copied.
    */
   #onLoadErrorContextMenu = (event: MouseEvent) => {
     const space = this.space;
-    if (!space || !this.rt) return;
+    if (event.shiftKey || !space || !this.rt) return;
     event.preventDefault();
     openPieceMenu({
       space,

@@ -245,11 +245,16 @@ export function payloadHint(action: PieceAction): string | undefined {
 }
 
 /**
- * CFPieceMenu — the menu a right-click on a piece opens, with the panels for
- * what it can show and do about that piece: its authored source, the origin
- * and history it records, its live argument and result data, and the handler
- * streams an event can be dispatched to. It also shows the containing space's
- * access rights and lets space owners change them.
+ * CFPieceMenu — the menu a right-click opens on a space, and usually on a
+ * piece in it. Its piece entries hold the panels for what it can show and do
+ * about that piece: the authored source, the origin and history it records,
+ * the live argument and result data, and the handler streams an event can be
+ * dispatched to. Below a divider it names the space and shows its access
+ * rights, which space owners can change.
+ *
+ * Opened on a space alone — over a surface no piece loaded into — the first
+ * heading reads "Piece unavailable", every entry needing a piece is disabled,
+ * and the space entries stay live.
  *
  * @element cf-piece-menu
  *
@@ -3215,7 +3220,12 @@ function copyThemeVariables(from: Element, to: HTMLElement): void {
  */
 let shared: CFPieceMenu | undefined;
 
-/** Show the piece menu for `cell` at a click position. */
+/**
+ * Show the menu at a click position, mounting it on `document.body` the first
+ * time. It addresses either a piece — `cell`, which the space and runtime are
+ * read from — or a space with no piece, named by `space` and reached through
+ * `runtime`. A call carrying neither leaves the menu closed.
+ */
 export function openPieceMenu(
   { cell, space, runtime, x, y, themeFrom, highlightedPiece, highlightTarget }:
     {

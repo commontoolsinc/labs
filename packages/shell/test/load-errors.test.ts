@@ -281,6 +281,24 @@ describe("load-errors", () => {
               highlightedPiece: undefined,
               highlightTarget: undefined,
             }]);
+
+            // Shift is how the browser's own menu is reached over piece
+            // content, and the error text under this surface is copied
+            // through it.
+            let shiftPrevented = false;
+            handler(
+              {
+                preventDefault: () => {
+                  shiftPrevented = true;
+                },
+                shiftKey: true,
+                clientX: 12,
+                clientY: 34,
+              } as unknown as MouseEvent,
+            );
+
+            expect(shiftPrevented).toBe(false);
+            expect(openings).toHaveLength(1);
           } finally {
             panel.isConnected = false;
             restore();
