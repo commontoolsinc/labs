@@ -73,6 +73,20 @@ anomalies. A provider error stops the experiment; it is never retried.
 | sol/V2 | standing six | not yet read | not yet read | not run |
 | sol/V2 | composition four | not yet read | not yet read | not run |
 
+### Terra/V0 reuse result
+
+The completed standing-suite reuse cell used `--base=origin/main`: the local
+`main` ref was `bc1ac33434cb4b61ab6c428200353821c35b5cea` and did not contain
+the fabric SHA, while `origin/main` was
+`5f406cd608e735ab39bec53b61559b287c26e3f6` and did. Its ancestry reading was
+therefore `ancestor`. Counts: 7 searches, 7 hits; 8 `run_pattern` calls (5 by
+id, 3 source, 0 composing); 6 `ok`. This differs from the historical 6/6
+by-id baseline and is the recorded reuse-cell outcome.
+
+The first composition invocation used the default `--base=main` and refused
+before a task or provider turn for that stale-ref reason. It is not a cell
+result and is rerun with `--base=origin/main`; no `--allow-diverged` is used.
+
 ## Amendment before the first provider turn: standing-suite purpose
 
 The first admissibility read found whole answers for all six standing tasks.
