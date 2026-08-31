@@ -864,6 +864,8 @@ function cellAsLink(value: object | ((...args: never[]) => unknown)): unknown {
  * ```
  */
 export class Runtime {
+  #tearingDownWrites = false;
+
   readonly id: string;
   readonly scheduler: Scheduler;
   readonly patternManager: PatternManager;
@@ -1878,6 +1880,10 @@ export class Runtime {
       // it cannot spin: every round awaits real promises, so a runtime that keeps
       // working keeps the barrier open rather than busy-looping.
       if (!closeStorage) await this.settled(Infinity);
+      // Kept-storage disposal first drains tracked writebacks above. From this
+      // point onward, no delayed reconciliation or retry may mint new work
+      // behind the teardown barriers below.
+      this.#tearingDownWrites = true;
       // Abort any pending (not-yet-started) queued jobs so they don't start
       // after storage is torn down.
       for (const queue of this.#queues.values()) {
@@ -1934,6 +1940,7 @@ export class Runtime {
       // Wait for any pending operations
       await this.scheduler.idle();
     } finally {
+      this.#tearingDownWrites = true;
       // Released whatever happened above. `storageManager.close()` can reject
       // — through a provider's `replica.close()` — and it is the one await
       // here that can. Every statement below is synchronous field-clearing
@@ -2467,6 +2474,17 @@ export class Runtime {
   ): Promise<
     { ok: T; error?: undefined } | { ok?: undefined; error: CommitError }
   > {
+    const teardownResult = (): {
+      ok?: undefined;
+      error: CommitError;
+    } => ({
+      error: {
+        name: "StorageTransactionAborted" as const,
+        message: "editWithRetry stopped because the runtime is disposing",
+        reason: new Error("runtime disposing"),
+      },
+    });
+    if (this.#tearingDownWrites) return Promise.resolve(teardownResult());
     const tx = this.edit();
     tx.tx.immediate = true;
     (tx.tx as { deferRunnerStartUntilCommit?: boolean })
@@ -2489,11 +2507,16 @@ export class Runtime {
     const commitPrepared = (): Promise<
       { ok: T; error?: undefined } | { ok?: undefined; error: CommitError }
     > => {
+      if (this.#tearingDownWrites) {
+        tx.abort("editWithRetry stopped because the runtime is disposing");
+        return Promise.resolve(teardownResult());
+      }
       this.prepareTxForCommit(tx);
       return tx.commit().then(async ({ error }) => {
         if (error) {
           if (maxRetries > 0 && isRetryableCommitRejection(error)) {
             await this.awaitCommitRetryReadiness(error);
+            if (this.#tearingDownWrites) return teardownResult();
             return this.editWithRetry<T>(fn, maxRetries - 1);
           } else {
             return { error };
@@ -2534,6 +2557,10 @@ export class Runtime {
       : 0;
     if (typeof reconciliation === "number") return commitPrepared();
     return reconciliation.then((present) => {
+      if (this.#tearingDownWrites) {
+        tx.abort("editWithRetry stopped because the runtime is disposing");
+        return teardownResult();
+      }
       if (present > 0) {
         tx.abort(
           `editWithRetry re-run: ${present} document(s) read as absent ` +

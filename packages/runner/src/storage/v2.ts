@@ -5845,13 +5845,14 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
    * documents — the same convergence the engine's rejection would force,
    * without the round trip, the catch-up gate, or the wasted upload.
    *
-   * Session-scoped reads are excluded: a session instance is keyed by this
-   * connection's own fresh session id, so no server-side revision can exist
-   * under it and its absence claims can never conflict. Space- and
-   * user-scoped instances persist across sessions and stay covered.
+   * Session-scoped reads of this replica's own fresh session are excluded,
+   * because no unseen server-side revision can exist under that instance.
+   * A served run can carry another session's identity, though, and that
+   * explicit instance is reconciled like a user-scoped one.
    *
-   * The instance key matches {@link buildReads}, which builds the read set
-   * against the replica's own instances.
+   * The instance key matches {@link buildReads}: a served run uses the
+   * transaction's scope identity, while ordinary client transactions use the
+   * replica's own identity.
    */
   loadUnexaminedAbsences(
     source: IStorageTransaction | undefined,
@@ -5859,6 +5860,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     if (source === undefined) return 0;
     const reads = getDirectTransactionReadActivities(source);
     if (!reads) return 0;
+    const identity = source.scopeKeyIdentity;
     // Documents this transaction writes are its own creations in flight:
     // reading one as absent and then writing it is what creating a document
     // IS, and the paired absence claim is what the engine validates the
@@ -5867,22 +5869,30 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     const ownWrites = new Set<string>();
     for (const write of getTransactionWriteAttempts(source) ?? []) {
       if (write.space !== this.#space) continue;
-      ownWrites.add(docKey(write.id, this.instanceKey(write.scope)));
+      ownWrites.add(docKey(write.id, this.instanceKey(write.scope, identity)));
     }
     const unexamined = new Map<string, WatchAddress>();
     for (const read of this.commitReadActivities(source, reads)) {
-      if (
-        normalizeCellScope(read.scope) === "session"
-      ) {
+      const scope = normalizeCellScope(read.scope);
+      // A malformed/incomplete served identity cannot name the instance on
+      // the wire. Leave its claim for commit admission rather than pulling a
+      // different instance under the replica identity.
+      if (identity !== undefined && !canResolveScopeKey(scope, identity)) {
         continue;
       }
-      const key = docKey(read.id, this.instanceKey(read.scope));
+      const instance = this.instanceKey(scope, identity);
+      const ownInstance = this.instanceKey(scope);
+      if (scope === "session" && instance === ownInstance) continue;
+      const key = docKey(read.id, instance);
       if (ownWrites.has(key)) continue;
       if (this.#docs.has(key) || unexamined.has(key)) continue;
       unexamined.set(key, {
         id: read.id,
         type: DOCUMENT_MIME as MIME,
-        scope: normalizeCellScope(read.scope),
+        scope,
+        ...(scope !== "space" && instance !== ownInstance
+          ? { scopeKey: instance as ScopeKey }
+          : {}),
       });
     }
     // Synchronous zero: with nothing to examine there is nothing to await,
@@ -5924,7 +5934,10 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
         const covered = Promise.resolve({ ok: {} } as Result<Unit, PullError>);
         for (let index = 0; index < entries.length; index++) {
           const [address, selector] = entries[index];
-          const key = docKey(address.id, this.instanceKey(address.scope));
+          const key = docKey(
+            address.id,
+            this.instanceKey(address.scope, identity, address.scopeKey),
+          );
           if ((this.#docs.get(key)?.confirmed.seq ?? 0) === 0) {
             absentWatchIds.push(watchIds[index]);
             continue;

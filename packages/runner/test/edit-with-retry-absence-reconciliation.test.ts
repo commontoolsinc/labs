@@ -1,8 +1,14 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
+import {
+  ExecutionLeaseCycle,
+  executionLeaseHolder,
+} from "@commonfabric/memory/v2/execution-lease";
+import { resolveScopeKey } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
+import { stampWaveRunContext } from "../src/executor/wave.ts";
 import { excludeReadFromConflict } from "../src/storage/reactivity-log.ts";
 import { toMemorySpaceAddress } from "../src/link-types.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
@@ -288,6 +294,184 @@ describe("editWithRetry absence reconciliation", () => {
       provider.loadUnexaminedAbsences = original;
       await runtime.dispose();
       await sm.close();
+      await server.close();
+    }
+  });
+
+  it("does not resume a reconciled edit after runtime disposal", async () => {
+    const server = newSharedServer();
+    const sm = EmulatedStorageManager.connectTo(server, { as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+    });
+    const provider = sm.open(space);
+    const original = provider.loadUnexaminedAbsences;
+    const reconciliation = Promise.withResolvers<number>();
+    let reconciliationCalled = false;
+    let disposed = false;
+    let outputAddress:
+      | ReturnType<typeof toMemorySpaceAddress>
+      | undefined;
+    try {
+      provider.loadUnexaminedAbsences = () => {
+        reconciliationCalled = true;
+        return reconciliation.promise;
+      };
+      const editing = runtime.editWithRetry((tx) => {
+        runtime.getCell(
+          space,
+          "dispose-during-reconciliation-input",
+          valueSchema,
+          tx,
+        ).get();
+        const output = runtime.getCell(
+          space,
+          "dispose-during-reconciliation-output",
+          valueSchema,
+          tx,
+        );
+        outputAddress = toMemorySpaceAddress(
+          output.getAsNormalizedFullLink(),
+        );
+        output.set({ value: 1 });
+      });
+      expect(reconciliationCalled).toBe(true);
+
+      await runtime.dispose({ closeStorage: false });
+      disposed = true;
+      reconciliation.resolve(0);
+      const result = await editing;
+
+      expect(result.error?.name).toBe("StorageTransactionAborted");
+      expect(
+        provider.replica.getDocument(
+          outputAddress!.id,
+          outputAddress!.scope,
+        ),
+      ).toBeUndefined();
+    } finally {
+      provider.loadUnexaminedAbsences = original;
+      reconciliation.resolve(0);
+      if (!disposed) await runtime.dispose({ closeStorage: false });
+      await sm.close();
+      await server.close();
+    }
+  });
+
+  it("reconciles the served transaction's user and session instances", async () => {
+    const actor = await Identity.fromPassphrase(
+      "absence reconciliation served actor",
+    );
+    const service = await Identity.fromPassphrase(
+      "absence reconciliation serving runtime",
+    );
+    const actorIdentity = {
+      principal: actor.did(),
+      sessionId: "absence-actor-session",
+    };
+    const server = newSharedServer();
+    let actorStorage: EmulatedStorageManager | undefined =
+      EmulatedStorageManager.connectTo(server, {
+        as: actor,
+        id: actorIdentity.sessionId,
+      });
+    let actorRuntime: Runtime | undefined = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: actorStorage,
+    });
+    let servingStorage: EmulatedStorageManager | undefined;
+    let servingRuntime: Runtime | undefined;
+    let lease: ExecutionLeaseCycle | undefined;
+    try {
+      const userCell = actorRuntime.getCell<{ value: number }>(
+        space,
+        "served-identity-user",
+        valueSchema,
+        undefined,
+        "user",
+      );
+      const sessionCell = actorRuntime.getCell<{ value: number }>(
+        space,
+        "served-identity-session",
+        valueSchema,
+        undefined,
+        "session",
+      );
+      const seed = actorRuntime.edit();
+      userCell.withTx(seed).set({ value: 11 });
+      sessionCell.withTx(seed).set({ value: 22 });
+      expect((await seed.commit()).error).toBeUndefined();
+      await actorStorage.synced();
+      const userId = userCell.getAsNormalizedFullLink().id;
+      const sessionId = sessionCell.getAsNormalizedFullLink().id;
+      await actorRuntime.dispose();
+      actorRuntime = undefined;
+      await actorStorage.close();
+      actorStorage = undefined;
+
+      const holder = executionLeaseHolder(service.did());
+      servingStorage = EmulatedStorageManager.connectTo(server, {
+        as: service,
+        id: holder,
+        servingHomeSpace: space,
+      });
+      servingRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: servingStorage,
+        servingPosture: true,
+        experimental: { serverExecution: true },
+      });
+      const engine = await server.engineForSpace(space);
+      lease = new ExecutionLeaseCycle({ engine, space, holder });
+      expect(lease.acquire()).toBe(true);
+
+      const tx = servingRuntime.edit();
+      stampWaveRunContext(tx, {
+        actionId: "reconcile-served-identity",
+        kind: "derivation",
+        scopeKeyIdentity: actorIdentity,
+        actionScopeKey: resolveScopeKey("user", actorIdentity),
+      });
+      tx.read({
+        space,
+        id: userId,
+        type: "application/json",
+        scope: "user",
+        path: [],
+      }, { trackReadWithoutLoad: true });
+      tx.read({
+        space,
+        id: sessionId,
+        type: "application/json",
+        scope: "session",
+        path: [],
+      }, { trackReadWithoutLoad: true });
+
+      const provider = servingStorage.open(space);
+      expect(await provider.loadUnexaminedAbsences!(tx.tx)).toBe(2);
+      expect(
+        (provider.replica.getDocument(userId, "user", actorIdentity)?.value as
+          | { value?: number }
+          | undefined)?.value,
+      ).toBe(11);
+      expect(
+        (provider.replica.getDocument(
+          sessionId,
+          "session",
+          actorIdentity,
+        )?.value as { value?: number } | undefined)?.value,
+      ).toBe(22);
+      expect(provider.replica.getDocument(userId, "user")).toBeUndefined();
+      expect(provider.replica.getDocument(sessionId, "session"))
+        .toBeUndefined();
+      tx.abort("inspection only");
+    } finally {
+      lease?.release();
+      await servingRuntime?.dispose();
+      await actorRuntime?.dispose();
+      await servingStorage?.close();
+      await actorStorage?.close();
       await server.close();
     }
   });
