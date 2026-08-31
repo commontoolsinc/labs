@@ -71,8 +71,10 @@ export interface ConsoleFlowNode {
   policyDenied?: boolean;
   policyDetail?: string;
 
-  /** Cells this call read, and cells it produced. */
+  /** Cells this call read. */
   reads: readonly ConsoleFlowCell[];
+
+  /** Cells this call produced. */
   produces: readonly ConsoleFlowCell[];
 
   /**

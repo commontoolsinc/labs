@@ -423,8 +423,13 @@ export interface VerifyResult {
      */
     reclassifiedGenerated: number;
 
-    /** Counts per entity kind, so "74 pieces" reads differently from "74 cells". */
+    /**
+     * `changed` broken out per entity kind, so that "74 pieces" reads
+     * differently from "74 cells".
+     */
     changedByKind: Record<string, number>;
+
+    /** `removed` broken out the same way. */
     removedByKind: Record<string, number>;
   };
 

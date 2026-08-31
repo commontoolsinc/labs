@@ -11,25 +11,22 @@ import { SchemaAndHash } from "./SchemaAndHash.ts";
 import { toDeepFrozenSchema } from "./schema-copy.ts";
 
 /**
- * Bidirectional intern cache for schemas.
- *
- * The cache is split into two maps to avoid strong retention:
- *
- * - `schemaToSah`: `WeakMap<JSONSchemaObj, SchemaAndHash>` — forward lookup.
- *   When the schema object is GC'd, the entry (and with it the
- *   `SchemaAndHash`) becomes unreachable.
- * - `hashToRef`: `Map<string, WeakRef<JSONSchemaObj>>` — reverse lookup
- *   (hash string → schema). Stores only a `WeakRef`, so the schema is not
- *   retained. Dead refs are cleaned up by `schemaFinalizer` and on lookup.
- *
- * To look up by hash: deref the `WeakRef` from `hashToRef`, then look up
- * the `SchemaAndHash` from `schemaToSah`. This ensures `SchemaAndHash` is
- * only reachable while the schema object itself is alive.
- *
- * - `booleanInterns`: prefab `SchemaAndHash` for `true` and `false` (boolean
- *   schemas are primitives and can't be `WeakMap`/`WeakRef` targets).
+ * Forward half of the bidirectional schema intern cache: schema object to its
+ * `SchemaAndHash`. A `WeakMap`, so that when the schema object is collected
+ * the entry — and with it the `SchemaAndHash` — becomes unreachable.
  */
 const schemaToSah = new WeakMap<JSONSchemaObj, SchemaAndHash>();
+
+/**
+ * Reverse half of that cache: hash string to schema. Holds only a `WeakRef`,
+ * so the schema is not retained; dead refs are cleaned up by
+ * `schemaFinalizer` and on lookup.
+ *
+ * Splitting the cache in two is what avoids strong retention, and it is why a
+ * lookup by hash takes both halves: deref the `WeakRef` from here, then read
+ * the `SchemaAndHash` out of `schemaToSah`. A `SchemaAndHash` is thereby
+ * reachable only while its own schema object is alive.
+ */
 const hashToRef = new Map<
   string,
   WeakRef<JSONSchemaObj> | boolean | undefined
