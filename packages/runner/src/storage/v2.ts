@@ -91,6 +91,7 @@ import {
   IMergedChanges,
   IOperationStorageCapability,
   IPreconditionFailedError,
+  IReadActivity,
   IRemoteStorageProviderSettings,
   ISpaceReplica,
   IStorageManager,
@@ -4684,6 +4685,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
   private async refreshWatchSet(
     entries: Iterable<[WatchAddress, SchemaPathSelector]>,
     type: "pull" | "integrate" = "pull",
+    watchBranch = "",
   ): Promise<Result<Unit, PullError>> {
     try {
       const { session } = await this.#activeSessionHandle();
@@ -4738,7 +4740,7 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
       }
 
       const watches = watchEntries.map(([address, selector]) => ({
-        id: watchIdForEntry(address, selector, ""),
+        id: watchIdForEntry(address, selector, watchBranch),
         kind: "graph" as const,
         query: {
           roots: [{
@@ -4785,6 +4787,36 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
       return { ok: {} };
     } catch (error) {
       return { error: toPullError(error) };
+    }
+  }
+
+  /** Remove graph watches whose caller needed only a one-shot absence probe. */
+  async #removeWatchIds(watchIds: readonly string[]): Promise<void> {
+    if (watchIds.length === 0) return;
+    try {
+      const { session } = await this.#activeSessionHandle();
+      const { view, precedingSyncs, sync } = await session.watchRemoveSync(
+        watchIds,
+      );
+      if (this.#closed) {
+        view.close();
+        return;
+      }
+      this.#watchView = view;
+      try {
+        for (const precedingSync of precedingSyncs) {
+          this.applySessionSync(precedingSync, "integrate");
+        }
+        this.applySessionSync(sync, "integrate");
+      } catch (error) {
+        view.close();
+        throw error;
+      }
+      this.#consumeWatchView(view);
+    } catch {
+      // Best effort. SpaceSession removes these ids from reconnect intent
+      // before issuing the request; if the session itself is gone, its server
+      // watches disappear with it.
     }
   }
 
@@ -5710,6 +5742,81 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
   }
 
   /**
+   * Return the raw reads that become commit-time concurrency preconditions.
+   * Reconciliation and commit construction must use the same set: loading a
+   * read that buildReads later drops can spend a retry on an observation the
+   * server would never validate.
+   */
+  private commitReadActivities(
+    source: IStorageTransaction,
+    reads: Iterable<IReadActivity>,
+  ): IReadActivity[] {
+    // A mergeable op resolves against durable state, so it does not depend on
+    // the document's prior value. Reads incidental to the op are excluded,
+    // while a handler's own explicit read remains a real dependency.
+    const mergeableOpPathsByEntity = new Map<
+      string,
+      (readonly string[])[]
+    >();
+    for (const op of getDirectTransactionMergeableOpAddresses(source) ?? []) {
+      if (op.space !== this.#space) continue;
+      const key = `${op.id}\0${normalizeCellScope(op.scope)}`;
+      const paths = mergeableOpPathsByEntity.get(key);
+      if (paths) {
+        paths.push(op.path);
+      } else {
+        mergeableOpPathsByEntity.set(key, [op.path]);
+      }
+    }
+
+    const commitReads: IReadActivity[] = [];
+    for (const read of reads) {
+      if (
+        read.space !== this.#space ||
+        (read.type ?? DOCUMENT_MIME) !== DOCUMENT_MIME ||
+        hasDataUriScheme(read.id) ||
+        // Content-addressed documents cannot change, so their reads carry no
+        // commit-time concurrency precondition.
+        read.id.startsWith("cid:") ||
+        // Blind UI-input write-target reads are replaced by one structural
+        // parent read after buildReads' main loop.
+        isReadIgnoredForCommit(read.meta) ||
+        // Reference-resolution shape reads stay reactive but do not constrain
+        // the commit; recursive reads remain value dependencies.
+        (isReadExcludedFromConflict(read.meta) &&
+          read.nonRecursive === true) ||
+        // Runtime verifier reads of the CFC label are point-in-time policy
+        // observations, not consumed values.
+        (isInternalVerifierRead(read.meta) && isCfcLabelPath(read.path))
+      ) {
+        continue;
+      }
+
+      const scope = normalizeCellScope(read.scope);
+      const opPaths = mergeableOpPathsByEntity.get(`${read.id}\0${scope}`);
+      // A read of an op array's length is a genuine dependency: the handler
+      // used the element count that a concurrent mergeable op changes.
+      const readsMergeableOpArrayLength = opPaths !== undefined &&
+        opPaths.some((opPath) => isArrayLengthChildPath(opPath, read.path));
+      if (
+        opPaths !== undefined &&
+        !readsMergeableOpArrayLength &&
+        (isMergeableOpRead(read.meta) ||
+          isReadMarkedAsAttemptedWrite(read.meta) ||
+          isCfcLabelPath(read.path) ||
+          opPaths.some((opPath) =>
+            isStrictPrefixPath(opPath, read.path) ||
+            (read.nonRecursive === true && isSamePath(opPath, read.path))
+          ))
+      ) {
+        continue;
+      }
+      commitReads.push(read);
+    }
+    return commitReads;
+  }
+
+  /**
    * Load the documents a transaction read as absent without the replica ever
    * having examined them, and report how many turned out to exist.
    *
@@ -5749,15 +5856,8 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
       ownWrites.add(docKey(write.id, this.instanceKey(write.scope)));
     }
     const unexamined = new Map<string, WatchAddress>();
-    for (const read of reads) {
+    for (const read of this.commitReadActivities(source, reads)) {
       if (
-        read.space !== this.#space ||
-        (read.type ?? DOCUMENT_MIME) !== DOCUMENT_MIME ||
-        hasDataUriScheme(read.id) ||
-        // Content-addressed reads carry no commit-time concurrency
-        // precondition at all, so `buildReads` drops them before any seq is
-        // exported.
-        read.id.startsWith("cid:") ||
         normalizeCellScope(read.scope) === "session"
       ) {
         continue;
@@ -5776,24 +5876,71 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
     // the commit-gated runner start among them.
     if (unexamined.size === 0) return 0;
     return (async () => {
+      // Like pull(), a one-shot probe must not reuse a session invalidated by
+      // an ACL change merely because the normal selector tracker is bypassed.
+      this.#consumeOwedSessionRemount();
+      const entries = normalizeSyncEntries(
+        [...unexamined.values()].map((
+          address,
+        ): [WatchAddress, SchemaPathSelector] => [
+          address,
+          // Fetch the document itself and follow no links. The basis needs
+          // this document's revision, not a schema-guided closure.
+          { path: [], schema: false },
+        ]),
+      );
+      // These probes own distinct watches so an absent result can be removed
+      // without disturbing a concurrent or pre-existing ordinary pull.
+      const watchBranch = `absence:${crypto.randomUUID()}`;
+      const watchIds = entries.map(([address, selector]) =>
+        watchIdForEntry(address, selector, watchBranch)
+      );
       try {
-        // `schema: false` asks for the document and follows nothing: what a
-        // basis needs is the document's own version, not the closure a
-        // schema-guided read would reach.
-        await this.pull(
-          [...unexamined.values()].map((
-            address,
-          ): [WatchAddress, SchemaPathSelector] => [
-            address,
-            { path: [], schema: false },
-          ]),
+        const result = await this.refreshWatchSet(
+          entries,
+          "pull",
+          watchBranch,
         );
+        if (result.error) {
+          await this.#removeWatchIds(watchIds);
+          return 0;
+        }
+
+        const absentWatchIds: string[] = [];
+        const covered = Promise.resolve({ ok: {} } as Result<Unit, PullError>);
+        for (let index = 0; index < entries.length; index++) {
+          const [address, selector] = entries[index];
+          const key = docKey(address.id, this.instanceKey(address.scope));
+          if ((this.#docs.get(key)?.confirmed.seq ?? 0) === 0) {
+            absentWatchIds.push(watchIds[index]);
+            continue;
+          }
+          // A discovered document is now a real dependency of the retry.
+          // Retain its watch and teach ordinary pulls that the selector is
+          // covered, even though this probe used a distinct watch id.
+          this.#watchSelectorTracker.add(
+            {
+              id: address.id,
+              type: DOCUMENT_MIME,
+              scope: normalizeCellScope(address.scope),
+              ...(address.scopeKey !== undefined
+                ? { scopeKey: address.scopeKey }
+                : {}),
+            },
+            selector,
+            covered,
+          );
+        }
+        // A never-created id must not become permanent live subscription
+        // state merely because one transaction asserted its absence.
+        await this.#removeWatchIds(absentWatchIds);
         let present = 0;
         for (const key of unexamined.keys()) {
           if ((this.#docs.get(key)?.confirmed.seq ?? 0) > 0) present += 1;
         }
         return present;
       } catch {
+        await this.#removeWatchIds(watchIds);
         // Best-effort, like the retry gate it front-runs: an unexamined
         // absence is what this path exported before, and the commit's own
         // verdict still decides.
@@ -5924,111 +6071,8 @@ class SpaceReplica implements ISpaceReplica, IOperationStorageCapability {
       }
     };
 
-    // A mergeable op resolves against durable state, so it does not depend on
-    // the document's prior value. On an entity touched by a mergeable op, the
-    // reads the op ITSELF issues are dropped from conflict detection — its own
-    // value read (marked `mergeableOpRead`), its write-target reads (marked
-    // attempted-write), and the CFC write-policy label at ["cfc"] — so disjoint
-    // and stale-base writes merge and the op applies on top of a concurrent
-    // whole-entity write. A handler's OWN explicit read of the entity is kept,
-    // so a conditional mergeable write (e.g. dedup-then-push) still conflicts
-    // and retries. Server-side write authorization is enforced at apply time.
-    const mergeableOpPathsByEntity = new Map<string, (readonly string[])[]>();
-    for (const op of getDirectTransactionMergeableOpAddresses(source) ?? []) {
-      if (op.space !== this.#space) continue;
-      const key = `${op.id}\0${normalizeCellScope(op.scope)}`;
-      const paths = mergeableOpPathsByEntity.get(key);
-      if (paths) {
-        paths.push(op.path);
-      } else {
-        mergeableOpPathsByEntity.set(key, [op.path]);
-      }
-    }
-
-    for (const read of reads) {
-      if (
-        read.space !== this.#space ||
-        (read.type ?? DOCUMENT_MIME) !== DOCUMENT_MIME ||
-        hasDataUriScheme(read.id) ||
-        // Content-addressed documents carry no commit-time concurrency
-        // precondition at all: their content can never change (the engine
-        // and every replica refuse content that does not hash to the id),
-        // so there is no staleness for a conflict check to find — while
-        // the client's confirmed basis for a cid: doc it resolved from
-        // its overlay or the realm registry is 0, and the doc's first
-        // INSTALL is a real revision row, so exporting that read killed
-        // the commit as `stale confirmed read: cid:… at seq 0` exactly
-        // in the delivery-gap window the resolution fallbacks serve
-        // (layer-indifference extended from layers to seqs; the
-        // server-side closure validation owns presence).
-        read.id.startsWith("cid:")
-      ) {
-        continue;
-      }
-      // A read tagged `ignoreReadForCommit` (UI-input blind-leaf-write mode) is not
-      // a value-equality concurrency precondition: a blind `set` must not lose the
-      // own-write race on its own write-target read. Drop it from the conflict set.
-      // Its structural replacement — one nonRecursive read at the cell's PARENT — is
-      // emitted once after the loop from the threaded `structuralTarget`, since the
-      // logical write path is known only at handleCellSet, not from this diff.
-      if (isReadIgnoredForCommit(read.meta)) {
-        continue;
-      }
-
-      // Reference-resolution reads (e.g. asCell argument materialization following
-      // a write-redirect to construct the Cell) are tagged excludeReadFromConflict.
-      // Scoped to NONRECURSIVE (shape/topology) reads: those resolve a reference,
-      // not consume a value, so they must not enter the conflict set (they stay in
-      // the journal for reactivity). A RECURSIVE read in the same scope is a real
-      // value dependency (a by-value arg) and is kept. Inert unless reads are marked.
-      if (isReadExcludedFromConflict(read.meta) && read.nonRecursive === true) {
-        continue;
-      }
-
-      // A runtime-internal read of a document's CFC metadata path resolves
-      // labels. It is outside the attempt's consumed set (CFC spec §18.6.2,
-      // read exclusions for runtime-internal reads), and a derived label
-      // records the join the attempt observed rather than subscribing to its
-      // sources (§8.9.4, point-in-time semantics). The read stays in the
-      // journal, so reactivity re-runs when the envelope changes; only the
-      // commit's conflict precondition drops it. A handler's own label
-      // introspection consumes through an explicit observation record rather
-      // than through this raw read.
-      if (isInternalVerifierRead(read.meta) && isCfcLabelPath(read.path)) {
-        continue;
-      }
-
+    for (const read of this.commitReadActivities(source, reads)) {
       const scope = normalizeCellScope(read.scope);
-
-      const opPaths = mergeableOpPathsByEntity.get(`${read.id}\0${scope}`);
-      // A read of the op array's own `length` is the handler depending on the
-      // element count, which a mergeable append / add-unique / remove-by-value
-      // changes. The op itself never reads `length` (it reads the array value
-      // and its new-element slots), so this read is a genuine dependency and is
-      // kept from every drop below: a push whose new element's index or id came
-      // from the length conflicts and retries against a concurrent append.
-      const readsMergeableOpArrayLength = opPaths !== undefined &&
-        opPaths.some((opPath) => isArrayLengthChildPath(opPath, read.path));
-      if (
-        opPaths !== undefined &&
-        !readsMergeableOpArrayLength &&
-        (isMergeableOpRead(read.meta) ||
-          isReadMarkedAsAttemptedWrite(read.meta) ||
-          isCfcLabelPath(read.path) ||
-          // Deep reads under the op path (link resolution, element sub-reads) are
-          // incidental to the op. A shape-only (nonRecursive) read AT the op path
-          // is also incidental — it is the container read a view of the array
-          // records, which must not false-conflict with a concurrent mergeable
-          // op on that array. A RECURSIVE read AT the op path is the
-          // handler's explicit read of the collection, and is kept so a
-          // conditional mergeable write still conflicts and retries.
-          opPaths.some((opPath) =>
-            isStrictPrefixPath(opPath, read.path) ||
-            (read.nonRecursive === true && isSamePath(opPath, read.path))
-          ))
-      ) {
-        continue;
-      }
       pushCommitRead(
         read.id as URI,
         scope,

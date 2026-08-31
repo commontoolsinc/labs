@@ -2567,8 +2567,17 @@ export class Runtime {
     for (const space of spaces) {
       const provider = this.storageManager.open(space);
       if (provider.loadUnexaminedAbsences === undefined) continue;
-      const answer = provider.loadUnexaminedAbsences(tx.tx);
-      if (typeof answer !== "number") pending.push(answer);
+      try {
+        const answer = provider.loadUnexaminedAbsences(tx.tx);
+        if (typeof answer !== "number") {
+          // Reconciliation only front-runs the authoritative commit verdict.
+          // A provider that cannot perform the best-effort load leaves the
+          // transaction's original absence claim for the server to judge.
+          pending.push(answer.catch(() => 0));
+        }
+      } catch {
+        // Same fallback for providers that fail before returning a promise.
+      }
     }
     if (pending.length === 0) return 0;
     return Promise.all(pending).then((counts) =>

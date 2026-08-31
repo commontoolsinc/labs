@@ -3,6 +3,8 @@ import { expect } from "@std/expect";
 import { Identity } from "@commonfabric/identity";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
+import { excludeReadFromConflict } from "../src/storage/reactivity-log.ts";
+import { toMemorySpaceAddress } from "../src/link-types.ts";
 import { newSharedServer } from "./memory-v2-test-utils.ts";
 
 const signer = await Identity.fromPassphrase("absence reconciliation test");
@@ -106,6 +108,184 @@ describe("editWithRetry absence reconciliation", () => {
       expect(result.error).toBeUndefined();
       expect(runs).toBe(1);
     } finally {
+      await runtime.dispose();
+      await sm.close();
+      await server.close();
+    }
+  });
+
+  it("removes the temporary watch after confirming an absence", async () => {
+    const server = newSharedServer();
+    const readerStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const readerRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: readerStorage,
+    });
+    let writerStorage: EmulatedStorageManager | undefined;
+    let writerRuntime: Runtime | undefined;
+    let probedAddress:
+      | ReturnType<typeof toMemorySpaceAddress>
+      | undefined;
+    try {
+      const result = await readerRuntime.editWithRetry((tx) => {
+        const probed = readerRuntime.getCell(
+          space,
+          "temporary-absence-watch-doc",
+          valueSchema,
+          tx,
+        );
+        probedAddress = toMemorySpaceAddress(probed.getAsNormalizedFullLink());
+        tx.read(probedAddress, { trackReadWithoutLoad: true });
+        readerRuntime.getCell(
+          space,
+          "temporary-absence-watch-output",
+          valueSchema,
+          tx,
+        ).set({ value: 1 });
+      });
+      expect(result.error).toBeUndefined();
+
+      // Create the probed document only after the absence transaction has
+      // committed. If reconciliation retained its one-shot watch, this later
+      // update would be pushed into the reader's replica.
+      writerStorage = EmulatedStorageManager.connectTo(server, { as: signer });
+      writerRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: writerStorage,
+      });
+      const create = writerRuntime.edit();
+      writerRuntime.getCell(
+        space,
+        "temporary-absence-watch-doc",
+        valueSchema,
+        create,
+      ).set({ value: 9 });
+      expect((await create.commit()).error).toBeUndefined();
+      await writerStorage.synced();
+      await server.flushSessions([space]);
+      await readerStorage.synced();
+
+      expect(
+        readerStorage.open(space).replica.getDocument(
+          probedAddress!.id,
+          probedAddress!.scope,
+        ),
+      ).toBeUndefined();
+    } finally {
+      await writerRuntime?.dispose();
+      await readerRuntime.dispose();
+      await writerStorage?.close();
+      await readerStorage.close();
+      await server.close();
+    }
+  });
+
+  it("does not reconcile reads excluded from the commit conflict set", async () => {
+    const server = newSharedServer();
+    const writerStorage = EmulatedStorageManager.connectTo(server, {
+      as: signer,
+    });
+    const writerRuntime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: writerStorage,
+    });
+    let readerStorage: EmulatedStorageManager | undefined;
+    let readerRuntime: Runtime | undefined;
+    try {
+      const excludedAddress = {
+        space,
+        id: "of:excluded-cold-read-doc" as const,
+        type: "application/json" as const,
+        scope: "space" as const,
+        path: [] as string[],
+      };
+      const seed = writerRuntime.edit();
+      seed.writeValueOrThrow(excludedAddress, { value: 17 });
+      expect((await seed.commit()).error).toBeUndefined();
+      await writerStorage.synced();
+
+      readerStorage = EmulatedStorageManager.connectTo(server, { as: signer });
+      readerRuntime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager: readerStorage,
+      });
+      let runs = 0;
+      const result = await readerRuntime.editWithRetry((tx) => {
+        runs++;
+        tx.read(
+          excludedAddress,
+          {
+            meta: excludeReadFromConflict,
+            nonRecursive: true,
+            trackReadWithoutLoad: true,
+          },
+        );
+        readerRuntime!.getCell(
+          space,
+          "excluded-cold-read-output",
+          valueSchema,
+          tx,
+        ).set({ value: runs });
+      });
+
+      expect(result.error).toBeUndefined();
+      expect(runs).toBe(1);
+      expect(
+        readerStorage.open(space).replica.getDocument(
+          excludedAddress.id,
+          excludedAddress.scope,
+        ),
+      ).toBeUndefined();
+    } finally {
+      await readerRuntime?.dispose();
+      await writerRuntime.dispose();
+      await readerStorage?.close();
+      await writerStorage.close();
+      await server.close();
+    }
+  });
+
+  it("falls back to the commit verdict when reconciliation providers fail", async () => {
+    const server = newSharedServer();
+    const sm = EmulatedStorageManager.connectTo(server, { as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+    });
+    const provider = sm.open(space);
+    const original = provider.loadUnexaminedAbsences;
+    try {
+      const failures = [
+        () => {
+          throw new Error("synchronous reconciliation failure");
+        },
+        () => Promise.reject(new Error("asynchronous reconciliation failure")),
+      ];
+      for (let index = 0; index < failures.length; index++) {
+        provider.loadUnexaminedAbsences = failures[index];
+        let runs = 0;
+        const result = await runtime.editWithRetry((tx) => {
+          runs++;
+          runtime.getCell(
+            space,
+            `provider-failure-cold-${index}`,
+            valueSchema,
+            tx,
+          ).get();
+          runtime.getCell(
+            space,
+            `provider-failure-output-${index}`,
+            valueSchema,
+            tx,
+          ).set({ value: 1 });
+        });
+        expect(result.error).toBeUndefined();
+        expect(runs).toBe(1);
+      }
+    } finally {
+      provider.loadUnexaminedAbsences = original;
       await runtime.dispose();
       await sm.close();
       await server.close();
