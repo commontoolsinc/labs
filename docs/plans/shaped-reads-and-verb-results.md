@@ -375,7 +375,7 @@ A receipt is an ordinary cell, and like any other it says what it holds — for
 a plain result. `handleJavaScriptHandlerResult`
 (`packages/runner/src/runner.ts`) derives a structural description from the
 value it has just written and stores it in the durable schema metadata —
-`setMetaRaw("schema", …)`, the field `piece get` reads back through
+`setMetaRaw("schema", …)`, the field `cf get` reads back through
 `asSchema`, not the schema argument to `getCell`, which seeds the link scope
 and the in-memory cell only. The receipt is minted before the handler runs,
 so there is no shape at that moment; the schema is written at result-write

@@ -296,8 +296,8 @@ completing it from the verb's declared result is item 6.
 ### 5. Result field paths for `get`, and why not for `wish`
 
 `--select` takes comma-separated, dot-separated field paths into the value a
-read returns, and `--schema` accepts the same spelling. On `cf get` and
-`cf piece get` both complete, in the projection's own grammar rather than the
+read returns, and `--schema` accepts the same spelling. On `cf get` both
+complete, in the projection's own grammar rather than the
 cell-path one: a list splits on `,` and a path on `.`, where `cellPathCandidates`
 walks `/`. A segment ending in `@` asks for that position's address rather than
 its value, and a bare `@` asks the read for its own, so both spellings of a

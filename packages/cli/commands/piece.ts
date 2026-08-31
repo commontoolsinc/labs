@@ -656,11 +656,11 @@ export function localPatternEntry(
 }
 
 /**
- * A `piece get` failure caused by a data condition rather than bad arguments:
+ * A `cf get` failure caused by a data condition rather than bad arguments:
  * a path that doesn't resolve, a result schema that can't project stored data
  * (PieceResultProjectionError), a filter/projection that doesn't fit the
  * selected value (CellSelectionError), or a path that lands on a verb
- * (PieceVerbReadError — the read-path guard's redirect at `cf piece call`).
+ * (PieceVerbReadError — the read-path guard's redirect at `cf call`).
  * Reported as a plain error on stderr with exit 1, never as a Cliffy
  * ValidationError (which would dump the usage screen and read as an arg-parse
  * failure).
@@ -674,11 +674,11 @@ export function isPieceGetDataError(error: unknown): error is Error {
 }
 
 /**
- * Build the stderr report for a `piece get` failure. Returns null when the
+ * Build the stderr report for a `cf get` failure. Returns null when the
  * error is not a data error (the caller should rethrow). `message` is the
  * one-line error; `hint` is an optional next-step tip. A projection error
  * already carries its own `--step` guidance, selection errors stand alone,
- * a verb refusal already carries its `cf piece call` redirect, and an
+ * a verb refusal already carries its `cf call` redirect, and an
  * input-mode read has nothing more to suggest — only a result-mode
  * unresolved path gets the `--input` tip.
  */
@@ -707,7 +707,7 @@ export function pieceGetDataErrorReport(
  * Build the stderr report for a `piece link` validation failure. Returns null
  * when the error is not a LinkValidationError (the caller should rethrow).
  * Link validation fails on data conditions — a source/target piece or path
- * that doesn't exist, read over the network — so it reports like `piece get`'s
+ * that doesn't exist, read over the network — so it reports like `cf get`'s
  * unresolved-path data error rather than as a Cliffy usage error.
  */
 export function pieceLinkDataErrorReport(
@@ -724,7 +724,7 @@ export function pieceLinkDataErrorReport(
 }
 
 /**
- * Build the stderr report for a `piece call` payload rejection. Returns null
+ * Build the stderr report for a `cf call` payload rejection. Returns null
  * when the error is not a VerbInputValidationError (the caller should
  * rethrow). The flags parsed fine and the piece resolved — the values simply
  * do not fit the verb — so it reports like the other data errors rather than
@@ -745,7 +745,7 @@ export function verbInputErrorReport(
 
 /**
  * Print a data-error report — message plus optional hint — to stderr and exit
- * 1. The single exit path for the `piece get` / `piece link` data errors
+ * 1. The single exit path for the `cf get` / `piece link` data errors
  * above. The `deps` seam lets unit tests observe the wiring without a real
  * process exit; runtime callers use the defaults.
  */
@@ -766,7 +766,7 @@ export function exitWithDataError(
 }
 
 /**
- * Turn a failed `piece call` into its stderr report, or re-throw.
+ * Turn a failed `cf call` into its stderr report, or re-throw.
  *
  * A named function rather than an inline `.catch` in the command action: the
  * action body only ever runs under Cliffy, so anything written there is
@@ -795,7 +795,7 @@ export function reportVerbInputErrorOrRethrow(
 }
 
 /**
- * The failure exit for `cf piece call`: closes the verbose in-flight span as
+ * The failure exit for `cf call`: closes the verbose in-flight span as
  * `failed` (idempotent — a span already closed elsewhere stays closed),
  * rethrows Cliffy validation errors so usage failures still render the usage
  * screen — with their span closed first — and reports everything else as the
@@ -1030,7 +1030,7 @@ export function invocationPhaseReporter(
 }
 
 /**
- * Phase observer for `cf piece call`: always advances the furthest-phase
+ * Phase observer for `cf call`: always advances the furthest-phase
  * tracker the failure report prints; under --verbose it also streams one
  * wall-clock span per observed phase transition (verb contract WS-D, phase
  * timings). Spans are bounded by the phases the `onPhase` callback already
@@ -1079,7 +1079,7 @@ export function pieceCallPhaseObserver(
 }
 
 /**
- * The success tail of `cf piece call`, extracted from the command action so
+ * The success tail of `cf call`, extracted from the command action so
  * it is unit-coverable — command action bodies never execute under the unit
  * suite, the same convention that keeps `cf test` out of its action body
  * (docs/development/COVERAGE.md). Help output returns BEFORE the observer
@@ -1212,7 +1212,7 @@ export function invocationJson(
   };
 }
 
-/** How long `cf piece call` waits for a handler invocation (verb contract
+/** How long `cf call` waits for a handler invocation (verb contract
  * WS-F, F3). `settle` is the default: await this handling's commit
  * acknowledgment plus receipt readback, optionally bounded by the caller's
  * patience (`--wait <seconds>`). `commit` (`--no-wait`) awaits the
@@ -1227,7 +1227,7 @@ export interface PieceCallWaitControl {
   boundSeconds?: number;
 }
 
-/** The `cf piece call` flags whose answer needs the receipt readback. */
+/** The `cf call` flags whose answer needs the receipt readback. */
 export interface PieceCallReadbackFlags {
   showLinks?: boolean;
   filter?: string;
@@ -1302,8 +1302,8 @@ function listFlags(flags: readonly string[]): string {
 }
 
 /**
- * Parse `cf piece call`'s selection flags into the shape the result should
- * arrive in, through the same parser `cf piece get` uses — one grammar, one
+ * Parse `cf call`'s selection flags into the shape the result should
+ * arrive in, through the same parser `cf get` uses — one grammar, one
  * set of error messages, whichever command a caller reaches for.
  *
  * The one combination refused here is `--filter` with `--show-links`. A link
@@ -1472,18 +1472,16 @@ COMMON WORKFLOWS:
 ${pieceEnvStatus()}
 TIPS:
   • Use 'setsrc' for iteration, not repeated 'new' (avoids clutter)
-  • After 'set', run 'step' to trigger computed value updates
+  • After 'cf set', run 'cf piece step' to update computed values
   • Path format: forward slashes only (items/0/name, not items[0].name)
   • JSON values: strings need quotes: echo '"hello"' | cf set ...`);
 
 /**
  * The target-selection surface every piece data command carries: quiet, the
  * combined URL, the API URL and identity with their environment fallbacks,
- * and the space. One function defines them for both surfaces that must
- * agree — `piece` declares them as globals its subcommands inherit, and the
- * top-level `cf get`/`cf set`/`cf call` instances carry them as their own,
- * having no parent globals to inherit — so the two spellings of a command
- * cannot drift apart in what they accept.
+ * and the space. `piece` declares them as globals its subcommands inherit;
+ * `cf get`, `cf set` and `cf call` have no parent globals, so each carries
+ * them as its own.
  */
 export function targetOptions(
   // deno-lint-ignore no-explicit-any
@@ -1511,68 +1509,6 @@ export function targetOptions(
 }
 
 /**
- * The day the `cf piece get`, `cf piece set`, and `cf piece call` spellings
- * stop working: two weeks after step 6a reached main
- * (docs/plans/cli-surface-shape.md). A literal rather than a window computed
- * at runtime, because a caller who reads the warning today and acts on it
- * next week must be told the same date both times. Step 6b removes the
- * spellings and their notices on this day.
- */
-export const PIECE_DATA_SPELLING_END_DATE = "2026-08-31";
-
-/**
- * The 6a deprecation notice for a piece-mounted data spelling. stderr and
- * never stdout: `get` and `call` reserve stdout for machine-readable
- * output, and a notice on stdout would corrupt exactly the piping scripts
- * this notice exists to migrate. Unconditional rather than behind
- * `--quiet`, because a quiet script is the caller most in need of the date.
- */
-export function warnDeprecatedPieceSpelling(
-  spelling: string,
-  deps: { writeError?: (text: string) => void } = {},
-): void {
-  const writeError = deps.writeError ?? console.error;
-  const short = spelling.replace(/^piece /, "");
-  writeError(
-    `'cf ${spelling}' is deprecated; spell it 'cf ${short}'. The ` +
-      `'cf ${spelling}' spelling stops working on ` +
-      `${PIECE_DATA_SPELLING_END_DATE}.`,
-  );
-}
-
-/**
- * An action wrapped with the 6a notice. The `this` binding passes through
- * untouched because `call`'s action reads `this.getLiteralArgs()`.
- */
-export function withDeprecatedSpellingWarning<
-  // deno-lint-ignore no-explicit-any
-  F extends (this: any, ...args: any[]) => unknown,
->(spelling: string, action: F): F {
-  // deno-lint-ignore no-explicit-any
-  return function (this: any, ...args: any[]) {
-    warnDeprecatedPieceSpelling(spelling);
-    return action.apply(this, args);
-  } as F;
-}
-
-/**
- * The action a data-command builder mounts: the piece-mounted spelling
- * warns (step 6a), the top-level spelling does not. Decided here, on the
- * one definition both mounts share, because a per-mount implementation is
- * how the two surfaces drift — and this is the single respect in which
- * they are allowed to differ (test/piece-data-spellings.test.ts pins
- * exactly that).
- */
-export function dataCommandAction<
-  // deno-lint-ignore no-explicit-any
-  F extends (this: any, ...args: any[]) => unknown,
->(spelling: string, action: F): F {
-  return spelling.startsWith("piece ")
-    ? withDeprecatedSpellingWarning(spelling, action)
-    : action;
-}
-
-/**
  * An action that refuses a `--` before it runs.
  *
  * `get` and `set` have no callable section, so a marker on their line closes
@@ -1594,13 +1530,11 @@ export function withNoSectionMarker<
 }
 
 /**
- * The one definition of `get`, mounted under `cf piece` and, through
- * {@link pieceDataCommand}, at top level as `cf get`. `spelling` is only
- * how the command names itself in its own help — and, since 6a, whether
- * its action carries the deprecation notice.
+ * The definition of `get`, mounted at top level as `cf get`. `spelling` is
+ * only how the command names itself in its own help.
  */
 // deno-lint-ignore no-explicit-any
-function buildGetCommand(spelling = "piece get"): Command<any> {
+function buildGetCommand(spelling: string): Command<any> {
   return new Command()
     .description(
       `Get a value from a piece at a specific path. Omit path to return the full result.
@@ -1709,19 +1643,14 @@ the way --input does.`,
       { conflicts: ["select"] },
     )
     .arguments("[addressOrPath:string] [path:string]")
-    .action(
-      dataCommandAction(
-        spelling,
-        withNoSectionMarker(spelling, getCellValueFromCommand),
-      ),
-    );
+    .action(withNoSectionMarker(spelling, getCellValueFromCommand));
 }
 
 /**
  * The one definition of `set`; see {@link buildGetCommand} for the shape.
  */
 // deno-lint-ignore no-explicit-any
-function buildSetCommand(spelling = "piece set"): Command<any> {
+function buildSetCommand(spelling: string): Command<any> {
   return new Command()
     .description(
       cliText(
@@ -1764,12 +1693,7 @@ counts, so cf ${spelling} /of:fid1:.../title needs no path argument. A trailing
         '"#argument" reference suffix spells the same selection)',
     )
     .arguments("[addressOrPath:string] [path:string]")
-    .action(
-      dataCommandAction(
-        spelling,
-        withNoSectionMarker(spelling, setCellValueFromCommand),
-      ),
-    );
+    .action(withNoSectionMarker(spelling, setCellValueFromCommand));
 }
 
 /**
@@ -1777,7 +1701,7 @@ counts, so cf ${spelling} /of:fid1:.../title needs no path argument. A trailing
  * shape.
  */
 // deno-lint-ignore no-explicit-any
-function buildCallCommand(spelling = "piece call"): Command<any> {
+function buildCallCommand(spelling: string): Command<any> {
   return new Command()
     .description(
       `Invoke a callable within a piece.
@@ -1931,10 +1855,10 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
     )
     .stopEarly()
     .arguments("<callable:string> [tail...:string]")
-    .action(dataCommandAction(spelling, async function (
-      // Spelled out because this builder stands alone: the target options
-      // arrive as `piece` globals on one mount and as own options on the
-      // other, so neither inference sees the whole surface.
+    .action(async function (
+      // Spelled out because `targetOptions` attaches the target options
+      // after the builder returns, so what the builder declares on its own
+      // is not the whole surface the action receives.
       options:
         & PieceCLIOptions
         & PieceCallReadbackFlags
@@ -1970,7 +1894,7 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
       setQuietMode(!!options.quiet);
       // Read outside the invocation's failure wrapper below. Nothing is
       // dispatched here — no callable resolved, no id spent — so a malformed
-      // selection is a data error about the flags, the same one `cf piece get`
+      // selection is a data error about the flags, the same one `cf get`
       // reports. Inside the wrapper it would name an id and a phase to retry
       // from for a call that was never made; a selection that fails against a
       // RESULT does sit inside it, and does name one.
@@ -2041,18 +1965,14 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
       } catch (error) {
         exitPieceCallFailure(observer, error, invocationId, phase);
       }
-    }));
+    });
 }
 
 /**
- * A top-level instance of a piece data command: the same builder the
- * `piece` chain mounts under the same name, carrying the target options
- * itself. `cf get`, `cf set`, and `cf call` are these — one definition per
- * command, two spellings that parse and behave identically in every
- * respect but one: the piece-mounted spelling is deprecated (step 6a) and
- * its invocations print the dated stderr notice `dataCommandAction`
- * attaches, until {@link PIECE_DATA_SPELLING_END_DATE} removes it with the
- * spelling (docs/plans/cli-surface-shape.md, steps 5–6).
+ * A piece data command, mounted at top level: `cf get`, `cf set`, and
+ * `cf call` — one definition per command, and one spelling for it. `name`
+ * reaches the builder because a command's own help quotes the spelling a
+ * caller types.
  */
 // deno-lint-ignore no-explicit-any
 export function pieceDataCommand(name: "get" | "set" | "call"): Command<any> {
@@ -2800,7 +2720,7 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
     } catch (error) {
       // A link that fails validation is a data error (the pieces/paths read
       // over the network don't support the link), not a usage error — report
-      // it like `piece get` does instead of letting Cliffy dump the help
+      // it like `cf get` does instead of letting Cliffy dump the help
       // screen over it.
       const report = pieceLinkDataErrorReport(error, {
         sourcePieceId: source.pieceId,
@@ -2815,8 +2735,6 @@ well-known IDs. See docs/common/concepts/well-known-ids.md for IDs and usage.`,
   → Visualize connections: cf piece map -i ... -a ... -s ...
   → Inspect target piece:  cf piece inspect --piece ${target.pieceId} ...`));
   })
-  /* piece get */
-  .command("get", buildGetCommand())
   /* piece get-label */
   .command(
     "get-label",
@@ -2886,8 +2804,6 @@ updated effective label view.`),
   )
   .arguments("[path:string]")
   .action(setCellCfcLabelFromCommand)
-  /* piece set */
-  .command("set", buildSetCommand())
   /* piece map */
   .command("map", "Show registered pieces and the connections between them")
   .usage(spaceUsage)
@@ -2911,8 +2827,6 @@ updated effective label view.`),
     const map = await generateSpaceMap(spaceConfig, format);
     render(map);
   })
-  /* piece call */
-  .command("call", buildCallCommand())
   /* piece verbs */
   .command(
     "verbs",
@@ -2941,7 +2855,7 @@ updated effective label view.`),
     // Default view: wrapper-tier (session-UI affordances) and deprecated
     // verbs are omitted, LOUDLY — the hidden counts always print, so nothing
     // is silently invisible. Rows carry their marks in both views, and
-    // `cf piece call` never consults them. The same rule covers the other way
+    // `cf call` never consults them. The same rule covers the other way
     // this listing can be short, which `verbListingNotes` prints beside them.
     if (options.json) {
       render(verbListingJson(listing, !!options.all), { json: true });
@@ -3169,7 +3083,7 @@ export interface PieceCellCommandDependencies {
 }
 
 /**
- * The `cf piece get` action: the target may ride `--piece` or sit in the
+ * The `cf get` action: the target may ride `--piece` or sit in the
  * first positional as a canonical address ({@link readTargetPositionals}
  * decides which the positionals name), and either spelling may end in
  * `#argument`, which reads the arguments cell the way `--input` does.
@@ -3221,7 +3135,7 @@ export async function getCellValueFromCommand(
 }
 
 /**
- * The `cf piece set` action, with the same positional-address intake as
+ * The `cf set` action, with the same positional-address intake as
  * {@link getCellValueFromCommand}. The write needs a path spelled somewhere
  * — embedded in the address, positionally, or both — and an explicit empty
  * positional (`""`) is a spelling: it has always named the root, and the
@@ -4496,7 +4410,7 @@ export async function checkPieceSourceFromCommand(
   if (!report.compatible) {
     // A refusal is a data condition — this source and this piece's stored
     // state don't fit — not an arg-parse failure, so it reports like the
-    // `piece get` / `piece link` data errors above: plain stderr and exit 1,
+    // `cf get` / `piece link` data errors above: plain stderr and exit 1,
     // never a Cliffy ValidationError, which would dump the usage screen over
     // the verdict.
     exitWithDataError({
@@ -4639,7 +4553,7 @@ export function readTargetPositionals(
 }
 
 /**
- * `cf piece call`'s positional intake: when the first positional is a
+ * `cf call`'s positional intake: when the first positional is a
  * canonical address it replaces `--piece`, and the callable name follows
  * it. The same `/`-leading grammar decides as in
  * {@link readTargetPositionals}; a bare callable name can never match it.

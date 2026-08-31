@@ -39,7 +39,7 @@ export interface CallableCommandExecutionOptions<
   /** Render the help page, once the parse has established one was asked for.
    *
    * Allowed to be async so a renderer can resolve something it needs ONLY
-   * here: `cf piece call` reads a handler's declared result off the compiled
+   * here: `cf call` reads a handler's declared result off the compiled
    * pattern, and every other invocation of the command has no use for it. A
    * synchronous renderer satisfies this signature unchanged. */
   renderHelp: (

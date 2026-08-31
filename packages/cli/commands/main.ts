@@ -195,10 +195,8 @@ export const main = new Command()
   .command("invocation-session", invocationSession)
   .command("test", createTestCommand({ recordResults: true }))
   .command("wish", wish)
-  // The top-level spellings of the piece data commands: the same builders
-  // the `piece` chain mounts under the same names, so `cf get` and
-  // `cf piece get` are one definition parsed two ways
-  // (docs/plans/cli-surface-shape.md, step 5).
+  // The piece data commands. `pieceDataCommand` holds the one definition
+  // of each, and this is the only place they are mounted.
   // @ts-ignore for the above type issue
   .command("get", pieceDataCommand("get"))
   // @ts-ignore for the above type issue

@@ -1,5 +1,5 @@
 /**
- * Pins the refusal `cf piece call` gives a payload carrying a field the verb's
+ * Pins the refusal `cf call` gives a payload carrying a field the verb's
  * event schema does not declare: which positions it fires at, the wording a
  * caller reads, and — in equal measure — the positions it passes over, each
  * asserted as the call still dispatching.
@@ -27,7 +27,7 @@ import { executePieceCallable } from "../lib/piece.ts";
 
 /**
  * Dispatch `payload` at a verb publishing `schema`, through the same
- * pre-dispatch gate `cf piece call` runs, and hand back what reached the
+ * pre-dispatch gate `cf call` runs, and hand back what reached the
  * stream.
  *
  * A position the walk passes over has to be asserted as the call DISPATCHING,
@@ -191,7 +191,7 @@ const CONFIG = {
 };
 
 interface Tracker {
-  /** Dispatch `verb` the way `cf piece call` does, with `payload` spelled as
+  /** Dispatch `verb` the way `cf call` does, with `payload` spelled as
    * the one positional JSON argument a caller writes by hand. */
   call: (
     verb: string,
@@ -869,7 +869,7 @@ describe("verb-undeclared-field", () => {
     });
   });
 
-  describe("cf piece call against a live verb", () => {
+  describe("cf call against a live verb", () => {
     it("declares an event schema naming `properties` with no `additionalProperties`", async () => {
       // The coupling every refusal below rests on: the shape the transformer
       // emits is one that drops what it does not name.
@@ -959,7 +959,7 @@ describe("verb-undeclared-field", () => {
     });
   });
 
-  describe("cf piece call on a verb whose event schema states no `type`", () => {
+  describe("cf call on a verb whose event schema states no `type`", () => {
     // The same two shapes on a running piece, reached through a verb whose
     // event schema the pattern writes out. `count` reads what committed, so a
     // dispatch is stated as the handling landing rather than as the command

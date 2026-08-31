@@ -64,7 +64,7 @@ const CONFIG = {
   space: "" as string,
 };
 
-/** Drive `cf piece call <verb> <args>` against a freshly run instance of the
+/** Drive `cf call <verb> <args>` against a freshly run instance of the
  * program above, and hand back what the command produced. */
 async function callVerb(
   verb: string,
@@ -137,7 +137,7 @@ function outputSection(helpText: string | undefined): string | undefined {
   return at === -1 ? undefined : helpText!.slice(at + marker.length);
 }
 
-describe("cf piece call --help against a live piece", () => {
+describe("cf call --help against a live piece", () => {
   it("enumerates the fields of a verb's declared result", async () => {
     const { helpText } = await callVerb("add", ["--help"]);
 

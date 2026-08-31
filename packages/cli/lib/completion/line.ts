@@ -48,7 +48,7 @@ export type CompletionSlot =
     readonly index: number;
   }
   /**
-   * A word after `--`. `cf piece call` and `cf exec` hand these to the
+   * A word after `--`. `cf call` and `cf exec` hand these to the
    * callable's own schema-derived parser, so the CLI's option tree does not
    * describe them.
    */
@@ -98,7 +98,7 @@ export interface CompletionLine {
   /** Deepest command the words resolved to. */
   readonly command: AnyCommand;
 
-  /** Command path below the program name, e.g. `["piece", "call"]`. */
+  /** Command path below the program name, e.g. `["piece", "ls"]`. */
   readonly path: readonly string[];
   readonly slot: CompletionSlot | null;
 
@@ -183,7 +183,7 @@ function expandBundle(
  * Subcommands that represent real commands.
  *
  * `main` registers `help` with `.global()`, so Cliffy propagates it to every
- * descendant and `hasCommands()` is true even on leaves like `piece call`.
+ * descendant and `hasCommands()` is true even on leaves like `cf call`.
  * Taking that at face value would resolve every leaf's positional to a
  * subcommand slot and silently disable all dynamic value completion.
  */
@@ -196,7 +196,7 @@ function realSubcommands(command: AnyCommand): AnyCommand[] {
 /**
  * Whether the command ends its own option parsing at the first positional.
  *
- * `cf piece call` and `cf exec` are `stopEarly()`, so every word after the
+ * `cf call` and `cf exec` are `stopEarly()`, so every word after the
  * callable name belongs to the callable's schema-derived parser and the CLI's
  * own flags are refused there. Cliffy stores the property with no accessor, so
  * it is read off the field: keeping the question where the command declares it
@@ -217,9 +217,6 @@ function stopsEarly(command: AnyCommand): boolean {
  * reason `PRE_PARSE_GLOBALS` is.
  */
 const POSITIONAL_ADDRESS_COMMANDS: ReadonlySet<string> = new Set([
-  "piece get",
-  "piece set",
-  "piece call",
   "get",
   "set",
   "call",

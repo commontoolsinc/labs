@@ -3385,13 +3385,13 @@ export async function deriveSelectedValue(
     const committed = await tx.commit();
     if (committed.error !== undefined) {
       throw new CellSelectionError(
-        `Could not apply piece get transform: ${committed.error}`,
+        `Could not apply get transform: ${committed.error}`,
       );
     }
     // This wait is GLOBAL: idle() drains the whole reactive graph and
     // synced() the whole storage manager, not just this transform. On a
-    // plain `piece get` that is benign — nothing else runs in the CLI's
-    // runtime — but a shaped `piece call` readback arrives here right after
+    // plain `cf get` that is benign — nothing else runs in the CLI's
+    // runtime — but a shaped `cf call` readback arrives here right after
     // its handler ran, so the selection waits on whatever derived
     // recomputation that handler triggered elsewhere, a coupling the plain
     // call's transaction-local acknowledgment deliberately avoids.
@@ -3432,7 +3432,7 @@ export async function deriveSelectedValue(
       }
       const lastError = recorded.at(-1)!;
       throw new CellSelectionError(
-        `Could not apply piece get transform: ${lastError.message}`,
+        `Could not apply get transform: ${lastError.message}`,
       );
     }
     deps.onOutputCell?.(outputCell);

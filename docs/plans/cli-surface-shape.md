@@ -22,7 +22,7 @@ have landed.
 | --- | --- |
 | 1–5 — the shared read step, the read options on every arrival, `--piece` taking the `of:` form, positional addresses with the `#argument` suffix, and `cf get`/`set`/`call` | on main |
 | 6a — the old spellings warn, each naming its end date | on main |
-| 6b — the old spellings are removed | pending, on the date `PIECE_DATA_SPELLING_END_DATE` names |
+| 6b — the old spellings are removed | on main |
 | 7 — the duplicated nouns are merged | not started; it is last because each pair is two working commands |
 
 **Arc two — how a caller writes what a command acts on.**
@@ -31,7 +31,7 @@ have landed.
 | --- | --- |
 | 8 — `CF_SPACE` is ambient, and a write names the space it wrote to | on main |
 | 9 — a reference takes a space by name and a piece by slug, positionally | not started; lands with 11, not alone |
-| 10 — the verb opens the callable's section and `--` closes it | not started; `PIECE_DATA_SPELLING_END_DATE` is the thing to check first |
+| 10 — the verb opens the callable's section and `--` closes it | not started; 6b has landed, so nothing gates it |
 | 11 — `--url` decomposes into the transport it names and the reference it carries | not started; lands with 9 |
 
 ## What the surface is for
@@ -44,7 +44,7 @@ itself part of the problem.
 | --- | --- |
 | **Authoring** — work on source files, never touching a live space | `check`, `test`, `view` (pager), `init`, `deps update` |
 | **Identity and access** — who you are, and who may do what | `id` (new/did/derive/from-mnemonic), `acl` (ls/set/remove) |
-| **Live data** — reading and writing running state | `piece get`/`set`/`call`/`apply`/`link`/`step`/`verbs`/`inspect`/`get-label`/`set-label`, `wish` |
+| **Live data** — reading and writing running state | `get`/`set`/`call`, `piece apply`/`link`/`step`/`verbs`/`inspect`/`get-label`/`set-label`, `wish` |
 | **Piece lifecycle** — deploying and managing running programs | `piece new`/`setsrc`/`getsrc`/`rm`/`ls`/`search`/`map`/`set-slug`/`recreate-root`/`set-home` |
 | **Rendering** — turning things into something to look at | `piece view` (terminal), `piece render` (HTML), `view` (source pager) |
 | **Storage forensics** — reading the database directly, mostly offline (`inspect pull` fetches from a remote) | `inspect` (22 subcommands), `space` (clone/verify/reset/fingerprint) |
@@ -66,7 +66,6 @@ nothing else.
 | Surface | What the name says | What it actually is |
 | --- | --- | --- |
 | `--piece` | a piece | any cell address — the function that fetches a piece's result returns the piece unchanged, and the read path checks nothing piece-specific |
-| `piece get` | reading a piece | reading a cell at a path |
 | `--input` | a mode you switch on | an address — it follows a link stored in the document to reach the arguments cell |
 | `--schema` | one input format | two — a full schema, and a concise path shorthand that is not a schema |
 | `--url` | a transport address | a target reference — host, space and piece in one token, and the only spelling that takes a space by name |
@@ -137,8 +136,8 @@ with the address suffix (`--select 'topic@,topic.title'`), and leaves "shape"
 free as the word for what a caller asks for — covering both spellings rather
 than competing with one of them.
 
-Both spellings are carried on every command that reads — `piece get`,
-`piece call`, `wish` and `exec` — and a command naming both is refused rather
+Both spellings are carried on every command that reads — `get`, `call`,
+`wish` and `exec` — and a command naming both is refused rather
 than resolved, because it has not said which shape it wants.
 
 **What a reader may not supply, in either syntax.** `asCell`, `default`,
@@ -249,7 +248,7 @@ above is prescriptive on this point: `<read opts>` is a position, not an
 illustration, and a projection written before the verb is refused rather than
 accepted quietly.
 
-`piece call` places them before the callable name today, because everything
+`cf call` places them before the callable name today, because everything
 after that name belongs to the callable's own schema-derived parser. So the one
 position the layout allows is the one position the command rejects, a caller who
 writes them where the layout shows them gets an error about a rule they did not
@@ -580,7 +579,7 @@ than taking anything away.
 
 1. **Factor out the shared read step** so a single implementation turns a cell
    and a shape into structured output.
-2. **Give every arrival access to it** — `piece call` gains `--select`,
+2. **Give every arrival access to it** — `cf call` gains `--select`,
    `--schema` and `--filter`, `wish` gains them, and an address renders identically from each.
 3. **`--piece` accepts the `of:` address form**, so an emitted address composes
    into the next command. This is where addressing stops being piece-flavored
@@ -594,7 +593,10 @@ than taking anything away.
    literal, fixed when this step merges, not a window recomputed per run: a
    caller who reads the warning today and acts on it next week must be told
    the same date both times.
-6b. **Remove the old spellings** on the date the warnings named.
+6b. **Remove the old spellings** on the date the warnings named. Done: the
+   piece-mounted `get`, `set` and `call`, the 6a notice and its dated
+   constant, and the parity coverage that existed only while both spellings
+   did, are gone.
 7. **Merge the duplicated nouns** — the two `inspect`s, the two `view`s, `piece
    map` against `inspect graph`, and `apply` against `set`.
 
@@ -604,12 +606,8 @@ spelling.
 
 **Naming the target is a second arc, not a later step.** Steps 1 through 7
 decide what the commands are called; the work below decides how a caller writes
-what a command acts on. The two are independent except at one point — 6b removes
-the spellings 6a warned about, so nothing here changes those same commands until
-it has landed. `PIECE_DATA_SPELLING_END_DATE` in
-`packages/cli/commands/piece.ts` is the date those warnings name and the one
-thing to check before starting step
-10.
+what a command acts on. The two are independent: 6b has removed the
+spellings 6a warned about, so step 10 is free to change those same commands.
 
 8. **Give the space an ambient source** in `CF_SPACE`, with the flag overriding
    it, serving reads and writes alike; and every command that writes names the
@@ -678,13 +676,13 @@ leading position stays legal where nothing is ambiguous; the documentation stops
 using it.
 
 **Each step carries its own documentation.** `--input`, `--piece`, and
-`piece get` appear across the tutorial, `packages/cli/README.md`, and the
+`cf get` appear across the tutorial, `packages/cli/README.md`, and the
 pattern documentation, so a single sweep at the end would leave every
 intermediate state wrong. What each step owes:
 
 | Step | Documentation owed |
 | --- | --- |
-| 2 | The read options gain a second host — `piece call`'s section in `packages/cli/README.md`, and [Verbs over the CLI](../common/verbs/over-the-cli.md) |
+| 2 | The read options gain a second host — `cf call`'s section in `packages/cli/README.md`, and [Verbs over the CLI](../common/verbs/over-the-cli.md) |
 | 3 | Address forms wherever `--piece` is taught: the CLI README and the tutorial's workflow chapter |
 | 4 | `#argument` beside every `--input` example, in the same places |
 | 5 | The new spellings alongside the old ones everywhere both work |

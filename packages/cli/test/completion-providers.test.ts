@@ -355,7 +355,7 @@ Deno.test("provider keys report which commands each option provider answers on",
   assertEquals(options.get("scope"), ["wish"]);
   assertEquals(options.get("list"), ["piece survey", "piece repair"]);
   assertEquals(options.get("diff"), ["piece survey"]);
-  assertEquals(options.get("select"), ["piece get", "get"]);
+  assertEquals(options.get("select"), ["get"]);
   assertEquals(options.get("root"), [
     "check",
     "piece new",
@@ -373,7 +373,7 @@ Deno.test("provider keys report which commands each option provider answers on",
   assertFalse(options.has("accept-unretained"));
   // A positional entry is keyed by command path already, so it carries no
   // command list of its own.
-  assert(positionals.has("piece call:callable"));
+  assert(positionals.has("call:callable"));
   assertFalse(positionals.has("callable"));
 });
 
@@ -692,8 +692,6 @@ Deno.test("live candidates: a fabric slot without context degrades to empty", as
         "cf exec /tmp/x --select ",
         "cf get --piece x --schema @",
         "cf get --piece x --schema {",
-        "cf piece call --piece x ",
-        "cf piece get --piece x ",
         "cf piece get-label --piece x ",
         "cf piece set-label --piece x ",
         "cf piece link ",

@@ -142,7 +142,7 @@ export declare const CELL_INNER_TYPE: unique symbol;
  * Nothing reads this at runtime — a verb's result schema travels on
  * `module.resultSchema`, never on the stream cell's own schema, which stays
  * the event/payload schema that `cf piece verbs` publishes and that
- * `piece call` validates against.
+ * `cf call` validates against.
  */
 export declare const CELL_RESULT_TYPE: unique symbol;
 
@@ -1698,7 +1698,7 @@ export type JSONSchemaObj = {
   // Verb listing mark on stream properties: a UI affordance outside the
   // headless contract (inferred at compile time from session-scoped handler
   // bindings + a void event). Hidden from the default `cf piece verbs`
-  // listing; always callable; never consulted by `cf piece call`.
+  // listing; always callable; never consulted by `cf call`.
   readonly tier?: "wrapper";
   // Discovery hashtags from the doc comment (lowercased, without the leading
   // `#`). Populated by the schema generator; mirrors the description text.

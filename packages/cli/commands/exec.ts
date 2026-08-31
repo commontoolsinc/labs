@@ -18,7 +18,7 @@ import type { ExecutedMountedCallableFile } from "../lib/exec.ts";
 
 /**
  * `cf exec` runs no verbose in-flight span, so the failure exit it shares with
- * `cf piece call` is handed a span that closes to nothing. The exit's own
+ * `cf call` is handed a span that closes to nothing. The exit's own
  * contract is what is being reused here — the message, the id and the phase —
  * and that part is span-independent.
  */
@@ -86,7 +86,7 @@ export function renderExecOutcome(
  * The caller's read options, read before anything is resolved or dispatched.
  *
  * A malformed selection is a fact about the flags: it costs no mount lookup and
- * runs no verb, so it is reported as the data error `cf piece get` reports for
+ * runs no verb, so it is reported as the data error `cf get` reports for
  * the same mistake. Routing it through {@link exitExecFailure} instead would
  * name an invocation and a phase to retry from for a call that was never made.
  * A selection that fails against a RESULT is the other case, and that one does
@@ -119,7 +119,7 @@ export async function parseExecSelection(
  * same one a missing mount or an unreadable callable has always printed.
  *
  * From `dispatched` onward the handling may have committed, and the report
- * becomes the one `cf piece call` makes: the message, then the id beside the
+ * becomes the one `cf call` makes: the message, then the id beside the
  * furthest phase reached. That phase is the difference between a retry that
  * deduplicates and one that commits a second time — and `cf exec` accepts no
  * `--invocation`, so a retry can only be a fresh pair. Saying so is what lets

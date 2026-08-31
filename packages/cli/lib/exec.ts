@@ -105,8 +105,8 @@ export interface ResolveMountedCallableOptions {
  * with. */
 export interface ExecuteMountedCallableOptions {
   /** `--filter`/`--select`/`--schema`: the shape the caller asked the result
-   * to arrive in, answered by the same selection step `cf piece get`,
-   * `cf piece call` and `cf wish` read through — so one grammar covers every
+   * to arrive in, answered by the same selection step `cf get`,
+   * `cf call` and `cf wish` read through — so one grammar covers every
    * arrival, whichever one a caller reached for. */
   selection?: CellSelection;
 
@@ -338,7 +338,7 @@ export async function resolveMountedCallableFile(
  * That is what gives this arrival an outcome at all: a handler's result is
  * read back off the receipt its handling files, and a dispatch naming no id
  * files under none. Minting both halves is the same default
- * `resolveInvocationIdentity` applies to a `cf piece call` that names neither
+ * `resolveInvocationIdentity` applies to a `cf call` that names neither
  * — the id is random, so it names an outcome nothing else will ask for.
  * Without it a `--select` over a handler could only ever answer nothing, which
  * is the silence the read options exist to remove.

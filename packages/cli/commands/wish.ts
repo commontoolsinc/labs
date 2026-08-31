@@ -87,7 +87,7 @@ export async function wishAction(
   const scope = parseScopeFlags(options.scope);
   // Read before the wish is issued: a malformed selection is a fact about the
   // flags, so it is reported without a resolution having been attempted. The
-  // same grammar and the same messages `cf piece get` and `cf piece call`
+  // same grammar and the same messages `cf get` and `cf call`
   // report, because it is the same parser.
   // Through the command's own exit seam rather than `exitWithDataError`, whose
   // `exit` is typed `never`: this command's seam returns, because its unit

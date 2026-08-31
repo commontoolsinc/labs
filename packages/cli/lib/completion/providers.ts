@@ -7,7 +7,7 @@
  *
  * Every provider resolves its fabric context from the half-typed line first and
  * the environment second, which is what lets
- * `cf piece call -s other-space --piece <TAB>` list the pieces of `other-space`
+ * `cf call -s other-space --piece <TAB>` list the pieces of `other-space`
  * rather than whatever `CF_SPACE`-shaped default the shell happens to carry.
  *
  * Failure is always silent and always empty. A completion request runs while
@@ -412,7 +412,6 @@ export function splitPathPrefix(
  * wish commits a cell to the space: a Tab must not write.
  */
 const PROJECTION_SOURCE_COMMANDS: readonly string[] = [
-  "piece get",
   "get",
 ];
 
@@ -1040,24 +1039,17 @@ const INSPECT_ENTITY_COMMANDS: readonly string[] = [
 /**
  * Positional providers, keyed by `<command path>:<argument name>`. The command
  * path disambiguates arguments that share a name across commands — `path` means
- * a cell path under `piece get` but a filesystem path elsewhere.
+ * a cell path under `cf get` but a filesystem path elsewhere.
  */
 const ARGUMENT_PROVIDERS: Readonly<
   Record<string, (line: CompletionLine) => Promise<ProviderResult>>
 > = {
-  "piece call:callable": callableCandidates,
-  // The first positional of `piece get`/`piece set` is a cell path unless the
-  // caller writes a canonical address there, and an address is pasted rather
-  // than completed — so the path candidates serve the slot either way. The
-  // top-level spellings are the same commands mounted at top level, and
-  // their entries keep the two spellings completing identically.
-  "piece get:addressOrPath": cellPathCandidates,
-  "piece get:path": cellPathCandidates,
   "piece get-label:path": cellPathCandidates,
-  "piece set:addressOrPath": cellPathCandidates,
-  "piece set:path": cellPathCandidates,
   "piece set-label:path": cellPathCandidates,
   "call:callable": callableCandidates,
+  // The first positional of `cf get`/`cf set` is a cell path unless the caller
+  // writes a canonical address there, and an address is pasted rather than
+  // completed — so the path candidates serve the slot either way.
   "get:addressOrPath": cellPathCandidates,
   "get:path": cellPathCandidates,
   "set:addressOrPath": cellPathCandidates,

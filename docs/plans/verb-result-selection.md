@@ -360,7 +360,7 @@ layer's call, not this half's.
    results only; see
    [Shaped reads and verb results](shaped-reads-and-verb-results.md) for the
    split and the open declared-sourced question.
-4. **`piece call` gains the read options** — `--select`, `--schema`,
+4. **`cf call` gains the read options** — `--select`, `--schema`,
    `--filter` — through the shared read implementation (#5505, re-landed as
    #5610) rather than a second output path.
 

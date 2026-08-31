@@ -68,7 +68,7 @@ interface SchemaRoot {
 
     // The stream's own schema describes what a caller SENDS: a reference to
     // the event type, carrying the marker. `cf piece verbs` publishes exactly
-    // this as the input schema and `piece call` validates payloads against it,
+    // this as the input schema and `cf call` validates payloads against it,
     // so a result leaking in here would both misreport the verb and start
     // refusing good payloads.
     expect(returning.$ref).toBe("#/$defs/AddTopic");

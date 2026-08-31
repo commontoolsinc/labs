@@ -338,7 +338,7 @@ check "$ADD_PROSE" \
   "and the candidate is annotated with the same sentence"
 
 step "7. Past the callable name, cf's own flags are not offered"
-# `piece call` is stopEarly(), so the first positional ends option parsing and
+# `cf call` is stopEarly(), so the first positional ends option parsing and
 # every later word belongs to the callable's schema-derived parser. A flag the
 # command refuses there is a candidate that teaches a caller something false.
 check "0" "$(succeeds $CF call --quiet --piece board $ARGS addItem \
