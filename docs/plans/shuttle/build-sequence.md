@@ -12,9 +12,9 @@ prerequisites land.
 
 ## Stage A — seams in `packages/cli`
 
-**A1 — export entries.** Done. Importing `@commonfabric/cli`'s `.` entry
-runs CLI startup, so the package carries workspace-internal entries for
-the modules a sibling calls: `./lib/piece`, `./commands/piece`,
+**A1 — export entries.** Done (#6626). Importing `@commonfabric/cli`'s `.`
+entry runs CLI startup, so the package carries workspace-internal entries
+for the modules a sibling calls: `./lib/piece`, `./commands/piece`,
 `./lib/wish`, `./lib/piece-render`. The completion listing is not a plain
 entry: it is `listCellKeys` in `packages/cli/lib/cell-listing.ts`,
 exported as `./lib/cell-listing` behind a `PieceResolutionDeps` seam with
