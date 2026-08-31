@@ -1164,10 +1164,12 @@ export class CFCodeEditor extends BaseElement {
         // The resolved cell IS the piece. For an index row the sub-cell is
         // the row rather than the topic behind it, and every caller here
         // wants the piece — to navigate to it, subscribe to its title, or
-        // write its name back. Before resolution completes the sub-cell is
-        // the best available, with exactly _getPieceId's instability
-        // caveat.
+        // write its name back. Before resolution completes, a row's own
+        // hydrated piece is the piece by a shorter road; only an entry
+        // that IS the piece falls through to the sub-cell, with exactly
+        // _getPieceId's instability caveat.
         return this._resolvedPieceCells.get(i) ??
+          this._hydratedPiece(i) ??
           (handle.key(i) as CellHandle<Mentionable>);
       }
     }
@@ -1176,14 +1178,30 @@ export class CFCodeEditor extends BaseElement {
   }
 
   /**
+   * The piece handle an index row carries, hydrated by the client — the
+   * synchronous stand-in until resolution lands, and null for an entry that
+   * is the piece itself. Bound to the mentionable schema so field reads on
+   * it materialize, as `_refDestination` binds a stored destination.
+   */
+  private _hydratedPiece(index: number): CellHandle<Mentionable> | null {
+    const item = ((this.mentionable?.get() ?? []) as MentionableArray)[index];
+    return item && isCellHandle(item.piece)
+      ? item.piece.asSchema<Mentionable>(MentionableSchema)
+      : null;
+  }
+
+  /**
    * Get the stable piece cell ID for a mentionable item at the given index,
    * in the BARE embed form wiki-link text persists (see mentionIdFromCellId
    * — CellHandle.id() is the full schemed URI; renderers add `/of:` back).
-   * Returns the pre-resolved ID if available, otherwise falls back to
-   * the sub-cell ID (which may be unstable across recomputations).
+   * Returns the pre-resolved ID if available, then an index row's own
+   * hydrated piece, and only then the sub-cell ID (which may be unstable
+   * across recomputations, and for an index row names the row rather than
+   * the piece).
    */
   private _getPieceId(index: number): string {
     const id = this._resolvedPieceIds.get(index) ??
+      this._hydratedPiece(index)?.id() ??
       (this.mentionable?.key(index)?.id() ?? "");
     return id ? mentionIdFromCellId(id) : id;
   }
@@ -1213,17 +1231,14 @@ export class CFCodeEditor extends BaseElement {
     const promises = mentionableData.map(async (item, i) => {
       if (!item) return;
       try {
-        const viaPiece = isCellHandle(item.piece);
-        const source = viaPiece
-          ? (item.piece as CellHandle<unknown>)
-          : handle.key(i);
+        const hydrated = this._hydratedPiece(i);
+        const source = hydrated ?? handle.key(i);
         const resolved = await source.resolveAsCell();
-        // Under the entry schema `piece` is an opaque cell — the
-        // `_refDestination` shape — so reads of the piece's own fields (the
-        // title subscription, the name write-back) materialize only under
-        // the mentionable schema, bound on here once for every consumer of
-        // the resolved cell.
-        const pieceCell = viaPiece
+        // Resolution answers with the canonical cell under its own schema,
+        // so a piece reached through a row is rebound to the mentionable
+        // schema — the `_refDestination` shape — for the field reads its
+        // consumers make (the title subscription, the name write-back).
+        const pieceCell = hydrated !== null
           ? resolved.asSchema<Mentionable>(MentionableSchema)
           : (resolved as CellHandle<Mentionable>);
         newCells.set(i, pieceCell);

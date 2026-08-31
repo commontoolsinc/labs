@@ -103,7 +103,9 @@ function deepSet(
  * Create a mock InitializedRuntimeConnection backed by a MockCellNetwork.
  *
  * - `request()` intercepts CellSet to propagate child→parent writes,
- *   then resolves with `{}`.
+ *   answers CellResolveAsCell with the asking ref (a mock cell is already
+ *   canonical — there is no link indirection to follow), and resolves
+ *   everything else with `{}`.
  * - `subscribe()` / `unsubscribe()` are no-ops.
  * - Includes EventEmitter stubs (`on`, `off`, `emit`) to satisfy the type.
  */
@@ -114,6 +116,9 @@ function createMockConnection(
     request: (data: { type: string; cell?: CellRef; value?: unknown }) => {
       if (data.type === "cell:set" && data.cell && data.value !== undefined) {
         network.handleCellSet(data.cell, data.value);
+      }
+      if (data.type === "cell:resolveAsCell" && data.cell) {
+        return Promise.resolve({ cell: data.cell } as any);
       }
       return Promise.resolve({} as any);
     },
