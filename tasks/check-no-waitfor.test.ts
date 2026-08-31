@@ -167,8 +167,11 @@ Deno.test("importsPollingWaitFor ignores a harness.waitFor member call", () => {
 });
 
 //
-// Commenting the import out is the first step of migrating a test off the
-// polling waitFor, so none of these shapes may be flagged.
+// Occurrences that are not an import
+//
+// Commenting one out is the first step of migrating a test off the polling
+// waitFor, and a specifier inside a string or a template literal is data
+// rather than an import. None of these shapes may be flagged.
 //
 
 Deno.test("importsPollingWaitFor ignores a commented-out member", () => {
