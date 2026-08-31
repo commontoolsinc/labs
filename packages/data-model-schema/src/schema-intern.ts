@@ -18,14 +18,18 @@ import { toDeepFrozenSchema } from "./schema-copy.ts";
 const schemaToSah = new WeakMap<JSONSchemaObj, SchemaAndHash>();
 
 /**
- * Reverse half of that cache: hash string to schema. Holds only a `WeakRef`,
- * so the schema is not retained; dead refs are cleaned up by
- * `schemaFinalizer` and on lookup.
+ * Reverse half of that cache: hash string to schema. An object schema is held
+ * as a `WeakRef`, so it is not retained; dead refs are cleaned up by
+ * `schemaFinalizer` and on lookup. A primitive schema — `true`, `false`, or
+ * `undefined` — is stored as itself instead, a primitive being no possible
+ * `WeakRef` target and having nothing to retain. Consumers tell the two apart
+ * by `typeof`.
  *
- * Splitting the cache in two is what avoids strong retention, and it is why a
- * lookup by hash takes both halves: deref the `WeakRef` from here, then read
- * the `SchemaAndHash` out of `schemaToSah`. A `SchemaAndHash` is thereby
- * reachable only while its own schema object is alive.
+ * Splitting the cache in two is what avoids strong retention, and it is why an
+ * object schema's lookup by hash takes both halves: deref the `WeakRef` from
+ * here, then read the `SchemaAndHash` out of `schemaToSah`. A `SchemaAndHash`
+ * is thereby reachable only while its own schema object is alive. A primitive
+ * hash is answered from `primInterns` and reaches neither half.
  */
 const hashToRef = new Map<
   string,
