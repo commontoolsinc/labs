@@ -438,9 +438,11 @@ describe("test-records-compact", () => {
       await compactDays({ ...OPTIONS, fetchImpl: storeFetch(whole) });
       const written = createdShards(whole);
 
-      // A run that died after two shards leaves those two behind and no
-      // manifest, which is what the next run finds.
+      // A run that died after two shards leaves its partition and those
+      // two behind, and no manifest, which is what the next run finds.
       const store = storeOf(DAY, bodies, SHARD_TARGET_BYTES / 8);
+      store.objects[rollupPartitionName(DAY)] = whole
+        .objects[rollupPartitionName(DAY)]!;
       for (const name of written.slice(0, 2)) store.objects[name] = "";
       await compactDays({ ...OPTIONS, fetchImpl: storeFetch(store) });
 
@@ -523,9 +525,58 @@ describe("test-records-compact", () => {
       );
     });
 
+    it("takes the count of the run that won the create", async () => {
+      const store = storeOf(DAY, casesOn(DAY, 40), SHARD_TARGET_BYTES / 8);
+      const inner = storeFetch(store);
+      const partition = JSON.stringify({ schema: 1, day: DAY, count: 2 });
+      // The listing this run made came before the other run's partition
+      // existed, so it claims one of its own, loses, and reads the count
+      // that won: two shards, where its own listing said five.
+      const raced = ((input: URL | RequestInfo, init?: RequestInit) => {
+        const url = String(input);
+        if (init?.method === "POST") {
+          const head = new TextDecoder("utf-8", { fatal: false })
+            .decode((init.body as Uint8Array).subarray(0, 512));
+          if (head.includes(`"name":"${rollupPartitionName(DAY)}"`)) {
+            return Promise.resolve(new Response("taken", { status: 412 }));
+          }
+        } else if (url.endsWith("/partition.json")) {
+          return Promise.resolve(new Response(partition, { status: 200 }));
+        }
+        return inner(input, init);
+      }) as typeof fetch;
+      await compactDays({ ...OPTIONS, fetchImpl: raced });
+      expect(
+        createdShards(store).map((name) =>
+          name.slice(rollupPrefix(DAY).length)
+        ),
+      ).toEqual(["0000-of-0002.ndjson", "0001-of-0002.ndjson"]);
+      expect(await compactedNames(store)).toEqual(
+        casesOn(DAY, 40).map((_, index) => `case ${index}`).sort(),
+      );
+    });
+
     it("leaves a day whose partition cannot be read open", async () => {
       const store = storeOf(DAY, [buildObjectBody(contextOn(DAY), [RECORD])]);
       store.objects[rollupPartitionName(DAY)] = "not a partition";
+      await compactDays({ ...OPTIONS, fetchImpl: storeFetch(store) });
+      expect(Object.keys(store.created)).toEqual([]);
+    });
+
+    it("leaves a day claiming more shards than objects open", async () => {
+      const store = storeOf(DAY, [buildObjectBody(contextOn(DAY), [RECORD])]);
+      store.objects[rollupPartitionName(DAY)] = JSON.stringify({
+        schema: 1,
+        day: DAY,
+        count: 1e9,
+      });
+      await compactDays({ ...OPTIONS, fetchImpl: storeFetch(store) });
+      expect(Object.keys(store.created)).toEqual([]);
+    });
+
+    it("leaves a folder with shards and no partition open", async () => {
+      const store = storeOf(DAY, [buildObjectBody(contextOn(DAY), [RECORD])]);
+      store.objects[`${rollupPrefix(DAY)}0000-of-0002.ndjson`] = "";
       await compactDays({ ...OPTIONS, fetchImpl: storeFetch(store) });
       expect(Object.keys(store.created)).toEqual([]);
     });

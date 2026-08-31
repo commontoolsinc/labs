@@ -432,13 +432,29 @@ export async function compactDays(options: CompactOptions): Promise<void> {
     }
     const partitionName = rollupPartitionName(day);
     const partitioned = present.some((object) => object.name === partitionName);
+    // Every shard of a day is written after the partition naming it, so a
+    // folder holding objects without one holds a partition this run cannot
+    // identify, and adding to it would leave whatever is there named by no
+    // manifest.
+    if (!partitioned && present.length > 0) {
+      console.error(
+        `${day}: the folder holds ${present.length} object(s) and no ` +
+          `${partitionName}; leaving the day open`,
+      );
+      continue;
+    }
     const claimed = partitioned
       ? parseRollupPartition(await readText(partitionName) ?? "", day)?.count
       : undefined;
-    if (partitioned && claimed === undefined) {
+    // A partition dividing a day into more shards than it has objects is
+    // one no run writes: shards are sized from the day's bytes, and an
+    // object is at most a fraction of a shard. Taking a count on trust is
+    // what turns a partition object nobody can replace into a day nobody
+    // can compact.
+    if (partitioned && (claimed === undefined || claimed > raw.length)) {
       console.error(
-        `${day}: ${partitionName} is not a partition of this day; ` +
-          "leaving the day open",
+        `${day}: ${partitionName} is not a partition of this day's ` +
+          `${raw.length} object(s); leaving the day open`,
       );
       continue;
     }
