@@ -253,7 +253,7 @@ Deno.test("lift(toSchema<T>(), fn) transfers the authored input schema into the 
 });
 
 //
-// cell(...) factory — value inference, scope, explicit type argument
+// cell(...) factory — value inference and explicit type argument
 //
 
 Deno.test("cell(value) infers a widened schema from the seed value and injects it as the second argument", async () => {
@@ -519,7 +519,7 @@ Deno.test("handler(fn) with an underscore-prefixed unused event param yields a f
 });
 
 //
-// cell scope: call form cell.perSession(...), and PerSession contextual scope
+// cell scope: the `new Writable.perX(seed)` accessor forms
 //
 
 Deno.test("new Writable.perUser(seed) reads the user scope and injects it into the schema", async () => {
@@ -604,7 +604,7 @@ Deno.test("pattern with an inferred any/unknown result reports pattern:any-resul
 });
 
 //
-// handler<E, S> with only one usable type argument bails out
+// handler event-schema optionality
 //
 
 Deno.test("handler event schema encodes an optional field as not required", async () => {
@@ -654,7 +654,7 @@ Deno.test("generateObject<T>(spreadOptions) spreads a non-literal options expres
 });
 
 //
-// sqliteQuery — method form and no-options form
+// sqliteQuery — no-options and untyped forms
 //
 
 Deno.test("sqliteQuery<Row>() with no options builds a fresh options object carrying rowSchema", async () => {
@@ -934,6 +934,10 @@ Deno.test("cell typed as Scoped<T, union-of-scopes> recovers the first concrete 
   assertEquals(schema.scope, "user");
 });
 
+//
+// lift factory application
+//
+
 Deno.test("applying a captured lift factory recovers the downstream input schema from the factory callback result", async () => {
   // lift factory captured in a variable, then applied — recover the result type
   // through the factory's callback
@@ -987,6 +991,13 @@ Deno.test("pattern result reports an unknown array element with an array path su
   // The array element walk appends `[]` to the path.
   assertStringIncludes(d!.message, "items[]");
 });
+
+//
+// An author-supplied schema is left untouched
+//
+// Each of these already carries a schema of its own, so injection has
+// nothing to add and must add nothing.
+//
 
 Deno.test("new Writable(value, schema) with two arguments is left untouched", async () => {
   // idempotency / author-supplied skips: a builder that already carries its
@@ -1070,6 +1081,10 @@ Deno.test("new Writable.perSession() with no value derives the value type from t
   assertEquals((ctor!.arguments![0] as ts.Identifier).text, "undefined");
 });
 
+//
+// lift-applied projection recovery
+//
+
 Deno.test("lift-applied element-access projection recovers the result schema from the indexed field", async () => {
   // lift-applied projection recovery: property-access and element-access forms
   // on a downstream callback whose parameter type is recovered from upstream
@@ -1119,6 +1134,10 @@ Deno.test("handler<E, S> marks a read-only Cell state field with asCell readonly
   // marker to readonly.
   assertEquals((state.properties as Obj).total.asCell, ["readonly"]);
 });
+
+//
+// lift-applied input recovery through Cell.get
+//
 
 Deno.test("lift-applied untyped callback using Cell.get on a Cell input recovers a cell-like input schema", async () => {
   // lift-applied whose untyped callback calls Cell methods on a Cell input: the

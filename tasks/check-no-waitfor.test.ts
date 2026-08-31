@@ -70,6 +70,8 @@ Deno.test("importsPollingWaitFor detects an aliased import", () => {
 });
 
 //
+// Type-only imports, which cannot poll
+//
 // A type-only import binds the type of `waitFor` and is erased before the test
 // runs, so it cannot poll. The value forms below it still have to be caught.
 //
@@ -129,6 +131,14 @@ Deno.test("importsPollingWaitFor detects a value waitFor after a type member on 
   ].join("\n");
   assert(importsPollingWaitFor(source));
 });
+
+//
+// Names and specifiers that are not the polling import
+//
+// A helper whose name merely begins with `waitFor`, a subpath specifier, and
+// a member call on something else: none of them import the thing the gate
+// exists to find.
+//
 
 Deno.test("importsPollingWaitFor ignores waitFor-prefixed helpers", () => {
   assertEquals(
@@ -291,6 +301,10 @@ Deno.test("importsPollingWaitFor ignores a sibling utils.ts outside the package"
     false,
   );
 });
+
+//
+// Scoping to integration test files
+//
 
 Deno.test("isIntegrationTestFile scopes to integration test files", () => {
   assert(isIntegrationTestFile("packages/shell/integration/piece.test.ts"));

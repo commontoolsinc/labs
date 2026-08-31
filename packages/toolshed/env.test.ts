@@ -1,4 +1,7 @@
 /**
+ * Parsing tests for toolshed's `EnvSchema`: each strict-boolean and defaulted
+ * variable is pinned against the misparse its type invites.
+ *
  * The EXPERIMENTAL_* → ExperimentalOptions mapping (including its tri-state
  * unset/true/false fidelity) now lives in the runner's canonical
  * `experimentalOptionsFromEnv` / `EXPERIMENTAL_ENV_VARS` (CT-1814), shared by

@@ -12,12 +12,10 @@
 //     inherited function as the bound value;
 //   - writing `undefined` to such a key looked like a no-op and was dropped.
 //
-// These pin the fix at the two paths reachable from the public API. Each has a
-// control case using an ordinary name, so a harness that stops exercising the
-// path fails loudly rather than passing vacuously.
-//
-// Review of the first pass found four more public paths with the same
-// predicate. Each is pinned here through the surface a caller actually uses.
+// These pin the fix at every path reachable from the public API, each through
+// the surface a caller actually uses. Each has a control case using an
+// ordinary name, so a harness that stops exercising the path fails loudly
+// rather than passing vacuously.
 //
 // Sibling of the same bug class in the query-result proxy's
 // `getOwnPropertyDescriptor` trap (#5357).

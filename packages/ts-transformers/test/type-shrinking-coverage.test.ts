@@ -179,6 +179,14 @@ function createContext(sourceFile: ts.SourceFile): {
   return { context, diagnostics };
 }
 
+//
+// Shrinking and wrapping the shapes that match
+//
+// The arms where a path resolves: array items and their unions, nested
+// leaves, identity paths across members, and the cell capabilities carried
+// through them.
+//
+
 Deno.test("applyShrinkAndWrap shrinks Array<T> reference items to accessed fields", () => {
   // Array element node building via type-driven shrinking (Array<T> reference).
   // Lines ~1185-1202, 1194-1199: TypeReference to `Array` resolved through the
@@ -951,8 +959,10 @@ Deno.test("applyShrinkAndWrap applies cell capabilities through parenthesized li
 });
 
 //
-// Batch 2: "unchanged / no-match" arms of each identity-path node shape, plus
-// remaining array-element and default clusters.
+// The unchanged and no-match arms
+//
+// Each identity-path node shape where nothing matches, with the remaining
+// array-element and default clusters.
 //
 
 Deno.test("applyShrinkAndWrap keeps Array<T> unchanged for an unresolved identity item path", () => {
@@ -1328,7 +1338,10 @@ Deno.test("applyShrinkAndWrap selects writable capability for read-and-write cel
 });
 
 //
-// Batch 3: array-union validation and remaining union collapse / defensive arms.
+// Array-union validation, and the defensive arms
+//
+// Validation over array unions, what remains of union collapse, and the
+// branches that exist to fail safely.
 //
 
 Deno.test("applyShrinkAndWrap accepts item paths present on a nullable array union element", () => {
