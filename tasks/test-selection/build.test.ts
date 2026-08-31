@@ -547,3 +547,57 @@ describe("what buildManifest() does with the states it is given", () => {
     expect(built(new Map([[KEY, emptyState()]])).withheld).toEqual([]);
   });
 });
+
+describe("a batch whose reports interleave in time", () => {
+  const KEY = testIdentityKey({ k: "unit", s: "memory", n: "space > writes" });
+
+  /** One object holding one run of the test at one commit. */
+  function run(commit: string, outcome: TestRecord["outcome"], at: string) {
+    return stored(
+      `labs/test-records/aggregated/v1/2026/08/20/shard-${commit}.ndjson`,
+      context({ commit, startedAt: at }),
+      [record({ outcome })],
+    );
+  }
+
+  function foldedIn(reports: ReturnType<typeof run>[]) {
+    const fold = new Fold(
+      emptyAggregate("2026-08-20"),
+      new AliasResolver([]),
+      "2026-08-20",
+    );
+    fold.add(reports);
+    return fold.finish().states.get(KEY)!;
+  }
+
+  it("folds a day's shards in the order the runs happened", () => {
+    // A rollup holds a whole day, and its shards are read concurrently,
+    // so the order they arrive in is not the order they ran in. The
+    // rules that decide whether a failure is a catch look backwards and
+    // forwards along that order, so it has to be the real one.
+    const broke = run("c1", "fail", "2026-08-20T01:00:00.000Z");
+    const fixed = run("c2", "pass", "2026-08-20T02:00:00.000Z");
+    expect(foldedIn([broke, fixed]).mainCatches).toBe(1);
+    expect(foldedIn([fixed, broke]).mainCatches).toBe(1);
+  });
+
+  it("reaches the same state whichever order the shards arrive in", () => {
+    const reports = [
+      run("c1", "fail", "2026-08-20T01:00:00.000Z"),
+      run("c2", "pass", "2026-08-20T02:00:00.000Z"),
+      run("c3", "fail", "2026-08-20T03:00:00.000Z"),
+      run("c4", "pass", "2026-08-20T04:00:00.000Z"),
+    ];
+    const forwards = foldedIn(reports);
+    const backwards = foldedIn([...reports].reverse());
+    const shuffled = foldedIn([
+      reports[2]!,
+      reports[0]!,
+      reports[3]!,
+      reports[1]!,
+    ]);
+    expect(backwards).toEqual(forwards);
+    expect(shuffled).toEqual(forwards);
+    expect(forwards.mainCatches).toBe(2);
+  });
+});
