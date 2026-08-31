@@ -10,14 +10,22 @@
  * described the session-backed read as covered by the integration lane. These
  * hold the table to reaching every step from both directions, and hold the
  * recorded step names to matching the functions that run them.
+ *
+ * What they read is the text of the table and of the matrix, so they see which
+ * steps are dispatched and nothing about what a step does once it runs. They
+ * also say nothing about the arms CI does not dispatch: `piece-basics` and the
+ * one-step arms are local conveniences, free to hold any subset.
  */
 
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
 
+/** The integration script, whose tail holds the dispatch table. */
 const SCRIPT = await Deno.readTextFile(
   new URL("../integration/integration.sh", import.meta.url),
 );
+
+/** The CI workflow, whose cli-integration-test job names the sections. */
 const WORKFLOW = await Deno.readTextFile(
   new URL("../../../.github/workflows/deno.yml", import.meta.url),
 );
@@ -27,13 +35,18 @@ function stepFunction(step: string): string {
   return `run_${step.replaceAll("-", "_")}`;
 }
 
-/** One section of the dispatch table and the steps it runs, in order. */
+/** One section of the dispatch table and the steps it runs. */
 interface Arm {
+  /** The section name, as `CF_CLI_INTEGRATION_SECTION` names it. */
   section: string;
+
+  /** The steps the arm runs, in the order it runs them. */
   steps: string[];
 }
 
+/** What one reading of the dispatch table found. */
 interface DispatchTable {
+  /** Every arm of the table, in the order they are written. */
   arms: Arm[];
 
   /** Body lines that are not a recorded step name paired with its call. */
@@ -44,7 +57,10 @@ interface DispatchTable {
  * Reads the dispatch table. An arm's body is pairs of a
  * `cf_test_step_begin <step>` line and the call that runs that step; anything
  * else is reported through `malformed` rather than dropped, so a step written
- * in an unexpected form cannot slip past the coverage checks below.
+ * in an unexpected form cannot slip past the coverage checks below. A step the
+ * table reaches through anything other than a literal call on its own line —
+ * a variable, a helper, a loop — is one of those unexpected forms, and is
+ * reported rather than counted.
  */
 function parseDispatchTable(script: string): DispatchTable {
   const lines = script.split("\n");
