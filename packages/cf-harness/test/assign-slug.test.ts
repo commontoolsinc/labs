@@ -279,6 +279,30 @@ describe("assign-slug", () => {
       expect(registered.map((piece) => piece.id)).toEqual([created.pieceId]);
     });
 
+    it("reports an initialization failure while listing an already-named piece", async () => {
+      const engine = createEngine();
+      const created = await createPiece(engine);
+      const cell = pieces.runtime.getCellFromLink(
+        parseLLMFriendlyLink(created.resultRef, pieces.getSpace()),
+      );
+      await cell.sync();
+      await assignSlug(pieces, cell, "doubling-report");
+      const originalEnsureDefaultPattern = pieces.ensureDefaultPattern;
+      pieces.ensureDefaultPattern = () =>
+        Promise.reject(new Error("space root unavailable"));
+
+      const result = await engine.invokeBuiltinTool("assign_slug", {
+        token: created.resultRef,
+        slug: "doubling-report",
+      });
+      pieces.ensureDefaultPattern = originalEnsureDefaultPattern;
+
+      const output = result.output as AssignSlugToolErrorOutput;
+      expect(output.status).toBe("error");
+      expect(output.message).toContain("failed while listing");
+      expect(output.message).toContain("space root unavailable");
+    });
+
     it("does not list the piece twice when retried after a failed assignment", async () => {
       // A first call can join the registry and then fail at the slug write.
       // The retry must settle the name without appending a second entry.
