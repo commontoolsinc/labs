@@ -35,10 +35,11 @@ removal, so each old spelling kept working until the date its warning named —
 two weeks after 6a reached main, written into the warning as a literal so it
 read the same on any day. 6b is the removal that date was for.
 
-**A deprecated spelling keeps working.** It costs a line of aliasing to leave a
-redirect in place, and it costs every script and skill file that used it to
-remove one — including files outside this repository, which no sweep here can
-reach.
+**A deprecated spelling kept working for a window.** Leaving a redirect in
+place costs a line of aliasing; removing one costs every script and skill file
+that used it, including files outside this repository that no sweep here can
+reach. That asymmetry is what the window between 6a and 6b was for, rather than
+removing the spellings when their replacements landed.
 
 **Step 7 is not sequencing.** Each of its pairs is two working commands with
 different behavior. Merging them decides which behavior survives, so each pair
@@ -107,8 +108,8 @@ pair the unit that moves.
 
 *Exit:* every command that takes `--piece` takes a positional, every command that
 takes `--input` takes the suffix, and the existing flags behave exactly as they
-do today. `deno task check-skill-facts` passes without a skill being rewritten,
-because nothing has been removed yet.
+do today. `deno task check-skill-facts` passed without a skill being rewritten, because
+this stage removed nothing.
 
 ## Stage 2 — the honest names
 
@@ -211,8 +212,9 @@ implementation, so the test was that their outputs did not differ — including
 error output, which is where an aliasing seam shows first. With one name left,
 what remains to guard is that the piece mount is absent.
 
-**D1 is that the warning does not reach stdout.** A deprecation notice on stdout
-corrupts the JSON an agent parses. It goes to stderr, and a test pins that.
+**D1 was that the warning did not reach stdout.** A deprecation notice on
+stdout corrupts the JSON an agent parses, so it went to stderr with a test
+pinning it. 6b removed the notice and that test with it.
 
 *And whether `--quiet` silences it.* The CLI's convention is that `--quiet`
 suppresses hints but not warnings, and a deprecation notice can be read as
@@ -227,9 +229,10 @@ behavior rather than against intent.
 ## Risks
 
 **A rename reaches outside this repository.** Skills, scripts, and agent
-transcripts elsewhere use the current spellings. Deprecation warnings and
-redirects are what make that survivable, and removing a spelling is not part of
-this plan.
+transcripts elsewhere used the old spellings, and no sweep here reaches them.
+The warning and the redirect were what made the removal survivable: a caller
+outside this repository met a notice naming the date before 6b removed the
+spelling on it.
 
 **Aliases drift.** Two names for one implementation stay honest only while they
 are one implementation. The byte-identity test is what keeps N1 from becoming two
@@ -239,9 +242,9 @@ commands that agree by coincidence.
 behaviors, and merging keeps one. Without characterization tests first, the
 survivor is whichever was easier to keep.
 
-**Deprecating on an unmeasurable condition.** Retired: the condition is a date
-the warning itself carries, so "whenever someone feels ready" is not available
-as an answer. What the date cannot cover is consumers outside this repository,
+**Deprecating on an unmeasurable condition.** Retired: the condition was a date
+the warning itself carried, so "whenever someone feels ready" was never
+available as an answer. What the date cannot cover is consumers outside this repository,
 who are unreachable by any sweep here and unmeasurable by any signal the CLI
 could add — which is what the two weeks are for.
 
