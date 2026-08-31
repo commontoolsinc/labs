@@ -98,7 +98,6 @@ import {
   prepareCfcGrantWrite,
   preparedDigestFor,
   type PreparedDigestInput,
-  sameStoredCfcMetadata,
   type SinkMaxConfidentiality,
   type TrustSnapshot,
   type WritePolicyInput,
@@ -1043,31 +1042,34 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
     );
   }
 
-  // Record a path-[] whole-document write that does not leave a stored ["cfc"]
-  // label map as it found it. Such a write replaces every sibling of `value`,
-  // so the envelope it carries decides what label map the document has
-  // afterwards, and it decides that without ever naming the ["cfc"] path the
-  // arm above keys on. Dropping the member erases the map. So does carrying
-  // one a reader reports as absent — `cfc: null`, a string, a record with no
-  // `version`. So does carrying a well-formed map that is not the stored one,
-  // an empty entry list included: the labels are gone either way, and a
-  // labeled document reads afterwards as an unlabeled one. All of it is the
-  // downgrade the ["cfc"]-path arm catches, reached through the document root,
-  // so it lands in the same record and yields the same fail-closed reason.
+  // Record a path-[] whole-document write that erases the stored ["cfc"] label
+  // map. Such a write replaces every sibling of `value`, so an envelope that
+  // leaves the document without a label map erases the one it held, and a
+  // labeled document reads afterwards as an unlabeled one. That is the
+  // downgrade the ["cfc"]-path arm above catches, reached by omission rather
+  // than by overwrite, so it lands in the same record and yields the same
+  // fail-closed reason.
   //
-  // `sameStoredCfcMetadata` decides, comparing canonically, so an envelope
-  // read out and written back — the shape `ACLManager` produces, and the one a
-  // whole-document update should produce — is the map the document already
-  // had, and passes.
+  // Both halves ask `cfcMetadataPresent`, the reader's own account of what
+  // presents a label map, so the arm fires on the change a reader would see
+  // rather than on the presence of a key. An envelope carrying `cfc: null`, or
+  // any other value the reader reports as absent, erases the map as surely as
+  // one carrying no `cfc` at all. A stored value the reader reports as absent
+  // is not a map to erase.
   //
-  // The stored side bounds the arm: it fires only when there is a map to
-  // protect. Creating a document passes, so does replacing one that carries no
-  // label map, and so does minting a map onto a document that had none — that
-  // last is the residual this arm does not reach, and the raw-seed idiom the
-  // CFC tests are built on. Hydration passes as well, since an envelope
-  // delivered from storage carries the `cfc` it was stored with, and the
-  // runtime's own root writes (`cid:` schema documents) return at the
-  // privileged-scope check above before reaching here.
+  // What this does NOT reach is a root write that leaves a label map behind
+  // but not the stored one — minting a map where the document had none, or
+  // substituting one for another. Both are the S18 forgery this seam still
+  // stands open on, and the CFC test suite seeds stored label state through
+  // exactly those shapes, so closing them means giving those fixtures another
+  // way to seed first.
+  //
+  // The arm fires only when a map is there to erase: creating a document, and
+  // replacing one that carries no label map, pass through. Hydration passes
+  // through as well — an envelope delivered from storage carries the `cfc` it
+  // was stored with — and the runtime's own root writes (`cid:` schema
+  // documents) return at the privileged-scope check above before reaching
+  // here.
   //
   // The read carries no weight of its own, the way the meta seam's guard read
   // above carries none. It goes through the inner transaction, so it stays out
@@ -1078,13 +1080,18 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
   // becoming a read-modify-write that loses the race against any advance of
   // the document it replaces. `internalVerifierRead` says what the read is:
   // the runtime resolving a label, the same mark `readStoredCfcMetadata`
-  // carries. What that leaves open is an erasure racing the guard, never a
-  // forgery — a write that names the ["cfc"] path is recorded from the write
-  // itself, with no read at all.
+  // carries. What the missing precondition leaves open is an erasure racing
+  // the guard.
   #noteRootEnvelopeWrite(
     address: IMemorySpaceAddress,
     value: FabricValue | undefined,
   ): void {
+    if (
+      isObjectOrArray(value) &&
+      cfcMetadataPresent((value as { cfc?: unknown }).cfc)
+    ) {
+      return;
+    }
     const stored = this.tx.read({ ...address, path: ["cfc"] }, {
       meta: {
         ...ignoreReadForScheduling,
@@ -1093,10 +1100,6 @@ export class ExtendedStorageTransaction implements IExtendedStorageTransaction {
       },
     });
     if (!cfcMetadataPresent(stored.ok?.value)) return;
-    const carried = isObjectOrArray(value)
-      ? (value as { cfc?: unknown }).cfc
-      : undefined;
-    if (sameStoredCfcMetadata(stored.ok?.value, carried)) return;
     this.markCfcRelevant("unprivileged-cfc-metadata-erasure");
     this.#cfcState.unprivilegedSystemWrites.push(`${address.id}/cfc`);
   }

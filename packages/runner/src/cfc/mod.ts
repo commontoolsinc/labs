@@ -236,11 +236,7 @@ export type {
   CfcPrepareInstrumentation,
   StoredCfcEnvelope,
 } from "./prepare.ts";
-export {
-  cfcMetadataPresent,
-  readStoredCfcMetadata,
-  sameStoredCfcMetadata,
-} from "./metadata.ts";
+export { cfcMetadataPresent, readStoredCfcMetadata } from "./metadata.ts";
 export { cfcSchemaMergeIssue } from "./schema-merge.ts";
 export type { CfcSchemaMergeIssue, IfcKey } from "./schema-merge.ts";
 export {

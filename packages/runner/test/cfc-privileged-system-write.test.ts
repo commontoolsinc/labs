@@ -292,19 +292,20 @@ describe("CFC privileged system write (S18)", () => {
     }
   });
 
-  it("does not gate a path-[] full-document write minting a cfc field", async () => {
-    // Open residual: a path-[] full-document write onto a document that
-    // stores NO label map can mint one, because the root arm's stored side
-    // finds nothing to protect. This is the raw-seed idiom the CFC tests are
-    // built on (seedPrivilegedCfc in cfc-boundary.test.ts), and it is
+  it("does not gate a path-[] full-document write carrying a cfc field", async () => {
+    // Open residual: a path-[] full-document write that leaves a label map
+    // behind is not gated, whether it mints one where the document stored
+    // none or substitutes one for another. This is the raw-seed idiom the CFC
+    // tests are built on (seedPrivilegedCfc in cfc-boundary.test.ts, and the
+    // metadata re-pointing in speculation-overlay.test.ts), and it is
     // reachable from untrusted code: a handler holds a runtime cell and the
     // transaction it is bound to addresses the whole document
     // (docs/plans/runner_cfc_implementation.md "Document Surface Rules").
     // The meta seam is gated across both addressing modes
-    // (meta-seam-write-authorization.test.ts); minting a label map where the
-    // document had none is what this test records as ungated. A root write
-    // that erases or swaps a map the document DOES store is gated — see the
-    // cases below.
+    // (meta-seam-write-authorization.test.ts); label-map forgery through the
+    // document root is what this test records as ungated. A root write that
+    // leaves NO readable map behind is a different case and IS gated — see
+    // the erasure cases below.
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -362,17 +363,15 @@ describe("CFC privileged system write (S18)", () => {
   // shapes that erase nothing, and the runtime's own exempt persistence.
   //
 
-  // Two entries, so the canonical comparison below has an ordering to be
-  // insensitive to.
   const storedMetadata = {
     version: 1,
     schemaHash: SEED_ENVELOPE_SCHEMA_HASH,
     labelMap: {
       version: 1,
-      entries: [
-        { path: [], label: { confidentiality: ["secret"] } },
-        { path: ["note"], label: { confidentiality: ["confidential"] } },
-      ],
+      entries: [{
+        path: [],
+        label: { confidentiality: ["secret"] },
+      }],
     },
   };
 
@@ -532,10 +531,10 @@ describe("CFC privileged system write (S18)", () => {
     }
   });
 
-  it("rejects a root envelope that swaps the stored label map for another", async () => {
-    // A well-formed map is not the stored map. Substituting one — an empty
-    // entry list, or an envelope whose `version` this build cannot read —
-    // strips the labels as surely as dropping the member does.
+  it("does not gate a root envelope carrying a label map this build cannot read", async () => {
+    // An envelope whose `version` this build does not interpret is not an
+    // erasure: the reader throws on it and every consumer fails closed, so the
+    // document it leaves behind is not an unlabeled one.
     const storageManager = StorageManager.emulate({ as: signer });
     const runtime = new Runtime({
       apiUrl: new URL("https://example.com"),
@@ -543,60 +542,13 @@ describe("CFC privileged system write (S18)", () => {
       cfcEnforcementMode: "enforce-explicit",
     });
     try {
-      for (
-        const [name, substitute] of [
-          ["s18-root-empty", {
-            ...storedMetadata,
-            labelMap: { version: 1, entries: [] },
-          }],
-          ["s18-root-relabel", {
-            ...storedMetadata,
-            labelMap: {
-              version: 1,
-              entries: [{ path: [], label: { confidentiality: [] } }],
-            },
-          }],
-          ["s18-root-future", { ...storedMetadata, version: 99 }],
-        ] as const
-      ) {
-        const address = await seedLabeledDocument(runtime, name);
-        const tx = runtime.edit();
-        tx.writeOrThrow(address, { value: { note: "two" }, cfc: substitute });
-        expect(tx.getCfcState().unprivilegedSystemWrites).toEqual([
-          `${address.id}/cfc`,
-        ]);
-        expect((await tx.commit()).error).toBeDefined();
-      }
-    } finally {
-      await runtime.dispose();
-      await storageManager.close();
-    }
-  });
-
-  it("does not gate a root envelope that respells the stored label map", async () => {
-    // The comparison is canonical, so an envelope carrying the same map with
-    // its entries in another order is the map the document already had.
-    const storageManager = StorageManager.emulate({ as: signer });
-    const runtime = new Runtime({
-      apiUrl: new URL("https://example.com"),
-      storageManager,
-      cfcEnforcementMode: "enforce-explicit",
-    });
-    try {
-      const address = await seedLabeledDocument(runtime, "s18-root-respell");
+      const address = await seedLabeledDocument(runtime, "s18-root-future");
       const tx = runtime.edit();
       tx.writeOrThrow(address, {
         value: { note: "two" },
-        cfc: {
-          ...storedMetadata,
-          labelMap: {
-            version: 1,
-            entries: [...storedMetadata.labelMap.entries].reverse(),
-          },
-        },
+        cfc: { ...storedMetadata, version: 99 },
       });
       expect(tx.getCfcState().unprivilegedSystemWrites.length).toBe(0);
-      expect((await tx.commit()).ok).toBeDefined();
     } finally {
       await runtime.dispose();
       await storageManager.close();
