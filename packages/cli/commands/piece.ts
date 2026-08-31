@@ -1932,11 +1932,6 @@ cf ${spelling} /of:fid1:... addItem '{"title":"Milk"}'.`,
               helpCommandPrefix: cliCommand(
                 [...spelling.split(" "), "...", callableName],
               ),
-              // Only where the section is empty: a field before the marker
-              // leaves it non-empty, and the reading is then unambiguous.
-              ...(tail.length === 0 && literalArgs.length > 0
-                ? { emptySectionReadOptions: literalArgs }
-                : {}),
               skipReadback: waitControl.mode === "commit",
               showLinks: !!options.showLinks,
               ...(selection === undefined ? {} : { selection }),

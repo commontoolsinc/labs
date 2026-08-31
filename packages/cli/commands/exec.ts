@@ -259,11 +259,6 @@ export const exec = new Command()
         {
           invocation,
           ...(selection === undefined ? {} : { selection }),
-          // Only where the section is empty: a field before the marker leaves
-          // it non-empty, and the reading is then unambiguous.
-          ...(sectionArgs.length === 0 && literalArgs.length > 0
-            ? { emptySectionReadOptions: literalArgs }
-            : {}),
         },
       );
       renderExecOutcome(result);

@@ -20,9 +20,8 @@
  * section it is read where a verb's fields are read, and those two
  * vocabularies are independent — either may grow a name the other already
  * has, so a line that worked would reach a different reader with no edit and
- * no warning. Past the marker with the section left empty, on a verb
- * declaring a field of that very name, neither reading can be told from the
- * other, and the caller is asked which they meant.
+ * no warning. Past the marker it is a projection, whatever the verb's own
+ * fields are called.
  *
  * Every refusal prints the line that works, which is what `refuseSectionMarker`
  * in `section-marker.ts` does for the marker written where nothing closes, and
@@ -516,54 +515,4 @@ export async function parseReadSection(
   }
   const { options } = await readSectionCommand().parse([...literalArgs]);
   return options as unknown as ReadSection;
-}
-
-/**
- * Refuse a line whose words past the marker are all fields the verb declares,
- * written with nothing in the callable's section.
- *
- * Nothing reserves a field name, so a verb may declare `select`, `filter` or
- * `schema`. Past the marker those words are read as a projection, and a line
- * that wrote no other field leaves the verb running with no input at all — it
- * succeeds, exits zero, and does something else. That is the one mistake here
- * that would otherwise pass quietly, which is why it is answered even though
- * the reading is not wrong so much as unknowable.
- *
- * Both readings are printed, because this door genuinely cannot tell them
- * apart: the caller has to say which they meant. A caller writing the grammar
- * as taught never reaches it — a field before the marker leaves the section
- * non-empty, and the section is what this is about.
- *
- * The verb's declared fields have to be in hand, so this settles after the
- * schema loads rather than during argument handling.
- */
-export function refuseFieldsReadAsProjection(
-  prefix: string,
-  verbKeyword: string,
-  literalArgs: readonly string[],
-  declared: ReadonlySet<string>,
-): void {
-  const names = sectionUnits(literalArgs, EVERY_FLAG_TAKES_A_VALUE)
-    .map((unit) => unit.flag)
-    .filter((flag): flag is string =>
-      flag !== undefined && READ_OPTION_NAMES.includes(flag)
-    );
-  if (names.length === 0) return;
-  if (names.some((name) => !declared.has(name))) return;
-
-  const written = literalArgs.map(quoteToken).join(" ");
-  const one = names.length === 1;
-  throw new ValidationError(
-    `${listFlags(names.map((name) => `"--${name}"`))} ` +
-      `${one ? "is a field" : "are fields"} this verb declares AND ` +
-      `${one ? "a `cf` read option" : "`cf` read options"}, and this line ` +
-      `leaves the callable's section empty. Past the \`--\` the read step ` +
-      `takes ${one ? "it" : "them"}, so the verb would run with no input at ` +
-      `all. Say which was meant:\n\n` +
-      `  written:          ${prefix} -- ${written}\n` +
-      `  as verb input:    ${prefix} ${written}\n` +
-      `  as a projection:  ${prefix} ${verbKeyword} -- ${written}\n\n` +
-      `The \`${verbKeyword}\` keyword is the callable's own word, so it ` +
-      `leaves the section non-empty and the marker closing something.`,
-  );
 }

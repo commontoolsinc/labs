@@ -114,11 +114,6 @@ export interface ExecuteMountedCallableOptions {
   /** @internal Seam for tests. Production mints a fresh pair per call: see
    * {@link executeMountedCallableFile}. */
   invocation?: InvocationIdentity;
-
-  /** The words past the marker, where the callable's section was left empty.
-   * See {@link CallableCommandExecutionOptions.emptySectionReadOptions}: the
-   * command reads them, and only the resolved callable can judge them. */
-  emptySectionReadOptions?: readonly string[];
 }
 
 async function defaultLoadPiece(
@@ -380,9 +375,6 @@ export async function executeMountedCallableFile(
     commandSpec: resolved.commandSpec,
     rawArgs,
     sectionPrefix: usageCommandPrefix(filePath, invocationStyle),
-    ...(options.emptySectionReadOptions === undefined
-      ? {}
-      : { emptySectionReadOptions: options.emptySectionReadOptions }),
     deps: {
       ...deps,
       invocation,

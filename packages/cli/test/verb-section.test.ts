@@ -5,7 +5,6 @@ import {
   EVERY_FLAG_TAKES_A_VALUE,
   parseReadSection,
   readSectionAsksVerbHelp,
-  refuseFieldsReadAsProjection,
   refuseProjectionBeforeSection,
   sectionUnits,
   sectionWithVerbHelp,
@@ -359,93 +358,6 @@ describe("verb-section", () => {
         parseReadSection("call", ["v", "--", "--select"], ["--select"])
       );
       expect(message).not.toBe("");
-    });
-  });
-
-  describe("refuseFieldsReadAsProjection()", () => {
-    /** The verb declares both names the read step also owns. */
-    const declaring = new Set(["select", "filter", "title"]);
-
-    it("returns where the verb declares no field of that name", () => {
-      // Unambiguous: nothing but the read step can be meant.
-      expect(() =>
-        refuseFieldsReadAsProjection(
-          "cf call ... addItem",
-          "invoke",
-          ["--select", "title"],
-          new Set(["title"]),
-        )
-      ).not.toThrow();
-    });
-
-    it("returns where any word past the marker is not a declared field", () => {
-      // `--schema` is nobody's field here, so the line is a projection and the
-      // verb's `select` field is not what the caller was reaching for.
-      expect(() =>
-        refuseFieldsReadAsProjection(
-          "cf call ... addItem",
-          "invoke",
-          ["--select", "a", "--schema", "{}"],
-          declaring,
-        )
-      ).not.toThrow();
-    });
-
-    it("refuses where every word is a field, and prints both readings", () => {
-      // The one mistake that would otherwise pass quietly: read as a
-      // projection, the verb runs with no input and exits zero.
-      const message = messageFrom(() =>
-        refuseFieldsReadAsProjection(
-          "cf call ... findItems",
-          "run",
-          ["--select", "title"],
-          declaring,
-        )
-      );
-      expect(message).toContain("leaves the callable's section empty");
-      expect(message).toContain(
-        "written:          cf call ... findItems -- --select title",
-      );
-      expect(message).toContain(
-        "as verb input:    cf call ... findItems --select title",
-      );
-      expect(message).toContain(
-        "as a projection:  cf call ... findItems run -- --select title",
-      );
-    });
-
-    it("names every colliding word, and uses the callable's own keyword", () => {
-      const message = messageFrom(() =>
-        refuseFieldsReadAsProjection(
-          "cf call ... addItem",
-          "invoke",
-          ["--select", "a", "--filter", "b"],
-          declaring,
-        )
-      );
-      expect(message).toContain('"--select" and "--filter" are fields');
-      expect(message).toContain("cf call ... addItem invoke -- --select a");
-    });
-
-    it("returns for a marker with nothing past it", () => {
-      expect(() =>
-        refuseFieldsReadAsProjection("cf call ... v", "invoke", [], declaring)
-      ).not.toThrow();
-    });
-
-    it("names the flag alone where the word after it is that flag's value", () => {
-      // Past the marker every read option takes a value, so `--filter` here is
-      // the word `--select` was given rather than a second colliding name.
-      const message = messageFrom(() =>
-        refuseFieldsReadAsProjection(
-          "cf call ... addItem",
-          "invoke",
-          ["--select", "--filter"],
-          declaring,
-        )
-      );
-      expect(message).toContain('"--select" is a field');
-      expect(message).not.toContain('"--filter"');
     });
   });
 

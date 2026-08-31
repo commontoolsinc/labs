@@ -617,19 +617,21 @@ spellings 6a warned about, so step 10 is free to change those same commands.
     the corrected line. The change takes effect at once rather than through a
     warned window.
 
-    Printing the corrected line is what carries that, and it is worth being
-    exact about which case needs it. A stray `cf` flag is refused as an unknown
-    read option and the message adds the spelling that works. A stray *field* is
-    not always refused: nothing reserves a field name, so a verb may declare
-    `select`, `filter` or `schema`, and a line whose only fields are those reads
-    as a projection instead — the handler runs with different input and exits
-    zero. Recognizing words after an empty callable section as fields the verb
-    declares is what turns that into a corrected line rather than a quiet
-    reinterpretation, and it is the same recognition the message needs anyway.
-    A caller writing the new grammar never produces the shape, since fields
-    before the marker leave the section non-empty. It needs the verb's declared
-    fields in hand, so it settles after the schema loads rather than during
-    argument handling.
+    Printing the corrected line is what carries that. A `cf` flag written in
+    the callable's section is refused with the section it belongs to named, and
+    a word past the marker that is not a read option is refused with the marker
+    taken back out — each message ends in the line to retype.
+
+    The boundary itself is unconditional, which is what keeps it worth having.
+    Past the marker a word is the read step's, whatever the verb's own fields
+    are called; before it, a word is the verb's. Nothing reserves a field name,
+    so a verb may declare `select`, `filter` or `schema` — and that costs its
+    caller nothing, because the field is written in the section the verb opened
+    and the projection past the marker, which are two different positions. A
+    verb wanting both on one line writes both, one on each side. That a
+    pattern's own vocabulary overlaps `cf`'s is a question for that pattern's
+    author, not one the CLI answers by guessing between two readings of the
+    same word.
 11. **`--url` decomposes** into the transport it names and the reference it
     carries, and survives as a convenience for pasting rather than as the only
     spelling that carries a whole target.

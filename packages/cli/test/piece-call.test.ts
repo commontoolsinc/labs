@@ -940,71 +940,48 @@ describe("executePieceCallable", () => {
     expect(harness.tracker.handlerWrites).toEqual([]);
   });
 
-  it("refuses an empty section whose words past the marker are the verb's own fields", async () => {
-    // The one mistake that passes quietly otherwise: `record` declares a
-    // `select` field, so `record -- --select tea` reads as a projection and
-    // the handler runs with no input at all, settles, and exits zero. It
-    // needs the verb's schema, so it settles here rather than during argument
-    // handling.
-    const harness = createPieceCallableHarness({
-      callableKind: "handler",
-      cellKey: "record",
-      inputSchema: {
-        type: "object",
-        properties: { select: { type: "string" } },
-        required: ["select"],
-      },
+  it("reads the words past the marker as a projection whatever the verb declares", async () => {
+    // `record` declares a `select` field and the read step owns `--select`,
+    // and the two vocabularies stay independent: past the marker the word is
+    // the read step's, so the line carries no verb input and the ordinary
+    // parse says so. Nothing here weighs the two readings against each other.
+    const declaring = () =>
+      createPieceCallableHarness({
+        callableKind: "handler",
+        cellKey: "record",
+        inputSchema: {
+          type: "object",
+          properties: { select: { type: "string" } },
+          required: ["select"],
+        },
+      });
+    const config = {
+      apiUrl: "http://localhost:8000",
+      identity: "/tmp/test-identity.pem",
+      piece: "fid1:piece-123",
+      space: "home",
+    };
+
+    const bare = declaring();
+    await expect(executePieceCallable(config, "record", [], {
+      loadPieces: () => Promise.resolve(bare.pieces),
+      loadPiece: () => Promise.resolve(bare.piece),
+      isStdinTerminal: () => true,
+    })).rejects.toThrow(/Handler requires input/);
+    expect(bare.tracker.handlerWrites).toStrictEqual([]);
+
+    // And a pipe is input, so the same line dispatches: the projection was
+    // never the verb's to read, and stdin fills the section it left empty.
+    const piped = declaring();
+    await executePieceCallable(config, "record", [], {
+      loadPieces: () => Promise.resolve(piped.pieces),
+      loadPiece: () => Promise.resolve(piped.piece),
+      isStdinTerminal: () => false,
+      readTextInput: () => Promise.resolve('{"select":"input"}'),
     });
-
-    await expect(executePieceCallable(
-      {
-        apiUrl: "http://localhost:8000",
-        identity: "/tmp/test-identity.pem",
-        piece: "fid1:piece-123",
-        space: "home",
-      },
-      "record",
-      [],
-      {
-        loadPieces: () => Promise.resolve(harness.pieces),
-        loadPiece: () => Promise.resolve(harness.piece),
-        isStdinTerminal: () => true,
-        emptySectionReadOptions: ["--select", "tea"],
-      },
-    )).rejects.toThrow(/leaves the callable's section empty/);
-  });
-
-  it("reads an empty section whose words past the marker name no field", async () => {
-    // The same shape on a verb declaring no `select`: nothing is ambiguous,
-    // so the projection is read as one and the line goes on to the ordinary
-    // parse — which refuses it for the input this handler owes, not for the
-    // grammar.
-    const harness = createPieceCallableHarness({
-      callableKind: "handler",
-      cellKey: "record",
-      inputSchema: {
-        type: "object",
-        properties: { query: { type: "string" } },
-        required: ["query"],
-      },
-    });
-
-    await expect(executePieceCallable(
-      {
-        apiUrl: "http://localhost:8000",
-        identity: "/tmp/test-identity.pem",
-        piece: "fid1:piece-123",
-        space: "home",
-      },
-      "record",
-      [],
-      {
-        loadPieces: () => Promise.resolve(harness.pieces),
-        loadPiece: () => Promise.resolve(harness.piece),
-        isStdinTerminal: () => true,
-        emptySectionReadOptions: ["--select", "tea"],
-      },
-    )).rejects.toThrow(/Handler requires input/);
+    expect(piped.tracker.handlerWrites).toStrictEqual([
+      { cellProp: "result", path: ["record"], value: { select: "input" } },
+    ]);
   });
 
   it("renders help under the canonical spelling when no mount names itself", async () => {

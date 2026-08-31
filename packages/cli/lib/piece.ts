@@ -374,9 +374,6 @@ export interface ResolvedPieceCallable extends CallableResolution {
 export interface PieceCallableDependencies extends CallableExecutionDeps {
   helpCommandPrefix?: string;
 
-  /** See {@link CallableCommandExecutionOptions.emptySectionReadOptions}. The
-   * command reads the words; only the resolved verb can judge them. */
-  emptySectionReadOptions?: readonly string[];
   loadPieces?: (config: SpaceConfig) => Promise<any>;
   loadPiece?: (
     pieces: any,
@@ -3404,9 +3401,6 @@ export async function executePieceCallable(
     rawArgs,
     deps,
     sectionPrefix: commandPrefix,
-    ...(deps.emptySectionReadOptions === undefined
-      ? {}
-      : { emptySectionReadOptions: deps.emptySectionReadOptions }),
     renderHelp: async (commandSpec, parsed) => {
       // The pattern is consulted HERE and nowhere earlier: the parse has
       // established that a page is being rendered, so the load it costs is

@@ -19,12 +19,24 @@ The step's documentation sweep ran to twenty-one files, across `docs/`,
 scripts.
 
 The count is worth recording because the estimate written before the sweep was
-twelve. The estimate was built from a `git grep -E` pattern written with `\b`
-for a word boundary, and `git grep -E` reads `\b` as a literal backspace
-character. A pattern written that way matches nothing, reports nothing, and
-gives no sign that it searched for the wrong thing — so the shortfall was not
-a matter of judgment about scope. It was an instrument that answered a question
-nobody asked, in a form indistinguishable from a small answer to the right one.
+twelve. The estimate was built from a `git grep -E` pattern that used `\b` for
+a word boundary, and on the machine the sweep ran on that pattern matched
+nothing at all — no output and exit 1, which is exactly how the same command
+reports a pattern with no matches in the tree.
+
+The measurements behind that, taken on the same machine and the same checkout:
+`git grep -cE '\bcall\b' -- packages/cli/README.md` finds nothing, while
+`git grep -cE 'call'` on that file finds 87 lines, `git grep -cP '\bcall\b'`
+finds 43, `git grep -cE '[[:<:]]call[[:>:]]'` finds 43, and the system's own
+`grep -cE '\bcall\b'` over the same file finds 43. So the corpus was there and
+the pattern was not reaching it, and `\b` is not simply unsupported on this
+machine — it works in `grep -E` and fails in `git grep -E`, one command apart.
+
+What is load-bearing is not which engine does what. It is that a pattern whose
+meaning varies between two tools on one machine — and, being an escape a regex
+dialect may or may not define, between platforms — is not a pattern to build an
+estimate on. And that this one failed in the one shape that cannot be noticed:
+a count of nothing, reported the way a true count of nothing is reported.
 
 Two of the twenty-one were the verb session documents, whose commands
 `deno task check-verb-session-sync` holds to what

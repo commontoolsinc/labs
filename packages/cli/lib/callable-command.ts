@@ -6,14 +6,12 @@ import {
   type InvocationOutcome,
 } from "./callable.ts";
 import {
-  declaredVerbFlags,
   type ExecCommandSpec,
   type ExecInputResolverDeps,
   normalizeCallableInputForExecution,
   type ParsedExecArgs,
   resolveExecInvocation,
 } from "./exec-schema.ts";
-import { refuseFieldsReadAsProjection } from "./verb-section.ts";
 
 export interface CallableCommandExecutionResult<TResolved> {
   helpText?: string;
@@ -64,17 +62,6 @@ export interface CallableCommandExecutionOptions<
    * own help page elides it, for the same reason.
    */
   sectionPrefix?: string;
-
-  /**
-   * The words past the marker, supplied only where the callable's section was
-   * left empty.
-   *
-   * They are read options by then — anything else was refused at the marker —
-   * but a verb may declare a field of the same name, and an empty section is
-   * what makes that reading unknowable. Deciding it needs the verb's schema,
-   * which is why the command hands the words down rather than settling it.
-   */
-  emptySectionReadOptions?: readonly string[];
 }
 
 export async function readJsonInputFromStdin(): Promise<unknown> {
@@ -124,23 +111,9 @@ export async function executeCallableCommand<
     renderHelp,
     validateRawArgs,
     sectionPrefix,
-    emptySectionReadOptions,
   } = options;
 
   validateRawArgs?.(rawArgs, commandSpec, resolved);
-
-  // Before the dispatch and after the schema: this is the first point where
-  // the verb's own vocabulary is known, and the last before the verb runs.
-  if (rawArgs.length === 0 && emptySectionReadOptions !== undefined) {
-    refuseFieldsReadAsProjection(
-      sectionPrefix ?? "...",
-      commandSpec.defaultVerb,
-      emptySectionReadOptions,
-      new Set(
-        declaredVerbFlags(commandSpec.inputSchema).map((flag) => flag.name),
-      ),
-    );
-  }
 
   const invocation = await resolveExecInvocation(
     commandSpec,
