@@ -117,7 +117,7 @@ export function relativeToRoot(url: string, root: string): string {
  * directory holding `.git`. Undefined outside any repository, and
  * undefined when the climb is not permitted to read the filesystem.
  */
-function repositoryRootOf(path: string): string | undefined {
+export function repositoryRootOf(path: string): string | undefined {
   let dir = dirname(resolve(path));
   for (;;) {
     try {

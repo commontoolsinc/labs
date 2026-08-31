@@ -71,6 +71,44 @@ Deno.test("newestManifest treats a malformed manifest as absent", async () => {
   assertEquals(found, undefined);
 });
 
+/**
+ * A store that lists one manifest and then answers for the object
+ * itself however the caller says. The listing has to succeed for the
+ * reader to reach the object at all.
+ */
+function storeRefusing(answer: () => Promise<Response>): typeof fetch {
+  const name = `${PREFIX}/manifest-2026-08-20T04:00:00.000Z-a.json.gz`;
+  return ((input: string | URL | Request) => {
+    const url = new URL(String(input instanceof Request ? input.url : input));
+    if (url.pathname.endsWith("/o")) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ items: [{ name }] }), { status: 200 }),
+      );
+    }
+    return answer();
+  }) as typeof fetch;
+}
+
+Deno.test("newestManifest treats a refused manifest as absent", async () => {
+  // Listed but not readable, which is what a manifest deleted between
+  // the listing and the read looks like.
+  for (const status of [403, 404, 500]) {
+    const found = await newestManifest({
+      fetchImpl: storeRefusing(() =>
+        Promise.resolve(new Response("", { status }))
+      ),
+    });
+    assertEquals(found, undefined);
+  }
+});
+
+Deno.test("newestManifest treats a failed read as absent", async () => {
+  const found = await newestManifest({
+    fetchImpl: storeRefusing(() => Promise.reject(new Error("no network"))),
+  });
+  assertEquals(found, undefined);
+});
+
 Deno.test("newestManifest treats an unreachable store as absent", async () => {
   const found = await newestManifest({
     fetchImpl: (() => Promise.reject(new Error("no network"))) as typeof fetch,

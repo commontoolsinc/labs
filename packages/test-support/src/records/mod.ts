@@ -72,6 +72,7 @@ export {
   registerFrameworkModule,
   registeringModule,
   relativeToRoot,
+  repositoryRootOf,
   serializeSkipList,
   SKIP_LIST_VARIABLE,
 } from "./registration.ts";

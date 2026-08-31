@@ -260,7 +260,13 @@ function laneLine(
     `${lane.projectedSeconds.toFixed(1)}s of ${LANE_BUDGET_SECONDS}s`;
 }
 
-/** The packing, over a manifest and no diff, as a lane would compute it. */
+/**
+ * The packing, over a manifest and no diff, as a lane would compute it.
+ * Which capabilities a suite needs is declared by the topology, which
+ * lands with part two, so until then the map is empty and a lane's
+ * capability setup costs nothing here. The publisher computes its
+ * reference plan the same way and for the same reason.
+ */
 function planFor(manifest: Manifest) {
   return plan({ manifest, mandatory: new Map(), capabilities: new Map() });
 }

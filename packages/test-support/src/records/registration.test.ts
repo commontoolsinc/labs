@@ -1,6 +1,6 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { join } from "@std/path";
+import { fromFileUrl, join } from "@std/path";
 
 import {
   activeCapture,
@@ -14,6 +14,7 @@ import {
   registerFrameworkModule,
   registeringModule,
   relativeToRoot,
+  repositoryRootOf,
   serializeSkipList,
 } from "./registration.ts";
 
@@ -404,6 +405,26 @@ describe("what the capture does with what it cannot read", () => {
   it("refuses a skip list that is not an object of lists", () => {
     for (const text of ["{not json", "null", '["a"]', '{"f.ts":"one"}']) {
       expect(parseSkipList(text)).toBeUndefined();
+    }
+  });
+});
+
+describe("repositoryRootOf()", () => {
+  it("finds the root above a file inside the repository", () => {
+    const root = repositoryRootOf(fromFileUrl(import.meta.url));
+    expect(root).toBeDefined();
+    expect(Deno.statSync(join(root!, ".git"))).toBeDefined();
+  });
+
+  it("is nothing for a path under no repository at all", async () => {
+    // The climb reaches the filesystem root and stops there. Answering
+    // with the root itself would make every registering module's path
+    // relative to "/", which names no file in any repository.
+    const outside = await Deno.makeTempDir();
+    try {
+      expect(repositoryRootOf(join(outside, "a.test.ts"))).toBeUndefined();
+    } finally {
+      await Deno.remove(outside, { recursive: true });
     }
   });
 });
