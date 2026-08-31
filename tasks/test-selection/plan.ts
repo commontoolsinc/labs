@@ -327,7 +327,6 @@ export function plan(input: PlanInput): Plan {
   // caller says so by naming it mandatory. It has no entry, so one is
   // made for it at the floor, costing nothing anybody measured.
   for (const [key, reason] of input.mandatory) {
-    if (taken.has(key)) continue;
     // Not even a mandatory identity is placed past the hard bound: the
     // lane would be killed and the run would report a timeout rather than
     // the test.

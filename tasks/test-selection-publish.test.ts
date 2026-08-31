@@ -8,6 +8,7 @@ import {
   partitionOf,
   publish,
   type StoreAccess,
+  writeToken,
 } from "./test-selection-publish.ts";
 import {
   buildObjectBody,
@@ -60,6 +61,7 @@ describe("test-selection-publish", () => {
       expect(parseArgs(["--days", "0"])).toBeUndefined();
       expect(parseArgs(["--days"])).toBeUndefined();
       expect(parseArgs(["--concurrency", "x"])).toBeUndefined();
+      expect(parseArgs(["--out"])).toBeUndefined();
     });
   });
 
@@ -434,5 +436,95 @@ describe("publish() over an aggregate it cannot make sense of", () => {
     };
     expect(await publish(["--days", "1"], broken, NOW)).toBe(1);
     expect(created.size).toBe(after);
+  });
+});
+
+describe("writeToken()", () => {
+  const NAME = "TEST_RECORDS_GCS_TOKEN";
+
+  /** Runs with the variable set as given, and puts back what was there. */
+  function withToken<T>(value: string | undefined, body: () => T): T {
+    const before = Deno.env.get(NAME);
+    if (value === undefined) Deno.env.delete(NAME);
+    else Deno.env.set(NAME, value);
+    try {
+      return body();
+    } finally {
+      if (before === undefined) Deno.env.delete(NAME);
+      else Deno.env.set(NAME, before);
+    }
+  }
+
+  it("is the federated token the workflow was given", () => {
+    expect(withToken("ya29.a0", writeToken)).toBe("ya29.a0");
+  });
+
+  it("is nothing when the variable is unset", () => {
+    expect(withToken(undefined, writeToken)).toBeUndefined();
+  });
+
+  it("is nothing when the variable is set to empty", () => {
+    // A step that failed to mint one leaves the variable set and empty.
+    // Read as a token it would reach the store and be refused there.
+    expect(withToken("", writeToken)).toBeUndefined();
+  });
+});
+
+describe("publish() over a store that answers badly", () => {
+  const NOW = new Date("2026-08-20T12:00:00.000Z");
+
+  it("refuses when the aggregate object will not read", async () => {
+    const { store, created } = fakeStore(seed());
+    await publish(["--bootstrap", "--days", "1"], store, NOW);
+    const after = created.size;
+    const broken: StoreAccess = {
+      ...store,
+      readText: () => Promise.reject(new Error("that object is gone")),
+    };
+    expect(await publish(["--days", "1"], broken, NOW)).toBe(1);
+    expect(created.size).toBe(after);
+  });
+
+  it("refuses when the submissions cannot be listed", async () => {
+    const { store, created } = fakeStore(seed());
+    await publish(["--bootstrap", "--days", "1"], store, NOW);
+    const after = created.size;
+    const broken: StoreAccess = {
+      ...store,
+      list: (prefix) =>
+        prefix.includes("/submissions/")
+          ? Promise.reject(new Error("the store is unreachable"))
+          : store.list(prefix),
+    };
+    expect(await publish(["--days", "1"], broken, NOW)).toBe(1);
+    expect(created.size).toBe(after);
+  });
+});
+
+describe("publish() reporting what no lane can hold", () => {
+  const NOW = new Date("2026-08-20T12:00:00.000Z");
+
+  it("names each one, with the cost the bound was judged against", async () => {
+    const slow = (commit: string, at: string) => {
+      const body = object(commit, "pass", at);
+      // One execution taking longer than a lane's whole hard bound.
+      return body.replace('"durationMs":40', '"durationMs":400000');
+    };
+    const { store } = fakeStore({
+      [CI(DAY, "1")]: slow("c1", "2026-08-20T01:00:00.000Z"),
+      [CI(DAY, "2")]: slow("c2", "2026-08-20T02:00:00.000Z"),
+    });
+    const said: string[] = [];
+    const log = console.log;
+    console.log = (...parts: unknown[]) => said.push(parts.join(" "));
+    try {
+      expect(await publish(["--bootstrap", "--days", "1"], store, NOW)).toBe(0);
+    } finally {
+      console.log = log;
+    }
+    const line = said.find((said) => said.includes("unschedulable"));
+    expect(line).toBeDefined();
+    expect(line).toContain("space > writes");
+    expect(line).toContain("400.0s");
   });
 });

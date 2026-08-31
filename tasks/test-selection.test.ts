@@ -4,12 +4,17 @@ import { expect } from "@std/expect";
 import {
   coverageLines,
   dialLines,
+  dispatch,
   explainLines,
+  gatedMembers,
   laneArgument,
   parseIdentityArgument,
   planLines,
+  type Sources,
+  Stop,
   verdictFor,
 } from "./test-selection.ts";
+import type { TestIdentity } from "@commonfabric/test-support/records";
 import {
   freeCalibration,
   sampleEntry,
@@ -311,5 +316,175 @@ describe("verdictFor()", () => {
     expect(
       verdictFor(manifest, { k: "unit", s: "memory", n: "both" }).selected,
     ).toBe(false);
+  });
+});
+
+describe("gatedMembers()", () => {
+  it("is every package in the workspace, and nothing else", async () => {
+    const members = await gatedMembers();
+    expect(members.length).toBeGreaterThan(10);
+    expect(members.every((member) => member.startsWith("packages/"))).toBe(
+      true,
+    );
+    // The workspace file lists members with a leading "./", and the
+    // coverage baselines a manifest carries do not.
+    expect(members.some((member) => member.startsWith("./"))).toBe(false);
+    expect(members).toContain("packages/test-support");
+    expect([...members].sort()).toEqual(members);
+  });
+
+  it("names members the gate has an opinion about", async () => {
+    // Every excluded member is one of these; an exclusion naming
+    // something outside the list would never be printed.
+    const members = new Set(await gatedMembers());
+    for (const excluded of EXCLUDED_FROM_COVERAGE_GATE.keys()) {
+      expect(members.has(excluded)).toBe(true);
+    }
+  });
+});
+
+describe("dispatch()", () => {
+  /** Everything the dispatch printed, and the code it gave back. */
+  async function ran(
+    args: readonly string[],
+    sources: Partial<Sources> = {},
+  ): Promise<{ code: number; out: string; err: string; stop?: Stop }> {
+    const out: string[] = [];
+    const err: string[] = [];
+    const log = console.log;
+    const warn = console.error;
+    console.log = (...parts: unknown[]) => out.push(parts.join(" "));
+    console.error = (...parts: unknown[]) => err.push(parts.join(" "));
+    try {
+      const code = await dispatch(args, {
+        manifest: () => Promise.resolve(sampleManifest()),
+        members: () => Promise.resolve(["packages/memory"]),
+        aliases: () =>
+          Promise.resolve({ resolve: (test: TestIdentity) => test }),
+        ...sources,
+      } as Sources);
+      return { code, out: out.join("\n"), err: err.join("\n") };
+    } catch (error) {
+      if (!(error instanceof Stop)) throw error;
+      return { code: error.code, out: out.join("\n"), err: "", stop: error };
+    } finally {
+      console.log = log;
+      console.error = warn;
+    }
+  }
+
+  it("prints the usage for no mode, and for either help flag", async () => {
+    for (const args of [[], ["--help"], ["-h"]]) {
+      const result = await ran(args);
+      expect(result.code).toBe(0);
+      expect(result.out).toContain("usage: test-selection");
+    }
+  });
+
+  it("stops with the usage code on a mode it does not have", async () => {
+    const result = await ran(["wat"]);
+    expect(result.code).toBe(2);
+    expect(result.stop?.message).toContain("unknown mode wat");
+  });
+
+  it("prints every dial without reading anything", async () => {
+    const result = await ran(["dials"], {
+      manifest: () => {
+        throw new Error("dials must not read a manifest");
+      },
+    });
+    expect(result.code).toBe(0);
+    expect(result.out).toContain(DIALS[0]!.name);
+  });
+
+  it("names the gated members, and carries on with no manifest", async () => {
+    const result = await ran(["coverage"], {
+      manifest: () => Promise.resolve(undefined),
+    });
+    expect(result.code).toBe(0);
+    expect(result.out).toContain("packages/memory");
+    expect(result.out).toContain("no baseline yet");
+  });
+
+  it("stops when explain is given no identity, or a bad one", async () => {
+    expect((await ran(["explain"])).code).toBe(2);
+    const bad = await ran(["explain", "not a key"]);
+    expect(bad.code).toBe(2);
+    expect(bad.stop?.message).toContain("not an identity key");
+  });
+
+  it("explains one test, through the alias file", async () => {
+    const asked: TestIdentity[] = [];
+    const result = await ran(["explain", '["unit","memory","old name"]'], {
+      manifest: () =>
+        Promise.resolve(sampleManifest({
+          entries: [sampleEntry({ k: "unit", s: "memory", n: "new name" })],
+        })),
+      aliases: () =>
+        Promise.resolve({
+          resolve: (test: TestIdentity) => {
+            asked.push(test);
+            return { ...test, n: "new name" };
+          },
+        }),
+    });
+    expect(result.code).toBe(0);
+    expect(asked[0]?.n).toBe("old name");
+    expect(result.out).toContain("new name");
+    expect(result.out).toContain("the current manifest selects it");
+  });
+
+  it(
+    "reports a missing manifest as a failure, not as an empty answer",
+    async () => {
+      // Printing nothing and exiting zero reads as "no test would run".
+      for (const args of [["explain", '["unit","memory","a"]'], ["plan"]]) {
+        const result = await ran(args, {
+          manifest: () => Promise.resolve(undefined),
+        });
+        expect(result.code).toBe(1);
+      }
+    },
+  );
+
+  it("prints the plan, and only the lane asked for", async () => {
+    const manifest = sampleManifest({
+      entries: Array.from(
+        { length: 12 },
+        (_, i) =>
+          sampleEntry({ k: "unit", s: "memory", n: `case ${i}` }, {
+            unit: `packages/memory/test/case-${i}.test.ts`,
+          }),
+      ),
+    });
+    const all = await ran(["plan", "--dry-run"], {
+      manifest: () => Promise.resolve(manifest),
+    });
+    expect(all.code).toBe(0);
+    expect(all.out.match(/^ {2}lane \d+:/gm)?.length).toBe(LANES);
+
+    const one = await ran(["plan", "--dry-run", "--lane", "2"], {
+      manifest: () => Promise.resolve(manifest),
+    });
+    expect(one.out.match(/^ {2}lane \d+:/gm)?.length).toBe(1);
+    expect(one.out).toContain("  lane 2:");
+  });
+
+  it("stops on a lane number no lane has", async () => {
+    const result = await ran(["plan", "--lane", "9"]);
+    expect(result.code).toBe(2);
+    expect(result.stop?.message).toContain("whole number from 1 to");
+  });
+
+  it("stops on --verify before reading a manifest", async () => {
+    // The mode does not read one, so a store it never needed must not be
+    // what it fails on.
+    const result = await ran(["plan", "--verify"], {
+      manifest: () => {
+        throw new Error("--verify must not read a manifest");
+      },
+    });
+    expect(result.code).toBe(2);
+    expect(result.stop?.message).toContain("test topology");
   });
 });

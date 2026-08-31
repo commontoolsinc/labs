@@ -62,9 +62,23 @@ export function laneArgument(
   return lane;
 }
 
+/**
+ * What the program says before stopping, and the code it stops with.
+ * Raised rather than exited so the whole dispatch runs in a test.
+ */
+export class Stop extends Error {
+  readonly code: number;
+
+  constructor(message: string, code: number) {
+    super(message);
+    this.name = "Stop";
+    this.code = code;
+  }
+}
+
+/** Stops with the usage code, which is what a mistyped command line gets. */
 function fail(message: string): never {
-  console.error(message);
-  Deno.exit(2);
+  throw new Stop(message, 2);
 }
 
 /** Pads a column so a printed table lines up. */
@@ -118,7 +132,7 @@ export function coverageLines(
 }
 
 /** The workspace members the coverage gate has an opinion about. */
-async function gatedMembers(): Promise<string[]> {
+export async function gatedMembers(): Promise<string[]> {
   const root = repositoryRoot() ?? Deno.cwd();
   return (await readWorkspaceMembers(join(root, "deno.jsonc")))
     .map((member) => member.replace(/^\.\//, ""))
@@ -337,22 +351,57 @@ async function newestManifest(): Promise<Manifest | undefined> {
   return found.manifest;
 }
 
-async function main(args: readonly string[]): Promise<void> {
+/** What the dispatch reads that is not in its arguments. */
+export interface Sources {
+  /** The newest published manifest, or nothing when there is none. */
+  manifest(): Promise<Manifest | undefined>;
+
+  /** The workspace members the coverage gate has an opinion about. */
+  members(): Promise<string[]>;
+
+  /**
+   * The alias file, which joins a renamed test to its own history. Named
+   * by what the dispatch asks of it rather than by the class the live one
+   * happens to be.
+   */
+  aliases(): Promise<{
+    resolve(test: TestIdentity, day: string): TestIdentity;
+  }>;
+}
+
+const LIVE: Sources = {
+  manifest: newestManifest,
+  members: gatedMembers,
+  aliases: loadAliasResolver,
+};
+
+/**
+ * Runs one command line and returns the code to stop with. Every line it
+ * means a person to read goes to the console; every reason to stop is a
+ * `Stop`, so nothing here ends the process.
+ */
+export async function dispatch(
+  args: readonly string[],
+  sources: Sources = LIVE,
+): Promise<number> {
   const mode = args[0];
   if (mode === undefined || mode === "--help" || mode === "-h") {
     console.log(USAGE);
-    return;
+    return 0;
   }
   switch (mode) {
     case "dials":
       for (const line of dialLines()) console.log(line);
-      return;
+      return 0;
     case "coverage": {
-      const manifest = await newestManifest();
-      for (const line of coverageLines(manifest, await gatedMembers())) {
+      // The one mode that reads a manifest and carries on without one:
+      // which members are gated is a fact about the tree, and only the
+      // baseline each is measured against comes from a manifest.
+      const manifest = await sources.manifest();
+      for (const line of coverageLines(manifest, await sources.members())) {
         console.log(line);
       }
-      return;
+      return 0;
     }
     case "explain": {
       const argument = args[1];
@@ -361,11 +410,11 @@ async function main(args: readonly string[]): Promise<void> {
       if (test === undefined) {
         fail(`not an identity key: ${argument}\n\n${USAGE}`);
       }
-      const manifest = await newestManifest();
-      if (manifest === undefined) Deno.exit(1);
+      const manifest = await sources.manifest();
+      if (manifest === undefined) return 1;
       // Resolving through the alias file is what joins the two halves of
       // a renamed test's history under today's name.
-      const resolver = await loadAliasResolver();
+      const resolver = await sources.aliases();
       const resolved = resolver.resolve(
         test,
         manifest.generatedAt.slice(0, 10),
@@ -379,7 +428,7 @@ async function main(args: readonly string[]): Promise<void> {
       ) {
         console.log(line);
       }
-      return;
+      return 0;
     }
     case "plan": {
       // Before the manifest, because this mode does not read one and
@@ -396,10 +445,10 @@ async function main(args: readonly string[]): Promise<void> {
       if (laneNumber === "invalid") {
         fail(`--lane takes a whole number from 1 to ${LANES}`);
       }
-      const manifest = await newestManifest();
-      if (manifest === undefined) Deno.exit(1);
+      const manifest = await sources.manifest();
+      if (manifest === undefined) return 1;
       for (const line of planLines(manifest, laneNumber)) console.log(line);
-      return;
+      return 0;
     }
     default:
       fail(`unknown mode ${mode}\n\n${USAGE}`);
@@ -407,5 +456,11 @@ async function main(args: readonly string[]): Promise<void> {
 }
 
 if (import.meta.main) {
-  await main(Deno.args);
+  try {
+    Deno.exit(await dispatch(Deno.args));
+  } catch (error) {
+    if (!(error instanceof Stop)) throw error;
+    console.error(error.message);
+    Deno.exit(error.code);
+  }
 }

@@ -324,7 +324,7 @@ async function readAggregate(store: StoreAccess): Promise<AggregateRead> {
  * there is no fallback to offer — `--dry-run --out` is how a person sees
  * what a run would produce.
  */
-function writeToken(): string | undefined {
+export function writeToken(): string | undefined {
   const federated = Deno.env.get("TEST_RECORDS_GCS_TOKEN");
   return federated !== undefined && federated.length > 0
     ? federated
@@ -391,7 +391,6 @@ export async function publish(
   const compacted: string[] = [];
   if (options.bootstrap) {
     for (const day of partitions) {
-      if (fold.knowsDay(day)) continue;
       const shards = await store.rollupShards(day);
       if (shards === undefined) continue;
       try {

@@ -3,6 +3,7 @@ import { expect } from "@std/expect";
 import { join } from "@std/path";
 
 import {
+  activeCapture,
   asDefinition,
   buildCapture,
   fileForName,
@@ -352,5 +353,163 @@ describe("registration", () => {
       expect(parseSkipList('{"a": "b"}')).toBeUndefined();
       expect(parseSkipList('{"a": [1]}')).toBeUndefined();
     });
+  });
+});
+
+describe("what the capture does with what it cannot read", () => {
+  it("leaves a URL it cannot parse alone", () => {
+    // The registering module is recovered from a stack trace, which is
+    // not always a URL. What is not one is passed through rather than
+    // turned into a path that names nothing.
+    expect(relativeToRoot("not a url", "/repo")).toBe("not a url");
+  });
+
+  it("ignores a name map that is not a map", async () => {
+    const dir = await Deno.makeTempDir();
+    try {
+      await Deno.writeTextFile(
+        join(dir, `${NAME_MAP_PREFIX}01${NAME_MAP_SUFFIX}`),
+        "{not json",
+      );
+      await Deno.writeTextFile(
+        join(dir, `${NAME_MAP_PREFIX}02${NAME_MAP_SUFFIX}`),
+        '["a name"]',
+      );
+      await Deno.writeTextFile(
+        join(dir, `${NAME_MAP_PREFIX}03${NAME_MAP_SUFFIX}`),
+        "null",
+      );
+      await writeNameMap(dir, "04", { one: "packages/a/one.test.ts" });
+      const names = await readNameMaps(dir);
+      expect([...names.keys()]).toEqual(["one"]);
+    } finally {
+      await Deno.remove(dir, { recursive: true });
+    }
+  });
+
+  it("drops a mapped file that is not a name", async () => {
+    const dir = await Deno.makeTempDir();
+    try {
+      await Deno.writeTextFile(
+        join(dir, `${NAME_MAP_PREFIX}01${NAME_MAP_SUFFIX}`),
+        JSON.stringify({ a: 7, b: "", c: "packages/a/one.test.ts" }),
+      );
+      const names = await readNameMaps(dir);
+      expect([...names.keys()]).toEqual(["c"]);
+    } finally {
+      await Deno.remove(dir, { recursive: true });
+    }
+  });
+
+  it("refuses a skip list that is not an object of lists", () => {
+    for (const text of ["{not json", "null", '["a"]', '{"f.ts":"one"}']) {
+      expect(parseSkipList(text)).toBeUndefined();
+    }
+  });
+});
+
+describe("activeCapture()", () => {
+  it("is nothing in a process that installed no capture", () => {
+    // Every invocation that is not recording, which is the one this test
+    // runs in: the bdd re-exports consult this and must find nothing.
+    expect(activeCapture()).toBeUndefined();
+  });
+});
+
+describe("the wrapper over a shape it does not model", () => {
+  it("hands the real registrar the arguments it was given", () => {
+    const seen: unknown[][] = [];
+    const built = buildCapture({
+      registrar: ((...args: unknown[]) => {
+        seen.push(args);
+      }) as unknown as typeof Deno.test,
+    });
+    // No name anywhere, so `asDefinition` recognizes nothing. The call
+    // still reaches the registrar, which is what reports its own error.
+    (built.registrar as unknown as (...args: unknown[]) => void)(7, 8);
+    expect(seen).toEqual([[7, 8]]);
+  });
+});
+
+describe("what the capture does when it cannot write", () => {
+  const registrar = (() => {}) as unknown as typeof Deno.test;
+
+  it("does nothing at all when there is no spool", () => {
+    const { capture } = buildCapture({ registrar });
+    capture.names.set("a test", "packages/a/one.test.ts");
+    // No spool is a run that was never recording, not a failed write.
+    capture.flush();
+  });
+
+  it("does nothing when it learned no names", async () => {
+    const spool = await Deno.makeTempDir();
+    try {
+      buildCapture({ registrar, spool }).capture.flush();
+      expect([...Deno.readDirSync(spool)]).toEqual([]);
+    } finally {
+      await Deno.remove(spool, { recursive: true });
+    }
+  });
+
+  it("writes the names it learned into the spool", async () => {
+    const spool = await Deno.makeTempDir();
+    try {
+      const { capture } = buildCapture({ registrar, spool });
+      capture.names.set("a test", "packages/a/one.test.ts");
+      capture.flush();
+      const names = await readNameMaps(spool);
+      expect(names.get("a test")).toBe("packages/a/one.test.ts");
+    } finally {
+      await Deno.remove(spool, { recursive: true });
+    }
+  });
+
+  it("says so and carries on when the spool cannot be made", async () => {
+    // A file where the directory should be. Failing to record must not
+    // fail the test run that was recording.
+    const parent = await Deno.makeTempDir();
+    const spool = join(parent, "in-the-way");
+    await Deno.writeTextFile(spool, "");
+    const said: string[] = [];
+    const warn = console.warn;
+    console.warn = (...parts: unknown[]) => said.push(parts.join(" "));
+    try {
+      const { capture } = buildCapture({ registrar, spool });
+      capture.names.set("a test", "packages/a/one.test.ts");
+      capture.flush();
+    } finally {
+      console.warn = warn;
+      await Deno.remove(parent, { recursive: true });
+    }
+    expect(said.join("\n")).toContain("cannot write a name map");
+  });
+});
+
+describe("the skip list a capture was built with", () => {
+  const registrar = (() => {}) as unknown as typeof Deno.test;
+
+  it("skips only the named test in the named file", () => {
+    const { capture } = buildCapture({
+      registrar,
+      skips: { "packages/a/one.test.ts": ["a test"] },
+    });
+    expect(capture.skipped("packages/a/one.test.ts", "a test")).toBe(true);
+    expect(capture.skipped("packages/a/one.test.ts", "another")).toBe(false);
+    expect(capture.skipped("packages/a/two.test.ts", "a test")).toBe(false);
+  });
+
+  it("skips nothing when the file is unknown", () => {
+    // A test whose file could not be recovered cannot be matched against
+    // a list keyed by file, so it runs.
+    const { capture } = buildCapture({
+      registrar,
+      skips: { "packages/a/one.test.ts": ["a test"] },
+    });
+    expect(capture.skipped(undefined, "a test")).toBe(false);
+  });
+
+  it("skips nothing when there is no list", () => {
+    const { capture } = buildCapture({ registrar });
+    expect(capture.skipped("packages/a/one.test.ts", "a test")).toBe(false);
   });
 });

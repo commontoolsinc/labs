@@ -24,7 +24,7 @@ import {
   reportFromText,
 } from "./build.ts";
 import { parseManifest, serializeManifest } from "./manifest.ts";
-import { flakeRate } from "./score.ts";
+import { emptyState, flakeRate, type IdentityState } from "./score.ts";
 import { FLAKE_EXCLUSION_RATE, MAX_REPEATS } from "./policy.ts";
 
 const NO_ALIASES = new AliasResolver([]);
@@ -114,6 +114,15 @@ describe("build", () => {
 
     it("declines a report with no context", () => {
       expect(provenance(undefined, CI_NAME)).toBeUndefined();
+    });
+
+    it("declines a continuous-integration run that names no branch", () => {
+      // The branch is the source a catch is attributed to, so a run with
+      // none cannot be told apart from any other run with none.
+      const nameless = context();
+      delete nameless.branch;
+      expect(provenance(nameless, CI_NAME)).toBeUndefined();
+      expect(provenance(context({ branch: "" }), CI_NAME)).toBeUndefined();
     });
   });
 
@@ -356,6 +365,45 @@ describe("build", () => {
       expect(parseAggregate('{"schema":99}')).toBeUndefined();
       expect(parseAggregate('{"schema":1,"day":"x"}')).toBeUndefined();
     });
+
+    it("refuses a shape it would otherwise have to guess at", () => {
+      const whole = {
+        schema: 1,
+        day: "2026-08-20",
+        folded: [],
+        states: {},
+        compactedDays: [],
+      };
+      const refused: Array<[string, unknown]> = [
+        ["a document that is not an object", 7],
+        ["a null document", null],
+        ["no folded list", { ...whole, folded: undefined }],
+        ["a folded list that is not one", { ...whole, folded: "one.ndjson" }],
+        ["a folded name that is not one", { ...whole, folded: [7] }],
+        ["states that are not a record", { ...whole, states: [] }],
+        ["null states", { ...whole, states: null }],
+        [
+          "a compacted list that is not one",
+          { ...whole, compactedDays: "2026-08-20" },
+        ],
+        ["a compacted day that is not one", { ...whole, compactedDays: [7] }],
+      ];
+      for (const [what, value] of refused) {
+        expect(parseAggregate(JSON.stringify(value)), what).toBeUndefined();
+      }
+    });
+
+    it("reads an aggregate written before rollups were read", () => {
+      // No compacted list at all is the truthful reading that nothing
+      // was compacted, which is different from a list it cannot read.
+      const before = {
+        schema: 1,
+        day: "2026-08-20",
+        folded: [],
+        states: {},
+      };
+      expect(parseAggregate(JSON.stringify(before))?.compactedDays).toEqual([]);
+    });
   });
 
   describe("identityOfKey()", () => {
@@ -428,5 +476,74 @@ describe("build", () => {
         "main-red",
       ]);
     });
+  });
+});
+
+describe("a fold's count of what it has folded", () => {
+  it("counts every execution, not every object", () => {
+    const fold = new Fold(
+      emptyAggregate("2026-08-20"),
+      new AliasResolver([]),
+      "2026-08-20",
+    );
+    expect(fold.observations).toBe(0);
+    fold.add([stored(CI_NAME, context(), [record(), record()])]);
+    expect(fold.observations).toBe(2);
+    expect(fold.finish().observations).toBe(2);
+  });
+});
+
+describe("what buildManifest() does with the states it is given", () => {
+  const KEY = testIdentityKey({ k: "unit", s: "memory", n: "space > writes" });
+
+  function built(
+    states: Map<string, IdentityState>,
+    mainRed = new Set<string>(),
+  ) {
+    return buildManifest({
+      states,
+      mainRed,
+      surfaces: new Map(),
+      today: "2026-08-20",
+      generatedAt: "2026-08-20T00:00:00.000Z",
+      seed: "01K3SAMPLE",
+      commit: "c8893b3a8",
+      runs: 1,
+    });
+  }
+
+  it("skips a state whose key does not name an identity", () => {
+    // A key that is not one cannot be turned back into a test to run, so
+    // carrying it would put an entry in the manifest naming nothing.
+    const states = new Map([
+      ["not a key", emptyState()],
+      ["[]", emptyState()],
+      [KEY, emptyState()],
+    ]);
+    expect(built(states).entries.length).toBe(1);
+  });
+
+  it("withholds a test that disagrees with itself too often", () => {
+    const state = emptyState();
+    state.failuresByDay["2026-08-20"] = 10;
+    state.flakesByDay["2026-08-20"] = 10;
+    const manifest = built(new Map([[KEY, state]]));
+    expect(manifest.withheld.length).toBe(1);
+    expect(manifest.withheld[0]!.reason).toBe("flaky");
+  });
+
+  it("calls a test failing on main red, however flaky it also is", () => {
+    // The two reasons are exclusive, and being broken on the default
+    // branch is the one that decides what a pull request may act on.
+    const state = emptyState();
+    state.failuresByDay["2026-08-20"] = 10;
+    state.flakesByDay["2026-08-20"] = 10;
+    const manifest = built(new Map([[KEY, state]]), new Set([KEY]));
+    expect(manifest.withheld.length).toBe(1);
+    expect(manifest.withheld[0]!.reason).toBe("main-red");
+  });
+
+  it("withholds nothing for a test that has never failed", () => {
+    expect(built(new Map([[KEY, emptyState()]])).withheld).toEqual([]);
   });
 });

@@ -10,6 +10,14 @@ import {
 } from "./selection.ts";
 import { sampleManifest } from "./selection-testing.ts";
 
+const TEST = { k: "unit", s: "memory", n: "space > writes" };
+const CALIBRATION = {
+  setupCost: {},
+  suites: {},
+  unitOverhead: {},
+  prologue: 0,
+};
+
 describe("selection", () => {
   describe("parseManifest()", () => {
     it("round-trips a manifest through its serialization", () => {
@@ -238,6 +246,175 @@ describe("selection", () => {
         "an independence flag that is not one",
         withField("independent", "yes", "entry"),
       ],
+
+      // The lists a manifest carries beside its entries. Each has its own
+      // reader, and each rejects the manifest whole.
+      ["an unavailable list that is not one", withField("unavailable", 7)],
+      [
+        "an unavailable entry that is not a record",
+        withField("unavailable", [7]),
+      ],
+      [
+        "an unavailable entry with no suite",
+        withField("unavailable", [{ suite: "", unit: "u", reason: "r" }]),
+      ],
+      [
+        "an unavailable entry with no unit",
+        withField("unavailable", [{ suite: "s", reason: "r" }]),
+      ],
+      [
+        "an unavailable entry with no reason",
+        withField("unavailable", [{ suite: "s", unit: "u", reason: 7 }]),
+      ],
+      [
+        "an unavailable variant that is present and empty",
+        withField("unavailable", [
+          { suite: "s", unit: "u", reason: "r", variant: "" },
+        ]),
+      ],
+      [
+        "an unavailable leaf name that is not one",
+        withField("unavailable", [
+          { suite: "s", unit: "u", reason: "r", leafName: 7 },
+        ]),
+      ],
+      [
+        "an unavailable phase that is not one",
+        withField("unavailable", [
+          { suite: "s", unit: "u", reason: "r", phase: "" },
+        ]),
+      ],
+
+      // The generation time, which is what a reader measures a manifest's
+      // age from, and a value that is not a date compares false against
+      // every threshold.
+      ["a generation time that is not a string", withField("generatedAt", 7)],
+      [
+        "a generation time that is only a day",
+        withField("generatedAt", "2026-08-20"),
+      ],
+      [
+        "a generation time no calendar has",
+        withField("generatedAt", "2026-99-20T00:00:00.000Z"),
+      ],
+
+      // The withheld list, which is what a lane reads to say why a test
+      // it can see is one it must not run.
+      ["an entry that is not a record", withField("entries", [7])],
+      ["a withheld entry that is not a record", withField("withheld", [7])],
+      [
+        "a withheld entry with no identity",
+        withField("withheld", [{ suite: "s", reason: "flaky" }]),
+      ],
+      [
+        "a withheld entry with no suite",
+        withField("withheld", [{ test: TEST, suite: "", reason: "flaky" }]),
+      ],
+      ["an unschedulable list that is not one", withField("unschedulable", 7)],
+      [
+        "an unschedulable entry that is not a record",
+        withField("unschedulable", ["heavy"]),
+      ],
+      [
+        "an unschedulable entry with no identity",
+        withField("unschedulable", [{ suite: "s", cost: 400 }]),
+      ],
+      [
+        "an unschedulable entry with no suite",
+        withField("unschedulable", [{ test: TEST, suite: "", cost: 400 }]),
+      ],
+      [
+        "an unschedulable cost that is not a number",
+        withField("unschedulable", [{ test: TEST, suite: "s", cost: "lots" }]),
+      ],
+
+      // The calibration, which is what turns a planned second into the
+      // second a lane really pays.
+      ["a calibration that is not a record", withField("calibration", 7)],
+      [
+        "a setup cost that is not a record",
+        withField("calibration", { ...CALIBRATION, setupCost: 7 }),
+      ],
+      [
+        "a setup cost that is not a number",
+        withField("calibration", {
+          ...CALIBRATION,
+          setupCost: { toolshed: "a while" },
+        }),
+      ],
+      [
+        "a suites map that is not a record",
+        withField("calibration", { ...CALIBRATION, suites: [] }),
+      ],
+      [
+        "a fitted suite that is not a record",
+        withField("calibration", { ...CALIBRATION, suites: { unit: 7 } }),
+      ],
+      [
+        "a suite overhead that is not a number",
+        withField("calibration", {
+          ...CALIBRATION,
+          suites: { unit: { overhead: "some", correction: 1 } },
+        }),
+      ],
+      [
+        "a suite correction that is not a number",
+        withField("calibration", {
+          ...CALIBRATION,
+          suites: { unit: { overhead: 0, correction: null } },
+        }),
+      ],
+      [
+        "a unit overhead that is not a record",
+        withField("calibration", { ...CALIBRATION, unitOverhead: 7 }),
+      ],
+      [
+        "a prologue that is not a number",
+        withField("calibration", { ...CALIBRATION, prologue: "quick" }),
+      ],
+
+      // The lanes, which are what a runner is pointed at.
+      ["a lane list that is not one", withField("lanes", 7)],
+      ["a lane that is not a record", withField("lanes", [1])],
+      [
+        "a lane number that is not one",
+        withField("lanes", [{ lane: "one", projectedSeconds: 2, batches: [] }]),
+      ],
+      [
+        "a projection that is not a number",
+        withField("lanes", [{ lane: 1, projectedSeconds: "2s", batches: [] }]),
+      ],
+      [
+        "lane batches that are not a list",
+        withField("lanes", [{ lane: 1, projectedSeconds: 2, batches: {} }]),
+      ],
+      [
+        "a batch that is not a record",
+        withField("lanes", [{ lane: 1, projectedSeconds: 2, batches: ["u"] }]),
+      ],
+      [
+        "a batch with no suite",
+        withField("lanes", [{
+          lane: 1,
+          projectedSeconds: 2,
+          batches: [{ suite: "", identities: [] }],
+        }]),
+      ],
+      [
+        "a batch identity that is not a key",
+        withField("lanes", [{
+          lane: 1,
+          projectedSeconds: 2,
+          batches: [{ suite: "unit", identities: [7] }],
+        }]),
+      ],
+
+      // The coverage baselines, which are what the gate measures against.
+      ["a baseline list that is not one", withField("coverageBaselines", 7)],
+      [
+        "a baseline that is not a record",
+        withField("coverageBaselines", ["packages/memory"]),
+      ],
     ];
 
     for (const [what, text] of rejected) {
@@ -263,7 +440,30 @@ describe("selection", () => {
           day: "2026-08-20",
           uncoveredLines: 3,
         }],
-        lanes: [{ lane: 1, projectedSeconds: 2, batches: [] }],
+        withheld: [{
+          test: TEST,
+          suite: "workspace-unit",
+          reason: "main-red",
+        }],
+        unschedulable: [{
+          test: TEST,
+          suite: "pattern-integration",
+          cost: 420.5,
+        }],
+        calibration: {
+          setupCost: { toolshed: 60 },
+          suites: { "pattern-integration": { overhead: 50, correction: 1.2 } },
+          unitOverhead: { "packages/patterns/one.test.ts": 10 },
+          prologue: 3,
+        },
+        lanes: [{
+          lane: 1,
+          projectedSeconds: 2,
+          batches: [{
+            suite: "workspace-unit",
+            identities: [JSON.stringify(["unit", "memory", "space > writes"])],
+          }],
+        }],
       });
       manifest.entries[0]!.independent = true;
       manifest.entries[0]!.inputs.lastCatch = "2026-08-20";

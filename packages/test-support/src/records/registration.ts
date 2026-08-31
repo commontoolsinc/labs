@@ -196,7 +196,13 @@ export async function readNameMaps(
     } catch {
       continue;
     }
-    if (typeof parsed !== "object" || parsed === null) continue;
+    // An array is an object, and its entries are index keys against the
+    // values, so a map written as one would register a test named "0".
+    if (
+      typeof parsed !== "object" || parsed === null || Array.isArray(parsed)
+    ) {
+      continue;
+    }
     for (const [name, file] of Object.entries(parsed)) {
       if (typeof file !== "string" || file.length === 0) continue;
       if (within !== undefined && !file.startsWith(within)) continue;

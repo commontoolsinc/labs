@@ -118,7 +118,13 @@ export function parseAggregate(text: string): AggregateState | undefined {
   if (typeof state.day !== "string" || !Array.isArray(state.folded)) {
     return undefined;
   }
-  if (typeof state.states !== "object" || state.states === null) {
+  // An array is an object, and read as one it would give a state set
+  // keyed by index. Every such key fails to name an identity, so the
+  // aggregate would be read as holding nothing rather than refused.
+  if (
+    typeof state.states !== "object" || state.states === null ||
+    Array.isArray(state.states)
+  ) {
     return undefined;
   }
   for (const name of state.folded) {
