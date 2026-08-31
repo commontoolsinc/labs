@@ -640,6 +640,10 @@ export class PiecesController<T = unknown> {
       });
     } catch (error) {
       passiveError = error;
+      pieceUpdateLogger.warn("passive-registry-open-failed", () => [
+        "getPieceRegistry: passive default-root open failed; retrying with start",
+        error,
+      ]);
     }
     if (passiveRoot) {
       const exported = this.#pieceRegistryExport(passiveRoot);

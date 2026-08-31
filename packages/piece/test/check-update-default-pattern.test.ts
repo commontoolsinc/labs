@@ -26,6 +26,7 @@ import {
   reconcilePieceSource,
 } from "../src/ops/piece-origin.ts";
 import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
+import { getLogger } from "@commonfabric/utils/logger";
 
 // The routes those refs resolve to. A system pattern is still SERVED at, and
 // its modules still NAMED by, the route path; the `system:` ref is what a
@@ -908,6 +909,31 @@ describe("opening a space root", () => {
       passiveFailure,
       runningFailure,
     ]);
+  });
+
+  it("records a passive failure when the running registry fallback succeeds", async () => {
+    await setup();
+    await controller.ensureDefaultPattern();
+    const passiveFailure = new Error("passive registry open failed");
+    const original = controller.getDefaultPattern.bind(controller);
+    controller.getDefaultPattern =
+      ((open = true) =>
+        typeof open === "object"
+          ? Promise.reject(passiveFailure)
+          : original(open)) as typeof controller.getDefaultPattern;
+    const logger = getLogger("piece.update");
+    const warningsBefore =
+      logger.countsByKey["passive-registry-open-failed"]?.warn ?? 0;
+
+    try {
+      expect(await controller.getPieceRegistry()).toBeDefined();
+    } finally {
+      controller.getDefaultPattern = original;
+    }
+
+    expect(
+      logger.countsByKey["passive-registry-open-failed"]?.warn ?? 0,
+    ).toBe(warningsBefore + 1);
   });
 
   it("preserves a passive failure when the running fallback finds no root", async () => {
