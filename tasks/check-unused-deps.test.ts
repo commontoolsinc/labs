@@ -92,7 +92,7 @@ Deno.test("importsAlias matches a @deno-types companion comment", () => {
 });
 
 //
-// Both spellings of the companion-type comment
+// The current `@ts-types` spelling of the companion-type comment
 //
 // `@ts-types` is Deno's current spelling of the companion-type comment; the
 // older `@deno-types` above still works and both must be recognized, or an
