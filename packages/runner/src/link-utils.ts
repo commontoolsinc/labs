@@ -225,6 +225,17 @@ export function areMaybeLinkAndNormalizedLinkSame(
 // ./link-types.ts — one canonical implementation — and reaches importers of
 // this module through the `export *` above.
 
+// Successful externalization depends on schema documents registered during
+// the current lease epoch. Frozen source schemas keep stable identity, so the
+// external reference can be reused until that registry clears.
+let externalizedLinkSchemaCache = new WeakMap<
+  object,
+  Map<KeepAsCell, JSONSchema>
+>();
+onSchemaRegistryClear(() => {
+  externalizedLinkSchemaCache = new WeakMap();
+});
+
 /**
  * Replaces an inline schema with a reference to content-addressed schema
  * documents (`docs/specs/content-addressed-schemas.md`, Phases 1 and 2;
@@ -329,14 +340,12 @@ export function createSigilLinkFromParsedLink(
   // permissive and should not turn links into schema-bearing links.
   if (options.includeSchema && link.schema !== undefined) {
     // Default to keeping streams unless a broader mode was requested.
-    const schema = sanitizeSchemaForLinks(
-      link.schema,
-      options.keepAsCell ?? KeepAsCell.OnlyStream,
-    );
+    const keepAsCell = options.keepAsCell ?? KeepAsCell.OnlyStream;
+    const schema = getContentAddressedSchemasConfig()
+      ? externalizeLinkSchema(link.schema, keepAsCell)
+      : sanitizeSchemaForLinks(link.schema, keepAsCell);
     if (isNontrivialSchema(schema)) {
-      reference.schema = getContentAddressedSchemasConfig()
-        ? externalizeSchema(schema as JSONSchemaObj)
-        : schema;
+      reference.schema = schema;
     }
   }
 
@@ -482,6 +491,36 @@ export function sanitizeSchemaForLinks(
   }
 
   return output;
+}
+
+/** Sanitizes and externalizes a link schema, memoizing frozen inputs. */
+function externalizeLinkSchema(
+  schema: JSONSchema,
+  keepAsCell: KeepAsCell,
+): JSONSchema {
+  const cacheable = isObjectOrArray(schema) && isDeepFrozen(schema);
+  const cached = cacheable
+    ? externalizedLinkSchemaCache.get(schema)?.get(keepAsCell)
+    : undefined;
+  if (cached !== undefined) return cached;
+  const sanitized = sanitizeSchemaForLinks(schema, keepAsCell);
+  if (!isObjectNotArray(sanitized) || !isNontrivialSchema(sanitized)) {
+    return sanitized;
+  }
+  const externalized = externalizeSchema(sanitized);
+  if (
+    cacheable && isObjectNotArray(externalized) &&
+    typeof externalized.$ref === "string" &&
+    isExternalSchemaRef(externalized.$ref)
+  ) {
+    let byMode = externalizedLinkSchemaCache.get(schema);
+    if (byMode === undefined) {
+      byMode = new Map();
+      externalizedLinkSchemaCache.set(schema, byMode);
+    }
+    byMode.set(keepAsCell, externalized);
+  }
+  return externalized;
 }
 
 interface SanitizeContext {

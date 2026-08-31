@@ -5,6 +5,7 @@ import {
   FabricPrimitive,
   valueEqual,
 } from "@commonfabric/data-model/fabric-value";
+import { deepFrozenCloneAndInternSchema } from "@commonfabric/data-model-schema";
 import {
   type FabricExecValue,
   isPattern,
@@ -110,7 +111,11 @@ const foldDeclaredScopeIntoLinkSchema = (
   if (authoredRootSchema === undefined || !isObjectOrArray(link.schema)) {
     return link;
   }
-  if (ContextualFlowControl.getSchemaScopeCap(link.schema) !== undefined) {
+  const emittedSchema = sanitizeAliasSchemaForBinding(link.schema);
+  if (
+    !isObjectOrArray(emittedSchema) ||
+    ContextualFlowControl.getSchemaScopeCap(emittedSchema) !== undefined
+  ) {
     return link;
   }
   const authoredSlotSchema = path.length > 0
@@ -125,7 +130,13 @@ const foldDeclaredScopeIntoLinkSchema = (
   ) {
     return link;
   }
-  return { ...link, schema: { ...link.schema, scope: declaredCap } };
+  return {
+    ...link,
+    schema: deepFrozenCloneAndInternSchema({
+      ...emittedSchema,
+      scope: declaredCap,
+    }),
+  };
 };
 
 const scopedLinkForPath = (
@@ -153,9 +164,7 @@ const scopedLinkForPath = (
   }
 
   const finalSchema = schemaOverride ?? childSchema;
-  const linkSchema = finalSchema === undefined
-    ? undefined
-    : sanitizeAliasSchemaForBinding(finalSchema);
+  const linkSchema = finalSchema;
   scope = declaredScope(linkSchema) ?? scope;
 
   return {
@@ -171,6 +180,19 @@ const sanitizeAliasSchemaForBinding = (schema: JSONSchema): JSONSchema =>
   // schemas without cell wrappers so scoped asCell entries do not stamp the
   // redirect link's own scope and bypass stored argument links.
   sanitizeSchemaForLinks(schema, KeepAsCell.OnlyStream);
+
+/**
+ * Returns a link with a canonical schema without freezing the caller's input.
+ */
+const canonicalSchemaLink = (
+  link: NormalizedFullLink | undefined,
+): NormalizedFullLink | undefined => {
+  if (link === undefined || !isObjectOrArray(link.schema)) return link;
+  const schema = deepFrozenCloneAndInternSchema(
+    sanitizeSchemaForLinks(link.schema, KeepAsCell.All),
+  );
+  return schema === link.schema ? link : { ...link, schema };
+};
 
 const descriptorForPartialCauseAlias = (
   partialCause: JSONValue,
@@ -544,7 +566,10 @@ export function unwrapOneLevelAndBindToDoc<T extends FabricExecValue>(
   resultCell: AnyCell<unknown>,
   options?: UnwrapOneLevelOptions,
 ): T {
-  const resultCellLink = resultCell.getAsNormalizedFullLink();
+  const resultCellLink = canonicalSchemaLink(
+    resultCell.getAsNormalizedFullLink(),
+  )!;
+  argumentCellLink = canonicalSchemaLink(argumentCellLink);
 
   /**
    * Rebinds one value, returning it unchanged when nothing under it rebound.

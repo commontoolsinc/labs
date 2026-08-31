@@ -761,6 +761,82 @@ describe("link-utils", () => {
         required: ["title"],
       });
     });
+
+    it("externalizes each sanitization mode for one frozen schema", () => {
+      setContentAddressedSchemasConfig(true);
+      const schema = deepFreeze(
+        {
+          type: "object",
+          properties: {
+            send: {
+              type: "string",
+              asCell: ["stream"],
+            },
+          },
+          required: ["send"],
+        } as const satisfies JSONSchema,
+      );
+      const link = {
+        id: "of:cached-schema",
+        path: [],
+        space,
+        schema,
+      } as const;
+
+      const kept = createSigilLinkFromParsedLink(link, {
+        includeSchema: true,
+      });
+      const stripped = createSigilLinkFromParsedLink(link, {
+        includeSchema: true,
+        keepAsCell: KeepAsCell.None,
+      });
+
+      expect(resolvedSchema(linkRefPayload(kept).schema)).toEqual(schema);
+      expect(resolvedSchema(linkRefPayload(stripped).schema)).toEqual({
+        type: "object",
+        properties: {
+          send: { type: "string" },
+        },
+      });
+    });
+
+    it("re-registers cached schema documents after an epoch change", async () => {
+      setContentAddressedSchemasConfig(true);
+      const schema = deepFreeze(
+        {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+          },
+        } as const satisfies JSONSchema,
+      );
+      const link = {
+        id: "of:cached-schema-epoch",
+        path: [],
+        space,
+        schema,
+      } as const;
+
+      const first = createSigilLinkFromParsedLink(link, {
+        includeSchema: true,
+      });
+      expect(resolvedSchema(linkRefPayload(first).schema)).toEqual(schema);
+
+      tx.abort();
+      await runtime.dispose();
+      await storageManager.close();
+      storageManager = StorageManager.emulate({ as: signer });
+      runtime = new Runtime({
+        apiUrl: new URL(import.meta.url),
+        storageManager,
+      });
+      tx = runtime.edit();
+
+      const second = createSigilLinkFromParsedLink(link, {
+        includeSchema: true,
+      });
+      expect(resolvedSchema(linkRefPayload(second).schema)).toEqual(schema);
+    });
   });
 
   describe("inlineExternalSchemaRefsInValue", () => {
