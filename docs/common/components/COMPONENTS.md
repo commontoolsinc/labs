@@ -440,9 +440,11 @@ error at the pattern.
 
 See `packages/patterns/examples/ui-variants-demo.tsx` for a full example.
 
-> Note: `sidebarUI`/`fabUI`/`settingsUI` are shell composition **slots**, a
-> separate concept — not size variants. A vended `uiVariant()` helper for
-> render paths outside `cf-render` is a planned follow-up and does not exist yet.
+> Note: `sidebarUI` is a shell composition **slot**, a separate concept from
+> size variants. Other exported subviews such as `settingsUI` are
+> application-level conventions; the shell does not consume `fabUI`. A vended
+> `uiVariant()` helper for render paths outside `cf-render` is a planned
+> follow-up and does not exist yet.
 
 ### The piece context menu
 

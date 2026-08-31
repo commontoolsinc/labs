@@ -884,6 +884,32 @@ describe("opening a space root", () => {
     expect(getPatternIdentityRef(healed)?.symbol).toBe("default");
   });
 
+  it("preserves both failures when passive and running registry opens fail", async () => {
+    await setup();
+    const passiveFailure = new Error("passive registry open failed");
+    const runningFailure = new Error("running registry open failed");
+    const original = controller.getDefaultPattern.bind(controller);
+    controller.getDefaultPattern = ((open = true) =>
+      Promise.reject(
+        typeof open === "object" ? passiveFailure : runningFailure,
+      )) as typeof controller.getDefaultPattern;
+
+    let failure: unknown;
+    try {
+      await controller.getPieceRegistry();
+    } catch (error) {
+      failure = error;
+    } finally {
+      controller.getDefaultPattern = original;
+    }
+
+    expect(failure).toBeInstanceOf(AggregateError);
+    expect((failure as AggregateError).errors).toEqual([
+      passiveFailure,
+      runningFailure,
+    ]);
+  });
+
   it("heals a stale root whose registry export is already persisted", async () => {
     await setup();
     const piece = await controller.ensureDefaultPattern();

@@ -194,10 +194,8 @@ export class XAppView extends BaseView {
     args: () => [this.app, this.rt, this.space, this._slugRevision],
   });
 
-  // This derives a space root pattern as well as an "active" (main)
-  // pattern for use in child views.
-  // This hybrid task intentionally only uses completed/fresh
-  // source patterns to avoid unsyncing state.
+  // Derive the active pattern from completed task values so child views never
+  // receive an in-flight or stale selection.
   _patterns = new Task(this, {
     task: function (
       [
@@ -209,7 +207,6 @@ export class XAppView extends BaseView {
       ],
     ): {
       activePattern: PageHandle<NameSchema> | undefined;
-      spaceRootPattern: PageHandle<NameSchema> | undefined;
     } {
       const spaceRootPattern = spaceRootPatternStatus === TaskStatus.COMPLETE
         ? spaceRootPatternValue
@@ -225,10 +222,7 @@ export class XAppView extends BaseView {
         : selectedPatternStatus === TaskStatus.COMPLETE
         ? selectedPatternValue
         : undefined;
-      return {
-        activePattern,
-        spaceRootPattern,
-      };
+      return { activePattern };
     },
     args: () => [
       this.app,
@@ -558,7 +552,7 @@ export class XAppView extends BaseView {
 
   override render() {
     const config = this.app.config ?? {};
-    const { activePattern, spaceRootPattern } = this._patterns.value ?? {};
+    const { activePattern } = this._patterns.value ?? {};
     const embedded = isEmbeddedView(this.app.view);
     const isViewingDefaultPattern = isViewingDefaultPatternView(this.app.view);
     const patternLoadError: LoadError | undefined = isViewingDefaultPattern
@@ -578,7 +572,6 @@ export class XAppView extends BaseView {
       <x-body-view
         .rt="${this.rt}"
         .activePattern="${activePattern}"
-        .spaceRootPattern="${spaceRootPattern}"
         .loadError="${loadError}"
         .runtimeError="${runtimeLoadError}"
         .showShellPieceListView="${config.showShellPieceListView ?? false}"

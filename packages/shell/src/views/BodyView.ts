@@ -13,7 +13,6 @@ import { CellHandle, PageHandle, VNode } from "@commonfabric/runtime-client";
 
 type SubPages = {
   sidebarUI?: VNode;
-  fabUI?: VNode;
 };
 
 export type LoadError = {
@@ -25,7 +24,6 @@ const SubPagesSchema = {
   type: "object",
   properties: {
     sidebarUI: { $ref: "#/$defs/vdomNode" },
-    fabUI: { $ref: "#/$defs/vdomNode" },
   },
   $defs: {
     ...rendererVDOMSchema.$defs,
@@ -139,9 +137,6 @@ export class XBodyView extends BaseView {
   @property({ attribute: false })
   accessor activePattern: PageHandle | undefined = undefined;
 
-  @property({ attribute: false })
-  accessor spaceRootPattern: PageHandle | undefined = undefined;
-
   @property()
   accessor showShellPieceListView = false;
 
@@ -164,9 +159,8 @@ export class XBodyView extends BaseView {
           sidebarUI: undefined,
         };
       }
-      const sidebarUI = await getSubPageCell(
+      const sidebarUI = await getSidebarCell(
         activePattern?.cell() as CellHandle<SubPages> | undefined,
-        "sidebarUI",
       );
       return {
         sidebarUI,
@@ -264,9 +258,8 @@ function loadErrorMessage(error: unknown): string {
 
 globalThis.customElements.define("x-body-view", XBodyView);
 
-async function getSubPageCell(
+async function getSidebarCell(
   cell: CellHandle<SubPages> | undefined,
-  key: "fabUI" | "sidebarUI",
 ): Promise<CellHandle<VNode> | undefined> {
   if (!cell) return undefined;
   const typedCell = cell.asSchema<SubPages>(SubPagesSchema);
@@ -278,7 +271,7 @@ async function getSubPageCell(
       return;
     }
   }
-  if (key in value && value[key]) {
-    return typedCell.key(key).asSchema<VNode>(rendererVDOMSchema);
+  if (value.sidebarUI) {
+    return typedCell.key("sidebarUI").asSchema<VNode>(rendererVDOMSchema);
   }
 }

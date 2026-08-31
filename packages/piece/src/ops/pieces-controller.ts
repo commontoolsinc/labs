@@ -103,9 +103,9 @@ const PIECE_TRACE_TIMINGS = typeof Deno !== "undefined" &&
 /**
  * What opening a piece does beyond resolving its cell.
  *
- * `reconcile` rolls a stored source forward to the origin it follows — the
- * healing every caller that opens a root has always relied on. `start` runs
- * the pattern, which materializes everything its result reaches.
+ * `reconcile` rolls a stored source forward to the origin it follows, keeping
+ * a followed root current. `start` runs the pattern, which materializes
+ * everything its result reaches.
  *
  * They are separable because they are wanted separately: a caller that
  * RENDERS a piece needs both, while a caller that reads what a piece
@@ -621,20 +621,26 @@ export class PiecesController<T = unknown> {
    * what it writes, so the stored value is current at every quiescent
    * moment, and a listing can be served from it.
    *
-   * The root is still RECONCILED, so a listing keeps healing a stale root
-   * the way it always has; only `runtime.start()` is skipped, which is the
-   * dominant phase of opening a space whose root reaches a large piece.
+   * The root is reconciled before the registry is read, so a listing heals a
+   * stale root without calling `runtime.start()`, the dominant phase of
+   * opening a space whose root reaches a large piece.
    * Running is kept for the cases that cannot be served from what is stored:
    * a root that has never exported a registry here, one whose passive open
    * fails, and `add()`.
    */
   async getPieceRegistry(): Promise<Cell<Cell<unknown>[]>> {
-    // Reconciled but not started: healing is a correctness contract this
-    // path has always carried, and it costs a fraction of the start.
-    const passiveRoot = await this.getDefaultPattern({
-      reconcile: true,
-      start: false,
-    }).catch(() => undefined);
+    // Reconcile without starting so the registry is read from current stored
+    // exports without materializing the root's result graph.
+    let passiveError: unknown;
+    let passiveRoot: Cell<NameSchema> | undefined;
+    try {
+      passiveRoot = await this.getDefaultPattern({
+        reconcile: true,
+        start: false,
+      });
+    } catch (error) {
+      passiveError = error;
+    }
     if (passiveRoot) {
       const exported = this.#pieceRegistryExport(passiveRoot);
       await this.syncPieces(exported);
@@ -647,11 +653,23 @@ export class PiecesController<T = unknown> {
       }
     }
 
-    // The running path is the backstop, and it keeps its own rescue: a
-    // passive open that threw reaches it rather than surfacing, so a root
-    // this listing could previously heal is still healed here.
-    const defaultPattern = await this.getDefaultPattern(true);
+    // The running path supplies a registry when no stored export is available.
+    // If both opens fail, retain both causes so the passive failure is not
+    // hidden by the fallback.
+    let defaultPattern: Cell<NameSchema> | undefined;
+    try {
+      defaultPattern = await this.getDefaultPattern(true);
+    } catch (error) {
+      if (passiveError !== undefined) {
+        throw new AggregateError(
+          [passiveError, error],
+          `Could not open the piece registry for space ${this.#space}`,
+        );
+      }
+      throw error;
+    }
     if (!defaultPattern) {
+      if (passiveError !== undefined) throw passiveError;
       // Return empty array cell if no default pattern. Loud on purpose: any
       // subscription made against this placeholder never fires again, so a
       // cold-cache miss here silently freezes piece listings (e.g. FUSE).
