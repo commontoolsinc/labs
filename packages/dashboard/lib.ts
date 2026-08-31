@@ -586,6 +586,9 @@ export function durationTag(ms: number): string {
   return `<span style="position:absolute;left:1px;bottom:0;font-size:9px;line-height:1;color:${CHART_HIGHLIGHT};pointer-events:none">${escapeHtml(humanSpan(ms))}</span>`;
 }
 
+// All sparkline variants and their duration labels occupy this rendered height.
+const SPARKLINE_HEIGHT = 28;
+
 function scaleValues(
   vals: number[],
   scale: { trim?: number; minValues?: number } | undefined,
@@ -662,7 +665,7 @@ export function sparkline(
   // The svg is a block, so the chart's box is the height it draws: an inline svg
   // sits on a text baseline, and the line box around it reserves descender space
   // underneath.
-  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="24" preserveAspectRatio="none" style="display:block;margin-top:9px">${defs}${lines.join("")}</svg>`;
+  return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${SPARKLINE_HEIGHT}" preserveAspectRatio="none" style="display:block;margin-top:9px">${defs}${lines.join("")}</svg>`;
 }
 
 // Overlaid trend lines (each oldest -> newest) sharing one vertical scale, each
@@ -848,21 +851,30 @@ export function multiSparkline(
 
   const labeled = drawable.filter((s) => s.label !== undefined);
   if (labeled.length === 0) {
-    return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="32" preserveAspectRatio="none" style="display:block;margin-top:9px">${defsBlock}${lines}</svg>`;
+    return `<svg viewBox="0 0 ${w} ${h}" width="100%" height="${SPARKLINE_HEIGHT}" preserveAspectRatio="none" style="display:block;margin-top:9px">${defsBlock}${lines}</svg>`;
   }
-  const RH = 32; // rendered svg height, px
+  const RH = SPARKLINE_HEIGHT;
+  const LABEL_INSET = 6;
+  const LABEL_GAP = 12;
+  const labelEdge = RH - LABEL_INSET;
   // Each label sits at its line's end height; when a chart is drawn its value
-  // appears only here, so spread any labels that would overlap into one unreadable
-  // stack — sort by height and push each down to at least MIN_GAP below the last.
-  const MIN_GAP = 12;
+  // appears only here. Sort the labels by height and spread close labels apart.
+  // A crowded chart divides the available band evenly between every label.
   const placed = labeled
-    .map((s) => ({ s, py: Math.max(6, Math.min(26, (yv(s.vals[s.vals.length - 1]) / h) * RH)) }))
+    .map((s) => ({ s, py: Math.max(LABEL_INSET, Math.min(labelEdge, (yv(s.vals[s.vals.length - 1]) / h) * RH)) }))
     .sort((a, b) => a.py - b.py);
+  const gap = placed.length > 1
+    ? Math.min(LABEL_GAP, (labelEdge - LABEL_INSET) / (placed.length - 1))
+    : 0;
   for (let i = 1; i < placed.length; i++) {
-    if (placed[i].py - placed[i - 1].py < MIN_GAP) placed[i].py = placed[i - 1].py + MIN_GAP;
+    placed[i].py = Math.max(placed[i].py, placed[i - 1].py + gap);
   }
-  const overflow = placed.length ? placed[placed.length - 1].py - 26 : 0;
-  if (overflow > 0) for (const p of placed) p.py -= overflow;
+  if (placed[placed.length - 1].py > labelEdge) {
+    placed[placed.length - 1].py = labelEdge;
+    for (let i = placed.length - 2; i >= 0; i--) {
+      placed[i].py = Math.min(placed[i].py, placed[i + 1].py - gap);
+    }
+  }
   const tags = placed.map(({ s, py }) =>
     `<span style="position:absolute;right:0;top:${py.toFixed(1)}px;transform:translateY(-50%);font-size:11px;line-height:1;color:${s.color};font-variant-numeric:tabular-nums;pointer-events:none">${escapeHtml(s.label!)}</span>`
   ).join("");
