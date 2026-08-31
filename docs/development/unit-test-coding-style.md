@@ -241,7 +241,10 @@ Three nearby shapes are not this one:
   adjacent cases that each pin one part of what it says — has no home inside
   any one of them. That comment is telling you the run wants a
   `describe()`: give the run its own block, and the comment goes inside that
-  block by the rule above, which is where a long rationale belongs anyway. A
+  block by the rule above, which is where a long rationale belongs anyway.
+  Wrapping a run renames every test in it, so where the history is worth
+  keeping, bridge the rename as
+  [test records](test-records.md) describes. A
   run that should not become a block takes a
   [section marker](code-comment-style.md#section-markers) instead, and then the
   region needs closing — a second marker after the run — or a reader cannot
@@ -254,11 +257,21 @@ Three nearby shapes are not this one:
   top-level `describe()`.
 - A [section marker](code-comment-style.md#section-markers) titles a region of
   the file holding several blocks. Reach is what tells the two apart, not
-  length or subject matter. A marker covering a single block is not marking a
-  region. Where it says something about that block, it becomes a block comment
-  in the form above. Where it only restates the block's own description, it is
-  deleted. A comment that would say no more than the description above it is
-  not worth writing.
+  length or subject matter.
+
+  A marker covering a single block is usually a block comment in the wrong
+  frame: where it says something about that block, it becomes a block comment
+  in the form above, and where it says no more than the block's own
+  description, it is deleted. A comment that would say no more than the
+  description above it is not worth writing.
+
+  Two things stop that. Where a file marks its regions in a series and this
+  marker is one of the series, it stays; a file with one way of showing its
+  regions beats a file that demotes eleven markers and leaves the twelfth
+  reading as an omission. And where the marker closes the region above it,
+  removing it reopens that region, so it is replaced rather than removed —
+  by a marker titling what follows, or by giving the region above a closer of
+  its own.
 
 ### The shape to aim for
 
@@ -275,6 +288,12 @@ Give a file one way of showing its regions and keep to it. Where a file marks
 regions, a marker ends the one before it, so a series of them reads as a series
 and a lone label in another form leaves the region above it looking wider than
 it is.
+
+Moving a comment into its block takes a boundary away with it. Whatever sat
+above was bounded in practice by that comment being there, and with the comment
+inside a callback the thing above reaches past where the comment held it. Look
+up before moving one: where a region ends at the comment, it needs a closer of
+its own in the same change. Deleting a comment does the same thing.
 
 None of this is checked mechanically, on purpose: the cases that do not fit
 keep arriving, and a gate would only make them expensive. It is guidance. A

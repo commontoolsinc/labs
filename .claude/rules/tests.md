@@ -60,13 +60,21 @@ surrounding code:
 - A comment about a test or a group of tests goes inside the block, as the
   first thing in the callback and followed by a blank line. Above the
   `describe()` or `it()` line, the next block inserted there lands between the
-  comment and what it describes. Hooks are the exception -- a `beforeEach()`
-  reads like any other statement with a comment over it -- and a comment
-  covering several adjacent tests is telling you those tests want a
+  comment and what it describes. Two shapes are exceptions: hooks — a
+  `beforeEach()` reads like any other statement with a comment over it — and a
+  callback with no body of its own, a bare expression or `{}` on the opener's
+  line, which keeps its comment beside it.
+- A comment covering several adjacent tests is telling you those tests want a
   `describe()` of their own, or says one thing per case and belongs in each.
-  A section marker covers the region up to the next marker or the end of the
-  block. None of this is checked mechanically; a file that reads better than
-  the rule wins.
+  Wrapping a run renames every test in it; bridge the rename per
+  `docs/development/test-records.md`.
+- A section marker covers the region up to the next marker or the end of the
+  block, so writing one means choosing where it ends and putting a marker
+  there. Its title is a claim about everything in that region, and the region
+  holds the helpers and fixtures sitting in it as well as the blocks. Moving
+  or deleting a comment takes away whatever boundary it was providing for the
+  region above it. None of this is checked mechanically; a file that reads
+  better than the rule wins.
 
 On placement: a test goes in the package's `test/` tree, mirroring `src/`. The
 exception is a directory of independent components, `packages/ui` and
