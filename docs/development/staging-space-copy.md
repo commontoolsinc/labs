@@ -129,6 +129,11 @@ catches is one you do not debug on a shared host.
 sqlite3 <store>/engine-v3/engine-v3/<did>.sqlite "VACUUM INTO '/tmp/<did>.sqlite'"
 sha256sum /tmp/<did>.sqlite
 ```
+Two notes: 
+- \<store\> is currently /data/memory on estuary.
+- estuary does not have enough free space in /tmp (as of 2026/08/31) to host
+  new snapshots, so put them into the same /data/memory directory for now and
+  clean them up as you go.
 
 **2. Rehearse it locally first**, following
 [`space-clone-rehearsal.md`](space-clone-rehearsal.md): clone, serve, run

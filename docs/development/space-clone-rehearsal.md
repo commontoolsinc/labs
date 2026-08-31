@@ -41,11 +41,6 @@ one. So acquisition is manual:
 # and emits one consistent file with no -wal/-shm companions.
 sqlite3 <store>/engine-v3/engine-v3/<did>.sqlite "VACUUM INTO '/tmp/<did>.sqlite'"
 # then copy it down (scp, or upload once and share the URL with the team)
-# Two notes: 
-# - <store> is currently /data/memory on estuary.
-# - estuary does not have enough free space in /tmp (as of 2026/08/31) to host
-#   new snapshots, so put them into the same /data/memory directory for now and
-#   clean them up as you go.
 ```
 
 Sharing **one** snapshot across operators is better hygiene than each taking
