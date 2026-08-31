@@ -193,6 +193,7 @@ describe("deep-freeze", () => {
       it("returns `true` after an object is frozen (no stale negative cache)", () => {
         // Regression test: isDeepFrozen must not cache `false` results, because
         // an object that is unfrozen now may be deep-frozen later.
+
         const obj = { a: 1, b: { c: 2 } };
         expect(isDeepFrozen(obj)).toBe(false); // unfrozen
         deepFreeze(obj);
@@ -203,6 +204,7 @@ describe("deep-freeze", () => {
         // Verify caching actually works by wrapping a frozen object in a Proxy
         // that counts property accesses. First call should access properties;
         // second call should hit the cache and skip traversal.
+
         const inner = Object.freeze({ x: 1, y: 2 });
         let accessCount = 0;
         const proxy = new Proxy(inner, {
@@ -283,6 +285,7 @@ describe("deep-freeze", () => {
         // The recursing slots on a `FabricError` are `cause` and any extras.
         // Construct one whose `cause` is a mutable plain object, and freeze
         // only the wrapper.
+
         const err = new Error("partial", { cause: { mutable: true } });
         const fe = FabricError.fromNativeError(err);
         Object.freeze(fe);
@@ -299,6 +302,7 @@ describe("deep-freeze", () => {
         // Here the wrapper is frozen and every enumerable slot is a frozen
         // primitive, but the extras bag holds a mutable array -> not
         // deep-frozen.
+
         const fe = FabricError.fromNativeError(new Error("has-extras"));
         fe.setExtra("payload", [1, 2, 3]);
         Object.freeze(fe);
@@ -313,6 +317,7 @@ describe("deep-freeze", () => {
         // graph is cycle-safe for read-side traversal too. (FabricError
         // snapshots its FabricValue state at construction, so the `cause`
         // must be wired BEFORE `fromNativeError`.)
+
         const wrapper: Record<string, unknown> = {};
         const err = new Error("cycle-cause", { cause: wrapper });
         const fe = FabricError.fromNativeError(err);
@@ -390,6 +395,7 @@ describe("deep-freeze", () => {
 
     it("returns `false` (no throw) for a non-canonical-form instance", () => {
       // Wrapper frozen but `cause` left unfrozen -> not deep-frozen.
+
       const err = new Error("partial", { cause: { mutable: true } });
       const fe = FabricError.fromNativeError(err);
       Object.freeze(fe);
@@ -402,6 +408,7 @@ describe("deep-freeze", () => {
     it("returns `false` for a frozen array with enumerable named properties", () => {
       // An array carrying a named property has no fabric representation, so it
       // is not a valid `FabricValue` even when fully frozen.
+
       const arr = [1, 2, 3] as unknown[] & { foo?: string };
       arr.foo = "bar";
       Object.freeze(arr);
@@ -430,6 +437,7 @@ describe("deep-freeze", () => {
       // executes it and can return a different value every time. Such an
       // object must not be granted the trust level of a deep-frozen
       // `FabricValue`.
+
       const obj = { a: 1 };
       Object.defineProperty(obj, "g", { get: () => 2, enumerable: true });
       Object.freeze(obj);
@@ -447,6 +455,7 @@ describe("deep-freeze", () => {
     it("returns `false` for a frozen array with a getter-backed index", () => {
       // The same principle applies with an array as the container: an index
       // whose reads execute code is not inert, frozen or not.
+
       const arr = [1, 2, 3];
       Object.defineProperty(arr, 1, {
         get: () => 22,

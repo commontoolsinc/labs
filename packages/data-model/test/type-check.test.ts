@@ -128,6 +128,7 @@ describe("type-check", () => {
         // validation is `isValidFabricConvertibleValue()`'s job. A nested
         // value that is not a `FabricValue` does not make the container itself
         // fail the per-se check.
+
         expect(isValidFabricValueLayer({ a: Symbol("x") })).toBe(true);
         expect(isValidFabricValueLayer([Symbol("x")])).toBe(true);
       });
@@ -159,6 +160,7 @@ describe("type-check", () => {
       it("returns `false` for an accessor-backed property", () => {
         // An accessor is live code, not inert data: a read executes it and can
         // return a different value every time. Freezing does not change that.
+
         const obj = { a: 1 };
         Object.defineProperty(obj, "g", { get: () => 2, enumerable: true });
         expect(isValidFabricValueLayer(obj)).toBe(false);
@@ -181,6 +183,7 @@ describe("type-check", () => {
         // inert, and a runtime that does not route assignment through a
         // prototype chain would carry it fine. It is refused because in this
         // host the name cannot survive the copy that every boundary performs.
+
         expect(isValidFabricValueLayer({ ["__proto__"]: 1, other: 2 })).toBe(
           false,
         );
@@ -192,6 +195,7 @@ describe("type-check", () => {
         // is not part of what a value says as data and would not survive
         // encoding, so a value carrying a different one is refused rather than
         // accepted and quietly changed.
+
         const obj = Object.create(null) as Record<string, unknown>;
         obj.a = 1;
         expect(isValidFabricValueLayer(obj)).toBe(false);
@@ -215,6 +219,7 @@ describe("type-check", () => {
       it("returns `false` for an array with an accessor-backed index", () => {
         // An accessor is live code, not inert data: a read executes it and can
         // return a different value every time. Freezing does not change that.
+
         const arr = [1, 2, 3];
         Object.defineProperty(arr, 1, {
           get: () => 22,
@@ -234,6 +239,7 @@ describe("type-check", () => {
       it("returns `false` for an `Array` subclass instance", () => {
         // A subclass prototype is live code just as an accessor is, and
         // freezing the instance does not change that.
+
         class Sub extends Array {}
         const sub = new Sub();
         sub.push(1, 2);
@@ -250,6 +256,7 @@ describe("type-check", () => {
       it("returns `false` for a sparse array with extra named properties", () => {
         // Length 3, hole at index 1, plus a named property "foo": still
         // `false` because the named property isn't a valid array index.
+
         const sparse = [] as unknown[] & { foo?: string };
         sparse[0] = 1;
         sparse[2] = 3;
@@ -285,6 +292,7 @@ describe("type-check", () => {
       // stop an ordinary schema being a `FabricValue` at all. That hazard is
       // handled where a property can become callable, in the value proxies,
       // rather than by refusing the name here.
+
       expect(isValidFabricValue({
         type: "object",
         if: { properties: { kind: { const: "a" } } },
@@ -325,6 +333,7 @@ describe("type-check", () => {
       it("returns `true` for an interned symbol", () => {
         // Registry-interned symbols are portable and are members, matching
         // `isValidFabricValueLayer()`.
+
         expect(isValidFabricValue(Symbol.for("k"))).toBe(true);
       });
 
@@ -415,6 +424,7 @@ describe("type-check", () => {
       it("returns `true` for an unfrozen plain object and array", () => {
         // Structurally valid but not frozen: still a `FabricValue`. This is the
         // deliberate difference from `isValidDeepFrozenFabricValue()`.
+
         const obj = { a: 1, nested: { b: 2 } };
         expect(Object.isFrozen(obj)).toBe(false);
         expect(isValidFabricValue(obj)).toBe(true);
@@ -425,6 +435,7 @@ describe("type-check", () => {
         // A `FabricInstance` is a member by type. Membership does not require
         // it to be deep-frozen, and does not recurse into its private
         // interior.
+
         const fe = FabricError.fromNativeError(new Error("test"));
         expect(Object.isFrozen(fe)).toBe(false);
         expect(isValidFabricValue(fe)).toBe(true);
@@ -460,6 +471,7 @@ describe("type-check", () => {
       it("returns `false` for an accessor-backed property, at any depth", () => {
         // An accessor is live code, not inert data: a read executes it and can
         // return a different value every time. Freezing does not change that.
+
         const top = { a: 1 };
         Object.defineProperty(top, "g", { get: () => 2, enumerable: true });
         expect(isValidFabricValue(top)).toBe(false);
@@ -498,6 +510,7 @@ describe("type-check", () => {
       it("returns `false` for an accessor-backed array index, at any depth", () => {
         // An accessor is live code, not inert data, no matter the container:
         // an array index reaches it just as a plain-object key does.
+
         const top = [1, 2, 3];
         Object.defineProperty(top, 1, {
           get: () => 22,
@@ -523,6 +536,7 @@ describe("type-check", () => {
         // A subclass prototype is live code no matter the container: an
         // overridden `Symbol.iterator` makes iteration yield content the
         // indices never show, and freezing does not reach the prototype.
+
         class Sub extends Array {}
         const top = new Sub();
         top.push(1, 2);
@@ -603,6 +617,7 @@ describe("type-check", () => {
       it("returns `false` for a null-prototype object", () => {
         // The narrowing `isFabricPlainObject()` accepts this one; membership
         // requires an `Object.prototype`-rooted record.
+
         const obj = Object.create(null) as Record<string, never>;
 
         expect(isFabricPlainObject(obj as FabricValue)).toBe(true);
@@ -735,6 +750,7 @@ describe("type-check", () => {
       it("returns `false` for a non-plain class instance (`Date`, `Map`, …)", () => {
         // Not representable as a `FabricPlainObject`, and reachable only via
         // an unsound cast, so the guard is fed them as `unknown`.
+
         expect(isFabricPlainObject(new Date() as unknown as FabricValue))
           .toBe(false);
         expect(isFabricPlainObject(new Map() as unknown as FabricValue))
@@ -774,6 +790,7 @@ describe("type-check", () => {
       // `toJSON()` is not consulted, and carrying one decides nothing: what
       // rejects this value is being a plain object. The `Date` below carries
       // one too and is accepted, which is what holds the two apart.
+
       expect(isValidFabricNativeObject({ toJSON: () => "x" })).toBe(false);
       expect(typeof Date.prototype.toJSON).toBe("function");
       expect(isValidFabricNativeObject(new Date())).toBe(true);
@@ -794,6 +811,7 @@ describe("type-check", () => {
     // same values through the fabric classes as well. Deciding a subset of one
     // answer by a different road is only correct if the two agree on every arm,
     // which is what the corpus is for.
+
     const nativeObjectTags: ReadonlyArray<string> = [
       VALUE_TAGS.Error,
       VALUE_TAGS.Map,
@@ -858,6 +876,7 @@ describe("type-check", () => {
       // The vet decides exactly what the predicate decides. That the corpus
       // lands on both answers is asserted rather than assumed, agreement being
       // free for one that has drifted to a side.
+
       const accepted: string[] = [];
       const refused: string[] = [];
 
@@ -912,6 +931,7 @@ describe("type-check", () => {
       // exception: conversion has a say over one, and either mints its fabric
       // form or refuses it there. The vet has no say and does not pretend to,
       // which its own group below covers.
+
       for (const [label, value] of LAYER_CORPUS) {
         if (isValidFabricNativeObject(value)) continue;
         it(`gives ${label} the same verdict, in the same words`, () => {
@@ -971,6 +991,7 @@ describe("type-check", () => {
         // value would let a value choose the name it is refused under, and
         // would let it make the refusal fail instead of report. Each case
         // below is refused as `Widget`, which is what its prototype says.
+
         class Widget {}
 
         function widgetWith(descriptor: PropertyDescriptor): unknown {
@@ -1011,6 +1032,7 @@ describe("type-check", () => {
         it("refuses a value whose class will not say its name", () => {
           // `name` is an accessor too, so guarding the constructor read alone
           // leaves the next read out in the open.
+
           class NameThrows {}
           Object.defineProperty(NameThrows.prototype, "constructor", {
             value: Object.defineProperty(function () {}, "name", {
@@ -1029,6 +1051,7 @@ describe("type-check", () => {
         it("refuses a value whose constructor traps `prototype`", () => {
           // A callable `Proxy` can throw from any read, `.prototype` included,
           // which is what the class lookup would otherwise ask it for.
+
           const trapped = new Proxy(function () {}, {
             get(target, key) {
               if (key === "prototype") {
@@ -1053,6 +1076,7 @@ describe("type-check", () => {
           // reason-picking probe and the name lookup fail on it, and the
           // refusal has to survive each: an error raised while explaining a
           // refusal would arrive in place of the refusal.
+
           class Unreadable {}
           Object.defineProperty(Unreadable.prototype, "constructor", {
             get() {
