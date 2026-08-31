@@ -36,16 +36,20 @@
  * contents; a day of records-free objects shows as compactable and is then
  * left open by the run that reads it.
  *
- * The writer credential comes from CF_TEST_RECORDS_COMPACTOR_KEY_FILE, a
- * service-account key with create-only access to the aggregated/ area;
- * that principal is provisioned in the infra repository when compaction
- * is turned on. Until then the compactor runs read-only with --plan.
+ * The writer credential is a federated access token in
+ * TEST_RECORDS_GCS_TOKEN, the variable the relay and the publisher read
+ * too. Only the compaction workflow holds one: the compactor's identity is
+ * pinned to that workflow file on main and is the sole principal with
+ * create on the aggregated/ area (infra: tofu/test-records). No key exists
+ * for it, so there is no credential a person could run this with, and
+ * --plan is how a person sees what a run would do.
  */
 
 import {
   buildObjectBody,
   createObject,
   datePartition,
+  type Environment,
   gzipChunks,
   type ListedObject,
   listObjectSizes,
@@ -53,13 +57,10 @@ import {
   readEnv,
   readObject,
   RECORD_SCHEMA_VERSION,
-  STORE_WRITE_SCOPE,
   type StoredReport,
-  tokenFromKey,
 } from "@commonfabric/test-support/records";
 import {
   ciSubmissionsPrefix,
-  parsePersonalKeyFile,
   storeBucket,
   storePrefix,
 } from "./test-records-config.ts";
@@ -566,6 +567,22 @@ export function parseCompactArgs(
   return { days, plan };
 }
 
+/**
+ * The access token for writing shards, when one is reachable. Only the
+ * compaction workflow has one, and there is no fallback to offer: the
+ * compactor's identity exists as no key, and a person's own reporting key
+ * is scoped to their submissions/local/<username>/ folder and cannot write
+ * a rollup. --plan is how a person sees what a run would do.
+ */
+export function writeToken(
+  env: Environment = Deno.env.get,
+): string | undefined {
+  const federated = readEnv("TEST_RECORDS_GCS_TOKEN", env);
+  return federated !== undefined && federated.length > 0
+    ? federated
+    : undefined;
+}
+
 async function main(): Promise<void> {
   const parsed = parseCompactArgs(Deno.args);
   if (parsed === undefined) Deno.exit(2);
@@ -578,20 +595,16 @@ async function main(): Promise<void> {
     rawPrefix: ciSubmissionsPrefix(),
   };
   if (!plan) {
-    const keyPath = readEnv("CF_TEST_RECORDS_COMPACTOR_KEY_FILE");
-    if (keyPath === undefined || keyPath.length === 0) {
+    const token = writeToken();
+    if (token === undefined) {
       console.error(
-        "CF_TEST_RECORDS_COMPACTOR_KEY_FILE is not set; run with --plan " +
-          "to see what would be compacted.",
+        "TEST_RECORDS_GCS_TOKEN is not set. The compactor's identity is " +
+          "held by the compaction workflow alone; run with --plan to see " +
+          "what would be compacted.",
       );
       Deno.exit(2);
     }
-    const key = parsePersonalKeyFile(await Deno.readTextFile(keyPath));
-    if (key === undefined) {
-      console.error(`${keyPath} is not a service-account key file`);
-      Deno.exit(2);
-    }
-    options.token = await tokenFromKey(key, STORE_WRITE_SCOPE);
+    options.token = token;
   }
 
   await compactDays(options);

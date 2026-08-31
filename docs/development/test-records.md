@@ -251,7 +251,10 @@ validating reader; `deno task` scripts built on it:
   records as a manifest and a few tens of rollup shards under
   `aggregated/`, sized so that a shard is a string a reader can hold;
   `--plan` reads the listing alone and shows what it would do without
-  credentials.
+  credentials. It writes from `.github/workflows/test-records-compact.yml`
+  on a daily schedule, which is the only place its identity can be
+  assumed; there is no key for it and no way to run the writing half by
+  hand.
 - `packages/dashboard/test-records-history.ts` — the dashboard's collector:
   cached per-identity daily series shaped for `trend.ts`.
 
