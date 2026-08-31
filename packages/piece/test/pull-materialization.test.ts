@@ -54,6 +54,7 @@ import {
 } from "../src/ops/piece-controller.ts";
 import { readPieceSourceState } from "../src/ops/piece-origin.ts";
 import { PiecesController } from "../src/ops/pieces-controller.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
 const signer = await Identity.fromPassphrase("piece pull materialization");
 
@@ -1345,7 +1346,11 @@ describe("piece pull materialization", () => {
       { start: true },
     );
     await runtime.editWithRetry((tx) => {
-      producer.withTx(tx).setMetaRaw("schema", argumentSchema);
+      producer.withTx(tx).setMetaRaw(
+        "schema",
+        argumentSchema,
+        rawMetaWriteAuthorization,
+      );
     });
 
     const base = runtime.getCell(
@@ -1460,7 +1465,11 @@ describe("piece pull materialization", () => {
         { start: true },
       );
       await runtime.editWithRetry((tx) => {
-        source.withTx(tx).setMetaRaw("schema", schema);
+        source.withTx(tx).setMetaRaw(
+          "schema",
+          schema,
+          rawMetaWriteAuthorization,
+        );
       });
       return source;
     };
@@ -1566,7 +1575,11 @@ describe("piece pull materialization", () => {
       { start: true },
     );
     await runtime.editWithRetry((tx) => {
-      source.withTx(tx).setMetaRaw("schema", scalarAncestorSchema);
+      source.withTx(tx).setMetaRaw(
+        "schema",
+        scalarAncestorSchema,
+        rawMetaWriteAuthorization,
+      );
     });
     const base = runtime.getCell(
       pieces.getSpace(),
@@ -1617,13 +1630,14 @@ describe("piece pull materialization", () => {
           }),
         },
         ...(originalInternal as FabricValue[]),
-      ]);
+      ], rawMetaWriteAuthorization);
       orphan.withTx(tx).setMetaRaw(
         "result",
         piece.withTx(tx).getAsWriteRedirectLink({
           base: orphan.withTx(tx),
           includeSchema: true,
         }),
+        rawMetaWriteAuthorization,
       );
     });
 
@@ -1823,7 +1837,7 @@ describe("piece pull materialization", () => {
       unknownPiece.withTx(tx).setMetaRaw("patternIdentity", {
         identity: "Z".repeat(43),
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
 
     await expect(runtime.setup(undefined, undefined, {}, unknownPiece))
@@ -5972,7 +5986,7 @@ describe("piece pull materialization", () => {
       piece.withTx(tx).setMetaRaw("patternIdentity", {
         identity: "keyless:fid1:legacy-orphan-from-a-pre-guard-session",
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
     });
     expect(error).toBeUndefined();
 

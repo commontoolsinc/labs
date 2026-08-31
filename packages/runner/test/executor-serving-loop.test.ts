@@ -48,6 +48,7 @@ import { TEST_MEMORY_SERVER_AUTH } from "./memory-v2-test-utils.ts";
 import { getArtifactEntryRef } from "../src/builder/pattern-metadata.ts";
 import { getLogger } from "@commonfabric/utils/logger";
 import { waitUntil } from "./support/wait-until.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 class SharedServerStorageManager extends EmulatedStorageManager {
   // Delegate to the base connectTo (shared-harness extraction, CT-1962):
@@ -989,7 +990,11 @@ describe("stage F serving loop", () => {
     // v1's pre-swap derived commits.
     const preSwapHead = Engine.serverSeq(engine);
     const pointerTx = clientRuntime.edit();
-    clientResult.withTx(pointerTx).setMetaRaw("patternIdentity", v2Ref!);
+    clientResult.withTx(pointerTx).setMetaRaw(
+      "patternIdentity",
+      v2Ref!,
+      rawMetaWriteAuthorization,
+    );
     expect((await pointerTx.commit()).error).toBeUndefined();
 
     // The SpaceServer's watcher swaps to v2 and the wave serves the new

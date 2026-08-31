@@ -1,4 +1,5 @@
 import { afterEach, describe, it } from "@std/testing/bdd";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 import { expect } from "@std/expect";
 import { toFileUrl } from "@std/path";
 import { Identity } from "@commonfabric/identity";
@@ -331,7 +332,7 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
       cell.withTx(repointTx).setMetaRaw("patternIdentity", {
         identity: unloadableIdentity,
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
       await repointTx.commit();
     }
     await runtime.idle();
@@ -391,7 +392,7 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
       cell.withTx(repointTx).setMetaRaw("patternIdentity", {
         identity: "keyless:fid1:legacy-orphan-from-a-pre-guard-session",
         symbol: "default",
-      });
+      }, rawMetaWriteAuthorization);
       await repointTx.commit();
     }
     await runtime.idle();
@@ -426,7 +427,7 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
     cell.withTx(tx).setMetaRaw("patternIdentity", {
       identity: "keyless:fid1:legacy-orphan-from-a-pre-guard-session",
       symbol: "default",
-    });
+    }, rawMetaWriteAuthorization);
     await tx.commit();
     await runtime.idle();
 
@@ -1195,7 +1196,7 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
         cell.withTx(tx).setMetaRaw("patternIdentity", {
           identity: orphan,
           symbol: "default",
-        });
+        }, rawMetaWriteAuthorization);
         await tx.commit();
         await runtime.idle();
         expect(await runtime.runner.start(cell)).toBe(false);
@@ -1234,7 +1235,7 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
           cell.withTx(repointTx).setMetaRaw("patternIdentity", {
             identity: orphan,
             symbol: "default",
-          });
+          }, rawMetaWriteAuthorization);
           await repointTx.commit();
         }
         await runtime.idle();
@@ -1267,7 +1268,7 @@ describe("keyless identities never land durably (L3(a), RULED 2026-08-27)", () =
           cell.withTx(repointTx).setMetaRaw("patternIdentity", {
             identity: unloadableIdentity,
             symbol: "default",
-          });
+          }, rawMetaWriteAuthorization);
           await repointTx.commit();
         }
         await runtime.idle();

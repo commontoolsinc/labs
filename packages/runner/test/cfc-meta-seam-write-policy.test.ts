@@ -10,6 +10,7 @@ import {
   SEED_ENVELOPE_SCHEMA_HASH,
   writeSeedEnvelopeDoc,
 } from "./cfc-seed-envelope.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-meta-seam");
 
@@ -83,11 +84,11 @@ describe("cfc-meta-seam-write-policy", () => {
       const tx = runtime.edit();
       const cell = runtime.getCell(signer.did(), cause, undefined, tx);
       await cell.sync();
-      cell.setMetaRaw("slug", "piece-slug");
+      cell.setMetaRaw("slug", "piece-slug", rawMetaWriteAuthorization);
       cell.setMetaRaw("patternIdentity", {
         identity: "cid:pattern",
         symbol: "main",
-      });
+      }, rawMetaWriteAuthorization);
       tx.prepareCfc();
       // Prepared (not invalidated): the prepare pass recorded no reasons at
       // all for the meta writes.
@@ -190,7 +191,7 @@ describe("cfc-meta-seam-write-policy", () => {
       });
       const sink = runtime.getCell(signer.did(), sinkCause, undefined, tx);
       await sink.sync();
-      sink.setMetaRaw("slug", secret as string);
+      sink.setMetaRaw("slug", secret as string, rawMetaWriteAuthorization);
       tx.prepareCfc();
       expect((await tx.commit()).ok).toBeDefined();
 

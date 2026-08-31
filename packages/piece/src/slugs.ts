@@ -13,6 +13,7 @@ import {
 } from "@commonfabric/runner";
 import { pieceId } from "./piece-id.ts";
 import type { PiecesController } from "./ops/pieces-controller.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
 export { SlugResolutionError };
 
@@ -97,9 +98,13 @@ export async function setSlugLink(
       metadataTargetWithTx !== undefined &&
       metadataTargetLink?.path.length === 0
     ) {
-      metadataTargetWithTx.setMetaRaw("slug", validSlug);
+      metadataTargetWithTx.setMetaRaw(
+        "slug",
+        validSlug,
+        rawMetaWriteAuthorization,
+      );
     }
-    slugWithTx.setMetaRaw("slug", validSlug);
+    slugWithTx.setMetaRaw("slug", validSlug, rawMetaWriteAuthorization);
     slugWithTx.setRawUntyped(
       targetWithTx.getAsWriteRedirectLink({ base: slugWithTx }),
     );

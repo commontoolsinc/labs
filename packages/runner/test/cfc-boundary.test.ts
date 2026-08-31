@@ -48,6 +48,7 @@ import {
   TEST_MEMORY_SERVER_AUTH,
   testSessionOpenAuthFactory,
 } from "./memory-v2-test-utils.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("runner-cfc-boundary-tests");
 
@@ -2906,7 +2907,7 @@ describe("ExtendedStorageTransaction CFC gate", () => {
         type: "object",
         ifc: { confidentiality: ["card-space"] },
         properties: { title: { type: "string" } },
-      });
+      }, rawMetaWriteAuthorization);
       const linkedTarget = runtime.getCell(
         signer.did(),
         "cfc-link-setup-schema-target",

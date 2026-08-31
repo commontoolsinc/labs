@@ -33,6 +33,7 @@ import {
   DEFAULT_APP_PATTERN_SOURCE,
   PiecesController,
 } from "../src/ops/pieces-controller.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 
 // The route that ref resolves to.
 const DEFAULT_APP_PATTERN_PATH = resolveSystemPatternSource(
@@ -922,7 +923,7 @@ describe("reading a piece's source state", () => {
     value: unknown,
   ): Promise<void> {
     const tx = runtime.edit();
-    cell.withTx(tx).setMetaRaw(key, value as never);
+    cell.withTx(tx).setMetaRaw(key, value as never, rawMetaWriteAuthorization);
     runtime.prepareTxForCommit(tx);
     const result = await tx.commit();
     expect(result.error).toBeUndefined();
@@ -1009,7 +1010,7 @@ describe("reading a piece's source state", () => {
     cell.withTx(tx).setMetaRaw("pieceSourceHistory", [{
       ...revision,
       origin: "not an origin",
-    }] as never);
+    }] as never, rawMetaWriteAuthorization);
     await tx.commit();
 
     const state = await readPieceSourceState(runtime, cell);
@@ -1817,6 +1818,7 @@ describe("reading a piece's source state", () => {
       source.getCell().withTx(tx).setMetaRaw(
         "patternSource",
         "https://example.test/changed.tsx",
+        rawMetaWriteAuthorization,
       );
       runtime.prepareTxForCommit(tx);
       const result = await tx.commit();

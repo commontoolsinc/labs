@@ -24,6 +24,7 @@ import type {
 } from "./scheduler-test-utils.ts";
 import { getDirectTransactionReactivityLog } from "../src/storage/transaction-inspection.ts";
 import { PASS_RUN_BUDGET } from "../src/scheduler/constants.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 // Seed stored CFC metadata via an ungated path-[] full-document write (the
 // shape hydration delivers it), reading the current doc first so the value
@@ -1314,7 +1315,7 @@ describe("scheduler", () => {
       tx,
     );
     testCell.set({ value: 1 });
-    testCell.setMetaRaw("slug", "tracked-slug");
+    testCell.setMetaRaw("slug", "tracked-slug", rawMetaWriteAuthorization);
     tx.commit();
     tx = runtime.edit();
 

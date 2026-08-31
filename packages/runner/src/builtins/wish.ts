@@ -48,6 +48,7 @@ import {
 } from "../storage/rejection.ts";
 import { onSchemaRegistryClear } from "../schema-registry.ts";
 import { scopedCell } from "./scope-policy.ts";
+import { rawMetaWriteAuthorization } from "../meta-seam.ts";
 
 const wishFlowLogger = getLogger("runner.wish-flow", {
   enabled: true,
@@ -2209,6 +2210,7 @@ export function wish(
             base: scoped,
             includeSchema: true,
           }),
+          rawMetaWriteAuthorization,
         );
       }
     }

@@ -24,6 +24,7 @@ import {
 } from "../src/storage/interface.ts";
 import { setResultCell } from "../src/result-utils.ts";
 import { trustPattern } from "./support/trusted-builder.ts";
+import { rawMetaWriteAuthorization } from "../src/meta-seam.ts";
 
 const signer = await Identity.fromPassphrase("test operator");
 const space = signer.did();
@@ -533,7 +534,7 @@ describe("Cell", () => {
       tx,
     );
     cell.set({ value: 1 });
-    cell.setMetaRaw("slug", "first");
+    cell.setMetaRaw("slug", "first", rawMetaWriteAuthorization);
     await tx.commit();
     tx = runtime.edit();
 
@@ -547,7 +548,7 @@ describe("Cell", () => {
     expect(seen).toEqual(["first"]);
 
     const metaTx = runtime.edit();
-    cell.withTx(metaTx).setMetaRaw("slug", "second");
+    cell.withTx(metaTx).setMetaRaw("slug", "second", rawMetaWriteAuthorization);
     await metaTx.commit();
     await runtime.idle();
 

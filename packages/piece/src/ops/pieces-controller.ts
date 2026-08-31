@@ -88,6 +88,7 @@ import {
 import { PieceController } from "./piece-controller.ts";
 import { reconcilePieceSource } from "./piece-origin.ts";
 import { compileProgram } from "./utils.ts";
+import { rawMetaWriteAuthorization } from "@commonfabric/runner/meta-seam";
 export {
   DEFAULT_APP_PATTERN_SOURCE,
   deriveSystemPatternSource,
@@ -2305,9 +2306,13 @@ export class PiecesController<T = unknown> {
           identity: pinnedRef.identity,
           symbol: pinnedRef.symbol,
           displacedAt: sourceTransition.timestamp,
-        });
+        }, rawMetaWriteAuthorization);
       }
-      rootTx.setMetaRaw("patternIdentity", officialRef);
+      rootTx.setMetaRaw(
+        "patternIdentity",
+        officialRef,
+        rawMetaWriteAuthorization,
+      );
       return true;
     });
     if (swapResult.error) {
