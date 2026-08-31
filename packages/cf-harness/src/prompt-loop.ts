@@ -181,14 +181,10 @@ export interface CreateHarnessPromptLoopOptions
   compactThreshold?: number;
 
   /**
-   * Whether a `pattern-author` child is told to search the index, to prefer
-   * composing what it finds, and how to wire a composed pattern in. Defaults
+   * Whether a `pattern-author` child receives the four composition and wiring
+   * bullets. Search-technique and publishing guidance remain in place. The
+   * narrow scope is intentional so a null result can be interpreted. Defaults
    * to true, which is the guidance the profile ships with.
-   *
-   * Set false to withhold that guidance while leaving `search_patterns` in
-   * the child's hands, which is how the guidance is measured rather than
-   * assumed: a child that still holds the tool and no longer holds the words
-   * separates what the words do from what the tool does.
    */
   subagentCompositionGuidance?: boolean;
 }

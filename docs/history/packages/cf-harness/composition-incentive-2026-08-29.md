@@ -19,9 +19,10 @@ Instructed explicitly to import it, the same session does it first time.
 
 ## The result
 
-Composition moved from a measured zero — across two suites, three batches and
-64 runs — to **three distinct tasks wiring five distinct atoms, all three
-reaching `ok`**.
+The experiment result below compares 26 `run_pattern` calls in the four-session
+`V0-new` control with 30 calls in the four-session `V2` batch. Composition moved
+from a measured zero to **three distinct tasks wiring five distinct atoms, all
+three reaching `ok`**.
 
 | | control (`V0-new`) | `V2` |
 |---|---|---|
@@ -86,7 +87,8 @@ an outcome difference.
    reporting `ok` means the program compiled and matched its declared schema.
    Three sessions composed published atoms into programs that ran; whether any
    of them *works* is not established here.
-4. **Composing was not cheap in this run**: 16 compile errors against 13 `ok`.
+4. **Composing was not cheap in this run**: the artifact-derived table records
+   17 compile errors against 13 `ok`.
 
 ## A session imported a whole application and used it as a part
 
@@ -159,13 +161,14 @@ batch:
   at 1 of 14 runs with the strongest anti-rebuild bullet present, 0 of 10 with
   the weaker set, and 1 of 14 with no index guidance at all. Flat across
   maximal, medium and absent prose.
-- **Composing is cheaper than rebuilding, not dearer.** Across 285 historical
-  `run_pattern` calls: composing reached `ok` in 2.00 calls on average against
-  6.65 from source, and **13 of 33 source-writing runs never produced a working
-  pattern at all, against 0 of 2 composing runs**. The hypothesis that the loop
-  was making a rational cost trade-off is falsified in the opposite direction.
-  Composing n=2 and a selection confound apply; the durable claim is the failure
-  asymmetry, not the ratio.
+- **Composing is cheaper than rebuilding, not dearer.** Across 64 historical
+  console transcripts — 38 containing 285 `run_pattern` calls — composing
+  reached `ok` in 2.00 calls on average against 6.65 from source, and **13 of 33
+  source-writing runs never produced a working pattern at all, against 0 of 2
+  composing runs**. The hypothesis that the loop was making a rational cost
+  trade-off is falsified in the opposite direction. Composing n=2 and a
+  selection confound apply; the durable claim is the failure asymmetry, not the
+  ratio.
 
 ## Method notes worth keeping
 
