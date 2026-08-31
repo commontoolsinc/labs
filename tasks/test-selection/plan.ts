@@ -9,14 +9,19 @@
  * The exploration draw's seed comes from the manifest.
  */
 
-import { testIdentityKey } from "@commonfabric/test-support/records";
+import {
+  type TestIdentity,
+  testIdentityKey,
+} from "@commonfabric/test-support/records";
 import {
   FILL_DENSITY_SHARE,
   FILL_EXPLORATION_SHARE,
   FILL_VALUE_SHARE,
   FLAKE_EXCLUSION_RATE,
+  LANE_BOUND_SECONDS,
   LANE_BUDGET_SECONDS,
   LANES,
+  VALUE_FLOOR,
 } from "./policy.ts";
 import type { Manifest, ManifestEntry } from "./manifest.ts";
 
@@ -61,6 +66,15 @@ export interface Plan {
 
   /** Set when the mandatory pass alone did not fit. */
   overBudgetSeconds: number;
+
+  /**
+   * Identities no lane can hold. One costing more than a lane's planned
+   * budget is given a lane to itself and allowed to run up to the hard
+   * bound; one costing more than the hard bound cannot run at all, and
+   * scheduling it would only time the lane out. It is reported instead,
+   * and the sixty-second rule is where such a test gets split.
+   */
+  unschedulable: ManifestEntry[];
 }
 
 /** What the packer needs beyond the manifest. */
@@ -77,11 +91,22 @@ export interface PlanInput {
   /** Which capabilities each suite needs. */
   capabilities: ReadonlyMap<string, readonly string[]>;
 
+  /**
+   * Where an identity the manifest does not carry runs, by identity key.
+   * An identity with no records is mandatory, and the manifest cannot say
+   * where it runs precisely because it has never seen it, so whoever
+   * enumerated the tree says instead.
+   */
+  unknown?: ReadonlyMap<string, { suite: string; unit: string }>;
+
   /** How many lanes to fill. Defaults to the dial. */
   lanes?: number;
 
   /** Seconds each lane may fill. Defaults to the dial. */
   budgetSeconds?: number;
+
+  /** The hard bound on a lane's work step. Defaults to the dial. */
+  boundSeconds?: number;
 }
 
 /**
@@ -226,14 +251,29 @@ export function plan(input: PlanInput): Plan {
     load: 0,
   }));
 
+  const bound = input.boundSeconds ?? LANE_BOUND_SECONDS;
   const byKey = new Map<string, ManifestEntry>();
   for (const entry of manifest.entries) {
     byKey.set(testIdentityKey(entry.test), entry);
   }
 
+  // An identity whose own measured time is past the hard bound cannot run
+  // in any lane, so it is reported rather than placed in one that would
+  // then be killed at its bound. Its suite's correction is applied first,
+  // because that is what the time will actually be.
+  const unschedulable: ManifestEntry[] = [];
+  const beyondBound = new Set<string>();
+  for (const entry of manifest.entries) {
+    const correction = manifest.calibration.suites[entry.suite]?.correction ??
+      1;
+    if (entry.cost * correction <= bound) continue;
+    unschedulable.push(entry);
+    beyondBound.add(testIdentityKey(entry.test));
+  }
+
   // What must not run, unless the change touches what it covers, in which
   // case it is very likely a fix and must be allowed to prove itself.
-  const excluded = new Set<string>();
+  const excluded = new Set<string>(beyondBound);
   for (const held of manifest.withheld) {
     const key = testIdentityKey(held.test);
     if (!input.mandatory.has(key)) excluded.add(key);
@@ -257,7 +297,18 @@ export function plan(input: PlanInput): Plan {
   // made for it at the floor, costing nothing anybody measured.
   for (const [key, reason] of input.mandatory) {
     if (taken.has(key)) continue;
-    const entry = byKey.get(key);
+    // Not even a mandatory identity is placed past the hard bound: the
+    // lane would be killed and the run would report a timeout rather than
+    // the test.
+    if (beyondBound.has(key)) continue;
+    // An identity the manifest has never heard of is exactly the one that
+    // must run: records exist only for tests that ran, and a renamed test
+    // is unknown until an alias lands. Dropping it here would break the
+    // rule the caller invoked by naming it mandatory, so it is carried on
+    // an entry standing in for the history it has none of — the floor
+    // score, and no measured cost, which is what an unrun test costs as
+    // far as anything here knows.
+    const entry = byKey.get(key) ?? unknownEntry(key, input);
     if (entry === undefined) continue;
     taken.add(key);
     // Mandatory work runs once. A repeat covers nothing a measured run
@@ -323,6 +374,42 @@ export function plan(input: PlanInput): Plan {
     })),
     withheld: manifest.withheld,
     overBudgetSeconds: overBudget,
+    unschedulable,
+  };
+}
+
+/**
+ * A stand-in entry for an identity the manifest does not carry. The
+ * caller says where it runs, because only the topology knows; without
+ * that the identity cannot be placed and is reported rather than run.
+ */
+function unknownEntry(
+  key: string,
+  input: PlanInput,
+): ManifestEntry | undefined {
+  const surface = input.unknown?.get(key);
+  if (surface === undefined) return undefined;
+  let test: TestIdentity;
+  try {
+    const [k, s, n, v] = JSON.parse(key) as string[];
+    if (
+      typeof k !== "string" || typeof s !== "string" || typeof n !== "string"
+    ) {
+      return undefined;
+    }
+    test = v === undefined ? { k, s, n } : { k, s, n, v };
+  } catch {
+    return undefined;
+  }
+  return {
+    test,
+    suite: surface.suite,
+    unit: surface.unit,
+    cost: 0,
+    score: VALUE_FLOOR,
+    inputs: { catches: 0, mainCatches: 0, sources: 0, churn: 0 },
+    flakeRate: 0,
+    repeats: 1,
   };
 }
 

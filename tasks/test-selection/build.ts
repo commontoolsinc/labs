@@ -191,7 +191,16 @@ export function readReport(
     for (const record of group.records) {
       const test = resolver.resolve(record.test, day);
       const key = testIdentityKey(test);
-      surfaces.set(key, recordSurface(test, record.file));
+      // A record with no file names its own identity as the unit, which
+      // is all an unmapped record can say. Where another record of the
+      // same identity did carry a file, that is the better answer and the
+      // unmapped one must not overwrite it: the suites are mid-migration
+      // onto the preload, so one identity can have records of both kinds.
+      const surface = recordSurface(test, record.file);
+      const known = surfaces.get(key);
+      if (record.file !== undefined || known === undefined) {
+        surfaces.set(key, surface);
+      }
       observations.push({
         test,
         outcome: record.outcome,

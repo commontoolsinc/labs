@@ -22,7 +22,6 @@ import { join } from "@std/path";
 import { ulid } from "@std/ulid";
 import {
   createObject,
-  gunzipToText,
   gzipText,
   listObjects,
   loadAliasResolver,
@@ -257,7 +256,9 @@ async function readAggregate(): Promise<AggregateRead> {
   const prefix = statePrefix();
   let names: string[];
   try {
-    names = await listObjects({ bucket, prefix });
+    // Trailing slash for the reason the manifest listing carries one: a
+    // bare prefix matches a longer sibling too.
+    names = await listObjects({ bucket, prefix: `${prefix}/` });
   } catch (error) {
     return { failed: `listing ${prefix} failed: ${error}` };
   }
@@ -269,10 +270,8 @@ async function readAggregate(): Promise<AggregateRead> {
     const url = objectUrl(bucket, newest);
     const response = await fetch(url);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const text = await gunzipToText(
-      new Uint8Array(await response.arrayBuffer()),
-    );
-    const state = parseAggregate(text);
+    // Transcoded on the way out, so this is already the JSON.
+    const state = parseAggregate(await response.text());
     return state === undefined
       ? { failed: `${newest} is not an aggregate this reader understands` }
       : { state };

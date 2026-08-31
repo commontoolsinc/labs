@@ -184,15 +184,22 @@ function resolvePendingMain(
 ): void {
   if (state.pendingMain.length === 0) return;
   if (observation.outcome === "fail") return;
-  for (const pending of state.pendingMain) {
-    if (pending.commit === observation.commit) continue;
-    if (coveredChanged(key, pending.commit, observation.commit)) {
-      creditCatch(state, "main", pending.day, pending.source);
-    } else {
-      bump(state.flakesByDay, pending.day);
-    }
-  }
+  // One breakage, one catch. A test that stays red across several runs on
+  // the default branch has one thing wrong with it, and the change that
+  // makes it green fixed that one thing; crediting every run it failed
+  // would make a long outage look like the most valuable test in the
+  // repository. The first failure is the one the catch belongs to, since
+  // that is where the breakage entered.
+  const first = state.pendingMain.reduce((earliest, pending) =>
+    pending.day < earliest.day ? pending : earliest
+  );
   state.pendingMain = [];
+  if (first.commit === observation.commit) return;
+  if (coveredChanged(key, first.commit, observation.commit)) {
+    creditCatch(state, "main", first.day, first.source);
+  } else {
+    bump(state.flakesByDay, first.day);
+  }
 }
 
 /** How a batch of observations was judged. */
@@ -299,7 +306,10 @@ export function foldObservations(
       seen = { day: observation.day, outcomes: new Set() };
       outcomesAtCommit.set(at, seen);
     }
-    seen.outcomes.add(observation.outcome);
+    // A skip is a test that deliberately did not run, so it agrees with
+    // nothing and contradicts nothing; counting it as disagreement would
+    // read a skip beside a failure as the test disagreeing with itself.
+    if (observation.outcome !== "skip") seen.outcomes.add(observation.outcome);
     if (observation.outcome === "fail") {
       const list = failures.get(key) ?? [];
       list.push({ day: observation.day, source: observation.source });
@@ -328,7 +338,13 @@ export function foldObservations(
     const day = observation.day;
 
     // A skip is a test that deliberately did not run. It says nothing
-    // about the test and nothing about the change.
+    // about the test and nothing about the change, so it does not reach
+    // `lastMainOutcome` either: a test skipped on the default branch has
+    // not been shown to be fixed, and the last run that did execute it is
+    // the last thing known about it. That keeps a still-broken test out of
+    // every pull request, which is the direction this design takes
+    // whenever the two errors are a lost signal and a change that cannot
+    // go green.
     if (observation.outcome === "skip") continue;
 
     bump(state.runsByDay, day);
@@ -449,28 +465,35 @@ export function sampledPercentile90(samples: DaySamples): number {
 }
 
 /**
- * Replaces a day's cost with the ninetieth percentile of the durations
- * given. Called once per identity per day, with that day's whole set, by
- * whoever folded it.
+ * Folds a batch of one day's durations into that day's cost.
+ *
+ * A day is read across as many runs as it takes for its objects to
+ * arrive, so this is given part of a day at a time and has to combine
+ * rather than replace: a later batch of two fast executions would
+ * otherwise overwrite a morning of slow ones and understate what the
+ * identity costs, which is the direction that overruns a lane.
+ *
+ * What it keeps is the higher percentile and the summed count. Two
+ * percentiles cannot be averaged into the percentile of their union
+ * without the samples behind them, and of the two answers available the
+ * larger is the one a time budget survives.
  */
 export function sealDay(
   state: IdentityState,
   day: string,
   durationsMs: readonly number[] | DaySamples,
 ): void {
-  if (Array.isArray(durationsMs)) {
-    if (durationsMs.length === 0) return;
-    state.costByDay[day] = {
-      p90: percentile90(durationsMs),
-      count: durationsMs.length,
+  const batch = Array.isArray(durationsMs)
+    ? { p90: percentile90(durationsMs), count: durationsMs.length }
+    : {
+      p90: sampledPercentile90(durationsMs as DaySamples),
+      count: (durationsMs as DaySamples).count,
     };
-    return;
-  }
-  const samples = durationsMs as DaySamples;
-  if (samples.count === 0) return;
-  state.costByDay[day] = {
-    p90: sampledPercentile90(samples),
-    count: samples.count,
+  if (batch.count === 0) return;
+  const known = state.costByDay[day];
+  state.costByDay[day] = known === undefined ? batch : {
+    p90: Math.max(known.p90, batch.p90),
+    count: known.count + batch.count,
   };
 }
 

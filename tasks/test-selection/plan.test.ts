@@ -63,15 +63,13 @@ describe("plan", () => {
       expect(keysOf(run(manifest))).toEqual(keysOf(run(manifest)));
     });
 
-    it("gives every lane the same answer about its own share", () => {
-      // The five lanes each call this over the same inputs, so what lane
-      // three would do has to be what the whole plan says lane three does.
+    it("keeps one lane's selections in a stable order", () => {
+      // Determinism of the set is checked above; this is the order within
+      // a lane, which is what a lane runs its batches in and what a job
+      // summary lists.
       const manifest = sampleManifest({ entries: entries(200) });
-      const first = run(manifest).lanes[2]!;
-      const again = run(manifest).lanes[2]!;
-      expect(first.selections.map((s) => s.entry.test.n)).toEqual(
-        again.selections.map((s) => s.entry.test.n),
-      );
+      expect(run(manifest).lanes[2]!.selections.map((s) => s.entry.test.n))
+        .toEqual(run(manifest).lanes[2]!.selections.map((s) => s.entry.test.n));
     });
   });
 

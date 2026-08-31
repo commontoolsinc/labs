@@ -9,7 +9,6 @@
  */
 
 import {
-  gunzipToText,
   listObjects,
   type Manifest,
   objectUrl,
@@ -17,7 +16,10 @@ import {
 } from "@commonfabric/test-support/records";
 
 export const TEST_SELECTION_BUCKET = "cf-ci-metadata";
-export const TEST_SELECTION_PREFIX = "labs/test-selection/v1";
+// The trailing slash is what keeps the listing inside this version. A
+// bare "v1" prefix also matches "v10", so a later schema's manifests
+// would sort above these and hide the newest one a v1 reader may use.
+export const TEST_SELECTION_PREFIX = "labs/test-selection/v1/";
 
 /** The generation time in a manifest's object name, when it is one. */
 export function generatedAtOf(objectName: string): string | undefined {
@@ -48,9 +50,9 @@ export async function newestManifest(options: {
     const url = objectUrl(bucket, newest);
     const response = await doFetch(url);
     if (!response.ok) return undefined;
-    return parseManifest(
-      await gunzipToText(new Uint8Array(await response.arrayBuffer())),
-    );
+    // The store serves these with transcoding, so a plain fetch has
+    // already decoded the gzip the object is stored under.
+    return parseManifest(await response.text());
   } catch {
     return undefined;
   }

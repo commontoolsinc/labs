@@ -36,6 +36,15 @@ permissions:
   contents: read
   id-token: write
 
+# Two runs folding from one aggregate would each create a state object,
+# and the one that finished later would become the newest while holding
+# the older snapshot. There is one publisher, so it runs one at a time,
+# and a queued run is never cancelled: skipping a cycle loses the records
+# that arrived during it.
+concurrency:
+  group: test-selection-publisher
+  cancel-in-progress: false
+
 jobs:
   publish:
     name: "Publish Test Selection Manifest"
@@ -51,8 +60,14 @@ jobs:
       - name: 📥 Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # No cache, as the relay does for the same reason: the cache steps
+      # inside this composite action are the one place a credentialed job
+      # here still runs a third-party action by a mutable tag. This job
+      # runs every four hours and is on nobody's critical path.
       - name: 🦕 Setup Deno
         uses: ./.github/actions/deno-setup
+        with:
+          cache: false
 
       - name: 🔍 Verify lock file & install dependencies
         uses: ./.github/actions/deno-install
@@ -67,22 +82,37 @@ jobs:
           token_format: access_token
           create_credentials_file: false
 
+      # The dispatch inputs reach the shell through the environment rather
+      # than through expansion into the script. An expansion is substituted
+      # before the shell parses the line, so a crafted value would run as
+      # part of this step — which is the step holding the access token.
+      # The window is quoted, then checked against the one shape it may
+      # take before it becomes an argument.
       - name: 📊 Publish the manifest
         env:
           TEST_RECORDS_GCS_TOKEN: ${{ steps.auth.outputs.access_token }}
           TEST_RECORDS_BUCKET: ${{ vars.TEST_RECORDS_BUCKET }}
           TEST_RECORDS_PREFIX: ${{ vars.TEST_RECORDS_PREFIX }}
           TEST_SELECTION_PREFIX: ${{ vars.TEST_SELECTION_PREFIX }}
+          PUBLISH_BOOTSTRAP: ${{ inputs.bootstrap }}
+          PUBLISH_DAYS: ${{ inputs.days }}
         run: |
-          args=""
-          if [ "${{ inputs.bootstrap }}" = "true" ]; then
-            args="--bootstrap"
+          set -euo pipefail
+          args=()
+          if [ "${PUBLISH_BOOTSTRAP:-}" = "true" ]; then
+            args+=(--bootstrap)
           fi
-          if [ -n "${{ inputs.days }}" ]; then
-            args="$args --days ${{ inputs.days }}"
+          if [ -n "${PUBLISH_DAYS:-}" ]; then
+            case "$PUBLISH_DAYS" in
+              *[!0-9]*|"")
+                echo "::error::days must be a positive whole number"
+                exit 1
+                ;;
+            esac
+            args+=(--days "$PUBLISH_DAYS")
           fi
           deno run --allow-read --allow-env --allow-net --allow-write \
-            tasks/test-selection-publish.ts $args \
+            tasks/test-selection-publish.ts "${args[@]}" \
             | tee publish.log
 
       - name: 📝 Summarize

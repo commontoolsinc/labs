@@ -1,5 +1,9 @@
 import { assertEquals } from "@std/assert";
-import { gzipText, sampleEntry, sampleManifest, serializeManifest } from "@commonfabric/test-support/records";
+import {
+  sampleEntry,
+  sampleManifest,
+  serializeManifest,
+} from "@commonfabric/test-support/records";
 
 import { generatedAtOf, newestManifest } from "./test-selection-manifest.ts";
 import { makeTestFlakes } from "./tiles/test-flakes.ts";
@@ -12,8 +16,13 @@ import type { Ctx } from "./types.ts";
 
 const PREFIX = "labs/test-selection/v1";
 
-/** A store answering one listing and the objects it named. */
-function storeOf(objects: Record<string, Uint8Array>): typeof fetch {
+/**
+ * A store answering one listing and the objects it named. Bodies are the
+ * text a real fetch delivers: the store serves with transcoding, so the
+ * gzip an object is stored under is already decoded by the time a reader
+ * sees it.
+ */
+function storeOf(objects: Record<string, string>): typeof fetch {
   return ((input: string | URL | Request) => {
     const url = new URL(String(input instanceof Request ? input.url : input));
     if (url.pathname.endsWith("/o")) {
@@ -43,12 +52,10 @@ Deno.test("newestManifest takes the newest object under the prefix", async () =>
   const newer = sampleManifest({ generatedAt: "2026-08-20T04:00:00.000Z" });
   const found = await newestManifest({
     fetchImpl: storeOf({
-      [`${PREFIX}/manifest-2026-08-20T00:00:00.000Z-a.json.gz`]: await gzipText(
+      [`${PREFIX}/manifest-2026-08-20T00:00:00.000Z-a.json.gz`]:
         serializeManifest(older),
-      ),
-      [`${PREFIX}/manifest-2026-08-20T04:00:00.000Z-b.json.gz`]: await gzipText(
+      [`${PREFIX}/manifest-2026-08-20T04:00:00.000Z-b.json.gz`]:
         serializeManifest(newer),
-      ),
     }),
   });
   assertEquals(found?.generatedAt, "2026-08-20T04:00:00.000Z");
@@ -57,9 +64,8 @@ Deno.test("newestManifest takes the newest object under the prefix", async () =>
 Deno.test("newestManifest treats a malformed manifest as absent", async () => {
   const found = await newestManifest({
     fetchImpl: storeOf({
-      [`${PREFIX}/manifest-2026-08-20T04:00:00.000Z-b.json.gz`]: await gzipText(
+      [`${PREFIX}/manifest-2026-08-20T04:00:00.000Z-b.json.gz`]:
         "{not a manifest",
-      ),
     }),
   });
   assertEquals(found, undefined);
@@ -81,9 +87,8 @@ const CTX: Ctx = {
 /** A store holding one manifest under a fixed name. */
 async function storeHolding(manifest: Parameters<typeof serializeManifest>[0]) {
   return storeOf({
-    [`${PREFIX}/manifest-2026-08-20T04:00:00.000Z-a.json.gz`]: await gzipText(
+    [`${PREFIX}/manifest-2026-08-20T04:00:00.000Z-a.json.gz`]:
       serializeManifest(manifest),
-    ),
   });
 }
 

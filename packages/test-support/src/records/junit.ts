@@ -311,10 +311,20 @@ export function ingestJUnit(
   // is what remains once the preload has wrapped `Deno.test` and every
   // classname names the preload instead.
   const files = new Map<string, string>();
+  const ambiguous = new Set<string>();
   for (const testcase of cases) {
     const file = classnameFile(testcase, options.filePrefix);
-    if (file !== undefined) files.set(testcase.name, file);
+    if (file === undefined) continue;
+    const known = files.get(testcase.name);
+    // Two files reporting one name are one identity, and which of them a
+    // leaf came from is not a question this report can answer. Attributing
+    // it to whichever was read last would be a guess presented as a fact,
+    // so the name carries no file at all and the collision is what the
+    // report tool surfaces.
+    if (known !== undefined && known !== file) ambiguous.add(testcase.name);
+    else files.set(testcase.name, file);
   }
+  for (const name of ambiguous) files.delete(name);
   for (const [name, file] of options.fileByName ?? []) files.set(name, file);
   return leaves.map((leaf) => {
     const test: TestIdentity = {

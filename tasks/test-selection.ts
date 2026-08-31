@@ -114,10 +114,13 @@ export function parseIdentityArgument(text: string): TestIdentity | undefined {
     return undefined;
   }
   const [k, s, n, v] = parts;
-  if (typeof k !== "string" || typeof s !== "string" || typeof n !== "string") {
-    return undefined;
-  }
-  if (v !== undefined && typeof v !== "string") return undefined;
+  // Empty parts are not an identity. The manifest validator refuses them,
+  // so accepting one here would report a test as unknown and mandatory
+  // when what was really wrong was the argument.
+  const named = (part: unknown): part is string =>
+    typeof part === "string" && part.length > 0;
+  if (!named(k) || !named(s) || !named(n)) return undefined;
+  if (v !== undefined && !named(v)) return undefined;
   const test: TestIdentity = { k, s, n };
   if (typeof v === "string") test.v = v;
   return test;
@@ -271,18 +274,28 @@ async function main(args: readonly string[]): Promise<void> {
       return;
     }
     case "plan": {
-      const manifest = await newestManifest();
-      if (manifest === undefined) Deno.exit(1);
-      const laneIndex = args.indexOf("--lane");
-      const laneNumber = laneIndex < 0
-        ? undefined
-        : Number(args[laneIndex + 1]);
+      // Before the manifest, because this mode does not read one and
+      // would otherwise fail on a store it never needed.
       if (args.includes("--verify")) {
         fail(
           "plan --verify needs the test topology, which is not in the tree " +
             "yet.\nSee docs/plans/pull-request-test-selection.md, part two.",
         );
       }
+      const laneIndex = args.indexOf("--lane");
+      let laneNumber: number | undefined;
+      if (laneIndex >= 0) {
+        laneNumber = Number(args[laneIndex + 1]);
+        if (
+          !Number.isInteger(laneNumber) || laneNumber < 1 || laneNumber > LANES
+        ) {
+          // Silently filtering every lane would exit zero having printed
+          // nothing, which reads as "this lane runs no tests".
+          fail(`--lane takes a whole number from 1 to ${LANES}`);
+        }
+      }
+      const manifest = await newestManifest();
+      if (manifest === undefined) Deno.exit(1);
       printDryRun(manifest, laneNumber);
       return;
     }

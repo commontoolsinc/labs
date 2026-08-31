@@ -1,6 +1,5 @@
 import { describe, it } from "@std/testing/bdd";
 import { expect } from "@std/expect";
-import { gzipText } from "@commonfabric/test-support/records";
 
 import {
   fetchManifest,
@@ -126,9 +125,7 @@ describe("store", () => {
       const found = await fetchManifest({
         at,
         env: NO_ENV,
-        fetch: storeOf({
-          [name]: await gzipText(serializeManifest(manifest)),
-        }),
+        fetch: storeOf({ [name]: serializeManifest(manifest) }),
       });
       expect(found.objectName).toBe(name);
       expect(found.manifest).toEqual(manifest);
@@ -148,7 +145,7 @@ describe("store", () => {
       const found = await fetchManifest({
         at,
         env: NO_ENV,
-        fetch: storeOf({ [name]: await gzipText("{not a manifest") }),
+        fetch: storeOf({ [name]: "{not a manifest" }),
       });
       expect(found.manifest).toBeUndefined();
       expect(found.absent).toContain("not a manifest this reader understands");

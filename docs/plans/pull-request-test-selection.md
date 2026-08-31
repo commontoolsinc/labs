@@ -1394,11 +1394,11 @@ every variant. Resolution preserves the record's variant, so one rename
 bridges the default and every non-default history without joining those
 histories to each other.
 
-What is missing is not mechanism, it is practice. The file holds 193
-lines, every one of them dated 2026-08-20, which is a single sweep rather
-than a habit. Whether a rename since then carried its line with it is what
-practice means here, and it is what the suggestion the reporter makes is
-for.
+The mechanism is there and so, by now, is the practice: the file holds
+219 lines across nine dates, so renames are being bridged as they happen
+rather than swept up once. What the reporter's suggestion adds is the
+case nobody notices — a rename whose author had no reason to think the
+history mattered.
 
 Three things follow.
 

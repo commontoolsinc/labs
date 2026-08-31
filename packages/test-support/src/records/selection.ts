@@ -212,6 +212,18 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+/**
+ * An ISO 8601 UTC instant. A reader measures a manifest's age from this,
+ * and a value that is not a date parses as a missing number, which
+ * compares false against every threshold — so a corrupt manifest would
+ * read as freshly generated forever.
+ */
+function isTimestamp(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  if (!/^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/.test(value)) return false;
+  return Number.isFinite(Date.parse(value));
+}
+
 function parseIdentity(value: unknown): TestIdentity | undefined {
   if (!isRecord(value)) return undefined;
   if (
@@ -258,8 +270,14 @@ function parseEntry(value: unknown): ManifestEntry | undefined {
   if (
     !isFiniteNumber(value.cost) || value.cost < 0 ||
     !isFiniteNumber(value.score) ||
-    !isFiniteNumber(value.flakeRate) ||
-    !isFiniteNumber(value.repeats) || value.repeats < 1
+    // A share of a test's runs, so outside zero to one it is not one. A
+    // negative rate would sit under the exclusion threshold and stay
+    // selectable, which is the direction a corrupt manifest must not go.
+    !isFiniteNumber(value.flakeRate) || value.flakeRate < 0 ||
+    value.flakeRate > 1 ||
+    // A count of runs. Nothing can run a test one and a half times.
+    !isFiniteNumber(value.repeats) || !Number.isInteger(value.repeats) ||
+    value.repeats < 1
   ) {
     return undefined;
   }
@@ -426,7 +444,7 @@ export function parseManifest(value: unknown): Manifest | undefined {
   if (!isRecord(value)) return undefined;
   if (value.schema !== MANIFEST_SCHEMA_VERSION) return undefined;
   if (
-    !isNonEmptyString(value.generatedAt) || !isNonEmptyString(value.seed) ||
+    !isTimestamp(value.generatedAt) || !isNonEmptyString(value.seed) ||
     !isNonEmptyString(value.commit) || !isFiniteNumber(value.runs) ||
     value.runs < 0 || !isRecord(value.dials)
   ) {

@@ -149,6 +149,19 @@ describe("build", () => {
       ).toBe("packages/memory/test/space.test.ts");
     });
 
+    it("keeps a file-backed unit when a later record has none", () => {
+      const read = readReport(
+        stored(CI_NAME, context(), [
+          record({ file: "packages/memory/test/space.test.ts" }),
+          record(),
+        ]),
+        NO_ALIASES,
+      );
+      expect([...read.surfaces.values()][0]!.unit).toEqual(
+        "packages/memory/test/space.test.ts",
+      );
+    });
+
     it("falls back to the identity's own name", () => {
       expect(
         recordSurface({ k: "pattern", s: "patterns", n: "a.tsx" }, undefined)

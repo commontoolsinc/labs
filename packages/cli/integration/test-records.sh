@@ -35,9 +35,15 @@ cf_test_record_line() {
     mkdir -p "$CF_TEST_RECORDS_DIR" 2>/dev/null || return 0
     CF_TEST_RECORD_FRAGMENT="$CF_TEST_RECORDS_DIR/fragment-sh-$$-${RANDOM}${RANDOM}.ndjson"
   fi
+  # A step name is a sentence somebody wrote beside the phase it
+  # describes. The two characters that would tear the line are escaped
+  # here, and a control character — a newline above all — is replaced
+  # rather than escaped, because a raw one splits the record into two
+  # lines and the reader drops both.
   local name="$1"
   name="${name//\\/\\\\}"
   name="${name//\"/\\\"}"
+  name=$(printf '%s' "$name" | tr '\000-\037' ' ')
   printf '{"line":"record","test":{"k":"integration","s":"cli","n":"%s"},"outcome":"%s","durationMs":%d}\n' \
     "$name" "$2" "$3" >> "$CF_TEST_RECORD_FRAGMENT" 2>/dev/null || true
 }

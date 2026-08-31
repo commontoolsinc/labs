@@ -11,7 +11,6 @@
 
 import {
   type Environment,
-  gunzipToText,
   gzipText,
   listObjects,
   objectUrl,
@@ -103,7 +102,14 @@ export function newestAtOrBefore(
   for (const name of objectNames) {
     const generatedAt = generatedAtOf(name);
     if (generatedAt === undefined || generatedAt > at) continue;
-    if (best === undefined || generatedAt > bestAt) {
+    // Two publishers can start in the same millisecond, and then the
+    // timestamp does not order them. The name does, and every reader
+    // sorts it the same way, so the lanes and the wall obey one manifest
+    // rather than two that happen to share an instant.
+    if (
+      best === undefined || generatedAt > bestAt ||
+      (generatedAt === bestAt && name > best)
+    ) {
       best = name;
       bestAt = generatedAt;
     }
@@ -142,7 +148,10 @@ export async function fetchManifest(options: {
   try {
     names = await listObjects({
       bucket,
-      prefix,
+      // The trailing slash keeps the listing inside this version: a bare
+      // "v1" prefix also matches "v10", whose manifests would sort above
+      // these and hide the newest one this reader may use.
+      prefix: `${prefix}/`,
       ...(options.fetch === undefined ? {} : { fetch: options.fetch }),
     });
   } catch (error) {
@@ -162,7 +171,9 @@ export async function fetchManifest(options: {
         absent: `reading ${objectName} failed: HTTP ${response.status}`,
       };
     }
-    text = await gunzipToText(new Uint8Array(await response.arrayBuffer()));
+    // The store serves these with transcoding, so a plain fetch has
+    // already decoded the gzip the object is stored under.
+    text = await response.text();
   } catch (error) {
     return { absent: `reading ${objectName} failed: ${error}` };
   }
