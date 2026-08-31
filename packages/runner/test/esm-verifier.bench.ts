@@ -174,7 +174,7 @@ async function loadParkingCoordinatorProgram(): Promise<RuntimeProgram> {
 }
 
 //
-// Pre-compile everything (outside bench timing)
+// Pre-compilation (outside bench timing)
 //
 
 const parkingCoordinatorProgram = await loadParkingCoordinatorProgram();

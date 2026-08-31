@@ -481,6 +481,13 @@ Deno.test("readWorkspaceExports surfaces an unreadable member config", async () 
   }
 });
 
+//
+// The real repository
+//
+// The two runs that read this tree rather than a fixture, which is what makes
+// the gate answer for the repository as it stands.
+//
+
 /**
  * Runs the script as `deno task check-skill-facts` does. This is what exercises
  * the entry point, and the only thing that proves the permissions the shebang
@@ -491,13 +498,6 @@ Deno.test("readWorkspaceExports surfaces an unreadable member config", async () 
  * inherit the test runner's lock flags and resolving its imports must not write
  * to the real deno.lock.
  */
-//
-// The real repository
-//
-// The two runs that read this tree rather than a fixture, which is what makes
-// the gate answer for the repository as it stands.
-//
-
 Deno.test("the script runs as a command over the real repo", async () => {
   const root = fromFileUrl(new URL("..", import.meta.url));
   const output = await runDenoCommandWithTemporaryLock({
@@ -606,6 +606,10 @@ Deno.test("a package AGENTS.md resolves paths inside its own package", async () 
     await Deno.remove(root, { recursive: true });
   }
 });
+
+//
+// The conservative half of the heuristic
+//
 
 Deno.test("a relative citation with no matching directory is left alone", async () => {
   // The conservative half of the heuristic, which the widened scan leans on
