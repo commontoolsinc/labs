@@ -72,17 +72,22 @@ Deno.test("an assertion that holds says nothing", function () {
   runWith().assert(true, "test successful");
 });
 
-//
-// No real run in this suite is killed by a signal, so this states one. The
-// transcript names the signal rather than only the exit code it comes with.
-//
-
 Deno.test("a run the kernel killed names the signal", function () {
+  // No real run in this suite is killed by a signal, so this states one. The
+  // transcript names the signal rather than only the exit code it comes with.
+
   const transcript = runWith({ code: 137, signal: "SIGKILL" }).transcript();
 
   assertStringIncludes(transcript, "SIGKILL");
   assertStringIncludes(transcript, "137");
 });
+
+//
+// What the harness keeps out of a run's streams
+//
+// Download noise before the harness boundary goes; what a test itself wrote
+// stays, control sequences included.
+//
 
 Deno.test("dependency downloads before the harness boundary are removed", function () {
   const encoder = new TextEncoder();
