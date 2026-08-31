@@ -111,13 +111,15 @@ class WatchAddRemoveTransport extends ScriptedSessionTransport {
 // corrected complete set and acknowledges cleanup.
 class FailFirstWatchRemovalTransport extends ScriptedSessionTransport {
   watchRemovalAttempts = 0;
+  readonly #failuresBeforeSuccess: number;
 
-  constructor() {
+  constructor(failuresBeforeSuccess = 1) {
     super({
       name: "watch-removal-retry",
       sessionId: "session:watch-removal-retry",
       space,
     });
+    this.#failuresBeforeSuccess = failuresBeforeSuccess;
   }
 
   protected override handle(message: ScriptedTransportMessage): void {
@@ -149,7 +151,7 @@ class FailFirstWatchRemovalTransport extends ScriptedSessionTransport {
       }
       case "session.watch.set":
         this.watchRemovalAttempts++;
-        if (this.watchRemovalAttempts === 1) {
+        if (this.watchRemovalAttempts <= this.#failuresBeforeSuccess) {
           this.respond({
             type: "response",
             requestId: message.requestId!,
@@ -235,6 +237,92 @@ Deno.test("absence reconciliation retries a failed temporary watch removal", asy
     assertEquals(await provider.loadUnexaminedAbsences(tx.tx), 0);
     assertEquals(transport.watchRemovalAttempts, 2);
   } finally {
+    tx.abort("inspection only");
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("absence reconciliation retries when applying a watch removal sync fails", async () => {
+  const transport = new FailFirstWatchRemovalTransport(0);
+  const sessionFactory = new SingleSessionFactory(transport);
+  const storageManager = TestStorageManager.create({
+    as: signer,
+    memoryHost: new URL("memory://runner-v2-watch-removal-apply-retry"),
+  }, sessionFactory);
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const provider = storageManager.open(space);
+  const replica = provider.replica as unknown as {
+    applySessionSync(sync: unknown, type: string): void;
+  };
+  const originalApply = replica.applySessionSync.bind(replica);
+  let applyCalls = 0;
+  replica.applySessionSync = (sync, type) => {
+    applyCalls++;
+    if (applyCalls === 2) {
+      replica.applySessionSync = originalApply;
+      throw new Error("synthetic watch removal apply failure");
+    }
+    originalApply(sync, type);
+  };
+  const tx = runtime.edit();
+  tx.read({
+    space,
+    id: `of:watch-removal-apply-retry-${crypto.randomUUID()}`,
+    type: "application/json",
+    scope: "space",
+    path: [],
+  }, { trackReadWithoutLoad: true });
+
+  try {
+    assertEquals(await provider.loadUnexaminedAbsences!(tx.tx), 0);
+    assertEquals(transport.watchRemovalAttempts, 2);
+  } finally {
+    replica.applySessionSync = originalApply;
+    tx.abort("inspection only");
+    await runtime.dispose();
+    await storageManager.close();
+  }
+});
+
+Deno.test("absence reconciliation warns after temporary watch cleanup exhausts retries", async () => {
+  const transport = new FailFirstWatchRemovalTransport(2);
+  const sessionFactory = new SingleSessionFactory(transport);
+  const storageManager = TestStorageManager.create({
+    as: signer,
+    memoryHost: new URL("memory://runner-v2-watch-removal-exhausted"),
+  }, sessionFactory);
+  const runtime = new Runtime({
+    apiUrl: new URL(import.meta.url),
+    storageManager,
+  });
+  const provider = storageManager.open(space);
+  const tx = runtime.edit();
+  tx.read({
+    space,
+    id: `of:watch-removal-exhausted-${crypto.randomUUID()}`,
+    type: "application/json",
+    scope: "space",
+    path: [],
+  }, { trackReadWithoutLoad: true });
+  const originalWarn = console.warn;
+  const warnings: unknown[][] = [];
+  console.warn = (...values: unknown[]) => warnings.push(values);
+
+  try {
+    assertEquals(await provider.loadUnexaminedAbsences!(tx.tx), 0);
+    assertEquals(transport.watchRemovalAttempts, 2);
+    assertEquals(
+      warnings.some((values) =>
+        values[0] === "failed to remove temporary graph watches after retry"
+      ),
+      true,
+    );
+  } finally {
+    console.warn = originalWarn;
     tx.abort("inspection only");
     await runtime.dispose();
     await storageManager.close();

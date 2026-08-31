@@ -8,6 +8,10 @@ import {
 import { resolveScopeKey } from "@commonfabric/memory/v2";
 import { EmulatedStorageManager } from "../src/storage/v2-emulate.ts";
 import { Runtime } from "../src/runtime.ts";
+import type {
+  IExtendedStorageTransaction,
+  IStorageTransaction,
+} from "../src/storage/interface.ts";
 import { stampWaveRunContext } from "../src/executor/wave.ts";
 import { excludeReadFromConflict } from "../src/storage/reactivity-log.ts";
 import { toMemorySpaceAddress } from "../src/link-types.ts";
@@ -290,8 +294,88 @@ describe("editWithRetry absence reconciliation", () => {
         expect(result.error).toBeUndefined();
         expect(runs).toBe(1);
       }
+
+      // The capability is optional. A provider that predates absence
+      // reconciliation must retain the original server-judged commit path.
+      provider.loadUnexaminedAbsences = undefined;
+      const result = await runtime.editWithRetry((tx) => {
+        runtime.getCell(
+          space,
+          "provider-without-reconciliation-capability",
+          valueSchema,
+          tx,
+        ).get();
+        runtime.getCell(
+          space,
+          "provider-without-reconciliation-output",
+          valueSchema,
+          tx,
+        ).set({ value: 1 });
+      });
+      expect(result.error).toBeUndefined();
     } finally {
       provider.loadUnexaminedAbsences = original;
+      await runtime.dispose();
+      await sm.close();
+      await server.close();
+    }
+  });
+
+  it("aborts an edit when disposal begins inside its action", async () => {
+    const server = newSharedServer();
+    const sm = EmulatedStorageManager.connectTo(server, { as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+    });
+    let disposing: Promise<void> | undefined;
+    try {
+      const result = await runtime.editWithRetry((tx) => {
+        runtime.getCell(
+          space,
+          "dispose-before-edit-commit",
+          valueSchema,
+          tx,
+        ).set({ value: 1 });
+        // The closing path sets the write gate synchronously before its first
+        // awaited teardown barrier. editWithRetry must abort this prepared
+        // transaction instead of committing behind disposal.
+        disposing = runtime.dispose();
+      });
+
+      expect(result.error?.name).toBe("StorageTransactionAborted");
+      expect(result.error?.message).toContain("runtime is disposing");
+      await disposing;
+    } finally {
+      await disposing?.catch(() => undefined);
+      await sm.close();
+      await server.close();
+    }
+  });
+
+  it("returns a transaction error when commit rejects its promise", async () => {
+    const server = newSharedServer();
+    const sm = EmulatedStorageManager.connectTo(server, { as: signer });
+    const runtime = new Runtime({
+      apiUrl: new URL(import.meta.url),
+      storageManager: sm,
+    });
+    const failure = new Error("synthetic commit rejection");
+    let attempted: IExtendedStorageTransaction | undefined;
+    try {
+      const result = await runtime.editWithRetry((tx) => {
+        attempted = tx;
+        tx.commit = (() => Promise.reject(failure)) as typeof tx.commit;
+        return "uncommitted";
+      }, 0);
+
+      expect(result.error?.name).toBe("StorageTransactionAborted");
+      expect(result.error?.message).toContain("synthetic commit rejection");
+      expect((result.error as { reason?: unknown } | undefined)?.reason).toBe(
+        failure,
+      );
+    } finally {
+      attempted?.abort("synthetic commit completed");
       await runtime.dispose();
       await sm.close();
       await server.close();
@@ -503,12 +587,40 @@ describe("editWithRetry absence reconciliation", () => {
 
       const provider = smB.open(space);
       expect(provider.loadUnexaminedAbsences).toBeDefined();
+      expect(await provider.loadUnexaminedAbsences!(undefined)).toBe(0);
+      expect(
+        await provider.loadUnexaminedAbsences!({
+          getReadActivities: () => undefined,
+        } as unknown as IStorageTransaction),
+      ).toBe(0);
+
+      // A write in another space is irrelevant to this replica's own-write
+      // exclusion, and must be skipped rather than keyed here.
+      const otherSpace = (await Identity.fromPassphrase(
+        "absence reconciliation unrelated space",
+      )).did();
+      runtimeB.getCell(otherSpace, "unrelated-write", valueSchema, txB)
+        .set({ value: 1 });
       // Of the two cold reads, exactly one document turns out to exist; the
       // other's absence is examined and stays a sound claim.
       expect(await provider.loadUnexaminedAbsences!(txB.tx)).toBe(1);
       // Loaded is loaded: a second pass finds nothing left unexamined.
       expect(await provider.loadUnexaminedAbsences!(txB.tx)).toBe(0);
       txB.abort("inspection only");
+
+      // A partial served identity cannot name a session instance on the wire.
+      // Leave that absence for ordinary commit admission.
+      const incomplete = runtimeB.edit();
+      incomplete.tx.scopeKeyIdentity = { principal: signer.did() };
+      incomplete.read({
+        space,
+        id: "of:incomplete-served-session-identity",
+        type: "application/json",
+        scope: "session",
+        path: [],
+      }, { trackReadWithoutLoad: true });
+      expect(await provider.loadUnexaminedAbsences!(incomplete.tx)).toBe(0);
+      incomplete.abort("inspection only");
     } finally {
       await runtimeB?.dispose();
       await runtimeA.dispose();
