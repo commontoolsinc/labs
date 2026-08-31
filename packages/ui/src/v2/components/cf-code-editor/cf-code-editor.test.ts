@@ -354,30 +354,40 @@ describe("CFCodeEditor pasted-mention decision", () => {
 describe("CFCodeEditor mention-piece resolution", () => {
   // The private resolution surface under test. `piece`-bearing entries are
   // index rows standing for their piece; entries without one ARE the piece.
+  // A row's piece is stored as a LINK, and its value crosses the client
+  // boundary as an empty object — so the fixtures store raw `$link`
+  // sigils, and the mock network's resolveAsCell follows them, exactly as
+  // the runtime does. Nothing here reaches a piece through a value.
   type ResolutionInternals = {
     mentionable: CellHandle<MentionableArray> | null;
     _resolvePieceIds(): Promise<void>;
     _resolvedPieceCells: Map<number, CellHandle<Mentionable>>;
     _getPieceId(index: number): string;
     findPieceById(id: string): CellHandle<Mentionable> | null;
+    getFilteredMentionable(query: string): Array<[unknown, number]>;
   };
 
   const internals = (element: CFCodeEditor): ResolutionInternals =>
     element as unknown as ResolutionInternals;
 
-  const pieceRef = { id: "of:target-piece" } as Partial<CellRef>;
+  const pieceLink = {
+    "$link": { id: "of:target-piece", path: [] },
+  };
 
   it("resolves a piece-bearing entry to its piece", async () => {
     const element = internals(new CFCodeEditor());
-    const piece = createMockCellHandle({ title: "Target" }, pieceRef);
+    const target = createMockCellHandle(
+      { title: "Target" },
+      { id: "of:target-piece" } as Partial<CellRef>,
+    );
     element.mentionable = createMockCellHandle([
-      { [NAME]: "Row", title: "Row", piece },
+      { [NAME]: "Row", title: "Row", piece: pieceLink },
     ]) as unknown as CellHandle<MentionableArray>;
 
     await element._resolvePieceIds();
 
     const resolved = element._resolvedPieceCells.get(0);
-    expect(resolved?.id()).toBe(piece.id());
+    expect(resolved?.id()).toBe(target.id());
   });
 
   it("resolves an entry without a piece to the entry itself", async () => {
@@ -391,61 +401,66 @@ describe("CFCodeEditor mention-piece resolution", () => {
     expect(resolved?.id()).toBe(list.key(0).id());
   });
 
-  it("finds a row's piece before resolution lands", () => {
-    // Nothing resolved yet: the id and the returned cell both come from the
-    // row's hydrated piece, never from the row's own sub-cell.
+  it("withholds an index row until its piece resolves", async () => {
+    // Before resolution a row has no usable identity — its sub-cell names
+    // the row, and no id beats a wrong one — so the completion surfaces
+    // exclude it and its id is empty. Resolution restores all three.
     const element = internals(new CFCodeEditor());
-    const piece = createMockCellHandle({ title: "Target" }, pieceRef);
+    const target = createMockCellHandle(
+      { title: "Target" },
+      { id: "of:target-piece" } as Partial<CellRef>,
+    );
     element.mentionable = createMockCellHandle([
-      { [NAME]: "Row", title: "Row", piece },
+      { [NAME]: "Row", title: "Row", piece: pieceLink },
     ]) as unknown as CellHandle<MentionableArray>;
 
+    expect(element.getFilteredMentionable("")).toEqual([]);
+    expect(element._getPieceId(0)).toBe("");
+
+    await element._resolvePieceIds();
+
+    expect(element.getFilteredMentionable("").length).toBe(1);
     const found = element.findPieceById(element._getPieceId(0));
-    expect(found?.id()).toBe(piece.id());
+    expect(found?.id()).toBe(target.id());
   });
 
   it("keeps the newer resolution when an older pass finishes late", async () => {
     // The mentionable HANDLE stays identical when its contents change, so an
     // older pass that resolves slowly can finish after a newer one. The
-    // slow pass here is gated open only once the fast pass has published;
-    // what the caches hold at the end decides the race.
+    // slow pass is gated open only once the fast pass has published; what
+    // the caches hold at the end decides the race. Plain entries, so the
+    // gate can ride the sub-cell the pass resolves.
     const element = internals(new CFCodeEditor());
-    const slow = createMockCellHandle(
-      { title: "Slow" },
-      { id: "of:slow-piece" } as Partial<CellRef>,
-    );
-    const fast = createMockCellHandle(
-      { title: "Fast" },
-      { id: "of:fast-piece" } as Partial<CellRef>,
-    );
+    const list = createMockCellHandle([{ [NAME]: "Slow" }], {
+      id: "of:race-list" as CellRef["id"],
+    });
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
-    // The resolution path reads the piece through an `asSchema` copy, so the
-    // gate has to ride the copy: an override on `slow` itself would be left
-    // behind by the copy and the "slow" pass would resolve instantly.
-    const realResolve = slow.resolveAsCell.bind(slow);
-    const realAsSchema = slow.asSchema.bind(slow);
-    slow.asSchema = ((schema: never) => {
-      const copy = realAsSchema(schema);
-      copy.resolveAsCell = (async () => {
-        await gate;
-        return await realResolve();
-      }) as typeof copy.resolveAsCell;
-      return copy;
-    }) as typeof slow.asSchema;
+    let armed = true;
+    const realKey = list.key.bind(list);
+    list.key = ((k: PropertyKey) => {
+      const child = realKey(k as never);
+      if (armed && String(k) === "0") {
+        const realResolve = child.resolveAsCell.bind(child);
+        child.resolveAsCell = (async () => {
+          await gate;
+          return await realResolve();
+        }) as typeof child.resolveAsCell;
+      }
+      return child;
+    }) as typeof list.key;
 
-    const list = createMockCellHandle([
-      { [NAME]: "Row", title: "Row", piece: slow },
-    ]);
     element.mentionable = list as unknown as CellHandle<MentionableArray>;
     const older = element._resolvePieceIds();
 
-    list.set([{ [NAME]: "Row", title: "Row", piece: fast }]);
+    armed = false;
+    list.set([{ [NAME]: "Fast" }]);
     await element._resolvePieceIds();
-    expect(element._resolvedPieceCells.get(0)?.id()).toBe(fast.id());
+    const fastId = element._resolvedPieceCells.get(0)?.id();
+    expect(fastId).toBeDefined();
 
     release();
     await older;
-    expect(element._resolvedPieceCells.get(0)?.id()).toBe(fast.id());
+    expect(element._resolvedPieceCells.get(0)?.id()).toBe(fastId);
   });
 });

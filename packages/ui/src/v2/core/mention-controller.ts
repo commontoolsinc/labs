@@ -290,18 +290,20 @@ export class MentionController implements ReactiveController {
   }
 
   /**
-   * The entry's destination: a row's hydrated `piece` when it carries one,
-   * the entry itself otherwise. An entry with `piece` is a derived index
-   * row standing for the piece — encoding the entry would make every
-   * mention name a row of somebody's bookkeeping. Bound to the mentionable
-   * schema so field reads on the destination materialize.
+   * The entry's destination: a row's `piece` when it carries one, the
+   * entry itself otherwise. An entry with `piece` is a derived index row
+   * standing for the piece — encoding the entry would make every mention
+   * name a row of somebody's bookkeeping. The row is detected by the KEY's
+   * presence and its piece reached by ADDRESS: an `asCell` value crosses
+   * the client boundary as an empty object, so the value itself can carry
+   * no handle. Bound to the mentionable schema so field reads on the
+   * destination materialize.
    */
   private _destinationOf(
     mention: CellHandle<Mentionable>,
   ): CellHandle<Mentionable> {
-    const piece = mention.get()?.piece;
-    return isCellHandle(piece)
-      ? piece.asSchema<Mentionable>(MentionableSchema)
+    return mention.get()?.piece !== undefined
+      ? mention.key("piece").asSchema<Mentionable>(MentionableSchema)
       : mention;
   }
 
