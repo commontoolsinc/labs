@@ -24,6 +24,18 @@
  * here and rebuilt every iteration in the real crossing, and the allocation
  * pressure that comes of it lands on whichever step is running.
  *
+ * The two client-side steps read an arrival this file built once, so each
+ * iteration decodes and hydrates a tree already resident in cache. What they
+ * report is therefore a lower bound. Handing each iteration an arrival of its
+ * own does not fix that so much as move it: the figure rises with the size of
+ * the working set rather than settling anywhere, from 360 us over one tree to
+ * 403 over 64 and 438 over 256, on the 1000-record subject. Neither number is
+ * what a crossing pays, one message being neither one of many resident trees
+ * nor one of hundreds. `ipc-crossing.bench.ts` is what pays the real cost, on
+ * a tree `postMessage()` has just written; this file is for ranking the steps
+ * against each other and for comparing a change against its base, and a bound
+ * that holds on both sides of such a comparison does not disturb it.
+ *
  * The transport step is `structuredClone()` rather than a real
  * `postMessage()`, which is a proxy and not the thing: it serializes and
  * deserializes as the crossing does, on the calling thread and without the
