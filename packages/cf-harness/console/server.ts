@@ -206,7 +206,7 @@ const DEFAULT_FABRIC_API_URL = "http://localhost:8000";
 const DEFAULT_FABRIC_CFC_POSTURE: CfcPosture = "max-enforcement";
 
 /** The CLI's own default model, so both entrypoints bill the same route. */
-const DEFAULT_MODEL = "gpt-5.6-terra";
+const DEFAULT_MODEL = "gpt-5.6-sol";
 
 /** How often the stream publishes a liveness tick, in milliseconds. */
 const PING_INTERVAL_MS = 15_000;
