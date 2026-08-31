@@ -52,9 +52,10 @@ export interface CommitMessage {
   /** The commit hash, as printed after `commit `. */
   readonly sha: string;
 
-  /** First and last (inclusive) 0-based line indices of the indented message. */
+  /** First 0-based line index of the indented message. */
   readonly start: number;
 
+  /** Last such index, inclusive. */
   readonly end: number;
 }
 

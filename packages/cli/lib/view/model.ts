@@ -68,11 +68,16 @@ export interface Span {
   /** Single-line spelling used when displaying an exact definition target. */
   readonly exactDefinitionDisplayName?: string;
 
-  /** Rich-text modifiers used by rendered document views. */
+  /** Bold, one of the rich-text modifiers rendered document views use. */
   readonly bold?: boolean;
 
+  /** Italic, likewise. */
   readonly italic?: boolean;
+
+  /** Underline, likewise. */
   readonly underline?: boolean;
+
+  /** Strikethrough, likewise. */
   readonly strikethrough?: boolean;
 }
 
@@ -229,6 +234,7 @@ export interface StructureNode {
   /** Character offset of the node start, for definition peeks. */
   readonly startOffset: number;
 
+  /** Character offset of the node end, read the same way. */
   readonly endOffset: number;
   readonly depth: number;
   readonly children: StructureNode[];

@@ -16,10 +16,10 @@ export interface DiffFileRange {
   /** 0-based index in document order — the stable key for the fold set. */
   readonly index: number;
 
-  /** First and last (inclusive) diff-text line of the file (header … last
-   * hunk line). */
+  /** First diff-text line of the file, which is its header line. */
   readonly headerLine: number;
 
+  /** Last such line, inclusive — the file's last hunk line. */
   readonly endLine: number;
 
   /** The path used for file-category detection (new side, else old side). */
@@ -28,9 +28,10 @@ export interface DiffFileRange {
   readonly isTest: boolean;
   readonly isMarkdown: boolean;
 
-  /** Added and removed line counts within the file's range. */
+  /** Added line count within the file's range. */
   readonly adds: number;
 
+  /** Removed line count over the same range. */
   readonly dels: number;
 
   /** The one-line summary shown when the file is collapsed. */
