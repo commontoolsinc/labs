@@ -51,6 +51,7 @@ const REF_A = `/of:fid1:${HASH_A}/summary`;
  * handle boundary does not swap them — the scrub is what keeps them out.
  */
 const SCRUB_HASH = "C".repeat(43);
+
 const HOSTILE_HASH_NAME = `fid1:${SCRUB_HASH}`;
 const HOSTILE_DID_NAME = "did:key:z6MkfffDescribeHandleScrubbing";
 
@@ -60,6 +61,7 @@ const HOSTILE_DID_NAME = "did:key:z6MkfffDescribeHandleScrubbing";
  * boundary's business: a link is swapped for a token, wherever it sits.
  */
 const LINKED_NAME_HASH = "E".repeat(43);
+
 const LINK_PROPERTY_NAME = `/of:fid1:${LINKED_NAME_HASH}/total`;
 
 /** The sandbox members the prompt loop reaches on a run with no shell work. */

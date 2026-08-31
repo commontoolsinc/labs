@@ -44,6 +44,7 @@ export interface PatternIndexSearchResult {
    * claim that everything matched — the ratio is what says how close.
    */
   matchedTerms?: number;
+
   queryTerms?: number;
 }
 
@@ -110,6 +111,7 @@ export interface PatternIndexListedPattern {
 
   /** Event type to how many times it was recorded against this pattern. */
   events: Readonly<Record<string, number>>;
+
   score: number;
 }
 
@@ -135,6 +137,7 @@ export interface PatternIndexEvent {
 
   /** `null` for an event the index holds no timestamp for. */
   ts: string | null;
+
   note?: string;
 }
 

@@ -25,6 +25,7 @@ export interface ConsoleCellFacts {
    * the call this sighting belongs to.
    */
   confidentiality?: readonly string[];
+
   schema?: unknown;
 
   /** What the space stores for the cell itself, where the run read it. */
@@ -248,6 +249,7 @@ export class ConsoleCell extends LitElement {
    * `mouseleave` alone strands a card the keyboard is still holding open.
    */
   #hovered = false;
+
   #focused = false;
 
   #open(by: "hover" | "focus"): void {

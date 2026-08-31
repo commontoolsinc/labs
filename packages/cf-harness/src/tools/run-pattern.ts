@@ -83,6 +83,7 @@ export interface RunPatternToolInput {
    * never reaches the model, on the success path or on any error path.
    */
   patternId?: string;
+
   inputs?: Record<string, unknown>;
   resultSchema?: JSONSchema;
 }
@@ -119,6 +120,7 @@ export interface RunPatternToolSuccessOutput {
 
   /** Sanitized result value; present only when `resultSchema` was given. */
   value?: unknown;
+
   linkedStringCount?: number;
 
   /** Why `value` is absent despite a `resultSchema`: the raw result did not
@@ -867,6 +869,7 @@ export const runPatternTool: HarnessToolDefinition<
           ? "run_pattern was cancelled"
           : `run_pattern was cancelled; ${detail}`,
       );
+
     if (context.getFabricSession === undefined) {
       return errorOutput(
         "error",
@@ -1230,6 +1233,7 @@ export const runPatternTool: HarnessToolDefinition<
         recordPatternIndexEvent(getPatternIndexClient, patternId, eventType);
       }
     };
+
     let piece: PieceController<unknown>;
     try {
       // Deliberately unregistered: no `pieces.add()` and no default-pattern

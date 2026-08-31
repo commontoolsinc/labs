@@ -319,6 +319,7 @@ interface ConsoleConfig {
    * fabric session names is resolved against the caches on this host.
    */
   spaceDbPath?: string;
+
   maxModelTurns?: number;
   skillsRoot?: string;
 
@@ -736,6 +737,7 @@ export class ConsoleServer {
    * envelope reaches the streams on the call that broadcast it.
    */
   #heldFanOut: Promise<void> | undefined;
+
   #beats = 0;
 
   /**

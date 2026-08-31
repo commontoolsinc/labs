@@ -34,8 +34,10 @@ import {
 export interface ConsoleHandleUse {
   /** The step that passed it. */
   step: number;
+
   /** The tool it was passed to. */
   toolName: string;
+
   /**
    * How it was passed: the `inputs` key that carried it into a pattern, or the
    * argument name for a tool that takes a handle directly.
@@ -52,6 +54,7 @@ export interface ConsoleHandle {
   token: string;
   /** The address the handle stands for, when the run's table still holds it. */
   ref?: string;
+
   addressKey?: string;
   /** The step whose text first carried this token. */
   introducedAtStep: number;
@@ -151,8 +154,10 @@ export type ConsoleStepStatus = "ok" | "error" | "denied" | "none";
 export interface ConsoleDisclosure {
   /** Bytes of JSON the result carried as value. */
   valueBytes: number;
+
   /** Positions the sanitizer replaced with an opaque link. */
   sealedPositions: number;
+
   /**
    * The longest run of numbers the value carries. An array of integers is an
    * array of values none of which is sealed, so a long one is a channel wide
@@ -177,10 +182,12 @@ export interface ConsoleStep {
    * produced, so one it malformed is reported as `inputText` instead.
    */
   input?: unknown;
+
   inputText?: string;
 
   /** The result the model read, parsed on the same terms as the input. */
   output?: unknown;
+
   outputText?: string;
 
   /** Where the untruncated result was persisted, when the run recorded it. */

@@ -89,6 +89,7 @@ export interface CreateHarnessInteractiveChatServiceOptions {
    * for openai-codex; interactive requests cannot select or replace it.
    */
   credentialOwner?: HarnessCredentialOwnerRef;
+
   createPromptLoop?: HarnessInteractivePromptLoopFactory;
   now?: () => string;
   randomUUID?: () => string;
@@ -114,6 +115,7 @@ interface HarnessInteractiveChatSessionRecord {
    * session is refused rather than sent to a provider.
    */
   recoveryError?: HarnessChatError;
+
   startingTurnId?: string;
   startingTurn?: HarnessChatTurnStatus;
   activeTurnToken?: object;
@@ -363,6 +365,7 @@ type HarnessTranscriptMalformation =
 class MalformedHarnessChatTranscriptError extends Error {
   /** Kind of malformed history encountered. */
   readonly malformation: HarnessTranscriptMalformation;
+
   /** Zero-based index of the message where validation failed. */
   readonly transcriptIndex: number;
 
@@ -424,6 +427,7 @@ const unknownToolOutcome = (
 interface NormalizedHarnessChatTranscript {
   /** Transcript with every repairable tool call paired to one result. */
   transcript: HarnessTranscriptMessage[];
+
   /** Tool call IDs paired to synthesized unknown-outcome results. */
   synthesizedToolCallIds: readonly string[];
 }

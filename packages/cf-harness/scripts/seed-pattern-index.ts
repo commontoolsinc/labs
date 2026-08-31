@@ -193,6 +193,7 @@ export interface SeedDeps {
    * content-addressed identity.
    */
   compile: (path: string) => Promise<CompiledAtom>;
+
   publish: (
     request: PatternIndexPublishRequest,
   ) => Promise<{ patternId: string; created: boolean }>;
@@ -200,6 +201,7 @@ export interface SeedDeps {
 
   /** Answers which of `paths` are not formatted as the repository formats them. */
   checkFormatting: (paths: readonly string[]) => Promise<readonly string[]>;
+
   log: (line: string) => void;
   logError: (line: string) => void;
 }
@@ -208,6 +210,7 @@ export interface SeedDeps {
 export interface CompiledAtom {
   /** Absent when the compile produced no durable identity. */
   patternId?: string;
+
   program: RuntimeProgram;
   argumentSchema?: unknown;
   resultSchema?: unknown;

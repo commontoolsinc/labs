@@ -117,6 +117,7 @@ interface FakeConsoleOptions {
     keepOpen: boolean;
     fault?: boolean;
   }[];
+
   runId?: string;
   artifactRoot?: string;
   touchRunState?: boolean;

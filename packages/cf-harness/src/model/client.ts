@@ -53,6 +53,7 @@ export interface HarnessModelTurnRequest {
    * compaction entirely.
    */
   compactThreshold?: number;
+
   signal?: AbortSignal;
   onAttempt?: (
     attempt: HarnessModelAttemptDiagnostic,
@@ -67,10 +68,12 @@ export interface HarnessModelUsage {
 
   /** Cache-write tokens included within `inputTokens`, not additional tokens. */
   cacheWriteTokens?: number;
+
   outputTokens?: number;
 
   /** Reasoning tokens included within `outputTokens`, not additional tokens. */
   reasoningTokens?: number;
+
   totalTokens?: number;
 
   /**
@@ -133,6 +136,7 @@ export interface HarnessModelCatalogEntry {
 
   /** Maximum output tokens; needed to derive the usable input budget. */
   maxOutputTokens?: number;
+
   supportsParallelToolCalls: boolean;
 }
 
@@ -141,6 +145,7 @@ export interface HarnessModelClient {
 
   /** Exact authenticated owner binding for owner-bound providers. */
   readonly credentialOwner?: HarnessCredentialOwnerRef;
+
   complete(request: HarnessModelTurnRequest): Promise<HarnessModelTurnResult>;
   listModels?(
     signal?: AbortSignal,

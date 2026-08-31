@@ -176,6 +176,7 @@ export interface CreateHarnessPromptLoopOptions
    * constant across the turns that replay one append-only transcript.
    */
   cacheAffinityKey?: string;
+
   promptCacheMode?: "implicit" | "explicit";
   reasoningEffort?: string;
   compactThreshold?: number;
@@ -225,6 +226,7 @@ export interface HarnessPromptLoopResult {
 
   /** Direct usage plus usage reported by completed descendant loops. */
   totalUsage?: HarnessModelUsage;
+
   modelUsage?: HarnessModelTurnUsage[];
   runState: ReturnType<CfHarnessEngine["getRunState"]>;
 }
@@ -3738,6 +3740,7 @@ export class CfHarnessPromptLoop {
 
     /** The materialized skillHandle text + token, resolved before dispatch. */
     resolvedSkill?: { text: string; token: string };
+
     model: string;
     promptSlotBinding?: PromptSlotBinding;
     signal?: AbortSignal;

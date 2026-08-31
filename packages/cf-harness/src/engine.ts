@@ -292,6 +292,7 @@ export interface CreateHarnessEngineOptions
    * the fabric session is resolved against the caches on this host.
    */
   spaceDbPath?: string;
+
   now?: () => string;
 }
 

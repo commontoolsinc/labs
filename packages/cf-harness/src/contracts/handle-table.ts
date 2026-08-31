@@ -55,6 +55,7 @@ export const HANDLE_TOKEN_PATTERN = new RegExp(
 export interface HarnessHandleEntry {
   /** The full token, prefix included (`cfh:a:<suffix>`). */
   token: string;
+
   kind: HarnessHandleKind;
 
   /**

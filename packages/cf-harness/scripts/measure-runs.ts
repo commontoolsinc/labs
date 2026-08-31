@@ -115,6 +115,7 @@ export type RunPatternTarget =
 
     /** The source's size in UTF-8 bytes, which is what the report prints. */
     sourceBytes: number;
+
     importedPatternIds: readonly string[];
     composition: SourceComposition;
   };
@@ -230,14 +231,21 @@ export interface MeasurementTotals {
   runPatternsUnreadTarget: number;
 
   /**
-   * Source importing a published pattern, and the split of it. The two below
-   * partition this one; a single figure over both would read as composition
-   * and count bare re-exports towards it.
+   * Source importing a published pattern. The three counts below partition
+   * this one; a single figure over them would read as composition and count
+   * bare re-exports and bare imports towards it.
    */
   runPatternsImportingPatterns: number;
+
+  /** Of those, the ones whose import a composing call put to work. */
   runPatternsComposing: number;
+
+  /** Of those, the ones that only re-export what they import. */
   runPatternsReexporting: number;
+
+  /** Of those, the ones that import without composing or re-exporting. */
   runPatternsBareImporting: number;
+
   runPatternOutcomes: Readonly<Record<string, number>>;
   runPatternOutcomesUnread: number;
 
@@ -250,17 +258,22 @@ export interface MeasurementTotals {
    * union as "what composed what" would report a reference as a composition.
    */
   composedPatternIds: readonly string[];
+
   delegations: number;
   delegationProfiles: Readonly<Record<string, number>>;
   delegationProfilesUnread: number;
-  /**
-   * `assign_slug` calls, and the split of them. `slugNames` holds only the
-   * names the tool assigned.
-   */
+  /** `assign_slug` calls. The three counts below partition this one. */
   slugs: number;
+
+  /** Of those, the ones the tool assigned a slug for. */
   slugsAssigned: number;
+
+  /** Of those, the ones it refused. */
   slugsRefused: number;
+
+  /** Of those, the ones whose outcome could not be read. */
   slugsUnread: number;
+
   slugNames: readonly string[];
 
   /**
@@ -526,6 +539,7 @@ const LINE_COMMENT = /(^|[^:])\/\/[^\n]*/g;
 const IMPORT_STATEMENT = /\bimport\s+[\s\S]*?\s+from\s*(['"])([^'"]+)\1\s*;?/g;
 /** `import "cf:pattern:…"`, which binds nothing and so carries no `from`. */
 const BARE_IMPORT_STATEMENT = /\bimport\s*(['"])([^'"]+)\1\s*;?/g;
+
 const EXPORT_FROM_STATEMENT =
   /\bexport\s+(?:\*|\{[\s\S]*?\})\s+from\s*(['"])([^'"]+)\1\s*;?/g;
 const DEFAULT_IMPORT =

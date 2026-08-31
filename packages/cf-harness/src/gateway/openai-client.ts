@@ -80,6 +80,7 @@ export interface OpenAIChatCompletionMessage {
 
   /** Absent on tool-call-only turns from some providers, not just null. */
   content?: OpenAIChatMessageContent;
+
   tool_calls?: readonly OpenAIChatCompletionToolCall[];
   tool_call_id?: string;
   grounding_metadata?: unknown;
@@ -122,6 +123,7 @@ export interface OpenAIResponsesRequest {
     type: "compaction";
     compact_threshold: number;
   }[];
+
   prompt_cache_key?: string;
   prompt_cache_options?: {
     mode: "implicit" | "explicit";

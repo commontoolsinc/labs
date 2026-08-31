@@ -27,6 +27,7 @@ export interface FabricInstantiationRecord {
    * prefix marks a session-synthetic pointer no other runtime can load.
    */
   identity: string;
+
   symbol: string;
 
   /**

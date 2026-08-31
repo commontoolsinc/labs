@@ -33,6 +33,7 @@ export const MAX_SUBAGENT_MAX_MODEL_TURNS = 64;
  * own rather than the run's, so raising it does not loosen any other child.
  */
 export const PATTERN_AUTHOR_SUBAGENT_MAX_MODEL_TURNS = 24;
+
 export const DEFAULT_SUBAGENT_RETURN_CHANNEL =
   "summary-and-sanitized-state" as const;
 
@@ -50,6 +51,7 @@ export const DEFAULT_SUBAGENT_ALLOWED_TOOL_IDS = [
   "write_file",
   "run_pattern",
 ] as const satisfies readonly BuiltinToolId[];
+
 export const BROWSER_SUBAGENT_ALLOWED_TOOL_IDS = [
   "browser",
   "read_file",
@@ -85,6 +87,7 @@ export const PATTERN_AUTHOR_SUBAGENT_ALLOWED_TOOL_IDS = [
   "search_patterns",
   "record_feedback",
 ] as const satisfies readonly BuiltinToolId[];
+
 export const NO_HOST_TOOL_IDS = [] as const satisfies readonly BuiltinToolId[];
 export const BROWSER_SUBAGENT_HOST_TOOL_IDS = [
   "browser",
@@ -337,6 +340,7 @@ export interface HarnessSubagentProfileConfig {
    * its channel says `profile`.
    */
   returnContractAuthority?: HarnessSubagentReturnContractAuthority;
+
   returnPolicy: HarnessSubagentReturnPolicy;
 }
 
@@ -527,6 +531,7 @@ export interface HarnessSubagentStructuredReturn {
    * Present whenever the child's return says `ok: false`, on either status.
    */
   failureCode?: HarnessSubagentFailureReasonCode;
+
   schemaDigest: string;
   rawOutputId: string;
   rawArtifactPath?: string;

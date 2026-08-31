@@ -354,6 +354,7 @@ export interface HarnessChatSubagentRef {
 export interface HarnessChatSubagentSummary extends HarnessChatSubagentRef {
   /** The task the parent delegated, as the parent worded it. */
   goal?: string;
+
   summary?: string;
 }
 

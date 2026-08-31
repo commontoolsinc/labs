@@ -80,6 +80,7 @@
  * than argued away.
  */
 import type { JSONSchema } from "@commonfabric/api";
+
 import type { Cell } from "@commonfabric/runner";
 import { UI } from "@commonfabric/runner/shared";
 import { uiSchema } from "@commonfabric/runner/schemas";

@@ -109,6 +109,7 @@ export interface HarnessToolContext {
    * tool-side timeout supplements it. Tools are free to ignore it.
    */
   signal?: AbortSignal;
+
   sandbox: SandboxRuntime;
   hostProcessRunner: ProcessRunner;
   currentDir: string;
@@ -132,6 +133,7 @@ export interface HarnessToolContext {
    * stay locked to their source file's bytes.
    */
   imageAttachmentSnapshotDir?: string;
+
   doesHostPathIntersectArtifactRoot(
     path: string,
     options?: { allowMissing?: boolean },

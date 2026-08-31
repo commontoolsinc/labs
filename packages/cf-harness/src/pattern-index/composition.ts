@@ -237,10 +237,13 @@ export const materializeComposedPatterns = async (
   }
   /** Ids made durable by this call, dependencies first. */
   const materialized: string[] = [];
+
   /** Ids on the path currently being resolved, which is the cycle test. */
   const resolving = new Set<string>();
+
   /** Ids known durable in `space`, whether this call put them there or not. */
   const present = new Set<string>();
+
   /**
    * Patterns this call has begun drawing in, which is what the cap counts.
    * Counting the finished ones instead would let a chain descend to any depth

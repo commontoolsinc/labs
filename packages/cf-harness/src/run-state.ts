@@ -68,6 +68,7 @@ export interface HarnessFabricSessionCfcPosture {
 
   /** `configured` when the operator set the dial; `preset-pin` otherwise. */
   enforcementModeSource: "configured" | "preset-pin";
+
   flowLabels: "off" | "observe" | "persist";
 
   /**
@@ -131,6 +132,7 @@ export interface HarnessRunState {
    * from the tree can learn what a cell is labelled.
    */
   cellLabels?: HarnessCellLabels;
+
   cellLabelsPath?: string;
   handleTable?: HarnessHandleTable;
   wellKnownGrants?: HarnessWellKnownGrant[];

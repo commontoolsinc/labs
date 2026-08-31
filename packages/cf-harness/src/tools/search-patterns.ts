@@ -46,6 +46,7 @@ export interface SearchPatternsToolResult {
    * ratio is a distant cousin, not an answer.
    */
   matchedTerms?: number;
+
   queryTerms?: number;
 
   /**

@@ -537,6 +537,7 @@ type BrowserHandleResolution =
  * the destination, which is validated separately once it is known.
  */
 const HANDLE_SHAPE_PLACEHOLDER = "cf-harness-handle-placeholder";
+
 const HANDLE_SHAPE_PLACEHOLDER_URL = "https://handle.placeholder.invalid/";
 
 const withHandlePlaceholders = (input: BrowserToolInput): BrowserToolInput => ({

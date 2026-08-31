@@ -32,6 +32,7 @@ export type HarnessGatewayAuthMode = "bearer" | "none";
 export type HarnessFabricCfcEnforcementMode =
   | "enforce-explicit"
   | "enforce-strict";
+
 export type HarnessFabricCfcFlowLabelsMode = CfcFlowLabelsMode;
 
 /**
@@ -53,6 +54,7 @@ export interface HarnessFabricSessionConfig {
   cfcFlowLabels?: HarnessFabricCfcFlowLabelsMode;
   cfcPosture?: CfcPosture;
 }
+
 /**
  * Connection settings for the deployed pattern index: the base URL its
  * functions are served under. When present, the run offers `search_patterns`
@@ -119,6 +121,7 @@ interface HarnessCommonConfig {
    * so that is what an operator gets to decide.
    */
   handleValueOrigins?: readonly string[];
+
   artifactRoot?: string;
   cfcEnforcementMode: CfcEnforcementMode;
   cfcEnforcementModeSource: HarnessCfcEnforcementModeSource;
