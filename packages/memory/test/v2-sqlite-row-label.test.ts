@@ -162,7 +162,6 @@ Deno.test("any() rejects a conjunctive alternative — no (A∧B)∨C → A∨B�
   // A direct all() as an any() alternative is rejected: union-flattening it
   // would make the row readable by A alone even though the author required
   // A AND B.
-
   assertThrows(
     () =>
       table(EMAIL_COLUMNS, (f) => ({
