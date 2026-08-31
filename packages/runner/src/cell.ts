@@ -177,6 +177,8 @@ ensureNotRenderThread();
 
 const logger = getLogger("cell", { level: "warn" });
 
+const markDocumentSynced = Symbol("markDocumentSynced");
+
 type SinkOptions = {
   changeGroup?: ChangeGroup;
 
@@ -867,6 +869,17 @@ export function createCell<T>(
 }
 
 /**
+ * Mark a cell handle as covered by a document-level sync barrier owned by the
+ * caller. Separate handles for the same document otherwise each try to load it.
+ */
+export function markCellDocumentSynced(cell: Cell<any>): void {
+  if (!(cell instanceof CellImpl)) {
+    throw new TypeError("Expected a runner CellImpl handle");
+  }
+  cell[markDocumentSynced]();
+}
+
+/**
  * Shared container for entity ID and cause information across sibling cells.
  * When cells are created via .asSchema(), .withTx(), they share the same
  * logical identity (same entity id) but may have different paths or schemas.
@@ -947,6 +960,10 @@ export class CellImpl<T extends FabricValue>
 
     this.#kind = kind ?? "cell";
     this.#cfcLabelView = cloneCfcLabelView(_cfcLabelView);
+  }
+
+  [markDocumentSynced](): void {
+    this.#synced = true;
   }
 
   isReadableCell(): boolean {

@@ -392,6 +392,7 @@ describe("syncArgumentLinkTargets", () => {
     } as JSONSchema);
     // One document, one path, two bindings that read different fields of it.
     // Neither walk stands in for the other, so both leaves are pre-synced.
+    expect(syncedIds.filter((each) => each === id(shared))).toHaveLength(1);
     expect(syncedIds).toContain(id(leftLeaf));
     expect(syncedIds).toContain(id(rightLeaf));
   });

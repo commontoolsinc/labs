@@ -58,7 +58,12 @@ import {
   useCancelGroup,
   useDeferredCancelOwnership,
 } from "./cancel.ts";
-import { type Cell, createCell, isCell } from "./cell.ts";
+import {
+  type Cell,
+  createCell,
+  isCell,
+  markCellDocumentSynced,
+} from "./cell.ts";
 import {
   ContextualFlowControl,
   resolveExternalRootRefForStructure,
@@ -5428,11 +5433,9 @@ export class Runner {
               ),
           );
         } else {
-          // The document was synced through another handle. Mark this one
-          // synced too, or the next wave's raw read fires a background sync
-          // whose rejection nothing awaits — the same shape-cast doStart's
-          // `wasSyncedAtEntry` reads through.
-          (target as Cell<any> & { synced?: boolean }).synced = true;
+          // The walk awaits the sibling handle's document sync before
+          // advancing to the next wave.
+          markCellDocumentSynced(target);
         }
         if (hopsLeft <= 0) return;
         // The key names the subtree a walk would descend: the document, the
