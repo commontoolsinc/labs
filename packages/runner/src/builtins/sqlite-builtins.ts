@@ -43,7 +43,11 @@ import { waveRunContextOf, waveSettlementOf } from "../executor/wave.ts";
 import { parseCfLinkToSigil } from "./sqlite/cf-link.ts";
 import { type IFCLabel, mergeLabel } from "../cfc/label-view-core.ts";
 import { cloneIfNecessary } from "@commonfabric/data-model/value-clone";
-import { fabricFromNativeValue } from "@commonfabric/data-model/fabric-value";
+import {
+  fabricFromNativeValue,
+  type FabricValue,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
 import { validateRowLabelSpec } from "@commonfabric/memory/sqlite/row-label";
 import {
   columnDeclaresIfc,
@@ -796,9 +800,21 @@ export function sqliteQuery(
   /** Hashes whose RPC this node instance currently has in flight — the
    * in-process half of the memo decision above. */
   const inFlightIssues = new Set<string>();
+  /**
+   * The query this node staged on its most recent run, if that run staged one.
+   * A token rather than the request's hash: two stagings of the same statement
+   * are still two queries, and the ending of the first must not be read as the
+   * ending of the second.
+   */
+  let currentStaging: symbol | undefined;
   const space = parentCell.space;
 
   const action: Action = (tx: IExtendedStorageTransaction) => {
+    // Cleared for the whole run and set again only by the arm that stages a
+    // query, so every way this run can end without staging one — inputs it
+    // cannot read, a result already stored, a query already in flight — leaves
+    // the ending of an earlier query with nothing of this node's to write to.
+    currentStaging = undefined;
     const inputs = inputsCell.withTx(tx).get() as {
       db?: unknown;
       sql?: string;
@@ -924,8 +940,11 @@ export function sqliteQuery(
     // posture a dropped effect leaves it orphaned, and only re-issuing
     // heals that (sqliteQueryMemoDecision above; serving-loop.md §4,
     // §6 step 3).
+    // The claim as it stands before this request writes its own, for the
+    // abandonment ending below to compare against.
+    const storedBeforeClaim = result.withTx(tx).get();
     const decision = sqliteQueryMemoDecision({
-      stored: result.withTx(tx).get(),
+      stored: storedBeforeClaim,
       hash,
       inFlightHere: inFlightIssues.has(hash),
       servedRun,
@@ -938,6 +957,8 @@ export function sqliteQuery(
       return;
     }
     if (decision === "dedupe") return;
+    const staging = Symbol(hash);
+    currentStaging = staging;
     result.withTx(tx).set({ pending: true, requestHash: hash });
 
     const sql = inputs.sql;
@@ -954,7 +975,7 @@ export function sqliteQuery(
       // the scheduler stops attempting the commit neither landed and no read
       // is coming, so a reader of the claim would wait on a query nobody is
       // running.
-      abandon: (rejection) => {
+      abandon: () => {
         runtime.trackAsyncWork(
           settleAbandonedRequest(
             runtime,
@@ -962,18 +983,53 @@ export function sqliteQuery(
             effectKey,
             (settleTx) => {
               sendResult(settleTx, result);
-              // Read the stored claim at write time: a newer request commits
-              // its own hash, and from then on the result is that request's
-              // to write, exactly as `failQuery` decides it.
+              // Read the stored claim at write time. Another query holds
+              // this result in either of two ways, and the ending steps around
+              // both. One is running: the pending flag is up under a hash that
+              // is not this query's, and from then on the result is that
+              // query's to write, exactly as `failQuery` decides it. Or one
+              // has committed here since this query was staged, whatever state
+              // it left — a later query that already answered leaves its own
+              // hash with the flag down, and that answer is its own to keep.
+              //
+              // What is left over from before this query was staged is neither.
+              // A query that finished leaves its hash standing with the flag
+              // down, so every query after the first one finds a hash here that
+              // belongs to nobody, and reading that as a takeover would leave
+              // the pattern holding the finished query's rows under a statement
+              // it no longer runs.
               const stored = result.withTx(settleTx).get();
-              if (
-                stored?.requestHash !== undefined && stored.requestHash !== hash
-              ) {
+              // This node has moved on if its latest run staged something
+              // else, or staged nothing at all. The store can say nothing about
+              // that: a run whose statement returns to one already answered
+              // reads that answer and writes nothing, so the two durable tests
+              // below both see exactly what this query left behind.
+              if (currentStaging !== staging) return;
+              const running = stored?.pending === true &&
+                stored.requestHash !== undefined && stored.requestHash !== hash;
+              // Whole value, not one field of it: a query that answers
+              // records rows without moving the hash, and one that takes over
+              // moves the hash without recording rows.
+              // `valueEqual` rather than a structural walk: a decoded row can
+              // carry a `FabricValue` whose contents live in private fields
+              // that such a walk cannot see, and every distinct instance of one
+              // compares equal to every other.
+              const writtenSinceStaged = !valueEqual(
+                storedBeforeClaim as FabricValue,
+                stored as FabricValue,
+              );
+              if (running || writtenSinceStaged) {
                 return;
               }
+              // What the pattern reads is that the query was refused, and
+              // nothing more. The refusal names the document the rule matched
+              // on and the source of each caveat — the principal that
+              // introduced it — which is what the pattern-facing surface
+              // withholds. That detail reaches the operator through the
+              // scheduler's report of the dropped write.
               result.withTx(settleTx).set({
                 pending: false,
-                error: (rejection as { message?: string })?.message,
+                error: "sqliteQuery request was refused before it started",
                 requestHash: hash,
               });
             },

@@ -5,6 +5,10 @@ import type {
 } from "@commonfabric/api";
 import { FabricBytes } from "@commonfabric/data-model/fabric-primitives";
 import { internSchema } from "@commonfabric/data-model-schema";
+import {
+  type FabricValue,
+  valueEqual,
+} from "@commonfabric/data-model/fabric-value";
 import { isObjectOrArray } from "@commonfabric/utils/types";
 
 import { getPatternEnvironment } from "../builder/env.ts";
@@ -314,6 +318,13 @@ function fetchBuiltin(kind: FetchKind) {
     let internal: Cell<Schema<typeof internalSchema>>;
     let cellScope: CellScope | undefined;
     let myRequestId: string | undefined = undefined;
+    /**
+     * The request this node staged on its most recent run, if that run staged
+     * one. A token rather than the request's hash: two stagings of the same
+     * inputs are still two requests, and the ending of the first must not be
+     * read as the ending of the second.
+     */
+    let currentStaging: symbol | undefined = undefined;
     let abortController: AbortController | undefined = undefined;
 
     // This is called when the pattern containing this node is being stopped.
@@ -360,6 +371,11 @@ function fetchBuiltin(kind: FetchKind) {
 
     return (tx: IExtendedStorageTransaction) => {
       tx.resetNarrowestReadScope();
+      // Cleared for the whole run and set again only by the arm that stages a
+      // request, so every way this run can end without staging one — an empty
+      // url, a result already stored, a request already in flight — leaves the
+      // ending of an earlier request with nothing of this node's to write to.
+      currentStaging = undefined;
       const inputsSnapshot = snapshotInputs(inputsCell.withTx(tx));
       const mutexTimeoutMs = mutexTimeoutForCell(kind, inputsCell.withTx(tx));
       const outputScope = tx.getNarrowestReadScope();
@@ -507,6 +523,19 @@ function fetchBuiltin(kind: FetchKind) {
         // inputs keeps its own effect — its closure writes its own cells,
         // which a shared key would have dropped (round-2 headline).
         const newRequestId = `${runtime.id}:${inputHash}`;
+        const staging = Symbol(inputHash);
+        currentStaging = staging;
+        // These cells as this request found them. Whether anything has been
+        // committed to them since is one question about all four together, not
+        // four questions: a request that answers writes its result without
+        // moving the claim id, and one that takes over moves the claim id
+        // without writing a result.
+        const cellsBeforeStage = {
+          pending: currentPending,
+          result: currentResult,
+          error: currentError,
+          internal: currentInternal,
+        };
         const effectKey = effectTargetKey(
           `${kind.name}:${inputHash}`,
           result,
@@ -608,15 +637,49 @@ function fetchBuiltin(kind: FetchKind) {
                     // The announcement rode the abandoned transaction, so it
                     // is made again whoever owns the answer now.
                     sendResult(settleTx, { pending, result, error });
-                    // Decided here rather than when this callback ran: a newer
-                    // request can start in between and claim these cells, and
-                    // its claim id is what says so.
-                    const claim = internal.withTx(settleTx).key("requestId")
-                      .get();
-                    if (
+                    // Decided here rather than when this callback ran.
+                    // Another request holds these cells in either of two ways,
+                    // and the ending steps around both. One is in flight: the
+                    // pending flag is up under a claim id that is not this
+                    // request's. Or one has claimed here since this request was
+                    // staged, whatever state it left — a later request that
+                    // already answered leaves its own claim id with the flag
+                    // down, and that answer is its own to keep.
+                    //
+                    // What was left over from before this request was staged is
+                    // neither. A request that finished leaves its claim id
+                    // standing with the flag down, so every request after the
+                    // first one finds an id here that belongs to nobody, and
+                    // reading that as a takeover would leave the pattern
+                    // holding the finished request's answer under inputs it no
+                    // longer describes.
+                    // This node has moved on if its latest run staged
+                    // something else, or staged nothing at all. The store can
+                    // say nothing about that: a run whose inputs return to ones
+                    // already answered keeps that answer and writes nothing, so
+                    // the two durable tests below both see exactly what this
+                    // request left behind.
+                    if (currentStaging !== staging) return;
+                    const cellsNow = {
+                      pending: pending.withTx(settleTx).get(),
+                      result: result.withTx(settleTx).get(),
+                      error: error.withTx(settleTx).get(),
+                      internal: internal.withTx(settleTx).get(),
+                    };
+                    const claim = cellsNow.internal?.requestId;
+                    const inFlight = cellsNow.pending === true &&
                       claim !== undefined && claim !== "" &&
-                      claim !== newRequestId
-                    ) {
+                      claim !== newRequestId;
+                    // `valueEqual` rather than a structural walk: a fetched
+                    // body is a `FabricValue`, and `fetchBinary` answers with
+                    // `FabricBytes`, whose contents live in private fields that
+                    // a structural walk cannot see — every distinct instance of
+                    // one compares equal to every other.
+                    const writtenSinceStaged = !valueEqual(
+                      cellsBeforeStage as FabricValue,
+                      cellsNow as FabricValue,
+                    );
+                    if (inFlight || writtenSinceStaged) {
                       return;
                     }
                     pending.withTx(settleTx).set(false);
